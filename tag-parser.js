@@ -2,8 +2,17 @@
 
 const memoryEngine = require("./memory-engine");
 
-const TAG_RE = /<memory>([\s\S]*?)<\/memory>/gi;
-const PIN_TAG_RE = /<pin>([\s\S]*?)<\/pin>/gi;
+const TAG_RE = /<\s*memory\b[^>]*>([\s\S]*?)<\s*\/memory\s*>/gi;
+const PIN_TAG_RE = /<\s*pin\b[^>]*>([\s\S]*?)<\s*\/pin\s*>/gi;
+
+// 剥离所有 <memory>/<pin> 标签（含属性写法、未闭合标签），供流式过滤/时间线匹配复用
+function stripTags(text) {
+  return String(text || "")
+    .replace(/<\s*memory\b[^>]*>([\s\S]*?)<\s*\/memory\s*>/gi, "")
+    .replace(/<\s*pin\b[^>]*>([\s\S]*?)<\s*\/pin\s*>/gi, "")
+    .replace(/<\s*(?:memory|pin)\b[^>]*>/gi, "")
+    .replace(/<\s*(?:memory|pin)\b[^>]*$/gi, "");
+}
 
 function parseTagContent(raw) {
   try {
@@ -67,11 +76,10 @@ const VALID_TYPES = ["fact", "preference", "emotion", "unresolved", "resolved", 
 async function extractAndStore(text) {
   if (!text) return text;
 
-  let cleanText = text;
   const promises = [];
 
   // --- <memory> tags ---
-  const memMatches = text.matchAll(/<memory>([\s\S]*?)<\/memory>/gi);
+  const memMatches = text.matchAll(TAG_RE);
 
   for (const match of memMatches) {
     const raw = match[1];
@@ -93,11 +101,10 @@ async function extractAndStore(text) {
       console.warn("[tag-parser] 标签解析失败或类型无效:", raw.slice(0, 80));
     }
 
-    cleanText = cleanText.split(match[0]).join("");
   }
 
   // --- <pin> tags ---
-  const pinMatches = text.matchAll(/<pin>([\s\S]*?)<\/pin>/gi);
+  const pinMatches = text.matchAll(PIN_TAG_RE);
 
   for (const match of pinMatches) {
     const raw = match[1];
@@ -123,11 +130,10 @@ async function extractAndStore(text) {
       console.warn("[tag-parser] pin标签解析失败:", raw.slice(0, 80));
     }
 
-    cleanText = cleanText.split(match[0]).join("");
   }
 
   await Promise.all(promises);
-  return cleanText.trim();
+  return stripTags(text).trim();
 }
 
-module.exports = { extractAndStore };
+module.exports = { extractAndStore, stripTags };

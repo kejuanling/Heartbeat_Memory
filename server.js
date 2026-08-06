@@ -259,18 +259,86 @@ function safeJsonForInlineScript(value) {
 
 // ========================
 // Streaming tag filter helper
+// 上游（如 DeepSeek）会把 <memory>/<pin> 拆成 <、memory、> 等多个 SSE 事件，
+// 字节层找不到完整标签，必须在 content 文本层做带缓冲的过滤。
 // ========================
-function findPartialOpen(str) {
-  // Check if str ends with a partial prefix of "<memory>" or "<pin>"
-  const TAGS = ["<memory>", "<pin>"];
-  for (const TAG_OPEN of TAGS) {
-    for (let i = 1; i < TAG_OPEN.length; i++) {
-      if (str.endsWith(TAG_OPEN.slice(0, i))) {
-        return str.length - i;
-      }
-    }
+function createContentTagFilter() {
+  let buf = "";
+  let inTag = false;
+  let tagType = ""; // "memory" | "pin"
+
+  // 判断 tail（从某个 "<" 开始的小写文本）是否可能是 memory/pin 开标签
+  function isPotentialOpen(tail) {
+    if (/^<(memory|pin)(\s[^>]*)?>/.test(tail)) return true; // 完整开标签（可带属性）
+    if (/^<(memory|pin)\s[^>]*$/.test(tail)) return true;     // 属性写法进行中
+    if (/^<(memory|pin)$/.test(tail)) return true;            // 恰好 <memory / <pin
+    if (/^<m(?:e(?:m(?:o(?:r)?)?)?)?$/.test(tail)) return true; // <m <me <mem <memo <memor
+    if (/^<p(?:i)?$/.test(tail)) return true;                  // <p <pi
+    if (tail === "<") return true;
+    return false;
   }
-  return -1;
+
+  // 找到最早的可能是标签开头的 "<"
+  function findOpenIndex(str) {
+    const lower = str.toLowerCase();
+    const candidates = [];
+    const re = /<(?=[mp])/g;
+    let m;
+    while ((m = re.exec(lower)) !== null) {
+      candidates.push(m.index);
+      if (candidates.length >= 20) break;
+    }
+    const lastLt = lower.lastIndexOf("<");
+    if (lastLt !== -1 && !candidates.includes(lastLt)) candidates.push(lastLt);
+    candidates.sort((a, b) => a - b);
+    for (const idx of candidates) {
+      if (isPotentialOpen(lower.slice(idx))) return idx;
+    }
+    return -1;
+  }
+
+  return {
+    push(delta, emit) {
+      if (!delta) return;
+      buf += delta;
+      for (;;) {
+        if (inTag) {
+          const closeRe = tagType === "memory" ? /<\/memory>/i : /<\/pin>/i;
+          const m = closeRe.exec(buf);
+          if (m) {
+            buf = buf.slice(m.index + m[0].length);
+            inTag = false;
+            tagType = "";
+            continue;
+          }
+          // 未闭合：只保留尾部，防止无限增长
+          if (buf.length > 8192) buf = buf.slice(-8192);
+          return;
+        }
+        const open = findOpenIndex(buf);
+        if (open !== -1) {
+          if (open > 0) emit(buf.slice(0, open));
+          buf = buf.slice(open);
+          if (/^<(memory|pin)(\s[^>]*)?>/.test(buf.toLowerCase())) {
+            inTag = true;
+            tagType = buf.toLowerCase().startsWith("<pin") ? "pin" : "memory";
+          }
+          return;
+        }
+        if (buf) {
+          emit(buf);
+          buf = "";
+        }
+        return;
+      }
+    },
+    flush() {
+      // 丢弃未闭合标签或可疑前缀，避免半截标签发给客户端
+      buf = "";
+      inTag = false;
+      tagType = "";
+    }
+  };
 }
 
 // ========================
@@ -523,9 +591,7 @@ function appendSpecialEvent(content) {
 
 // 剥离内部标签（用于把客户端清洗版和时间线原始版互相匹配）
 function stripInternalTags(text) {
-  return String(text || "")
-    .replace(/<memory>[\s\S]*?<\/memory>/gi, "")
-    .replace(/<pin>[\s\S]*?<\/pin>/gi, "");
+  return tagParser.stripTags(text).trim();
 }
 
 function stripPosition(messages) {
@@ -1118,65 +1184,54 @@ app.post("/v1/chat/completions", async (req, reply) => {
     const reader = response.body.getReader();
     const streamChunks = [];
     try {
-    // Streaming tag filter: buffer incomplete <memory> and <pin> tags across chunks
-    let tagBuffer = "";
-    const TAG_PAIRS = [
-      { open: "<memory>", close: "</memory>" },
-      { open: "<pin>", close: "</pin>" }
-    ];
+    // Streaming tag filter: 上游会把 <memory>/<pin> 拆成 <、memory、> 等多个事件，
+    // 字节层匹配不到完整标签，必须在 content 文本层过滤后再重组 SSE 事件。
+    const contentFilter = createContentTagFilter();
+    const emitRawLine = (line) => reply.raw.write(line + "\n");
+    let sseBuffer = "";
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       streamChunks.push(value);
 
-      // Decode chunk and apply tag filtering
-      let chunkStr = Buffer.from(value).toString("utf-8");
-      let outputStr = tagBuffer + chunkStr;
-      tagBuffer = "";
-
-      // Process all complete tag pairs (<memory>, <pin>) in the buffer
-      let processed = true;
-      while (processed) {
-        processed = false;
-        // Find the earliest opening tag across all types
-        let earliestOpen = -1;
-        let earliestPair = null;
-        for (const pair of TAG_PAIRS) {
-          const idx = outputStr.indexOf(pair.open);
-          if (idx !== -1 && (earliestOpen === -1 || idx < earliestOpen)) {
-            earliestOpen = idx;
-            earliestPair = pair;
-          }
+      sseBuffer += Buffer.from(value).toString("utf-8");
+      let nl;
+      while ((nl = sseBuffer.indexOf("\n")) !== -1) {
+        const rawLine = sseBuffer.slice(0, nl);
+        sseBuffer = sseBuffer.slice(nl + 1);
+        const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+        if (!line.startsWith("data:")) {
+          emitRawLine(line);
+          continue;
         }
-        if (earliestOpen === -1) {
-          // No tag open found; check if buffer ends with a partial tag
-          const partialOpen = findPartialOpen(outputStr);
-          if (partialOpen !== -1) {
-            tagBuffer = outputStr.slice(partialOpen);
-            outputStr = outputStr.slice(0, partialOpen);
-          }
-          break;
+        const payload = line.slice(5).replace(/^\s+/, "");
+        if (!payload || payload === "[DONE]") {
+          emitRawLine(line);
+          continue;
         }
-        const closeIdx = outputStr.indexOf(earliestPair.close, earliestOpen);
-        if (closeIdx === -1) {
-          // Tag opened but not closed; buffer from the open tag onward
-          tagBuffer = outputStr.slice(earliestOpen);
-          outputStr = outputStr.slice(0, earliestOpen);
-          break;
+        let evt;
+        try {
+          evt = JSON.parse(payload);
+        } catch {
+          emitRawLine(line);
+          continue;
         }
-        // Complete tag found; remove it
-        const tagEnd = closeIdx + earliestPair.close.length;
-        outputStr = outputStr.slice(0, earliestOpen) + outputStr.slice(tagEnd);
-        processed = true;
-      }
-
-      if (outputStr) {
-        reply.raw.write(Buffer.from(outputStr, "utf-8"));
+        const delta = evt && evt.choices && evt.choices[0] && evt.choices[0].delta;
+        // 空字符串 content 常伴随 finish_reason/usage（如末尾事件），必须原样透传
+        if (delta && typeof delta.content === "string" && delta.content.length > 0) {
+          contentFilter.push(delta.content, (filtered) => {
+            delta.content = filtered;
+            reply.raw.write("data: " + JSON.stringify(evt) + "\n\n");
+          });
+        } else {
+          emitRawLine(line);
+        }
       }
     }
-    // 丢弃残留的未闭合标签，避免把 <memory>/<pin> 半截标签发给客户端
-    tagBuffer = "";
+    // 收尾：丢弃未闭合标签/残留前缀，转发剩余行，结束响应
+    contentFilter.flush();
+    if (sseBuffer) emitRawLine(sseBuffer.replace(/\n+$/, ""));
     reply.raw.end();
     } catch (streamErr) {
       // 上游中断/超时时确保响应结束，避免连接悬挂

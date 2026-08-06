@@ -83,10 +83,7 @@ function extractDiaryFromResponse(text) {
 
 // 剥离 AI 回复里的内部标签（<memory>/<pin>），避免原始标签出现在推送和上下文里
 function stripInternalTags(text) {
-  return String(text || "")
-    .replace(/<memory>[\s\S]*?<\/memory>/gi, "")
-    .replace(/<pin>[\s\S]*?<\/pin>/gi, "")
-    .replace(/^\s+|\s+$/g, "");
+  return tagParser.stripTags(text).replace(/^\s+|\s+$/g, "");
 }
 
 function appendDiaryEntry(content) {
