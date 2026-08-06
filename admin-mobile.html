@@ -1,0 +1,1277 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>管理台</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f3efe9;--card:rgba(255,255,255,0.85);--text:#3a3533;--text2:#8a8280;--text3:#b0a8a4;--border:rgba(60,40,40,0.08);--accent:#c89098;--accent2:#d8a8b0;--tab-active:#6a4848;--tab-inactive:#b8aea8;--shadow:0 2px 16px rgba(0,0,0,0.04);--radius:16px;--radius-sm:10px;--safe-bottom:env(safe-area-inset-bottom,0px)}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:calc(68px + var(--safe-bottom));line-height:1.6}
+.header{padding:20px 20px 8px;text-align:center}
+.header h1{font-family:"Noto Serif SC",serif;font-size:22px;font-weight:600;color:var(--tab-active);letter-spacing:3px}
+.header p{font-size:12px;color:var(--text2);margin-top:2px;letter-spacing:1px}
+.tab-content{display:none;padding:12px 16px 20px;animation:fadeIn .25s ease}
+.tab-content.active{display:block}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.card{background:var(--card);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:var(--radius);padding:18px 20px;margin-bottom:12px;box-shadow:var(--shadow);border:1px solid var(--border)}
+.card-title{font-size:11px;font-weight:600;color:var(--text2);letter-spacing:2px;text-transform:uppercase;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border)}
+.stat-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;font-size:13px;border-bottom:1px solid rgba(0,0,0,0.03)}
+.stat-row:last-child{border-bottom:none}
+.stat-label{color:var(--text2);font-weight:400}
+.stat-value{color:var(--text);font-weight:500;text-align:right;max-width:60%;word-break:break-all}
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-size:12px;color:var(--text2);font-weight:500;margin-bottom:5px;letter-spacing:.5px}
+.form-group input,.form-group select{width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:rgba(255,255,255,0.7);font-family:"Noto Sans SC",sans-serif;font-size:13px;color:var(--text);outline:none;transition:border-color .2s}
+.form-group input:focus,.form-group select:focus{border-color:var(--accent2)}
+.switch-wrap{display:flex;justify-content:space-between;align-items:center;padding:6px 0}
+.switch{position:relative;width:44px;height:26px;flex-shrink:0;margin-left:12px}
+.switch input{opacity:0;width:0;height:0}
+.switch .slider{position:absolute;cursor:pointer;inset:0;background:#ddd;border-radius:13px;transition:.25s}
+.switch .slider::before{content:"";position:absolute;height:20px;width:20px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.25s}
+.switch input:checked+.slider{background:var(--accent)}
+.switch input:checked+.slider::before{transform:translateX(18px)}
+.range-wrap{display:flex;align-items:center;gap:12px}
+.range-wrap input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;background:#ece4de;outline:none}
+.range-wrap input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:18px;height:18px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.12)}
+.range-val{font-size:13px;font-weight:500;color:var(--tab-active);min-width:32px;text-align:right}
+.btn{display:inline-flex;align-items:center;justify-content:center;padding:10px 20px;border:none;border-radius:var(--radius-sm);font-family:"Noto Sans SC",sans-serif;font-size:13px;font-weight:500;cursor:pointer;transition:all .2s;letter-spacing:.5px}
+.btn-primary{background:var(--accent);color:#fff;width:100%}
+.btn-primary:active{opacity:.85;transform:scale(.98)}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text2);width:100%}
+.btn-sm{padding:6px 12px;font-size:11px;border-radius:6px}
+.btn-danger{background:#e8d8d4;color:#6a4848}
+.btn-edit{background:#e0d4d0;color:#6a4848}
+.btn-delete{background:#e0d4d0;color:#6a4848}
+.tab-bar{position:fixed;bottom:0;left:0;right:0;z-index:100;background:rgba(255,255,255,0.92);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-top:1px solid var(--border);padding:6px 0 calc(6px + var(--safe-bottom));display:flex;box-shadow:0 -2px 12px rgba(0,0,0,0.04)}
+.tab-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 0;cursor:pointer;transition:all .2s;border:none;background:none;font-family:"Noto Sans SC",sans-serif}
+.tab-item .tab-icon{font-size:20px;line-height:1;color:var(--tab-inactive);transition:color .2s}.tab-item.active .tab-icon{color:var(--tab-active)}
+.tab-item .tab-label{font-size:10px;color:var(--tab-inactive);font-weight:400;letter-spacing:.5px;transition:color .2s}
+.tab-item.active .tab-label{color:var(--tab-active);font-weight:600}
+.mem-item{padding:14px 0;border-bottom:1px solid var(--border)}
+.mem-item:last-child{border-bottom:none}
+.mem-meta{display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
+.mem-tag{font-size:10px;padding:2px 8px;border-radius:4px;font-weight:500}
+.mem-tag.type-fact{background:#ede0d8;color:#6a4848}
+.mem-tag.type-preference{background:#e8e0d4;color:#6a4848}
+.mem-tag.type-emotion{background:#e8d8d4;color:#7a5858}
+.mem-tag.type-summary{background:#ede4de;color:#6a5858}
+.mem-tag.type-unresolved{background:#ede8e4;color:#6a5858}
+.mem-tag.type-moment{background:#e8e0dc;color:#6a4848}
+.mem-tag.type-trace{background:#e0d8d8;color:#6a4848}
+.mem-tag.type-note{background:#e8e4e0;color:#7a6868}
+.mem-tag.type-resolved{background:#d8d0cc;color:#7a6060}
+.mem-tag.active{background:#d0e8d0;color:#4a7a4a}
+.mem-tag.inactive{background:#e8e0e0;color:#8a7a7a}
+.mem-time{font-size:11px;color:var(--text3)}
+.mem-content{font-size:13px;color:var(--text);line-height:1.6;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;word-break:break-all}
+
+.mem-actions input[type=range]{-webkit-appearance:none;appearance:none;height:3px;border-radius:2px;background:#ece4de;outline:none}.mem-actions input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:8px;height:8px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.15);transition:width .2s ease,height .2s ease,box-shadow .2s ease}.mem-actions input[type=range]::-webkit-slider-thumb:active,.mem-actions input[type=range]::-webkit-slider-thumb:focus{width:16px;height:16px;box-shadow:0 2px 6px rgba(0,0,0,0.2)}.mem-actions input[type=range]::-moz-range-thumb{width:8px;height:8px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.15);transition:width .2s,height .2s}.mem-actions input[type=range]::-moz-range-thumb:active{width:16px;height:16px}@media(max-width:380px){.mem-actions input[type=range]::-webkit-slider-thumb{width:10px;height:10px}.mem-actions input[type=range]::-webkit-slider-thumb:active{width:18px;height:18px}}.mem-imp-row{display:flex;align-items:center;gap:8px;margin-top:6px}
+.mem-imp-row .mem-imp-label{font-size:10px;color:var(--text3);flex-shrink:0}
+.mem-imp-row input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:3px;border-radius:2px;background:#ece4de;outline:none;min-width:80px}
+.mem-imp-row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.15)}
+.mem-imp-row .mem-imp-val{font-size:10px;color:var(--tab-active);font-weight:500;min-width:30px;text-align:right;flex-shrink:0}
+.mem-actions{display:flex;gap:8px;margin-top:8px;justify-content:flex-end}
+.similar-cluster{background:rgba(0,0,0,0.02);border-radius:10px;padding:12px;margin-bottom:10px;border:1px solid var(--border)}
+.similar-cluster-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.similar-cluster-title{font-size:12px;font-weight:600;color:var(--tab-active)}
+.similar-cluster-count{font-size:11px;color:var(--text2)}
+.similar-cluster-member{background:rgba(255,255,255,0.6);border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.similar-cluster-member:last-child{margin-bottom:0}
+.similar-member-content{flex:1;font-size:12px;color:var(--text);line-height:1.5;word-break:break-all}
+.similar-member-del{flex-shrink:0;background:none;border:none;color:var(--text3);cursor:pointer;padding:4px 8px;font-size:14px;border-radius:6px;transition:all .2s}
+.similar-member-del:hover{color:#c05050;background:rgba(192,80,80,0.08)}
+.similar-empty{text-align:center;padding:40px 20px;color:var(--text3);font-size:13px}
+
+
+/* Import/Export menu */
+.mem-import-wrap{position:fixed;top:2px;right:12px;z-index:300}
+.mem-import-trigger{position:relative;top:0;right:0;width:22px;height:22px;border-radius:4px;background:transparent;color:var(--text3);border:1px solid transparent;font-size:0.75rem;cursor:pointer;transition:all .25s;display:flex;align-items:center;justify-content:center;font-family:inherit;z-index:5;opacity:0.4}
+.mem-import-trigger:hover{opacity:1;color:var(--accent-dark)}
+.mem-import-trigger.active{opacity:1;color:var(--accent-dark);border-color:var(--accent);background:var(--card-bg)}
+.mem-import-menu{position:absolute;top:0;right:26px;display:none;gap:6px;z-index:5}
+.mem-import-menu.show{display:flex}
+.mem-import-btn{padding:4px 10px;border-radius:6px;background:var(--accent);color:#fff;border:none;font-size:0.65rem;letter-spacing:1px;cursor:pointer;transition:all .25s;font-family:inherit;white-space:nowrap;box-shadow:0 2px 8px rgba(212,160,160,0.3)}
+.mem-import-btn:hover{background:var(--accent-dark)}
+.mem-export-btn{padding:4px 10px;border-radius:6px;background:transparent;color:var(--tab-active);border:1px solid var(--border);font-size:0.65rem;letter-spacing:1px;cursor:pointer;transition:all .25s;font-family:inherit;white-space:nowrap}
+.mem-export-btn:hover{background:rgba(200,144,152,0.1)}
+.stats-bar{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.stat-card{text-align:center;padding:12px 8px;background:var(--card);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:var(--radius-sm);box-shadow:var(--shadow);border:1px solid var(--border)}
+.stat-card .num{font-size:20px;font-weight:700;color:var(--tab-active);font-family:"Noto Serif SC",serif}
+.stat-card .lbl{font-size:10px;color:var(--text2);margin-top:2px}
+.search-bar{display:flex;gap:8px;margin-bottom:12px;overflow:hidden}
+.search-bar input{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:rgba(255,255,255,0.7);font-family:"Noto Sans SC",sans-serif;font-size:13px;color:var(--text);outline:none}
+.search-bar select{padding:10px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);background:rgba(255,255,255,0.7);font-family:"Noto Sans SC",sans-serif;font-size:12px;color:var(--text);outline:none;max-width:120px;flex-shrink:0;white-space:nowrap}
+.config-group{margin-bottom:16px}
+.config-group .group-title{font-size:11px;font-weight:600;color:var(--accent);letter-spacing:1.5px;margin-bottom:10px;text-transform:uppercase}
+.config-item{padding:10px 0;border-bottom:1px solid rgba(0,0,0,0.03)}
+.config-item:last-child{border-bottom:none}
+.ci-label{font-size:12px;font-weight:500;color:var(--text);margin-bottom:4px}
+.ci-desc{font-size:11px;color:var(--text3);margin-bottom:6px}
+.switch-row .ci-label{margin-bottom:2px}
+.switch-row .ci-desc{margin-bottom:0}
+.switch-row{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:10px 0;border-bottom:1px solid rgba(0,0,0,0.03)}
+.switch-row:last-child{border-bottom:none}
+.diary-item{padding:10px 0;border-bottom:1px solid var(--border)}
+.diary-item:last-child{border-bottom:none}
+.diary-item summary{font-size:13px;color:var(--text);cursor:pointer;display:flex;justify-content:space-between;align-items:center}
+.diary-item summary em{font-size:11px;color:var(--text3);font-style:normal}
+.diary-item pre{font-size:12px;color:var(--text2);margin-top:8px;padding:10px;background:rgba(0,0,0,0.02);border-radius:8px;white-space:pre-wrap;word-break:break-all;line-height:1.5;max-height:300px;overflow-y:auto}
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:999;background:rgba(60,60,60,0.92);backdrop-filter:blur(8px);color:#fff;padding:10px 24px;border-radius:10px;font-size:13px;font-family:"Noto Sans SC",sans-serif;opacity:0;transition:opacity .3s;pointer-events:none}
+.toast.show{opacity:1}
+.loading{text-align:center;padding:30px;color:var(--text3);font-size:13px}
+.modal-overlay{display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.3);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);justify-content:center;align-items:center;padding:24px}
+.modal-overlay.show{display:flex}
+.modal{background:var(--card);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-radius:var(--radius);padding:24px;width:100%;max-width:420px;box-shadow:0 8px 40px rgba(0,0,0,0.1);border:1px solid var(--border);max-height:85vh;overflow-y:auto}
+.modal-edit-mem{max-width:480px;padding:28px;display:flex;flex-direction:column;max-height:90vh}
+.modal-edit-mem .form-group{flex-shrink:0;margin-bottom:16px}
+.modal-edit-mem textarea{min-height:280px;max-height:40vh;font-size:15px;line-height:1.7}
+.modal-edit-mem .modal-actions{flex-shrink:0;margin-top:20px}
+.modal h3{font-family:"Noto Serif SC",serif;font-size:16px;font-weight:600;color:var(--tab-active);margin-bottom:16px;text-align:center}
+.modal-actions{display:flex;gap:10px;margin-top:16px}
+.modal-actions .btn{flex:1}
+.empty{padding:30px 20px;text-align:center;color:var(--text3);font-size:13px}
+.env-row{display:flex;gap:6px;margin-bottom:6px;align-items:center}
+.env-row .env-key{font-size:11px;font-weight:500;color:var(--text2);min-width:80px;flex-shrink:0;word-break:break-all}
+.env-row .env-val{flex:1;font-size:12px;color:var(--text);word-break:break-all}
+.preset-item-row{display:flex;gap:8px;margin-bottom:8px;align-items:center}
+.preset-item-row .preset-name{flex:1;font-size:13px;color:var(--text);cursor:pointer;padding:8px 12px;background:rgba(255,255,255,0.5);border-radius:8px;border:1px solid var(--border);transition:all .2s;font-family:"Noto Sans SC",sans-serif;text-align:left}
+.preset-item-row .preset-name:active{background:var(--accent2);color:#fff}
+@media(min-width:600px){.tab-content{padding:20px 40px;max-width:560px;margin:0 auto}.header{padding:28px 40px 12px}}
+
+/* Custom scrollbar for scrollable panels */
+#llm-context {
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent2) transparent;
+  -webkit-overflow-scrolling: touch;
+}
+#llm-context::-webkit-scrollbar, #llm-context::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+#llm-context::-webkit-scrollbar-track, #llm-context::-webkit-scrollbar-track {
+  background: rgba(0,0,0,0.04);
+  border-radius: 3px;
+}
+#llm-context::-webkit-scrollbar-thumb, #llm-context::-webkit-scrollbar-thumb {
+  background: var(--accent2);
+  border-radius: 3px;
+}
+#llm-context::-webkit-scrollbar-thumb:hover, #llm-context::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+</style>
+</head>
+<body>
+<div class="header"><h1>管理台</h1><p id="headerSub">HEARTBEAT · Runtime</p></div>
+
+<!-- Tab 1: 心跳管理 -->
+<div class="tab-content active" id="tab-heartbeat">
+  <div class="card"><div class="card-title">服务状态</div>
+    <div class="stat-row"><span class="stat-label">运行时长</span><span class="stat-value" id="st-uptime">-</span></div>
+    <div class="stat-row"><span class="stat-label">唤醒服务</span><span class="stat-value" id="st-wake">-</span></div>
+    <div class="stat-row"><span class="stat-label">API 地址</span><span class="stat-value" id="st-api-url">-</span></div>
+    <div class="stat-row"><span class="stat-label">模型</span><span class="stat-value" id="st-model">-</span></div>
+    <div class="stat-row"><span class="stat-label">网关密钥</span><span class="stat-value" id="st-gateway-key">-</span></div>
+    <div class="stat-row"><span class="stat-label">推送图标</span><span class="stat-value" id="st-icon">-</span></div>
+  </div>
+  <div class="card"><div class="card-title">唤醒配置</div>
+    <div class="stat-row"><span class="stat-label">日间唤醒间隔</span><span class="stat-value" id="wake-day-after">-</span></div>
+    <div class="stat-row"><span class="stat-label">夜间唤醒间隔</span><span class="stat-value" id="wake-night-after">-</span></div>
+    <div class="stat-row"><span class="stat-label">日间检查间隔</span><span class="stat-value" id="wake-day-check">-</span></div>
+    <div class="stat-row"><span class="stat-label">夜间检查间隔</span><span class="stat-value" id="wake-night-check">-</span></div>
+    <div class="stat-row"><span class="stat-label">日间时段</span><span class="stat-value" id="wake-hours">-</span></div>
+  </div>
+  <div class="card"><div class="card-title">天气配置</div>
+    <div class="stat-row"><span class="stat-label">启用</span><span class="stat-value" id="weather-enabled">-</span></div>
+    <div class="stat-row"><span class="stat-label">地点</span><span class="stat-value" id="weather-location">-</span></div>
+    <div class="stat-row"><span class="stat-label">经纬度</span><span class="stat-value" id="weather-coords">-</span></div>
+    <div class="stat-row"><span class="stat-label">单位</span><span class="stat-value" id="weather-units">-</span></div>
+  </div>
+  <div class="card"><div class="card-title">环境变量</div><div id="env-list"></div>
+    <button class="btn btn-primary" onclick="openEnvEditor()">编辑环境变量</button>
+  </div>
+  <div class="card"><div class="card-title">预设管理</div><div id="preset-list"></div>
+    <button class="btn btn-outline" onclick="openPresetSave()">保存当前为预设</button>
+  </div>
+  <div class="card"><div class="card-title">日记阅览</div><div id="diary-list"></div></div>
+  <button class="btn btn-primary" onclick="restartService()" style="margin-top:4px;background:#c89098">重启服务</button>
+</div>
+
+<!-- Tab 2: 记忆配置管理 -->
+<div class="tab-content" id="tab-config">
+  <div class="card"><div class="card-title">记忆配置</div><div id="config-form"><div class="loading">加载中...</div></div>
+    <button class="btn btn-primary" onclick="saveConfig()" style="margin-top:8px">保存配置</button>
+  </div>
+</div>
+
+<!-- Tab 3: 记忆数据管理 -->
+<div class="tab-content" id="tab-memories" style="position:relative">
+  <div class="mem-import-wrap">
+    <button class="mem-import-trigger" id="memImportTrigger" title="导入/导出">⬆</button>
+    <div class="mem-import-menu" id="memImportMenu">
+      <button class="mem-export-btn" id="memExportBtn">导出JSON</button>
+      <button class="mem-export-btn" id="memExportTxtBtn">导出TXT</button>
+      <button class="mem-import-btn" id="memImportBtn">导入</button>
+    </div>
+  </div>
+  <div class="stats-bar">
+    <div class="stat-card"><div class="num" id="ms-total">-</div><div class="lbl">总数</div></div>
+    <div class="stat-card"><div class="num" id="ms-active">-</div><div class="lbl">活跃</div></div>
+    <div class="stat-card" onclick="openSimilarPanel()" style="cursor:pointer"><div class="num" id="ms-similar">-</div><div class="lbl">相似</div></div>
+  </div>
+  <div class="search-bar">
+    <input type="text" id="mem-search" placeholder="搜索记忆..." oninput="loadMemories()">
+    <select id="mem-type-filter" onchange="loadMemories()">
+      <option value="">全部</option>
+      <optgroup label="此刻想起">
+        <option value="fact">事实</option>
+        <option value="preference">偏好</option>
+        <option value="emotion">情感</option>
+        <option value="summary">摘要</option>
+        <option value="unresolved">未了</option>
+        <option value="resolved">已解决</option>
+      </optgroup>
+      <optgroup label="那些时刻">
+        <option value="moment">心动时刻</option>
+      </optgroup>
+      <optgroup label="走过的路">
+        <option value="trace">决策痕迹</option>
+        <option value="note">类日记</option>
+      </optgroup>
+    </select>
+    <select id="mem-sort" onchange="loadMemories()">
+      <option value="newest">最新优先</option>
+      <option value="oldest">最旧优先</option>
+      <option value="importance">重要性优先</option>
+    </select>
+
+  </div>
+  <div id="mem-list"><div class="loading">加载中...</div></div>
+</div>
+
+<!-- Tab 4: 日志 -->
+<div class="tab-content" id="tab-logs">
+  <div class="card">
+    <div class="card-title">唤醒原始日志</div>
+    <div id="wake-log" style="max-height:200px;overflow-y:auto;font-family:monospace;font-size:11px;color:var(--text2);line-height:1.5;padding:10px;background:rgba(0,0,0,0.02);border-radius:8px;"><div class="loading">加载中...</div></div>
+    <button class="btn btn-outline" onclick="loadWakeLog()" style="margin-top:8px">刷新</button>
+  </div>
+
+  <div class="card">
+    <div class="card-title">唤醒提示词</div>
+    <textarea id="wake-prompt-edit" rows="8" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;font-family:monospace;line-height:1.6;resize:vertical;">加载中...</textarea>
+    <div class="env-row" style="margin-top:8px;gap:8px;">
+      <button class="btn btn-primary" onclick="saveWakePrompt()" style="flex:1;background:var(--accent)">保存</button>
+      <button class="btn btn-outline" onclick="loadWakePrompt()" style="flex:1">重新载入</button>
+    </div>
+    <div style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 wake_prompt.txt，下次唤醒即生效。</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">摘要提示词</div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">System（身份提示）</div>
+    <textarea id="summary-system-edit" rows="2" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;resize:vertical;">加载中...</textarea>
+    <div style="font-size:11px;color:var(--text3);margin:8px 0 4px;">User Prompt 模板（占位符：${PERSONA}=人设、${conversationText}=对话原文）</div>
+    <textarea id="summary-prompt-edit" rows="10" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;font-family:monospace;line-height:1.6;resize:vertical;">加载中...</textarea>
+    <div class="env-row" style="margin-top:8px;gap:8px;">
+      <button class="btn btn-primary" onclick="saveSummaryPrompt()" style="flex:1;background:var(--accent)">保存</button>
+      <button class="btn btn-outline" onclick="loadSummaryPrompt()" style="flex:1">重新载入</button>
+      <button class="btn btn-outline" onclick="resetSummaryPrompt()" style="flex:1">恢复默认</button>
+    </div>
+    <div style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 data/summary_prompt.json，下次生成摘要即生效。</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">永久注入上下文</div>
+    <div class="env-row" style="margin-bottom:10px;">
+      <input type="text" id="pin-title" placeholder="标题 (可选)" style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;">
+    </div>
+    <div class="env-row" style="margin-bottom:10px;">
+      <textarea id="pin-content" rows="2" placeholder="内容..." style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;resize:vertical;"></textarea>
+    </div>
+    <button class="btn btn-primary" onclick="addPinned()" style="margin-bottom:12px;background:var(--accent)">+ 新增</button>
+    <div id="pinned-list" style="max-height:300px;overflow-y:auto;"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">上下文 (发给LLM的完整消息)</div>
+    <div id="llm-context" style="max-height:400px;overflow-y:auto;font-size:12px;"><div class="loading">加载中...</div></div>
+    <div class="env-row" style="margin-top:8px;">
+      <span class="env-key" id="ctx-time" style="font-size:11px;color:var(--text3)"></span>
+    </div>
+  </div>
+</div>
+
+<div class="tab-bar">
+  <button class="tab-item active" data-tab="heartbeat" onclick="switchTab('heartbeat')">
+    <span class="tab-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></span><span class="tab-label">心跳</span>
+  </button>
+  <button class="tab-item" data-tab="config" onclick="switchTab('config')">
+    <span class="tab-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span><span class="tab-label">配置</span>
+  </button>
+  <button class="tab-item" data-tab="memories" onclick="switchTab('memories')">
+    <span class="tab-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="14" y2="11"/></svg></span><span class="tab-label">记忆</span>
+  </button>
+  <button class="tab-item" data-tab="logs" onclick="switchTab('logs')">
+    <span class="tab-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></span><span class="tab-label">日志</span>
+  </button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Env Editor Modal -->
+<div class="modal-overlay" id="envModal">
+  <div class="modal"><h3>编辑环境变量</h3><div id="env-editor-fields"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal('envModal')">取消</button>
+      <button class="btn btn-primary" onclick="saveEnv()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Preset Save Modal -->
+<div class="modal-overlay" id="presetModal">
+  <div class="modal"><h3>保存预设</h3>
+    <div class="form-group"><label>预设名称</label><input type="text" id="preset-name-input" placeholder="例如: 日常模式"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal('presetModal')">取消</button>
+      <button class="btn btn-primary" onclick="savePreset()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Memory Modal -->
+<div class="modal-overlay" id="editMemModal">
+  <div class="modal modal-edit-mem">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-shrink:0">
+      <h3 style="margin:0;font-size:18px">编辑记忆</h3>
+      <button onclick="closeModal('editMemModal')" style="background:rgba(0,0,0,0.04);border:none;font-size:16px;color:var(--text2);cursor:pointer;padding:6px 10px;border-radius:8px;line-height:1">&times;</button>
+    </div>
+    <div class="form-group" style="flex:1;min-height:0">
+      <label style="font-weight:600;color:var(--tab-active)">内容</label>
+      <textarea id="edit-mem-content" placeholder="输入记忆内容..." style="width:100%;height:100%;min-height:280px;padding:16px;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,0.85);font-family:"Noto Sans SC",sans-serif;font-size:15px;line-height:1.7;color:var(--text);outline:none;resize:none;box-shadow:inset 0 1px 3px rgba(0,0,0,0.04)"></textarea>
+    </div>
+    <div class="form-group" style="flex-shrink:0">
+      <label>类型</label>
+      <select id="edit-mem-type" style="padding:12px 14px;font-size:14px;border-radius:12px">
+        <optgroup label="此刻想起">
+          <option value="fact">事实</option>
+          <option value="preference">偏好</option>
+          <option value="emotion">情感</option>
+          <option value="summary">摘要</option>
+          <option value="unresolved">未了</option>
+          <option value="resolved">已解决</option>
+        </optgroup>
+        <optgroup label="那些时刻">
+          <option value="moment">心动时刻</option>
+        </optgroup>
+        <optgroup label="走过的路">
+          <option value="trace">决策痕迹</option>
+          <option value="note">类日记</option>
+        </optgroup>
+      </select>
+    </div>
+    <div class="form-group" style="flex-shrink:0">
+      <label>重要性</label>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
+        <input type="range" id="edit-mem-importance" min="0" max="1" step="0.05" value="0.5" oninput="document.getElementById('edit-mem-imp-val').textContent=this.value" style="flex:1">
+        <span style="font-size:15px;color:var(--tab-active);font-weight:600;min-width:40px;text-align:right" id="edit-mem-imp-val">0.50</span>
+      </div>
+    </div>
+    <div class="modal-actions" style="display:flex;gap:12px;margin-top:20px;flex-shrink:0">
+      <button class="btn btn-danger" onclick="deleteEditingMem()" style="flex:1;padding:14px;font-size:15px;border-radius:12px">删除</button>
+      <button class="btn btn-primary" onclick="saveEditingMem()" style="flex:1;padding:14px;font-size:15px;border-radius:12px">保存</button>
+    </div>
+  </div>
+</div>
+<div class="modal-overlay" id="editPinnedModal">
+  <div class="modal modal-edit-mem">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-shrink:0">
+      <h3 style="margin:0;font-size:18px">编辑永久上下文</h3>
+      <button onclick="closeModal('editPinnedModal')" style="background:rgba(0,0,0,0.04);border:none;font-size:16px;color:var(--text2);cursor:pointer;padding:6px 10px;border-radius:8px;line-height:1">&times;</button>
+    </div>
+    <div class="form-group" style="flex-shrink:0">
+      <label style="font-weight:600;color:var(--tab-active)">标题</label>
+      <input id="edit-pinned-title" placeholder="标题（可选）" style="width:100%;padding:14px 16px;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,0.85);font-size:14px;color:var(--text);outline:none;">
+    </div>
+    <div class="form-group" style="flex:1;min-height:0">
+      <label style="font-weight:600;color:var(--tab-active)">内容</label>
+      <textarea id="edit-pinned-content" placeholder="输入内容..." style="width:100%;height:100%;min-height:240px;padding:16px;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,0.85);font-family:"Noto Sans SC",sans-serif;font-size:15px;line-height:1.7;color:var(--text);outline:none;resize:none;box-shadow:inset 0 1px 3px rgba(0,0,0,0.04)"></textarea>
+    </div>
+    <div class="modal-actions" style="display:flex;gap:12px;margin-top:20px;flex-shrink:0">
+      <button class="btn btn-primary" onclick="saveEditPinned()" style="flex:1;padding:14px;font-size:15px;border-radius:12px">保存</button>
+      <button class="btn btn-outline" onclick="closeModal('editPinnedModal')" style="flex:1;padding:14px;font-size:15px;border-radius:12px">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- 相似记忆弹窗 -->
+<div class="modal-overlay" id="similarModal">
+  <div class="modal" style="max-width:600px;width:95vw;max-height:85vh;display:flex;flex-direction:column">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-shrink:0">
+      <h3 style="margin:0;font-size:18px">相似/重复记忆</h3>
+      <button onclick="closeModal('similarModal')" style="background:rgba(0,0,0,0.04);border:none;font-size:16px;color:var(--text2);cursor:pointer;padding:6px 10px;border-radius:8px;line-height:1">&times;</button>
+    </div>
+    <div style="margin-bottom:14px;flex-shrink:0">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+        <span style="font-size:12px;color:var(--text2);white-space:nowrap">相似度阈值</span>
+        <span id="similar-threshold-val" style="font-size:14px;font-weight:600;color:var(--tab-active)">0.60</span>
+      </div>
+      <input type="range" id="similar-threshold" min="0.2" max="0.95" step="0.05" value="0.60" oninput="document.getElementById('similar-threshold-val').textContent=parseFloat(this.value).toFixed(2)" style="width:100%;-webkit-appearance:none;appearance:none;height:6px;border-radius:3px;background:linear-gradient(to right,var(--accent) 0%,var(--accent) var(--pct,42%),#e8e0d8 var(--pct,42%),#e8e0d8 100%);outline:none" oninput="this.style.setProperty('--pct',((this.value-this.min)/(this.max-this.min)*100)+'%')">
+      <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+        
+        <button class="chip-btn" onclick="setThreshold(0.4)" style="padding:4px 10px;font-size:11px;border-radius:12px;border:1px solid var(--border);background:rgba(255,255,255,0.6);color:var(--text2);cursor:pointer">宽松 0.40</button>
+        <button class="chip-btn" onclick="setThreshold(0.6)" style="padding:4px 10px;font-size:11px;border-radius:12px;border:1px solid var(--border);background:rgba(255,255,255,0.6);color:var(--text2);cursor:pointer">标准 0.60</button>
+        <button class="chip-btn" onclick="setThreshold(0.8)" style="padding:4px 10px;font-size:11px;border-radius:12px;border:1px solid var(--border);background:rgba(255,255,255,0.6);color:var(--text2);cursor:pointer">严格 0.80</button>
+        <button class="chip-btn" onclick="setThreshold(0.95)" style="padding:4px 10px;font-size:11px;border-radius:12px;border:1px solid var(--border);background:rgba(255,255,255,0.6);color:var(--text2);cursor:pointer">精确 0.95</button>
+        <button class="btn btn-sm btn-primary" onclick="loadSimilarMemories()" style="padding:4px 12px;font-size:11px;border-radius:12px;background:var(--accent);color:#fff;border:none;cursor:pointer;margin-left:auto">扫描</button>
+      </div>
+    </div>
+    <div id="similar-list" style="flex:1;overflow-y:auto;min-height:200px"><div class="loading">扫描中...</div></div>
+  </div>
+</div>
+
+<!-- 粘贴导入弹窗 -->
+<div class="modal-overlay" id="pasteImportModal">
+  <div class="modal" style="max-width:600px;width:95vw;max-height:85vh;display:flex;flex-direction:column">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-shrink:0">
+      <h3 style="margin:0;font-size:18px">粘贴导入</h3>
+      <button onclick="closeModal('pasteImportModal')" style="background:rgba(0,0,0,0.04);border:none;font-size:16px;color:var(--text2);cursor:pointer;padding:6px 10px;border-radius:8px;line-height:1">&times;</button>
+    </div>
+    <div style="flex-shrink:0;margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-shrink:0">
+        <span style="font-size:13px;color:var(--text2)">方式一：粘贴</span>
+        <button class="btn btn-sm btn-outline" onclick="document.getElementById('importFileInput').click()" style="margin-left:auto">📄 方式二：选择文件</button>
+        <input type="file" id="importFileInput" accept=".txt,.json,text/plain,application/json" style="display:none" onchange="handleImportFile(this)">
+      </div>
+      <textarea id="pasteImportText" placeholder="粘贴 JSON 数组或纯文本...（或选择文件自动解析）" style="width:100%;height:150px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:monospace;font-size:12px;resize:vertical;outline:none;background:rgba(255,255,255,0.7);color:var(--text)"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-sm btn-primary" onclick="parsePasteImport()" style="flex:1">解析</button>
+        <button class="btn btn-sm btn-outline" onclick="closeModal('pasteImportModal')" style="flex:1">取消</button>
+      </div>
+    </div>
+    <div id="pastePreview" style="flex:1;overflow-y:auto;min-height:100px"></div>
+    <div id="pasteConfirmBar" style="display:none;flex-shrink:0;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:space-between;align-items:center">
+      <span id="pastePreviewCount" style="font-size:12px;color:var(--text2)"></span>
+      <button class="btn btn-sm btn-primary" onclick="confirmPasteImport()" style="padding:8px 24px">确认导入</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// API 基址：兼容 nginx 反代前缀（/heartbeat/admin）与直连（/admin）
+const ADMIN_API = location.pathname.indexOf('/heartbeat/admin/') === 0 ? '/heartbeat/admin' : '/admin';
+let INITIAL_DATA = null;
+let editingMemId = null;
+let editingPinnedId = null;
+let configData = null;
+
+// ============ Init ============
+async function initApp(){
+  try{
+    const r = await fetch(ADMIN_API + '/env');
+    if(r.ok) { INITIAL_DATA = await r.json(); }
+    else {
+      document.getElementById('headerSub').textContent = '认证失败，请刷新页面';
+      return;
+    }
+  }catch(e){
+    document.getElementById('headerSub').textContent = '加载失败: '+e.message;
+    return;
+  }
+  renderHeartbeat();
+  renderEnv();
+  renderPresets();
+  renderDiary();
+}
+
+function toast(msg){
+  const el=document.getElementById('toast');
+  el.textContent=msg;el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'),2200);
+}
+
+function openModal(id){document.getElementById(id).classList.add('show')}
+function closeModal(id){document.getElementById(id).classList.remove('show')}
+
+// ============ Heartbeat ============
+function renderHeartbeat(){
+  const d=INITIAL_DATA;
+  document.getElementById('st-uptime').textContent=formatUptime(d.uptime);
+  document.getElementById('st-wake').textContent=d.wakeStatus;
+  document.getElementById('st-api-url').textContent=d.apiUrl||'-';
+  document.getElementById('st-model').textContent=d.model||'-';
+  document.getElementById('st-gateway-key').textContent=d.gatewayKey?'已配置':'未配置';
+  document.getElementById('st-icon').textContent=d.icon||'-';
+  document.getElementById('wake-day-after').textContent=d.wake.dayWakeAfter+' 分钟';
+  document.getElementById('wake-night-after').textContent=d.wake.nightWakeAfter+' 分钟';
+  document.getElementById('wake-day-check').textContent=d.wake.dayCheckInterval+' 分钟';
+  document.getElementById('wake-night-check').textContent=d.wake.nightCheckInterval+' 分钟';
+  document.getElementById('wake-hours').textContent=d.wake.dayStartHour+':00 - '+d.wake.dayEndHour+':00';
+  document.getElementById('weather-enabled').textContent=d.weather.enabled==='true'?'已启用':'已禁用';
+  document.getElementById('weather-location').textContent=d.weather.locationName||'-';
+  document.getElementById('weather-coords').textContent=(d.weather.lat||'-')+', '+(d.weather.lon||'-');
+  document.getElementById('weather-units').textContent=d.weather.units||'-';
+}
+
+function formatUptime(s){
+  const d=Math.floor(s/86400);const h=Math.floor((s%86400)/3600);const m=Math.floor((s%3600)/60);
+  let r='';if(d>0)r+=d+'天';if(h>0)r+=h+'小时';r+=m+'分钟';return r;
+}
+
+function renderEnv(){
+  const keys=['TARGET_API_URL','TARGET_API_KEY','MODEL_NAME','BARK_KEY','GATEWAY_API_KEY','CUSTOM_ICON_URL','WEATHER_ENABLED','WEATHER_LOCATION_NAME','WEATHER_LAT','WEATHER_LON','DIARY_ENABLED','DIARY_DIR','PORT','MEMORY_COOLDOWN_MINUTES'];
+  const SECRET_KEYS=new Set(['TARGET_API_KEY','BARK_KEY','GATEWAY_API_KEY']);
+  document.getElementById('env-list').innerHTML=keys.map(k=>{
+    const v=INITIAL_DATA.env[k]||'';
+    let display;
+    if(SECRET_KEYS.has(k)){
+      display=INITIAL_DATA.env[k+'_SET']?'<span style="color:var(--accent)">已设置</span>':'<span style="color:var(--text3)">未设置</span>';
+    }else{
+      display=v.length>40?v.slice(0,40)+'...':v||'<span style="color:var(--text3)">未设置</span>';
+    }
+    return '<div class="env-row"><span class="env-key">'+k+'</span><span class="env-val">'+display+'</span></div>';
+  }).join('');
+}
+
+function openEnvEditor(){
+  const keys=['TARGET_API_URL','TARGET_API_KEY','GATEWAY_API_KEY','MODEL_NAME','BARK_KEY','CUSTOM_ICON_URL','DAY_WAKE_AFTER_MINUTES','NIGHT_WAKE_AFTER_MINUTES','DAY_CHECK_INTERVAL_MINUTES','NIGHT_CHECK_INTERVAL_MINUTES','WAKE_DAY_START_HOUR','WAKE_DAY_END_HOUR','WEATHER_ENABLED','WEATHER_LOCATION_NAME','WEATHER_LAT','WEATHER_LON','WEATHER_UNITS','MEMORY_COOLDOWN_MINUTES'];
+  const SECRET_KEYS=new Set(['TARGET_API_KEY','BARK_KEY','GATEWAY_API_KEY']);
+  document.getElementById('env-editor-fields').innerHTML=keys.map(k=>{
+    const v=INITIAL_DATA.env[k]||'';
+    const ph=SECRET_KEYS.has(k)?' placeholder="'+(INITIAL_DATA.env[k+'_SET']?'已设置，留空不修改':'未设置，留空保存')+'"':'';
+    return '<div class="form-group"><label>'+k+'</label><input type="text" id="env-'+k+'" value="'+v.replace(/"/g,'&quot;')+'"'+ph+'></div>';
+  }).join('');
+  openModal('envModal');
+}
+
+async function saveEnv(){
+  const keyMap={'TARGET_API_URL':'target_url','TARGET_API_KEY':'target_key','GATEWAY_API_KEY':'gateway_api_key','MODEL_NAME':'model_name','BARK_KEY':'bark_key','CUSTOM_ICON_URL':'custom_icon','DAY_WAKE_AFTER_MINUTES':'day_wake_after','NIGHT_WAKE_AFTER_MINUTES':'night_wake_after','DAY_CHECK_INTERVAL_MINUTES':'day_check_interval','NIGHT_CHECK_INTERVAL_MINUTES':'night_check_interval','WAKE_DAY_START_HOUR':'wake_day_start_hour','WAKE_DAY_END_HOUR':'wake_day_end_hour','WEATHER_ENABLED':'weather_enabled','WEATHER_LOCATION_NAME':'weather_location_name','WEATHER_LAT':'weather_lat','WEATHER_LON':'weather_lon','WEATHER_UNITS':'weather_units'};
+  const body={};
+  Object.keys(keyMap).forEach(k=>{const el=document.getElementById('env-'+k);if(el)body[keyMap[k]]=el.value;});
+  try{
+    const r=await fetch(ADMIN_API + '/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const j=await r.json();
+    if(j.success){toast('已保存，请重启服务生效');closeModal('envModal');}
+    else toast('保存失败: '+j.error);
+  }catch(e){toast('网络错误: '+e.message)}
+}
+
+function renderPresets(){
+  const presets=INITIAL_DATA.presets||[];
+  const el=document.getElementById('preset-list');
+  if(!presets.length){el.innerHTML='<div class="empty">暂无预设</div>';return}
+  el.innerHTML=presets.map(p=>
+    '<div class="preset-item-row"><button class="preset-name" onclick="applyPreset(\''+p.name.replace(/'/g,"\'")+'\')">'+p.name+' <span style="color:var(--text3);font-size:11px">'+(p.model_name||'')+'</span></button><button class="btn btn-sm btn-danger" onclick="deletePreset(\''+p.name.replace(/'/g,"\'")+'\')">✕</button></div>'
+  ).join('');
+}
+
+function applyPreset(name){
+  const p=INITIAL_DATA.presets.find(x=>x.name===name);
+  if(!p)return;
+  openEnvEditor();
+  setTimeout(()=>{
+    const el=document.getElementById('env-TARGET_API_URL');if(el)el.value=p.target_url||'';
+    const el2=document.getElementById('env-TARGET_API_KEY');if(el2)el2.value=p.target_key||'';
+    const el3=document.getElementById('env-MODEL_NAME');if(el3)el3.value=p.model_name||'';
+  },100);
+}
+
+async function deletePreset(name){
+  if(!confirm('删除预设「'+name+'」？'))return;
+  try{
+    const r=await fetch(ADMIN_API + '/presets/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+    const j=await r.json();
+    if(j.success){toast('已删除');location.reload();}
+    else toast('删除失败');
+  }catch(e){toast('网络错误')}
+}
+
+function openPresetSave(){document.getElementById('preset-name-input').value='';openModal('presetModal');}
+
+async function savePreset(){
+  const name=document.getElementById('preset-name-input').value.trim();
+  if(!name){toast('请输入预设名称');return}
+  try{
+    const r=await fetch(ADMIN_API + '/presets/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,target_url:INITIAL_DATA.env.TARGET_API_URL||'',target_key:INITIAL_DATA.env.TARGET_API_KEY||'',model_name:INITIAL_DATA.env.MODEL_NAME||''})});
+    const j=await r.json();
+    if(j.success){toast('已保存');closeModal('presetModal');location.reload();}
+    else toast('保存失败');
+  }catch(e){toast('网络错误')}
+}
+
+function renderDiary(){
+  const entries=INITIAL_DATA.diary||[];
+  const el=document.getElementById('diary-list');
+  if(!entries.length){el.innerHTML='<div class="empty">暂无日记</div>';return}
+  el.innerHTML=entries.map(e=>
+    '<details class="diary-item"><summary><span>'+e.name+'</span><em>'+e.time+'</em></summary><pre>'+e.content+'</pre></details>'
+  ).join('');
+}
+
+async function restartService(){
+  if(!confirm('确认重启服务？服务将短暂中断。'))return;
+  try{
+    const r=await fetch(ADMIN_API + '/restart',{method:'POST',headers:{'Content-Type':'application/json'}});
+    const j=await r.json();
+    toast(j.output||'重启指令已发送');
+  }catch(e){toast('网络错误')}
+}
+
+// ============ Config ============
+function cfgRangeInput(key, unlimited){
+  const r=document.getElementById('cfg-'+key);
+  const v=document.getElementById('cfgv-'+key);
+  if(!r||!v)return;
+  if(unlimited && parseInt(r.value,10)>=parseInt(r.max,10)){ v.textContent='无限制'; }
+  else v.textContent=r.value;
+}
+async function loadConfig(){
+  const el=document.getElementById('config-form');
+  if(configData){renderConfig(configData);return}
+  el.innerHTML='<div class="loading">加载中...</div>';
+  try{
+    const r=await fetch(ADMIN_API + '/config');
+    const j=await r.json();
+    configData=j;
+    renderConfig(j);
+  }catch(e){el.innerHTML='<div class="empty">加载失败: '+e.message+'</div>'}
+}
+
+function renderConfig(cfg){
+  const el=document.getElementById('config-form');
+  const groups=[
+    {title:'摘要触发',fields:[
+      {key:'idle_threshold_minutes',label:'沉默阈值（分钟）',desc:'用户沉默多久后触发摘要',type:'range',min:1,max:60,step:1},
+      {key:'max_interval_minutes',label:'最长间隔（分钟）',desc:'无论是否沉默，最多多久生成一次摘要',type:'range',min:5,max:120,step:5},
+      {key:'auto_summary_enabled',label:'自动摘要',desc:'是否启用自动摘要生成',type:'switch'}
+    ]},
+    {title:'对话时检索与浮现',fields:[
+      {key:'retrieval_top_k',label:'检索数量',desc:'每次检索返回的记忆条数',type:'range',min:1,max:20,step:1},
+      {key:'memory_query_window',label:'对话窗口',desc:'用最近几条对话消息（含AI回复）拼接作为检索提示词',type:'range',min:1,max:10,step:1},
+      {key:'memory_relevance_threshold',label:'相关性阈值',desc:'只有高于此分数的记忆才会浮现（0-1，越低越宽松）',type:'range',min:0,max:1,step:0.05},
+      {key:'keyword_search_enabled',label:'关键词检索',desc:'启用 BM25 关键词搜索融合',type:'switch'},
+      {key:'memory_item_cooldown_minutes',label:'单条记忆冷却（分钟）',desc:'同一条记忆冷却期内不重复浮现（0=关闭），避免同一记忆反复冒出来',type:'range',min:0,max:1440,step:30,def:120}
+    ]},
+    {title:'去重与覆盖',fields:[
+      {key:'dedup_threshold',label:'去重阈值',desc:'相似度超过此值视为重复，更新重要性而非新增',type:'range',min:0.5,max:1,step:0.01},
+      {key:'conflict_threshold',label:'覆盖阈值',desc:'相似度超过此值则旧记忆沉底（superseded）',type:'range',min:0.5,max:1,step:0.01}
+    ]},
+    {title:'保底分配',fields:[
+      {key:'min_fact_count',label:'画像最少条数',desc:'上下文里至少包含的画像记忆数',type:'range',min:1,max:10,step:1},
+      {key:'min_summary_count',label:'摘要最少条数',desc:'上下文里至少包含的摘要记忆数',type:'range',min:1,max:10,step:1}
+    ]},
+    {title:'衰减与模型',fields:[
+      {key:'time_decay_days',label:'时间衰减（天）',desc:'超过此天数的记忆权重降低',type:'range',min:1,max:90,step:1},
+      {key:'embedding_model',label:'嵌入模型',desc:'向量化模型名称',type:'text'}
+    ]},
+    {title:'记忆浮现',fields:[
+      {key:'memory_cooldown_minutes',label:'记忆冷静期（分钟）',desc:'记忆浮现后多久才重新检索，冷静期内所有请求复用同一份记忆',type:'range',min:1,max:120,step:5}
+    ]},
+    {title:'时间注入',fields:[
+      {key:'time_injection_enabled',label:'注入当前时间',desc:'给 AI 注入当前时间；关闭后完全不注入（缓存最稳）',type:'switch'},
+      {key:'time_tag_interval_minutes',label:'时间更新间隔（分钟）',desc:'时间标签多久更新一次，间隔内所有请求时间相同，越大越利于缓存命中',type:'range',min:1,max:120,step:5}
+    ]},
+    {title:'唤醒记忆',fields:[
+      {key:'wake_query_window',label:'唤醒检索窗口',desc:'唤醒时用最近几条消息拼检索提示词，独立于对话窗口',type:'range',min:1,max:10,step:1},
+      {key:'wake_relevance_threshold',label:'唤醒相关性阈值',desc:'唤醒时过滤低于此分数的检索记忆（不影响随机记忆），独立于对话阈值',type:'range',min:0,max:1,step:0.05},
+      {key:'wake_top_k',label:'唤醒检索数量',desc:'唤醒时相关性检索的记忆条数（通常比对话时多）',type:'range',min:1,max:20,step:1},
+      {key:'wake_total_limit',label:'唤醒记忆上限',desc:'唤醒时最多浮现的记忆总数（含随机记忆）',type:'range',min:1,max:30,step:1},
+      {key:'wake_random_count',label:'随机记忆数',desc:'唤醒时额外注入的随机记忆条数，拓宽视野',type:'range',min:0,max:15,step:1},
+      {key:'wake_repeat_window',label:'唤醒防重复次数',desc:'最近 N 次唤醒看过的记忆不重复浮现（0=关闭），防止同一批记忆反复出现',type:'range',min:0,max:5,step:1,def:3}
+    ]}
+  ];
+  let html='';
+  groups.forEach(g=>{
+    html+='<div class="config-group"><div class="group-title">'+g.title+'</div>';
+    g.fields.forEach(f=>{
+      const val=cfg[f.key]!==undefined?cfg[f.key]:(f.def!==undefined?f.def:'');
+      if(f.type==='switch'){
+        html+='<div class="switch-row"><div><div class="ci-label">'+f.label+'</div><div class="ci-desc">'+f.desc+'</div></div><label class="switch"><input type="checkbox" id="cfg-'+f.key+'" '+(val?'checked':'')+'><span class="slider"></span></label></div>';
+      }else{
+        html+='<div class="config-item"><div class="ci-label">'+f.label+'</div><div class="ci-desc">'+f.desc+'</div>';
+        if(f.type==='range'){
+        const unlimited = f.unlimited && (!val || val>=f.max);
+        const shownVal = unlimited ? f.max : val;
+        const shownLabel = unlimited ? '无限制' : val;
+        html+='<div class="range-wrap"><input type="range" id="cfg-'+f.key+'" min="'+f.min+'" max="'+f.max+'" step="'+f.step+'" value="'+shownVal+'" oninput="cfgRangeInput(\''+f.key+'\','+(f.unlimited?'true':'false')+')"><span class="range-val" id="cfgv-'+f.key+'">'+shownLabel+'</span></div>';
+      }else if(f.type==='text'){
+        html+='<input type="text" id="cfg-'+f.key+'" value="'+String(val).replace(/"/g,'&quot;')+'">';
+      }
+      html+='</div>';
+      }
+    });
+    html+='</div>';
+  });
+  el.innerHTML=html;
+}
+
+async function saveConfig(){
+  if(!configData)return;
+  const updates={};
+  const fields=['idle_threshold_minutes','max_interval_minutes','auto_summary_enabled','retrieval_top_k','memory_query_window','memory_relevance_threshold','dedup_threshold','conflict_threshold','min_fact_count','min_summary_count','time_decay_days','keyword_search_enabled','embedding_model','memory_item_cooldown_minutes','memory_cooldown_minutes','time_injection_enabled','time_tag_interval_minutes','wake_query_window','wake_relevance_threshold','wake_top_k','wake_total_limit','wake_random_count'];
+  fields.forEach(key=>{
+    const el=document.getElementById('cfg-'+key);
+    if(!el)return;
+    if(el.type==='checkbox') updates[key]=el.checked;
+    else if(el.type==='range'||el.type==='number') updates[key]=parseFloat(el.value);
+    else updates[key]=el.value;
+  });
+  try{
+    const r=await fetch(ADMIN_API + '/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(updates)});
+    const j=await r.json();
+    if(j.success){toast('配置已保存');configData=j.config;}
+    else toast('保存失败: '+(j.error||''));
+  }catch(e){toast('网络错误: '+e.message)}
+}
+
+
+// ── Import/Export for Memories ──
+var memImportMenuOpen = false;
+// 绑定导入/导出按钮：页面加载时执行一次，避免切换记忆页时重复绑定导致多次触发
+(function bindMemImportButtons(){
+  var trigger = document.getElementById('memImportTrigger');
+  if(!trigger) return;
+  trigger.addEventListener('click', toggleMemImportMenu);
+  document.getElementById('memImportBtn').addEventListener('click', function(e){e.stopPropagation();doMemImport()});
+  document.getElementById('memExportBtn').addEventListener('click', function(e){e.stopPropagation();doMemExport()});
+  document.getElementById('memExportTxtBtn').addEventListener('click', function(e){e.stopPropagation();doMemExportTxt()});
+  document.addEventListener('click', function(e){
+    if(memImportMenuOpen && !e.target.closest('.mem-import-wrap')){
+      toggleMemImportMenu();
+    }
+  });
+})();
+function toggleMemImportMenu(){
+  memImportMenuOpen = !memImportMenuOpen;
+  var trigger = document.getElementById('memImportTrigger');
+  var menu = document.getElementById('memImportMenu');
+  if(memImportMenuOpen){
+    trigger.classList.add('active');
+    menu.classList.add('show');
+  } else {
+    trigger.classList.remove('active');
+    menu.classList.remove('show');
+  }
+}
+function doMemImport(){
+  memImportMenuOpen = false;
+  document.getElementById('memImportTrigger').classList.remove('active');
+  document.getElementById('memImportMenu').classList.remove('show');
+  document.getElementById('pasteImportText').value='';
+  document.getElementById('pastePreview').innerHTML='';
+  document.getElementById('pasteConfirmBar').style.display='none';
+  openModal('pasteImportModal');
+}
+var pasteParsedItems = [];
+function handleImportFile(input){
+  var file = input.files && input.files[0];
+  if(!file){toast('未选择文件');return}
+  var reader = new FileReader();
+  reader.onload = function(ev){
+    document.getElementById('pasteImportText').value = ev.target.result;
+    input.value = '';
+    parsePasteImport();
+  };
+  reader.onerror = function(){toast('文件读取失败')};
+  reader.readAsText(file, 'utf-8');
+}
+function parsePasteImport(){
+  var text = document.getElementById('pasteImportText').value.trim();
+  if(!text){toast('请先粘贴内容');return}
+  pasteParsedItems = [];
+  try{
+    var data = JSON.parse(text);
+    if(Array.isArray(data)){
+      pasteParsedItems = data.filter(function(i){return i.content});
+      pasteParsedItems.forEach(function(it){
+        if(!it.type) it.type='fact';
+        if(!it.importance) it.importance=0.5;
+        if(!it.timestamp) it.timestamp=new Date().toISOString();
+        if(!it.source) it.source='import';
+      });
+    } else if(data.content){
+      pasteParsedItems = [data];
+    }
+  }catch(e){
+    var lines = text.split(/\n/).filter(function(l){return l.trim()});
+    if(lines.length === 1 && lines[0].length > 200){
+      pasteParsedItems = [{content:lines[0],type:'fact',importance:0.5,timestamp:new Date().toISOString(),source:'import'}];
+    } else {
+      pasteParsedItems = lines.map(function(l){
+        return {content:l.trim(),type:'fact',importance:0.5,timestamp:new Date().toISOString(),source:'import'};
+      }).filter(function(it){return it.content});
+    }
+  }
+  if(pasteParsedItems.length === 0){toast('未解析到有效数据');return}
+  renderPastePreview();
+}
+function renderPastePreview(){
+  var el = document.getElementById('pastePreview');
+  var count = pasteParsedItems.length;
+  document.getElementById('pastePreviewCount').textContent = count + ' 条记忆待导入';
+  document.getElementById('pasteConfirmBar').style.display = 'flex';
+  el.innerHTML = pasteParsedItems.map(function(it, i){
+    return '<div style="background:rgba(0,0,0,0.02);border-radius:8px;padding:10px 12px;margin-bottom:8px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
+      '<span style="font-size:11px;color:var(--text3)">#'+(i+1)+'</span>'+
+      '<select onchange="pasteParsedItems['+i+'].type=this.value" style="font-size:11px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;background:rgba(255,255,255,0.7);color:var(--text);outline:none">'+
+      ["fact","preference","emotion","summary","moment","trace","note","unresolved","resolved"].map(function(t){return '<option value="'+t+'"'+(it.type===t?' selected':'')+'>'+t+'</option>'}).join('')+
+      '</select>'+
+      '</div>'+
+      '<textarea oninput="pasteParsedItems['+i+'].content=this.value" style="width:100%;height:60px;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text);resize:vertical;outline:none;background:rgba(255,255,255,0.5)">'+(it.content||'')+'</textarea>'+
+      '<div style="display:flex;align-items:center;gap:8px;margin-top:6px">'+
+      '<span style="font-size:10px;color:var(--text3)">重要性</span>'+
+      '<input type="range" min="0" max="1" step="0.05" value="'+(it.importance||0.5)+'" oninput="this.nextElementSibling.textContent=parseFloat(this.value).toFixed(2);pasteParsedItems['+i+'].importance=parseFloat(this.value)" style="flex:1;height:3px;-webkit-appearance:none;appearance:none;border-radius:2px;background:#ece4de;outline:none">'+
+      '<span style="font-size:10px;color:var(--tab-active);font-weight:500;min-width:26px;text-align:center">'+(it.importance||0.5).toFixed(2)+'</span>'+
+      '<button onclick="pasteParsedItems.splice('+i+',1);renderPastePreview()" style="background:none;border:none;color:var(--text3);cursor:pointer;padding:2px 8px;font-size:14px;border-radius:4px">✕</button>'+
+      '</div></div>';
+  }).join('');
+}
+function confirmPasteImport(){
+  if(pasteParsedItems.length === 0){toast('没有可导入的数据');return}
+  fetch(ADMIN_API + '/memories/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({entries:pasteParsedItems})}).then(function(r){return r.json()}).then(function(d){
+    if(d.success){
+      toast('成功导入 '+d.added+' 条（跳过 '+d.skipped+' 条）');
+      closeModal('pasteImportModal');
+      loadMemStats();
+      loadMemories();
+    } else {
+      toast('导入失败: '+(d.error||''));
+    }
+  }).catch(function(e){toast('网络错误: '+e.message)});
+}
+function doMemExportTxt(){
+  memImportMenuOpen = false;
+  document.getElementById('memImportTrigger').classList.remove('active');
+  document.getElementById('memImportMenu').classList.remove('show');
+  fetch(ADMIN_API + '/memories?active=true&pageSize=1000').then(function(r){return r.json()}).then(function(d){
+    var mems = d.memories||[];
+    if(!mems.length){toast('暂无记忆可导出');return}
+    var typeLabel={fact:'事实',preference:'偏好',emotion:'情绪',unresolved:'待办',resolved:'已了结',summary:'摘要',moment:'时刻',trace:'决策',note:'独白'};
+    var lines = mems.map(function(m){
+      return '【'+(typeLabel[m.type]||m.type)+'】'+m.content;
+    });
+    var blob = new Blob([lines.join('\n\n')],{type:'text/plain;charset=utf-8'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;a.download = 'memories_'+new Date().toISOString().slice(0,10)+'.txt';
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('已导出 '+mems.length+' 条记忆为 TXT');
+  }).catch(function(e){toast('导出失败: '+e.message)});
+}
+function doMemExport(){
+  memImportMenuOpen = false;
+  document.getElementById('memImportTrigger').classList.remove('active');
+  document.getElementById('memImportMenu').classList.remove('show');
+  fetch(ADMIN_API + '/memories?active=true&pageSize=1000').then(function(r){return r.json()}).then(function(d){
+    var mems = d.memories||[];
+    if(!mems.length){toast('暂无记忆可导出');return}
+    var dataStr = JSON.stringify(mems.map(function(m){return{content:m.content,type:m.type,importance:m.importance,source:m.source,timestamp:m.timestamp}}),null,2);
+    var blob = new Blob([dataStr],{type:'application/json'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;a.download = 'memories_'+new Date().toISOString().slice(0,10)+'.json';
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('已导出 '+mems.length+' 条记忆');
+  }).catch(function(e){toast('导出失败: '+e.message)});
+}
+// ============ Memories ============
+async function loadMemStats(){
+  try{
+    const r=await fetch(ADMIN_API + '/stats');
+    const j=await r.json();
+    document.getElementById('ms-total').textContent=j.total||0;
+    document.getElementById('ms-active').textContent=j.active||0;
+    document.getElementById('ms-similar').textContent=j.similarCount||0;
+  }catch(e){}
+}
+
+async function loadMemories(){
+  const el=document.getElementById('mem-list');
+  const search=document.getElementById('mem-search').value.trim();
+  const type=document.getElementById('mem-type-filter').value;
+  let url=ADMIN_API + '/memories?active=true&pageSize=50';
+  if(search)url+='&search='+encodeURIComponent(search);
+  if(type)url+='&type='+encodeURIComponent(type);
+  const sortBy=document.getElementById('mem-sort').value;
+  if(sortBy)url+='&sortBy='+encodeURIComponent(sortBy);
+  el.innerHTML='<div class="loading">加载中...</div>';
+  try{
+    const r=await fetch(url);
+    const j=await r.json();
+    const mems=j.memories||[];
+    if(!mems.length){el.innerHTML='<div class="empty">暂无记忆数据</div>';return}
+    el.innerHTML=mems.map(m=>{
+      const time=m.timestamp?new Date(m.timestamp).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
+      return '<div class="mem-item"><div class="mem-meta">'+
+        '<span class="mem-tag type-'+(m.type||'fact')+'">'+(m.type||'fact')+'</span>'+
+        '<span class="mem-tag '+(m.active?'active':'inactive')+'">'+(m.active?'活跃':'已归档')+'</span>'+
+        '<span class="mem-time">'+time+'</span>'+
+        
+        '</div><div class="mem-content">'+(m.content||'')+'</div>'+
+        '<div class="mem-actions" style="align-items:center;gap:8px;flex-wrap:nowrap;justify-content:space-between">'+
+        '<input type="range" class="mem-imp-slider" min="0" max="1" step="0.05" value="'+(m.importance||0.5)+'" style="flex:1;min-width:70px" oninput="document.getElementById(\'impv-'+m.id+'\').textContent=parseFloat(this.value).toFixed(2)" onchange="updateMemImportance(\''+m.id+'\',this.value)" title="重要性: '+((m.importance||0.5).toFixed(2))+'">'+
+        '<span id="impv-'+m.id+'" style="font-size:11px;color:var(--tab-active);font-weight:600;min-width:30px;text-align:center;flex-shrink:0">'+(m.importance||0.5).toFixed(2)+'</span>'+
+        '<div style="display:flex;gap:6px;flex-shrink:0">'+
+        '<button class="btn btn-sm btn-edit" onclick="openEditMem(\''+m.id+'\')">编辑</button>'+
+        '<button class="btn btn-sm btn-delete" onclick="deleteMem(\''+m.id+'\')">删除</button>'+
+        '</div></div></div>';
+    }).join('');
+  }catch(e){el.innerHTML='<div class="empty">加载失败: '+e.message+'</div>'}
+}
+
+function openEditMem(id){
+  editingMemId=id;
+  fetch(ADMIN_API + '/memories/'+encodeURIComponent(id),{credentials:'include'}).then(r=>{
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    return r.json();
+  }).then(mem=>{
+    if(!mem||!mem.id){toast('未找到该记忆');return}
+    document.getElementById('edit-mem-content').value=mem.content||'';
+    document.getElementById('edit-mem-type').value=mem.type||'fact';
+    const imp=mem.importance||0.5;
+    document.getElementById('edit-mem-importance').value=imp;
+    document.getElementById('edit-mem-imp-val').textContent=imp;
+    openModal('editMemModal');
+  }).catch(()=>toast('加载失败'));
+}
+
+async function saveEditingMem(){
+  if(!editingMemId)return;
+  const content=document.getElementById('edit-mem-content').value.trim();
+  const type=document.getElementById('edit-mem-type').value;
+  const importance=parseFloat(document.getElementById('edit-mem-importance').value);
+  const updates={};
+  if(content)updates.content=content;
+  updates.type=type;
+  updates.importance=importance;
+  try{
+    const r=await fetch(ADMIN_API + '/memories/'+editingMemId,{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(updates)});
+    const j=await r.json();
+    if(j.success){toast('已更新');closeModal('editMemModal');loadMemories();loadMemStats();}
+    else toast('更新失败: '+(j.error||''));
+  }catch(e){toast('网络错误')}
+}
+
+async function deleteEditingMem(){
+  if(!editingMemId||!confirm('确认删除这条记忆？'))return;
+  const url=ADMIN_API + '/memories/'+encodeURIComponent(editingMemId);
+  console.log('[DEBUG deleteEditingMem] url:',url,'id:',editingMemId);
+  try{
+    const r=await fetch(url,{method:'DELETE',credentials:'include'});
+    const txt=await r.text();
+    console.log('[DEBUG] response status:',r.status,'body:',txt);
+    let j={};
+    try{j=JSON.parse(txt);}catch(e){}
+    if(r.status===401){toast('认证已过期，请重新登录');return;}
+    if(r.status===404){toast('未找到该记忆(404)');closeModal('editMemModal');loadMemories();return;}
+    if(r.status>=400){toast('请求失败('+r.status+'): '+(j.error||txt));return;}
+    if(j.success){toast('已删除');closeModal('editMemModal');loadMemories();loadMemStats();}
+    else toast('删除失败: '+(j.error||'未知错误'));
+  }catch(e){console.error('[DEBUG] error:',e);toast('网络错误: '+e.message)}
+}
+
+async function deleteMem(id){
+  if(!confirm('确认删除这条记忆？'))return;
+  const url=ADMIN_API + '/memories/'+encodeURIComponent(id);
+  console.log('[DEBUG deleteMem] url:',url,'id:',id);
+  try{
+    const r=await fetch(url,{method:'DELETE',credentials:'include'});
+    const txt=await r.text();
+    console.log('[DEBUG] response status:',r.status,'body:',txt);
+    let j={};
+    try{j=JSON.parse(txt);}catch(e){}
+    if(r.status===401){toast('认证已过期，请重新登录');return;}
+    if(r.status===404){toast('未找到该记忆(404)');loadMemories();return;}
+    if(r.status>=400){toast('请求失败('+r.status+'): '+(j.error||txt));return;}
+    if(j.success){toast('已删除');loadMemories();loadMemStats();}
+    else toast('删除失败: '+(j.error||'未知错误'));
+  }catch(e){console.error('[DEBUG] error:',e);toast('网络错误: '+e.message)}
+}
+
+
+
+function updateMemImportance(id, val){
+  fetch(ADMIN_API + '/memories/'+encodeURIComponent(id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({importance:parseFloat(val)})}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(d){if(d.success){toast('重要性已更新')}else{toast('更新失败: '+(d.error||''))}}).catch(function(e){toast('网络错误: '+e.message)});
+}
+
+// ============ Logs / Tab 4 ============
+let logsRefreshTimer = null;
+
+function switchTab(name){
+  document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
+  document.querySelectorAll('.tab-item').forEach(el=>el.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  document.querySelector('.tab-item[data-tab="'+name+'"]').classList.add('active');
+  if(name==='config') loadConfig();
+  if(name==='memories'){loadMemStats();loadMemories();}
+  if(name==='logs'){startLogsAutoRefresh();}
+  else{stopLogsAutoRefresh();}
+}
+
+function startLogsAutoRefresh(){
+  loadWakeLog();
+  loadPinned();
+  loadLLMContext();
+  loadWakePrompt();
+  loadSummaryPrompt();
+  if(logsRefreshTimer) clearInterval(logsRefreshTimer);
+  logsRefreshTimer = setInterval(() => {
+    loadWakeLog();
+    loadLLMContext();
+    loadPinned();
+  }, 5000);
+}
+
+function stopLogsAutoRefresh(){
+  if(logsRefreshTimer){clearInterval(logsRefreshTimer);logsRefreshTimer=null;}
+}
+
+async function loadWakeLog(){
+  const el=document.getElementById('wake-log');
+  if(!el)return;
+  try{
+    const r=await fetch(ADMIN_API + '/logs/wake-up?lines=100');
+    const j=await r.json();
+    if(!j.lines||!j.lines.length){el.innerHTML='<div class="empty">暂无日志</div>';return}
+    el.innerHTML=j.lines.slice(-50).map(l=>{
+      const esc=l.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      return '<div>'+esc+'</div>';
+    }).join('');
+  }catch(e){el.innerHTML='<div class="empty">加载失败</div>'}
+}
+
+async function loadWakePrompt(){
+  const el=document.getElementById('wake-prompt-edit');
+  if(!el)return;
+  try{
+    const r=await fetch(ADMIN_API + '/logs/wake-prompt');
+    const j=await r.json();
+    el.value=j.text||'';
+  }catch(e){el.value='加载失败'}
+}
+
+async function saveWakePrompt(){
+  const el=document.getElementById('wake-prompt-edit');
+  const text=el.value;
+  if(!text.trim()){toast('内容不能为空');return}
+  try{
+    const r=await fetch(ADMIN_API + '/logs/wake-prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+    const j=await r.json();
+    if(j.ok) toast('已保存，下次唤醒生效');
+    else toast('保存失败: '+(j.error||''));
+  }catch(e){toast('网络错误')}
+}
+
+async function loadSummaryPrompt(){
+  const se=document.getElementById('summary-system-edit');
+  const pe=document.getElementById('summary-prompt-edit');
+  if(!se||!pe)return;
+  try{
+    const r=await fetch(ADMIN_API + '/logs/summary-prompt');
+    const j=await r.json();
+    se.value=j.system||'';
+    pe.value=j.template||j.prompt||'';
+  }catch(e){se.value='加载失败';pe.value=''}
+}
+
+async function saveSummaryPrompt(){
+  const se=document.getElementById('summary-system-edit');
+  const pe=document.getElementById('summary-prompt-edit');
+  if(!pe.value.trim()){toast('模板不能为空');return}
+  try{
+    const r=await fetch(ADMIN_API + '/logs/summary-prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({system:se.value,template:pe.value})});
+    const j=await r.json();
+    if(j.ok) toast('已保存，下次摘要生效');
+    else toast('保存失败: '+(j.error||''));
+  }catch(e){toast('网络错误')}
+}
+
+async function resetSummaryPrompt(){
+  if(!confirm('恢复默认摘要提示词？'))return;
+  try{
+    const r=await fetch(ADMIN_API + '/logs/summary-prompt',{method:'DELETE'});
+    const j=await r.json();
+    if(j.ok){toast('已恢复默认');loadSummaryPrompt();}
+    else toast('失败: '+(j.error||''));
+  }catch(e){toast('网络错误')}
+}
+
+async function loadPinned(){
+  const el=document.getElementById('pinned-list');
+  if(!el)return;
+  try{
+    const r=await fetch(ADMIN_API + '/logs/pinned');
+    const j=await r.json();
+    const list=j.list||[];
+    if(!list.length){el.innerHTML='<div class="empty">暂无永久注入上下文</div>';return}
+    el.innerHTML=list.map((m,i)=>{
+      const mid=String(m.id||'').replace(/"/g,'&quot;');
+      const title=(m.title||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const content=(m.content||'').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+      return '<div class="mem-item"><div class="mem-meta" style="justify-content:space-between">'+
+        '<div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1">'+
+        '<span class="mem-tag">#'+(i+1)+'</span>'+
+        (title?'<span class="mem-time" style="font-weight:500;color:var(--tab-active);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+title+'</span>':'')+
+        '</div>'+
+        "<div style=\"display:flex;gap:4px;flex-shrink:0\">"+
+        "<button class=\"btn btn-sm\" style=\"background:none;border:none;font-size:14px;color:var(--text3);cursor:pointer;padding:2px 6px;line-height:1\" onclick=\"openEditPinned('" + mid + "')\" title=\"编辑\">&#9998;</button>"+
+        "<button class=\"btn btn-sm\" style=\"background:none;border:none;font-size:16px;color:var(--text3);cursor:pointer;padding:2px 6px;line-height:1\" onclick=\"deletePinned('" + mid + "')\">&times;</button>"+
+        "</div>"+
+        '</div><div class="mem-content">'+content+'</div></div>';
+    }).join('');
+  }catch(e){el.innerHTML='<div class="empty">加载失败</div>'}
+}
+
+async function addPinned(){
+  const title=document.getElementById('pin-title').value.trim();
+  const content=document.getElementById('pin-content').value.trim();
+  if(!content){toast('请输入内容');return}
+  try{
+    const r=await fetch(ADMIN_API + '/logs/pinned',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,content})});
+    const j=await r.json();
+    if(j.success){toast('已添加');document.getElementById('pin-title').value='';document.getElementById('pin-content').value='';loadPinned();}
+    else toast('添加失败');
+  }catch(e){toast('网络错误')}
+}
+
+async function deletePinned(id){
+  if(!confirm('确认删除？'))return;
+  try{
+    const r=await fetch(ADMIN_API + '/logs/pinned/'+id,{method:'DELETE'});
+    const j=await r.json();
+    if(j.success){toast('已删除');loadPinned();}
+    else toast('删除失败');
+  }catch(e){toast('网络错误')}
+}
+
+async function openEditPinned(id){
+  editingPinnedId = id;
+  try{
+    const r=await fetch(ADMIN_API + '/logs/pinned');
+    const j=await r.json();
+    const item=(j.list||[]).find(m=>m.id===id);
+    if(!item){toast('未找到');return}
+    document.getElementById('edit-pinned-title').value=item.title||'';
+    document.getElementById('edit-pinned-content').value=item.content||'';
+    openModal('editPinnedModal');
+  }catch(e){toast('加载失败')}
+}
+
+async function saveEditPinned(){
+  if(!editingPinnedId){toast('未找到');return}
+  const title=document.getElementById('edit-pinned-title').value.trim();
+  const content=document.getElementById('edit-pinned-content').value.trim();
+  if(!content){toast('内容不能为空');return}
+  try{
+    const r=await fetch(ADMIN_API + '/logs/pinned/'+editingPinnedId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,content})});
+    const j=await r.json();
+    if(j.success){toast('已更新');closeModal('editPinnedModal');loadPinned();}
+    else toast('更新失败: '+(j.error||''));
+  }catch(e){toast('网络错误')}
+}
+
+async function loadLLMContext(){
+  const el=document.getElementById('llm-context');
+  if(!el)return;
+  try{
+    const r=await fetch(ADMIN_API + '/logs/context');
+    const j=await r.json();
+    if(!j.messages||!j.messages.length){el.innerHTML='<div class="empty">暂无上下文 (还未有对话)</div>';document.getElementById('ctx-time').textContent='';return}
+    const roleMap={system:'系统',user:'用户',assistant:'AI',tool:'工具',_divider:'---'};
+    const roleClass={system:'color:var(--tab-active);',user:'color:var(--accent);',assistant:'color:var(--text);',tool:'color:var(--accent2);',_divider:'color:var(--text3);text-align:center;'}
+    let html='<div style="font-size:11px;color:var(--text3);margin-bottom:8px">共 '+j.total+' 条消息</div>';
+    html+=j.messages.map(m=>{
+      const role=roleMap[m.role]||m.role;
+      const c=(typeof m.content==='string')?m.content:(m.content?JSON.stringify(m.content):'');
+      const esc=c.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      if(m.role==='_divider')return '<div style="padding:6px 0;border-top:1px dashed var(--border);margin:4px 0;">'+esc+'</div>';
+      return '<div style="margin-bottom:8px;"><span style="font-size:10px;font-weight:600;letter-spacing:1px;'+roleClass[m.role]+'">['+role+']</span><div style="font-size:12px;color:var(--text);margin-top:2px;white-space:pre-wrap;word-break:break-all;padding:6px 10px;background:rgba(0,0,0,0.02);border-radius:6px;">'+esc+'</div></div>';
+    }).join('');
+    el.innerHTML=html;
+    document.getElementById('ctx-time').textContent=j.captureTime?'更新于: '+new Date(j.captureTime).toLocaleString('zh-CN'):'';
+  }catch(e){el.innerHTML='<div class="empty">加载失败</div>'}
+}
+
+
+
+function setThreshold(val) {
+  const slider = document.getElementById('similar-threshold');
+  slider.value = val;
+  document.getElementById('similar-threshold-val').textContent = val.toFixed(2);
+  slider.dispatchEvent(new Event('input'));
+  loadSimilarMemories();
+}
+
+// 相似记忆面板
+async function openSimilarPanel() {
+  openModal('similarModal');
+  await loadSimilarMemories();
+}
+
+async function loadSimilarMemories() {
+  const el = document.getElementById('similar-list');
+  const threshold = parseFloat(document.getElementById('similar-threshold').value) || 0.6;
+  el.innerHTML = '<div class="loading">扫描中...</div>';
+  try {
+    const r = await fetch(ADMIN_API + '/memories/similar?threshold=' + threshold);
+    const j = await r.json();
+    const clusters = j.clusters || [];
+    if (!clusters.length) {
+      el.innerHTML = '<div class="similar-empty">没有发现相似或重复的记忆</div>';
+      return;
+    }
+    el.innerHTML = clusters.map((cluster, ci) => {
+      const tagColor = cluster.type || 'fact';
+      const exactBadge = cluster.exact ? '<span style="font-size:10px;color:#c05050;margin-left:6px">完全相同</span>' : '';
+      return '<div class="similar-cluster">' +
+        '<div class="similar-cluster-header">' +
+          '<span class="similar-cluster-title">相似组 #' + (ci+1) + ' <span class="mem-tag type-' + tagColor + '">' + (cluster.type || 'fact') + '</span>' + exactBadge + '</span>' +
+          '<span class="similar-cluster-count">共 ' + cluster.count + ' 条</span>' +
+        '</div>' +
+        cluster.members.map(m => {
+          const time = m.timestamp ? new Date(m.timestamp).toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '-';
+          const imp = m.importance ? ' 重要:' + m.importance.toFixed(2) : '';
+          const content = (m.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          return '<div class="similar-cluster-member">' +
+            '<div class="similar-member-content">' + content + '<br><span style="font-size:10px;color:var(--text3)">' + time + imp + '</span></div>' +
+            '<button class="similar-member-del" onclick="deleteSimilarMem(\'' + m.id + '\')" title="删除">×</button>' +
+          '</div>';
+        }).join('') +
+      '</div>';
+    }).join('');
+  } catch(e) {
+    el.innerHTML = '<div class="similar-empty">加载失败: ' + e.message + '</div>';
+  }
+}
+
+async function deleteSimilarMem(id) {
+  if (!confirm('确定删除这条记忆？')) return;
+  try {
+    const r = await fetch(ADMIN_API + '/memories/' + encodeURIComponent(id), {method:'DELETE'});
+    const j = await r.json();
+    if (j.success) {
+      toast('已删除');
+      await loadSimilarMemories();
+      loadMemories();  // refresh main list
+    } else {
+      toast('删除失败');
+    }
+  } catch(e) {
+    toast('网络错误');
+  }
+}
+
+initApp();
+
+</script>
+</body>
+</html>

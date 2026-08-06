@@ -1,0 +1,20 @@
+.env
+node_modules
+enhanced_messages.json
+message_timestamps.json
+enhanced_messages.json*
+*bak*
+.DS_Store
+presets.json
+wake_prompt.txt
+diary/
+
+# 本地数据与中间文件
+data/
+*.orig
+state.json
+pinned.json
+memories.json
+
+# 历史数据备份（时间线/时间戳旧库归档）
+.backup_timefield/
