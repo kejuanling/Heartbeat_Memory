@@ -320,7 +320,7 @@ def tool_memories_search(args):
     return {"query": q, "count": len(cleaned), "memories": cleaned}
 
 TOOLS["memories_search"] = {
-    "description": "主动检索谢意行的长期记忆库（语义+关键词混合检索，含相关度评分）。想回忆涵的偏好、事实、时刻、情绪、摘要时使用。",
+    "description": "检索长期记忆库（语义+关键词混合检索，含相关度评分）。",
     "inputSchema": {
         "type": "object",
         "properties": {
