@@ -488,8 +488,12 @@ async function runWakeUp() {
   // ========================
   let memoryContext = "";
   try {
-    // Use recent user+AI messages as query (wider context than chat mode)
     const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
+    // 记忆检索总开关：关闭后唤醒不再检索记忆
+    if (cfg.memory_retrieval_enabled === false) {
+      console.log("[memory] 检索开关关闭，唤醒时跳过记忆检索");
+    } else {
+    // Use recent user+AI messages as query (wider context than chat mode)
     const windowSize = cfg.wake_query_window || 3;
     const recentMsgs = messages.slice(-windowSize)
       .filter(m => (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
@@ -516,6 +520,7 @@ async function runWakeUp() {
     if (memStr) {
       memoryContext = "\n\n## 我回忆起的关于她的事\n" + memStr;
       console.log("[memory] 唤醒时携带记忆上下文");
+    }
     }
   } catch (memErr) {
     console.error("[memory] 唤醒时记忆检索失败:", memErr.message);

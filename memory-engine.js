@@ -42,7 +42,7 @@ async function init() {
     const raw = await fs.readJson(MEMORIES_FILE);
     memories = Array.isArray(raw) ? raw : [];
   } catch { memories = []; }
-  const DEFAULT_CONFIG = { idle_threshold_minutes: 5, max_interval_minutes: 30, auto_summary_enabled: true, retrieval_top_k: 5, dedup_threshold: 0.9, conflict_threshold: 0.85, min_fact_count: 2, min_summary_count: 2, time_decay_days: 30, keyword_search_enabled: true, embedding_model: "Xenova/paraphrase-multilingual-MiniLM-L12-v2", memory_relevance_threshold: 0.3, memory_query_window: 3, memory_cooldown_minutes: 30, memory_item_cooldown_minutes: 120, time_injection_enabled: true, time_tag_interval_minutes: 30, wake_query_window: 3, wake_relevance_threshold: 0.3, wake_repeat_window: 3 };
+  const DEFAULT_CONFIG = { idle_threshold_minutes: 5, max_interval_minutes: 30, auto_summary_enabled: true, memory_retrieval_enabled: true, retrieval_top_k: 5, dedup_threshold: 0.9, conflict_threshold: 0.85, min_fact_count: 2, min_summary_count: 2, time_decay_days: 30, keyword_search_enabled: true, embedding_model: "Xenova/paraphrase-multilingual-MiniLM-L12-v2", memory_relevance_threshold: 0.3, memory_query_window: 3, memory_cooldown_minutes: 30, memory_item_cooldown_minutes: 120, summary_surfacing_min_age_hours: 24, summary_surfacing_min_age_enabled: true, time_injection_enabled: true, time_tag_interval_minutes: 30, wake_query_window: 3, wake_relevance_threshold: 0.3, wake_repeat_window: 3 };
   try {
     config = { ...DEFAULT_CONFIG, ...(await fs.readJson(CONFIG_FILE)) };
   } catch {
@@ -343,6 +343,16 @@ async function buildContext(query, opts = {}) {
   // 排除指定记忆（如最近几次唤醒已看过的），避免同一批反复出现
   if (excludeIds) {
     allCandidates = allCandidates.filter(mm => !excludeIds.has(mm.id));
+  }
+  // 近期摘要覆盖的对话通常还在上下文窗口中，聊天时再浮现属于重复。
+  // 通过 minSummaryAgeHours（小时）排除"太新"的摘要；唤醒等无上下文场景不传该参数，不受影响。
+  if (opts.minSummaryAgeHours > 0) {
+    const cutoff = Date.now() - opts.minSummaryAgeHours * 3600 * 1000;
+    allCandidates = allCandidates.filter(mm => {
+      if (mm.type !== "summary") return true;
+      if (!mm.timestamp) return true;
+      return new Date(mm.timestamp).getTime() < cutoff;
+    });
   }
   let result = allCandidates.slice(0, totalLimit);
   

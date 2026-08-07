@@ -138,6 +138,12 @@ function timeInjectionEnabled() {
   const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
   return cfg.time_injection_enabled !== false;
 }
+
+// 记忆检索总开关：关闭后对话不再自动检索并注入记忆
+function memoryRetrievalEnabled() {
+  const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
+  return cfg.memory_retrieval_enabled !== false;
+}
 // 构建系统时间标签（注入到最后一条 user 之后；按间隔桶化，间隔内所有请求相同）
 function buildSystemTimeTag() {
   const bucketMs = getTimeTagIntervalMinutes() * 60 * 1000;
@@ -965,17 +971,21 @@ app.post("/v1/chat/completions", async (req, reply) => {
         (m.role === "user" || m.role === "assistant") && typeof m.content === "string"
       );
       if (dialogMsgs.length > 0) {
+        // 记忆检索总开关：关闭时清空冷静期缓存，避免旧记忆继续注入
+        if (!memoryRetrievalEnabled()) memoryInjectionCache = null;
         const now = Date.now();
         // 冷静期内直接复用缓存内容，保证请求体尾部稳定
-        const reused = memoryInjectionCache && now < memoryInjectionCache.expiresAt;
+        const reused = memoryRetrievalEnabled() && memoryInjectionCache && now < memoryInjectionCache.expiresAt;
         let dynContent = reused ? memoryInjectionCache.content : null;
-        if (dynContent === null) {
+        if (dynContent === null && memoryRetrievalEnabled()) {
           // 冷静期已过：重新检索相关记忆并刷新缓存
           const cfg = memoryEngine.getConfig();
           const windowSize = cfg.memory_query_window || 3;
           const recentMsgs = dialogMsgs.slice(-windowSize);
           const query = recentMsgs.map(m => m.content).join(" ");
-          const memResults = await memoryEngine.buildContext(query);
+          const memResults = await memoryEngine.buildContext(query, {
+            minSummaryAgeHours: cfg.summary_surfacing_min_age_enabled === false ? 0 : (Number(cfg.summary_surfacing_min_age_hours) || 0)
+          });
           if (memResults.length > 0) {
             const threshold = cfg.memory_relevance_threshold || 0.3;
             const relevant = memResults.filter(m => (m._score || 0) >= threshold);
