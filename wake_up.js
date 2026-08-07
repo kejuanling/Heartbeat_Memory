@@ -70,11 +70,23 @@ function getDiaryTimeString(date = new Date()) {
 // 批注 2026-07-11：日记只接受模型显式输出的 [DIARY] 块，避免把普通推送内容误写进本地日记。
 function extractDiaryFromResponse(text) {
   const diaryBlocks = [];
-  const remainingText = String(text || "").replace(/\[DIARY\]([\s\S]*?)\[\/DIARY\]/gi, (_, content) => {
-    const diary = String(content || "").trim();
-    if (diary) diaryBlocks.push(diary);
-    return "";
-  }).trim();
+  let remainingText = String(text || "")
+    .replace(/\[DIARY\]([\s\S]*?)\[\/DIARY\]/gi, (_, content) => {
+      const diary = String(content || "").trim();
+      if (diary) diaryBlocks.push(diary);
+      return "";
+    })
+    .trim();
+  // 容错：模型输出被截断或漏写 [/DIARY] 时，把开标签之后剩余内容视为日记
+  remainingText = remainingText
+    .replace(/\[DIARY\][\s\S]*$/i, (m) => {
+      const diary = m.replace(/^\[DIARY\]/i, "").trim();
+      if (diary) diaryBlocks.push(diary);
+      return "";
+    })
+    .trim();
+  // 兜底：清除残留的 [DIARY]/[/DIARY] 标记，避免泄漏到推送
+  remainingText = remainingText.replace(/\[DIARY\]|\[\/DIARY\]/gi, "").trim();
   return {
     diaryContent: diaryBlocks.join("\n\n").trim(),
     remainingText
@@ -675,7 +687,7 @@ ${historyText}`
   } else {
     // 没有 [NO_ACTION] 就视为想发推送
     console.log("\nAI 选择发送推送\n");
-    let barkText = stripInternalTags(aiText);
+    let barkText = stripInternalTags(aiText).replace(/\[DIARY\]|\[\/DIARY\]/gi, "");
 
     // 如果 AI 还是写了 [BARK] ... [/BARK] 标签，就剥掉
     const barkMatch = barkText.match(/\[BARK\]([\s\S]*?)\[\/BARK\]/);

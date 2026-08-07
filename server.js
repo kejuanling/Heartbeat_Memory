@@ -600,6 +600,15 @@ function stripInternalTags(text) {
   return tagParser.stripTags(text).trim();
 }
 
+// 剥离 [DIARY] 块（成对或未闭合）：日记已通过 diary 字段单独记录，避免原始标签/重复文本进入上下文
+function stripDiaryBlocks(text) {
+  return String(text || "")
+    .replace(/\[DIARY\]([\s\S]*?)\[\/DIARY\]/gi, "")
+    .replace(/\[DIARY\][\s\S]*$/i, "")
+    .replace(/\[DIARY\]|\[\/DIARY\]/gi, "")
+    .trim();
+}
+
 function stripPosition(messages) {
   // 只保留消息正文，剥离内部排序与时间字段（与 wake_up.js 保持一致，避免内部字段外泄）
   return messages.map(({ position, time, ...rest }) => rest);
@@ -1323,10 +1332,10 @@ app.post("/internal/wake-event", async (req, reply) => {
     }
     if (content) {
       // 先解析记忆标签，存储清洗后的文本，避免 <memory> 原始标签进入上下文/事件
-      let stored = String(content).trim();
+      let stored = stripDiaryBlocks(String(content).trim());
       try {
         const cleaned = await tagParser.extractAndStore(content);
-        if (cleaned) stored = cleaned;
+        if (cleaned) stored = stripDiaryBlocks(cleaned);
       } catch (e) {
         console.warn("[wake-event] 标签解析失败:", e.message);
       }
@@ -2355,6 +2364,50 @@ app.get("/internal/memory/search", async (req, reply) => {
     reply.send({ query: q, count: safe.length, memories: safe });
   } catch (err) {
     console.error("[GET /internal/memory/search] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 记忆编辑（MCP/AI 主动修改记忆：内容、重要性、类型等；按 id 精确修改）
+app.post("/internal/memory/update", async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const body = req.body || {};
+    const id = String(body.id || "").trim();
+    const updates = body.updates || {};
+    if (!id) return reply.code(400).send({ error: "id 必填" });
+    const clean = {};
+    for (const k of ["content", "importance", "type", "active"]) {
+      if (updates[k] !== undefined) clean[k] = updates[k];
+    }
+    if (Object.keys(clean).length === 0) {
+      return reply.code(400).send({ error: "没有可更新的字段（content/importance/type/active）" });
+    }
+    const ok = await engine.updateMemory(id, clean);
+    if (!ok) return reply.code(404).send({ error: "记忆不存在: " + id });
+    const mem = engine.getMemoryById(id);
+    const { embedding, ...rest } = mem;
+    reply.send({ success: true, memory: rest });
+  } catch (err) {
+    console.error("[POST /internal/memory/update] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 记忆删除（软删除：active=false，沉底不再被检索）
+app.post("/internal/memory/delete", async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const id = String((req.body || {}).id || "").trim();
+    if (!id) return reply.code(400).send({ error: "id 必填" });
+    const mem = engine.getMemoryById(id);
+    if (!mem) return reply.code(404).send({ error: "记忆不存在: " + id });
+    const ok = engine.deleteMemory(id);
+    if (!ok) return reply.code(500).send({ error: "删除失败" });
+    const { embedding, ...rest } = mem;
+    reply.send({ success: true, deleted: rest });
+  } catch (err) {
+    console.error("[POST /internal/memory/delete] error:", err.message);
     reply.code(500).send({ error: err.message });
   }
 });
