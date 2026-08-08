@@ -65,7 +65,7 @@ npm start              # 或 pm2 start ecosystem.config.js
 
 ## 安全模型
 
-- 管理台 `/admin`：HTTP Basic Auth（建议自行在前置层加 HTTPS）。
+- 管理台：HTTP Basic Auth + 会话登录（登录后 30 天免登录），登录页 `/admin/mobile/login`（建议自行在前置层加 HTTPS）。
 - 内部接口 `/internal/*`、`/test-bark`：必须携带 `INTERNAL_API_KEY`。
 - 公网 `/v1/*`：`ALLOW_PUBLIC_API=true` 时要求 `GATEWAY_API_KEY`（`Authorization: Bearer` 或 `x-api-key`）。
 - 反向代理场景：网关仅在直连来源为可信内网时才信任 `X-Real-IP` / `X-Forwarded-For`，公网请求不会被伪装成内网放行。
@@ -73,7 +73,7 @@ npm start              # 或 pm2 start ecosystem.config.js
 
 ## 管理台
 
-访问 `/admin`（或移动端 `/admin/mobile`）可：
+访问管理台（`/admin` 会自动跳转到 `/admin/mobile`）可：
 
 - 查看与搜索时间线上下文、记忆池、唤醒事件
 - 查看/编辑唤醒提示词与摘要提示词

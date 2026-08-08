@@ -501,9 +501,12 @@ async function runWakeUp() {
   let memoryContext = "";
   try {
     const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
-    // 记忆检索总开关：关闭后唤醒不再检索记忆
-    if (cfg.memory_retrieval_enabled === false) {
-      console.log("[memory] 检索开关关闭，唤醒时跳过记忆检索");
+    // 记忆检索开关（唤醒时）：独立于对话开关；未设置时沿用原总开关，保持旧行为
+    const wakeRetrievalEnabled = cfg.memory_retrieval_wake_enabled !== undefined
+      ? cfg.memory_retrieval_wake_enabled !== false
+      : cfg.memory_retrieval_enabled !== false;
+    if (!wakeRetrievalEnabled) {
+      console.log("[memory] 唤醒时记忆检索已关闭，跳过记忆检索");
     } else {
     // Use recent user+AI messages as query (wider context than chat mode)
     const windowSize = cfg.wake_query_window || 3;

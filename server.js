@@ -3,6 +3,7 @@ require("dotenv").config();
 const Fastify = require("fastify");
 const fs = require("fs-extra");
 const path = require("path");
+const crypto = require("crypto");
 const {
   getDatePartsInTimeZone,
   formatDateTimeInTimeZone,
@@ -139,7 +140,7 @@ function timeInjectionEnabled() {
   return cfg.time_injection_enabled !== false;
 }
 
-// 记忆检索总开关：关闭后对话不再自动检索并注入记忆
+// 记忆检索开关（对话时）：关闭后对话不再自动检索并注入记忆；唤醒时另有独立开关
 function memoryRetrievalEnabled() {
   const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
   return cfg.memory_retrieval_enabled !== false;
@@ -1430,777 +1431,156 @@ function readDiaryEntries(limit = 20) {
 // ========================
 // HTTP Basic Auth
 // ========================
-function basicAuth(req, reply, done) {
+// ========================
+// 管理台会话（记住登录）
+// ========================
+const SESSION_MAX_AGE_DAYS = 30;
+const SESSION_SECRET_FILE = path.join(__dirname, "data", "session_secret.txt");
+let sessionSecret = null;
+function getSessionSecret() {
+  if (sessionSecret) return sessionSecret;
+  try {
+    const saved = fs.readFileSync(SESSION_SECRET_FILE, "utf-8").trim();
+    if (saved) {
+      sessionSecret = saved;
+      return saved;
+    }
+  } catch (e) {}
+  sessionSecret = crypto.randomBytes(32).toString("hex");
+  try {
+    fs.writeFileSync(SESSION_SECRET_FILE, sessionSecret, { mode: 0o600 });
+  } catch (e) {}
+  return sessionSecret;
+}
+function createSessionToken() {
+  const exp = Date.now() + SESSION_MAX_AGE_DAYS * 24 * 3600 * 1000;
+  const payload = `${exp}.${process.env.ADMIN_USER}`;
+  const sig = crypto.createHmac("sha256", getSessionSecret()).update(payload).digest("hex");
+  return `${payload}.${sig}`;
+}
+function validSessionToken(token) {
+  if (!token) return false;
+  const parts = token.split(".");
+  if (parts.length !== 3) return false;
+  const [expS, user, sig] = parts;
+  if (user !== process.env.ADMIN_USER) return false;
+  if (!/^\d+$/.test(expS) || Number(expS) < Date.now()) return false;
+  const expected = crypto.createHmac("sha256", getSessionSecret()).update(`${expS}.${user}`).digest("hex");
+  if (sig.length !== expected.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(expected, "hex"));
+}
+function parseCookies(header) {
+  const out = {};
+  if (!header) return out;
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx < 0) continue;
+    const key = part.slice(0, idx).trim();
+    const val = part.slice(idx + 1).trim();
+    try {
+      out[key] = decodeURIComponent(val);
+    } catch (e) {
+      out[key] = val;
+    }
+  }
+  return out;
+}
+function adminBasePath(req) {
+  return req.url.startsWith("/heartbeat/admin") ? "/heartbeat/admin" : "/admin";
+}
+function isAuthorized(req) {
+  const cookies = parseCookies(req.headers.cookie);
+  if (cookies.admin_session && validSessionToken(cookies.admin_session)) return true;
   const auth = req.headers.authorization || "";
   const [scheme, encoded] = auth.split(" ");
-  if (scheme !== "Basic" || !encoded) {
-    reply.code(401).header("WWW-Authenticate", 'Basic realm="Admin"').send("Unauthorized");
-    return;
-  }
+  if (scheme !== "Basic" || !encoded) return false;
   const decoded = Buffer.from(encoded, "base64").toString();
   const colonIndex = decoded.indexOf(":");
   const user = decoded.substring(0, colonIndex);
   const password = decoded.substring(colonIndex + 1);
-  if (user === process.env.ADMIN_USER && password === process.env.ADMIN_PASSWORD) {
-    done();
-  } else {
-    reply.code(401).header("WWW-Authenticate", 'Basic realm="Admin"').send("Unauthorized");
-  }
+  return user === process.env.ADMIN_USER && password === process.env.ADMIN_PASSWORD;
 }
+
+function basicAuth(req, reply, done) {
+  if (isAuthorized(req)) {
+    done();
+    return;
+  }
+  reply.code(401).header("WWW-Authenticate", 'Basic realm="Admin"').send("Unauthorized");
+}
+
+function mobileAuth(req, reply, done) {
+  if (isAuthorized(req)) {
+    done();
+    return;
+  }
+  reply.redirect(adminBasePath(req) + "/mobile/login");
+}
+
+const LOGIN_PAGE_HTML = `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>管理台登录</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:#f5f6fa;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+  .card{width:100%;max-width:360px;background:#fff;border-radius:16px;padding:28px 24px;box-shadow:0 8px 30px rgba(0,0,0,.08)}
+  h1{font-size:20px;margin-bottom:6px}
+  p.sub{font-size:13px;color:#888;margin-bottom:24px}
+  label{display:block;font-size:13px;color:#555;margin:14px 0 6px}
+  input{width:100%;padding:11px 12px;border:1px solid #dde1e7;border-radius:10px;font-size:15px;outline:none}
+  input:focus{border-color:#6c8cff}
+  button{width:100%;margin-top:24px;padding:12px;border:none;border-radius:10px;background:#4a6cf7;color:#fff;font-size:16px;cursor:pointer}
+  button:active{opacity:.85}
+  .err{background:#fdecec;color:#c0392b;font-size:13px;padding:10px 12px;border-radius:8px;margin-top:16px}
+  .hint{font-size:12px;color:#aaa;margin-top:14px;text-align:center}
+</style>
+</head>
+<body>
+  <form class="card" method="post" action="">
+    <h1>管理台</h1>
+    <p class="sub">登录后 30 天内免登录</p>
+    <label>用户名</label>
+    <input type="text" name="user" autocomplete="username" required autofocus>
+    <label>密码</label>
+    <input type="password" name="password" autocomplete="current-password" required>
+    <!--ERROR-->
+    <button type="submit">登 录</button>
+    <p class="hint">登录状态保留 30 天，仅本机浏览器有效</p>
+  </form>
+</body>
+</html>`;
+
+// ========================
+// 管理台登录接口
+// ========================
+app.get("/admin/mobile/login", async (req, reply) => {
+  reply.type("text/html").send(LOGIN_PAGE_HTML.replace("<!--ERROR-->", ""));
+});
+
+app.post("/admin/mobile/login", async (req, reply) => {
+  const body = req.body || {};
+  const ok = String(body.user || "") === process.env.ADMIN_USER
+    && String(body.password || "") === process.env.ADMIN_PASSWORD;
+  if (ok) {
+    reply.header("Set-Cookie", `admin_session=${createSessionToken()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_DAYS * 24 * 3600}`);
+    reply.redirect(adminBasePath(req) + "/mobile");
+    return;
+  }
+  await new Promise(r => setTimeout(r, 500));
+  reply.type("text/html").send(LOGIN_PAGE_HTML.replace("<!--ERROR-->", '<div class="err">用户名或密码错误</div>'));
+});
 
 // ========================
 // 管理页面 GET /admin
 // ========================
-app.get("/admin", { preHandler: basicAuth }, async (req, reply) => {
-  const serverUptime = Math.floor(process.uptime());
-  const wakeUpStatus = wakeUpLastHeartbeat
-    ? `在线（上次心跳: ${formatDateTimeInTimeZone(new Date(wakeUpLastHeartbeat), TIME_ZONE)}）`
-    : "离线或未启动";
-
-  const currentUrl = readEnvValue("TARGET_API_URL");
-  const currentModel = readEnvValue("MODEL_NAME");
-  const currentIcon = readEnvValue("CUSTOM_ICON_URL");
-  const gatewayKeyStatus = readEnvValue("GATEWAY_API_KEY") ? "已配置" : "未配置";
-  const wakeConfig = {
-    dayWakeAfter: readEnvValueOrDefault("DAY_WAKE_AFTER_MINUTES", "60"),
-    nightWakeAfter: readEnvValueOrDefault("NIGHT_WAKE_AFTER_MINUTES", "120"),
-    dayCheckInterval: readEnvValueOrDefault("DAY_CHECK_INTERVAL_MINUTES", "10"),
-    nightCheckInterval: readEnvValueOrDefault("NIGHT_CHECK_INTERVAL_MINUTES", "120"),
-    dayStartHour: readEnvValueOrDefault("WAKE_DAY_START_HOUR", "10"),
-    dayEndHour: readEnvValueOrDefault("WAKE_DAY_END_HOUR", "24")
-  };
-  const weatherConfig = {
-    enabled: readEnvValueOrDefault("WEATHER_ENABLED", "false"),
-    locationName: readEnvValue("WEATHER_LOCATION_NAME"),
-    lat: readEnvValue("WEATHER_LAT"),
-    lon: readEnvValue("WEATHER_LON"),
-    units: readEnvValueOrDefault("WEATHER_UNITS", "metric")
-  };
-  const diaryEntries = readDiaryEntries(20);
-  const diaryHtml = diaryEntries.length
-    ? diaryEntries.map(entry => `
-      <details class="diary-entry">
-        <summary>
-          <span>${escapeHtml(entry.name)}</span>
-          <em>${escapeHtml(formatDateTimeInTimeZone(new Date(entry.updated_at), TIME_ZONE))}</em>
-        </summary>
-        <pre>${escapeHtml(entry.content)}</pre>
-      </details>
-    `).join("")
-    : `<div class="diary-empty">还没有日记。模型在 wake-up 回复里输出 [DIARY]...[/DIARY] 后会保存到这里。</div>`;
-
-  const authToken = Buffer.from(`${process.env.ADMIN_USER}:${process.env.ADMIN_PASSWORD}`).toString("base64");
-  const runtimeConfigNotice = IS_RAILWAY_RUNTIME
-    ? `<div class="hint">Railway 检测到：此页面保存的是当前容器的 .env。Railway Variables 会优先提供运行时配置，且未挂载 Volume 的文件会在重新部署后丢失；请在 Railway Variables 修改唤醒数值并重新部署。</div>`
-    : "";
-
-  const presets = loadPresets();
-  const presetsJson = safeJsonForInlineScript(presets);
-  const authHeaderJson = safeJsonForInlineScript(`Basic ${authToken}`);
-
-const html = `<!DOCTYPE html>
-<html lang="zh">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HEARTBEAT · Runtime</title>
-  <!-- 引入思源宋体 -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&display=swap" rel="stylesheet">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    
-    body {
-      font-family: "Noto Serif SC", Georgia, "Times New Roman", serif;
-      background: linear-gradient(135deg, #f8f0f3 0%, #f5e6eb 100%);
-      background-image: 
-        radial-gradient(circle at 20% 80%, rgba(230, 190, 200, 0.15) 0%, transparent 50%),
-        radial-gradient(circle at 80% 20%, rgba(210, 170, 180, 0.1) 0%, transparent 50%);
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 30px 20px;
-    }
-
-    .container {
-      max-width: 480px;
-      width: 100%;
-      background: rgba(255, 255, 255, 0.75);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border-radius: 24px;
-      padding: 40px 32px;
-      box-shadow: 
-        0 2px 10px rgba(180, 120, 130, 0.05),
-        0 15px 40px rgba(180, 120, 130, 0.15),
-        0 0 0 1px rgba(255, 255, 255, 0.8) inset;
-      transition: all 0.4s ease;
-    }
-
-    .container:hover {
-      box-shadow: 
-        0 2px 10px rgba(180, 120, 130, 0.08),
-        0 20px 50px rgba(180, 120, 130, 0.2),
-        0 0 0 1px rgba(255, 255, 255, 0.9) inset;
-    }
-
-    h2 {
-      text-align: center;
-      font-size: 32px;
-      font-weight: 700;
-      color: #8a4a58;
-      margin-bottom: 4px;
-      letter-spacing: 6px;
-      font-family: "Times New Roman", "Georgia", "Noto Serif SC", serif;
-      font-style: normal;
-      text-transform: uppercase;
-    }
-
-    .subtitle {
-      text-align: center;
-      font-size: 12px;
-      color: #a87a85;
-      margin-bottom: 32px;
-      letter-spacing: 4px;
-      text-transform: uppercase;
-      font-style: italic;
-      opacity: 0.85;
-    }
-
-    .status {
-      background: rgba(255, 250, 252, 0.6);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      border-radius: 14px;
-      padding: 16px 20px;
-      margin-bottom: 24px;
-      border: 1px solid rgba(230, 200, 208, 0.4);
-    }
-
-    .status p {
-      margin: 6px 0;
-      font-size: 13px;
-      color: #6d5057;
-      font-weight: 400;
-      line-height: 1.5;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }
-
-    .status strong {
-      color: #8a4a58;
-      font-weight: 600;
-      letter-spacing: 0.5px;
-    }
-
-    label {
-      display: block;
-      margin-top: 16px;
-      font-weight: 500;
-      font-size: 11px;
-      color: #8b6b72;
-      letter-spacing: 1.5px;
-      text-transform: uppercase;
-    }
-
-    input {
-      width: 100%;
-      padding: 10px 14px;
-      margin-top: 6px;
-      border: 1px solid rgba(200, 160, 170, 0.3);
-      border-radius: 10px;
-      background: rgba(255, 255, 255, 0.7);
-      font-family: "Noto Serif SC", serif;
-      font-size: 13px;
-      color: #5a4046;
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      backdrop-filter: blur(4px);
-      -webkit-backdrop-filter: blur(4px);
-    }
-
-    input:focus {
-      outline: none;
-      border-color: #c89aa6;
-      box-shadow: 0 0 0 3px rgba(200, 154, 166, 0.1);
-      background: rgba(255, 255, 255, 0.95);
-      transform: translateY(-1px);
-    }
-
-    input::placeholder {
-      color: #b8a0a6;
-      font-style: italic;
-      font-size: 12px;
-    }
-
-    select {
-      width: 100%;
-      padding: 10px 14px;
-      margin-top: 6px;
-      border: 1px solid rgba(200, 160, 170, 0.3);
-      border-radius: 10px;
-      background: rgba(255, 255, 255, 0.7);
-      font-family: "Noto Serif SC", serif;
-      font-size: 13px;
-      color: #5a4046;
-    }
-
-    button {
-      width: 100%;
-      margin-top: 16px;
-      padding: 12px;
-      border: none;
-      border-radius: 10px;
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      letter-spacing: 1.5px;
-      font-family: "Noto Serif SC", serif;
-      backdrop-filter: blur(4px);
-      -webkit-backdrop-filter: blur(4px);
-      text-transform: uppercase;
-    }
-
-    button.save {
-      background: linear-gradient(135deg, #d8a0ad 0%, #c8909d 100%);
-      color: white;
-      box-shadow: 0 4px 12px rgba(180, 120, 130, 0.2);
-    }
-
-    button.save:hover {
-      background: linear-gradient(135deg, #c8909d 0%, #b8808d 100%);
-      transform: translateY(-2px);
-      box-shadow: 0 8px 20px rgba(180, 120, 130, 0.3);
-    }
-
-    button.save:active {
-      transform: translateY(0);
-      box-shadow: 0 2px 8px rgba(180, 120, 130, 0.2);
-    }
-
-    button.restart {
-      background: linear-gradient(135deg, #e8909d 0%, #d8808d 100%);
-      color: white;
-      box-shadow: 0 4px 12px rgba(200, 100, 120, 0.25);
-      margin-top: 28px;
-    }
-
-    button.restart:hover {
-      background: linear-gradient(135deg, #d8808d 0%, #c8707d 100%);
-      transform: translateY(-2px);
-      box-shadow: 0 8px 20px rgba(200, 100, 120, 0.35);
-    }
-
-    button.restart:active {
-      transform: translateY(0);
-      box-shadow: 0 2px 8px rgba(200, 100, 120, 0.25);
-    }
-
-    .note {
-      margin-top: 16px;
-      font-size: 10px;
-      color: #a88a92;
-      text-align: center;
-      font-style: italic;
-      letter-spacing: 1px;
-      opacity: 0.7;
-    }
-
-    /* 预设区域 */
-    .presets-box {
-      background: rgba(255, 250, 252, 0.5);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      border-radius: 16px;
-      padding: 20px;
-      margin-bottom: 24px;
-      border: 1px solid rgba(230, 200, 208, 0.3);
-    }
-
-    .presets-box h3 {
-      margin: 0 0 14px 0;
-      font-size: 12px;
-      color: #8a4a58;
-      font-weight: 500;
-      letter-spacing: 1.5px;
-      text-transform: uppercase;
-    }
-
-    .preset-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      margin-bottom: 16px;
-    }
-
-    .preset-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .preset-btn {
-      flex: 1;
-      padding: 10px 14px;
-      background: rgba(255, 255, 255, 0.7);
-      backdrop-filter: blur(4px);
-      -webkit-backdrop-filter: blur(4px);
-      border: 1px solid rgba(220, 180, 190, 0.3);
-      border-radius: 10px;
-      text-align: left;
-      font-size: 13px;
-      color: #6d5057;
-      cursor: pointer;
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      font-family: "Noto Serif SC", serif;
-    }
-
-    .preset-btn:hover {
-      background: rgba(255, 245, 248, 0.9);
-      border-color: #c89aa6;
-      box-shadow: 0 4px 12px rgba(180, 120, 130, 0.15);
-      transform: translateY(-1px);
-    }
-
-    .preset-btn span {
-      color: #9a7a82;
-      font-size: 11px;
-      margin-left: 8px;
-      font-style: italic;
-    }
-
-    .preset-del {
-      padding: 8px 12px;
-      background: rgba(255, 240, 243, 0.6);
-      border: 1px solid rgba(240, 200, 210, 0.4);
-      border-radius: 8px;
-      font-size: 11px;
-      color: #a85a68;
-      cursor: pointer;
-      backdrop-filter: blur(4px);
-      -webkit-backdrop-filter: blur(4px);
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    .preset-del:hover {
-      background: rgba(255, 230, 235, 0.8);
-      border-color: #e8a0b0;
-      color: #9a4a58;
-    }
-
-    .add-preset {
-      border-top: 1px solid rgba(220, 180, 190, 0.3);
-      padding-top: 16px;
-    }
-
-    .add-preset strong {
-      font-size: 11px;
-      color: #8a4a58;
-      display: block;
-      margin-bottom: 8px;
-      font-weight: 500;
-      letter-spacing: 1.5px;
-      text-transform: uppercase;
-    }
-
-    .add-preset input {
-      margin-top: 6px;
-      background: rgba(255, 255, 255, 0.8);
-    }
-
-    .add-preset button {
-      background: linear-gradient(135deg, #c89aa6 0%, #b88a96 100%);
-      color: white;
-      box-shadow: 0 4px 10px rgba(160, 100, 110, 0.2);
-      font-size: 12px;
-      padding: 10px;
-    }
-
-    .add-preset button:hover {
-      background: linear-gradient(135deg, #b88a96 0%, #a87a86 100%);
-    }
-
-    .config-box {
-      background: rgba(255, 250, 252, 0.5);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      border-radius: 16px;
-      padding: 20px;
-      border: 1px solid rgba(230, 200, 208, 0.3);
-    }
-
-    .diary-box {
-      background: rgba(255, 250, 252, 0.5);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      border-radius: 16px;
-      padding: 20px;
-      margin-bottom: 24px;
-      border: 1px solid rgba(230, 200, 208, 0.3);
-    }
-
-    .diary-box h3 {
-      margin: 0 0 12px 0;
-      font-size: 12px;
-      color: #8a4a58;
-      font-weight: 600;
-      letter-spacing: 1.5px;
-      text-transform: uppercase;
-    }
-
-    .diary-entry {
-      border: 1px solid rgba(220, 180, 190, 0.3);
-      border-radius: 12px;
-      background: rgba(255, 255, 255, 0.58);
-      margin-top: 10px;
-      overflow: hidden;
-    }
-
-    .diary-entry summary {
-      cursor: pointer;
-      padding: 12px 14px;
-      color: #6d5057;
-      font-size: 13px;
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      align-items: center;
-    }
-
-    .diary-entry summary span {
-      font-weight: 600;
-    }
-
-    .diary-entry summary em {
-      color: #a88a92;
-      font-style: normal;
-      font-size: 10px;
-      white-space: nowrap;
-    }
-
-    .diary-entry pre {
-      white-space: pre-wrap;
-      word-break: break-word;
-      margin: 0;
-      padding: 0 14px 14px;
-      color: #5a4046;
-      font-family: "Noto Serif SC", Georgia, "Times New Roman", serif;
-      font-size: 12px;
-      line-height: 1.8;
-      max-height: 360px;
-      overflow: auto;
-    }
-
-    .diary-empty {
-      color: #9a7a82;
-      font-size: 12px;
-      line-height: 1.7;
-      background: rgba(255, 255, 255, 0.55);
-      border-radius: 12px;
-      padding: 12px 14px;
-    }
-
-    .section-title {
-      margin-top: 22px;
-      padding-top: 18px;
-      border-top: 1px solid rgba(220, 180, 190, 0.3);
-      font-size: 12px;
-      color: #8a4a58;
-      font-weight: 600;
-      letter-spacing: 1.5px;
-      text-transform: uppercase;
-    }
-
-    .grid-2 {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-    }
-
-    .hint {
-      margin-top: 8px;
-      font-size: 11px;
-      color: #9a7a82;
-      line-height: 1.6;
-    }
-
-    /* 加载动画 */
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(10px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    .container {
-      animation: fadeIn 0.6s ease-out;
-    }
-
-    .status, .presets-box, .config-box {
-      animation: fadeIn 0.8s ease-out;
-    }
-
-    .restart {
-      animation: fadeIn 1s ease-out;
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h2>HEARTBEAT</h2>
-    <div class="subtitle">Runtime · AI Residency</div>
-
-    <div class="status">
-      <p>Gateway <strong>运行中 (${serverUptime}秒)</strong></p>
-      <p>Auto Wakeup <strong>${wakeUpStatus}</strong></p>
-    </div>
-    ${runtimeConfigNotice}
-
-    <div class="diary-box">
-      <h3>Wake Diary</h3>
-      ${diaryHtml}
-    </div>
-
-    <!-- 预设方案 -->
-    <div class="presets-box">
-      <h3>预设方案</h3>
-      <div class="preset-list" id="presetList"></div>
-      <div class="add-preset">
-        <strong>保存当前配置为新预设</strong>
-        <input id="presetName" placeholder="预设名称，例如：DeepSeek / Claude">
-        <button onclick="savePreset()">保存为预设</button>
-      </div>
-    </div>
-
-    <!-- 配置表单 -->
-    <div class="config-box">
-      <form id="configForm" onsubmit="saveConfig(event)">
-        <label>API URL</label>
-        <input name="target_url" id="f_url" value="${escapeHtml(currentUrl)}">
-        <label>API Key</label>
-        <input name="target_key" id="f_key" placeholder="留空不修改">
-        <label>Gateway API Key</label>
-        <input name="gateway_api_key" id="f_gateway_key" placeholder="公网 /v1 鉴权 key，留空不修改">
-        <div class="hint">当前状态：${escapeHtml(gatewayKeyStatus)}。公开部署并开启 ALLOW_PUBLIC_API=true 时，Kelivo 的 API Key 请填写这个 Gateway API Key，不要填写上游 API Key。</div>
-        <label>Model Name</label>
-        <input name="model_name" id="f_model" value="${escapeHtml(currentModel)}">
-        <label>Bark Key</label>
-        <input name="bark_key" id="f_bark" placeholder="留空不修改">
-        <label>Bark Icon URL</label>
-        <input name="custom_icon" id="f_icon" value="${escapeHtml(currentIcon)}" placeholder="可选">
-
-        <div class="section-title">Wake Settings</div>
-        <div class="grid-2">
-          <div>
-            <label>白天多久未回复后唤醒（分钟）</label>
-            <input type="number" min="1" name="day_wake_after" id="f_day_wake_after" value="${escapeHtml(wakeConfig.dayWakeAfter)}">
-          </div>
-          <div>
-            <label>夜间多久未回复后唤醒（分钟）</label>
-            <input type="number" min="1" name="night_wake_after" id="f_night_wake_after" value="${escapeHtml(wakeConfig.nightWakeAfter)}">
-          </div>
-          <div>
-            <label>白天检查间隔（分钟）</label>
-            <input type="number" min="1" name="day_check_interval" id="f_day_check_interval" value="${escapeHtml(wakeConfig.dayCheckInterval)}">
-          </div>
-          <div>
-            <label>夜间检查间隔（分钟）</label>
-            <input type="number" min="1" name="night_check_interval" id="f_night_check_interval" value="${escapeHtml(wakeConfig.nightCheckInterval)}">
-          </div>
-          <div>
-            <label>白天开始小时</label>
-            <input type="number" min="0" max="23" name="wake_day_start_hour" id="f_wake_day_start_hour" value="${escapeHtml(wakeConfig.dayStartHour)}">
-          </div>
-          <div>
-            <label>白天结束小时</label>
-            <input type="number" min="1" max="24" name="wake_day_end_hour" id="f_wake_day_end_hour" value="${escapeHtml(wakeConfig.dayEndHour)}">
-          </div>
-        </div>
-
-        <div class="section-title">Weather</div>
-        <label>天气注入</label>
-        <select name="weather_enabled" id="f_weather_enabled">
-          <option value="false" ${weatherConfig.enabled === "true" ? "" : "selected"}>关闭</option>
-          <option value="true" ${weatherConfig.enabled === "true" ? "selected" : ""}>开启</option>
-        </select>
-        <label>位置名称</label>
-        <input name="weather_location_name" id="f_weather_location_name" value="${escapeHtml(weatherConfig.locationName)}" placeholder="例如：Beijing">
-        <div class="grid-2">
-          <div>
-            <label>纬度 Latitude</label>
-            <input name="weather_lat" id="f_weather_lat" value="${escapeHtml(weatherConfig.lat)}" placeholder="例如：39.9042">
-          </div>
-          <div>
-            <label>经度 Longitude</label>
-            <input name="weather_lon" id="f_weather_lon" value="${escapeHtml(weatherConfig.lon)}" placeholder="例如：116.4074">
-          </div>
-        </div>
-        <label>单位</label>
-        <select name="weather_units" id="f_weather_units">
-          <option value="metric" ${weatherConfig.units === "fahrenheit" ? "" : "selected"}>摄氏度 / km/h</option>
-          <option value="fahrenheit" ${weatherConfig.units === "fahrenheit" ? "selected" : ""}>华氏度 / mph</option>
-        </select>
-        <div class="hint">天气使用 Open-Meteo 免费接口，不需要 API Key；只有开启后才会按你填写的经纬度读取天气。</div>
-        <button type="submit" class="save">保存配置</button>
-      </form>
-    </div>
-
-    <button onclick="restartServices()" class="restart">一键重启所有服务</button>
-    <div class="note">修改配置后先保存，再点重启按钮生效</div>
-  </div>
-
-  <script>
-    // ====== 以下脚本保持不变 ======
-    const AUTH_HEADER = ${authHeaderJson};
-    let presets = ${presetsJson};
-
-    function escapeHtmlText(value) {
-      return String(value || "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-    }
-
-    function renderPresets() {
-      const list = document.getElementById("presetList");
-      if (!presets.length) {
-        list.innerHTML = '<div style="color:#aaa;font-size:12px;font-style:italic;">还没有预设，保存当前配置即可创建。</div>';
-        return;
-      }
-      list.innerHTML = presets.map((p, idx) => {
-        return '<div class="preset-item">' +
-          '<button class="preset-btn" onclick="applyPreset(' + idx + ')">' + escapeHtmlText(p.name) + '<span>' + escapeHtmlText(p.model_name) + '</span></button>' +
-          '<button class="preset-del" onclick="deletePreset(' + idx + ')">删除</button>' +
-        '</div>';
-      }).join("");
-    }
-
-    function applyPreset(idx) {
-      const p = presets[idx];
-      document.getElementById("f_url").value = p.target_url || "";
-      document.getElementById("f_model").value = p.model_name || "";
-      if (p.target_key) document.getElementById("f_key").value = p.target_key;
-      document.querySelector(".config-box").scrollIntoView({ behavior: "smooth" });
-    }
-
-    async function saveConfig(event) {
-      event.preventDefault();
-      const payload = {
-        target_url: document.getElementById("f_url").value.trim(),
-        target_key: document.getElementById("f_key").value.trim(),
-        gateway_api_key: document.getElementById("f_gateway_key").value.trim(),
-        model_name: document.getElementById("f_model").value.trim(),
-        bark_key: document.getElementById("f_bark").value.trim(),
-        custom_icon: document.getElementById("f_icon").value.trim(),
-        day_wake_after: document.getElementById("f_day_wake_after").value.trim(),
-        night_wake_after: document.getElementById("f_night_wake_after").value.trim(),
-        day_check_interval: document.getElementById("f_day_check_interval").value.trim(),
-        night_check_interval: document.getElementById("f_night_check_interval").value.trim(),
-        wake_day_start_hour: document.getElementById("f_wake_day_start_hour").value.trim(),
-        wake_day_end_hour: document.getElementById("f_wake_day_end_hour").value.trim(),
-        weather_enabled: document.getElementById("f_weather_enabled").value,
-        weather_location_name: document.getElementById("f_weather_location_name").value.trim(),
-        weather_lat: document.getElementById("f_weather_lat").value.trim(),
-        weather_lon: document.getElementById("f_weather_lon").value.trim(),
-        weather_units: document.getElementById("f_weather_units").value
-      };
-
-      if (!payload.target_url || !payload.model_name) {
-        alert("请填写 API 地址和模型名称");
-        return;
-      }
-
-      try {
-        const resp = await fetch("/admin/save", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": AUTH_HEADER },
-          body: JSON.stringify(payload)
-        });
-        const result = await resp.json();
-        if (result.success) {
-          document.getElementById("f_key").value = "";
-          document.getElementById("f_gateway_key").value = "";
-          document.getElementById("f_bark").value = "";
-          alert("配置已保存，现在可以点击重启按钮让新配置生效。");
-        } else {
-          alert("保存失败：" + (result.error || "未知错误"));
-        }
-      } catch (e) {
-        alert("请求失败：" + e.message);
-      }
-    }
-
-    async function savePreset() {
-      const name = document.getElementById("presetName").value.trim();
-      const target_url = document.getElementById("f_url").value.trim();
-      const target_key = document.getElementById("f_key").value.trim();
-      const model_name = document.getElementById("f_model").value.trim();
-      if (!name) { alert("请填写预设名称"); return; }
-      if (!target_url || !model_name) { alert("请先填写 API 地址和模型名称"); return; }
-
-      const resp = await fetch("/admin/presets/save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": AUTH_HEADER },
-        body: JSON.stringify({ name, target_url, target_key, model_name })
-      });
-      const r = await resp.json();
-      if (r.success) {
-        const existing = presets.findIndex(p => p.name === name);
-        const entry = { name, target_url, target_key, model_name };
-        if (existing >= 0) presets[existing] = entry;
-        else presets.push(entry);
-        renderPresets();
-        document.getElementById("presetName").value = "";
-        alert("预设已保存：" + name);
-      } else {
-        alert("保存失败：" + (r.error || "未知错误"));
-      }
-    }
-
-    async function deletePreset(idx) {
-      const p = presets[idx];
-      if (!confirm("删除预设「" + p.name + "」？")) return;
-      await fetch("/admin/presets/delete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": AUTH_HEADER },
-        body: JSON.stringify({ name: p.name })
-      });
-      presets.splice(idx, 1);
-      renderPresets();
-    }
-
-    async function restartServices() {
-      if (!confirm("确定要重启 Gateway 和 wake_up 吗？")) return;
-      try {
-        const resp = await fetch("/admin/restart", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": AUTH_HEADER },
-          body: "{}"
-        });
-        const result = await resp.json();
-        if (result.success) {
-          alert("重启成功！页面稍后自动刷新。");
-          setTimeout(() => location.reload(), 3000);
-        } else {
-          alert("重启失败：" + (result.error || "未知错误"));
-        }
-      } catch (e) {
-        alert("请求失败：" + e.message);
-      }
-    }
-
-    renderPresets();
-  </script>
-</body>
-</html>`;
-
-  reply.type("text/html").send(html);
+// 管理台入口：桌面版已移除，统一跳转到移动端管理台
+app.get("/admin", { preHandler: mobileAuth }, async (req, reply) => {
+  reply.redirect(adminBasePath(req) + "/mobile");
 });
-// ========================
-// 管理保存 POST /admin/save
-// ========================
+
 app.post("/admin/save", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const {
@@ -2702,7 +2082,7 @@ app.get("/admin/env", { preHandler: basicAuth }, async (req, reply) => {
 });
 
 // 移动端管理页面
-app.get("/admin/mobile", { preHandler: basicAuth }, async (req, reply) => {
+app.get("/admin/mobile", { preHandler: mobileAuth }, async (req, reply) => {
   const fss = require("fs");
   const pathh = require("path");
   const template = fss.readFileSync(pathh.join(__dirname, "admin-mobile.html"), "utf-8");

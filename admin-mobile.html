@@ -466,6 +466,19 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
 <script>
 // API 基址：兼容 nginx 反代前缀（/heartbeat/admin）与直连（/admin）
 const ADMIN_API = location.pathname.indexOf('/heartbeat/admin/') === 0 ? '/heartbeat/admin' : '/admin';
+
+// 登录过期时自动跳转到登录页（记住登录状态下一般不会触发）
+(function () {
+  const _fetch = window.fetch;
+  window.fetch = function () {
+    return _fetch.apply(this, arguments).then(function (r) {
+      if (r.status === 401) {
+        location.href = ADMIN_API + '/mobile/login';
+      }
+      return r;
+    });
+  };
+})();
 let INITIAL_DATA = null;
 let editingMemId = null;
 let editingPinnedId = null;
@@ -671,7 +684,8 @@ function renderConfig(cfg){
       {key:'embedding_model',label:'嵌入模型',desc:'向量化模型名称',type:'text'}
     ]},
     {title:'记忆浮现',fields:[
-      {key:'memory_retrieval_enabled',label:'记忆检索总开关',desc:'关闭后对话与唤醒时不再自动检索并注入记忆',type:'switch'},
+      {key:'memory_retrieval_enabled',label:'对话时记忆检索',desc:'关闭后对话时不再自动检索并注入记忆',type:'switch'},
+      {key:'memory_retrieval_wake_enabled',label:'唤醒时记忆检索',desc:'关闭后唤醒时不再自动检索并注入记忆',type:'switch',def:true},
       {key:'summary_surfacing_min_age_enabled',label:'新摘要冷却',desc:'开启后，最近 24 小时内生成的摘要不会在对话中浮现',type:'switch'},
       {key:'memory_cooldown_minutes',label:'记忆冷静期（分钟）',desc:'记忆浮现后多久才重新检索，冷静期内所有请求复用同一份记忆',type:'range',min:1,max:120,step:5}
     ]},
@@ -716,7 +730,7 @@ function renderConfig(cfg){
 async function saveConfig(){
   if(!configData)return;
   const updates={};
-  const fields=['idle_threshold_minutes','max_interval_minutes','auto_summary_enabled','memory_retrieval_enabled','summary_surfacing_min_age_enabled','retrieval_top_k','memory_query_window','memory_relevance_threshold','dedup_threshold','conflict_threshold','min_fact_count','min_summary_count','time_decay_days','keyword_search_enabled','embedding_model','memory_item_cooldown_minutes','memory_cooldown_minutes','time_injection_enabled','time_tag_interval_minutes','wake_query_window','wake_relevance_threshold','wake_top_k','wake_total_limit','wake_random_count'];
+  const fields=['idle_threshold_minutes','max_interval_minutes','auto_summary_enabled','memory_retrieval_enabled','memory_retrieval_wake_enabled','summary_surfacing_min_age_enabled','retrieval_top_k','memory_query_window','memory_relevance_threshold','dedup_threshold','conflict_threshold','min_fact_count','min_summary_count','time_decay_days','keyword_search_enabled','embedding_model','memory_item_cooldown_minutes','memory_cooldown_minutes','time_injection_enabled','time_tag_interval_minutes','wake_query_window','wake_relevance_threshold','wake_top_k','wake_total_limit','wake_random_count'];
   fields.forEach(key=>{
     const el=document.getElementById('cfg-'+key);
     if(!el)return;
