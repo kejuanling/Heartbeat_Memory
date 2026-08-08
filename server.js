@@ -441,7 +441,8 @@ function isSpecialEvent(msg) {
     c.includes("自动唤醒：本次未发送推送") ||
     (c.includes(`刚刚给${userDisplay}发了`) && c.includes("推送")) ||
     (c.includes("刚刚给宝宝发了") && c.includes("推送")) ||
-    c.includes("自动写了日记")
+    c.includes("自动写了日记") ||
+    c.includes("记忆浮现）")
   );
 }
 
@@ -594,6 +595,24 @@ function appendSpecialEvent(content) {
   saveTimeline(timeline);
   // 批注 2026-07-15：特殊事件可能包含推送正文；日志只记录长度，避免公开部署时泄漏私密内容。
   console.log(`\n已记录特殊事件 (position ${newEvent.position}, chars ${normalizeContentToText(content).length})\n`);
+}
+
+// ========================
+// 记忆浮现写入对话：把浮现的记忆作为特殊事件写入对话记录，永久留在上下文
+// （同一记忆只写入一次，避免对话记录被同一段记忆反复刷屏）
+// ========================
+const surfacedMemoryEventIds = new Set();
+function buildMemoryEventContent(memories) {
+  const timeStr = formatDateTimeInTimeZone(new Date(), TIME_ZONE);
+  const body = memories.map(m => memoryEngine.formatContext([m])).join("\n");
+  return `（${timeStr} 记忆浮现）\n${body}`;
+}
+function insertMemoriesToConversation(memories) {
+  const freshOnes = memories.filter(m => m && m.id && typeof m.content === "string" && m.content && !surfacedMemoryEventIds.has(m.id));
+  if (freshOnes.length === 0) return 0;
+  appendSpecialEvent(buildMemoryEventContent(freshOnes));
+  freshOnes.forEach(m => surfacedMemoryEventIds.add(m.id));
+  return freshOnes.length;
 }
 
 // 剥离内部标签（用于把客户端清洗版和时间线原始版互相匹配）
@@ -1015,6 +1034,15 @@ app.post("/v1/chat/completions", async (req, reply) => {
               memoryInjectionCache = { content: dynContent, expiresAt: now + getMemoryCooldownMinutes() * 60 * 1000 };
               console.log(`[memory] 重新检索并缓存记忆浮现（冷静期 ${getMemoryCooldownMinutes()} 分钟，单条冷却 ${getMemoryItemCooldownMinutes()} 分钟，浮现 ${fresh.length} 条，阈值: ${threshold}）`);
               fresh.forEach(m => recentInjectedMemoryIds.set(m.id, now));
+              // 记忆浮现写入对话：开启时，本次浮现的记忆写入对话记录，永久留在上下文
+              if (cfg.memory_persist_on_surface_enabled) {
+                try {
+                  const inserted = insertMemoriesToConversation(fresh);
+                  if (inserted > 0) console.log(`[memory] 浮现记忆已写入对话 ${inserted} 条`);
+                } catch (convErr) {
+                  console.warn("[memory] 浮现记忆写入对话失败:", convErr.message);
+                }
+              }
               // 清理已过冷却期的记录，防止 Map 无限膨胀
               for (const [id, ts] of recentInjectedMemoryIds) {
                 if (now - ts >= itemCooldownMs) recentInjectedMemoryIds.delete(id);
@@ -1318,8 +1346,20 @@ app.post("/v1/chat/completions", async (req, reply) => {
 // ========================
 app.post("/internal/wake-event", async (req, reply) => {
   try {
-    const { content, event, diary } = req.body;
-    if (!content && !event && !diary) return reply.code(400).send({ error: "content or event is required" });
+    const { content, event, diary, memories } = req.body;
+    if (!content && !event && !diary && !(Array.isArray(memories) && memories.length)) return reply.code(400).send({ error: "content or event is required" });
+    if (Array.isArray(memories) && memories.length > 0) {
+      // 记忆浮现写入对话：开启时，唤醒浮现的记忆随事件写入对话记录，永久留在上下文
+      try {
+        const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
+        if (cfg.memory_persist_on_surface_enabled) {
+          const inserted = insertMemoriesToConversation(memories.filter(m => m && m.id));
+          if (inserted > 0) console.log(`[wake-event] 浮现记忆已写入对话 ${inserted} 条`);
+        }
+      } catch (memErr) {
+        console.warn("[wake-event] 浮现记忆写入对话失败:", memErr.message);
+      }
+    }
     if (diary) {
       appendSpecialEvent(`（${formatDateTimeInTimeZone(new Date(), TIME_ZONE)} 自动写了日记：${String(diary).trim()}）`);
     }

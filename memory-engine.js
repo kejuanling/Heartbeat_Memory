@@ -42,7 +42,7 @@ async function init() {
     const raw = await fs.readJson(MEMORIES_FILE);
     memories = Array.isArray(raw) ? raw : [];
   } catch { memories = []; }
-  const DEFAULT_CONFIG = { idle_threshold_minutes: 5, max_interval_minutes: 30, auto_summary_enabled: true, memory_retrieval_enabled: true, retrieval_top_k: 5, dedup_threshold: 0.9, conflict_threshold: 0.85, min_fact_count: 2, min_summary_count: 2, time_decay_days: 30, keyword_search_enabled: true, embedding_model: "Xenova/paraphrase-multilingual-MiniLM-L12-v2", memory_relevance_threshold: 0.3, memory_query_window: 3, memory_cooldown_minutes: 30, memory_item_cooldown_minutes: 120, summary_surfacing_min_age_hours: 24, summary_surfacing_min_age_enabled: true, time_injection_enabled: true, time_tag_interval_minutes: 30, wake_query_window: 3, wake_relevance_threshold: 0.3, wake_repeat_window: 3 };
+  const DEFAULT_CONFIG = { idle_threshold_minutes: 5, max_interval_minutes: 30, auto_summary_enabled: true, memory_retrieval_enabled: true, retrieval_top_k: 5, dedup_threshold: 0.9, conflict_threshold: 0.85, min_fact_count: 2, min_summary_count: 2, time_decay_days: 30, keyword_search_enabled: true, embedding_model: "Xenova/paraphrase-multilingual-MiniLM-L12-v2", memory_relevance_threshold: 0.3, memory_query_window: 3, memory_cooldown_minutes: 30, memory_item_cooldown_minutes: 120, summary_surfacing_min_age_hours: 24, summary_surfacing_min_age_enabled: true, time_injection_enabled: true, time_tag_interval_minutes: 30, wake_query_window: 3, wake_relevance_threshold: 0.3, wake_repeat_window: 3, memory_persist_on_surface_enabled: false };
   try {
     config = { ...DEFAULT_CONFIG, ...(await fs.readJson(CONFIG_FILE)) };
   } catch {
@@ -690,5 +690,12 @@ module.exports = {
   async updateConfig(updates) {
     Object.assign(config, updates);
     await atomicWriteJson(CONFIG_FILE, config);
+  },
+  async refreshConfig() {
+    try {
+      Object.assign(config, await fs.readJson(CONFIG_FILE));
+    } catch (err) {
+      // 读取失败时保持现有配置
+    }
   }
 };

@@ -499,7 +499,13 @@ async function runWakeUp() {
   // 记忆检索：唤醒时携带相关记忆
   // ========================
   let memoryContext = "";
+  // 记忆浮现写入对话：开启时记录本次浮现的记忆，唤醒结束后随事件一起写入对话
+  let surfacedMemoriesForConversation = [];
   try {
+    // 每次唤醒前刷新配置，让管理台开关即时生效（config.json 由 gateway 写入）
+    try {
+      if (memoryEngine.refreshConfig) await memoryEngine.refreshConfig();
+    } catch { }
     const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
     // 记忆检索开关（唤醒时）：独立于对话开关；未设置时沿用原总开关，保持旧行为
     const wakeRetrievalEnabled = cfg.memory_retrieval_wake_enabled !== undefined
@@ -530,6 +536,12 @@ async function runWakeUp() {
     if (repeatWindow > 0 && memList.length > 0) {
       recentWakeMemoryIds.push(memList.map(m => m.id));
       while (recentWakeMemoryIds.length > repeatWindow) recentWakeMemoryIds.shift();
+    }
+    // 记忆浮现写入对话：开启时记录本次浮现的记忆，唤醒结束后随事件一起写入对话
+    if (cfg.memory_persist_on_surface_enabled) {
+      surfacedMemoriesForConversation = memList
+        .filter(m => m && m.id && typeof m.content === "string" && m.content)
+        .map(m => ({ id: m.id, content: m.content, type: m.type }));
     }
     const memStr = memoryEngine.formatContext(memList);
     if (memStr) {
@@ -756,7 +768,12 @@ ${historyText}`
       const aiReplyResponse = await fetch(GATEWAY_URL, {
         method: "POST",
         headers: internalHeaders(),
-        body: JSON.stringify({ content: rawAiText, event: eventContent, diary: diaryResult.diaryContent || "" })
+        body: JSON.stringify({
+          content: rawAiText,
+          event: eventContent,
+          diary: diaryResult.diaryContent || "",
+          ...(surfacedMemoriesForConversation.length > 0 ? { memories: surfacedMemoriesForConversation } : {})
+        })
       });
       if (aiReplyResponse.ok) {
         console.log("\n已保存 AI 完整回复到时间线\n");
