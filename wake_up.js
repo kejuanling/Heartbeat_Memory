@@ -1,6 +1,33 @@
 require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
+
+const ENV_FILE = path.join(__dirname, ".env");
+let lastEnvFingerprint = "";
+// 管理台保存 .env 后热生效：每轮检查前重读 .env 并覆盖 process.env
+function reloadEnvFromFile() {
+  try {
+    const content = fs.readFileSync(ENV_FILE, "utf-8");
+    const parsed = {};
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq <= 0) continue;
+      parsed[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim();
+    }
+    const fingerprint = JSON.stringify(Object.entries(parsed).sort());
+    if (fingerprint !== lastEnvFingerprint) {
+      Object.assign(process.env, parsed);
+      lastEnvFingerprint = fingerprint;
+      console.log("[wake-up] .env 配置已热更新");
+    }
+    return true;
+  } catch (err) {
+    console.warn("[wake-up] 读取 .env 失败:", err.message);
+    return false;
+  }
+}
 const memoryEngine = require("./memory-engine");
 const tagParser = require("./tag-parser");
 let memoryReady = false;
@@ -216,13 +243,13 @@ function isDayTime(date = new Date()) {
 function getWakeAfterMinutes(date = new Date()) {
   return isDayTime(date)
     ? readNumberEnv("DAY_WAKE_AFTER_MINUTES", 60, { min: 1 })
-    : readNumberEnv("NIGHT_WAKE_AFTER_MINUTES", 120, { min: 1 });
+    : readNumberEnv("NIGHT_WAKE_AFTER_MINUTES", 180, { min: 1 });
 }
 
 function getCheckIntervalMinutes(date = new Date()) {
   return isDayTime(date)
-    ? readNumberEnv("DAY_CHECK_INTERVAL_MINUTES", 10, { min: 1 })
-    : readNumberEnv("NIGHT_CHECK_INTERVAL_MINUTES", 120, { min: 1 });
+    ? readNumberEnv("DAY_CHECK_INTERVAL_MINUTES", 60, { min: 1 })
+    : readNumberEnv("NIGHT_CHECK_INTERVAL_MINUTES", 180, { min: 1 });
 }
 
 function normalizeContentToText(content) {
@@ -792,6 +819,7 @@ function getCheckIntervalMs() {
 
 async function scheduleNextCheck() {
   try {
+    reloadEnvFromFile();
     // 发送心跳
     try {
       await fetch(HEARTBEAT_URL, { method: "POST", headers: internalHeaders(), body: "{}" });

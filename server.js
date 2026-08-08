@@ -37,7 +37,7 @@ const IS_RAILWAY_RUNTIME = Boolean(
 const TIMELINE_FILE = "enhanced_messages.json";
 // 批注 2026-07-17：管理页保存 .env 后要让 PM2 刷新进程环境；保留原进程名，
 // 只补 --update-env，避免用户改完推送配置却继续运行旧值。
-const DEFAULT_RESTART_COMMAND = "pm2 restart gateway wake-up --update-env";
+const DEFAULT_RESTART_COMMAND = "pm2 restart wake-up gateway --update-env";
 // 上游模型请求超时（毫秒），防止上游挂起时 /v1 请求永久阻塞
 const UPSTREAM_TIMEOUT_MS = Number(process.env.UPSTREAM_TIMEOUT_MS) || 180000;
 
@@ -47,10 +47,15 @@ function readBooleanEnv(key, fallback = false) {
   return ["1", "true", "yes", "on"].includes(raw);
 }
 
+function publicApiEnabled() {
+  const raw = String(readEnvValue("ALLOW_PUBLIC_API") || "").trim().toLowerCase();
+  return ["true", "1", "yes", "on"].includes(raw);
+}
+
 function configuredModelName() {
   // 批注 2026-07-15：/v1/models 要暴露部署者实际配置的模型名；
   // 不能继续硬编码示例模型，否则 Kelivo 模型选择会和真实上游不一致。
-  return String(process.env.MODEL_NAME || "gateway-model").trim() || "gateway-model";
+  return String(readEnvValue("MODEL_NAME") || "gateway-model").trim() || "gateway-model";
 }
 
 // ========================
@@ -126,7 +131,9 @@ function normalizeMessageForTimeline(msg) {
 }
 
 // 动态注入内容的提示头：明确告诉模型这段是系统注入、用户不可见
-const SYSTEM_NOTE_PREFIX = `（系统提示：以下内容${process.env.USER_DISPLAY_NAME || "用户"}不可见，仅供你参考）`;
+function systemNotePrefix() {
+  return `（系统提示：以下内容${readEnvValue("USER_DISPLAY_NAME") || "用户"}不可见，仅供你参考）`;
+}
 
 // 时间注入配置：开关 + 间隔（分钟），从配置读取，配置台可调
 function getTimeTagIntervalMinutes() {
@@ -153,8 +160,8 @@ function buildSystemTimeTag() {
   const dayNames = ['周日','周一','周二','周三','周四','周五','周六'];
   // 星期必须按 TIME_ZONE 的日期计算，避免服务器本地时区与配置时区不一致时错一天
   const dayName = dayNames[new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day))).getUTCDay()] || '';
-  const startHour = Number(process.env.WAKE_DAY_START_HOUR) || 10;
-  const endHour = Number(process.env.WAKE_DAY_END_HOUR) || 24;
+  const startHour = Number(readEnvValue("WAKE_DAY_START_HOUR")) || 10;
+  const endHour = Number(readEnvValue("WAKE_DAY_END_HOUR")) || 24;
   const hour = Number(parts.hour);
   const period = (hour >= startHour && hour < endHour) ? '白天' : '夜晚';
   return `[当前系统时间：${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute} ${dayName} ${period}]`;
@@ -756,7 +763,7 @@ app.addHook("onRequest", (req, reply, done) => {
   }
   // 批注 2026-07-15：公网部署常经过反代，真实公网请求可能在 Node 侧显示为 127/10 网段；
   // 所以 ALLOW_PUBLIC_API=true 后必须先验 /v1 的网关 key，避免被云平台内网 IP 绕过。
-  if (readBooleanEnv("ALLOW_PUBLIC_API", false) && req.url.startsWith("/v1/")) {
+  if (publicApiEnabled() && req.url.startsWith("/v1/")) {
     const configuredKey = readEnvValue("GATEWAY_API_KEY");
     if (!configuredKey) {
       reply.code(401).send({ error: "公网 /v1 已开启，但 GATEWAY_API_KEY 未配置" });
@@ -966,7 +973,9 @@ app.post("/v1/chat/completions", async (req, reply) => {
 
     // (trim 逻辑移至 lastLLMMessages 捕获处，避免误删当前用户请求)
 
-    if (!TARGET_API_URL || !process.env.TARGET_API_KEY) {
+    const targetApiUrl = readEnvValue("TARGET_API_URL");
+    const targetApiKey = readEnvValue("TARGET_API_KEY");
+    if (!targetApiUrl || !targetApiKey) {
       return reply.code(500).send({ error: "TARGET_API_URL / TARGET_API_KEY 未配置" });
     }
 
@@ -1029,8 +1038,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
               // 浮现记忆作为独立 system 消息，插到最后一条 user 之后；启用时间注入时带上时间
               const timeTag = timeInjectionEnabled() ? buildSystemTimeTag() : '';
               dynContent = timeTag
-                ? `${SYSTEM_NOTE_PREFIX}\n\n${timeTag}\n\n## 相关记忆\n${memStr}`
-                : `${SYSTEM_NOTE_PREFIX}\n\n## 相关记忆\n${memStr}`;
+                ? `${systemNotePrefix()}\n\n${timeTag}\n\n## 相关记忆\n${memStr}`
+                : `${systemNotePrefix()}\n\n## 相关记忆\n${memStr}`;
               memoryInjectionCache = { content: dynContent, expiresAt: now + getMemoryCooldownMinutes() * 60 * 1000 };
               console.log(`[memory] 重新检索并缓存记忆浮现（冷静期 ${getMemoryCooldownMinutes()} 分钟，单条冷却 ${getMemoryItemCooldownMinutes()} 分钟，浮现 ${fresh.length} 条，阈值: ${threshold}）`);
               fresh.forEach(m => recentInjectedMemoryIds.set(m.id, now));
@@ -1116,7 +1125,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
           if (llmMessages[i].role === "user") { lastUserIdx2 = i; break; }
         }
         if (lastUserIdx2 >= 0) {
-          llmMessages.splice(lastUserIdx2 + 1, 0, { role: "system", content: `${SYSTEM_NOTE_PREFIX}\n\n${timeTag}` });
+          llmMessages.splice(lastUserIdx2 + 1, 0, { role: "system", content: `${systemNotePrefix()}\n\n${timeTag}` });
         }
       }
     }
@@ -1155,11 +1164,11 @@ app.post("/v1/chat/completions", async (req, reply) => {
     const upstreamTimer = setTimeout(() => upstreamController.abort(), UPSTREAM_TIMEOUT_MS);
     let response;
     try {
-      response = await fetch(TARGET_API_URL, {
+      response = await fetch(targetApiUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.TARGET_API_KEY}`
+          Authorization: `Bearer ${targetApiKey}`
         },
         body: JSON.stringify({ ...body, messages: sanitizedMessages }),
         signal: upstreamController.signal
@@ -1434,6 +1443,12 @@ function normalizeBooleanString(value, key, fallback) {
   return readEnvValueOrDefault(key, fallback);
 }
 
+function normalizePushProvider(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "bark" || raw === "ntfy") return raw;
+  return readEnvValueOrDefault("PUSH_PROVIDER", "bark");
+}
+
 function normalizeWeatherUnits(value) {
   const raw = String(value || "").trim().toLowerCase();
   if (raw === "fahrenheit") return "fahrenheit";
@@ -1640,7 +1655,17 @@ app.post("/admin/save", { preHandler: basicAuth }, async (req, reply) => {
       weather_location_name,
       weather_lat,
       weather_lon,
-      weather_units
+      weather_units,
+      all_public_api,
+      push_provider,
+      ntfy_server_url,
+      ntfy_topic,
+      ntfy_token,
+      ntfy_priority,
+      ntfy_tags,
+      user_display_name,
+      ai_display_name,
+      diary_enabled
     } = req.body || {};
 
     if (!target_url || !model_name) {
@@ -1659,22 +1684,32 @@ app.post("/admin/save", { preHandler: basicAuth }, async (req, reply) => {
       GATEWAY_API_KEY: finalGatewayKey,
       MODEL_NAME: model_name,
       BARK_KEY: finalBarkKey,
-      CUSTOM_ICON_URL: custom_icon || "",
+      CUSTOM_ICON_URL: custom_icon ?? readEnvValue("CUSTOM_ICON_URL"),
       DAY_WAKE_AFTER_MINUTES: normalizePositiveInteger(day_wake_after, "DAY_WAKE_AFTER_MINUTES", "60"),
-      NIGHT_WAKE_AFTER_MINUTES: normalizePositiveInteger(night_wake_after, "NIGHT_WAKE_AFTER_MINUTES", "120"),
-      DAY_CHECK_INTERVAL_MINUTES: normalizePositiveInteger(day_check_interval, "DAY_CHECK_INTERVAL_MINUTES", "10"),
-      NIGHT_CHECK_INTERVAL_MINUTES: normalizePositiveInteger(night_check_interval, "NIGHT_CHECK_INTERVAL_MINUTES", "120"),
+      NIGHT_WAKE_AFTER_MINUTES: normalizePositiveInteger(night_wake_after, "NIGHT_WAKE_AFTER_MINUTES", "180"),
+      DAY_CHECK_INTERVAL_MINUTES: normalizePositiveInteger(day_check_interval, "DAY_CHECK_INTERVAL_MINUTES", "60"),
+      NIGHT_CHECK_INTERVAL_MINUTES: normalizePositiveInteger(night_check_interval, "NIGHT_CHECK_INTERVAL_MINUTES", "180"),
       WAKE_DAY_START_HOUR: normalizeHour(wake_day_start_hour, "WAKE_DAY_START_HOUR", "10", 0, 23),
       WAKE_DAY_END_HOUR: normalizeHour(wake_day_end_hour, "WAKE_DAY_END_HOUR", "24", 1, 24),
       WEATHER_ENABLED: normalizeBooleanString(weather_enabled, "WEATHER_ENABLED", "false"),
-      WEATHER_LOCATION_NAME: weather_location_name || "",
-      WEATHER_LAT: weather_lat || "",
-      WEATHER_LON: weather_lon || "",
+      WEATHER_LOCATION_NAME: weather_location_name ?? readEnvValue("WEATHER_LOCATION_NAME"),
+      WEATHER_LAT: weather_lat ?? readEnvValue("WEATHER_LAT"),
+      WEATHER_LON: weather_lon ?? readEnvValue("WEATHER_LON"),
       WEATHER_UNITS: normalizeWeatherUnits(weather_units),
+      ALLOW_PUBLIC_API: normalizeBooleanString(all_public_api, "ALLOW_PUBLIC_API", "false"),
+      PUSH_PROVIDER: normalizePushProvider(push_provider),
+      NTFY_SERVER_URL: ntfy_server_url ?? readEnvValue("NTFY_SERVER_URL"),
+      NTFY_TOPIC: ntfy_topic ?? readEnvValue("NTFY_TOPIC"),
+      NTFY_TOKEN: ntfy_token || readEnvValue("NTFY_TOKEN"),
+      NTFY_PRIORITY: ntfy_priority ?? readEnvValue("NTFY_PRIORITY"),
+      NTFY_TAGS: ntfy_tags ?? readEnvValue("NTFY_TAGS"),
+      USER_DISPLAY_NAME: user_display_name ?? readEnvValue("USER_DISPLAY_NAME"),
+      AI_DISPLAY_NAME: ai_display_name ?? readEnvValue("AI_DISPLAY_NAME"),
+      DIARY_ENABLED: normalizeBooleanString(diary_enabled, "DIARY_ENABLED", "true"),
       ADMIN_USER: readEnvValue("ADMIN_USER"),
       ADMIN_PASSWORD: readEnvValue("ADMIN_PASSWORD")
     });
-    console.log("\n✅ .env 已更新，可通过管理页重启服务\n");
+    console.log("\n✅ .env 已更新（热生效，无需重启）\n");
 
     if (wantsJsonResponse(req)) {
       return reply.send({ success: true });
@@ -1704,7 +1739,7 @@ app.post("/admin/presets/save", { preHandler: basicAuth }, async (req, reply) =>
   }
   const presets = loadPresets();
   const existing = presets.findIndex(p => p.name === name);
-  const entry = { name, target_url, target_key: target_key || "", model_name };
+  const entry = { name, target_url, target_key: target_key || readEnvValue("TARGET_API_KEY"), model_name };
   if (existing >= 0) presets[existing] = entry;
   else presets.push(entry);
   savePresets(presets);
@@ -2074,9 +2109,9 @@ app.get("/admin/env", { preHandler: basicAuth }, async (req, reply) => {
       gatewayKey: !!readEnvValue("GATEWAY_API_KEY"),
       wake: {
         dayWakeAfter: readEnvValueOrDefault("DAY_WAKE_AFTER_MINUTES", "60"),
-        nightWakeAfter: readEnvValueOrDefault("NIGHT_WAKE_AFTER_MINUTES", "120"),
-        dayCheckInterval: readEnvValueOrDefault("DAY_CHECK_INTERVAL_MINUTES", "10"),
-        nightCheckInterval: readEnvValueOrDefault("NIGHT_CHECK_INTERVAL_MINUTES", "120"),
+        nightWakeAfter: readEnvValueOrDefault("NIGHT_WAKE_AFTER_MINUTES", "180"),
+        dayCheckInterval: readEnvValueOrDefault("DAY_CHECK_INTERVAL_MINUTES", "60"),
+        nightCheckInterval: readEnvValueOrDefault("NIGHT_CHECK_INTERVAL_MINUTES", "180"),
         dayStartHour: readEnvValueOrDefault("WAKE_DAY_START_HOUR", "10"),
         dayEndHour: readEnvValueOrDefault("WAKE_DAY_END_HOUR", "24")
       },
@@ -2099,9 +2134,9 @@ app.get("/admin/env", { preHandler: basicAuth }, async (req, reply) => {
         GATEWAY_API_KEY_SET: Boolean(readEnvValue("GATEWAY_API_KEY")),
         CUSTOM_ICON_URL: readEnvValue("CUSTOM_ICON_URL"),
         DAY_WAKE_AFTER_MINUTES: readEnvValueOrDefault("DAY_WAKE_AFTER_MINUTES", "60"),
-        NIGHT_WAKE_AFTER_MINUTES: readEnvValueOrDefault("NIGHT_WAKE_AFTER_MINUTES", "120"),
-        DAY_CHECK_INTERVAL_MINUTES: readEnvValueOrDefault("DAY_CHECK_INTERVAL_MINUTES", "10"),
-        NIGHT_CHECK_INTERVAL_MINUTES: readEnvValueOrDefault("NIGHT_CHECK_INTERVAL_MINUTES", "120"),
+        NIGHT_WAKE_AFTER_MINUTES: readEnvValueOrDefault("NIGHT_WAKE_AFTER_MINUTES", "180"),
+        DAY_CHECK_INTERVAL_MINUTES: readEnvValueOrDefault("DAY_CHECK_INTERVAL_MINUTES", "60"),
+        NIGHT_CHECK_INTERVAL_MINUTES: readEnvValueOrDefault("NIGHT_CHECK_INTERVAL_MINUTES", "180"),
         WAKE_DAY_START_HOUR: readEnvValueOrDefault("WAKE_DAY_START_HOUR", "10"),
         WAKE_DAY_END_HOUR: readEnvValueOrDefault("WAKE_DAY_END_HOUR", "24"),
         WEATHER_ENABLED: readEnvValueOrDefault("WEATHER_ENABLED", "false"),
@@ -2109,6 +2144,16 @@ app.get("/admin/env", { preHandler: basicAuth }, async (req, reply) => {
         WEATHER_LAT: readEnvValue("WEATHER_LAT"),
         WEATHER_LON: readEnvValue("WEATHER_LON"),
         WEATHER_UNITS: readEnvValueOrDefault("WEATHER_UNITS", "metric"),
+        ALLOW_PUBLIC_API: readEnvValueOrDefault("ALLOW_PUBLIC_API", "false"),
+        PUSH_PROVIDER: readEnvValueOrDefault("PUSH_PROVIDER", "bark"),
+        NTFY_SERVER_URL: readEnvValue("NTFY_SERVER_URL"),
+        NTFY_TOPIC: readEnvValue("NTFY_TOPIC"),
+        NTFY_TOKEN: "",
+        NTFY_TOKEN_SET: Boolean(readEnvValue("NTFY_TOKEN")),
+        NTFY_PRIORITY: readEnvValue("NTFY_PRIORITY"),
+        NTFY_TAGS: readEnvValue("NTFY_TAGS"),
+        USER_DISPLAY_NAME: readEnvValue("USER_DISPLAY_NAME"),
+        AI_DISPLAY_NAME: readEnvValue("AI_DISPLAY_NAME"),
         DIARY_ENABLED: readEnvValueOrDefault("DIARY_ENABLED", "true"),
         DIARY_DIR: readEnvValueOrDefault("DIARY_DIR", "diary"),
         PORT: readEnvValueOrDefault("PORT", "3000")
