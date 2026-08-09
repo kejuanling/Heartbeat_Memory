@@ -178,14 +178,14 @@ function generateId() {
 }
 
 async function addMemory(entry) {
-  const { content, type, importance, source, time_range } = entry;
+  const { content, type, importance, source, time_range, skipDedup } = entry;
   if (!content || !type) return null;
   const embedPromise = getEmbedding(content);
   const sameTypeActive = memories.filter(m => m.type === type && m.active);
   // Exact text match dedup (before embedding check)
   const contentKey = content.trim();
   const exactDup = sameTypeActive.find(m => m.content.trim() === contentKey);
-  if (exactDup) {
+  if (exactDup && !skipDedup) {
     exactDup.importance = Math.min(1.0, (exactDup.importance || 0.5) + 0.05);
     exactDup.timestamp = new Date().toISOString();
     if (source === "inline") exactDup.source = "inline";
@@ -196,7 +196,7 @@ async function addMemory(entry) {
   let embedding = await embedPromise;
 
   // Dedup check - returns early if duplicate found
-  if (embedding) {
+  if (embedding && !skipDedup) {
     for (const old of sameTypeActive) {
       if (!old.embedding) continue;
       const sim = cosineSimilarity(embedding, old.embedding);
@@ -219,31 +219,18 @@ async function addMemory(entry) {
     embedding: embedding || null,
     active: true,
     superseded_by: null,
-    timestamp: new Date().toISOString(),
+    timestamp: entry.timestamp || new Date().toISOString(),
     source: source || "inline",
-    time_range: time_range || null
+    time_range: time_range || null,
+    ...(entry.source_moment_id !== undefined ? { source_moment_id: entry.source_moment_id } : {})
   };
 
   // Conflict coverage (old memories get superseded)
-  if (embedding && type !== "summary") {
+  if (embedding && type !== "summary" && !skipDedup) {
     for (const old of sameTypeActive) {
       if (!old.embedding) continue;
       const sim = cosineSimilarity(embedding, old.embedding);
       if (sim > (config.conflict_threshold || 0.85)) {
-        old.active = false;
-        old.superseded_by = newMem.id;
-        markDirty();
-      }
-    }
-  }
-
-  // Resolved coverage
-  if (type === "resolved" && embedding) {
-    const unresolved = memories.filter(m => m.type === "unresolved" && m.active);
-    for (const old of unresolved) {
-      if (!old.embedding) continue;
-      const sim = cosineSimilarity(embedding, old.embedding);
-      if (sim > 0.8) {
         old.active = false;
         old.superseded_by = newMem.id;
         markDirty();
@@ -318,7 +305,7 @@ async function buildContext(query, opts = {}) {
   const excludeIds = opts.excludeIds || null;
   
   // 并行检索所有类型，不做硬性配额
-  const allTypes = opts.types || ["fact", "preference", "emotion", "unresolved", "summary", "moment", "trace", "note"];
+  const allTypes = opts.types || ["fact", "preference", "emotion", "summary", "moment"];
   const searchPromises = allTypes.map(type => search(query, topK, { types: [type], minImportance }));
   const resultsByType = await Promise.all(searchPromises);
   
@@ -375,7 +362,7 @@ function formatContext(memories) {
   if (!memories || memories.length === 0) return "";
   const lines = memories.map(m => {
     // 时间标签已移除：记忆内容本身自带日期时间，避免冗余的动态相对时间
-    const prefixMap = { fact: "此刻想起", preference: "此刻想起", emotion: "此刻想起", unresolved: "此刻想起", resolved: "此刻想起", summary: "此刻想起", moment: "那些时刻", trace: "走过的路", note: "走过的路" };
+    const prefixMap = { fact: "此刻想起", preference: "此刻想起", emotion: "此刻想起", summary: "此刻想起", moment: "那些时刻" };
     const prefix = prefixMap[m.type] || "此刻想起";
     return "[" + prefix + "] " + m.content;
   });

@@ -34,6 +34,18 @@
 | `diary/` | 自动日记（Markdown） |
 | `.env` | 全部配置与密钥 |
 
+## 记忆分类
+
+模型手写类型 3 种（`trace` / `note` / `unresolved` / `resolved` 已于 2026-08-09 移除），`summary` 由自动摘要引擎生成，模型不手动写：
+
+- `fact` 事实：客观、稳定、可长期使用的信息（身份、关系、生活安排、明确陈述、重要日期）。
+- `preference` 偏好：她明确表达或一贯展现的喜好与雷区。
+- `emotion` 情绪·经验复盘：一次值得复盘的互动经验，五段式（她说了什么 → 我的判断 → 我的回应 → 我的感受 → 她的反应），长期保留、同类合并。
+
+`moment` 心动时刻由心动时刻网页（`/root/workspace/daily-涵/data.json` 的 `moments`）作为唯一真源，网页增删改时通过 gateway `/internal/moments/*` 接口实时同步进记忆池（按 `source_moment_id` 增量去重），记忆池只做检索镜像，模型不写。
+
+给模型的完整书写规则位于永久上下文 `data/pinned.json` 的「记忆写入规则（内联标签版）」条目，随每次对话/唤醒注入 system prompt。
+
 ## 快速开始
 
 ```bash

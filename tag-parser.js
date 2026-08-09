@@ -71,7 +71,7 @@ function parsePinContent(raw) {
   return null;
 }
 
-const VALID_TYPES = ["fact", "preference", "emotion", "unresolved", "resolved", "summary", "moment", "trace", "note"];
+const VALID_TYPES = ["fact", "preference", "emotion"];
 
 async function extractAndStore(text) {
   if (!text) return text;
