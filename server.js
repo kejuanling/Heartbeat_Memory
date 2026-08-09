@@ -650,9 +650,8 @@ let lastLLMMessages = null;
 let lastLLMCaptureTime = null;
 
 // ========================
-// 预设方案
+// 网易云环境（网易云 MCP 会话管理）
 // ========================
-const PRESETS_FILE = "./presets.json";
 const ENV_FILE = ".env";
 const PREFERRED_ENV_ORDER = [
   "TARGET_API_URL",
@@ -691,13 +690,66 @@ const PREFERRED_ENV_ORDER = [
   "ADMIN_PASSWORD"
 ];
 
-function loadPresets() {
-  if (!fs.existsSync(PRESETS_FILE)) return [];
-  try { return fs.readJsonSync(PRESETS_FILE); } catch { return []; }
+const NETEASE_DIR = "/opt/netease-music-mcp";
+const NETEASE_ENV_FILE = path.join(NETEASE_DIR, ".env");
+const NETEASE_SESSION_FILE = path.join(NETEASE_DIR, "data", "netease.session");
+const NETEASE_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
+
+function readNetEaseEnv(key) {
+  try {
+    const envContent = fs.readFileSync(NETEASE_ENV_FILE, "utf-8");
+    const lines = envContent.split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith(key + "=")) return trimmed.substring(key.length + 1).trim();
+    }
+  } catch {}
+  return "";
 }
 
-function savePresets(presets) {
-  atomicWriteJsonSync(PRESETS_FILE, presets);
+function readNeteaseSession() {
+  try {
+    const raw = fs.readFileSync(NETEASE_SESSION_FILE, "utf-8").trim();
+    const musicU = raw.match(/(?:^|;\s*)MUSIC_U=([^;\s]+)/)?.[1] || "";
+    const csrf = raw.match(/(?:^|;\s*)__csrf=([^;\s]+)/)?.[1] || "";
+    return { musicU, csrf, raw };
+  } catch {
+    return { musicU: "", csrf: "", raw: "" };
+  }
+}
+
+function writeNeteaseSession(musicU, csrf) {
+  const header = `MUSIC_U=${musicU}` + (csrf ? `; __csrf=${csrf}` : "") + "\n";
+  const tmp = NETEASE_SESSION_FILE + ".tmp";
+  fs.writeFileSync(tmp, header, { mode: 0o600 });
+  fs.renameSync(tmp, NETEASE_SESSION_FILE);
+}
+
+async function fetchNeteaseAccount(cookieHeader) {
+  if (!cookieHeader) return null;
+  try {
+    const response = await fetch("https://music.163.com/api/nuser/account/get", {
+      headers: {
+        Cookie: cookieHeader,
+        Referer: "https://music.163.com/",
+        "User-Agent": NETEASE_UA
+      },
+      signal: AbortSignal.timeout(8000)
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    const profile = data?.profile;
+    if (profile && profile.userId) {
+      return {
+        nickname: String(profile.nickname || ""),
+        userId: String(profile.userId),
+        vipType: Number(profile.vipType ?? 0)
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function wantsJsonResponse(req) {
@@ -1730,30 +1782,61 @@ app.post("/admin/save", { preHandler: basicAuth }, async (req, reply) => {
 });
 
 // ========================
-// 保存预设方案
+// 网易云环境
 // ========================
-app.post("/admin/presets/save", { preHandler: basicAuth }, async (req, reply) => {
-  const { name, target_url, target_key, model_name } = req.body || {};
-  if (!name || !target_url || !model_name) {
-    return reply.code(400).send({ error: "name / target_url / model_name 必填" });
+app.get("/admin/netease", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const session = readNeteaseSession();
+    let sessionUpdatedAt = null;
+    try {
+      sessionUpdatedAt = formatDateTimeInTimeZone(new Date(fs.statSync(NETEASE_SESSION_FILE).mtime), TIME_ZONE);
+    } catch {}
+    const cookieHeader = session.musicU
+      ? `MUSIC_U=${session.musicU}` + (session.csrf ? `; __csrf=${session.csrf}` : "")
+      : "";
+    const account = await fetchNeteaseAccount(cookieHeader);
+    reply.send({
+      success: true,
+      netease: {
+        host: readNetEaseEnv("NETEASE_MCP_HOST") || "0.0.0.0",
+        port: readNetEaseEnv("NETEASE_MCP_PORT") || "3303",
+        cookieFile: readNetEaseEnv("NETEASE_MCP_COOKIE_FILE") || NETEASE_SESSION_FILE,
+        accountWriteEnabled: readNetEaseEnv("NETEASE_MCP_ACCOUNT_WRITE_ENABLED") === "1",
+        sessionSet: Boolean(session.musicU),
+        sessionUpdatedAt,
+        account
+      }
+    });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
   }
-  const presets = loadPresets();
-  const existing = presets.findIndex(p => p.name === name);
-  const entry = { name, target_url, target_key: target_key || readEnvValue("TARGET_API_KEY"), model_name };
-  if (existing >= 0) presets[existing] = entry;
-  else presets.push(entry);
-  savePresets(presets);
-  reply.send({ success: true });
 });
 
-// ========================
-// 删除预设方案
-// ========================
-app.post("/admin/presets/delete", { preHandler: basicAuth }, async (req, reply) => {
-  const { name } = req.body || {};
-  const presets = loadPresets().filter(p => p.name !== name);
-  savePresets(presets);
-  reply.send({ success: true });
+app.post("/admin/netease/save", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const musicU = String(req.body?.music_u ?? "").trim();
+    const csrf = String(req.body?.csrf ?? "").trim();
+    if (!musicU && !csrf) {
+      return reply.code(400).send({ error: "请至少填写 MUSIC_U" });
+    }
+    if (musicU && !/^[^\s;=]+$/.test(musicU)) {
+      return reply.code(400).send({ error: "MUSIC_U 格式无效" });
+    }
+    if (csrf && !/^[^\s;=]+$/.test(csrf)) {
+      return reply.code(400).send({ error: "__csrf 格式无效" });
+    }
+    const existing = readNeteaseSession();
+    const finalMusicU = musicU || existing.musicU;
+    const finalCsrf = csrf || existing.csrf;
+    if (!finalMusicU) {
+      return reply.code(400).send({ error: "缺少 MUSIC_U，无法保存会话" });
+    }
+    writeNeteaseSession(finalMusicU, finalCsrf);
+    const account = await fetchNeteaseAccount(`MUSIC_U=${finalMusicU}` + (finalCsrf ? `; __csrf=${finalCsrf}` : ""));
+    reply.send({ success: true, account });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
 });
 
 // ========================
@@ -1819,6 +1902,80 @@ app.get("/internal/memory/search", async (req, reply) => {
     reply.send({ query: q, count: safe.length, memories: safe });
   } catch (err) {
     console.error("[GET /internal/memory/search] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// ========================
+// 心动时刻同步（heart 网页为唯一真源，记忆池只做检索镜像）
+// ========================
+// 按网页 id (source_moment_id) 增量同步：新增 / 更新 / 复活
+app.post("/internal/moments/sync", async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const items = (req.body && req.body.items) || [];
+    if (!Array.isArray(items)) return reply.code(400).send({ error: "items 数组必填" });
+    let added = 0, updated = 0, skipped = 0;
+    for (const it of items) {
+      const sid = it.id;
+      if (sid === undefined || sid === null) { skipped++; continue; }
+      const parts = [];
+      if (it.title) parts.push("《" + String(it.title).trim() + "》");
+      const han = String(it.text_han || "").trim();
+      const xie = String(it.text_xie || "").trim();
+      if (han) parts.push("涵：" + han);
+      if (xie) parts.push("谢：" + xie);
+      const text = String(it.text || "").trim();
+      if (!han && !xie && text) parts.push(text);
+      if (it.feelings) parts.push("感受：" + String(it.feelings).trim());
+      const content = parts.join("\n").trim();
+      if (!content) { skipped++; continue; }
+      const importance = it.is_defining ? 0.95 : (it.category === "dense" ? 0.75 : 0.6);
+      const ts = it.ts ? new Date(it.ts).toISOString() : new Date().toISOString();
+      const existing = (engine.memories || []).find(m => m.source_moment_id === sid);
+      if (existing) {
+        await engine.updateMemory(existing.id, { content, importance, type: "moment" });
+        existing.timestamp = ts;
+        existing.active = true;
+        existing.source_moment_id = sid;
+        updated++;
+      } else {
+        await engine.addMemory({
+          content,
+          type: "moment",
+          importance,
+          source: "heart-web",
+          timestamp: ts,
+          source_moment_id: sid,
+          skipDedup: true
+        });
+        added++;
+      }
+    }
+    reply.send({ ok: true, added, updated, skipped });
+  } catch (err) {
+    console.error("[POST /internal/moments/sync] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 按网页 id 软删除（网页删了，镜像同步删除）
+app.post("/internal/moments/remove", async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const ids = (req.body && req.body.source_moment_ids) || [];
+    if (!Array.isArray(ids)) return reply.code(400).send({ error: "source_moment_ids 数组必填" });
+    let removed = 0;
+    for (const mem of engine.memories || []) {
+      if (mem.source_moment_id !== undefined && ids.includes(mem.source_moment_id) && mem.active) {
+        mem.active = false;
+        removed++;
+      }
+    }
+    if (removed > 0 && engine.markDirty) engine.markDirty();
+    reply.send({ ok: true, removed });
+  } catch (err) {
+    console.error("[POST /internal/moments/remove] error:", err.message);
     reply.code(500).send({ error: err.message });
   }
 });
@@ -2097,7 +2254,6 @@ app.post("/admin/config", { preHandler: basicAuth }, async (req, reply) => {
 // 环境变量获取
 app.get("/admin/env", { preHandler: basicAuth }, async (req, reply) => {
   try {
-    const presets = loadPresets();
     const diaryEntries = readDiaryEntries(20);
     const diaryData = diaryEntries.map(e => ({ name: e.name, time: formatDateTimeInTimeZone(new Date(e.updated_at), TIME_ZONE), content: e.content }));
     reply.send({
@@ -2158,7 +2314,6 @@ app.get("/admin/env", { preHandler: basicAuth }, async (req, reply) => {
         DIARY_DIR: readEnvValueOrDefault("DIARY_DIR", "diary"),
         PORT: readEnvValueOrDefault("PORT", "3000")
       },
-      presets: presets,
       diary: diaryData
     });
   } catch (err) {
