@@ -152,6 +152,16 @@ function memoryRetrievalEnabled() {
   const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
   return cfg.memory_retrieval_enabled !== false;
 }
+// 对话注入分类白名单：配置页「记忆浮现 → 对话时记忆检索」下细分，关闭的分类不注入
+const ALL_INJECTION_TYPES = ["fact", "preference", "emotion", "summary", "moment"];
+function getDialogInjectionTypes() {
+  const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
+  const t = cfg.context_injection_types;
+  if (Array.isArray(t)) {
+    return t.filter(x => ALL_INJECTION_TYPES.includes(x));
+  }
+  return ALL_INJECTION_TYPES.slice();
+}
 // 构建系统时间标签（注入到最后一条 user 之后；按间隔桶化，间隔内所有请求相同）
 function buildSystemTimeTag() {
   const bucketMs = getTimeTagIntervalMinutes() * 60 * 1000;
@@ -449,7 +459,8 @@ function isSpecialEvent(msg) {
     (c.includes(`刚刚给${userDisplay}发了`) && c.includes("推送")) ||
     (c.includes("刚刚给宝宝发了") && c.includes("推送")) ||
     c.includes("自动写了日记") ||
-    c.includes("记忆浮现）")
+    c.includes("记忆浮现）") ||
+    c.includes("时间标记")
   );
 }
 
@@ -605,23 +616,146 @@ function appendSpecialEvent(content) {
 }
 
 // ========================
+// 时间标记特殊事件：把当前时间作为特殊事件永久写入时间线
+// （开启后按「时间更新间隔」写入；同一时刻不重复写，只保留最新一条时间标记，避免刷屏）
+// ========================
+function buildTimeEventContent() {
+  // 永久标记用真实当前时间（不套动态注入的分桶，避免显示滞后）
+  const now = new Date();
+  const parts = getDatePartsInTimeZone(now);
+  const dayNames = ['周日','周一','周二','周三','周四','周五','周六'];
+  const dayName = dayNames[new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day))).getUTCDay()] || '';
+  const startHour = Number(readEnvValue("WAKE_DAY_START_HOUR")) || 10;
+  const endHour = Number(readEnvValue("WAKE_DAY_END_HOUR")) || 24;
+  const hour = Number(parts.hour);
+  const period = (hour >= startHour && hour < endHour) ? '白天' : '夜晚';
+  return `（${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute} ${dayName} ${period} 时间标记）`;
+}
+
+function getLastTimeEvent(timeline) {
+  for (let i = timeline.length - 1; i >= 0; i--) {
+    const m = timeline[i];
+    if (m && m.role === "assistant" && typeof m.content === "string" && m.content.includes("时间标记")) {
+      return m;
+    }
+  }
+  return null;
+}
+
+function writeTimeEventIfDue() {
+  try {
+    const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
+    if (!cfg.time_event_injection_enabled) return;
+    const intervalMs = (getTimeTagIntervalMinutes() || 30) * 60 * 1000;
+    const timeline = loadTimeline();
+    const last = getLastTimeEvent(timeline);
+    const now = Date.now();
+    if (last) {
+      const lastTs = last.time ? new Date(last.time).getTime() : 0;
+      if (isFinite(lastTs) && now - lastTs < intervalMs) return;
+    }
+    const content = buildTimeEventContent();
+    // 只保留最新一条时间标记，其余移除，避免时间线被时间事件刷屏
+    const next = timeline.filter(m => !(m && m.role === "assistant" && typeof m.content === "string" && m.content.includes("时间标记")));
+    let maxPos = 0;
+    for (const msg of next) {
+      if (msg.position && msg.position > maxPos) maxPos = msg.position;
+    }
+    next.push({ role: "assistant", content, position: maxPos + 0.5, time: new Date().toISOString() });
+    saveTimeline(next);
+    console.log(`[time-event] 已写入时间标记特殊事件: ${content}`);
+  } catch (err) {
+    console.warn("[time-event] 写入失败:", err.message);
+  }
+}
+
+let timeEventTimer = null;
+function startTimeEventTimer() {
+  if (timeEventTimer) clearInterval(timeEventTimer);
+  timeEventTimer = setInterval(writeTimeEventIfDue, 60 * 1000);
+  console.log("[time-event] 时间标记定时器已启动（每分钟检查一次）");
+}
+
+// ========================
 // 记忆浮现写入对话：把浮现的记忆作为特殊事件写入对话记录，永久留在上下文
 // （同一记忆只写入一次，避免对话记录被同一段记忆反复刷屏）
 // ========================
-const surfacedMemoryEventIds = new Set();
+// 记忆写入对话的去重与冷静期：持久化到 data/surfaced_memories.json，
+// 记录「哪些记忆已作为记忆浮现写入过对话」及最近写入时间。
+// 冷静期内（单条冷却或全局冷静期）不重复写入，进程重启后依然有效。
+const SURFACED_MEMORIES_FILE = path.join(__dirname, "data", "surfaced_memories.json");
+let surfacedMemories = {};
+
+function loadSurfacedMemories() {
+  try {
+    if (fs.existsSync(SURFACED_MEMORIES_FILE)) {
+      const raw = JSON.parse(fs.readFileSync(SURFACED_MEMORIES_FILE, "utf-8"));
+      if (raw && typeof raw === "object") surfacedMemories = raw;
+    }
+  } catch (e) {
+    console.warn("[memory] 读取已写入对话的记忆记录失败:", e.message);
+    surfacedMemories = {};
+  }
+}
+
+function pruneSurfacedMemories(now) {
+  // 只保留 90 天内的记录，超限时保留最近写入的 2000 条，防止文件无限膨胀
+  const cutoff = now - 90 * 24 * 60 * 60 * 1000;
+  let entries = Object.entries(surfacedMemories).filter(([, rec]) => rec && rec.lastTime >= cutoff);
+  if (entries.length > 2000) {
+    entries.sort((a, b) => (b[1].lastTime || 0) - (a[1].lastTime || 0));
+    entries = entries.slice(0, 2000);
+  }
+  surfacedMemories = Object.fromEntries(entries);
+}
+
+function saveSurfacedMemories() {
+  try {
+    fs.ensureDirSync(path.dirname(SURFACED_MEMORIES_FILE));
+    fs.writeFileSync(SURFACED_MEMORIES_FILE, JSON.stringify(surfacedMemories, null, 2));
+  } catch (e) {
+    console.warn("[memory] 保存已写入对话的记忆记录失败:", e.message);
+  }
+}
+
+// 写入对话的冷静期：单条冷却开启时以单条冷却为准（更长），否则用全局冷静期
+function getConversationWriteCooldownMs() {
+  const itemMs = getMemoryItemCooldownMinutes() * 60 * 1000;
+  const globalMs = getMemoryCooldownMinutes() * 60 * 1000;
+  const v = itemMs > 0 ? Math.max(itemMs, globalMs) : globalMs;
+  return Math.max(60 * 1000, v);
+}
+
 function buildMemoryEventContent(memories) {
   const timeStr = formatDateTimeInTimeZone(new Date(), TIME_ZONE);
   const body = memories.map(m => memoryEngine.formatContext([m])).join("\n");
   return `（${timeStr} 记忆浮现）\n${body}`;
 }
 function insertMemoriesToConversation(memories) {
-  const freshOnes = memories.filter(m => m && m.id && typeof m.content === "string" && m.content && !surfacedMemoryEventIds.has(m.id));
+  const now = Date.now();
+  const cooldownMs = getConversationWriteCooldownMs();
+  const freshOnes = [];
+  for (const m of memories) {
+    if (!m || !m.id || typeof m.content !== "string" || !m.content) continue;
+    const rec = surfacedMemories[m.id];
+    // 冷静期内已写入过对话的记忆不重复写入（进程重启后同样生效）
+    if (rec && rec.lastTime && (now - rec.lastTime) < cooldownMs) continue;
+    freshOnes.push(m);
+  }
   if (freshOnes.length === 0) return 0;
   appendSpecialEvent(buildMemoryEventContent(freshOnes));
-  freshOnes.forEach(m => surfacedMemoryEventIds.add(m.id));
+  for (const m of freshOnes) {
+    const rec = surfacedMemories[m.id] || {};
+    if (!rec.firstTime) rec.firstTime = now;
+    rec.lastTime = now;
+    surfacedMemories[m.id] = rec;
+  }
+  pruneSurfacedMemories(now);
+  saveSurfacedMemories();
   return freshOnes.length;
 }
 
+loadSurfacedMemories();
 // 剥离内部标签（用于把客户端清洗版和时间线原始版互相匹配）
 function stripInternalTags(text) {
   return tagParser.stripTags(text).trim();
@@ -1065,7 +1199,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
         if (!memoryRetrievalEnabled()) memoryInjectionCache = null;
         const now = Date.now();
         // 冷静期内直接复用缓存内容，保证请求体尾部稳定
-        const reused = memoryRetrievalEnabled() && memoryInjectionCache && now < memoryInjectionCache.expiresAt;
+        const reused = memoryRetrievalEnabled() && memoryInjectionCache && now < memoryInjectionCache.expiresAt && !memoryInjectionCache.empty;
         let dynContent = reused ? memoryInjectionCache.content : null;
         if (dynContent === null && memoryRetrievalEnabled()) {
           // 冷静期已过：重新检索相关记忆并刷新缓存
@@ -1074,16 +1208,23 @@ app.post("/v1/chat/completions", async (req, reply) => {
           const recentMsgs = dialogMsgs.slice(-windowSize);
           const query = recentMsgs.map(m => m.content).join(" ");
           const memResults = await memoryEngine.buildContext(query, {
-            minSummaryAgeHours: cfg.summary_surfacing_min_age_enabled === false ? 0 : (Number(cfg.summary_surfacing_min_age_hours) || 0)
+            minSummaryAgeHours: cfg.summary_surfacing_min_age_enabled === false ? 0 : (Number(cfg.summary_surfacing_min_age_hours) || 0),
+            types: getDialogInjectionTypes()
           });
           if (memResults.length > 0) {
-            const threshold = cfg.memory_relevance_threshold || 0.3;
+            const threshold = Number.isFinite(Number(cfg.memory_relevance_threshold)) ? Number(cfg.memory_relevance_threshold) : 0.3;
             const relevant = memResults.filter(m => (m._score || 0) >= threshold);
             // 单条记忆冷却：同一条记忆冷却期内不重复浮现
             const itemCooldownMs = getMemoryItemCooldownMinutes() * 60 * 1000;
+            // 已写入对话时间线的记忆（记忆浮现特殊事件已永久留在上下文）：
+            // 冷静期内不再动态注入，避免同一记忆在同一轮对话里出现两次
+            const writeCooldownMs = getConversationWriteCooldownMs();
             const fresh = relevant.filter(m => {
               const last = recentInjectedMemoryIds.get(m.id);
-              return last === undefined || (now - last) >= itemCooldownMs;
+              if (last !== undefined && (now - last) < itemCooldownMs) return false;
+              const rec = surfacedMemories[m.id];
+              if (rec && rec.lastTime && (now - rec.lastTime) < writeCooldownMs) return false;
+              return true;
             });
             if (fresh.length > 0) {
               const memStr = memoryEngine.formatContext(fresh);
@@ -1114,6 +1255,10 @@ app.post("/v1/chat/completions", async (req, reply) => {
                 recentInjectedMemoryIds.clear();
                 entries.forEach(([id, ts]) => recentInjectedMemoryIds.set(id, ts));
               }
+            } else {
+              // 相关记忆都已写入时间线（或都在冷却期内）：冷静期内不再动态注入，避免与时间线特殊事件重复
+              memoryInjectionCache = { content: null, empty: true, expiresAt: now + getMemoryCooldownMinutes() * 60 * 1000 };
+              console.log(`[memory] 相关记忆均已写入时间线或冷却中，冷静期内不再动态注入（相关 ${relevant.length} 条）`);
             }
           }
         }
@@ -1413,7 +1558,11 @@ app.post("/internal/wake-event", async (req, reply) => {
       // 记忆浮现写入对话：开启时，唤醒浮现的记忆随事件写入对话记录，永久留在上下文
       try {
         const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
-        if (cfg.memory_persist_on_surface_enabled) {
+        // 唤醒侧独立开关：未设置时沿用旧开关保持原行为
+        const persistWake = cfg.wake_memory_persist_on_surface_enabled !== undefined
+          ? cfg.wake_memory_persist_on_surface_enabled
+          : cfg.memory_persist_on_surface_enabled !== false;
+        if (persistWake) {
           const inserted = insertMemoriesToConversation(memories.filter(m => m && m.id));
           if (inserted > 0) console.log(`[wake-event] 浮现记忆已写入对话 ${inserted} 条`);
         }
@@ -1980,6 +2129,113 @@ app.post("/internal/moments/remove", async (req, reply) => {
   }
 });
 
+// ========================
+// 决策痕迹同步（decision-trail 网页为唯一真源，记忆池只做检索镜像，对接 emotion 类型）
+// ========================
+// 按网页 id (source_decision_id) 增量同步：新增 / 更新 / 复活
+// 决策记录字段与 emotion「经验复盘」五段式对应：触发→她说了什么，判断→依据，选择→回应，感受，回响→她的反应
+function buildDecisionContent(it) {
+  const parts = [];
+  const v = (s) => typeof s === "string" && s.trim().length > 0;
+  if (v(it.trigger)) parts.push("触发：" + it.trigger.trim());
+  if (Array.isArray(it.forks) && it.forks.length > 0) {
+    const forks = it.forks.map(f => typeof f === "string" ? f.trim() : "").filter(Boolean);
+    if (forks.length > 0) parts.push("分叉：" + forks.join(" / "));
+  }
+  if (v(it.choice)) parts.push("我的选择：" + it.choice.trim());
+  if (v(it.reason)) parts.push("我的判断：" + it.reason.trim());
+  if (v(it.feeling)) parts.push("我的感受：" + it.feeling.trim());
+  if (v(it.echo)) parts.push("她的反应：" + it.echo.trim());
+  return parts.join("\n").trim();
+}
+
+app.post("/internal/decisions/sync", async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const items = (req.body && req.body.items) || [];
+    if (!Array.isArray(items)) return reply.code(400).send({ error: "items 数组必填" });
+    let added = 0, updated = 0, skipped = 0;
+    for (const it of items) {
+      const sid = it.id;
+      if (sid === undefined || sid === null) { skipped++; continue; }
+      const content = buildDecisionContent(it);
+      if (!content) { skipped++; continue; }
+      const importance = 0.75;
+      const ts = it.created_at ? new Date(it.created_at).toISOString() : new Date().toISOString();
+      const existing = (engine.memories || []).find(m => m.source_decision_id === sid);
+      if (existing) {
+        await engine.updateMemory(existing.id, { content, importance, type: "emotion" });
+        existing.timestamp = ts;
+        existing.active = true;
+        existing.source_decision_id = sid;
+        updated++;
+      } else {
+        await engine.addMemory({
+          content,
+          type: "emotion",
+          importance,
+          source: "decision-trail",
+          timestamp: ts,
+          source_decision_id: sid,
+          skipDedup: true
+        });
+        added++;
+      }
+    }
+    reply.send({ ok: true, added, updated, skipped });
+  } catch (err) {
+    console.error("[POST /internal/decisions/sync] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 按网页 id 软删除（网页删了，镜像同步删除）
+app.post("/internal/decisions/remove", async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const ids = (req.body && req.body.source_decision_ids) || [];
+    if (!Array.isArray(ids)) return reply.code(400).send({ error: "source_decision_ids 数组必填" });
+    let removed = 0;
+    for (const mem of engine.memories || []) {
+      if (mem.source_decision_id !== undefined && ids.includes(mem.source_decision_id) && mem.active) {
+        mem.active = false;
+        removed++;
+      }
+    }
+    if (removed > 0 && engine.markDirty) engine.markDirty();
+    reply.send({ ok: true, removed });
+  } catch (err) {
+    console.error("[POST /internal/decisions/remove] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// ========================
+// 记忆分类查看（MCP/AI 按 type 查看某分类的全部内容，内部密钥鉴权）
+// ========================
+app.get("/internal/memory/list", async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const query = req.query || {};
+    const type = String(query.type || "").trim();
+    if (!type) return reply.code(400).send({ error: "type 必填" });
+    const filters = { types: [type] };
+    if (query.active !== undefined) filters.active = query.active === "true" || query.active === true;
+    filters.sortBy = query.sortBy || "newest";
+    if (query.pageSize) filters.pageSize = Math.min(500, parseInt(query.pageSize) || 200);
+    if (query.page) filters.page = parseInt(query.page);
+    const result = engine.getMemories ? engine.getMemories(filters) : [];
+    const safe = result.map(m => {
+      const { embedding, ...rest } = m;
+      return rest;
+    });
+    reply.send({ type, count: safe.length, memories: safe });
+  } catch (err) {
+    console.error("[GET /internal/memory/list] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
 // 记忆编辑（MCP/AI 主动修改记忆：内容、重要性、类型等；按 id 精确修改）
 app.post("/internal/memory/update", async (req, reply) => {
   try {
@@ -2186,9 +2442,22 @@ app.get("/admin/memories/similar", { preHandler: basicAuth }, async (req, reply)
   }
 });
 
-// 触发摘要
+// 触发摘要（支持 exclude：手动摘要前剔除不需要写摘要的消息下标，从待摘要队列移除）
 app.post("/admin/summary/trigger", { preHandler: basicAuth }, async (req, reply) => {
   try {
+    const exclude = (req.body && Array.isArray(req.body.exclude)) ? req.body.exclude : null;
+    if (exclude && exclude.length > 0) {
+      const engine = require("./memory-engine");
+      const pending = engine.getPendingMessages();
+      const excludeSet = new Set(exclude.map(Number).filter(n => Number.isInteger(n) && n >= 0));
+      if (excludeSet.size > 0) {
+        const before = pending.length;
+        const next = pending.filter((_, i) => !excludeSet.has(i));
+        pending.splice(0, pending.length, ...next);
+        engine.persistPendingMessages();
+        console.log(`[admin] 手动摘要前剔除 ${before - pending.length} 条不摘要的消息`);
+      }
+    }
     const summaryEngine = require("./summary-engine");
     if (summaryEngine.triggerNow) {
       summaryEngine.triggerNow().catch(e => {
@@ -2213,10 +2482,20 @@ app.get("/admin/summary/last", { preHandler: basicAuth }, async (req, reply) => 
         state = JSON.parse(fss.readFileSync(stateFile, "utf-8"));
       }
     } catch {}
+    const pendingList = Array.isArray(state.pending_messages) ? state.pending_messages : [];
+    const userDisplay = readEnvValue("USER_DISPLAY_NAME") || "对方";
+    const pendingText = pendingList
+      .map(m => `[${m && m.role === "user" ? userDisplay : "我"}] ${m && m.content ? m.content : ""}`)
+      .join("\n\n");
     reply.send({
       last_summary_time: state.last_summary_time || null,
       is_summary_running: state.is_summary_running || false,
-      pending_messages: (state.pending_messages || []).length
+      pending_messages: pendingList.length,
+      pending_list: pendingList.map(m => ({
+        role: (m && m.role) || "assistant",
+        content: (m && m.content) || ""
+      })),
+      pending_text: pendingText
     });
   } catch (err) {
     reply.code(500).send({ error: err.message });
@@ -2233,16 +2512,36 @@ app.get("/admin/config", { preHandler: basicAuth }, async (req, reply) => {
   }
 });
 
-// 配置管理：更新配置
+// 配置管理：更新配置（只接受已知配置项，避免脏 key 写入 config.json）
+const CONFIG_KEY_WHITELIST = new Set([
+  "idle_threshold_minutes", "max_interval_minutes", "auto_summary_enabled",
+  "memory_retrieval_enabled", "retrieval_top_k", "dedup_threshold", "conflict_threshold",
+  "time_decay_days", "keyword_search_enabled", "embedding_model", "memory_relevance_threshold",
+  "memory_query_window", "context_injection_types", "memory_cooldown_minutes",
+  "memory_item_cooldown_minutes", "summary_surfacing_min_age_hours", "summary_surfacing_min_age_enabled",
+  "time_injection_enabled", "time_tag_interval_minutes", "time_event_injection_enabled",
+  "wake_query_window", "wake_relevance_threshold", "wake_repeat_window",
+  "memory_persist_on_surface_enabled", "memory_retrieval_wake_enabled",
+  "wake_memory_persist_on_surface_enabled", "wake_top_k", "wake_total_limit", "wake_random_count"
+]);
 app.post("/admin/config", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const updates = req.body || {};
-    if (Object.keys(updates).length === 0) {
-      return reply.code(400).send({ error: "无更新内容" });
+    const filtered = {};
+    for (const key of Object.keys(updates)) {
+      if (CONFIG_KEY_WHITELIST.has(key)) filtered[key] = updates[key];
     }
-    await require("./memory-engine").updateConfig(updates);
+    if (Object.keys(filtered).length === 0) {
+      return reply.code(400).send({ error: "没有可更新的配置项" });
+    }
+    await require("./memory-engine").updateConfig(filtered);
+    // 注入分类白名单变化：立即清空冷静期缓存，让关闭的分类不再注入
+    if (filtered.context_injection_types !== undefined && typeof memoryInjectionCache !== "undefined") {
+      memoryInjectionCache = null;
+      console.log("[config] 注入分类已变更，清空记忆冷静期缓存");
+    }
     // If max_interval changed, restart the max interval timer
-    if (updates.max_interval_minutes !== undefined) {
+    if (filtered.max_interval_minutes !== undefined) {
       try { require("./summary-engine").restartMaxIntervalTimer(); } catch (e) {}
     }
     reply.send({ success: true, config: require("./memory-engine").getConfig() });
@@ -2489,6 +2788,7 @@ const summaryEngine = require("./summary-engine");
 require("./memory-engine").init().then(() => {
   console.log("[memory] 记忆引擎就绪");
   require("./summary-engine").init();
+  startTimeEventTimer();
 }).catch(err => {
   console.error("[memory] 记忆引擎初始化失败:", err.message);
 });

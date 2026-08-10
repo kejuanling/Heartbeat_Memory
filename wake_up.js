@@ -29,6 +29,14 @@ function reloadEnvFromFile() {
   }
 }
 const memoryEngine = require("./memory-engine");
+// 唤醒注入分类白名单：与对话侧共用 config.context_injection_types，
+// 关闭的分类在唤醒时同样不注入（含随机记忆），保证「关闭的分类不会注入」全局一致
+const WAKE_ALL_INJECTION_TYPES = ["fact", "preference", "emotion", "summary", "moment"];
+function getWakeInjectionTypes() {
+  const t = memoryEngine.getConfig ? memoryEngine.getConfig().context_injection_types : null;
+  if (Array.isArray(t)) return t.filter(x => WAKE_ALL_INJECTION_TYPES.includes(x));
+  return WAKE_ALL_INJECTION_TYPES.slice();
+}
 const tagParser = require("./tag-parser");
 let memoryReady = false;
 // 防重复：最近 N 次唤醒浮现过的记忆 id（每格=一次唤醒），下次唤醒排除
@@ -556,7 +564,8 @@ async function runWakeUp() {
       topK: cfg.wake_top_k || 8,
       totalLimit: (cfg.wake_total_limit || 12) + buffer,
       randomCount: (cfg.wake_random_count || 4) + buffer,
-      threshold: cfg.wake_relevance_threshold || 0.3,
+      threshold: Number.isFinite(Number(cfg.wake_relevance_threshold)) ? Number(cfg.wake_relevance_threshold) : 0.3,
+      types: getWakeInjectionTypes(),
       excludeIds: excludeIds.size > 0 ? excludeIds : null
     });
     const memList = memResults.slice(0, cfg.wake_total_limit || 12);
@@ -564,8 +573,11 @@ async function runWakeUp() {
       recentWakeMemoryIds.push(memList.map(m => m.id));
       while (recentWakeMemoryIds.length > repeatWindow) recentWakeMemoryIds.shift();
     }
-    // 记忆浮现写入对话：开启时记录本次浮现的记忆，唤醒结束后随事件一起写入对话
-    if (cfg.memory_persist_on_surface_enabled) {
+    // 记忆浮现写入对话（唤醒）：独立于对话开关；未设置时沿用旧开关保持原行为
+    const persistWakeSurface = cfg.wake_memory_persist_on_surface_enabled !== undefined
+      ? cfg.wake_memory_persist_on_surface_enabled
+      : cfg.memory_persist_on_surface_enabled !== false;
+    if (persistWakeSurface) {
       surfacedMemoriesForConversation = memList
         .filter(m => m && m.id && typeof m.content === "string" && m.content)
         .map(m => ({ id: m.id, content: m.content, type: m.type }));

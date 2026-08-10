@@ -42,7 +42,7 @@ async function init() {
     const raw = await fs.readJson(MEMORIES_FILE);
     memories = Array.isArray(raw) ? raw : [];
   } catch { memories = []; }
-  const DEFAULT_CONFIG = { idle_threshold_minutes: 5, max_interval_minutes: 30, auto_summary_enabled: true, memory_retrieval_enabled: true, retrieval_top_k: 5, dedup_threshold: 0.9, conflict_threshold: 0.85, time_decay_days: 30, keyword_search_enabled: true, embedding_model: "Xenova/paraphrase-multilingual-MiniLM-L12-v2", memory_relevance_threshold: 0.3, memory_query_window: 3, memory_cooldown_minutes: 30, memory_item_cooldown_minutes: 120, summary_surfacing_min_age_hours: 24, summary_surfacing_min_age_enabled: true, time_injection_enabled: true, time_tag_interval_minutes: 30, wake_query_window: 3, wake_relevance_threshold: 0.3, wake_repeat_window: 3, memory_persist_on_surface_enabled: false };
+  const DEFAULT_CONFIG = { idle_threshold_minutes: 5, max_interval_minutes: 30, auto_summary_enabled: true, memory_retrieval_enabled: true, retrieval_top_k: 5, dedup_threshold: 0.9, conflict_threshold: 0.85, time_decay_days: 30, keyword_search_enabled: true, embedding_model: "Xenova/paraphrase-multilingual-MiniLM-L12-v2", memory_relevance_threshold: 0.3, memory_query_window: 3, context_injection_types: ["fact", "preference", "emotion", "summary", "moment"], memory_cooldown_minutes: 30, memory_item_cooldown_minutes: 120, summary_surfacing_min_age_hours: 24, summary_surfacing_min_age_enabled: true, time_injection_enabled: true, time_tag_interval_minutes: 30, time_event_injection_enabled: false, wake_query_window: 3, wake_relevance_threshold: 0.3, wake_repeat_window: 3, memory_persist_on_surface_enabled: false };
   try {
     config = { ...DEFAULT_CONFIG, ...(await fs.readJson(CONFIG_FILE)) };
   } catch {
@@ -222,7 +222,8 @@ async function addMemory(entry) {
     timestamp: entry.timestamp || new Date().toISOString(),
     source: source || "inline",
     time_range: time_range || null,
-    ...(entry.source_moment_id !== undefined ? { source_moment_id: entry.source_moment_id } : {})
+    ...(entry.source_moment_id !== undefined ? { source_moment_id: entry.source_moment_id } : {}),
+    ...(entry.source_decision_id !== undefined ? { source_decision_id: entry.source_decision_id } : {})
   };
 
   // Conflict coverage (old memories get superseded)
@@ -346,7 +347,8 @@ async function buildContext(query, opts = {}) {
   // 注入随机记忆（用于唤醒等场景，拓宽视野）
   if (randomCount > 0 && memories.length > 0) {
     const existingIds = new Set(result.map(m => m.id));
-    const candidates = memories.filter(m => !existingIds.has(m.id) && m.active !== false && (!excludeIds || !excludeIds.has(m.id)));
+    const typeSet = new Set(allTypes);
+    const candidates = memories.filter(m => !existingIds.has(m.id) && m.active !== false && (!excludeIds || !excludeIds.has(m.id)) && typeSet.has(m.type));
     const shuffled = candidates.sort(() => Math.random() - 0.5);
     const randomPicks = shuffled.slice(0, randomCount).map(m => ({
       ...m,
@@ -362,7 +364,7 @@ function formatContext(memories) {
   if (!memories || memories.length === 0) return "";
   const lines = memories.map(m => {
     // 时间标签已移除：记忆内容本身自带日期时间，避免冗余的动态相对时间
-    const prefixMap = { fact: "此刻想起", preference: "此刻想起", emotion: "此刻想起", summary: "此刻想起", moment: "那些时刻" };
+    const prefixMap = { fact: "此刻想起", preference: "此刻想起", emotion: "那些选择", summary: "此刻想起", moment: "那些时刻" };
     const prefix = prefixMap[m.type] || "此刻想起";
     return "[" + prefix + "] " + m.content;
   });

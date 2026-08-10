@@ -102,7 +102,10 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
 .search-bar input{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:rgba(255,255,255,0.7);font-family:"Noto Sans SC",sans-serif;font-size:13px;color:var(--text);outline:none}
 .search-bar select{padding:10px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);background:rgba(255,255,255,0.7);font-family:"Noto Sans SC",sans-serif;font-size:12px;color:var(--text);outline:none;max-width:120px;flex-shrink:0;white-space:nowrap}
 .config-group{margin-bottom:16px}
-.config-group .group-title{font-size:11px;font-weight:600;color:var(--accent);letter-spacing:1.5px;margin-bottom:10px;text-transform:uppercase}
+.config-group .group-title{font-size:11px;font-weight:600;color:var(--accent);letter-spacing:1.5px;margin-bottom:10px;text-transform:uppercase;cursor:pointer;display:flex;justify-content:space-between;align-items:center;user-select:none;padding:4px 0}
+.config-group .group-arrow{font-size:10px;color:var(--text3);transition:transform .15s;letter-spacing:0}
+.config-group.open .group-arrow{transform:rotate(90deg)}
+.config-group .group-body{padding-left:2px}
 .config-item{padding:10px 0;border-bottom:1px solid rgba(0,0,0,0.03)}
 .config-item:last-child{border-bottom:none}
 .ci-label{font-size:12px;font-weight:500;color:var(--text);margin-bottom:4px}
@@ -111,6 +114,15 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
 .switch-row .ci-desc{margin-bottom:0}
 .switch-row{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:10px 0;border-bottom:1px solid rgba(0,0,0,0.03)}
 .switch-row:last-child{border-bottom:none}
+.multi-group{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
+.multi-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:rgba(255,255,255,0.6);font-size:12px;color:var(--text);cursor:pointer;user-select:none;transition:all .15s}
+.multi-chip input{display:none}
+.multi-chip:has(input:checked){background:var(--accent);border-color:var(--accent);color:#fff}
+.summary-msg{padding:8px 10px;margin-bottom:6px;background:rgba(255,255,255,0.55);border:1px solid rgba(0,0,0,0.04);border-radius:8px}
+.summary-msg:last-child{margin-bottom:0}
+.summary-msg-meta{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.summary-msg-content{white-space:pre-wrap;word-break:break-all;font-size:11px;color:var(--text2);line-height:1.6;font-family:monospace}
+.psum-seq{font-size:10px;color:var(--text3);flex:1}
 .diary-item{padding:10px 0;border-bottom:1px solid var(--border)}
 .diary-item:last-child{border-bottom:none}
 .diary-item summary{font-size:13px;color:var(--text);cursor:pointer;display:flex;justify-content:space-between;align-items:center}
@@ -224,8 +236,10 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
       <optgroup label="此刻想起">
         <option value="fact">事实</option>
         <option value="preference">偏好</option>
-        <option value="emotion">情感</option>
         <option value="summary">摘要</option>
+      </optgroup>
+      <optgroup label="那些选择">
+        <option value="emotion">决策痕迹</option>
       </optgroup>
       <optgroup label="那些时刻">
         <option value="moment">心动时刻</option>
@@ -257,6 +271,20 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
       <button class="btn btn-outline" onclick="loadWakePrompt()" style="flex:1">重新载入</button>
     </div>
     <div style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 wake_prompt.txt，下次唤醒即生效。</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">手动摘要</div>
+    <div id="summary-status" style="font-size:12px;color:var(--text2);margin-bottom:8px;line-height:1.8;">加载中...</div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">待摘要对话原文（点每条右侧 × 排除，排除的不写进摘要）</div>
+    <div id="pending-summary-window" style="max-height:280px;overflow-y:auto;padding:10px;background:rgba(0,0,0,0.02);border-radius:8px;"><div class="loading">加载中...</div></div>
+    <div id="pending-excluded-hint" style="font-size:11px;color:var(--text3);margin-top:6px;">加载中...</div>
+    <div class="env-row" style="margin-top:8px;gap:8px;">
+      <button class="btn btn-primary" onclick="triggerManualSummary()" style="flex:1;background:var(--accent)">手动摘要</button>
+      <button class="btn btn-outline" onclick="loadPendingSummary()" style="flex:1">刷新内容</button>
+      <button class="btn btn-outline" onclick="restorePendingItems()" style="flex:1">恢复已删</button>
+    </div>
+    <div style="font-size:11px;color:var(--text3);margin-top:6px;">点击「手动摘要」立即把上方剩余待摘要消息交给模型生成，结果自动存入记忆池（summary）。</div>
   </div>
 
   <div class="card">
@@ -350,8 +378,10 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
         <optgroup label="此刻想起">
           <option value="fact">事实</option>
           <option value="preference">偏好</option>
-          <option value="emotion">情感</option>
           <option value="summary">摘要</option>
+        </optgroup>
+        <optgroup label="那些选择">
+          <option value="emotion">决策痕迹</option>
         </optgroup>
         <optgroup label="那些时刻">
           <option value="moment">心动时刻</option>
@@ -448,6 +478,7 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
 <script>
 // API 基址：兼容 nginx 反代前缀（/heartbeat/admin）与直连（/admin）
 const ADMIN_API = location.pathname.indexOf('/heartbeat/admin/') === 0 ? '/heartbeat/admin' : '/admin';
+const TYPE_LABELS={fact:'事实',preference:'偏好',emotion:'决策痕迹',summary:'摘要',moment:'心动时刻'};
 
 // 登录过期时自动跳转到登录页（记住登录状态下一般不会触发）
 (function () {
@@ -633,65 +664,71 @@ function cfgRangeInput(key, unlimited){
 }
 async function loadConfig(){
   const el=document.getElementById('config-form');
-  if(configData){renderConfig(configData);return}
-  el.innerHTML='<div class="loading">加载中...</div>';
+  if(!el)return;
+  // 每次进入配置页都重新拉取最新配置，避免显示缓存旧值
+  const openGroups=collectOpenGroups();
   try{
     const r=await fetch(ADMIN_API + '/config');
     const j=await r.json();
     configData=j;
     renderConfig(j);
+    restoreOpenGroups(openGroups);
   }catch(e){el.innerHTML='<div class="empty">加载失败: '+e.message+'</div>'}
 }
 
 function renderConfig(cfg){
   const el=document.getElementById('config-form');
   const groups=[
-    {title:'摘要触发',fields:[
+    {title:'摘要',fields:[
+      {key:'auto_summary_enabled',label:'自动摘要',desc:'是否启用自动摘要生成',type:'switch'},
       {key:'idle_threshold_minutes',label:'沉默阈值（分钟）',desc:'用户沉默多久后触发摘要',type:'range',min:1,max:60,step:1},
       {key:'max_interval_minutes',label:'最长间隔（分钟）',desc:'无论是否沉默，最多多久生成一次摘要',type:'range',min:5,max:120,step:5},
-      {key:'auto_summary_enabled',label:'自动摘要',desc:'是否启用自动摘要生成',type:'switch'}
+      {key:'summary_surfacing_min_age_enabled',label:'新摘要冷却',desc:'开启后，新生成的摘要会在冷却时长内不于对话中浮现',type:'switch'},
+      {key:'summary_surfacing_min_age_hours',label:'新摘要冷却时长（小时）',desc:'开启「新摘要冷却」后，多久以内生成的摘要不浮现',type:'range',min:1,max:72,step:1}
     ]},
-    {title:'对话时检索与浮现',fields:[
+    {title:'对话 · 记忆检索',fields:[
+      {key:'memory_retrieval_enabled',label:'对话时记忆检索',desc:'关闭后对话时不再自动检索并注入记忆',type:'switch'},
+      {key:'context_injection_types',label:'注入分类（可多选）',desc:'对话时记忆检索只注入勾选的分类；关闭的分类不会注入',type:'multiselect',options:[{v:'fact',l:'事实'},{v:'preference',l:'偏好'},{v:'emotion',l:'决策痕迹'},{v:'summary',l:'摘要'},{v:'moment',l:'心动时刻'}],def:['fact','preference','emotion','summary','moment']},
       {key:'retrieval_top_k',label:'检索数量',desc:'每次检索返回的记忆条数',type:'range',min:1,max:20,step:1},
       {key:'memory_query_window',label:'对话窗口',desc:'用最近几条对话消息（含AI回复）拼接作为检索提示词',type:'range',min:1,max:10,step:1},
       {key:'memory_relevance_threshold',label:'相关性阈值',desc:'只有高于此分数的记忆才会浮现（0-1，越低越宽松）',type:'range',min:0,max:1,step:0.05},
       {key:'keyword_search_enabled',label:'关键词检索',desc:'启用 BM25 关键词搜索融合',type:'switch'},
+      {key:'memory_cooldown_minutes',label:'记忆冷静期（分钟）',desc:'记忆浮现后多久才重新检索，冷静期内所有请求复用同一份记忆',type:'range',min:1,max:120,step:5},
       {key:'memory_item_cooldown_minutes',label:'单条记忆冷却（分钟）',desc:'同一条记忆冷却期内不重复浮现（0=关闭），避免同一记忆反复冒出来',type:'range',min:0,max:1440,step:30,def:120}
     ]},
-    {title:'去重与覆盖',fields:[
-      {key:'dedup_threshold',label:'去重阈值',desc:'相似度超过此值视为重复，更新重要性而非新增',type:'range',min:0.5,max:1,step:0.01},
-      {key:'conflict_threshold',label:'覆盖阈值',desc:'相似度超过此值则旧记忆沉底（superseded）',type:'range',min:0.5,max:1,step:0.01}
+    {title:'对话 · 记忆写入',fields:[
+      {key:'memory_persist_on_surface_enabled',label:'对话时·浮现后写入对话',desc:'开启后，对话中浮现过的记忆会写入对话记录并永久留在上下文里，不再消失；关闭时维持原有的短暂浮现',type:'switch',def:false}
     ]},
-    {title:'衰减与模型',fields:[
-      {key:'time_decay_days',label:'时间衰减（天）',desc:'超过此天数的记忆权重降低',type:'range',min:1,max:90,step:1},
-      {key:'embedding_model',label:'嵌入模型',desc:'向量化模型名称（修改后需重启服务生效）',type:'text'}
-    ]},
-    {title:'记忆浮现',fields:[
-      {key:'memory_retrieval_enabled',label:'对话时记忆检索',desc:'关闭后对话时不再自动检索并注入记忆',type:'switch'},
+    {title:'唤醒',fields:[
       {key:'memory_retrieval_wake_enabled',label:'唤醒时记忆检索',desc:'关闭后唤醒时不再自动检索并注入记忆',type:'switch',def:true},
-      {key:'memory_persist_on_surface_enabled',label:'浮现后写入对话',desc:'开启后，对话/唤醒时浮现过的记忆会写入对话记录并永久留在上下文里，不再消失；关闭时维持原有的短暂浮现',type:'switch',def:false},
-      {key:'summary_surfacing_min_age_enabled',label:'新摘要冷却',desc:'开启后，新生成的摘要会在冷却时长内不于对话中浮现',type:'switch'},
-      {key:'summary_surfacing_min_age_hours',label:'新摘要冷却时长（小时）',desc:'开启「新摘要冷却」后，多久以内生成的摘要不浮现',type:'range',min:1,max:72,step:1},
-      {key:'memory_cooldown_minutes',label:'记忆冷静期（分钟）',desc:'记忆浮现后多久才重新检索，冷静期内所有请求复用同一份记忆',type:'range',min:1,max:120,step:5}
-    ]},
-    {title:'时间注入',fields:[
-      {key:'time_injection_enabled',label:'注入当前时间',desc:'给 AI 注入当前时间；关闭后完全不注入（缓存最稳）',type:'switch'},
-      {key:'time_tag_interval_minutes',label:'时间更新间隔（分钟）',desc:'时间标签多久更新一次，间隔内所有请求时间相同，越大越利于缓存命中',type:'range',min:1,max:120,step:5}
-    ]},
-    {title:'唤醒记忆',fields:[
+      {key:'wake_memory_persist_on_surface_enabled',label:'唤醒时·浮现后写入对话',desc:'开启后，唤醒时浮现过的记忆会随唤醒事件写入对话记录并永久留在上下文；关闭时维持原有的短暂浮现',type:'switch',defKey:'memory_persist_on_surface_enabled',def:false},
       {key:'wake_query_window',label:'唤醒检索窗口',desc:'唤醒时用最近几条消息拼检索提示词，独立于对话窗口',type:'range',min:1,max:10,step:1},
       {key:'wake_relevance_threshold',label:'唤醒相关性阈值',desc:'唤醒时过滤低于此分数的检索记忆（不影响随机记忆），独立于对话阈值',type:'range',min:0,max:1,step:0.05},
       {key:'wake_top_k',label:'唤醒检索数量',desc:'唤醒时相关性检索的记忆条数（通常比对话时多）',type:'range',min:1,max:20,step:1},
       {key:'wake_total_limit',label:'唤醒记忆上限',desc:'唤醒时最多浮现的记忆总数（含随机记忆）',type:'range',min:1,max:30,step:1},
       {key:'wake_random_count',label:'随机记忆数',desc:'唤醒时额外注入的随机记忆条数，拓宽视野',type:'range',min:0,max:15,step:1},
       {key:'wake_repeat_window',label:'唤醒防重复次数',desc:'最近 N 次唤醒看过的记忆不重复浮现（0=关闭），防止同一批记忆反复出现',type:'range',min:0,max:5,step:1,def:3}
+    ]},
+    {title:'去重与覆盖',fields:[
+      {key:'dedup_threshold',label:'去重阈值',desc:'相似度超过此值视为重复，更新重要性而非新增',type:'range',min:0.5,max:1,step:0.01},
+      {key:'conflict_threshold',label:'覆盖阈值',desc:'相似度超过此值则旧记忆沉底（superseded）',type:'range',min:0.5,max:1,step:0.01}
+    ]},
+    {title:'时间注入',fields:[
+      {key:'time_injection_enabled',label:'注入当前时间（动态）',desc:'给 AI 注入当前时间；关闭后完全不注入（缓存最稳）',type:'switch'},
+      {key:'time_tag_interval_minutes',label:'时间更新间隔（分钟）',desc:'时间标签多久更新一次，间隔内所有请求时间相同，越大越利于缓存命中',type:'number',min:1,max:120},
+      {key:'time_event_injection_enabled',label:'时间标记写入对话（永久）',desc:'开启后按「时间更新间隔」把当前时间作为特殊事件写入时间线，永久留在上下文；只保留最新一条，不刷屏',type:'switch',def:false}
+    ]},
+    {title:'模型与衰减',fields:[
+      {key:'time_decay_days',label:'时间衰减（天）',desc:'超过此天数的记忆权重降低',type:'range',min:1,max:90,step:1},
+      {key:'embedding_model',label:'嵌入模型',desc:'向量化模型名称（修改后需重启服务生效）',type:'text'}
     ]}
   ];
   let html='';
   groups.forEach(g=>{
-    html+='<div class="config-group"><div class="group-title">'+g.title+'</div>';
+    html+='<div class="config-group"><div class="group-title" onclick="toggleConfigGroup(this)"><span>'+g.title+'</span><span class="group-arrow">▶</span></div><div class="group-body" style="display:none">';
     g.fields.forEach(f=>{
-      const val=cfg[f.key]!==undefined?cfg[f.key]:(f.def!==undefined?f.def:'');
+      let val=cfg[f.key]!==undefined?cfg[f.key]:(f.def!==undefined?f.def:'');
+      if(val===''&&f.defKey&&cfg[f.defKey]!==undefined) val=cfg[f.defKey];
       if(f.type==='switch'){
         html+='<div class="switch-row"><div><div class="ci-label">'+f.label+'</div><div class="ci-desc">'+f.desc+'</div></div><label class="switch"><input type="checkbox" id="cfg-'+f.key+'" '+(val?'checked':'')+'><span class="slider"></span></label></div>';
       }else{
@@ -703,24 +740,63 @@ function renderConfig(cfg){
         html+='<div class="range-wrap"><input type="range" id="cfg-'+f.key+'" min="'+f.min+'" max="'+f.max+'" step="'+f.step+'" value="'+shownVal+'" oninput="cfgRangeInput(\''+f.key+'\','+(f.unlimited?'true':'false')+')"><span class="range-val" id="cfgv-'+f.key+'">'+shownLabel+'</span></div>';
       }else if(f.type==='text'){
         html+='<input type="text" id="cfg-'+f.key+'" value="'+String(val).replace(/"/g,'&quot;')+'">';
+      }else if(f.type==='number'){
+        html+='<input type="number" id="cfg-'+f.key+'" value="'+String(val)+'" min="'+(f.min||0)+'" max="'+(f.max!==undefined?f.max:'')+'">';
+      }else if(f.type==='multiselect'){
+        const cur=Array.isArray(val)?val:((f.def||[]).slice());
+        html+='<div class="multi-group">';
+        (f.options||[]).forEach(function(o){
+          html+='<label class="multi-chip"><input type="checkbox" id="cfg-'+f.key+'-'+o.v+'" value="'+o.v+'" '+(cur.indexOf(o.v)>=0?'checked':'')+'><span>'+o.l+'</span></label>';
+        });
+        html+='</div>';
       }
       html+='</div>';
       }
     });
-    html+='</div>';
+    html+='</div></div>';
   });
   el.innerHTML=html;
+}
+
+function collectOpenGroups(){
+  const names=[];
+  document.querySelectorAll('#config-form .config-group.open').forEach(function(g){
+    const t=g.querySelector('.group-title span');
+    if(t&&t.textContent)names.push(t.textContent);
+  });
+  return names;
+}
+function restoreOpenGroups(names){
+  if(!names||!names.length)return;
+  document.querySelectorAll('#config-form .config-group').forEach(function(g){
+    const t=g.querySelector('.group-title span');
+    const body=g.querySelector('.group-body');
+    if(t&&body&&names.indexOf(t.textContent)>=0&&body.style.display==='none'){
+      toggleConfigGroup(g.querySelector('.group-title'));
+    }
+  });
+}
+function toggleConfigGroup(titleEl){
+  const body=titleEl.parentElement.querySelector('.group-body');
+  const isOpen=body.style.display!=='none';
+  body.style.display=isOpen?'none':'block';
+  titleEl.parentElement.classList.toggle('open',!isOpen);
 }
 
 async function saveConfig(){
   if(!configData)return;
   const updates={};
-  const fields=['idle_threshold_minutes','max_interval_minutes','auto_summary_enabled','memory_retrieval_enabled','memory_retrieval_wake_enabled','memory_persist_on_surface_enabled','summary_surfacing_min_age_enabled','summary_surfacing_min_age_hours','retrieval_top_k','memory_query_window','memory_relevance_threshold','dedup_threshold','conflict_threshold','time_decay_days','keyword_search_enabled','embedding_model','memory_item_cooldown_minutes','memory_cooldown_minutes','time_injection_enabled','time_tag_interval_minutes','wake_query_window','wake_relevance_threshold','wake_top_k','wake_total_limit','wake_random_count','wake_repeat_window'];
+  const fields=['idle_threshold_minutes','max_interval_minutes','auto_summary_enabled','memory_retrieval_enabled','context_injection_types','memory_retrieval_wake_enabled','memory_persist_on_surface_enabled','wake_memory_persist_on_surface_enabled','summary_surfacing_min_age_enabled','summary_surfacing_min_age_hours','retrieval_top_k','memory_query_window','memory_relevance_threshold','dedup_threshold','conflict_threshold','time_decay_days','keyword_search_enabled','embedding_model','memory_item_cooldown_minutes','memory_cooldown_minutes','time_injection_enabled','time_tag_interval_minutes','time_event_injection_enabled','wake_query_window','wake_relevance_threshold','wake_top_k','wake_total_limit','wake_random_count','wake_repeat_window'];
   fields.forEach(key=>{
     const el=document.getElementById('cfg-'+key);
-    if(!el)return;
+    if(!el){
+      // 多选分类：收集该 key 下所有勾选值（全不勾=空数组=全部不注入）
+      const chks=document.querySelectorAll('input[id^="cfg-'+key+'-"]');
+      if(chks.length) updates[key]=Array.from(chks).filter(function(c){return c.checked}).map(function(c){return c.value});
+      return;
+    }
     if(el.type==='checkbox') updates[key]=el.checked;
-    else if(el.type==='range'||el.type==='number') updates[key]=parseFloat(el.value);
+    else if(el.type==='range'||el.type==='number'){ const n=parseFloat(el.value); if(Number.isFinite(n)) updates[key]=n; }
     else updates[key]=el.value;
   });
   try{
@@ -822,7 +898,7 @@ function renderPastePreview(){
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
       '<span style="font-size:11px;color:var(--text3)">#'+(i+1)+'</span>'+
       '<select onchange="pasteParsedItems['+i+'].type=this.value" style="font-size:11px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;background:rgba(255,255,255,0.7);color:var(--text);outline:none">'+
-      ["fact","preference","emotion","summary","moment"].map(function(t){return '<option value="'+t+'"'+(it.type===t?' selected':'')+'>'+t+'</option>'}).join('')+
+      ["fact","preference","emotion","summary","moment"].map(function(t){return '<option value="'+t+'"'+(it.type===t?' selected':'')+'>'+(TYPE_LABELS[t]||t)+'</option>'}).join('')+
       '</select>'+
       '</div>'+
       '<textarea oninput="pasteParsedItems['+i+'].content=this.value" style="width:100%;height:60px;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text);resize:vertical;outline:none;background:rgba(255,255,255,0.5)">'+(it.content||'')+'</textarea>'+
@@ -854,7 +930,7 @@ function doMemExportTxt(){
   fetch(ADMIN_API + '/memories?active=true&pageSize=1000').then(function(r){return r.json()}).then(function(d){
     var mems = d.memories||[];
     if(!mems.length){toast('暂无记忆可导出');return}
-    var typeLabel={fact:'事实',preference:'偏好',emotion:'情绪',summary:'摘要',moment:'时刻'};
+    var typeLabel={fact:'事实',preference:'偏好',emotion:'决策痕迹',summary:'摘要',moment:'心动时刻'};
     var lines = mems.map(function(m){
       return '【'+(typeLabel[m.type]||m.type)+'】'+m.content;
     });
@@ -913,7 +989,7 @@ async function loadMemories(){
     el.innerHTML=mems.map(m=>{
       const time=m.timestamp?new Date(m.timestamp).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
       return '<div class="mem-item" id="mem-item-'+m.id+'"><div class="mem-meta">'+
-        '<span class="mem-tag type-'+(m.type||'fact')+'">'+(m.type||'fact')+'</span>'+
+        '<span class="mem-tag type-'+(m.type||'fact')+'">'+(TYPE_LABELS[m.type]||m.type||'fact')+'</span>'+
         '<span class="mem-tag '+(m.active?'active':'inactive')+'">'+(m.active?'活跃':'已归档')+'</span>'+
         '<span class="mem-time">'+time+'</span>'+
         
@@ -1031,17 +1107,20 @@ function switchTab(name){
   else{stopLogsAutoRefresh();}
 }
 
+let lastPendingCount = null;
 function startLogsAutoRefresh(){
   loadWakeLog();
   loadPinned();
   loadLLMContext();
   loadWakePrompt();
   loadSummaryPrompt();
+  loadSummaryStatus(true);
   if(logsRefreshTimer) clearInterval(logsRefreshTimer);
   logsRefreshTimer = setInterval(() => {
     loadWakeLog();
     loadLLMContext();
     loadPinned();
+    loadSummaryStatus(false);
   }, 5000);
 }
 
@@ -1116,6 +1195,102 @@ async function resetSummaryPrompt(){
     const j=await r.json();
     if(j.ok){toast('已恢复默认');loadSummaryPrompt();}
     else toast('失败: '+(j.error||''));
+  }catch(e){toast('网络错误')}
+}
+
+async function loadSummaryStatus(renderContent){
+  const statusEl=document.getElementById('summary-status');
+  if(!statusEl)return;
+  try{
+    const r=await fetch(ADMIN_API + '/summary/last');
+    const j=await r.json();
+    const cnt=j.pending_messages||0;
+    // 待摘要数量变化（如摘要完成后旧消息被消化）时自动重绘内容窗口；
+    // 用户正在逐条排除时不清空编辑状态
+    if(lastPendingCount!==null && lastPendingCount!==cnt && (!pendingExcluded || pendingExcluded.size===0)) renderPendingSummary(j);
+    lastPendingCount=cnt;
+    const last=j.last_summary_time?new Date(j.last_summary_time).toLocaleString():'从未';
+    statusEl.innerHTML='待摘要消息 <b>'+cnt+'</b> 条 · 上次摘要 '+last+(j.is_summary_running?' · <b style="color:var(--accent)">摘要运行中…</b>':'');
+    if(renderContent!==false) renderPendingSummary(j);
+  }catch(e){statusEl.innerHTML='<span class="empty">加载失败</span>'}
+}
+
+let pendingSummaryList = null;
+let pendingExcluded = new Set();
+
+function renderPendingSummary(j){
+  const el=document.getElementById('pending-summary-window');
+  if(!el)return;
+  const list=(j&&j.pending_list)||[];
+  pendingSummaryList=list;
+  pendingExcluded=new Set();
+  if(!list.length){el.innerHTML='<div class="empty">当前没有待摘要的消息</div>';updatePendingExcludedHint();return}
+  el.innerHTML=list.map(function(it,i){
+    const roleLabel=(it.role==='user')?'对方':'我';
+    const esc=String(it.content||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return '<div class="summary-msg" id="psum-'+i+'">'+
+      '<div class="summary-msg-meta"><span class="mem-tag">['+roleLabel+']</span><span class="psum-seq">#'+(i+1)+'</span>'+
+      '<button style="background:none;border:none;font-size:15px;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1" onclick="removePendingItem('+i+')" title="排除，不写进摘要">&times;</button></div>'+
+      '<div class="summary-msg-content">'+esc+'</div></div>';
+  }).join('');
+  el.scrollTop=0;
+  updatePendingExcludedHint();
+}
+
+function updatePendingExcludedHint(){
+  const hint=document.getElementById('pending-excluded-hint');
+  if(!hint)return;
+  const n=pendingExcluded?pendingExcluded.size:0;
+  hint.innerHTML=n>0?'已排除 <b style="color:var(--accent)">'+n+'</b> 条，不会写进摘要':'点击每条右侧 <b>&times;</b> 排除，排除的内容不会写进摘要';
+}
+
+function removePendingItem(i){
+  if(!pendingSummaryList)return;
+  pendingExcluded.add(i);
+  const row=document.getElementById('psum-'+i);
+  if(row)row.style.display='none';
+  updatePendingExcludedHint();
+}
+
+function restorePendingItems(){
+  if(!pendingSummaryList){toast('暂无内容');return}
+  pendingExcluded=new Set();
+  renderPendingSummary({pending_list:pendingSummaryList});
+  toast('已恢复全部');
+}
+
+async function loadPendingSummary(){
+  try{
+    const r=await fetch(ADMIN_API + '/summary/last');
+    const j=await r.json();
+    renderPendingSummary(j);
+    loadSummaryStatus(false);
+  }catch(e){toast('加载失败')}
+}
+
+async function triggerManualSummary(){
+  const exclude=pendingExcluded?Array.from(pendingExcluded):[];
+  if(pendingSummaryList && exclude.length>=pendingSummaryList.length){
+    toast('所有消息都已排除，没有可摘要的内容');return;
+  }
+  const msg=exclude.length
+    ? '立即手动触发一次摘要？已排除 '+exclude.length+' 条消息，不会写进摘要。'
+    : '立即手动触发一次摘要？待摘要消息会交给模型生成并存入记忆池。';
+  if(!confirm(msg))return;
+  try{
+    const body=exclude.length?{exclude:exclude}:{};
+    const r=await fetch(ADMIN_API + '/summary/trigger',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const j=await r.json();
+    if(!j.success){toast('触发失败: '+(j.error||''));return}
+    toast(exclude.length?('摘要已触发（已排除 '+exclude.length+' 条），正在生成…'):'摘要已触发，正在生成…');
+    let tries=0;
+    const timer=setInterval(async()=>{
+      tries++;
+      await loadSummaryStatus(true);
+      const st=document.getElementById('summary-status');
+      const running=st&&st.textContent.indexOf('摘要运行中')>=0;
+      if(!running||tries>=40){clearInterval(timer);toast(tries>=40?'等待超时，可稍后刷新查看':'摘要已完成');}
+    },3000);
   }catch(e){toast('网络错误')}
 }
 
