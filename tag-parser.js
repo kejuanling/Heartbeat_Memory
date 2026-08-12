@@ -39,7 +39,7 @@ function parseKeyValueBlock(raw, keys) {
 function parseTagContent(raw) {
   try {
     const parsed = JSON.parse(raw.trim());
-    if (parsed.content && parsed.type) {
+    if (parsed.content) {
       return {
         content: parsed.content.trim(),
         type: parsed.type,
@@ -49,7 +49,7 @@ function parseTagContent(raw) {
   } catch {}
 
   const out = parseKeyValueBlock(raw, ["type", "content", "importance"]);
-  if (out.content && out.type) {
+  if (out.content) {
     return {
       content: out.content.trim(),
       type: out.type,
@@ -100,10 +100,12 @@ async function extractAndStore(text) {
     const raw = match[1];
     const parsed = parseTagContent(raw);
 
-    if (parsed && VALID_TYPES.includes(parsed.type)) {
+    if (parsed) {
+      // 类型不再由 AI 判断：未写 type 或类型非法时兜底为 fact
+      const memType = parsed.type && VALID_TYPES.includes(parsed.type) ? parsed.type : "fact";
       const entry = {
         content: parsed.content,
-        type: parsed.type,
+        type: memType,
         importance: parsed.importance !== undefined ? parsed.importance : 0.5,
         source: "inline"
       };
@@ -113,7 +115,7 @@ async function extractAndStore(text) {
         })
       );
     } else {
-      console.warn("[tag-parser] 标签解析失败或类型无效:", raw.slice(0, 80));
+      console.warn("[tag-parser] 标签解析失败:", raw.slice(0, 80));
     }
 
   }

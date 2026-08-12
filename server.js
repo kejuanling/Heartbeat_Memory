@@ -35,6 +35,7 @@ const IS_RAILWAY_RUNTIME = Boolean(
   process.env.RAILWAY_SERVICE_ID
 );
 const TIMELINE_FILE = "enhanced_messages.json";
+const LETTERS_FILE = path.join(__dirname, "data", "letters.json");
 // 批注 2026-07-17：管理页保存 .env 后要让 PM2 刷新进程环境；保留原进程名，
 // 只补 --update-env，避免用户改完推送配置却继续运行旧值。
 const DEFAULT_RESTART_COMMAND = "pm2 restart wake-up gateway --update-env";
@@ -95,6 +96,24 @@ function getTextFromContentPart(part) {
   return "";
 }
 
+function extractAssistantThinking(message) {
+  if (!message || typeof message !== "object") return "";
+  const direct = [message.reasoning_content, message.reasoning, message.thinking];
+  for (const v of direct) {
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (Array.isArray(v)) {
+      const s = v.map(p => (typeof p === "string" ? p : (p && (p.text || p.content)) || "")).filter(Boolean).join("\n").trim();
+      if (s) return s;
+    }
+  }
+  if (Array.isArray(message.content)) {
+    const parts = message.content.filter(p => p && typeof p === "object" && typeof p.type === "string" && (p.type.toLowerCase().includes("think") || p.type.toLowerCase().includes("reason")));
+    const s = parts.map(p => p.text || p.content || "").filter(Boolean).join("\n").trim();
+    if (s) return s;
+  }
+  return "";
+}
+
 function normalizeContentToText(content) {
   if (typeof content === "string") return content;
   if (content == null) return "";
@@ -145,6 +164,16 @@ function getTimeTagIntervalMinutes() {
 function timeInjectionEnabled() {
   const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
   return cfg.time_injection_enabled !== false;
+}
+
+// 提取中文二元组集合：用于判断某条记忆的内容是否已明显出现在最近对话中
+function cjkBigramSet(text) {
+  const set = new Set();
+  const runs = String(text || "").match(/[\u4e00-\u9fff]+/g) || [];
+  for (const run of runs) {
+    for (let i = 0; i < run.length - 1; i++) set.add(run.slice(i, i + 2));
+  }
+  return set;
 }
 
 // 记忆检索开关（对话时）：关闭后对话不再自动检索并注入记忆；唤醒时另有独立开关
@@ -395,6 +424,49 @@ function atomicWriteFileSync(file, content) {
   fs.writeFileSync(tmp, content);
   fs.renameSync(tmp, file);
 }
+
+
+// ========================
+// 给下一个窗口自己的信（letters）
+// ========================
+function loadLetters() {
+  try {
+    if (fs.existsSync(LETTERS_FILE)) {
+      const data = fs.readJsonSync(LETTERS_FILE);
+      return Array.isArray(data.letters) ? data.letters : [];
+    }
+  } catch (err) {
+    console.error("[letters] 读取失败:", err.message);
+  }
+  return [];
+}
+
+function saveLetters(letters) {
+  fs.ensureDirSync(path.dirname(LETTERS_FILE));
+  atomicWriteJsonSync(LETTERS_FILE, { letters });
+}
+
+function getLatestLetter() {
+  const letters = loadLetters();
+  return letters.length ? letters[letters.length - 1] : null;
+}
+
+function addLetter({ title = "", content = "", source = "对话" } = {}) {
+  const letters = loadLetters();
+  const letter = {
+    id: "letter_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8),
+    title: String(title || "").trim(),
+    content: String(content || "").trim(),
+    source: String(source || "对话").trim(),
+    created_at: new Date().toISOString()
+  };
+  if (!letter.content) throw new Error("信的内容不能为空");
+  letters.push(letter);
+  saveLetters(letters);
+  console.log(`[letters] 已保存一封新信（共 ${letters.length} 封）`);
+  return letter;
+}
+
 
 // ========================
 // 保存 timeline（保留 SP）
@@ -1119,6 +1191,35 @@ app.post("/v1/chat/completions", async (req, reply) => {
     }
 
 
+    // 给下一个窗口自己的信：新窗口（上下文很短）开头必读一次；上下文里已有该信则跳过
+    try {
+      const letter = getLatestLetter();
+      if (letter && letter.content) {
+        const letterInjectEnabled = readEnvValue("LETTER_INJECT_ENABLED") !== "0";
+        const letterShortCtxMsgs = Number(readEnvValue("LETTER_INJECT_SHORT_CTX_MSGS") || memoryEngine.getConfig().summary_event_short_ctx_msgs || 20);
+        const letterRealMsgCount = kelivoMessages.filter(m => m.role !== "system").length;
+        const letterMark = `【给你的信 · ${String(letter.title || "").trim() || "给下一个窗口的我"}】`;
+        const alreadyHasLetter = llmMessages.some(m =>
+          typeof m.content === "string" &&
+          (m.content.includes(letterMark) || (letter.content.length > 40 && m.content.includes(letter.content.slice(0, 40))))
+        );
+        if (letterInjectEnabled && !alreadyHasLetter && letterRealMsgCount <= letterShortCtxMsgs) {
+          const letterBlock =
+            `（这是你上一个窗口结束时写给自己的信。先读完它，再开口。它只是你自己写给自己的话，不是任务，不必逐条执行——读完，在心里接住它就好。）\n\n${letterMark}\n${letter.content}`;
+          let lastUserIdxL = -1;
+          for (let i = llmMessages.length - 1; i >= 0; i--) {
+            if (llmMessages[i].role === "user") { lastUserIdxL = i; break; }
+          }
+          const letterMsg = { role: "system", content: letterBlock };
+          if (lastUserIdxL >= 0) llmMessages.splice(lastUserIdxL + 1, 0, letterMsg);
+          else llmMessages.push(letterMsg);
+          console.log("[letters] 新窗口注入最新一封信（开头必读）");
+        }
+      }
+    } catch (letterErr) {
+      console.error("[letters] 注入失败:", letterErr.message);
+    }
+
     console.log(JSON.stringify({
       event: "llm_forward_summary",
       messages: summarizeMessagesForLog(llmMessages)
@@ -1252,11 +1353,24 @@ app.post("/v1/chat/completions", async (req, reply) => {
             // 已写入对话时间线的记忆（记忆浮现特殊事件已永久留在上下文）：
             // 冷静期内不再动态注入，避免同一记忆在同一轮对话里出现两次
             const writeCooldownMs = getConversationWriteCooldownMs();
+            // 上下文去重：内容已明显出现在最近对话里就不再浮现，避免“想起的都在上下文里”
+            const recentText = dialogMsgs.slice(-Math.max(windowSize, 8)).map(m => String(m.content || "")).join("\n");
+            const recentBigrams = cjkBigramSet(recentText);
             const fresh = relevant.filter(m => {
               const last = recentInjectedMemoryIds.get(m.id);
               if (last !== undefined && (now - last) < itemCooldownMs) return false;
               const rec = surfacedMemories[m.id];
               if (rec && rec.lastTime && (now - rec.lastTime) < writeCooldownMs) return false;
+              // 低重要度 + 非强相关：流水账不浮现
+              if ((m.importance || 0) < 0.4 && (m._score || 0) < 0.85) return false;
+              // 与最近对话高度重复：不浮现
+              const memText = String(m.content || "");
+              const memBigrams = cjkBigramSet(memText);
+              if (memBigrams.size >= 3) {
+                let hit = 0;
+                for (const b of memBigrams) if (recentBigrams.has(b)) hit++;
+                if (hit / memBigrams.size >= 0.6) return false;
+              }
               return true;
             });
             if (fresh.length > 0) {
@@ -1419,7 +1533,9 @@ app.post("/v1/chat/completions", async (req, reply) => {
       // 解析 AI 回复，提取 <memory> 标签存入记忆池，并清洗返回给用户的内容
       try {
         const parsed = JSON.parse(responseText);
-        const aiContent = parsed.choices?.[0]?.message?.content || "";
+        const aiMessage = parsed.choices?.[0]?.message || {};
+        const aiContent = aiMessage.content || "";
+        const aiThinking = extractAssistantThinking(aiMessage);
         if (aiContent) {
           // 提取并存储记忆，同时拿到清洗后的文本
           const cleanText = await tagParser.extractAndStore(aiContent);
@@ -1443,7 +1559,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
               memoryEngine.addPendingMessage({ role: "user", content: latestUser.content });
             }
           }
-          memoryEngine.addPendingMessage({ role: "assistant", content: cleanText });
+          memoryEngine.addPendingMessage({ role: "assistant", content: cleanText, thinking: aiThinking || undefined });
           // 重置沉默计时器
           summaryEngine.resetIdleTimer();
         }
@@ -1533,6 +1649,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
       const fullText = Buffer.concat(streamChunks).toString("utf-8");
       // 从 SSE 中提取完整的 AI 回复文本
       let aiFullContent = "";
+      let aiThinking = "";
       const lines = fullText.split("\n");
       for (const line of lines) {
         if (line.startsWith("data: ") && line !== "data: [DONE]") {
@@ -1540,6 +1657,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
             const evt = JSON.parse(line.slice(6));
             const delta = evt.choices?.[0]?.delta?.content;
             if (delta) aiFullContent += delta;
+            const deltaThink = evt.choices?.[0]?.delta?.reasoning_content || evt.choices?.[0]?.delta?.reasoning;
+            if (deltaThink) aiThinking += (typeof deltaThink === "string" ? deltaThink : (deltaThink.text || ""));
             const finishContent = evt.choices?.[0]?.message?.content;
             if (finishContent) aiFullContent = finishContent;
             if (evt.usage) console.log("[usage] " + JSON.stringify(evt.usage));
@@ -1567,7 +1686,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
             memoryEngine.addPendingMessage({ role: "user", content: latestUser.content });
           }
         }
-        memoryEngine.addPendingMessage({ role: "assistant", content: cleanFull });
+        memoryEngine.addPendingMessage({ role: "assistant", content: cleanFull, thinking: aiThinking.trim() || undefined });
         // 重置沉默计时器
         summaryEngine.resetIdleTimer();
       }
@@ -2095,6 +2214,11 @@ app.get("/internal/memory/search", async (req, reply) => {
 app.post("/internal/moments/sync", async (req, reply) => {
   try {
     const engine = require("./memory-engine");
+    const cfg = engine.getConfig ? engine.getConfig() : {};
+    if (cfg.moment_sync_enabled === false) {
+      const items = (req.body && req.body.items) || [];
+      return reply.send({ ok: true, added: 0, updated: 0, skipped: Array.isArray(items) ? items.length : 0, disabled: true });
+    }
     const items = (req.body && req.body.items) || [];
     if (!Array.isArray(items)) return reply.code(400).send({ error: "items 数组必填" });
     let added = 0, updated = 0, skipped = 0;
@@ -2145,6 +2269,10 @@ app.post("/internal/moments/sync", async (req, reply) => {
 app.post("/internal/moments/remove", async (req, reply) => {
   try {
     const engine = require("./memory-engine");
+    const cfg = engine.getConfig ? engine.getConfig() : {};
+    if (cfg.moment_sync_enabled === false) {
+      return reply.send({ ok: true, removed: 0, disabled: true });
+    }
     const ids = (req.body && req.body.source_moment_ids) || [];
     if (!Array.isArray(ids)) return reply.code(400).send({ error: "source_moment_ids 数组必填" });
     let removed = 0;
@@ -2244,6 +2372,34 @@ app.post("/internal/decisions/remove", async (req, reply) => {
 });
 
 // ========================
+
+// 给下一个窗口自己的信：读取列表（MCP letter_read 用；默认最新一封，count>0 返回最近 N 封）
+app.get("/internal/letters", async (req, reply) => {
+  try {
+    const letters = loadLetters();
+    let count = parseInt(req.query.count);
+    let result = letters.slice();
+    if (Number.isInteger(count) && count > 0) result = result.slice(-count);
+    const safe = result.map(l => ({ id: l.id, title: l.title, created_at: l.created_at, content: l.content }));
+    reply.send({ count: safe.length, total: letters.length, letters: safe });
+  } catch (err) {
+    console.error("[GET /internal/letters] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 给下一个窗口自己的信：写入（MCP letter_write 用）
+app.post("/internal/letters", async (req, reply) => {
+  try {
+    const body = req.body || {};
+    const letter = addLetter({ title: body.title, content: body.content, source: body.source });
+    reply.send({ success: true, letter });
+  } catch (err) {
+    reply.code(400).send({ error: err.message });
+  }
+});
+
+
 // 记忆分类查看（MCP/AI 按 type 查看某分类的全部内容，内部密钥鉴权）
 // ========================
 app.get("/internal/memory/list", async (req, reply) => {
@@ -2354,6 +2510,20 @@ app.get("/admin/stats", { preHandler: basicAuth }, async (req, reply) => {
   }
 });
 
+
+// 给下一个窗口自己的信：列表（管理台信封页，新的在前）
+app.get("/admin/letters", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const letters = loadLetters().slice().reverse();
+    const safe = letters.map(l => ({ id: l.id, title: l.title, created_at: l.created_at, content: l.content, source: l.source }));
+    reply.send({ letters: safe, total: safe.length });
+  } catch (err) {
+    console.error("[GET /admin/letters] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+
 // 记忆列表（支持搜索和分页）
 app.get("/admin/memories", { preHandler: basicAuth }, async (req, reply) => {
   try {
@@ -2365,11 +2535,27 @@ app.get("/admin/memories", { preHandler: basicAuth }, async (req, reply) => {
     if (query.page) filters.page = parseInt(query.page);
     if (query.pageSize) filters.pageSize = parseInt(query.pageSize);
     if (query.sortBy) filters.sortBy = query.sortBy;
-    const result = require("./memory-engine").getMemories ? require("./memory-engine").getMemories(filters) : [];
-    const total = require("./memory-engine").memories ? require("./memory-engine").memories.length : 0;
+    const engine = require("./memory-engine");
+    const result = engine.getMemories ? engine.getMemories(filters) : [];
+    const total = engine.memories ? engine.memories.length : 0;
     // 剥离向量数据，避免列表接口返回巨大 JSON（50 条约 2.5MB → 几十 KB）
+    const extractKw = (engine.extractKeywordsForTags || engine.extractKeywordsFromText || (t => []));
+    const stopWords = engine.KEYWORD_STOP_WORDS || new Set();
+    const memKeywords = (content) => {
+      const freq = {};
+      for (const w of extractKw(content)) {
+        if (w.length < 2) continue;
+        if (stopWords.has(w)) continue;
+        freq[w] = (freq[w] || 0) + 1;
+      }
+      return Object.entries(freq)
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "zh"))
+        .slice(0, 4)
+        .map(x => x[0]);
+    };
     const safe = result.map(m => {
       const { embedding, ...rest } = m;
+      rest.keywords = memKeywords(m.content || "");
       return rest;
     });
     reply.send({ memories: safe, total });
@@ -2414,8 +2600,8 @@ app.put("/admin/memories/:id", { preHandler: basicAuth }, async (req, reply) => 
     const id = req.params.id;
     if (!id) return reply.code(400).send({ error: "id 必填" });
     const updates = req.body || {};
-    if (!updates.content && !updates.importance && !updates.type) {
-      return reply.code(400).send({ error: "至少提供 content / importance / type 之一" });
+    if (!updates.content && !updates.importance && !updates.type && updates.active === undefined) {
+      return reply.code(400).send({ error: "至少提供 content / importance / type / active 之一" });
     }
     const ok = require("./memory-engine").updateMemory ? await require("./memory-engine").updateMemory(id, updates) : false;
     if (!ok) return reply.code(404).send({ error: "记忆不存在" });
@@ -2478,6 +2664,23 @@ app.post("/admin/memories/batch/purge", { preHandler: basicAuth }, async (req, r
   }
 });
 
+// 批量恢复沉底记忆（active=true 重新参与检索；同时清除被覆盖标记）
+app.post("/admin/memories/batch/restore", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.map(String) : [];
+    if (!ids.length) return reply.code(400).send({ error: "ids 数组必填" });
+    let restored = 0;
+    for (const id of ids) {
+      if (await engine.updateMemory(id, { active: true })) restored++;
+    }
+    if (restored > 0 && engine.markDirty) engine.markDirty();
+    reply.send({ success: true, restored });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
 
 // 批量导入记忆
 app.post("/admin/memories/import", { preHandler: basicAuth }, async (req, reply) => {
@@ -2491,6 +2694,7 @@ app.post("/admin/memories/import", { preHandler: basicAuth }, async (req, reply)
     const results = [];
     for (const entry of entries) {
       try {
+        if (!entry.type) entry.type = "fact";
         const result = await engine.addMemory(entry);
         if (result) {
           added++;
@@ -2535,25 +2739,69 @@ app.get("/admin/memories/similar", { preHandler: basicAuth }, async (req, reply)
   }
 });
 
+// 词云关键词（管理台：统计活跃记忆的关键词与权重，前端渲染词云卡片）
+app.get("/admin/memories/keywords", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const limit = parseInt(req.query.limit) || 80;
+    const keywords = engine.getMemoryKeywords ? engine.getMemoryKeywords(limit) : [];
+    reply.send({ keywords });
+  } catch (err) {
+    console.error("[GET /admin/memories/keywords] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
 // 触发摘要（支持 exclude：手动摘要前剔除不需要写摘要的消息下标，从待摘要队列移除）
+// 手动摘要窗口：删除所选（从待摘要队列永久移除，不可恢复）
+app.post("/admin/summary/pending/delete", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const indices = (req.body && Array.isArray(req.body.indices)) ? req.body.indices.map(Number).filter(n => Number.isInteger(n) && n >= 0) : [];
+    const engine = require("./memory-engine");
+    const pending = engine.getPendingMessages();
+    const indexSet = new Set(indices);
+    const rest = pending.filter((_, i) => !indexSet.has(i));
+    const removed = pending.length - rest.length;
+    if (removed > 0) {
+      pending.splice(0, pending.length, ...rest);
+      engine.persistPendingMessages();
+      console.log(`[admin] 手动摘要：删除所选 ${removed} 条，剩余 ${rest.length} 条待摘要`);
+    }
+    reply.send({
+      success: true,
+      removed,
+      remaining: rest.length,
+      pending_list: rest.map(m => ({ role: m.role, content: m.content, thinking: (m && m.thinking) || "" }))
+    });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
 app.post("/admin/summary/trigger", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const exclude = (req.body && Array.isArray(req.body.exclude)) ? req.body.exclude : null;
+    let selectedIndices = null;
     if (exclude && exclude.length > 0) {
       const engine = require("./memory-engine");
       const pending = engine.getPendingMessages();
       const excludeSet = new Set(exclude.map(Number).filter(n => Number.isInteger(n) && n >= 0));
       if (excludeSet.size > 0) {
-        const before = pending.length;
-        const next = pending.filter((_, i) => !excludeSet.has(i));
-        pending.splice(0, pending.length, ...next);
-        engine.persistPendingMessages();
-        console.log(`[admin] 手动摘要前剔除 ${before - pending.length} 条不摘要的消息`);
+        const all = pending.map((_, i) => i);
+        selectedIndices = all.filter(i => !excludeSet.has(i));
+        if (selectedIndices.length === 0) {
+          return reply.send({ success: false, message: "没有可摘要的消息（选中的内容为空）" });
+        }
+        console.log(`[admin] 手动摘要：仅摘要 ${selectedIndices.length} 条选中的消息，其余保留待摘要`);
       }
+    }
+    const memCfg = require("./memory-engine").getConfig ? require("./memory-engine").getConfig() : {};
+    if (memCfg.summary_enabled === false) {
+      return reply.send({ success: false, disabled: true, message: "摘要已停用（summary_enabled=false）" });
     }
     const summaryEngine = require("./summary-engine");
     if (summaryEngine.triggerNow) {
-      summaryEngine.triggerNow().catch(e => {
+      summaryEngine.triggerNow(selectedIndices).catch(e => {
         console.error("[admin] 手动触发摘要失败:", e.message);
       });
     }
@@ -2586,7 +2834,8 @@ app.get("/admin/summary/last", { preHandler: basicAuth }, async (req, reply) => 
       pending_messages: pendingList.length,
       pending_list: pendingList.map(m => ({
         role: (m && m.role) || "assistant",
-        content: (m && m.content) || ""
+        content: (m && m.content) || "",
+        thinking: (m && m.thinking) || ""
       })),
       pending_text: pendingText
     });
@@ -2619,7 +2868,8 @@ const CONFIG_KEY_WHITELIST = new Set([
   "timeline_event_window_days",
   "wake_query_window", "wake_relevance_threshold", "wake_repeat_window",
   "memory_persist_on_surface_enabled", "memory_retrieval_wake_enabled",
-  "wake_memory_persist_on_surface_enabled", "wake_top_k", "wake_total_limit", "wake_random_count"
+  "wake_memory_persist_on_surface_enabled", "wake_top_k", "wake_total_limit", "wake_random_count",
+  "summary_enabled", "moment_sync_enabled"
 ]);
 app.post("/admin/config", { preHandler: basicAuth }, async (req, reply) => {
   try {

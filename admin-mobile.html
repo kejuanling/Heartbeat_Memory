@@ -53,15 +53,20 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
 .tab-item.active .tab-label{color:var(--tab-active);font-weight:600}
 .mem-item{padding:14px 0;border-bottom:1px solid var(--border)}
 .mem-item:last-child{border-bottom:none}
+.mem-swipe-item{position:relative;overflow:hidden;border-bottom:1px solid var(--border)}
+.mem-swipe-item:last-child{border-bottom:none}
+.mem-swipe-item .mem-item{position:relative;z-index:2;background:var(--bg);border-bottom:none;transition:transform .25s ease;will-change:transform;touch-action:pan-y;-webkit-user-select:none;user-select:none}
+.mem-swipe-item.swiped .mem-item{transform:translateX(-96px)}
+.swipe-sink-actions{position:absolute;top:0;right:0;bottom:0;z-index:1;display:flex;align-items:stretch;padding:8px}
+.swipe-sink-btn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-width:80px;background:linear-gradient(180deg,#f06b6b,#d05050);color:#fff;border:none;border-radius:12px;font-size:11px;font-weight:600;letter-spacing:3px;cursor:pointer;font-family:"Noto Sans SC",sans-serif;box-shadow:0 2px 8px rgba(192,80,80,.35);transition:transform .15s ease}
+.swipe-sink-btn::before{content:"⤵";font-size:16px;line-height:1;margin-bottom:2px}
+.swipe-sink-btn:active{transform:scale(.95)}
 .mem-meta{display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
 .mem-tag{font-size:10px;padding:2px 8px;border-radius:4px;font-weight:500}
-.mem-tag.type-fact{background:#ede0d8;color:#6a4848}
-.mem-tag.type-preference{background:#e8e0d4;color:#6a4848}
-.mem-tag.type-emotion{background:#e8d8d4;color:#7a5858}
-.mem-tag.type-summary{background:#ede4de;color:#6a5858}
-.mem-tag.type-moment{background:#e8e0dc;color:#6a4848}
 .mem-tag.active{background:#d0e8d0;color:#4a7a4a}
 .mem-tag.inactive{background:#e8e0e0;color:#8a7a7a}
+.mem-tag.kw{background:#ece7df;color:#7a6a5a;cursor:pointer;border:1px solid #e2d8cc}
+.mem-tag.kw:hover{background:#e2d8cc;color:#5a4a3a}
 .mem-time{font-size:11px;color:var(--text3)}
 .mem-content{font-size:13px;color:var(--text);line-height:1.6;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;word-break:break-all}
 
@@ -120,10 +125,12 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
 .multi-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:rgba(255,255,255,0.6);font-size:12px;color:var(--text);cursor:pointer;user-select:none;transition:all .15s}
 .multi-chip input{display:none}
 .multi-chip:has(input:checked){background:var(--accent);border-color:var(--accent);color:#fff}
-.summary-msg{padding:8px 10px;margin-bottom:6px;background:rgba(255,255,255,0.55);border:1px solid rgba(0,0,0,0.04);border-radius:8px}
+.summary-msg{padding:8px 10px;margin-bottom:6px;background:rgba(255,255,255,0.55);border:1px solid rgba(0,0,0,0.04);border-radius:8px;cursor:pointer}
 .summary-msg:last-child{margin-bottom:0}
 .summary-msg-meta{display:flex;align-items:center;gap:8px;margin-bottom:4px}
 .summary-msg-content{white-space:pre-wrap;word-break:break-all;font-size:11px;color:var(--text2);line-height:1.6;font-family:monospace}
+.psum-think{margin:6px 0 2px;padding:8px 10px;background:rgba(74,90,114,0.07);border-left:2px solid rgba(74,90,114,0.35);border-radius:8px;font-size:12px;line-height:1.6;color:#5a6a82;max-height:110px;overflow-y:auto}
+.psum-think span{font-style:italic}
 .psum-seq{font-size:10px;color:var(--text3);flex:1}
 .diary-item{padding:10px 0;border-bottom:1px solid var(--border)}
 .diary-item:last-child{border-bottom:none}
@@ -231,22 +238,21 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
     <div class="stat-card" onclick="openInactivePanel()" style="cursor:pointer" title="点击查看沉底记忆"><div class="num" id="ms-active">-</div><div class="lbl">活跃</div></div>
     <div class="stat-card" onclick="openSimilarPanel()" style="cursor:pointer"><div class="num" id="ms-similar">-</div><div class="lbl">相似</div></div>
   </div>
+  <div id="mem-view-toggle" style="display:flex;gap:6px;margin-bottom:10px">
+    <button class="chip-btn" id="mem-view-cloud" onclick="switchMemView('cloud')" style="padding:5px 14px;font-size:12px;border-radius:12px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer">词云</button>
+    <button class="chip-btn" id="mem-view-list" onclick="switchMemView('list')" style="padding:5px 14px;font-size:12px;border-radius:12px;border:1px solid var(--border);background:rgba(255,255,255,0.6);color:var(--text2);cursor:pointer">列表</button>
+    <button class="chip-btn" id="mem-view-self" onclick="switchMemView('self')" style="padding:5px 14px;font-size:12px;border-radius:12px;border:1px solid var(--border);background:rgba(255,255,255,0.6);color:var(--text2);cursor:pointer">自我</button>
+    <button class="chip-btn" id="mem-view-daily" onclick="switchMemView('daily')" style="padding:5px 14px;font-size:12px;border-radius:12px;border:1px solid var(--border);background:rgba(255,255,255,0.6);color:var(--text2);cursor:pointer">日常</button>
+    <button class="chip-btn" id="mem-view-letter" onclick="switchMemView('letter')" style="padding:5px 14px;font-size:12px;border-radius:12px;border:1px solid var(--border);background:rgba(255,255,255,0.6);color:var(--text2);cursor:pointer">✉️ 信</button>
+  </div>
+  <div id="mem-cloud-wrap">
+    <div id="mem-cloud" style="min-height:340px;position:relative;background:rgba(255,255,255,0.55);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:8px"><div class="loading">统计中...</div></div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">词越大 = 出现越多越重要，点词查看相关记忆</div>
+    <div id="cloud-results"></div>
+  </div>
+  <div id="mem-list-wrap" style="display:none">
   <div class="search-bar">
     <input type="text" id="mem-search" placeholder="搜索记忆..." oninput="scheduleMemSearch()">
-    <select id="mem-type-filter" onchange="loadMemories()">
-      <option value="">全部</option>
-      <optgroup label="此刻想起">
-        <option value="fact">事实</option>
-        <option value="preference">偏好</option>
-        <option value="summary">摘要</option>
-      </optgroup>
-      <optgroup label="那些选择">
-        <option value="emotion">决策痕迹</option>
-      </optgroup>
-      <optgroup label="那些时刻">
-        <option value="moment">心动时刻</option>
-      </optgroup>
-    </select>
     <select id="mem-sort" onchange="loadMemories()">
       <option value="newest">最新优先</option>
       <option value="oldest">最旧优先</option>
@@ -255,6 +261,14 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
 
   </div>
   <div id="mem-list"><div class="loading">加载中...</div></div>
+  </div>
+</div>
+
+<div id="mem-letter-wrap" style="display:none">
+  <div class="search-bar" style="margin-bottom:10px">
+    <span style="font-size:12px;color:var(--text3)">每个窗口的自己写给下一个窗口的信 · 下个窗口开始时会自动读到最新一封</span>
+  </div>
+  <div id="mem-letter-list"><div class="loading">加载中...</div></div>
 </div>
 
 <!-- Tab 4: 日志 -->
@@ -278,13 +292,22 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
   <div class="card">
     <div class="card-title">手动摘要</div>
     <div id="summary-status" style="font-size:12px;color:var(--text2);margin-bottom:8px;line-height:1.8;">加载中...</div>
-    <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">待摘要对话原文（点每条右侧 × 排除，排除的不写进摘要）</div>
-    <div id="pending-summary-window" style="max-height:280px;overflow-y:auto;padding:10px;background:rgba(0,0,0,0.02);border-radius:8px;"><div class="loading">加载中...</div></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <div style="font-size:11px;color:var(--text3);">待摘要对话原文（勾选 = 写进摘要）</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <label style="display:flex;align-items:center;gap:3px;font-size:11px;color:var(--text2);cursor:pointer"><input type="checkbox" id="psum-select-all" onchange="checkAllPending(this.checked)" style="accent-color:var(--accent)"> 全选</label>
+        <span id="pending-check-count" style="font-size:11px;color:var(--accent);font-weight:600;">已选 0 / 0</span>
+      </div>
+    </div>
+    <div id="pending-summary-window" style="max-height:280px;overflow-y:auto;padding:10px;background:rgba(255,255,255,0.45);border:1px solid var(--border);border-radius:10px;"><div class="loading">加载中...</div></div>
     <div id="pending-excluded-hint" style="font-size:11px;color:var(--text3);margin-top:6px;">加载中...</div>
-    <div class="env-row" style="margin-top:8px;gap:8px;">
-      <button class="btn btn-primary" onclick="triggerManualSummary()" style="flex:1;background:var(--accent)">手动摘要</button>
-      <button class="btn btn-outline" onclick="loadPendingSummary()" style="flex:1">刷新内容</button>
-      <button class="btn btn-outline" onclick="restorePendingItems()" style="flex:1">恢复已删</button>
+    <div class="env-row" style="margin-top:8px;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-outline" onclick="deleteSelectedPending()" style="flex:1;min-width:80px;color:#c05050;border-color:rgba(192,80,80,0.4)">删除所选</button>
+      <button class="btn btn-outline" onclick="restorePendingItems()" style="flex:1;min-width:80px">恢复已删</button>
+      <button class="btn btn-outline" onclick="loadPendingSummary()" style="flex:1;min-width:80px">刷新内容</button>
+    </div>
+    <div class="env-row" style="margin-top:10px;gap:8px;flex-wrap:wrap">
+      <button id="summary-trigger-btn" class="btn btn-primary" onclick="triggerManualSummary()" style="flex:1;min-width:120px;background:var(--accent)">手动摘要</button>
     </div>
     <div style="font-size:11px;color:var(--text3);margin-top:6px;">点击「手动摘要」立即把上方剩余待摘要消息交给模型生成，结果自动存入记忆池（summary）。</div>
   </div>
@@ -375,22 +398,6 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
       <textarea id="edit-mem-content" placeholder="输入记忆内容..." style="width:100%;height:100%;min-height:280px;padding:16px;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,0.85);font-family:"Noto Sans SC",sans-serif;font-size:15px;line-height:1.7;color:var(--text);outline:none;resize:none;box-shadow:inset 0 1px 3px rgba(0,0,0,0.04)"></textarea>
     </div>
     <div class="form-group" style="flex-shrink:0">
-      <label>类型</label>
-      <select id="edit-mem-type" style="padding:12px 14px;font-size:14px;border-radius:12px">
-        <optgroup label="此刻想起">
-          <option value="fact">事实</option>
-          <option value="preference">偏好</option>
-          <option value="summary">摘要</option>
-        </optgroup>
-        <optgroup label="那些选择">
-          <option value="emotion">决策痕迹</option>
-        </optgroup>
-        <optgroup label="那些时刻">
-          <option value="moment">心动时刻</option>
-        </optgroup>
-      </select>
-    </div>
-    <div class="form-group" style="flex-shrink:0">
       <label>重要性</label>
       <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
         <input type="range" id="edit-mem-importance" min="0" max="1" step="0.05" value="0.5" oninput="document.getElementById('edit-mem-imp-val').textContent=this.value" style="flex:1">
@@ -421,6 +428,18 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
       <button class="btn btn-primary" onclick="saveEditPinned()" style="flex:1;padding:14px;font-size:15px;border-radius:12px">保存</button>
       <button class="btn btn-outline" onclick="closeModal('editPinnedModal')" style="flex:1;padding:14px;font-size:15px;border-radius:12px">取消</button>
     </div>
+  </div>
+</div>
+
+<!-- 信封：信全文弹窗 -->
+<div class="modal-overlay" id="letterModal">
+  <div class="modal" style="max-width:600px;width:95vw;max-height:85vh;display:flex;flex-direction:column">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-shrink:0">
+      <h3 style="margin:0;font-size:18px" id="letter-modal-title">给下一个窗口的我</h3>
+      <button onclick="closeModal('letterModal')" style="background:rgba(0,0,0,0.04);border:none;font-size:16px;color:var(--text2);cursor:pointer;padding:6px 10px;border-radius:8px;line-height:1">&times;</button>
+    </div>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:10px;flex-shrink:0" id="letter-modal-time"></div>
+    <div id="letter-modal-body" style="flex:1;overflow-y:auto;white-space:pre-wrap;line-height:1.9;font-size:15px;color:var(--text);background:rgba(255,255,255,0.6);border:1px solid var(--border);border-radius:12px;padding:16px;min-height:200px"></div>
   </div>
 </div>
 
@@ -461,7 +480,8 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text2);cursor:pointer">
         <input type="checkbox" id="inactive-select-all" onchange="toggleSelectAllInactive(this.checked)"> 全选
       </label>
-      <span style="font-size:11px;color:var(--text3)">沉底的记忆不会再被检索和浮现，勾选后可永久删除</span>
+      <span style="font-size:11px;color:var(--text3)">沉底的记忆不会再被检索和浮现；可恢复为活跃，勾选后可永久删除</span>
+      <button class="btn btn-sm" style="background:var(--accent);color:#fff;border:none;padding:6px 14px;border-radius:8px;font-size:12px;cursor:pointer" onclick="restoreSelectedInactive()">恢复所选</button>
       <button class="btn btn-sm" style="margin-left:auto;background:#c05050;color:#fff;border:none;padding:6px 14px;border-radius:8px;font-size:12px;cursor:pointer" onclick="purgeSelectedInactive()">永久删除所选</button>
     </div>
     <div id="inactive-list" style="flex:1;overflow-y:auto;min-height:200px"><div class="loading">加载中...</div></div>
@@ -498,7 +518,6 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
 <script>
 // API 基址：兼容 nginx 反代前缀（/heartbeat/admin）与直连（/admin）
 const ADMIN_API = location.pathname.indexOf('/heartbeat/admin/') === 0 ? '/heartbeat/admin' : '/admin';
-const TYPE_LABELS={fact:'事实',preference:'偏好',emotion:'决策痕迹',summary:'摘要',moment:'心动时刻'};
 
 // 登录过期时自动跳转到登录页（记住登录状态下一般不会触发）
 (function () {
@@ -707,6 +726,7 @@ function renderConfig(cfg){
   const el=document.getElementById('config-form');
   const groups=[
     {title:'摘要',fields:[
+      {key:'summary_enabled',label:'摘要总开关',desc:'关闭后不再自动或手动生成摘要（保留开关，可随时打开）',type:'switch',def:false},
       {key:'auto_summary_enabled',label:'自动摘要',desc:'是否启用自动摘要生成',type:'switch'},
       {key:'idle_threshold_minutes',label:'沉默阈值（分钟）',desc:'用户沉默多久后触发摘要',type:'range',min:1,max:60,step:1},
       {key:'max_interval_minutes',label:'最长间隔（分钟）',desc:'无论是否沉默，最多多久生成一次摘要',type:'range',min:5,max:120,step:5},
@@ -718,6 +738,7 @@ function renderConfig(cfg){
     ]},
     {title:'对话 · 记忆检索',fields:[
       {key:'memory_retrieval_enabled',label:'对话时记忆检索',desc:'关闭后对话时不再自动检索并注入记忆',type:'switch'},
+      {key:'moment_sync_enabled',label:'心动时刻同步',desc:'关闭后心动时刻不再自动注入记忆池（页面数据不受影响）',type:'switch',def:false},
       {key:'context_injection_types',label:'注入分类（可多选）',desc:'对话时记忆检索只注入勾选的分类；关闭的分类不会注入',type:'multiselect',options:[{v:'fact',l:'事实'},{v:'preference',l:'偏好'},{v:'emotion',l:'决策痕迹'},{v:'summary',l:'摘要'},{v:'moment',l:'心动时刻'}],def:['fact','preference','emotion','summary','moment']},
       {key:'retrieval_top_k',label:'检索数量',desc:'每次检索返回的记忆条数',type:'range',min:1,max:20,step:1},
       {key:'memory_query_window',label:'对话窗口',desc:'用最近几条对话消息（含AI回复）拼接作为检索提示词',type:'range',min:1,max:10,step:1},
@@ -928,9 +949,6 @@ function renderPastePreview(){
     return '<div style="background:rgba(0,0,0,0.02);border-radius:8px;padding:10px 12px;margin-bottom:8px">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
       '<span style="font-size:11px;color:var(--text3)">#'+(i+1)+'</span>'+
-      '<select onchange="pasteParsedItems['+i+'].type=this.value" style="font-size:11px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;background:rgba(255,255,255,0.7);color:var(--text);outline:none">'+
-      ["fact","preference","emotion","summary","moment"].map(function(t){return '<option value="'+t+'"'+(it.type===t?' selected':'')+'>'+(TYPE_LABELS[t]||t)+'</option>'}).join('')+
-      '</select>'+
       '</div>'+
       '<textarea oninput="pasteParsedItems['+i+'].content=this.value" style="width:100%;height:60px;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text);resize:vertical;outline:none;background:rgba(255,255,255,0.5)">'+(it.content||'')+'</textarea>'+
       '<div style="display:flex;align-items:center;gap:8px;margin-top:6px">'+
@@ -1002,6 +1020,12 @@ async function loadMemStats(){
   }catch(e){}
 }
 
+function filterMemByKeyword(kw,el){
+  const input=document.getElementById('mem-search');
+  if(input.value.trim()===kw){input.value='';}
+  else{input.value=kw;}
+  loadMemories();
+}
 let memSearchTimer=null;
 let memSearchSeq=0;
 function scheduleMemSearch(){
@@ -1012,10 +1036,8 @@ async function loadMemories(){
   const seq=++memSearchSeq;
   const el=document.getElementById('mem-list');
   const search=document.getElementById('mem-search').value.trim();
-  const type=document.getElementById('mem-type-filter').value;
   let url=ADMIN_API + '/memories?active=true&pageSize=50';
   if(search)url+='&search='+encodeURIComponent(search);
-  if(type)url+='&type='+encodeURIComponent(type);
   const sortBy=document.getElementById('mem-sort').value;
   if(sortBy)url+='&sortBy='+encodeURIComponent(sortBy);
   if(!el.querySelector('.mem-item'))el.innerHTML='<div class="loading">加载中...</div>';
@@ -1024,14 +1046,18 @@ async function loadMemories(){
     const r=await fetch(url);
     const j=await r.json();
     if(seq!==memSearchSeq)return;
-    const mems=j.memories||[];
+    let mems=j.memories||[];
+    if(memView==='self')mems=mems.filter(function(m){return m.type==='emotion'});
+    else if(memView==='daily')mems=mems.filter(function(m){return m.type!=='emotion'});
     el.style.opacity='';
-    if(!mems.length){el.innerHTML='<div class="empty">暂无记忆数据</div>';return}
+    if(!mems.length){el.innerHTML='<div class="empty">'+(memView==='self'?'还没有决策痕迹（自我觉察）记录':'暂无记忆数据')+'</div>';return}
     el.innerHTML=mems.map(m=>{
       const time=m.timestamp?new Date(m.timestamp).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
-      return '<div class="mem-item" id="mem-item-'+m.id+'"><div class="mem-meta">'+
-        '<span class="mem-tag type-'+(m.type||'fact')+'">'+(TYPE_LABELS[m.type]||m.type||'fact')+'</span>'+
+      return '<div class="mem-swipe-item" id="mem-swipe-'+m.id+'" data-mid="'+m.id+'">'+
+        '<div class="swipe-sink-actions"><button class="swipe-sink-btn" onclick="sinkMem(\''+m.id+'\')">沉底</button></div>'+
+        '<div class="mem-item" id="mem-item-'+m.id+'"><div class="mem-meta">'+
         '<span class="mem-tag '+(m.active?'active':'inactive')+'">'+(m.active?'活跃':'已归档')+'</span>'+
+        ((m.keywords||[]).slice(0,4).map(function(kw){return '<span class="mem-tag kw" onclick="event.stopPropagation();filterMemByKeyword(this.textContent,this)">'+kw+'</span>'}).join(''))+
         '<span class="mem-time">'+time+'</span>'+
         
         '</div><div class="mem-content">'+(m.content||'')+'</div>'+
@@ -1041,7 +1067,7 @@ async function loadMemories(){
         '<div style="display:flex;gap:6px;flex-shrink:0">'+
         '<button class="btn btn-sm btn-edit" onclick="openEditMem(\''+m.id+'\')">编辑</button>'+
         '<button class="btn btn-sm btn-delete" onclick="deleteMem(\''+m.id+'\')">删除</button>'+
-        '</div></div></div>';
+        '</div></div></div></div>';
     }).join('');
   }catch(e){
     if(seq!==memSearchSeq)return;
@@ -1054,7 +1080,6 @@ function updateMemItemInDom(id, data){
   var el=document.getElementById('mem-item-'+id);
   if(!el)return;
   if(data.content!==undefined){var c=el.querySelector('.mem-content');if(c)c.textContent=data.content;}
-  if(data.type!==undefined){var tag=el.querySelector('.mem-tag');if(tag){tag.className='mem-tag type-'+(data.type||'fact');tag.textContent=data.type||'fact';}}
   if(data.importance!==undefined){
     var slider=el.querySelector('.mem-imp-slider');
     if(slider){slider.value=data.importance;slider.title='重要性: '+data.importance.toFixed(2);}
@@ -1071,7 +1096,6 @@ function openEditMem(id){
   }).then(mem=>{
     if(!mem||!mem.id){toast('未找到该记忆');return}
     document.getElementById('edit-mem-content').value=mem.content||'';
-    document.getElementById('edit-mem-type').value=mem.type||'fact';
     const imp=mem.importance||0.5;
     document.getElementById('edit-mem-importance').value=imp;
     document.getElementById('edit-mem-imp-val').textContent=imp;
@@ -1082,16 +1106,14 @@ function openEditMem(id){
 async function saveEditingMem(){
   if(!editingMemId)return;
   const content=document.getElementById('edit-mem-content').value.trim();
-  const type=document.getElementById('edit-mem-type').value;
   const importance=parseFloat(document.getElementById('edit-mem-importance').value);
   const updates={};
   if(content)updates.content=content;
-  updates.type=type;
   updates.importance=importance;
   try{
     const r=await fetch(ADMIN_API + '/memories/'+editingMemId,{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(updates)});
     const j=await r.json();
-    if(j.success){toast('已更新');closeModal('editMemModal');updateMemItemInDom(editingMemId,{content:content,type:type,importance:importance});loadMemStats();}
+    if(j.success){toast('已更新');closeModal('editMemModal');loadMemories();loadMemStats();}
     else toast('更新失败: '+(j.error||''));
   }catch(e){toast('网络错误')}
 }
@@ -1109,7 +1131,7 @@ async function deleteEditingMem(){
     if(r.status===401){toast('认证已过期，请重新登录');return;}
     if(r.status===404){toast('未找到该记忆(404)');closeModal('editMemModal');loadMemories();return;}
     if(r.status>=400){toast('请求失败('+r.status+'): '+(j.error||txt));return;}
-    if(j.success){toast('已删除');closeModal('editMemModal');var el=document.getElementById('mem-item-'+editingMemId);if(el)el.remove();loadMemStats();}
+    if(j.success){toast('已删除');closeModal('editMemModal');var el=document.getElementById('mem-item-'+editingMemId);if(el){var sw=el.closest('.mem-swipe-item');if(sw)sw.remove();else el.remove();}loadMemStats();}
     else toast('删除失败: '+(j.error||'未知错误'));
   }catch(e){console.error('[DEBUG] error:',e);toast('网络错误: '+e.message)}
 }
@@ -1127,7 +1149,7 @@ async function deleteMem(id){
     if(r.status===401){toast('认证已过期，请重新登录');return;}
     if(r.status===404){toast('未找到该记忆(404)');loadMemories();return;}
     if(r.status>=400){toast('请求失败('+r.status+'): '+(j.error||txt));return;}
-    if(j.success){toast('已删除');var el=document.getElementById('mem-item-'+id);if(el)el.remove();loadMemStats();}
+    if(j.success){toast('已删除');var el=document.getElementById('mem-item-'+id);if(el){var sw=el.closest('.mem-swipe-item');if(sw)sw.remove();else el.remove();}loadMemStats();}
     else toast('删除失败: '+(j.error||'未知错误'));
   }catch(e){console.error('[DEBUG] error:',e);toast('网络错误: '+e.message)}
 }
@@ -1136,6 +1158,87 @@ async function deleteMem(id){
 
 function updateMemImportance(id, val){
   fetch(ADMIN_API + '/memories/'+encodeURIComponent(id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({importance:parseFloat(val)})}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(d){if(d.success){toast('重要性已更新')}else{toast('更新失败: '+(d.error||''))}}).catch(function(e){toast('网络错误: '+e.message)});
+}
+
+// ============ 记忆列表左滑沉底 ============
+let swipeCtx=null;
+function initMemSwipe(){
+  const list=document.getElementById('mem-list');
+  if(!list||list.dataset.swipeInit)return;
+  list.dataset.swipeInit='1';
+  list.addEventListener('touchstart',memSwipeStart,{passive:true});
+  list.addEventListener('touchmove',memSwipeMove,{passive:false});
+  list.addEventListener('touchend',memSwipeEnd);
+  list.addEventListener('touchcancel',memSwipeEnd);
+  list.addEventListener('mousedown',memSwipeStart);
+  list.addEventListener('mousemove',memSwipeMove);
+  list.addEventListener('mouseup',memSwipeEnd);
+  list.addEventListener('mouseleave',memSwipeEnd);
+  document.addEventListener('click',function(e){
+    if(e.target.closest&&e.target.closest('#mem-list .mem-swipe-item'))return;
+    closeMemSwipes();
+  });
+}
+
+function memSwipeStart(e){
+  if(!e.target.closest)return;
+  const wrap=e.target.closest('.mem-swipe-item');
+  if(!wrap)return;
+  if(e.target.closest('input,button,select,textarea,a'))return;
+  const pt=(e.touches&&e.touches[0])||e;
+  swipeCtx={wrap:wrap,item:wrap.querySelector('.mem-item'),startX:pt.clientX,startY:pt.clientY,dx:0,active:false};
+}
+
+function memSwipeMove(e){
+  if(!swipeCtx)return;
+  const pt=(e.touches&&e.touches[0])||e;
+  swipeCtx.dx=pt.clientX-swipeCtx.startX;
+  const dy=pt.clientY-swipeCtx.startY;
+  if(!swipeCtx.active){
+    if(Math.abs(swipeCtx.dx)<10&&Math.abs(dy)<10)return;
+    if(Math.abs(swipeCtx.dx)<=Math.abs(dy)){swipeCtx=null;return;}
+    swipeCtx.active=true;
+    if(e.cancelable)e.preventDefault();
+  }
+  let tx=swipeCtx.dx+(swipeCtx.wrap.classList.contains('swiped')?-96:0);
+  if(tx>0)tx=0;
+  if(tx<-96)tx=-96;
+  swipeCtx.item.style.transform='translateX('+tx+'px)';
+}
+
+function memSwipeEnd(){
+  if(!swipeCtx)return;
+  const ctx=swipeCtx;swipeCtx=null;
+  if(!ctx.active)return;
+  const dx=ctx.dx||0;
+  ctx.item.style.transform='';
+  closeMemSwipes(ctx.wrap);
+  if(dx<=-80){sinkMem(ctx.wrap.dataset.mid);}
+  else if(dx<=-40){ctx.wrap.classList.add('swiped');}
+  else{ctx.wrap.classList.remove('swiped');}
+}
+
+function closeMemSwipes(except){
+  document.querySelectorAll('#mem-list .mem-swipe-item.swiped').forEach(function(w){
+    if(w!==except)w.classList.remove('swiped');
+  });
+}
+
+async function sinkMem(id){
+  closeMemSwipes();
+  if(!id)return;
+  try{
+    const r=await fetch(ADMIN_API + '/memories/'+encodeURIComponent(id),{method:'DELETE',credentials:'include'});
+    const j=await r.json();
+    if(r.status===401){toast('认证已过期，请重新登录');return;}
+    if(j.success){
+      toast('已沉底');
+      const wrap=document.getElementById('mem-swipe-'+id);
+      if(wrap)wrap.remove();
+      else{const el=document.getElementById('mem-item-'+id);if(el)el.remove();}
+      loadMemStats();
+    }else{toast('操作失败: '+(j.error||''));}
+  }catch(e){toast('网络错误')}
 }
 
 // ============ Logs / Tab 4 ============
@@ -1148,7 +1251,7 @@ function switchTab(name){
   document.getElementById('tab-'+name).classList.add('active');
   document.querySelector('.tab-item[data-tab="'+name+'"]').classList.add('active');
   if(name==='config') loadConfig();
-  if(name==='memories'){loadMemStats();loadMemories();}
+  if(name==='memories'){loadMemStats();if(typeof memView!=='undefined'&&memView==='cloud')loadMemCloud();else loadMemories();}
   if(name==='logs'){startLogsAutoRefresh();}
   else{stopLogsAutoRefresh();}
 }
@@ -1273,40 +1376,119 @@ function renderPendingSummary(j){
   if(!list.length){el.innerHTML='<div class="empty">当前没有待摘要的消息</div>';updatePendingExcludedHint();return}
   el.innerHTML=list.map(function(it,i){
     const roleLabel=(it.role==='user')?'对方':'我';
+    const roleStyle=(it.role==='user')?'background:#ede0d8;color:#6a4848':'background:#dde4ee;color:#4a5a72';
     const esc=String(it.content||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    return '<div class="summary-msg" id="psum-'+i+'">'+
-      '<div class="summary-msg-meta"><span class="mem-tag">['+roleLabel+']</span><span class="psum-seq">#'+(i+1)+'</span>'+
-      '<button style="background:none;border:none;font-size:15px;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1" onclick="removePendingItem('+i+')" title="排除，不写进摘要">&times;</button></div>'+
-      '<div class="summary-msg-content">'+esc+'</div></div>';
+    const thinkRaw=String(it.thinking||'').trim();
+    const thinkHtml=thinkRaw
+      ? '<div class="psum-think">💭 '+thinkRaw.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div>'
+      : '';
+    return '<div class="summary-msg" id="psum-'+i+'" onclick="togglePendingCard('+i+')">'+
+      '<div class="summary-msg-meta">'+
+      '<input type="checkbox" class="psum-check" data-i="'+i+'" checked onchange="togglePendingItem('+i+',this.checked)" onclick="event.stopPropagation()" style="accent-color:var(--accent);flex-shrink:0" title="勾选=写进摘要">'+
+      '<span class="mem-tag" style="'+roleStyle+'">'+roleLabel+'</span><span class="psum-seq">#'+(i+1)+'</span>'+
+      '<button style="background:none;border:none;font-size:15px;color:var(--text3);cursor:pointer;padding:2px 8px;line-height:1" onclick="event.stopPropagation();removePendingItem('+i+')" title="取消勾选，不写进摘要">&times;</button></div>'+
+      '<div class="summary-msg-content">'+esc+'</div>'+thinkHtml+'</div>';
   }).join('');
   el.scrollTop=0;
   updatePendingExcludedHint();
+}
+
+function updatePendingCheckCount(){
+  const total=pendingSummaryList?pendingSummaryList.length:0;
+  const checked=document.querySelectorAll('#pending-summary-window .psum-check:checked').length;
+  const c=document.getElementById('pending-check-count');
+  if(c)c.textContent='已选 '+checked+' / '+total;
+  const all=document.getElementById('psum-select-all');
+  if(all)all.checked=total>0&&checked===total;
+  const btn=document.getElementById('summary-trigger-btn');
+  if(btn)btn.textContent=total>0?('一键摘要（已选 '+checked+' 条）'):'手动摘要';
 }
 
 function updatePendingExcludedHint(){
   const hint=document.getElementById('pending-excluded-hint');
   if(!hint)return;
   const n=pendingExcluded?pendingExcluded.size:0;
-  hint.innerHTML=n>0?'已排除 <b style="color:var(--accent)">'+n+'</b> 条，不会写进摘要':'点击每条右侧 <b>&times;</b> 排除，排除的内容不会写进摘要';
+  hint.innerHTML=n>0?'已取消 <b style="color:var(--accent)">'+n+'</b> 条，不会写进摘要':'勾选要写进摘要的；「删除所选」/ × = 不写进摘要';
+  if(typeof updatePendingCheckCount==='function')updatePendingCheckCount();
+}
+
+function togglePendingCard(i){
+  if(!pendingSummaryList)return;
+  const cb=document.querySelector('#psum-'+i+' .psum-check');
+  if(!cb)return;
+  cb.checked=!cb.checked;
+  togglePendingItem(i,cb.checked);
+}
+
+function togglePendingItem(i,checked){
+  if(!pendingSummaryList)return;
+  if(checked)pendingExcluded.delete(i);else pendingExcluded.add(i);
+  const row=document.getElementById('psum-'+i);
+  if(row)row.style.opacity=checked?'':'0.45';
+  updatePendingExcludedHint();
 }
 
 function removePendingItem(i){
   if(!pendingSummaryList)return;
   pendingExcluded.add(i);
+  const cb=document.querySelector('#psum-'+i+' .psum-check');
+  if(cb)cb.checked=false;
   const row=document.getElementById('psum-'+i);
-  if(row)row.style.display='none';
+  if(row)row.style.opacity='0.45';
   updatePendingExcludedHint();
+}
+
+function checkAllPending(checked){
+  if(!pendingSummaryList)return;
+  pendingExcluded=new Set();
+  if(!checked){
+    pendingSummaryList.forEach(function(_,i){pendingExcluded.add(i)});
+  }
+  document.querySelectorAll('#pending-summary-window .psum-check').forEach(function(cb){cb.checked=checked});
+  document.querySelectorAll('#pending-summary-window .summary-msg').forEach(function(row){row.style.opacity=checked?'':'0.45';});
+  updatePendingExcludedHint();
+}
+
+async function deleteSelectedPending(){
+  if(!pendingSummaryList){toast('暂无内容');return}
+  const idx=[];
+  document.querySelectorAll('#pending-summary-window .psum-check:checked').forEach(function(cb){
+    idx.push(parseInt(cb.getAttribute('data-i'),10));
+  });
+  if(!idx.length){toast('先勾选要删除的消息');return}
+  if(!confirm('将从待摘要队列永久删除 '+idx.length+' 条，不可恢复。确定删除？'))return;
+  try{
+    const r=await fetch(ADMIN_API + '/summary/pending/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({indices:idx})});
+    const j=await r.json();
+    if(!j.success){toast('删除失败: '+(j.error||''));return}
+    renderPendingSummary(j);
+    toast('已删除 '+j.removed+' 条');
+  }catch(e){toast('网络错误')}
 }
 
 function restorePendingItems(){
   if(!pendingSummaryList){toast('暂无内容');return}
   pendingExcluded=new Set();
-  renderPendingSummary({pending_list:pendingSummaryList});
+  document.querySelectorAll('#pending-summary-window .psum-check').forEach(function(cb){cb.checked=true;});
+  document.querySelectorAll('#pending-summary-window .summary-msg').forEach(function(row){row.style.opacity='';});
+  updatePendingExcludedHint();
   toast('已恢复全部');
 }
 
 async function loadPendingSummary(){
   try{
+    const cfgR=await fetch(ADMIN_API + '/config');
+    const cfg=await cfgR.json();
+    if(cfg.summary_enabled===false){
+      const win=document.getElementById('pending-summary-window');
+      if(win)win.innerHTML='<div class="similar-empty">摘要已停用（配置 → 摘要总开关 已关闭），可在「配置」里重新开启。</div>';
+      const st=document.getElementById('summary-status');
+      if(st)st.textContent='摘要已停用';
+      const hint=document.getElementById('pending-excluded-hint');
+      if(hint)hint.textContent='';
+      document.querySelectorAll('#tab-logs .env-row button').forEach(function(b){b.disabled=true;b.style.opacity='0.5';});
+      return;
+    }
     const r=await fetch(ADMIN_API + '/summary/last');
     const j=await r.json();
     renderPendingSummary(j);
@@ -1315,6 +1497,11 @@ async function loadPendingSummary(){
 }
 
 async function triggerManualSummary(){
+  try{
+    const cfgR=await fetch(ADMIN_API + '/config');
+    const cfg=await cfgR.json();
+    if(cfg.summary_enabled===false){toast('摘要已停用');return;}
+  }catch(e){}
   const exclude=pendingExcluded?Array.from(pendingExcluded):[];
   if(pendingSummaryList && exclude.length>=pendingSummaryList.length){
     toast('所有消息都已排除，没有可摘要的内容');return;
@@ -1465,11 +1652,10 @@ async function loadSimilarMemories() {
       return;
     }
     el.innerHTML = clusters.map((cluster, ci) => {
-      const tagColor = cluster.type || 'fact';
       const exactBadge = cluster.exact ? '<span style="font-size:10px;color:#c05050;margin-left:6px">完全相同</span>' : '';
       return '<div class="similar-cluster">' +
         '<div class="similar-cluster-header">' +
-          '<span class="similar-cluster-title">相似组 #' + (ci+1) + ' <span class="mem-tag type-' + tagColor + '">' + (cluster.type || 'fact') + '</span>' + exactBadge + '</span>' +
+          '<span class="similar-cluster-title">相似组 #' + (ci+1) + exactBadge + '</span>' +
           '<span class="similar-cluster-count">共 ' + cluster.count + ' 条</span>' +
         '</div>' +
         cluster.members.map(m => {
@@ -1512,7 +1698,10 @@ async function deleteSimilarMem(id) {
       }
       // 主列表如有这条也直接移除，统计刷新
       const mainItem = document.getElementById('mem-item-' + id);
-      if (mainItem) mainItem.remove();
+      if (mainItem) {
+        const wrap = mainItem.closest('.mem-swipe-item');
+        if (wrap) wrap.remove(); else mainItem.remove();
+      }
       loadMemStats();
     } else {
       toast('操作失败');
@@ -1547,10 +1736,12 @@ async function loadInactiveMemories(){
       return '<div class="similar-cluster-member" style="align-items:flex-start;gap:8px">'+
         '<input type="checkbox" class="inactive-check" value="'+m.id+'" style="margin-top:3px;flex-shrink:0">'+
         '<div style="flex:1;min-width:0">'+
-          '<div><span class="mem-tag type-'+(m.type||'fact')+'">'+(TYPE_LABELS[m.type]||m.type||'fact')+'</span>'+
+          '<div>'+
+          ((m.keywords||[]).slice(0,4).map(function(kw){return '<span class="mem-tag kw" onclick="event.stopPropagation();filterMemByKeyword(this.textContent,this)">'+kw+'</span>'}).join(''))+
           '<span style="font-size:10px;color:var(--text3);margin-left:6px">'+time+'</span>'+(superseded?' '+superseded:'')+'</div>'+
           '<div class="similar-member-content" style="margin-top:4px">'+content+'</div>'+
         '</div>'+
+        '<button class="btn btn-sm" style="background:var(--accent);color:#fff;border:none;padding:6px 12px;border-radius:6px;font-size:11px;cursor:pointer;flex-shrink:0" onclick="restoreInactiveMem(\''+m.id+'\')">恢复</button>'+
       '</div>';
     }).join('');
   }catch(e){el.innerHTML='<div class="similar-empty">加载失败: '+e.message+'</div>'}
@@ -1574,6 +1765,235 @@ async function purgeSelectedInactive(){
   }catch(e){toast('删除失败: '+e.message)}
 }
 
+async function restoreInactiveMem(id){
+  if(!confirm('把这条记忆恢复为活跃？恢复后会重新参与检索和浮现。'))return;
+  try{
+    const r=await fetch(ADMIN_API + '/memories/'+encodeURIComponent(id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:true})});
+    const j=await r.json();
+    if(!r.ok||!j.success)throw new Error(j.error||('HTTP '+r.status));
+    toast('已恢复');
+    loadMemStats();
+    await loadInactiveMemories();
+  }catch(e){toast('恢复失败: '+e.message)}
+}
+
+async function restoreSelectedInactive(){
+  const ids=Array.from(document.querySelectorAll('#inactive-list .inactive-check:checked')).map(function(cb){return cb.value});
+  if(!ids.length){toast('请先勾选要恢复的记忆');return}
+  if(!confirm('恢复选中的 '+ids.length+' 条记忆为活跃？'))return;
+  try{
+    const r=await fetch(ADMIN_API + '/memories/batch/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:ids})});
+    const j=await r.json();
+    if(!r.ok||!j.success)throw new Error(j.error||('HTTP '+r.status));
+    toast('已恢复 '+j.restored+' 条');
+    loadMemStats();
+    await loadInactiveMemories();
+  }catch(e){toast('恢复失败: '+e.message)}
+}
+
+// ============ 记忆词云卡片 ============
+let memView='cloud';
+function switchMemView(v){
+  memView=v;
+  const cloud=document.getElementById('mem-cloud-wrap');
+  const list=document.getElementById('mem-list-wrap');
+  const letter=document.getElementById('mem-letter-wrap');
+  if(cloud)cloud.style.display=v==='cloud'?'':'none';
+  if(list)list.style.display=(v==='cloud'||v==='letter')?'none':'';
+  if(letter)letter.style.display=v==='letter'?'':'none';
+  const styleBtn=function(id,active){
+    const b=document.getElementById(id);
+    if(b)b.style.cssText='padding:5px 14px;font-size:12px;border-radius:12px;border:1px solid '+(active?'var(--accent)':'var(--border)')+';background:'+(active?'var(--accent)':'rgba(255,255,255,0.6)')+';color:'+(active?'#fff':'var(--text2)')+';cursor:pointer';
+  };
+  styleBtn('mem-view-cloud',v==='cloud');
+  styleBtn('mem-view-list',v==='list');
+  styleBtn('mem-view-self',v==='self');
+  styleBtn('mem-view-daily',v==='daily');
+  styleBtn('mem-view-letter',v==='letter');
+  if(v==='cloud')loadMemCloud();
+  else if(v==='letter')loadLetters();
+  else loadMemories();
+}
+// ============ 信封：写给下一个窗口自己的信 ============
+let letterSeq=0;
+async function loadLetters(){
+  const el=document.getElementById('mem-letter-list');
+  if(!el)return;
+  const seq=++letterSeq;
+  el.innerHTML='<div class="loading">加载中...</div>';
+  try{
+    const r=await fetch(ADMIN_API + '/letters');
+    const j=await r.json();
+    if(seq!==letterSeq)return;
+    const letters=j.letters||[];
+    if(!letters.length){el.innerHTML='<div class="empty">还没有信。信由对话中的谢意行写好，写完后会出现在这里。</div>';return}
+    el.innerHTML=letters.map(function(l){
+      const time=l.created_at?new Date(l.created_at).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
+      const title=l.title||'给下一个窗口的我';
+      const content=l.content||'';
+      const preview=content.slice(0,60)+(content.length>60?'…':'');
+      return '<div class="mem-swipe-item">'+
+        '<div class="mem-item" onclick="openLetter(\''+l.id+'\')" style="cursor:pointer">'+
+        '<div class="mem-meta"><span class="mem-tag active" style="background:rgba(200,144,152,0.15);color:var(--accent)">✉️ 信</span><span class="mem-time">'+time+'</span></div>'+
+        '<div style="font-weight:600;color:var(--tab-active);margin:4px 0 6px;font-size:14px">'+title+'</div>'+
+        '<div class="mem-content" style="color:var(--text2)">'+preview+'</div>'+
+        '</div></div>';
+    }).join('');
+  }catch(e){
+    if(seq!==letterSeq)return;
+    el.innerHTML='<div class="empty">加载失败: '+e.message+'</div>';
+  }
+}
+function openLetter(id){
+  fetch(ADMIN_API + '/letters').then(function(r){return r.json()}).then(function(j){
+    const l=(j.letters||[]).find(function(x){return x.id===id});
+    if(!l){toast('信不存在');return}
+    document.getElementById('letter-modal-title').textContent=l.title||'给下一个窗口的我';
+    document.getElementById('letter-modal-time').textContent=l.created_at?new Date(l.created_at).toLocaleString('zh-CN'):'';
+    document.getElementById('letter-modal-body').textContent=l.content||'';
+    openModal('letterModal');
+  }).catch(function(){toast('加载失败')});
+}
+
+async function loadMemCloud(){
+  const el=document.getElementById('mem-cloud');
+  if(!el)return;
+  el.innerHTML='<div class="loading">统计中...</div>';
+  try{
+    const r=await fetch(ADMIN_API + '/memories/keywords?limit=80');
+    const j=await r.json();
+    renderWordCloud(el,j.keywords||[]);
+  }catch(e){el.innerHTML='<div class="empty">加载失败: '+e.message+'</div>'}
+}
+function renderWordCloud(el,words){
+  el.innerHTML='';
+  if(!words.length){el.innerHTML='<div class="empty">暂无记忆可统计</div>';return}
+  const max=words[0].weight||1;
+  const palette=['#6a4848','#a05c5c','#c89098','#b98a8a','#8a6a5a','#6a7a8a','#7a8a6a'];
+  const W=Math.max(320,el.clientWidth||320), H=400;
+  // 自动缩放字号：按预估占用面积，超出画布 80% 就整体缩小，保证都能放下
+  const est=words.reduce(function(s,k){
+    const ratio=k.weight/max, size=13+26*ratio;
+    return s+(k.word.length*size*0.92+6)*(size+6);
+  },0);
+  const avail=(W-10)*(H-10)*0.8;
+  const scaleF=Math.min(1,Math.sqrt(avail/Math.max(1,est)));
+  const canvas=document.createElement('canvas');
+  canvas.width=W*2; canvas.height=H*2;
+  canvas.style.width=W+'px'; canvas.style.height=H+'px';
+  canvas.style.display='block'; canvas.style.margin='0 auto';
+  canvas.title='点击词查看相关记忆';
+  el.appendChild(canvas);
+  const ctx=canvas.getContext('2d');
+  ctx.scale(2,2);
+  // 网格占用：已放置的词占住格子，新词检测候选位置是否冲突
+  const CELL=4, cols=Math.ceil(W/CELL), rows=Math.ceil(H/CELL);
+  const grid=new Uint8Array(cols*rows);
+  function cellFree(x,y,bw,bh){
+    const x0=Math.max(0,Math.floor((x-bw/2)/CELL)), x1=Math.min(cols-1,Math.floor((x+bw/2)/CELL));
+    const y0=Math.max(0,Math.floor((y-bh/2)/CELL)), y1=Math.min(rows-1,Math.floor((y+bh/2)/CELL));
+    for(let cy=y0;cy<=y1;cy++)for(let cx=x0;cx<=x1;cx++){if(grid[cy*cols+cx])return false}
+    return true;
+  }
+  function markCells(x,y,bw,bh){
+    const x0=Math.max(0,Math.floor((x-bw/2)/CELL)), x1=Math.min(cols-1,Math.floor((x+bw/2)/CELL));
+    const y0=Math.max(0,Math.floor((y-bh/2)/CELL)), y1=Math.min(rows-1,Math.floor((y+bh/2)/CELL));
+    for(let cy=y0;cy<=y1;cy++)for(let cx=x0;cx<=x1;cx++)grid[cy*cols+cx]=1;
+  }
+  const placed=[];
+  const R=Math.hypot(W,H)/2;
+  const fontFamily='"Noto Sans SC","PingFang SC",sans-serif';
+  words.forEach(function(k,i){
+    const ratio=k.weight/max;
+    let done=false;
+    // 由内向外逐环扫描；放不下就缩小字号再试
+    for(const scl of [1,0.85,0.7]){
+      const size=Math.max(11,Math.round((13+26*ratio)*scaleF*scl));
+      const w=k.word.length*size*0.92;
+      const bw=w+6, bh=size+6;
+      let found=false,px=0,py=0;
+      for(let rad=8;rad<R&&!found;rad+=2){
+        const arc=Math.max(1,Math.round(rad*2*Math.PI/5));
+        for(let a=0;a<arc&&!found;a++){
+          const theta=(a/arc)*Math.PI*2+(rad%7)*0.17;
+          const x=W/2+rad*Math.cos(theta);
+          const y=H/2+rad*Math.sin(theta);
+          if(x-bw/2>=2&&x+bw/2<=W-2&&y-bh/2>=2&&y+bh/2<=H-2){
+            if(cellFree(x,y,bw,bh)){found=true;px=x;py=y}
+          }
+        }
+      }
+      if(found){
+        placed.push({word:k.word,x:px,y:py,bw:bw,bh:bh});
+        markCells(px,py,bw,bh);
+        ctx.font=(ratio>0.7?'700':'500')+' '+size+'px '+fontFamily;
+        ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.globalAlpha=0.62+0.38*ratio;
+        ctx.fillStyle=palette[i%palette.length];
+        ctx.fillText(k.word,px,py);
+        ctx.globalAlpha=1;
+        done=true;
+        break;
+      }
+    }
+    if(!done)return;
+  });
+  canvas.addEventListener('click',function(e){
+    const rect=canvas.getBoundingClientRect();
+    const x=e.clientX-rect.left, y=e.clientY-rect.top;
+    for(const p of placed){
+      if(x>=p.x-p.bw/2&&x<=p.x+p.bw/2&&y>=p.y-p.bh/2&&y<=p.y+p.bh/2){
+        selectCloudWord(p.word);
+        return;
+      }
+    }
+  });
+}
+
+async function selectCloudWord(word){
+  const el=document.getElementById('cloud-results');
+  if(!el)return;
+  el.innerHTML='<div class="loading">检索「'+word+'」...</div>';
+  try{
+    const r=await fetch(ADMIN_API + '/memories?active=true&pageSize=50&search='+encodeURIComponent(word));
+    const j=await r.json();
+    const mems=j.memories||[];
+    if(!mems.length){el.innerHTML='<div class="similar-empty">没有找到相关记忆</div>';return}
+    el.innerHTML='<div style="font-size:12px;color:var(--text2);margin-bottom:6px">关键词「'+word+'」相关 '+mems.length+' 条记忆</div>'+
+      mems.map(m=>{
+        const time=m.timestamp?new Date(m.timestamp).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
+        const content=(m.content||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        return '<div class="similar-cluster-member" style="align-items:flex-start;gap:8px">'+
+          '<div style="flex:1;min-width:0">'+
+          (m.active===false?'<span class="mem-tag inactive">沉底</span>':'')+
+          ((m.keywords||[]).slice(0,4).map(function(kw){return '<span class="mem-tag kw" onclick="event.stopPropagation();filterMemByKeyword(this.textContent,this)">'+kw+'</span>'}).join(''))+
+          '<span style="font-size:10px;color:var(--text3);margin-left:6px">'+time+'</span>'+
+          '<span style="font-size:10px;color:var(--text3);margin-left:6px">重要:'+(m.importance||0).toFixed(2)+'</span>'+
+          '<div class="similar-member-content" style="margin-top:4px">'+content+'</div></div>'+
+          '<div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">'+
+          '<button class="btn btn-sm" style="background:var(--accent);color:#fff;border:none;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer" onclick="openEditMem(\''+m.id+'\')">编辑</button>'+
+          '<button class="btn btn-sm" style="background:#c05050;color:#fff;border:none;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer" onclick="cloudSinkMem(\''+m.id+'\')">沉底</button>'+
+          '</div></div>';
+      }).join('');
+    el.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }catch(e){el.innerHTML='<div class="similar-empty">加载失败: '+e.message+'</div>'}
+}
+async function cloudSinkMem(id){
+  if(!confirm('把这条记忆沉底？沉底后不再被检索浮现，可在「沉底记忆」里恢复。'))return;
+  try{
+    const r=await fetch(ADMIN_API + '/memories/'+encodeURIComponent(id),{method:'DELETE',credentials:'include'});
+    const j=await r.json();
+    if(j.success){
+      toast('已沉底');
+      loadMemStats();
+      const cr=document.getElementById('cloud-results');
+      if(cr)cr.innerHTML='';
+      await loadMemCloud();
+    }else{toast('操作失败: '+(j.error||''));}
+  }catch(e){toast('网络错误')}
+}
+
+initMemSwipe();
 initApp();
 
 </script>

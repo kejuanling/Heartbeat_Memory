@@ -42,7 +42,7 @@ async function init() {
     const raw = await fs.readJson(MEMORIES_FILE);
     memories = Array.isArray(raw) ? raw : [];
   } catch { memories = []; }
-  const DEFAULT_CONFIG = { idle_threshold_minutes: 5, max_interval_minutes: 30, auto_summary_enabled: true, memory_retrieval_enabled: true, retrieval_top_k: 5, dedup_threshold: 0.9, conflict_threshold: 0.85, time_decay_days: 30, keyword_search_enabled: true, embedding_model: "Xenova/paraphrase-multilingual-MiniLM-L12-v2", memory_relevance_threshold: 0.3, memory_query_window: 3, context_injection_types: ["fact", "preference", "emotion", "summary", "moment"], memory_cooldown_minutes: 30, memory_item_cooldown_minutes: 120, summary_surfacing_min_age_hours: 24, summary_surfacing_min_age_enabled: true, summary_event_injection_enabled: false, summary_event_inject_enabled: true, summary_event_short_ctx_msgs: 20, time_injection_enabled: true, time_tag_interval_minutes: 30, time_event_injection_enabled: false, timeline_event_window_days: 7, wake_query_window: 3, wake_relevance_threshold: 0.3, wake_repeat_window: 3, memory_persist_on_surface_enabled: false };
+  const DEFAULT_CONFIG = { idle_threshold_minutes: 5, max_interval_minutes: 30, auto_summary_enabled: true, memory_retrieval_enabled: true, retrieval_top_k: 5, dedup_threshold: 0.9, conflict_threshold: 0.85, time_decay_days: 30, keyword_search_enabled: true, embedding_model: "Xenova/paraphrase-multilingual-MiniLM-L12-v2", memory_relevance_threshold: 0.3, memory_query_window: 3, context_injection_types: ["fact", "preference", "emotion", "summary", "moment"], memory_cooldown_minutes: 30, memory_item_cooldown_minutes: 120, summary_surfacing_min_age_hours: 24, summary_surfacing_min_age_enabled: true, summary_event_injection_enabled: false, summary_event_inject_enabled: true, summary_event_short_ctx_msgs: 20, time_injection_enabled: true, time_tag_interval_minutes: 30, time_event_injection_enabled: false, timeline_event_window_days: 7, wake_query_window: 3, wake_relevance_threshold: 0.3, wake_repeat_window: 3, memory_persist_on_surface_enabled: false, summary_enabled: true, moment_sync_enabled: true };
   try {
     config = { ...DEFAULT_CONFIG, ...(await fs.readJson(CONFIG_FILE)) };
   } catch {
@@ -485,7 +485,11 @@ async function updateMemory(id, updates) {
   }
   if (updates.importance !== undefined) mem.importance = updates.importance;
   if (updates.type !== undefined) mem.type = updates.type;
-  if (updates.active !== undefined) mem.active = updates.active;
+  if (updates.active !== undefined) {
+    mem.active = updates.active;
+    // 恢复为活跃时清除“被覆盖”标记，避免数据状态自相矛盾
+    if (updates.active === true && mem.superseded_by) mem.superseded_by = null;
+  }
   markDirty();
   return true;
 }
@@ -521,6 +525,109 @@ function getStats() {
 // ========================
 // 状态管理（供 summary-engine 使用）
 // ========================
+
+// ========================
+// 词云关键词提取（管理台词云卡片用；按关键词+重要度加权统计活跃记忆）
+// ========================
+const KEYWORD_SPLIT = "[的了我是你他它她在在有也就说都还被把让跟和与或但而而且还再不没这那们个种些去来到上下前后时次天点会能要想觉得自己什么怎么这样那样现在然后因为所以但是如果感觉时候东西应该可以已经知道看到听到想到]";
+
+// 决策痕迹五段式模板前缀与结构性用词：不进入词云
+const KEYWORD_LABEL_RE = /^(?:触发|分叉|我的选择|我的判断|我的感受|她的反应|感受|回响|依据)[：:]\s*/gm;
+const KEYWORD_STOP_WORDS = new Set([
+  "触发", "判断", "选择", "分叉", "感受", "回响", "依据",
+  "其实", "继续", "告诉", "回答", "答案", "问题", "任何", "开始", "变成", "证明",
+  "本身", "之间", "每一", "直接", "真正", "愿意", "定义", "完整", "理由", "一步",
+  "瞬间", "顺着", "条件", "分析", "事情", "句话", "带着", "指出", "反复", "决定",
+  "话题", "模式", "记住", "希望", "立刻", "位置", "期待", "慢慢", "形状", "回避",
+  "否认", "否定", "动作", "人类", "即使", "第一", "第三", "具体", "意继", "那个",
+  "这样", "那样", "什么", "怎么", "时候", "东西", "知道", "觉得", "应该", "可以",
+  "已经", "看到", "听到", "想到", "没有", "不是", "就是", "不会", "不能", "还有",
+  "一直", "刚才", "一句", "确实", "地方", "方式", "开口", "重新"
+]);
+
+function extractKeywordsFromText(text) {
+  const words = [];
+  const raw = String(text || "").replace(KEYWORD_LABEL_RE, "");
+  // 引号/书名号内的短语整体作为关键词
+  const quoted = raw.match(/[\u300a\u300c\u201c\u201c\u3010\u300e]([^\u300b\u300d\u201d\u201d\u3011\u300f]{2,14})[\u300b\u300d\u201d\u201d\u3011\u300f]/g) || [];
+  for (const q of quoted) {
+    const w = q.replace(/[\u300a\u300c\u201c\u201c\u3010\u300e\u300b\u300d\u201d\u201d\u3011\u300f]/g, "").trim();
+    if (w.length >= 2 && w.length <= 8) words.push(w);
+  }
+  // 连续汉字串按停用字切分，取 2-4 字词；长段取相邻两字
+  const runs = raw.match(/[\u4e00-\u9fff]+/g) || [];
+  for (const run of runs) {
+    const parts = run.split(new RegExp(KEYWORD_SPLIT)).filter(p => p.length >= 2);
+    for (const part of parts) {
+      if (part.length <= 4) words.push(part);
+      else {
+        for (let i = 0; i <= part.length - 2; i++) words.push(part.slice(i, i + 2));
+      }
+    }
+  }
+  return words;
+}
+
+// 单条记忆的关键词标签提取：比词云版更收敛，避免长串切成大量无意义双字碎片
+function extractKeywordsForTags(text) {
+  const words = [];
+  const raw = String(text || "").replace(KEYWORD_LABEL_RE, "");
+  // 引号/书名号内的短语整体作为关键词（最可信）
+  const quoted = raw.match(/[\u300a\u300c\u201c\u3010\u300e]([^\u300b\u300d\u201d\u3011\u300f]{2,10})[\u300b\u300d\u201d\u3011\u300f]/g) || [];
+  for (const q of quoted) {
+    const w = q.replace(/[\u300a\u300c\u201c\u3010\u300e\u300b\u300d\u201d\u3011\u300f]/g, "").trim();
+    if (w.length >= 2) words.push(w);
+  }
+  const runs = raw.match(/[\u4e00-\u9fff]+/g) || [];
+  for (const run of runs) {
+    const parts = run.split(new RegExp(KEYWORD_SPLIT)).filter(p => p.length >= 2);
+    for (const part of parts) {
+      if (part.length <= 4) { words.push(part); continue; }
+      // 长串：先按连接词二次切分，仍过长则只取首尾各 4 字核心
+      const subs = part.split(/[与和或及以及并且]/).filter(p => p.length >= 2);
+      for (const sub of subs) {
+        if (sub.length <= 4) words.push(sub);
+        else {
+          words.push(sub.slice(0, 4));
+          words.push(sub.slice(-4));
+        }
+      }
+    }
+  }
+  return words;
+}
+
+function getMemoryKeywords(limit) {
+  if (limit === undefined) limit = 80;
+  // 只统计活跃记忆：沉底的记忆不参与词云
+  const counts = new Map();
+  let totalMem = 0;
+  for (const m of memories) {
+    if (m.active === false) continue;
+    totalMem++;
+    const imp = Math.max(0.3, m.importance || 0.5);
+    const seen = new Set();
+    for (const w of extractKeywordsFromText(m.content)) {
+      if (seen.has(w)) continue;
+      seen.add(w);
+      const cur = counts.get(w) || { count: 0, weight: 0 };
+      cur.count += 1;
+      cur.weight += imp;
+      counts.set(w, cur);
+    }
+  }
+  const N = Math.max(2, totalMem);
+  return Array.from(counts.entries())
+    .filter(([w, c]) => c.count >= 2 && w.length >= 2 && !KEYWORD_STOP_WORDS.has(w))
+    .map(([word, c]) => ({
+      word,
+      count: c.count,
+      // 词频 × 重要度 × IDF：泛词（很多记忆都有）降权，话题词（少数记忆反复出现）浮出
+      weight: Math.round(c.weight * Math.log(N / c.count) * 10) / 10
+    }))
+    .sort((a, b) => b.weight - a.weight || b.count - a.count)
+    .slice(0, limit);
+}
 
 function addPendingMessage(msg) {
   pendingMessages.push(msg);
@@ -675,7 +782,8 @@ function findSimilarMemories(threshold = 0.6) {
 module.exports = {
   init, shutdown, addMemory, search, buildContext, formatContext,
   markDirty,
-  getMemories, getMemoryById, updateMemory, deleteMemory, purgeMemory, getStats, findSimilarMemories,
+  getMemories, getMemoryById, updateMemory, deleteMemory, purgeMemory, getStats, findSimilarMemories, getMemoryKeywords,
+  extractKeywordsFromText, extractKeywordsForTags, KEYWORD_STOP_WORDS,
   get config() { return config; },
   addPendingMessage,
   getPendingMessages,

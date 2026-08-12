@@ -93,7 +93,8 @@ function buildSummaryPrompt(messages) {
   const conversationText = messages
     .map(m => {
       const role = m.role === "user" ? (process.env.USER_DISPLAY_NAME || "对方") : "我";
-      return `[${role}] ${m.content}`;
+      const thinking = m.thinking ? `\n（我的内心活动）${m.thinking}` : "";
+      return `[${role}] ${m.content}${thinking}`;
     })
     .join("\n\n");
 
@@ -129,10 +130,20 @@ function resetSummaryPromptConfig() {
   return { system: DEFAULT_SUMMARY_SYSTEM, template: DEFAULT_SUMMARY_TEMPLATE };
 }
 
+// 摘要失败/被截断时恢复 pending：选中模式恢复全部（保顺序），默认模式把处理中的回填回去
+function restorePendingMessages(pending, original, toProcess, selectedMode) {
+  if (selectedMode) {
+    pending.splice(0, pending.length, ...original);
+  } else {
+    pending.unshift(...toProcess);
+  }
+  memoryEngine.persistPendingMessages();
+}
+
 // ========================
 // 执行摘要生成
 // ========================
-async function runSummary() {
+async function runSummary(selectedIndices) {
   if (isRunning) {
     console.log("[summary-engine] 上一次摘要仍在进行中，跳过本次");
     return;
@@ -147,8 +158,28 @@ async function runSummary() {
   isRunning = true;
   memoryEngine.setSummaryRunning(true);
 
-  // Move toProcess outside try so catch block can restore it
-  const toProcess = pending.splice(0, 50);
+  // 手动多选摘要：只处理选中的消息，未选中的保留在待摘要队列里
+  const selectedMode = Array.isArray(selectedIndices) && selectedIndices.length > 0;
+  const original = pending.slice();
+  let toProcess;
+  if (selectedMode) {
+    const indexSet = new Set(selectedIndices.map(Number).filter(n => Number.isInteger(n) && n >= 0));
+    toProcess = [];
+    const rest = [];
+    pending.forEach((m, i) => {
+      if (indexSet.has(i)) toProcess.push(m);
+      else rest.push(m);
+    });
+    if (toProcess.length === 0) {
+      isRunning = false;
+      memoryEngine.setSummaryRunning(false);
+      return;
+    }
+    pending.splice(0, pending.length, ...rest);
+  } else {
+    // 默认模式：处理前 50 条
+    toProcess = pending.splice(0, 50);
+  }
 
   if (toProcess.length === 0) {
     isRunning = false;
@@ -159,12 +190,12 @@ async function runSummary() {
   console.log(`[summary-engine] 开始摘要，处理 ${toProcess.length} 条消息`);
 
   try {
-    const prompt = buildSummaryPrompt(toProcess);
+    const prompt = buildSummaryPrompt(toProcess)
+      + "\n\n最后请单独输出一行：重要度=0到1之间的小数（例如 重要度=0.8），表示这段对话对你和她的重要程度。除此之外不要输出其他内容。";
 
     if (!TARGET_API_URL || !TARGET_API_KEY || !MODEL_NAME) {
       console.warn("[summary-engine] TARGET_API_URL / TARGET_API_KEY / MODEL_NAME 未配置，回填消息");
-      pending.unshift(...toProcess);
-      memoryEngine.persistPendingMessages();
+      restorePendingMessages(pending, original, toProcess, selectedMode);
       isRunning = false;
       memoryEngine.setSummaryRunning(false);
       return;
@@ -202,8 +233,7 @@ async function runSummary() {
     const finishReason = data.choices?.[0]?.finish_reason;
     if (finishReason === "length") {
       console.warn("[summary-engine] 摘要被输出上限截断（finish_reason=length），回填消息稍后重试");
-      pending.unshift(...toProcess);
-      memoryEngine.persistPendingMessages();
+      restorePendingMessages(pending, original, toProcess, selectedMode);
       isRunning = false;
       memoryEngine.setSummaryRunning(false);
       return;
@@ -212,8 +242,7 @@ async function runSummary() {
 
     if (!summaryText) {
       console.warn("[summary-engine] 摘要内容为空，回填消息");
-      pending.unshift(...toProcess);
-      memoryEngine.persistPendingMessages();
+      restorePendingMessages(pending, original, toProcess, selectedMode);
       isRunning = false;
       memoryEngine.setSummaryRunning(false);
       return;
@@ -226,11 +255,21 @@ async function runSummary() {
       end: now.toISOString()
     };
 
-    // 存入记忆池
+    // 解析摘要 AI 自评的重要度（如 重要度=0.8），解析不到时兜底 0.55
+    let importance = 0.55;
+    let cleanSummary = summaryText;
+    const impMatch = summaryText.match(/重要度\s*[:=：]\s*(0(?:\.\d+)?|1(?:\.0+)?)/);
+    if (impMatch) {
+      importance = Math.min(1, Math.max(0, parseFloat(impMatch[1])));
+      cleanSummary = summaryText.replace(/重要度\s*[:=：]\s*(0(?:\.\d+)?|1(?:\.0+)?)[^\n]*\n?/g, "").trim();
+      if (!cleanSummary) cleanSummary = summaryText.trim();
+    }
+
+    // 存入记忆池：作为普通记忆（无分类），不再使用已停用的「摘要」分类
     await memoryEngine.addMemory({
-      content: summaryText,
-      type: "summary",
-      importance: 0.55,
+      content: cleanSummary,
+      type: "fact",
+      importance: importance,
       source: "summary",
       time_range: timeRange
     });
@@ -265,8 +304,7 @@ async function runSummary() {
   } catch (err) {
     // Restore messages on ANY failure (timeout, network, parse error)
     console.error("[summary-engine] 摘要生成失败，回填消息:", err.message);
-    pending.unshift(...toProcess);
-    memoryEngine.persistPendingMessages();
+    restorePendingMessages(pending, original, toProcess, selectedMode);
   } finally {
     isRunning = false;
     memoryEngine.setSummaryRunning(false);
@@ -281,6 +319,7 @@ function resetIdleTimer() {
     clearTimeout(idleTimer);
     idleTimer = null;
   }
+  if (memoryEngine.config.summary_enabled === false) return;
 
   const config = memoryEngine.config;
   const threshold = (config.idle_threshold_minutes || 5) * 60 * 1000;
@@ -320,6 +359,10 @@ function startMaxIntervalTimer() {
 // 初始化
 // ========================
 function init() {
+  if (memoryEngine.config.summary_enabled === false) {
+    console.log("[summary-engine] 摘要总开关关闭（summary_enabled=false），不启动定时摘要");
+    return;
+  }
   startMaxIntervalTimer();
   console.log("[summary-engine] 已启动，沉默阈值:", memoryEngine.config.idle_threshold_minutes || 5, "分钟，兜底间隔:", memoryEngine.config.max_interval_minutes || 30, "分钟");
 }
@@ -327,8 +370,12 @@ function init() {
 // ========================
 // 手动触发（供管理页调用）
 // ========================
-async function triggerNow() {
-  return runSummary();
+async function triggerNow(selectedIndices) {
+  if (memoryEngine.config.summary_enabled === false) {
+    console.log("[summary-engine] 摘要总开关关闭，跳过手动触发");
+    return;
+  }
+  return runSummary(selectedIndices);
 }
 
 // ========================
