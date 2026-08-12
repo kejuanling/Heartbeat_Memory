@@ -460,7 +460,8 @@ function isSpecialEvent(msg) {
     (c.includes("刚刚给宝宝发了") && c.includes("推送")) ||
     c.includes("自动写了日记") ||
     c.includes("记忆浮现）") ||
-    c.includes("时间标记")
+    c.includes("时间标记") ||
+    c.includes("摘要）")
   );
 }
 
@@ -1065,10 +1066,42 @@ app.post("/v1/chat/completions", async (req, reply) => {
       if (t && !timeByKey.has(key)) timeByKey.set(key, t);
     }
     const oldEvents = stripPosition(finalTimeline.filter(isSpecialEvent));
+    // 特殊事件注入窗口：只注入最近 N 天内的特殊事件（0=全部），避免历史事件撑大上下文
+    const eventWindowDays = Number(memoryEngine.getConfig().timeline_event_window_days) || 0;
+    let injectableEvents = oldEvents;
+    if (eventWindowDays > 0) {
+      const cutoffMs = Date.now() - eventWindowDays * 24 * 60 * 60 * 1000;
+      injectableEvents = oldEvents.filter(ev => {
+        const t = ev.time ? new Date(ev.time).getTime() : NaN;
+        return !isFinite(t) || t >= cutoffMs;
+      });
+    }
 
-    console.log("本次注入的特殊事件数量:", oldEvents.length);
+    // 摘要事件只在「上下文很短」（新窗口）时注入：请求里对话消息数超过阈值时，
+    // 最近的摘要内容与上下文里的近期对话重复，跳过摘要事件（其他特殊事件不受影响）
+    const summaryInjectEnabled = memoryEngine.getConfig().summary_event_inject_enabled !== false;
+    const summaryShortCtxMsgs = Number(memoryEngine.getConfig().summary_event_short_ctx_msgs) || 0;
+    if (!summaryInjectEnabled) {
+      // 开关关闭：任何上下文都不注入摘要事件（摘要仍可写入时间线，只是不注入）
+      const before = injectableEvents.length;
+      injectableEvents = injectableEvents.filter(ev => !(typeof ev.content === "string" && ev.content.includes("摘要）")));
+      if (injectableEvents.length !== before) {
+        console.log("[summary-event] 摘要事件注入已关闭，跳过所有摘要事件");
+      }
+    } else if (summaryShortCtxMsgs > 0) {
+      const realMsgCount = kelivoMessages.filter(m => m.role !== "system").length;
+      if (realMsgCount > summaryShortCtxMsgs) {
+        const before = injectableEvents.length;
+        injectableEvents = injectableEvents.filter(ev => !(typeof ev.content === "string" && ev.content.includes("摘要）")));
+        if (injectableEvents.length !== before) {
+          console.log(`[summary-event] 上下文较长(${realMsgCount}条>${summaryShortCtxMsgs})，跳过摘要事件注入`);
+        }
+      }
+    }
 
-    for (const event of oldEvents) {
+    console.log("本次注入的特殊事件数量:", injectableEvents.length, eventWindowDays > 0 ? `(窗口 ${eventWindowDays} 天)` : "(全部)");
+
+    for (const event of injectableEvents) {
       const eventTime = extractTimestampWithMemory(event);
       if (!eventTime) { llmMessages.push(event); continue; }
       let inserted = false;
@@ -2236,6 +2269,37 @@ app.get("/internal/memory/list", async (req, reply) => {
   }
 });
 
+// 记忆池统计（MCP memories_count 用）：总数/活跃/按分类分组/最近N条预览
+app.get("/internal/memory/stats", async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const memories = engine.memories || [];
+    const stats = engine.getStats ? engine.getStats() : { total: 0, active: 0, byType: {}, similarCount: 0, similarGroups: 0 };
+    const activeByType = {};
+    for (const m of memories) {
+      if (m.active) {
+        const t = m.type || "unknown";
+        activeByType[t] = (activeByType[t] || 0) + 1;
+      }
+    }
+    let previewN = parseInt(req.query.preview);
+    if (isNaN(previewN) || previewN < 0) previewN = 0;
+    previewN = Math.min(previewN, 50);
+    let recent = [];
+    if (previewN > 0) {
+      const sorted = [...memories].sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+      for (const m of sorted.slice(0, previewN)) {
+        const { embedding, ...rest } = m;
+        recent.push(rest);
+      }
+    }
+    reply.send({ ...stats, activeByType, recent, recent_count: recent.length });
+  } catch (err) {
+    console.error("[GET /internal/memory/stats] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
 // 记忆编辑（MCP/AI 主动修改记忆：内容、重要性、类型等；按 id 精确修改）
 app.post("/internal/memory/update", async (req, reply) => {
   try {
@@ -2303,7 +2367,12 @@ app.get("/admin/memories", { preHandler: basicAuth }, async (req, reply) => {
     if (query.sortBy) filters.sortBy = query.sortBy;
     const result = require("./memory-engine").getMemories ? require("./memory-engine").getMemories(filters) : [];
     const total = require("./memory-engine").memories ? require("./memory-engine").memories.length : 0;
-    reply.send({ memories: result, total });
+    // 剥离向量数据，避免列表接口返回巨大 JSON（50 条约 2.5MB → 几十 KB）
+    const safe = result.map(m => {
+      const { embedding, ...rest } = m;
+      return rest;
+    });
+    reply.send({ memories: safe, total });
   } catch (err) {
     reply.code(500).send({ error: err.message });
   }
@@ -2380,6 +2449,30 @@ app.post("/admin/memories/batch/archive", { preHandler: basicAuth }, async (req,
       if (engine.markDirty) engine.markDirty();
     })();
     reply.send({ success: true, archived: count });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 批量永久删除沉底记忆（物理移除，不可恢复；清理指向被删记忆的 superseded_by 引用）
+app.post("/admin/memories/batch/purge", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.map(String) : [];
+    if (!ids.length) return reply.code(400).send({ error: "ids 数组必填" });
+    let removed = 0;
+    const removedSet = new Set();
+    for (const id of ids) {
+      if (engine.purgeMemory && engine.purgeMemory(id)) {
+        removed++;
+        removedSet.add(id);
+      }
+    }
+    for (const m of engine.memories || []) {
+      if (m.superseded_by && removedSet.has(String(m.superseded_by))) m.superseded_by = null;
+    }
+    if (removed > 0 && engine.markDirty) engine.markDirty();
+    reply.send({ success: true, removed });
   } catch (err) {
     reply.code(500).send({ error: err.message });
   }
@@ -2520,6 +2613,10 @@ const CONFIG_KEY_WHITELIST = new Set([
   "memory_query_window", "context_injection_types", "memory_cooldown_minutes",
   "memory_item_cooldown_minutes", "summary_surfacing_min_age_hours", "summary_surfacing_min_age_enabled",
   "time_injection_enabled", "time_tag_interval_minutes", "time_event_injection_enabled",
+  "summary_event_injection_enabled",
+  "summary_event_inject_enabled",
+  "summary_event_short_ctx_msgs",
+  "timeline_event_window_days",
   "wake_query_window", "wake_relevance_threshold", "wake_repeat_window",
   "memory_persist_on_surface_enabled", "memory_retrieval_wake_enabled",
   "wake_memory_persist_on_surface_enabled", "wake_top_k", "wake_total_limit", "wake_random_count"

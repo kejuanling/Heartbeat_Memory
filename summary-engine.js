@@ -1,6 +1,7 @@
 "use strict";
 
 const memoryEngine = require("./memory-engine");
+const timeUtils = require("./time_utils");
 const fs = require("fs");
 const path = require("path");
 
@@ -233,6 +234,27 @@ async function runSummary() {
       source: "summary",
       time_range: timeRange
     });
+
+    // 摘要事件写入对话（跨窗口）：开启后把摘要作为特殊事件写进时间线，
+    // 注入范围由「特殊事件注入窗口（天）」统一控制
+    try {
+      const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
+      if (cfg.summary_event_injection_enabled) {
+        const file = path.join(__dirname, "enhanced_messages.json");
+        const tl = JSON.parse(fs.readFileSync(file, "utf-8"));
+        if (Array.isArray(tl)) {
+          let maxPos = 0;
+          for (const m of tl) if (m.position && m.position > maxPos) maxPos = m.position;
+          const now = new Date();
+          const content = `（${timeUtils.formatDateTimeInTimeZone(now)} 摘要）\n${summaryText}`;
+          tl.push({ role: "assistant", content, position: maxPos + 0.5, time: now.toISOString() });
+          fs.writeFileSync(file, JSON.stringify(tl, null, 2), "utf-8");
+          console.log("[summary-event] 摘要已写入对话时间线（跨窗口）");
+        }
+      }
+    } catch (evErr) {
+      console.warn("[summary-event] 摘要写入时间线失败:", evErr.message);
+    }
 
     // 更新最后摘要时间
     memoryEngine.setLastSummaryTime(now.toISOString());

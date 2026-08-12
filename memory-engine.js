@@ -42,7 +42,7 @@ async function init() {
     const raw = await fs.readJson(MEMORIES_FILE);
     memories = Array.isArray(raw) ? raw : [];
   } catch { memories = []; }
-  const DEFAULT_CONFIG = { idle_threshold_minutes: 5, max_interval_minutes: 30, auto_summary_enabled: true, memory_retrieval_enabled: true, retrieval_top_k: 5, dedup_threshold: 0.9, conflict_threshold: 0.85, time_decay_days: 30, keyword_search_enabled: true, embedding_model: "Xenova/paraphrase-multilingual-MiniLM-L12-v2", memory_relevance_threshold: 0.3, memory_query_window: 3, context_injection_types: ["fact", "preference", "emotion", "summary", "moment"], memory_cooldown_minutes: 30, memory_item_cooldown_minutes: 120, summary_surfacing_min_age_hours: 24, summary_surfacing_min_age_enabled: true, time_injection_enabled: true, time_tag_interval_minutes: 30, time_event_injection_enabled: false, wake_query_window: 3, wake_relevance_threshold: 0.3, wake_repeat_window: 3, memory_persist_on_surface_enabled: false };
+  const DEFAULT_CONFIG = { idle_threshold_minutes: 5, max_interval_minutes: 30, auto_summary_enabled: true, memory_retrieval_enabled: true, retrieval_top_k: 5, dedup_threshold: 0.9, conflict_threshold: 0.85, time_decay_days: 30, keyword_search_enabled: true, embedding_model: "Xenova/paraphrase-multilingual-MiniLM-L12-v2", memory_relevance_threshold: 0.3, memory_query_window: 3, context_injection_types: ["fact", "preference", "emotion", "summary", "moment"], memory_cooldown_minutes: 30, memory_item_cooldown_minutes: 120, summary_surfacing_min_age_hours: 24, summary_surfacing_min_age_enabled: true, summary_event_injection_enabled: false, summary_event_inject_enabled: true, summary_event_short_ctx_msgs: 20, time_injection_enabled: true, time_tag_interval_minutes: 30, time_event_injection_enabled: false, timeline_event_window_days: 7, wake_query_window: 3, wake_relevance_threshold: 0.3, wake_repeat_window: 3, memory_persist_on_surface_enabled: false };
   try {
     config = { ...DEFAULT_CONFIG, ...(await fs.readJson(CONFIG_FILE)) };
   } catch {
@@ -498,6 +498,15 @@ function deleteMemory(id) {
   return true;
 }
 
+// 物理删除：直接从记忆池移除（不可恢复）
+function purgeMemory(id) {
+  const idx = memories.findIndex(m => m.id === id);
+  if (idx === -1) return false;
+  memories.splice(idx, 1);
+  markDirty();
+  return true;
+}
+
 function getStats() {
   const active = memories.filter(m => m.active);
   const total = memories.length;
@@ -666,7 +675,7 @@ function findSimilarMemories(threshold = 0.6) {
 module.exports = {
   init, shutdown, addMemory, search, buildContext, formatContext,
   markDirty,
-  getMemories, getMemoryById, updateMemory, deleteMemory, getStats, findSimilarMemories,
+  getMemories, getMemoryById, updateMemory, deleteMemory, purgeMemory, getStats, findSimilarMemories,
   get config() { return config; },
   addPendingMessage,
   getPendingMessages,

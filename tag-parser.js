@@ -14,6 +14,28 @@ function stripTags(text) {
     .replace(/<\s*(?:memory|pin)\b[^>]*$/gi, "");
 }
 
+// 宽松解析 {key:value,...}：值可不带引号，值里含逗号也能正确处理；
+// 按 ",key:" 切分（只认已知键），兼容系统提示词教的 <pin>{title:...,content:...}</pin> 写法
+function parseKeyValueBlock(raw, keys) {
+  const trimmed = String(raw || "").trim().replace(/^\{|\}$/g, "");
+  const re = new RegExp(",\\s*(?=(?:" + keys.join("|") + ")\\s*:)", "i");
+  const parts = trimmed.split(re);
+  const out = {};
+  for (const part of parts) {
+    const m = part.match(/^\s*(title|content|type|importance|reason)\s*[:=]\s*(.*)$/i);
+    if (!m) continue;
+    const key = m[1].toLowerCase();
+    let val = m[2].trim().replace(/^["']|["']$/g, "");
+    if (key === "importance") {
+      const n = parseFloat(val);
+      if (isFinite(n)) out.importance = n;
+    } else {
+      out[key] = val;
+    }
+  }
+  return out;
+}
+
 function parseTagContent(raw) {
   try {
     const parsed = JSON.parse(raw.trim());
@@ -26,15 +48,12 @@ function parseTagContent(raw) {
     }
   } catch {}
 
-  const contentMatch = raw.match(/content["']?\s*[:=]\s*["']([^"']+)["']/);
-  const typeMatch = raw.match(/type["']?\s*[:=]\s*["']([^"']+)["']/);
-  const impMatch = raw.match(/importance["']?\s*[:=]\s*([0-9.]+)/);
-
-  if (contentMatch && typeMatch) {
+  const out = parseKeyValueBlock(raw, ["type", "content", "importance"]);
+  if (out.content && out.type) {
     return {
-      content: contentMatch[1].trim(),
-      type: typeMatch[1].trim(),
-      importance: impMatch ? parseFloat(impMatch[1]) : undefined
+      content: out.content.trim(),
+      type: out.type,
+      importance: out.importance
     };
   }
 
@@ -54,17 +73,13 @@ function parsePinContent(raw) {
     }
   } catch {}
 
-  const titleMatch = raw.match(/title["']?\s*[:=]\s*["']([^"']+)["']/);
-  const contentMatch = raw.match(/content["']?\s*[:=]\s*["']([^"']+)["']/);
-  const impMatch = raw.match(/importance["']?\s*[:=]\s*([0-9.]+)/);
-  const reasonMatch = raw.match(/reason["']?\s*[:=]\s*["']([^"']+)["']/);
-
-  if (contentMatch) {
+  const out = parseKeyValueBlock(raw, ["title", "content", "importance", "reason"]);
+  if (out.content) {
     return {
-      title: titleMatch ? titleMatch[1].trim() : '',
-      content: contentMatch[1].trim(),
-      importance: impMatch ? parseFloat(impMatch[1]) : undefined,
-      reason: reasonMatch ? reasonMatch[1].trim() : ''
+      title: out.title || '',
+      content: out.content.trim(),
+      importance: out.importance,
+      reason: out.reason || ''
     };
   }
 
