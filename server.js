@@ -11,6 +11,8 @@ const {
   zonedWallTimeToDate
 } = require("./time_utils");
 
+const contextCompactor = require("./context-compactor");
+
 const DEFAULT_BODY_LIMIT_MB = 50;
 
 function readBodyLimitBytes() {
@@ -464,6 +466,27 @@ function addLetter({ title = "", content = "", source = "对话" } = {}) {
   letters.push(letter);
   saveLetters(letters);
   console.log(`[letters] 已保存一封新信（共 ${letters.length} 封）`);
+  return letter;
+}
+
+function editLetter({ id = "", title, content } = {}) {
+  const letters = loadLetters();
+  let letter;
+  if (id) {
+    letter = letters.find(l => l.id === id);
+    if (!letter) return null;
+  } else {
+    letter = letters.length ? letters[letters.length - 1] : null;
+    if (!letter) return addLetter({ title, content, source: "对话" });
+  }
+  if (content !== undefined) {
+    const text = String(content || "").trim();
+    if (!text) throw new Error("信的内容不能为空");
+    letter.content = text;
+  }
+  if (title !== undefined) letter.title = String(title || "").trim();
+  saveLetters(letters);
+  console.log(`[letters] 已编辑信 ${letter.id}`);
   return letter;
 }
 
@@ -1138,9 +1161,9 @@ app.post("/v1/chat/completions", async (req, reply) => {
       if (t && !timeByKey.has(key)) timeByKey.set(key, t);
     }
     const oldEvents = stripPosition(finalTimeline.filter(isSpecialEvent));
-    // 特殊事件注入窗口：只注入最近 N 天内的特殊事件（0=全部），避免历史事件撑大上下文
+    // 特殊事件注入窗口：只注入最近 N 天内的特殊事件（0=不注入任何特殊事件），避免历史事件撑大上下文
     const eventWindowDays = Number(memoryEngine.getConfig().timeline_event_window_days) || 0;
-    let injectableEvents = oldEvents;
+    let injectableEvents = [];
     if (eventWindowDays > 0) {
       const cutoffMs = Date.now() - eventWindowDays * 24 * 60 * 60 * 1000;
       injectableEvents = oldEvents.filter(ev => {
@@ -1476,6 +1499,19 @@ app.post("/v1/chat/completions", async (req, reply) => {
 
 
 
+
+    // 上下文压缩：早期对话块替换为缓存摘要（默认关闭，开启后生效；失败则按原样转发）
+    try {
+      if (contextCompactor && contextCompactor.isEnabled()) {
+        const beforeCount = llmMessages.length;
+        llmMessages = contextCompactor.compactMessages(llmMessages);
+        if (llmMessages.length !== beforeCount) {
+          console.log("[context-compactor] 转发前压缩生效: 消息 " + beforeCount + " -> " + llmMessages.length);
+        }
+      }
+    } catch (compactErr) {
+      console.warn("[context-compactor] 压缩失败（跳过，按原样转发）:", compactErr.message);
+    }
 
     // 请求模型
     // Capture the actual messages sent to LLM for inspection
@@ -1837,6 +1873,66 @@ function readDiaryEntries(limit = 20) {
 }
 
 // ========================
+// 管理台：修改日记（文件 + 时间线特殊事件同步）
+// 编辑日记文件后，把时间线里同日的「自动写了日记」特殊事件一并更新，
+// 保证注入 LLM 上下文的内容与日记文件一致。
+// ========================
+function syncDiarySpecialEvents(fileName, newContent) {
+  const dateMatch = String(fileName || "").match(/^(\d{4}-\d{2}-\d{2})\.md$/i);
+  if (!dateMatch) return 0;
+  const dateKey = dateMatch[1];
+  const timeline = loadTimeline();
+  let updated = 0;
+  const next = timeline.map(msg => {
+    if (!msg || msg.role !== "assistant" || typeof msg.content !== "string") return msg;
+    const text = msg.content;
+    if (!text.includes("自动写了日记")) return msg;
+    const head = text.match(/^（\s*(\d{4}-\d{2}-\d{2})(?:\s+(\d{1,2}:\d{2}))?\s*自动写了日记[:：]?\s*/);
+    if (!head || head[1] !== dateKey) return msg;
+    // 优先按「## 日期 时间」标题把对应条目摘出来；匹配不到就用整篇新内容
+    let diaryText = String(newContent || "").trim();
+    if (head[2]) {
+      const timeEsc = head[2].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const entryRe = new RegExp("##\\s*" + dateKey + "\\s+" + timeEsc + "\\s*\\n([\\s\\S]*?)(?=\\n\\s*##\\s|$)", "i");
+      const entryMatch = String(newContent || "").match(entryRe);
+      if (entryMatch && entryMatch[1].trim()) diaryText = entryMatch[1].trim();
+    }
+    updated++;
+    const timeLabel = head[2] ? `${head[1]} ${head[2]}` : head[1];
+    return { ...msg, content: `（${timeLabel} 自动写了日记：${diaryText}）` };
+  });
+  if (updated > 0) {
+    saveTimeline(next);
+    console.log(`[diary] 已同步 ${updated} 条日记特殊事件（${fileName}）`);
+  }
+  return updated;
+}
+
+// 删除日记时同步移除时间线里同日的「自动写了日记」特殊事件
+function removeDiarySpecialEvents(fileName) {
+  const dateMatch = String(fileName || "").match(/^(\d{4}-\d{2}-\d{2})\.md$/i);
+  if (!dateMatch) return 0;
+  const dateKey = dateMatch[1];
+  const timeline = loadTimeline();
+  const before = timeline.length;
+  const next = timeline.filter(msg => {
+    if (!msg || msg.role !== "assistant" || typeof msg.content !== "string") return true;
+    const text = msg.content;
+    if (!text.includes("自动写了日记")) return true;
+    const head = text.match(/^（\s*(\d{4}-\d{2}-\d{2})(?:\s+\d{1,2}:\d{2})?\s*自动写了日记[:：]?\s*/);
+    return !(head && head[1] === dateKey);
+  });
+  const removed = before - next.length;
+  if (removed > 0) {
+    saveTimeline(next);
+    console.log(`[diary] 已删除 ${removed} 条日记特殊事件（${fileName}）`);
+  }
+  return removed;
+}
+
+
+
+// ========================
 // HTTP Basic Auth
 // ========================
 // ========================
@@ -1939,7 +2035,7 @@ const LOGIN_PAGE_HTML = `<!doctype html>
   p.sub{font-size:13px;color:#888;margin-bottom:24px}
   label{display:block;font-size:13px;color:#555;margin:14px 0 6px}
   input{width:100%;padding:11px 12px;border:1px solid #dde1e7;border-radius:10px;font-size:15px;outline:none}
-  input:focus{border-color:#6c8cff}
+  input:focus{border-color:#d8a8b0;box-shadow:0 0 0 3px rgba(216,168,176,0.25)}
   button{width:100%;margin-top:24px;padding:12px;border:none;border-radius:10px;background:#4a6cf7;color:#fff;font-size:16px;cursor:pointer}
   button:active{opacity:.85}
   .err{background:#fdecec;color:#c0392b;font-size:13px;padding:10px 12px;border-radius:8px;margin-top:16px}
@@ -2399,6 +2495,29 @@ app.post("/internal/letters", async (req, reply) => {
   }
 });
 
+// 给下一个窗口自己的信：编辑（MCP letter_edit 用；无 id 编辑最新一封，还没有信则新建）
+app.put("/internal/letters", async (req, reply) => {
+  try {
+    const body = req.body || {};
+    const letter = editLetter({ title: body.title, content: body.content });
+    reply.send({ success: true, letter });
+  } catch (err) {
+    reply.code(400).send({ error: err.message });
+  }
+});
+
+// 给下一个窗口自己的信：编辑指定 id（MCP letter_edit 用）
+app.put("/internal/letters/:id", async (req, reply) => {
+  try {
+    const body = req.body || {};
+    const letter = editLetter({ id: req.params.id, title: body.title, content: body.content });
+    if (!letter) return reply.code(404).send({ error: "信不存在" });
+    reply.send({ success: true, letter });
+  } catch (err) {
+    reply.code(400).send({ error: err.message });
+  }
+});
+
 
 // 记忆分类查看（MCP/AI 按 type 查看某分类的全部内容，内部密钥鉴权）
 // ========================
@@ -2845,6 +2964,216 @@ app.get("/admin/summary/last", { preHandler: basicAuth }, async (req, reply) => 
 });
 
 // 配置管理：获取配置
+// ========================
+// 上下文压缩（分块预览 / 摘要生成 / 边界调整）
+// ========================
+app.get("/admin/context-compaction/preview", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const plan = contextCompactor.preview({ includeMessages: req.query.includeMessages === "1" });
+    reply.send(plan);
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+app.post("/admin/context-compaction/generate", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  const chunkIndex = Number(body.chunkIndex);
+  try {
+    const plan = contextCompactor.preview({ includeMessages: true });
+    const byIndex = {};
+    (plan.chunks || []).forEach(function (c) { byIndex[c.index] = c; });
+    // 选中批量：按 chunkIndices 逐个生成（已有缓存摘要的块跳过）
+    if (Array.isArray(body.chunkIndices)) {
+      const targets = body.chunkIndices.map(Number).filter(function (n) { return Number.isInteger(n); });
+      if (targets.length === 0) return reply.code(400).send({ error: "chunkIndices 为空" });
+      const results = [];
+      for (const idx of targets) {
+        const chunk = byIndex[idx];
+        if (!chunk) { results.push({ index: idx, error: "块不存在" }); continue; }
+        if (chunk.cached) { results.push({ index: idx, skipped: true, message: "已有缓存摘要" }); continue; }
+        try {
+          results.push(await contextCompactor.generateSummary(chunk, { mode: "manual", manual: true }));
+        } catch (e) {
+          results.push({ index: idx, error: e.message });
+        }
+      }
+      return reply.send({ ok: true, generated: results });
+    }
+    // 批量：生成所有未缓存的块
+    if (body.all === true || chunkIndex === 0) {
+      const targets = (plan.chunks || []).filter(function (c) { return !c.cached; });
+      if (targets.length === 0) {
+        return reply.send({ ok: true, generated: [], message: "没有未生成的块" });
+      }
+      const results = [];
+      for (const c of targets) {
+        try {
+          results.push(await contextCompactor.generateSummary(c, { mode: "manual", manual: true }));
+        } catch (e) {
+          results.push({ index: c.index, error: e.message });
+        }
+      }
+      return reply.send({ ok: true, generated: results });
+    }
+    if (!Number.isInteger(chunkIndex) || chunkIndex < 1) {
+      return reply.code(400).send({ error: "chunkIndex 无效" });
+    }
+    const chunk = byIndex[chunkIndex];
+    if (!chunk) return reply.code(404).send({ error: "块 #" + chunkIndex + " 不存在" });
+    const result = await contextCompactor.generateSummary(chunk, { mode: "manual", manual: true });
+    reply.send(result);
+  } catch (err) {
+    console.error("[context-compactor] 摘要生成失败:", err.message);
+    reply.code(500).send({ error: "摘要生成失败: " + err.message });
+  }
+});
+
+// 恢复某块摘要的历史版本
+app.post("/admin/context-compaction/restore", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  const chunkIndex = Number(body.chunkIndex);
+  const historyIndex = Number(body.historyIndex);
+  try {
+    const plan = contextCompactor.preview({ includeMessages: false });
+    const chunk = (plan.chunks || []).find(function (c) { return c.index === chunkIndex; });
+    if (!chunk) return reply.code(404).send({ error: "块 #" + chunkIndex + " 不存在" });
+    const restored = contextCompactor.restoreSummary(chunk.signature, historyIndex);
+    reply.send({
+      ok: true,
+      summary: restored.summary,
+      generatedAt: restored.generatedAt,
+      length: restored.summary.length
+    });
+  } catch (err) {
+    reply.code(400).send({ error: err.message });
+  }
+});
+
+// 保存手动编辑后的摘要
+app.post("/admin/context-compaction/update", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  const chunkIndex = Number(body.chunkIndex);
+  const summary = String(body.summary || "").trim();
+  try {
+    if (!summary) return reply.code(400).send({ error: "摘要内容不能为空" });
+    const plan = contextCompactor.preview({ includeMessages: false });
+    const chunk = (plan.chunks || []).find(function (c) { return c.index === chunkIndex; });
+    if (!chunk) return reply.code(404).send({ error: "块 #" + chunkIndex + " 不存在" });
+    const updated = contextCompactor.updateSummary(chunk.signature, summary);
+    reply.send({ ok: true, summary: updated.summary, length: updated.summary.length });
+  } catch (err) {
+    reply.code(400).send({ error: err.message });
+  }
+});
+
+// 删除某块摘要的一条历史版本
+app.post("/admin/context-compaction/history/delete", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  const chunkIndex = Number(body.chunkIndex);
+  const historyIndex = Number(body.historyIndex);
+  try {
+    const plan = contextCompactor.preview({ includeMessages: false });
+    const chunk = (plan.chunks || []).find(function (c) { return c.index === chunkIndex; });
+    if (!chunk) return reply.code(404).send({ error: "块 #" + chunkIndex + " 不存在" });
+    const r = contextCompactor.removeHistoryVersion(chunk.signature, historyIndex);
+    reply.send({ ok: true, remaining: r.remaining });
+  } catch (err) {
+    reply.code(400).send({ error: err.message });
+  }
+});
+
+// 单块「替换上下文」：标记/取消强制替换
+app.post("/admin/context-compaction/force", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  const chunkIndex = Number(body.chunkIndex);
+  const on = body.on === true || body.on === "true" || body.on === 1;
+  try {
+    const plan = contextCompactor.preview({ includeMessages: false });
+    const chunk = (plan.chunks || []).find(function (c) { return c.index === chunkIndex; });
+    if (!chunk) return reply.code(404).send({ error: "块 #" + chunkIndex + " 不存在" });
+    const list = contextCompactor.setForceReplace(chunk.signature, on);
+    reply.send({ ok: true, on: on, forceCount: list.length });
+  } catch (err) {
+    reply.code(400).send({ error: err.message });
+  }
+});
+
+app.post("/admin/context-compaction/clear", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  try {
+    const plan = contextCompactor.preview({ includeMessages: true });
+    const byIndex = {};
+    (plan.chunks || []).forEach(function (c) { byIndex[c.index] = c; });
+    if (body.all === true) {
+      const sigs = (plan.chunks || []).filter(function (c) { return c.cached; }).map(function (c) { return c.signature; });
+      const removed = contextCompactor.removeSummaries(sigs);
+      return reply.send({ ok: true, removed: removed });
+    }
+    const indices = (Array.isArray(body.chunkIndices) ? body.chunkIndices : []).map(Number).filter(Number.isInteger);
+    const sigs = indices.map(function (i) { const c = byIndex[i]; return c && c.signature; }).filter(Boolean);
+    const removed = contextCompactor.removeSummaries(sigs);
+    reply.send({ ok: true, removed: removed });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+app.post("/admin/context-compaction/mark", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  const key = String(body.key || "").trim();
+  if (!key) return reply.code(400).send({ error: "key 无效" });
+  try {
+    const marked = contextCompactor.setMark(key, body.marked === true);
+    reply.send({ ok: true, key: key, marked: marked });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+app.post("/admin/context-compaction/overrides", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const cutPoints = contextCompactor.saveCutPoints(req.body && req.body.cutPoints);
+    reply.send({ ok: true, cutPoints: cutPoints });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 「添加一块 / 移除一块」：追加式分块——旧块边界完全不动，
+// 添加 = 从最后一块之后的未覆盖内容里按自然边界切一块（约 chunk_size 条）；
+// 移除 = 删除最后一个已定块，内容退回未覆盖区。
+app.post("/admin/context-compaction/blocks", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  const action = String(body.action || "");
+  try {
+    if (action === "reset") {
+      const cutPoints = contextCompactor.saveCutPoints([]);
+      return reply.send({ ok: true, action: "reset", cutPoints: cutPoints });
+    }
+    if (action === "add") {
+      const r = contextCompactor.addCutPoint();
+      if (!r.ok) return reply.send({ ok: false, message: r.message });
+      return reply.send({
+        ok: true,
+        action: "add",
+        fixed: !!r.fixed,
+        cutPoints: r.cutPoints,
+        addedCount: r.addedCount || 0,
+        message: r.message || ""
+      });
+    }
+    if (action === "remove") {
+      const r = contextCompactor.removeCutPoint();
+      if (!r.ok) return reply.send({ ok: false, message: r.message });
+      return reply.send({ ok: true, action: "remove", cutPoints: r.cutPoints });
+    }
+    return reply.code(400).send({ error: "action 必须是 add / remove / reset" });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
 app.get("/admin/config", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const config = require("./memory-engine").getConfig ? require("./memory-engine").getConfig() : {};
@@ -2859,7 +3188,7 @@ const CONFIG_KEY_WHITELIST = new Set([
   "idle_threshold_minutes", "max_interval_minutes", "auto_summary_enabled",
   "memory_retrieval_enabled", "retrieval_top_k", "dedup_threshold", "conflict_threshold",
   "time_decay_days", "keyword_search_enabled", "embedding_model", "memory_relevance_threshold",
-  "memory_query_window", "context_injection_types", "memory_cooldown_minutes",
+  "memory_query_window", "memory_retrieval_window_days", "context_injection_types", "memory_cooldown_minutes",
   "memory_item_cooldown_minutes", "summary_surfacing_min_age_hours", "summary_surfacing_min_age_enabled",
   "time_injection_enabled", "time_tag_interval_minutes", "time_event_injection_enabled",
   "summary_event_injection_enabled",
@@ -2869,7 +3198,10 @@ const CONFIG_KEY_WHITELIST = new Set([
   "wake_query_window", "wake_relevance_threshold", "wake_repeat_window",
   "memory_persist_on_surface_enabled", "memory_retrieval_wake_enabled",
   "wake_memory_persist_on_surface_enabled", "wake_top_k", "wake_total_limit", "wake_random_count",
-  "summary_enabled", "moment_sync_enabled"
+    "summary_enabled", "moment_sync_enabled",
+  "compaction_chunk_size", "compaction_chunk_min", "compaction_chunk_max",
+  "compaction_keep_recent_messages", "compaction_min_messages", "compaction_gap_minutes",
+  "compaction_summary_max_chars", "compaction_summary_min_chars", "compaction_include_thinking"
 ]);
 app.post("/admin/config", { preHandler: basicAuth }, async (req, reply) => {
   try {
@@ -2967,6 +3299,62 @@ app.get("/admin/env", { preHandler: basicAuth }, async (req, reply) => {
   }
 });
 
+
+// 修改日记：更新文件内容，并同步时间线里对应的「自动写了日记」特殊事件
+app.post("/admin/diary/update", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const { name, content } = req.body || {};
+    const fileName = String(name || "").trim();
+    const newContent = String(content === undefined ? "" : content);
+    if (!/^\d{4}-\d{2}-\d{2}\.md$/i.test(fileName)) {
+      return reply.code(400).send({ error: "日记文件名格式不正确（应为 YYYY-MM-DD.md）" });
+    }
+    const dir = diaryDirectoryPath();
+    const filePath = path.join(dir, fileName);
+    if (path.dirname(path.resolve(filePath)) !== path.resolve(dir)) {
+      return reply.code(400).send({ error: "非法日记路径" });
+    }
+    if (!fs.existsSync(filePath)) {
+      return reply.code(404).send({ error: "日记文件不存在：" + fileName });
+    }
+    if (!fs.statSync(filePath).isFile()) {
+      return reply.code(400).send({ error: "目标不是普通文件：" + fileName });
+    }
+    atomicWriteFileSync(filePath, newContent);
+    const syncedEvents = syncDiarySpecialEvents(fileName, newContent);
+    reply.send({ success: true, file: fileName, syncedEvents, chars: newContent.length });
+  } catch (err) {
+    console.error("[diary] 修改日记失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 删除日记：删除文件，并同步移除时间线里对应的「自动写了日记」特殊事件
+app.post("/admin/diary/delete", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const { name } = req.body || {};
+    const fileName = String(name || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}\.md$/i.test(fileName)) {
+      return reply.code(400).send({ error: "日记文件名格式不正确（应为 YYYY-MM-DD.md）" });
+    }
+    const dir = diaryDirectoryPath();
+    const filePath = path.join(dir, fileName);
+    if (path.dirname(path.resolve(filePath)) !== path.resolve(dir)) {
+      return reply.code(400).send({ error: "非法日记路径" });
+    }
+    if (!fs.existsSync(filePath)) {
+      return reply.code(404).send({ error: "日记文件不存在：" + fileName });
+    }
+    fs.removeSync(filePath);
+    const removedEvents = removeDiarySpecialEvents(fileName);
+    reply.send({ success: true, file: fileName, removedEvents });
+  } catch (err) {
+    console.error("[diary] 删除日记失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+
 // 移动端管理页面
 app.get("/admin/mobile", { preHandler: mobileAuth }, async (req, reply) => {
   const fss = require("fs");
@@ -3025,6 +3413,33 @@ app.post("/admin/logs/summary-prompt", { preHandler: basicAuth }, async (req, re
 app.delete("/admin/logs/summary-prompt", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const cfg = summaryEngine.resetSummaryPromptConfig();
+    reply.send({ ok: true, system: cfg.system, template: cfg.template });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 压缩上下文提示词
+app.get("/admin/logs/compaction-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    reply.send(contextCompactor.getCompactionPromptForDisplay());
+  } catch (err) {
+    reply.send({ error: err.message });
+  }
+});
+
+app.post("/admin/logs/compaction-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const cfg = contextCompactor.saveCompactionPromptConfig(req.body && req.body.system, req.body && req.body.template);
+    reply.send({ ok: true, system: cfg.system, template: cfg.template });
+  } catch (err) {
+    reply.code(400).send({ error: err.message });
+  }
+});
+
+app.delete("/admin/logs/compaction-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const cfg = contextCompactor.resetCompactionPromptConfig();
     reply.send({ ok: true, system: cfg.system, template: cfg.template });
   } catch (err) {
     reply.code(500).send({ error: err.message });

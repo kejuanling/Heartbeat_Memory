@@ -42,7 +42,7 @@ async function init() {
     const raw = await fs.readJson(MEMORIES_FILE);
     memories = Array.isArray(raw) ? raw : [];
   } catch { memories = []; }
-  const DEFAULT_CONFIG = { idle_threshold_minutes: 5, max_interval_minutes: 30, auto_summary_enabled: true, memory_retrieval_enabled: true, retrieval_top_k: 5, dedup_threshold: 0.9, conflict_threshold: 0.85, time_decay_days: 30, keyword_search_enabled: true, embedding_model: "Xenova/paraphrase-multilingual-MiniLM-L12-v2", memory_relevance_threshold: 0.3, memory_query_window: 3, context_injection_types: ["fact", "preference", "emotion", "summary", "moment"], memory_cooldown_minutes: 30, memory_item_cooldown_minutes: 120, summary_surfacing_min_age_hours: 24, summary_surfacing_min_age_enabled: true, summary_event_injection_enabled: false, summary_event_inject_enabled: true, summary_event_short_ctx_msgs: 20, time_injection_enabled: true, time_tag_interval_minutes: 30, time_event_injection_enabled: false, timeline_event_window_days: 7, wake_query_window: 3, wake_relevance_threshold: 0.3, wake_repeat_window: 3, memory_persist_on_surface_enabled: false, summary_enabled: true, moment_sync_enabled: true };
+  const DEFAULT_CONFIG = { idle_threshold_minutes: 5, max_interval_minutes: 30, auto_summary_enabled: true, memory_retrieval_enabled: true, retrieval_top_k: 5, dedup_threshold: 0.9, conflict_threshold: 0.85, time_decay_days: 30, keyword_search_enabled: true, embedding_model: "Xenova/paraphrase-multilingual-MiniLM-L12-v2", memory_relevance_threshold: 0.3, memory_query_window: 3, memory_retrieval_window_days: 0, context_injection_types: ["fact", "preference", "emotion", "summary", "moment"], memory_cooldown_minutes: 30, memory_item_cooldown_minutes: 120, summary_surfacing_min_age_hours: 24, summary_surfacing_min_age_enabled: true, summary_event_injection_enabled: false, summary_event_inject_enabled: true, summary_event_short_ctx_msgs: 20, time_injection_enabled: true, time_tag_interval_minutes: 30, time_event_injection_enabled: false, timeline_event_window_days: 7, wake_query_window: 3, wake_relevance_threshold: 0.3, wake_repeat_window: 3, memory_persist_on_surface_enabled: false, summary_enabled: true, moment_sync_enabled: true };
   try {
     config = { ...DEFAULT_CONFIG, ...(await fs.readJson(CONFIG_FILE)) };
   } catch {
@@ -304,6 +304,14 @@ async function buildContext(query, opts = {}) {
   const minImportance = opts.minImportance || 0;
   const threshold = opts.threshold || 0;
   const excludeIds = opts.excludeIds || null;
+  // 记忆只看最近 N 天：只对「日常分类」生效（决策痕迹 emotion 不受时间窗口限制）
+  const retrievalWindowDays = Number(config.memory_retrieval_window_days) || 0;
+  const inRetrievalWindow = (mm) => {
+    if (retrievalWindowDays <= 0) return true;
+    if (mm.type === "emotion") return true;
+    if (!mm.timestamp) return true;
+    return new Date(mm.timestamp).getTime() >= Date.now() - retrievalWindowDays * 24 * 60 * 60 * 1000;
+  };
   
   // 并行检索所有类型，不做硬性配额
   const allTypes = opts.types || ["fact", "preference", "emotion", "summary", "moment"];
@@ -332,6 +340,8 @@ async function buildContext(query, opts = {}) {
   if (excludeIds) {
     allCandidates = allCandidates.filter(mm => !excludeIds.has(mm.id));
   }
+  // 记忆检索时间窗口：超期「日常」记忆不注入（决策痕迹除外）
+  allCandidates = allCandidates.filter(inRetrievalWindow);
   // 近期摘要覆盖的对话通常还在上下文窗口中，聊天时再浮现属于重复。
   // 通过 minSummaryAgeHours（小时）排除"太新"的摘要；唤醒等无上下文场景不传该参数，不受影响。
   if (opts.minSummaryAgeHours > 0) {
@@ -348,7 +358,7 @@ async function buildContext(query, opts = {}) {
   if (randomCount > 0 && memories.length > 0) {
     const existingIds = new Set(result.map(m => m.id));
     const typeSet = new Set(allTypes);
-    const candidates = memories.filter(m => !existingIds.has(m.id) && m.active !== false && (!excludeIds || !excludeIds.has(m.id)) && typeSet.has(m.type));
+    const candidates = memories.filter(m => !existingIds.has(m.id) && m.active !== false && (!excludeIds || !excludeIds.has(m.id)) && typeSet.has(m.type) && inRetrievalWindow(m));
     const shuffled = candidates.sort(() => Math.random() - 0.5);
     const randomPicks = shuffled.slice(0, randomCount).map(m => ({
       ...m,

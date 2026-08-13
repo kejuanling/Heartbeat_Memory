@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#f3efe9;--card:rgba(255,255,255,0.85);--text:#3a3533;--text2:#8a8280;--text3:#b0a8a4;--border:rgba(60,40,40,0.08);--accent:#c89098;--accent2:#d8a8b0;--tab-active:#6a4848;--tab-inactive:#b8aea8;--shadow:0 2px 16px rgba(0,0,0,0.04);--radius:16px;--radius-sm:10px;--safe-bottom:env(safe-area-inset-bottom,0px)}
+:root{--bg:#f3efe9;--card:#ffffff;--text:#3a3533;--text2:#8a8280;--text3:#b0a8a4;--border:rgba(60,40,40,0.08);--accent:#c89098;--accent2:#d8a8b0;--tab-active:#6a4848;--tab-inactive:#b8aea8;--shadow:0 2px 16px rgba(0,0,0,0.04);--shadow-card:0 3px 18px rgba(60,40,40,0.06);--radius:16px;--radius-sm:10px;--sp-xs:8px;--sp-sm:12px;--sp-md:16px;--sp-lg:20px;--sp-xl:24px;--fs-title:16px;--fs-body:13px;--fs-hint:11px;--fs-tag:10px;--safe-bottom:env(safe-area-inset-bottom,0px)}
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:calc(68px + var(--safe-bottom));line-height:1.6}
 .header{padding:20px 20px 8px;text-align:center}
@@ -17,8 +17,13 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
 .tab-content{display:none;padding:12px 16px 20px;animation:fadeIn .25s ease}
 .tab-content.active{display:block}
 @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-.card{background:var(--card);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:var(--radius);padding:18px 20px;margin-bottom:12px;box-shadow:var(--shadow);border:1px solid var(--border)}
+.card{background:var(--card);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:var(--radius);padding:18px 20px;margin-bottom:12px;box-shadow:var(--shadow-card);border:1px solid var(--border)}
 .card-title{font-size:11px;font-weight:600;color:var(--text2);letter-spacing:2px;text-transform:uppercase;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border)}
+.card-title.collapsible{display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;user-select:none;-webkit-user-select:none}
+.card-title.collapsible .collapse-arrow{font-size:12px;letter-spacing:0;color:var(--text3);transition:transform .2s ease;flex-shrink:0;line-height:1}
+.card.collapsed .card-title.collapsible{margin-bottom:0;padding-bottom:0;border-bottom:none}
+.card.collapsed .card-body{display:none}
+.card.collapsed .card-title.collapsible .collapse-arrow{transform:rotate(-90deg)}
 .stat-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;font-size:13px;border-bottom:1px solid rgba(0,0,0,0.03)}
 .stat-row:last-child{border-bottom:none}
 .stat-label{color:var(--text2);font-weight:400}
@@ -34,9 +39,10 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
 .switch .slider::before{content:"";position:absolute;height:20px;width:20px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.25s}
 .switch input:checked+.slider{background:var(--accent)}
 .switch input:checked+.slider::before{transform:translateX(18px)}
-.range-wrap{display:flex;align-items:center;gap:12px}
-.range-wrap input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;background:#ece4de;outline:none}
-.range-wrap input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:18px;height:18px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.12)}
+.cfg-num{width:78px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:rgba(255,255,255,0.7);color:var(--text);font-family:inherit;font-size:12px;text-align:center;outline:none;transition:border-color .2s}
+.cfg-num:focus{border-color:var(--accent2)}
+.cfg-text{width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:rgba(255,255,255,0.7);font-size:12px;color:var(--text);font-family:inherit;outline:none;transition:border-color .2s}
+.cfg-text:focus{border-color:var(--accent2)}
 .range-val{font-size:13px;font-weight:500;color:var(--tab-active);min-width:32px;text-align:right}
 .btn{display:inline-flex;align-items:center;justify-content:center;padding:10px 20px;border:none;border-radius:var(--radius-sm);font-family:"Noto Sans SC",sans-serif;font-size:13px;font-weight:500;cursor:pointer;transition:all .2s;letter-spacing:.5px}
 .btn-primary{background:var(--accent);color:#fff;width:100%}
@@ -48,46 +54,79 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
 .btn-delete{background:#e0d4d0;color:#6a4848}
 .tab-bar{position:fixed;bottom:0;left:0;right:0;z-index:100;background:rgba(255,255,255,0.92);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-top:1px solid var(--border);padding:6px 0 calc(6px + var(--safe-bottom));display:flex;box-shadow:0 -2px 12px rgba(0,0,0,0.04)}
 .tab-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 0;cursor:pointer;transition:all .2s;border:none;background:none;font-family:"Noto Sans SC",sans-serif}
-.tab-item .tab-icon{font-size:20px;line-height:1;color:var(--tab-inactive);transition:color .2s}.tab-item.active .tab-icon{color:var(--tab-active)}
+.tab-item .tab-icon{font-size:20px;line-height:1;color:var(--tab-inactive);transition:color .2s}.tab-item.active .tab-icon{color:var(--accent)}
 .tab-item .tab-label{font-size:10px;color:var(--tab-inactive);font-weight:400;letter-spacing:.5px;transition:color .2s}
-.tab-item.active .tab-label{color:var(--tab-active);font-weight:600}
+.tab-item.active .tab-label{color:var(--accent);font-weight:600}
 .mem-item{padding:14px 0;border-bottom:1px solid var(--border)}
 .mem-item:last-child{border-bottom:none}
-.mem-swipe-item{position:relative;overflow:hidden;border-bottom:1px solid var(--border)}
-.mem-swipe-item:last-child{border-bottom:none}
-.mem-swipe-item .mem-item{position:relative;z-index:2;background:var(--bg);border-bottom:none;transition:transform .25s ease;will-change:transform;touch-action:pan-y;-webkit-user-select:none;user-select:none}
+.mem-swipe-item{position:relative;overflow:hidden;margin-bottom:10px;border-radius:var(--radius-sm)}
+.mem-swipe-item:last-child{margin-bottom:0}
+.mem-swipe-item .mem-item{position:relative;z-index:2;padding:14px 16px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow-card);transition:transform .25s ease;will-change:transform;touch-action:pan-y;-webkit-user-select:none;user-select:none}
 .mem-swipe-item.swiped .mem-item{transform:translateX(-96px)}
 .swipe-sink-actions{position:absolute;top:0;right:0;bottom:0;z-index:1;display:flex;align-items:stretch;padding:8px}
 .swipe-sink-btn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-width:80px;background:linear-gradient(180deg,#f06b6b,#d05050);color:#fff;border:none;border-radius:12px;font-size:11px;font-weight:600;letter-spacing:3px;cursor:pointer;font-family:"Noto Sans SC",sans-serif;box-shadow:0 2px 8px rgba(192,80,80,.35);transition:transform .15s ease}
 .swipe-sink-btn::before{content:"⤵";font-size:16px;line-height:1;margin-bottom:2px}
 .swipe-sink-btn:active{transform:scale(.95)}
 .mem-meta{display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
-.mem-tag{font-size:10px;padding:2px 8px;border-radius:4px;font-weight:500}
-.mem-tag.active{background:#d0e8d0;color:#4a7a4a}
-.mem-tag.inactive{background:#e8e0e0;color:#8a7a7a}
-.mem-tag.kw{background:#ece7df;color:#7a6a5a;cursor:pointer;border:1px solid #e2d8cc}
-.mem-tag.kw:hover{background:#e2d8cc;color:#5a4a3a}
-.mem-time{font-size:11px;color:var(--text3)}
-.mem-content{font-size:13px;color:var(--text);line-height:1.6;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;word-break:break-all}
+.mem-tag{font-size:10px;padding:2px 8px;border-radius:6px;font-weight:500}
+.mem-tag.active{background:#e2efe2;color:#4a7a4a}
+.mem-tag.inactive{background:#ece6e6;color:#8a7a7a}
+.mem-tag.kw{background:#f8f5f1;color:#9a9088;cursor:pointer;border:1px solid #f0ebe4}
+.mem-tag.kw:hover{background:#f0e9e0;color:#8a7d72}
+.mem-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#7cb87c;flex-shrink:0;box-shadow:0 0 0 2px rgba(124,184,124,.18)}
+.mem-time{font-size:11px;color:var(--text3);margin-left:auto}
+.mem-content{font-size:13px;color:var(--text);line-height:1.7;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;word-break:break-all}
 
 .mem-actions input[type=range]{-webkit-appearance:none;appearance:none;height:3px;border-radius:2px;background:#ece4de;outline:none}.mem-actions input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:8px;height:8px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.15);transition:width .2s ease,height .2s ease,box-shadow .2s ease}.mem-actions input[type=range]::-webkit-slider-thumb:active,.mem-actions input[type=range]::-webkit-slider-thumb:focus{width:16px;height:16px;box-shadow:0 2px 6px rgba(0,0,0,0.2)}.mem-actions input[type=range]::-moz-range-thumb{width:8px;height:8px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.15);transition:width .2s,height .2s}.mem-actions input[type=range]::-moz-range-thumb:active{width:16px;height:16px}@media(max-width:380px){.mem-actions input[type=range]::-webkit-slider-thumb{width:10px;height:10px}.mem-actions input[type=range]::-webkit-slider-thumb:active{width:18px;height:18px}}.mem-imp-row{display:flex;align-items:center;gap:8px;margin-top:6px}
 .mem-imp-row .mem-imp-label{font-size:10px;color:var(--text3);flex-shrink:0}
 .mem-imp-row input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:3px;border-radius:2px;background:#ece4de;outline:none;min-width:80px}
 .mem-imp-row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.15)}
 .mem-imp-row .mem-imp-val{font-size:10px;color:var(--tab-active);font-weight:500;min-width:30px;text-align:right;flex-shrink:0}
-.mem-actions{display:flex;gap:8px;margin-top:8px;justify-content:flex-end}
+.mem-actions{display:flex;flex-direction:column;gap:12px;margin-top:12px}
+.mem-actions .mem-imp-row{margin-top:0}
+.mem-act-btn{display:inline-flex;align-items:center;justify-content:center;padding:6px 14px;border-radius:var(--radius-sm);font-size:11px;font-family:inherit;cursor:pointer;transition:all .2s;flex-shrink:0}
+.mem-act-btn:active{transform:scale(.96)}
+.mem-act-btn.edit{background:#fff;border:1px solid rgba(200,144,152,.5);color:#b57f88}
+.mem-act-btn.del{background:#fff;border:1px solid rgba(192,80,80,.4);color:#b05555}
 .similar-cluster{background:rgba(0,0,0,0.02);border-radius:10px;padding:12px;margin-bottom:10px;border:1px solid var(--border)}
 .similar-cluster-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
 .similar-cluster-title{font-size:12px;font-weight:600;color:var(--tab-active)}
 .similar-cluster-count{font-size:11px;color:var(--text2)}
-.similar-cluster-member{background:rgba(255,255,255,0.6);border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.similar-cluster-member{background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
 .similar-cluster-member:last-child{margin-bottom:0}
+.inactive-item{cursor:pointer;border:1px solid transparent;transition:background .15s,border-color .15s}
+.inactive-item .inactive-check{margin-top:3px;flex-shrink:0;accent-color:var(--accent);width:15px;height:15px;cursor:pointer}
+.inactive-item.selected{background:#faf3ec;border-color:rgba(200,144,152,.5)}
+.inactive-item .inactive-meta{font-size:10px;color:var(--text3);margin-top:3px;line-height:1.5}
+.inactive-item .inactive-content{font-size:13px;color:var(--text);line-height:1.75;margin-top:6px;word-break:break-all}
+.btn-danger-outline{background:#fff;border:1px solid rgba(192,80,80,.4);color:#b05555}
+.btn-danger-outline:active{background:rgba(192,80,80,.06)}
+.btn:disabled{opacity:.45;pointer-events:none}
 .similar-member-content{flex:1;font-size:12px;color:var(--text);line-height:1.5;word-break:break-all}
 .similar-member-del{flex-shrink:0;background:none;border:none;color:var(--text3);cursor:pointer;padding:4px 8px;font-size:14px;border-radius:6px;transition:all .2s;-webkit-tap-highlight-color:transparent}
 .similar-member-del:hover{color:#c05050;background:rgba(192,80,80,0.08)}
 .similar-member-del:focus,.similar-member-del:active{outline:none;background:none;color:var(--text3)}
 @media (hover:none){.similar-member-del:hover{color:var(--text3);background:none}}
 .similar-empty{text-align:center;padding:40px 20px;color:var(--text3);font-size:13px}
+.cloud-results{display:flex;flex-direction:column;gap:10px;margin-top:4px;animation:ccFadeIn .25s ease}
+.cloud-results-title{font-size:12px;color:var(--text2);margin-bottom:8px;letter-spacing:.5px}
+.cloud-results-title b{color:var(--accent);font-weight:600}
+.cloud-card{min-height:340px;position:relative;background:#fff;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;padding:18px 18px 10px}
+.cloud-hint{font-size:11px;color:var(--text3);margin:12px 0 0;text-align:left}
+.cloud-res-item{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;box-shadow:var(--shadow-card);transition:transform .15s ease,box-shadow .15s ease;animation:ccFadeIn .28s ease}
+.cloud-res-item:active{transform:scale(.99)}
+.cloud-res-meta{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.cloud-res-imp{font-size:10px;color:var(--accent);background:rgba(200,144,152,0.12);padding:2px 8px;border-radius:999px;font-weight:600}
+.cloud-res-time{font-size:10px;color:var(--text3)}
+.cloud-res-content{font-size:13px;color:var(--text);line-height:1.7;word-break:break-all;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.cloud-res-left{display:flex;align-items:center;gap:6px;flex-wrap:wrap;flex:1;min-width:0}
+.cloud-res-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:12px;flex-wrap:wrap}
+.kw-wrap{display:flex;align-items:center;gap:6px;flex-wrap:wrap;flex:1;min-width:0}
+.cloud-res-btn-group{display:flex;gap:8px;flex-shrink:0}
+.cloud-res-btn{display:inline-flex;align-items:center;justify-content:center;padding:6px 14px;border-radius:var(--radius-sm);font-size:11px;font-family:inherit;cursor:pointer;transition:all .2s}
+.cloud-res-btn:active{transform:scale(.96)}
+.cloud-res-btn.edit{background:var(--accent);color:#fff;border:1px solid var(--accent);box-shadow:0 2px 6px rgba(200,144,152,.28)}
+.cloud-res-btn.sink{background:#fff;color:var(--text2);border:1px solid var(--border)}
 
 
 /* Import/Export menu */
@@ -101,25 +140,36 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
 .mem-import-btn:hover{background:var(--accent-dark)}
 .mem-export-btn{padding:4px 10px;border-radius:6px;background:transparent;color:var(--tab-active);border:1px solid var(--border);font-size:0.65rem;letter-spacing:1px;cursor:pointer;transition:all .25s;font-family:inherit;white-space:nowrap}
 .mem-export-btn:hover{background:rgba(200,144,152,0.1)}
-.stats-bar{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
-.stat-card{text-align:center;padding:12px 8px;background:var(--card);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:var(--radius-sm);box-shadow:var(--shadow);border:1px solid var(--border)}
+.stats-bar{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.stat-card{text-align:center;padding:12px 8px;background:var(--card);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:var(--radius-sm);box-shadow:var(--shadow-card);border:1px solid var(--border)}
 .stat-card .num{font-size:20px;font-weight:700;color:var(--tab-active);font-family:"Noto Serif SC",serif}
 .stat-card .lbl{font-size:10px;color:var(--text2);margin-top:2px}
 .search-bar{display:flex;gap:8px;margin-bottom:12px;overflow:hidden}
 .search-bar input{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:rgba(255,255,255,0.7);font-family:"Noto Sans SC",sans-serif;font-size:13px;color:var(--text);outline:none}
 .search-bar select{padding:10px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);background:rgba(255,255,255,0.7);font-family:"Noto Sans SC",sans-serif;font-size:12px;color:var(--text);outline:none;max-width:120px;flex-shrink:0;white-space:nowrap}
+.mem-tabs{display:inline-flex;gap:6px;margin-bottom:12px;padding:0 2px;flex-wrap:wrap;max-width:100%}
+.mem-tab{flex:0 0 auto;height:30px;display:inline-flex;align-items:center;justify-content:center;padding:0 12px;font-size:11px;border-radius:999px;border:1px solid var(--border);background:#fff;color:var(--text2);cursor:pointer;font-family:inherit;transition:all .2s;white-space:nowrap}
+.mem-tab.active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.mem-tab:active{transform:scale(.96)}
 .config-group{margin-bottom:16px}
-.config-group .group-title{font-size:11px;font-weight:600;color:var(--accent);letter-spacing:1.5px;margin-bottom:10px;text-transform:uppercase;cursor:pointer;display:flex;justify-content:space-between;align-items:center;user-select:none;padding:4px 0}
+.config-group .group-title{font-size:13px;font-weight:600;color:var(--tab-active);cursor:pointer;display:flex;justify-content:space-between;align-items:center;user-select:none;padding:9px 10px;margin:0 -10px 6px;border-radius:var(--radius-sm);transition:background .15s}
+@media(hover:hover){.config-group .group-title:hover{background:rgba(60,40,40,0.04)}}
 .config-group .group-arrow{font-size:10px;color:var(--text3);transition:transform .15s;letter-spacing:0}
 .config-group.open .group-arrow{transform:rotate(90deg)}
 .config-group .group-body{padding-left:2px}
-.config-item{padding:10px 0;border-bottom:1px solid rgba(0,0,0,0.03)}
+.config-group.open .group-body{animation:ccFadeIn .18s ease}
+.config-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid rgba(60,40,40,0.05)}
 .config-item:last-child{border-bottom:none}
-.ci-label{font-size:12px;font-weight:500;color:var(--text);margin-bottom:4px}
-.ci-desc{font-size:11px;color:var(--text3);margin-bottom:6px}
+.config-item .ci-text{flex:1;min-width:0}
+.config-item .cfg-num{flex-shrink:0;width:44px}
+.config-item .cfg-text{flex-shrink:0;width:44%;min-width:110px}
+.config-item.multi-item{flex-direction:column;align-items:stretch}
+.config-item.multi-item .multi-group{margin-top:10px}
+.ci-label{font-size:12px;font-weight:500;color:var(--text)}
+.ci-desc{font-size:11px;color:var(--text3);margin-top:2px}
 .switch-row .ci-label{margin-bottom:2px}
 .switch-row .ci-desc{margin-bottom:0}
-.switch-row{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:10px 0;border-bottom:1px solid rgba(0,0,0,0.03)}
+.switch-row{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid rgba(60,40,40,0.05)}
 .switch-row:last-child{border-bottom:none}
 .multi-group{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
 .multi-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:rgba(255,255,255,0.6);font-size:12px;color:var(--text);cursor:pointer;user-select:none;transition:all .15s}
@@ -134,9 +184,15 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
 .psum-seq{font-size:10px;color:var(--text3);flex:1}
 .diary-item{padding:10px 0;border-bottom:1px solid var(--border)}
 .diary-item:last-child{border-bottom:none}
-.diary-item summary{font-size:13px;color:var(--text);cursor:pointer;display:flex;justify-content:space-between;align-items:center}
-.diary-item summary em{font-size:11px;color:var(--text3);font-style:normal}
+.diary-item .diary-head{font-size:13px;color:var(--text);display:flex;justify-content:space-between;align-items:center}
+.diary-item .diary-head em{font-size:11px;color:var(--text3);font-style:normal}
 .diary-item pre{font-size:12px;color:var(--text2);margin-top:8px;padding:10px;background:rgba(0,0,0,0.02);border-radius:8px;white-space:pre-wrap;word-break:break-all;line-height:1.5;max-height:300px;overflow-y:auto}
+.diary-edit-btn{font-size:11px;color:var(--accent);border:1px solid var(--border);background:rgba(255,255,255,0.6);border-radius:6px;padding:2px 8px;cursor:pointer;line-height:1.6}
+.diary-edit-btn:hover{background:rgba(255,255,255,0.95)}
+#env-list{max-height:220px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+#diary-list{max-height:260px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+#env-list::-webkit-scrollbar,#diary-list::-webkit-scrollbar{width:4px}
+#env-list::-webkit-scrollbar-thumb,#diary-list::-webkit-scrollbar-thumb{background:rgba(60,40,40,0.15);border-radius:2px}
 .toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:999;background:rgba(60,60,60,0.92);backdrop-filter:blur(8px);color:#fff;padding:10px 24px;border-radius:10px;font-size:13px;font-family:"Noto Sans SC",sans-serif;opacity:0;transition:opacity .3s;pointer-events:none}
 .toast.show{opacity:1}
 .loading{text-align:center;padding:30px;color:var(--text3);font-size:13px}
@@ -154,7 +210,24 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
 .env-row{display:flex;gap:6px;margin-bottom:6px;align-items:center}
 .env-row .env-key{font-size:11px;font-weight:500;color:var(--text2);min-width:80px;flex-shrink:0;word-break:break-all}
 .env-row .env-val{flex:1;font-size:12px;color:var(--text);word-break:break-all}
-@media(min-width:600px){.tab-content{padding:20px 40px;max-width:560px;margin:0 auto}.header{padding:28px 40px 12px}}
+@media(min-width:600px){.tab-content{padding:20px 40px;max-width:720px;margin:0 auto}.header{padding:28px 40px 12px}}
+@media(min-width:768px){
+body{font-size:clamp(15px,1.1vw,17px);padding-bottom:calc(84px + var(--safe-bottom))}
+.card{padding:clamp(16px,1.6vw,26px) clamp(16px,2vw,34px)}
+.tab-content{max-width:min(92vw,1200px);padding:24px max(24px,4vw)}
+.header h1{font-size:clamp(24px,2.2vw,34px)}
+.header p{font-size:clamp(12px,1vw,14px)}
+.tab-bar{left:0;right:0;transform:none;width:auto;bottom:0;border-radius:0;border-left:none;border-right:none;box-shadow:0 -2px 12px rgba(0,0,0,0.04)}
+.tab-bar .tab-item{padding:8px 0}
+.tab-bar .tab-icon svg{width:clamp(22px,2.2vw,30px);height:clamp(22px,2.2vw,30px)}
+.tab-bar .tab-label{font-size:clamp(10px,0.9vw,13px)}
+.stats-bar{gap:clamp(10px,1vw,16px)}
+.stat-card{padding:clamp(14px,1.5vw,22px) 10px}
+.stat-card .num{font-size:clamp(22px,2vw,30px)}
+.cloud-results{display:grid;grid-template-columns:repeat(2,1fr);gap:clamp(10px,1vw,16px)}
+.modal{max-width:min(56vw,560px)}
+.modal-edit-mem{max-width:min(62vw,640px)}
+}
 
 /* Custom scrollbar for scrollable panels */
 #llm-context {
@@ -178,6 +251,128 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
   background: var(--accent);
 }
 
+
+/* ── 配置页整理 ── */
+.cfg-toolbar{display:flex;gap:8px;margin-bottom:12px;align-items:center}
+.cfg-search-wrap{flex:1;position:relative}
+.cfg-search-wrap input{width:100%;padding:9px 12px 9px 32px;border:1px solid var(--border);border-radius:999px;background:rgba(255,255,255,0.7);font-size:12px;color:var(--text);outline:none;font-family:inherit;transition:border-color .2s}
+.cfg-search-wrap input:focus{border-color:var(--accent2)}
+.cfg-search-wrap::before{content:'🔍';position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:12px;opacity:.7}
+.cfg-empty{text-align:center;padding:36px 16px;color:var(--text3);font-size:13px}
+.cfg-toolbar-btns{display:flex;gap:6px;flex:1}
+.cfg-mini-btn{flex:1;justify-content:center;padding:8px 12px;border:1px solid var(--border);border-radius:999px;background:rgba(255,255,255,0.7);font-size:11px;color:var(--text2);cursor:pointer;font-family:inherit;transition:all .2s;white-space:nowrap}
+.cfg-mini-btn:active{transform:scale(.96)}
+.cc-badge{display:inline-flex;align-items:center;gap:5px;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:600;line-height:1.5;flex-shrink:0}
+.cc-badge.todo{background:rgba(0,0,0,0.04);color:var(--text3);animation:ccTodoPulse 2.2s ease-in-out infinite}
+.cc-badge.gen{background:rgba(200,144,152,0.14);color:var(--accent)}
+.cc-badge.done{background:rgba(106,154,90,0.13);color:#5c8a4e}
+.cc-spin{display:inline-block;width:11px;height:11px;border:2px solid rgba(200,144,152,0.3);border-top-color:var(--accent);border-radius:50%;animation:ccspin .8s linear infinite}
+@keyframes ccspin{to{transform:rotate(360deg)}}
+.cc-meta{display:flex;flex-wrap:wrap;gap:2px 8px;font-size:12px;color:var(--text2);margin-top:8px;align-items:center}
+.cc-meta b{color:var(--tab-active);font-weight:600}
+.cc-num{width:52px;padding:5px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);background:rgba(255,255,255,0.7);color:var(--text);font-family:inherit;font-size:12px;text-align:center;outline:none;transition:border-color .2s}
+.cc-num:focus{border-color:var(--accent2)}
+/* ── 上下文压缩页 UI 规范 ── */
+.cc-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.cc-head-title{min-width:0}
+.cc-head-h2{font-family:'Noto Serif SC',serif;font-size:18px;font-weight:600;color:var(--tab-active);letter-spacing:1px;margin:0;line-height:1.4}
+.cc-head-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.cc-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:7px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:#fff;color:var(--text2);font-size:11px;font-family:inherit;cursor:pointer;white-space:nowrap;transition:all .2s;line-height:1.5}
+.cc-btn:active{transform:scale(.96)}
+.cc-btn:disabled{opacity:.5;cursor:not-allowed}
+.cc-btn.secondary{background:#fff;color:var(--text2);border-color:var(--border)}
+.cc-btn.primary{background:var(--accent);color:#fff;border-color:var(--accent);box-shadow:0 2px 6px rgba(200,144,152,.28)}
+.cc-btn.on{background:rgba(106,154,90,.14);color:#5c8a4e;border-color:rgba(106,154,90,.4)}
+.cc-btn.danger{color:#c05050;border-color:rgba(192,80,80,.35);background:#fff}
+.cc-genall-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:#e05a5a;color:#fff;font-size:10px;font-weight:700;line-height:1;flex-shrink:0}
+.cc-batchbar{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)}
+.cc-batch-group{display:flex;gap:8px;flex-wrap:wrap}
+.cc-stats{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.cc-stat-main{background:linear-gradient(135deg,rgba(200,144,152,.18),rgba(216,168,176,.10));border:1px solid rgba(200,144,152,.5);border-radius:var(--radius);padding:14px 16px;text-align:center;box-shadow:0 2px 10px rgba(200,144,152,.12)}
+.cc-stat-main .l{font-size:11px;color:var(--text2);letter-spacing:2px}
+.cc-stat-main .v{font-size:30px;font-weight:700;color:var(--tab-active);font-family:"Noto Serif SC",serif;line-height:1.25;margin-top:2px}
+.cc-stat-main .v .unit{font-size:13px;font-weight:600;color:var(--accent);margin-left:4px}
+.cc-stat-main .d{font-size:10px;color:var(--text3);margin-top:2px}
+.cc-stat-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.cc-stat{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 10px;text-align:center}
+.cc-stat .v{font-size:17px;font-weight:700;color:var(--tab-active);font-family:"Noto Serif SC",serif;line-height:1.2}
+.cc-stat .l{font-size:10px;color:var(--text3);margin-top:3px;letter-spacing:1px}
+.cc-chunk{padding:14px 16px;margin-bottom:10px}
+.cc-chunk-head{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;-webkit-user-select:none}
+.cc-chunk-title{font-weight:600;color:var(--tab-active);font-size:14px;flex-shrink:0}
+.cc-chunk-chars{margin-left:auto;font-size:11px;color:var(--text3);flex-shrink:0}
+.cc-preview{font-size:12px;color:var(--text3);margin-top:8px;line-height:1.6;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-all}
+.cc-chunk-count{font-size:11px;color:var(--text2);background:rgba(0,0,0,0.04);padding:2px 8px;border-radius:999px;flex-shrink:0}
+.cc-controls{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
+.cc-label{font-size:11px;color:var(--text3)}
+.cc-summary-toggle{display:flex;align-items:center;gap:6px;width:100%;padding:8px 4px;margin:-4px 0 -2px;font-size:12px;color:var(--tab-active);cursor:pointer;user-select:none;-webkit-user-select:none;transition:color .2s}
+.cc-summary-toggle:active{color:var(--accent)}
+.cc-summary-open{animation:ccFadeIn .22s ease}
+@keyframes ccFadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.cc-uncovered{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;padding:12px 14px;background:rgba(0,0,0,0.03);border:1px dashed rgba(60,40,40,0.22);border-radius:var(--radius);font-size:12px;color:var(--text2)}
+.cc-uncovered-ic{flex-shrink:0;font-size:15px;line-height:1.4}
+.cc-uncovered-tx{line-height:1.6}
+.cc-uncovered-tx b{color:var(--tab-active);font-weight:600}
+@media(max-width:420px){.cc-head-actions .cc-btn{padding:6px 9px;font-size:10px}.cc-head-h2{font-size:16px}.cc-genall-badge{min-width:14px;height:14px;font-size:9px}}
+.cc-chunk.pending{background:linear-gradient(135deg,rgba(200,144,152,.06),rgba(255,255,255,.85));border-color:rgba(200,144,152,.28)}
+.cc-msg-hint{font-size:10.5px;color:var(--text3);margin:10px 4px 8px;line-height:1.5}
+.cc-msg-list{border:1px solid var(--border);border-radius:var(--radius-sm);background:rgba(0,0,0,0.02);padding:10px;max-height:55vh;overflow-y:auto}
+.cc-msg-item{background:rgba(255,255,255,0.65);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:8px}
+.cc-msg-item:last-child{margin-bottom:0}
+.cc-msg-item.marked{border-color:rgba(200,144,152,.55);background:rgba(200,144,152,.08)}
+.cc-msg-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}
+.cc-msg-num{font-size:10px;color:var(--text3);flex-shrink:0;letter-spacing:.3px}
+.cc-msg-body{font-size:12.5px;color:var(--text);line-height:1.75;white-space:pre-wrap;word-break:break-word}
+.cc-msg-mark{padding:2px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:#fff;color:var(--text3);font-size:10px;font-family:inherit;cursor:pointer;flex-shrink:0;transition:all .2s}
+.cc-msg-mark:active{transform:scale(.95)}
+.cc-msg-mark.on{color:#c89098;border-color:rgba(200,144,152,.55);background:rgba(200,144,152,.08)}
+.cc-num.warn{border-color:rgba(200,144,152,.7);background:rgba(200,144,152,.1)}
+@keyframes ccTodoPulse{0%,100%{opacity:1}50%{opacity:.5}}
+.gt-left{display:flex;align-items:center;gap:8px;min-width:0}
+.gt-name{font-size:13px;color:var(--tab-active);letter-spacing:1px}
+.gt-count{font-size:10px;color:var(--text3);background:rgba(0,0,0,0.04);padding:1px 7px;border-radius:999px;letter-spacing:0;flex-shrink:0}
+.gt-right{display:flex;align-items:center;gap:8px}
+.gt-status{font-size:10px;color:var(--text3);letter-spacing:0;flex-shrink:0}
+.config-group.open .gt-status{color:var(--accent)}
+.cfg-save-bar{display:flex;gap:8px;margin-top:14px}
+.cfg-save-bar .btn{padding:12px 16px;border-radius:12px;font-size:14px;letter-spacing:1px}
+.cfg-save-bar .btn.dirty{background:#b57f88!important}
+@keyframes cfgPulse{0%,100%{box-shadow:0 0 0 0 rgba(200,144,152,.45)}50%{box-shadow:0 0 0 8px rgba(200,144,152,0)}}
+.cfg-save-hint{font-size:11px;color:var(--text3);margin-top:8px;text-align:center}
+/* ── 交互态 / 通用反馈 / 底部抽屉 ── */
+@media(hover:hover){
+  .cc-btn:hover,.cloud-res-btn:hover{border-color:rgba(200,144,152,.45);color:var(--tab-active)}
+  .cc-btn.primary:hover,.cloud-res-btn.edit:hover{background:#b57f88;border-color:#b57f88;color:#fff}
+  .mem-act-btn.edit:hover{background:rgba(200,144,152,.1);border-color:rgba(200,144,152,.65);color:#a06a75}
+  .mem-act-btn.del:hover{background:rgba(192,80,80,.06);border-color:rgba(192,80,80,.6);color:#a04a4a}
+  .mem-tab:not(.active):hover{border-color:rgba(200,144,152,.45);color:var(--tab-active)}
+}
+.cc-btn:disabled,.mem-act-btn:disabled,.cloud-res-btn:disabled{opacity:.5;pointer-events:none}
+.cc-btn.primary:active,.cloud-res-btn.edit:active{background:#b57f88}
+.mem-act-btn.edit:active{background:rgba(200,144,152,.15)}
+.cc-btn.secondary:active,.cloud-res-btn.sink:active,.mem-act-btn.del:active{background:rgba(192,80,80,.08)}
+.tab-item.active .tab-icon{animation:tabPop .32s ease}
+@keyframes tabPop{0%{transform:scale(.8)}55%{transform:scale(1.15)}100%{transform:scale(1)}}
+.back-top{position:fixed;right:16px;bottom:90px;z-index:150;width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,0.94);border:1px solid var(--border);box-shadow:var(--shadow-card);color:var(--tab-active);font-size:16px;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .25s,transform .2s;display:flex;align-items:center;justify-content:center;font-family:inherit}
+.back-top.show{opacity:1;pointer-events:auto}
+.back-top:active{transform:scale(.92)}
+.mem-list-wrap .empty::before,.mem-letter-wrap .empty::before{content:"🌿";display:block;font-size:30px;margin-bottom:10px;opacity:.7}
+.similar-empty::before{content:"🍂";display:block;font-size:30px;margin-bottom:10px;opacity:.7}
+.skeleton{padding:6px 2px}
+.sk-line{height:12px;border-radius:6px;background:linear-gradient(90deg,#ece4de 25%,#f6f0ea 50%,#ece4de 75%);background-size:200% 100%;animation:skShimmer 1.2s ease infinite;margin-bottom:12px}
+@keyframes skShimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.cloud-drawer{position:fixed;left:0;right:0;bottom:0;z-index:180;max-height:82vh;background:#fff;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border-radius:18px 18px 0 0;box-shadow:0 -8px 30px rgba(60,40,40,0.12);transform:translateY(105%);transition:transform .28s cubic-bezier(.32,.72,.35,1);display:flex;flex-direction:column}
+.cloud-drawer.open{transform:translateY(0)}
+.cloud-drawer-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px 16px 12px;border-bottom:1px solid var(--border)}
+.cloud-drawer-title{font-size:13px;color:var(--tab-active);font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cloud-drawer-btn{padding:6px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:#fff;color:var(--text2);font-size:11px;font-family:inherit;cursor:pointer;transition:all .2s}
+.cloud-drawer-btn:active{transform:scale(.95)}
+#cloud-results{flex:1;overflow-y:auto;padding:12px 16px 24px;margin-top:0}
+#edit-mem-importance{-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;background:linear-gradient(to right,var(--accent) 0%,var(--accent) 50%,#e8e0d8 50%,#e8e0d8 100%);outline:none}
+#edit-mem-importance::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:12px;height:12px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.15)}
+#edit-mem-importance::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.15)}
+@media(min-width:900px){#mem-list{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;align-items:start}}
+input:focus,textarea:focus,select:focus{outline:2px solid rgba(216,168,176,0.55);outline-offset:-1px}
 </style>
 </head>
 <body>
@@ -216,12 +411,25 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
   <button class="btn btn-primary" onclick="restartService()" style="margin-top:4px;background:#c89098">重启服务</button>
 </div>
 
-<!-- Tab 2: 记忆配置管理 -->
+<!-- Tab 2: 参数配置 -->
 <div class="tab-content" id="tab-config">
-  <div class="card"><div class="card-title">记忆配置</div><div id="config-form"><div class="loading">加载中...</div></div>
-    <button class="btn btn-primary" onclick="saveConfig()" style="margin-top:8px">保存配置</button>
+    <div class="cfg-toolbar">
+    <div class="cfg-search-wrap"><input type="search" id="cfg-search" placeholder="搜索配置项，如：冷却 / 阈值 / 摘要..." oninput="cfgFilter(this.value)" autocomplete="off"></div>
+    <div class="cfg-toolbar-btns">
+      <button class="cfg-mini-btn" onclick="setAllConfigGroups(true)">全部展开</button>
+      <button class="cfg-mini-btn" onclick="setAllConfigGroups(false)">全部收起</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">参数设置</div>
+    <div id="config-form"><div class="loading">加载中...</div></div>
+    <div class="cfg-save-bar">
+      <button id="cfg-save-btn" class="btn btn-primary" onclick="saveConfig()" style="flex:1;background:var(--accent)">保存全部修改</button>
+    </div>
+    <div class="cfg-save-hint">改动需点击「保存全部修改」才会生效；按钮出现 ★ 表示有未保存的修改。</div>
   </div>
 </div>
+
 
 <!-- Tab 3: 记忆数据管理 -->
 <div class="tab-content" id="tab-memories" style="position:relative">
@@ -238,17 +446,16 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
     <div class="stat-card" onclick="openInactivePanel()" style="cursor:pointer" title="点击查看沉底记忆"><div class="num" id="ms-active">-</div><div class="lbl">活跃</div></div>
     <div class="stat-card" onclick="openSimilarPanel()" style="cursor:pointer"><div class="num" id="ms-similar">-</div><div class="lbl">相似</div></div>
   </div>
-  <div id="mem-view-toggle" style="display:flex;gap:6px;margin-bottom:10px">
-    <button class="chip-btn" id="mem-view-cloud" onclick="switchMemView('cloud')" style="padding:5px 14px;font-size:12px;border-radius:12px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer">词云</button>
-    <button class="chip-btn" id="mem-view-list" onclick="switchMemView('list')" style="padding:5px 14px;font-size:12px;border-radius:12px;border:1px solid var(--border);background:rgba(255,255,255,0.6);color:var(--text2);cursor:pointer">列表</button>
-    <button class="chip-btn" id="mem-view-self" onclick="switchMemView('self')" style="padding:5px 14px;font-size:12px;border-radius:12px;border:1px solid var(--border);background:rgba(255,255,255,0.6);color:var(--text2);cursor:pointer">自我</button>
-    <button class="chip-btn" id="mem-view-daily" onclick="switchMemView('daily')" style="padding:5px 14px;font-size:12px;border-radius:12px;border:1px solid var(--border);background:rgba(255,255,255,0.6);color:var(--text2);cursor:pointer">日常</button>
-    <button class="chip-btn" id="mem-view-letter" onclick="switchMemView('letter')" style="padding:5px 14px;font-size:12px;border-radius:12px;border:1px solid var(--border);background:rgba(255,255,255,0.6);color:var(--text2);cursor:pointer">✉️ 信</button>
+  <div id="mem-view-toggle" class="mem-tabs">
+    <button class="mem-tab active" id="mem-view-cloud" onclick="switchMemView('cloud')">词云</button>
+    <button class="mem-tab" id="mem-view-list" onclick="switchMemView('list')">列表</button>
+    <button class="mem-tab" id="mem-view-self" onclick="switchMemView('self')">自我</button>
+    <button class="mem-tab" id="mem-view-daily" onclick="switchMemView('daily')">日常</button>
+    <button class="mem-tab" id="mem-view-letter" onclick="switchMemView('letter')">✉️ 信</button>
   </div>
   <div id="mem-cloud-wrap">
-    <div id="mem-cloud" style="min-height:340px;position:relative;background:rgba(255,255,255,0.55);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:8px"><div class="loading">统计中...</div></div>
-    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">词越大 = 出现越多越重要，点词查看相关记忆</div>
-    <div id="cloud-results"></div>
+    <div id="mem-cloud" class="cloud-card"><div class="loading">统计中...</div></div>
+    <div class="cloud-hint">词越大 = 出现越多越重要，点词查看相关记忆</div>
   </div>
   <div id="mem-list-wrap" style="display:none">
   <div class="search-bar">
@@ -265,85 +472,134 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
 </div>
 
 <div id="mem-letter-wrap" style="display:none">
-  <div class="search-bar" style="margin-bottom:10px">
-    <span style="font-size:12px;color:var(--text3)">每个窗口的自己写给下一个窗口的信 · 下个窗口开始时会自动读到最新一封</span>
-  </div>
   <div id="mem-letter-list"><div class="loading">加载中...</div></div>
 </div>
 
-<!-- Tab 4: 日志 -->
+<!-- Tab 4: 后台 -->
 <div class="tab-content" id="tab-logs">
-  <div class="card">
-    <div class="card-title">唤醒原始日志</div>
-    <div id="wake-log" style="max-height:200px;overflow-y:auto;font-family:monospace;font-size:11px;color:var(--text2);line-height:1.5;padding:10px;background:rgba(0,0,0,0.02);border-radius:8px;"><div class="loading">加载中...</div></div>
-    <button class="btn btn-outline" onclick="loadWakeLog()" style="margin-top:8px">刷新</button>
-  </div>
 
-  <div class="card">
-    <div class="card-title">唤醒提示词</div>
-    <textarea id="wake-prompt-edit" rows="8" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;font-family:monospace;line-height:1.6;resize:vertical;">加载中...</textarea>
-    <div class="env-row" style="margin-top:8px;gap:8px;">
-      <button class="btn btn-primary" onclick="saveWakePrompt()" style="flex:1;background:var(--accent)">保存</button>
-      <button class="btn btn-outline" onclick="loadWakePrompt()" style="flex:1">重新载入</button>
+  <div class="card" data-collapse-id="wake-log" data-default="open">
+    <div class="card-title collapsible" onclick="toggleCard(this)"><span>唤醒原始日志</span><span class="collapse-arrow">▾</span></div>
+    <div class="card-body">
+        <div id="wake-log" style="max-height:200px;overflow-y:auto;font-family:monospace;font-size:11px;color:var(--text2);line-height:1.5;padding:10px;background:rgba(0,0,0,0.02);border-radius:8px;"><div class="loading">加载中...</div></div>
+        <button class="btn btn-outline" onclick="loadWakeLog()" style="margin-top:8px">刷新</button>
     </div>
-    <div style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 wake_prompt.txt，下次唤醒即生效。</div>
   </div>
+  <div class="card" data-collapse-id="wake-prompt" data-default="collapsed">
+    <div class="card-title collapsible" onclick="toggleCard(this)"><span>唤醒提示词</span><span class="collapse-arrow">▾</span></div>
+    <div class="card-body">
+        <textarea id="wake-prompt-edit" rows="8" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;font-family:monospace;line-height:1.6;resize:vertical;">加载中...</textarea>
+        <div class="env-row" style="margin-top:8px;gap:8px;">
+          <button class="btn btn-primary" onclick="saveWakePrompt()" style="flex:1;background:var(--accent)">保存</button>
+          <button class="btn btn-outline" onclick="loadWakePrompt()" style="flex:1">重新载入</button>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 wake_prompt.txt，下次唤醒即生效。</div>
+    </div>
+  </div>
+  <div class="card" data-collapse-id="summary-prompt" data-default="collapsed">
+    <div class="card-title collapsible" onclick="toggleCard(this)"><span>摘要提示词</span><span class="collapse-arrow">▾</span></div>
+    <div class="card-body">
+        <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">System（身份提示）</div>
+        <textarea id="summary-system-edit" rows="2" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;resize:vertical;">加载中...</textarea>
+        <div style="font-size:11px;color:var(--text3);margin:8px 0 4px;">User Prompt 模板（占位符：${PERSONA}=人设、${conversationText}=对话原文）</div>
+        <textarea id="summary-prompt-edit" rows="10" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;font-family:monospace;line-height:1.6;resize:vertical;">加载中...</textarea>
+        <div class="env-row" style="margin-top:8px;gap:8px;">
+          <button class="btn btn-primary" onclick="saveSummaryPrompt()" style="flex:1;background:var(--accent)">保存</button>
+          <button class="btn btn-outline" onclick="loadSummaryPrompt()" style="flex:1">重新载入</button>
+          <button class="btn btn-outline" onclick="resetSummaryPrompt()" style="flex:1">恢复默认</button>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 data/summary_prompt.json，下次生成摘要即生效。</div>
+    </div>
+  </div>
+  <div class="card" data-collapse-id="cc-prompt" data-default="collapsed">
+    <div class="card-title collapsible" onclick="toggleCard(this)"><span>压缩上下文提示词</span><span class="collapse-arrow">▾</span></div>
+    <div class="card-body">
+      <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">System（身份提示）</div>
+      <textarea id="cc-prompt-system-edit" rows="2" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;resize:vertical;">加载中...</textarea>
+      <div style="font-size:11px;color:var(--text3);margin:8px 0 4px;">User Prompt 模板（占位符：${PERSONA}=人设、${chunkInfo}=块时间段、${conversationText}=对话原文、${normalChars}=基准字数、${maxChars}=上限字数）</div>
+      <textarea id="cc-prompt-edit" rows="10" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;font-family:monospace;line-height:1.6;resize:vertical;">加载中...</textarea>
+      <div class="env-row" style="margin-top:8px;gap:8px;">
+        <button class="btn btn-primary" onclick="saveCompactionPrompt()" style="flex:1;background:var(--accent)">保存</button>
+        <button class="btn btn-outline" onclick="loadCompactionPrompt()" style="flex:1">重新载入</button>
+        <button class="btn btn-outline" onclick="resetCompactionPrompt()" style="flex:1">恢复默认</button>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 data/compaction_prompt.json，下次生成压缩摘要即生效。</div>
+    </div>
+  </div>
+  <div class="card" data-collapse-id="manual-summary" data-default="collapsed">
+    <div class="card-title collapsible" onclick="toggleCard(this)"><span>手动摘要</span><span class="collapse-arrow">▾</span></div>
+    <div class="card-body">
+        <div id="summary-status" style="font-size:12px;color:var(--text2);margin-bottom:8px;line-height:1.8;">加载中...</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div style="font-size:11px;color:var(--text3);">待摘要对话原文（勾选 = 写进摘要）</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <label style="display:flex;align-items:center;gap:3px;font-size:11px;color:var(--text2);cursor:pointer"><input type="checkbox" id="psum-select-all" onchange="checkAllPending(this.checked)" style="accent-color:var(--accent)"> 全选</label>
+            <span id="pending-check-count" style="font-size:11px;color:var(--accent);font-weight:600;">已选 0 / 0</span>
+          </div>
+        </div>
+        <div id="pending-summary-window" style="max-height:280px;overflow-y:auto;padding:10px;background:rgba(255,255,255,0.45);border:1px solid var(--border);border-radius:10px;"><div class="loading">加载中...</div></div>
+        <div id="pending-excluded-hint" style="font-size:11px;color:var(--text3);margin-top:6px;">加载中...</div>
+        <div class="env-row" style="margin-top:8px;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline" onclick="deleteSelectedPending()" style="flex:1;min-width:80px;color:#c05050;border-color:rgba(192,80,80,0.4)">删除所选</button>
+          <button class="btn btn-outline" onclick="restorePendingItems()" style="flex:1;min-width:80px">恢复已删</button>
+          <button class="btn btn-outline" onclick="loadPendingSummary()" style="flex:1;min-width:80px">刷新内容</button>
+        </div>
+        <div class="env-row" style="margin-top:10px;gap:8px;flex-wrap:wrap">
+          <button id="summary-trigger-btn" class="btn btn-primary" onclick="triggerManualSummary()" style="flex:1;min-width:120px;background:var(--accent)">手动摘要</button>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:6px;">点击「手动摘要」立即把上方剩余待摘要消息交给模型生成，结果自动存入记忆池（summary）。</div>
+    </div>
+  </div>
+  <div class="card" data-collapse-id="pinned" data-default="collapsed">
+    <div class="card-title collapsible" onclick="toggleCard(this)"><span>永久注入上下文</span><span class="collapse-arrow">▾</span></div>
+    <div class="card-body">
+        <div class="env-row" style="margin-bottom:10px;">
+          <input type="text" id="pin-title" placeholder="标题 (可选)" style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;">
+        </div>
+        <div class="env-row" style="margin-bottom:10px;">
+          <textarea id="pin-content" rows="2" placeholder="内容..." style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;resize:vertical;"></textarea>
+        </div>
+        <button class="btn btn-primary" onclick="addPinned()" style="margin-bottom:12px;background:var(--accent)">+ 新增</button>
+        <div id="pinned-list" style="max-height:300px;overflow-y:auto;"></div>
+    </div>
+  </div>
+  <div class="card" data-collapse-id="llm-context" data-default="open">
+    <div class="card-title collapsible" onclick="toggleCard(this)"><span>上下文 (发给LLM的完整消息)</span><span class="collapse-arrow">▾</span></div>
+    <div class="card-body">
+        <div id="llm-context" style="max-height:400px;overflow-y:auto;font-size:12px;"><div class="loading">加载中...</div></div>
+        <div class="env-row" style="margin-top:8px;">
+          <span class="env-key" id="ctx-time" style="font-size:11px;color:var(--text3)"></span>
+        </div>
+    </div>
+  </div>
+</div>
 
-  <div class="card">
-    <div class="card-title">手动摘要</div>
-    <div id="summary-status" style="font-size:12px;color:var(--text2);margin-bottom:8px;line-height:1.8;">加载中...</div>
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-      <div style="font-size:11px;color:var(--text3);">待摘要对话原文（勾选 = 写进摘要）</div>
-      <div style="display:flex;align-items:center;gap:8px">
-        <label style="display:flex;align-items:center;gap:3px;font-size:11px;color:var(--text2);cursor:pointer"><input type="checkbox" id="psum-select-all" onchange="checkAllPending(this.checked)" style="accent-color:var(--accent)"> 全选</label>
-        <span id="pending-check-count" style="font-size:11px;color:var(--accent);font-weight:600;">已选 0 / 0</span>
+<!-- Tab 5: 上下文压缩 -->
+<div class="tab-content" id="tab-compaction">
+  <div style="padding:2px 0 12px">
+    <div class="cc-head">
+      <div class="cc-head-title">
+        <h2 class="cc-head-h2">上下文压缩</h2>
+      </div>
+      <div class="cc-head-actions">
+        <button class="cc-btn secondary" onclick="loadCompactionPreview()">↻ 刷新</button>
+        <button class="cc-btn secondary" id="cc-expandall-btn" onclick="toggleCcExpandAll()">全部展开</button>
+        <button class="cc-btn primary" id="cc-genall-btn" onclick="generateAllCompaction()"><span class="cc-genall-label">✦ 生成全部未生成</span><span class="cc-genall-badge" style="display:none"></span></button>
       </div>
     </div>
-    <div id="pending-summary-window" style="max-height:280px;overflow-y:auto;padding:10px;background:rgba(255,255,255,0.45);border:1px solid var(--border);border-radius:10px;"><div class="loading">加载中...</div></div>
-    <div id="pending-excluded-hint" style="font-size:11px;color:var(--text3);margin-top:6px;">加载中...</div>
-    <div class="env-row" style="margin-top:8px;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-outline" onclick="deleteSelectedPending()" style="flex:1;min-width:80px;color:#c05050;border-color:rgba(192,80,80,0.4)">删除所选</button>
-      <button class="btn btn-outline" onclick="restorePendingItems()" style="flex:1;min-width:80px">恢复已删</button>
-      <button class="btn btn-outline" onclick="loadPendingSummary()" style="flex:1;min-width:80px">刷新内容</button>
+    <div id="compaction-summary" style="margin-top:4px"></div>
+    <div id="compaction-chunks" style="margin-top:4px"></div>
+    <div class="cc-batchbar">
+      <div class="cc-batch-group">
+        <button class="cc-btn secondary" id="cc-add-btn" onclick="ccBlockOp('add')">＋ 添加一块</button>
+        <button class="cc-btn secondary" id="cc-remove-btn" onclick="ccBlockOp('remove')">－ 移除一块</button>
+      </div>
+      <div class="cc-batch-group">
+        <button class="cc-btn secondary" id="cc-reset-btn" onclick="ccBlockOp('reset')">恢复自动分块</button>
+        <button class="cc-btn primary" id="cc-save-btn" onclick="saveCompactionBoundaries()">保存边界</button>
+      </div>
     </div>
-    <div class="env-row" style="margin-top:10px;gap:8px;flex-wrap:wrap">
-      <button id="summary-trigger-btn" class="btn btn-primary" onclick="triggerManualSummary()" style="flex:1;min-width:120px;background:var(--accent)">手动摘要</button>
-    </div>
-    <div style="font-size:11px;color:var(--text3);margin-top:6px;">点击「手动摘要」立即把上方剩余待摘要消息交给模型生成，结果自动存入记忆池（summary）。</div>
-  </div>
-
-  <div class="card">
-    <div class="card-title">摘要提示词</div>
-    <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">System（身份提示）</div>
-    <textarea id="summary-system-edit" rows="2" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;resize:vertical;">加载中...</textarea>
-    <div style="font-size:11px;color:var(--text3);margin:8px 0 4px;">User Prompt 模板（占位符：${PERSONA}=人设、${conversationText}=对话原文）</div>
-    <textarea id="summary-prompt-edit" rows="10" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;font-family:monospace;line-height:1.6;resize:vertical;">加载中...</textarea>
-    <div class="env-row" style="margin-top:8px;gap:8px;">
-      <button class="btn btn-primary" onclick="saveSummaryPrompt()" style="flex:1;background:var(--accent)">保存</button>
-      <button class="btn btn-outline" onclick="loadSummaryPrompt()" style="flex:1">重新载入</button>
-      <button class="btn btn-outline" onclick="resetSummaryPrompt()" style="flex:1">恢复默认</button>
-    </div>
-    <div style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 data/summary_prompt.json，下次生成摘要即生效。</div>
-  </div>
-
-  <div class="card">
-    <div class="card-title">永久注入上下文</div>
-    <div class="env-row" style="margin-bottom:10px;">
-      <input type="text" id="pin-title" placeholder="标题 (可选)" style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;">
-    </div>
-    <div class="env-row" style="margin-bottom:10px;">
-      <textarea id="pin-content" rows="2" placeholder="内容..." style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;resize:vertical;"></textarea>
-    </div>
-    <button class="btn btn-primary" onclick="addPinned()" style="margin-bottom:12px;background:var(--accent)">+ 新增</button>
-    <div id="pinned-list" style="max-height:300px;overflow-y:auto;"></div>
-  </div>
-
-  <div class="card">
-    <div class="card-title">上下文 (发给LLM的完整消息)</div>
-    <div id="llm-context" style="max-height:400px;overflow-y:auto;font-size:12px;"><div class="loading">加载中...</div></div>
-    <div class="env-row" style="margin-top:8px;">
-      <span class="env-key" id="ctx-time" style="font-size:11px;color:var(--text3)"></span>
-    </div>
+    <div id="compaction-msg" style="margin-top:10px;font-size:12px;color:var(--accent);min-height:18px"></div>
   </div>
 </div>
 
@@ -358,11 +614,39 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
     <span class="tab-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="14" y2="11"/></svg></span><span class="tab-label">记忆</span>
   </button>
   <button class="tab-item" data-tab="logs" onclick="switchTab('logs')">
-    <span class="tab-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></span><span class="tab-label">日志</span>
+    <span class="tab-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></span><span class="tab-label">后台</span>
   </button>
+  <button class="tab-item" data-tab="compaction" onclick="switchTab('compaction')">
+    <span class="tab-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span><span class="tab-label">压缩</span>
+  </button>
+
 </div>
 
+<div class="cloud-drawer" id="cloudDrawer">
+  <div class="cloud-drawer-head">
+    <button class="cloud-drawer-btn" onclick="closeCloudDrawer()">← 返回词云</button>
+    <div class="cloud-drawer-title" id="cloudDrawerTitle">相关记忆</div>
+    <button class="cloud-drawer-btn" onclick="closeCloudDrawer()">✕</button>
+  </div>
+  <div id="cloud-results" class="cloud-results"></div>
+</div>
+<div class="back-top" id="backTopBtn" onclick="scrollToTop()" title="回到顶部">↑</div>
 <div class="toast" id="toast"></div>
+
+<!-- 摘要编辑放大窗口 -->
+<div class="modal-overlay" id="ccEditModal">
+  <div class="modal" style="max-width:min(94vw,760px);padding:18px 20px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 style="font-family:'Noto Serif SC',serif;font-size:16px;font-weight:600;color:var(--tab-active);margin:0">编辑摘要</h3>
+      <button class="cfg-mini-btn" onclick="closeCcEditModal()" title="收起">收起</button>
+    </div>
+    <textarea id="cc-edit-modal-sel" rows="16" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:13px;font-family:monospace;line-height:1.7;resize:vertical;min-height:50vh"></textarea>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-primary" onclick="saveCcEditModal()" style="flex:1;background:var(--accent)">保存修改</button>
+      <button class="btn btn-outline" onclick="closeCcEditModal()" style="flex:1">取消</button>
+    </div>
+  </div>
+</div>
 
 <!-- Env Editor Modal -->
 <div class="modal-overlay" id="envModal">
@@ -398,10 +682,10 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
       <textarea id="edit-mem-content" placeholder="输入记忆内容..." style="width:100%;height:100%;min-height:280px;padding:16px;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,0.85);font-family:"Noto Sans SC",sans-serif;font-size:15px;line-height:1.7;color:var(--text);outline:none;resize:none;box-shadow:inset 0 1px 3px rgba(0,0,0,0.04)"></textarea>
     </div>
     <div class="form-group" style="flex-shrink:0">
-      <label>重要性</label>
-      <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
-        <input type="range" id="edit-mem-importance" min="0" max="1" step="0.05" value="0.5" oninput="document.getElementById('edit-mem-imp-val').textContent=this.value" style="flex:1">
-        <span style="font-size:15px;color:var(--tab-active);font-weight:600;min-width:40px;text-align:right" id="edit-mem-imp-val">0.50</span>
+      <div style="display:flex;align-items:center;gap:10px">
+        <label style="flex-shrink:0;margin:0">重要性</label>
+        <input type="range" id="edit-mem-importance" min="0" max="1" step="0.05" value="0.5" oninput="editMemImp(this)" style="flex:1">
+        <span style="font-size:13px;color:var(--tab-active);font-weight:600;min-width:34px;text-align:right" id="edit-mem-imp-val">0.50</span>
       </div>
     </div>
     <div class="modal-actions" style="display:flex;gap:12px;margin-top:20px;flex-shrink:0">
@@ -432,6 +716,24 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
 </div>
 
 <!-- 信封：信全文弹窗 -->
+
+<div class="modal-overlay" id="diaryEditModal">
+  <div class="modal modal-edit-mem" style="max-width:min(94vw,780px)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-shrink:0">
+      <h3 style="margin:0;font-size:18px">编辑日记</h3>
+      <button onclick="closeModal('diaryEditModal')" style="background:rgba(0,0,0,0.04);border:none;font-size:16px;color:var(--text2);cursor:pointer;padding:6px 10px;border-radius:8px;line-height:1">&times;</button>
+    </div>
+    <div id="diary-edit-name" style="font-size:12px;color:var(--text3);margin-bottom:10px;flex-shrink:0"></div>
+    <div style="flex:1;min-height:0;display:flex;flex-direction:column">
+      <textarea id="diary-edit-content" placeholder="修改日记内容…保存后会自动同步更新上下文里的对应特殊事件" style="width:100%;flex:1;min-height:46vh;padding:10px;border:none;border-radius:8px;background:rgba(0,0,0,0.02);font-family:'Noto Sans SC',sans-serif;font-size:13px;line-height:1.5;color:var(--text2);outline:none;resize:vertical;white-space:pre-wrap;word-break:break-all"></textarea>
+    </div>
+    <div class="modal-actions" style="display:flex;gap:10px;margin-top:16px;flex-shrink:0">
+      <button class="btn btn-outline" onclick="deleteDiaryEditor()" style="flex:1;padding:9px 14px;font-size:13px;border-radius:10px">删除</button>
+      <button class="btn btn-primary" onclick="saveDiaryEditor()" style="flex:1;padding:9px 14px;font-size:13px;border-radius:10px">保存</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="letterModal">
   <div class="modal" style="max-width:600px;width:95vw;max-height:85vh;display:flex;flex-direction:column">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-shrink:0">
@@ -476,15 +778,29 @@ body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text
       <h3 style="margin:0;font-size:18px">沉底记忆 <span id="inactive-count" style="font-size:12px;color:var(--text3);font-weight:400"></span></h3>
       <button onclick="closeModal('inactiveModal')" style="background:rgba(0,0,0,0.04);border:none;font-size:16px;color:var(--text2);cursor:pointer;padding:6px 10px;border-radius:8px;line-height:1">&times;</button>
     </div>
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-shrink:0;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;margin-bottom:10px;flex-shrink:0">
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text2);cursor:pointer">
-        <input type="checkbox" id="inactive-select-all" onchange="toggleSelectAllInactive(this.checked)"> 全选
+        <input type="checkbox" id="inactive-select-all" onchange="toggleSelectAllInactive(this.checked)" style="accent-color:var(--accent);width:15px;height:15px"> 全选
       </label>
-      <span style="font-size:11px;color:var(--text3)">沉底的记忆不会再被检索和浮现；可恢复为活跃，勾选后可永久删除</span>
-      <button class="btn btn-sm" style="background:var(--accent);color:#fff;border:none;padding:6px 14px;border-radius:8px;font-size:12px;cursor:pointer" onclick="restoreSelectedInactive()">恢复所选</button>
-      <button class="btn btn-sm" style="margin-left:auto;background:#c05050;color:#fff;border:none;padding:6px 14px;border-radius:8px;font-size:12px;cursor:pointer" onclick="purgeSelectedInactive()">永久删除所选</button>
+    </div>
+    <div style="flex-shrink:0;margin-bottom:10px;font-size:11px;color:var(--text3);line-height:1.6;background:#f7f1ea;border:1px dashed rgba(60,40,40,0.18);border-radius:var(--radius-sm);padding:8px 12px">沉底后的记忆不会主动浮现、也无法检索；勾选后可恢复为活跃状态，也可永久删除（删除无法找回）</div>
+    <div style="display:flex;gap:10px;margin-bottom:12px;flex-shrink:0">
+      <button class="btn btn-sm" id="inactive-restore-btn" style="background:var(--accent);color:#fff;border:none;padding:6px 14px;border-radius:8px;font-size:12px;cursor:pointer" onclick="restoreSelectedInactive()" disabled>恢复所选</button>
+      <button class="btn btn-sm btn-danger-outline" id="inactive-purge-btn" style="margin-left:auto;padding:6px 14px;border-radius:8px;font-size:12px;cursor:pointer" onclick="purgeSelectedInactive()" disabled>永久删除所选</button>
     </div>
     <div id="inactive-list" style="flex:1;overflow-y:auto;min-height:200px"><div class="loading">加载中...</div></div>
+  </div>
+</div>
+
+<!-- 通用确认弹窗 -->
+<div class="modal-overlay" id="confirmModal">
+  <div class="modal" style="max-width:340px;text-align:center">
+    <h3 id="confirm-title" style="margin:0 0 10px;font-size:16px">确认操作</h3>
+    <p id="confirm-text" style="font-size:13px;color:var(--text2);line-height:1.7;margin:0 0 20px"></p>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal('confirmModal')">取消</button>
+      <button class="btn" id="confirm-ok" style="background:#c05050;color:#fff;border:none">确认</button>
+    </div>
   </div>
 </div>
 
@@ -538,10 +854,11 @@ let configData = null;
 
 // ============ Init ============
 async function initApp(){
+  initCollapsibleCards();
   // 恢复上次停留的导航 tab（刷新后不再回到心跳页）
   try{
     const savedTab = localStorage.getItem('adminTab');
-    if(savedTab && ['heartbeat','config','memories','logs'].indexOf(savedTab)>=0 && savedTab!=='heartbeat'){
+    if(savedTab && ['heartbeat','config','memories','logs','compaction'].indexOf(savedTab)>=0 && savedTab!=='heartbeat'){
       switchTab(savedTab);
     }
   }catch(e){}
@@ -682,13 +999,74 @@ async function saveNetease(){
   }catch(e){toast('网络错误: '+e.message)}
 }
 
+function escapeHtml(s){
+  return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]});
+}
+
+let editingDiaryName = null;
 function renderDiary(){
   const entries=INITIAL_DATA.diary||[];
   const el=document.getElementById('diary-list');
   if(!entries.length){el.innerHTML='<div class="empty">暂无日记</div>';return}
-  el.innerHTML=entries.map(e=>
-    '<details class="diary-item"><summary><span>'+e.name+'</span><em>'+e.time+'</em></summary><pre>'+e.content+'</pre></details>'
-  ).join('');
+  el.innerHTML=entries.map(e=>{
+    const name=escapeHtml(e.name);
+    return '<div class="diary-item"><div class="diary-head"><span>'+name+'</span><span style="display:flex;align-items:center;gap:8px"><em>'+e.time+'</em><button class="diary-edit-btn" onclick="openDiaryEditor(\''+name+'\')">编辑</button></span></div></div>'
+  }).join('');
+}
+
+function openDiaryEditor(name){
+  editingDiaryName=name;
+  const entries=INITIAL_DATA.diary||[];
+  const entry=entries.find(e=>e.name===name);
+  document.getElementById('diary-edit-name').textContent=name;
+  document.getElementById('diary-edit-content').value=entry?entry.content:'';
+  openModal('diaryEditModal');
+}
+
+async function saveDiaryEditor(){
+  if(!editingDiaryName){closeModal('diaryEditModal');return}
+  const content=document.getElementById('diary-edit-content').value;
+  try{
+    const r=await fetch(ADMIN_API+'/diary/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:editingDiaryName,content})});
+    const j=await r.json();
+    if(j.success){
+      toast('已保存，同步 '+j.syncedEvents+' 条上下文特殊事件');
+      closeModal('diaryEditModal');
+      try{
+        const dr=await fetch(ADMIN_API+'/env');
+        if(dr.ok){const d=await dr.json();INITIAL_DATA=d;}
+      }catch(e){}
+      renderDiary();
+    }else{
+      toast('保存失败: '+j.error);
+    }
+  }catch(e){
+    toast('网络错误: '+e.message);
+  }
+}
+
+
+async function deleteDiaryEditor(){
+  if(!editingDiaryName){closeModal('diaryEditModal');return}
+  if(!confirm('确认删除 '+editingDiaryName+'？上下文里对应的特殊事件也会同步移除。'))return;
+  try{
+    const r=await fetch(ADMIN_API+'/diary/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:editingDiaryName})});
+    const j=await r.json();
+    if(j.success){
+      toast('已删除，移除 '+j.removedEvents+' 条上下文特殊事件');
+      closeModal('diaryEditModal');
+      editingDiaryName=null;
+      try{
+        const dr=await fetch(ADMIN_API+'/env');
+        if(dr.ok){const d=await dr.json();INITIAL_DATA=d;}
+      }catch(e){}
+      renderDiary();
+    }else{
+      toast('删除失败: '+j.error);
+    }
+  }catch(e){
+    toast('网络错误: '+e.message);
+  }
 }
 
 async function restartService(){
@@ -701,13 +1079,6 @@ async function restartService(){
 }
 
 // ============ Config ============
-function cfgRangeInput(key, unlimited){
-  const r=document.getElementById('cfg-'+key);
-  const v=document.getElementById('cfgv-'+key);
-  if(!r||!v)return;
-  if(unlimited && parseInt(r.value,10)>=parseInt(r.max,10)){ v.textContent='无限制'; }
-  else v.textContent=r.value;
-}
 async function loadConfig(){
   const el=document.getElementById('config-form');
   if(!el)return;
@@ -719,40 +1090,51 @@ async function loadConfig(){
     configData=j;
     renderConfig(j);
     restoreOpenGroups(openGroups);
+    const cfgSearchBox=document.getElementById('cfg-search');
+    if(cfgSearchBox&&cfgSearchBox.value) cfgFilter(cfgSearchBox.value);
   }catch(e){el.innerHTML='<div class="empty">加载失败: '+e.message+'</div>'}
 }
 
 function renderConfig(cfg){
   const el=document.getElementById('config-form');
   const groups=[
-    {title:'摘要',fields:[
-      {key:'summary_enabled',label:'摘要总开关',desc:'关闭后不再自动或手动生成摘要（保留开关，可随时打开）',type:'switch',def:false},
+    {title:'摘要生成',icon:'✍️',fields:[
+      {key:'summary_enabled',label:'摘要总开关',desc:'关闭后不再自动或手动生成摘要',type:'switch',def:false},
       {key:'auto_summary_enabled',label:'自动摘要',desc:'是否启用自动摘要生成',type:'switch'},
       {key:'idle_threshold_minutes',label:'沉默阈值（分钟）',desc:'用户沉默多久后触发摘要',type:'range',min:1,max:60,step:1},
       {key:'max_interval_minutes',label:'最长间隔（分钟）',desc:'无论是否沉默，最多多久生成一次摘要',type:'range',min:5,max:120,step:5},
       {key:'summary_surfacing_min_age_enabled',label:'新摘要冷却',desc:'开启后，新生成的摘要会在冷却时长内不于对话中浮现',type:'switch'},
-      {key:'summary_event_injection_enabled',label:'摘要写入对话（永久）',desc:'开启后，每次生成摘要都会作为特殊事件写进时间线，跨窗口永久可见；注入范围受「特殊事件注入窗口（天）」控制，且只在上下文较短（新窗口）时注入',type:'switch',def:false},
-      {key:'summary_event_inject_enabled',label:'摘要事件注入',desc:'开启=只在上下文较短（新窗口）时注入摘要事件，长对话跳过避免重复；关闭=任何上下文都不注入摘要事件（摘要仍会写入时间线，只是不再注入）',type:'switch',def:true},
-      {key:'summary_event_short_ctx_msgs',label:'短上下文阈值（条）',desc:'「摘要事件注入」开启时生效：请求里的对话消息数不超过该值才算短上下文（新窗口）。填 0 表示不限制条数',type:'number',min:0,max:200},
       {key:'summary_surfacing_min_age_hours',label:'新摘要冷却时长（小时）',desc:'开启「新摘要冷却」后，多久以内生成的摘要不浮现',type:'range',min:1,max:72,step:1}
     ]},
-    {title:'对话 · 记忆检索',fields:[
+    {title:'上下文压缩',icon:'🗜️',fields:[
+      {key:'compaction_chunk_size',label:'目标块大小（条）',desc:'每块大约多少条消息，实际会就近落在自然边界上',type:'number',min:10,max:300},
+      {key:'compaction_chunk_min',label:'最小块（条）',desc:'块长低于此值不切',type:'number',min:5,max:200},
+      {key:'compaction_chunk_max',label:'最大块（条）',desc:'块长上限，超过则强制切开',type:'number',min:10,max:500},
+      {key:'compaction_keep_recent_messages',label:'保留原文（条）',desc:'最近 N 条对话保持原文不压缩',type:'number',min:10,max:1000},
+      {key:'compaction_min_messages',label:'触发阈值（条）',desc:'真实对话少于该条数时不做压缩',type:'number',min:50,max:5000},
+      {key:'compaction_gap_minutes',label:'时间边界（分钟）',desc:'两条消息间隔超过此值视为话题切换的自然边界',type:'number',min:5,max:240},
+      {key:'compaction_summary_max_chars',label:'摘要上限（字）',desc:'单块摘要硬上限，信息密集也最多写这么多',type:'number',min:200,max:3000},
+      {key:'compaction_summary_min_chars',label:'摘要下限（字）',desc:'单块摘要至少写这么多，避免过短丢信息',type:'number',min:50,max:1000},
+      {key:'compaction_include_thinking',label:'摘要包含思考',desc:'默认关闭：只拿对话正文做摘要；开启后会把模型的内心活动也喂进去（时间线未存思考，一般无需开启）',type:'switch',def:false},
+      {key:'compaction_compress_events',label:'特殊事件参与压缩',desc:'开启后时间标记/自动唤醒/推送/日记等系统事件会随对话一起被摘要；「记忆浮现」始终不参与摘要，且被摘要时段内的记忆浮现会直接从上下文删除。关闭则所有特殊事件保留原文',type:'switch',def:true}
+    ]},
+
+    {title:'对话 · 记忆',icon:'💬',fields:[
       {key:'memory_retrieval_enabled',label:'对话时记忆检索',desc:'关闭后对话时不再自动检索并注入记忆',type:'switch'},
       {key:'moment_sync_enabled',label:'心动时刻同步',desc:'关闭后心动时刻不再自动注入记忆池（页面数据不受影响）',type:'switch',def:false},
+      {key:'memory_persist_on_surface_enabled',label:'浮现后写入对话（永久）',desc:'开启后，对话中浮现过的记忆会写入对话记录并永久留在上下文里，不再消失',type:'switch',def:false},
       {key:'context_injection_types',label:'注入分类（可多选）',desc:'对话时记忆检索只注入勾选的分类；关闭的分类不会注入',type:'multiselect',options:[{v:'fact',l:'事实'},{v:'preference',l:'偏好'},{v:'emotion',l:'决策痕迹'},{v:'summary',l:'摘要'},{v:'moment',l:'心动时刻'}],def:['fact','preference','emotion','summary','moment']},
       {key:'retrieval_top_k',label:'检索数量',desc:'每次检索返回的记忆条数',type:'range',min:1,max:20,step:1},
       {key:'memory_query_window',label:'对话窗口',desc:'用最近几条对话消息（含AI回复）拼接作为检索提示词',type:'range',min:1,max:10,step:1},
+      {key:'memory_retrieval_window_days',label:'检索只看最近（天）',desc:'只检索最近 N 天内的「日常」记忆（决策痕迹除外）；填 0 = 检索全部',type:'number',min:0,max:365,def:0},
       {key:'memory_relevance_threshold',label:'相关性阈值',desc:'只有高于此分数的记忆才会浮现（0-1，越低越宽松）',type:'range',min:0,max:1,step:0.05},
       {key:'keyword_search_enabled',label:'关键词检索',desc:'启用 BM25 关键词搜索融合',type:'switch'},
       {key:'memory_cooldown_minutes',label:'记忆冷静期（分钟）',desc:'记忆浮现后多久才重新检索，冷静期内所有请求复用同一份记忆',type:'range',min:1,max:120,step:5},
       {key:'memory_item_cooldown_minutes',label:'单条记忆冷却（分钟）',desc:'同一条记忆冷却期内不重复浮现（0=关闭），避免同一记忆反复冒出来',type:'range',min:0,max:1440,step:30,def:120}
     ]},
-    {title:'对话 · 记忆写入',fields:[
-      {key:'memory_persist_on_surface_enabled',label:'对话时·浮现后写入对话',desc:'开启后，对话中浮现过的记忆会写入对话记录并永久留在上下文里，不再消失；关闭时维持原有的短暂浮现',type:'switch',def:false}
-    ]},
-    {title:'唤醒',fields:[
+    {title:'唤醒 · 记忆',icon:'⏰',fields:[
       {key:'memory_retrieval_wake_enabled',label:'唤醒时记忆检索',desc:'关闭后唤醒时不再自动检索并注入记忆',type:'switch',def:true},
-      {key:'wake_memory_persist_on_surface_enabled',label:'唤醒时·浮现后写入对话',desc:'开启后，唤醒时浮现过的记忆会随唤醒事件写入对话记录并永久留在上下文；关闭时维持原有的短暂浮现',type:'switch',defKey:'memory_persist_on_surface_enabled',def:false},
+      {key:'wake_memory_persist_on_surface_enabled',label:'浮现后写入对话（永久）',desc:'开启后，唤醒时浮现过的记忆会随唤醒事件写入对话记录并永久留在上下文',type:'switch',defKey:'memory_persist_on_surface_enabled',def:false},
       {key:'wake_query_window',label:'唤醒检索窗口',desc:'唤醒时用最近几条消息拼检索提示词，独立于对话窗口',type:'range',min:1,max:10,step:1},
       {key:'wake_relevance_threshold',label:'唤醒相关性阈值',desc:'唤醒时过滤低于此分数的检索记忆（不影响随机记忆），独立于对话阈值',type:'range',min:0,max:1,step:0.05},
       {key:'wake_top_k',label:'唤醒检索数量',desc:'唤醒时相关性检索的记忆条数（通常比对话时多）',type:'range',min:1,max:20,step:1},
@@ -760,40 +1142,39 @@ function renderConfig(cfg){
       {key:'wake_random_count',label:'随机记忆数',desc:'唤醒时额外注入的随机记忆条数，拓宽视野',type:'range',min:0,max:15,step:1},
       {key:'wake_repeat_window',label:'唤醒防重复次数',desc:'最近 N 次唤醒看过的记忆不重复浮现（0=关闭），防止同一批记忆反复出现',type:'range',min:0,max:5,step:1,def:3}
     ]},
-    {title:'去重与覆盖',fields:[
-      {key:'dedup_threshold',label:'去重阈值',desc:'相似度超过此值视为重复，更新重要性而非新增',type:'range',min:0.5,max:1,step:0.01},
-      {key:'conflict_threshold',label:'覆盖阈值',desc:'相似度超过此值则旧记忆沉底（superseded）',type:'range',min:0.5,max:1,step:0.01}
-    ]},
-    {title:'时间注入',fields:[
+    {title:'事件与时间',icon:'🕐',fields:[
+      {key:'summary_event_injection_enabled',label:'摘要写入对话（永久）',desc:'每次生成摘要都会作为特殊事件写进时间线，跨窗口永久可见；注入范围受「特殊事件注入窗口（天）」控制，且只在上下文较短（新窗口）时注入',type:'switch',def:false},
+      {key:'summary_event_inject_enabled',label:'摘要事件注入',desc:'开启=只在上下文较短（新窗口）时注入摘要事件，长对话跳过避免重复；关闭=任何上下文都不注入摘要事件（摘要仍会写入时间线）',type:'switch',def:true},
+      {key:'summary_event_short_ctx_msgs',label:'短上下文阈值（条）',desc:'「摘要事件注入」开启时生效：对话消息数不超过该值才算短上下文（新窗口）。填 0 表示不限制条数',type:'number',min:0,max:200},
       {key:'time_injection_enabled',label:'注入当前时间（动态）',desc:'给 AI 注入当前时间；关闭后完全不注入（缓存最稳）',type:'switch'},
       {key:'time_tag_interval_minutes',label:'时间更新间隔（分钟）',desc:'时间标签多久更新一次，间隔内所有请求时间相同，越大越利于缓存命中',type:'number',min:1,max:120},
       {key:'time_event_injection_enabled',label:'时间标记写入对话（永久）',desc:'开启后按「时间更新间隔」把当前时间作为特殊事件写入时间线，永久留在上下文；只保留最新一条，不刷屏',type:'switch',def:false},
-      {key:'timeline_event_window_days',label:'特殊事件注入窗口（天）',desc:'只把最近 N 天内的特殊事件（唤醒/Bark/时间标记/记忆浮现等）注入上下文；填 0 表示全部注入。历史事件越多越吃上下文，建议 3~7 天',type:'number',min:0,max:90}
+      {key:'timeline_event_window_days',label:'特殊事件注入窗口（天）',desc:'只把最近 N 天内的特殊事件（唤醒/Bark/时间标记/记忆浮现等）注入上下文；填 0 表示不注入任何特殊事件。历史事件越多越吃上下文，建议 3~7 天',type:'number',min:0,max:90}
     ]},
-    {title:'模型与衰减',fields:[
+    {title:'高级 · 存储',icon:'⚙️',fields:[
+      {key:'dedup_threshold',label:'去重阈值',desc:'相似度超过此值视为重复，更新重要性而非新增',type:'range',min:0.5,max:1,step:0.01},
+      {key:'conflict_threshold',label:'覆盖阈值',desc:'相似度超过此值则旧记忆沉底（superseded）',type:'range',min:0.5,max:1,step:0.01},
       {key:'time_decay_days',label:'时间衰减（天）',desc:'超过此天数的记忆权重降低',type:'range',min:1,max:90,step:1},
       {key:'embedding_model',label:'嵌入模型',desc:'向量化模型名称（修改后需重启服务生效）',type:'text'}
     ]}
   ];
   let html='';
-  groups.forEach(g=>{
-    html+='<div class="config-group"><div class="group-title" onclick="toggleConfigGroup(this)"><span>'+g.title+'</span><span class="group-arrow">▶</span></div><div class="group-body" style="display:none">';
+  groups.forEach((g,gi)=>{
+    const cfgOpen=gi===0;
+    let cfgOnCount=0;
+    g.fields.forEach(function(f){ if(f.type==='switch'&&cfgFieldVal(cfg,f))cfgOnCount++; });
+    html+='<div class="config-group'+(cfgOpen?' open':'')+'"><div class="group-title" onclick="toggleConfigGroup(this)"><span class="gt-left"><span class="gt-name">'+g.title+'</span><span class="gt-count">'+g.fields.length+' 项</span></span><span class="gt-right"><span class="gt-status">'+(cfgOnCount?('已开 '+cfgOnCount):'')+'</span><span class="group-arrow">▶</span></span></div><div class="group-body" style="display:'+(cfgOpen?'block':'none')+'">';
     g.fields.forEach(f=>{
-      let val=cfg[f.key]!==undefined?cfg[f.key]:(f.def!==undefined?f.def:'');
-      if(val===''&&f.defKey&&cfg[f.defKey]!==undefined) val=cfg[f.defKey];
+      let val=cfgFieldVal(cfg,f);
       if(f.type==='switch'){
         html+='<div class="switch-row"><div><div class="ci-label">'+f.label+'</div><div class="ci-desc">'+f.desc+'</div></div><label class="switch"><input type="checkbox" id="cfg-'+f.key+'" '+(val?'checked':'')+'><span class="slider"></span></label></div>';
       }else{
-        html+='<div class="config-item"><div class="ci-label">'+f.label+'</div><div class="ci-desc">'+f.desc+'</div>';
-        if(f.type==='range'){
-        const unlimited = f.unlimited && (!val || val>=f.max);
-        const shownVal = unlimited ? f.max : val;
-        const shownLabel = unlimited ? '无限制' : val;
-        html+='<div class="range-wrap"><input type="range" id="cfg-'+f.key+'" min="'+f.min+'" max="'+f.max+'" step="'+f.step+'" value="'+shownVal+'" oninput="cfgRangeInput(\''+f.key+'\','+(f.unlimited?'true':'false')+')"><span class="range-val" id="cfgv-'+f.key+'">'+shownLabel+'</span></div>';
+        const isMulti=f.type==='multiselect';
+        html+='<div class="config-item'+(isMulti?' multi-item':'')+'"><div class="ci-text"><div class="ci-label">'+f.label+'</div><div class="ci-desc">'+f.desc+'</div></div>';
+        if(f.type==='range'||f.type==='number'){
+        html+='<input type="number" class="cfg-num" id="cfg-'+f.key+'" value="'+String(val)+'" min="'+(f.min||0)+'" max="'+(f.max!==undefined?f.max:'')+'" step="'+(f.step||'')+'">';
       }else if(f.type==='text'){
-        html+='<input type="text" id="cfg-'+f.key+'" value="'+String(val).replace(/"/g,'&quot;')+'">';
-      }else if(f.type==='number'){
-        html+='<input type="number" id="cfg-'+f.key+'" value="'+String(val)+'" min="'+(f.min||0)+'" max="'+(f.max!==undefined?f.max:'')+'">';
+        html+='<input type="text" class="cfg-text" id="cfg-'+f.key+'" value="'+String(val).replace(/"/g,'&quot;')+'">';
       }else if(f.type==='multiselect'){
         const cur=Array.isArray(val)?val:((f.def||[]).slice());
         html+='<div class="multi-group">';
@@ -808,12 +1189,13 @@ function renderConfig(cfg){
     html+='</div></div>';
   });
   el.innerHTML=html;
+  bindConfigDirty();
 }
 
 function collectOpenGroups(){
   const names=[];
   document.querySelectorAll('#config-form .config-group.open').forEach(function(g){
-    const t=g.querySelector('.group-title span');
+    const t=g.querySelector('.gt-name');
     if(t&&t.textContent)names.push(t.textContent);
   });
   return names;
@@ -821,7 +1203,7 @@ function collectOpenGroups(){
 function restoreOpenGroups(names){
   if(!names||!names.length)return;
   document.querySelectorAll('#config-form .config-group').forEach(function(g){
-    const t=g.querySelector('.group-title span');
+    const t=g.querySelector('.gt-name');
     const body=g.querySelector('.group-body');
     if(t&&body&&names.indexOf(t.textContent)>=0&&body.style.display==='none'){
       toggleConfigGroup(g.querySelector('.group-title'));
@@ -835,10 +1217,74 @@ function toggleConfigGroup(titleEl){
   titleEl.parentElement.classList.toggle('open',!isOpen);
 }
 
+function cfgFieldVal(cfg,f){
+  let v=cfg[f.key]!==undefined?cfg[f.key]:(f.def!==undefined?f.def:'');
+  if(v===''&&f.defKey&&cfg[f.defKey]!==undefined)v=cfg[f.defKey];
+  return v;
+}
+function cfgFilter(q){
+  q=(q||'').trim().toLowerCase();
+  const form=document.getElementById('config-form');
+  if(!form)return;
+  const groups=form.querySelectorAll('.config-group');
+  groups.forEach(function(g){
+    const body=g.querySelector('.group-body');
+    if(!body)return;
+    if(q){
+      let vis=0;
+      g.querySelectorAll('.config-item,.switch-row').forEach(function(it){
+        const show=it.textContent.toLowerCase().indexOf(q)>=0;
+        it.style.display=show?'':'none';
+        if(show)vis++;
+      });
+      g.style.display=vis?'':'none';
+      if(vis){ body.style.display='block'; g.classList.add('open'); }
+    }else{
+      g.style.display='';
+      g.querySelectorAll('.config-item,.switch-row').forEach(function(it){ it.style.display=''; });
+      const isFirst=groups[0]===g;
+      if(isFirst){ body.style.display='block'; g.classList.add('open'); }
+      else{ body.style.display='none'; g.classList.remove('open'); }
+    }
+  });
+  let anyVisible=false;
+  groups.forEach(function(g){ if(g.style.display!=='none')anyVisible=true; });
+  let empty=form.querySelector('.cfg-empty');
+  if(!empty){ empty=document.createElement('div'); empty.className='cfg-empty'; form.appendChild(empty); }
+  empty.style.display=(q&&!anyVisible)?'block':'none';
+  empty.textContent='没有匹配的配置项';
+}
+function setAllConfigGroups(open){
+  document.querySelectorAll('#config-form .config-group').forEach(function(g){
+    const body=g.querySelector('.group-body');
+    if(!body)return;
+    if(open){ body.style.display='block'; g.classList.add('open'); }
+    else{ body.style.display='none'; g.classList.remove('open'); }
+  });
+}
+var cfgDirty=false;
+function bindConfigDirty(){
+  const el=document.getElementById('config-form');
+  if(!el)return;
+  el.querySelectorAll('input').forEach(function(inp){
+    inp.addEventListener('input',cfgMarkDirty);
+    inp.addEventListener('change',cfgMarkDirty);
+  });
+}
+function cfgMarkDirty(){
+  cfgDirty=true;
+  const b=document.getElementById('cfg-save-btn');
+  if(b){ b.classList.add('dirty'); b.textContent='★ 保存修改'; }
+}
+function cfgResetDirty(){
+  cfgDirty=false;
+  const b=document.getElementById('cfg-save-btn');
+  if(b){ b.classList.remove('dirty'); b.textContent='保存全部修改'; }
+}
 async function saveConfig(){
   if(!configData)return;
   const updates={};
-  const fields=['idle_threshold_minutes','max_interval_minutes','auto_summary_enabled','memory_retrieval_enabled','context_injection_types','memory_retrieval_wake_enabled','memory_persist_on_surface_enabled','wake_memory_persist_on_surface_enabled','summary_surfacing_min_age_enabled','summary_surfacing_min_age_hours','retrieval_top_k','memory_query_window','memory_relevance_threshold','dedup_threshold','conflict_threshold','time_decay_days','keyword_search_enabled','embedding_model','memory_item_cooldown_minutes','memory_cooldown_minutes','summary_event_injection_enabled','summary_event_inject_enabled','summary_event_short_ctx_msgs','time_injection_enabled','time_tag_interval_minutes','time_event_injection_enabled','timeline_event_window_days','wake_query_window','wake_relevance_threshold','wake_top_k','wake_total_limit','wake_random_count','wake_repeat_window'];
+  const fields=['idle_threshold_minutes','max_interval_minutes','auto_summary_enabled','summary_enabled','moment_sync_enabled','memory_retrieval_window_days','memory_retrieval_enabled','context_injection_types','memory_retrieval_wake_enabled','memory_persist_on_surface_enabled','wake_memory_persist_on_surface_enabled','summary_surfacing_min_age_enabled','summary_surfacing_min_age_hours','retrieval_top_k','memory_query_window','memory_relevance_threshold','dedup_threshold','conflict_threshold','time_decay_days','keyword_search_enabled','embedding_model','memory_item_cooldown_minutes','memory_cooldown_minutes','summary_event_injection_enabled','summary_event_inject_enabled','summary_event_short_ctx_msgs','time_injection_enabled','time_tag_interval_minutes','time_event_injection_enabled','timeline_event_window_days','wake_query_window','wake_relevance_threshold','wake_top_k','wake_total_limit','wake_random_count','wake_repeat_window'];
   fields.forEach(key=>{
     const el=document.getElementById('cfg-'+key);
     if(!el){
@@ -854,7 +1300,7 @@ async function saveConfig(){
   try{
     const r=await fetch(ADMIN_API + '/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(updates)});
     const j=await r.json();
-    if(j.success){toast('配置已保存');configData=j.config;}
+    if(j.success){toast('配置已保存');configData=j.config;cfgResetDirty();}
     else toast('保存失败: '+(j.error||''));
   }catch(e){toast('网络错误: '+e.message)}
 }
@@ -1024,7 +1470,9 @@ function filterMemByKeyword(kw,el){
   const input=document.getElementById('mem-search');
   if(input.value.trim()===kw){input.value='';}
   else{input.value=kw;}
-  loadMemories();
+  closeCloudDrawer();
+  if(memView==='cloud'||memView==='letter'){switchMemView('list');}
+  else{loadMemories();}
 }
 let memSearchTimer=null;
 let memSearchSeq=0;
@@ -1032,6 +1480,20 @@ function scheduleMemSearch(){
   clearTimeout(memSearchTimer);
   memSearchTimer=setTimeout(loadMemories,300);
 }
+function skeletonHtml(lines){
+  let h='<div class="skeleton">';
+  for(let i=0;i<lines;i++){h+='<div class="sk-line" style="width:'+(90-i*8)+'%"></div>';}
+  return h+'</div>';
+}
+
+function memImpInput(input,id){
+  const v=parseFloat(input.value)||0;
+  const pct=Math.round(v*100);
+  const val=document.getElementById('impv-'+id);
+  if(val)val.textContent=v.toFixed(2);
+  input.style.background='linear-gradient(to right,var(--accent) 0%,var(--accent) '+pct+'%,#ece4de '+pct+'%,#ece4de 100%)';
+}
+
 async function loadMemories(){
   const seq=++memSearchSeq;
   const el=document.getElementById('mem-list');
@@ -1040,7 +1502,7 @@ async function loadMemories(){
   if(search)url+='&search='+encodeURIComponent(search);
   const sortBy=document.getElementById('mem-sort').value;
   if(sortBy)url+='&sortBy='+encodeURIComponent(sortBy);
-  if(!el.querySelector('.mem-item'))el.innerHTML='<div class="loading">加载中...</div>';
+  if(!el.querySelector('.mem-item'))el.innerHTML=skeletonHtml(6);
   else el.style.opacity='0.45';
   try{
     const r=await fetch(url);
@@ -1056,17 +1518,17 @@ async function loadMemories(){
       return '<div class="mem-swipe-item" id="mem-swipe-'+m.id+'" data-mid="'+m.id+'">'+
         '<div class="swipe-sink-actions"><button class="swipe-sink-btn" onclick="sinkMem(\''+m.id+'\')">沉底</button></div>'+
         '<div class="mem-item" id="mem-item-'+m.id+'"><div class="mem-meta">'+
-        '<span class="mem-tag '+(m.active?'active':'inactive')+'">'+(m.active?'活跃':'已归档')+'</span>'+
+        (m.active?'<span class="mem-dot" title="活跃"></span>':'<span class="mem-tag inactive">已归档</span>')+
         ((m.keywords||[]).slice(0,4).map(function(kw){return '<span class="mem-tag kw" onclick="event.stopPropagation();filterMemByKeyword(this.textContent,this)">'+kw+'</span>'}).join(''))+
         '<span class="mem-time">'+time+'</span>'+
         
         '</div><div class="mem-content">'+(m.content||'')+'</div>'+
-        '<div class="mem-actions" style="align-items:center;gap:8px;flex-wrap:nowrap;justify-content:space-between">'+
-        '<input type="range" class="mem-imp-slider" min="0" max="1" step="0.05" value="'+(m.importance||0.5)+'" style="flex:1;min-width:70px" oninput="document.getElementById(\'impv-'+m.id+'\').textContent=parseFloat(this.value).toFixed(2)" onchange="updateMemImportance(\''+m.id+'\',this.value)" title="重要性: '+((m.importance||0.5).toFixed(2))+'">'+
-        '<span id="impv-'+m.id+'" style="font-size:11px;color:var(--tab-active);font-weight:600;min-width:30px;text-align:center;flex-shrink:0">'+(m.importance||0.5).toFixed(2)+'</span>'+
-        '<div style="display:flex;gap:6px;flex-shrink:0">'+
-        '<button class="btn btn-sm btn-edit" onclick="openEditMem(\''+m.id+'\')">编辑</button>'+
-        '<button class="btn btn-sm btn-delete" onclick="deleteMem(\''+m.id+'\')">删除</button>'+
+        '<div class="mem-actions">'+
+        '<div class="mem-imp-row"><span class="mem-imp-label">重要度</span>'+
+        '<input type="range" class="mem-imp-slider" min="0" max="1" step="0.05" value="'+(m.importance||0.5)+'" style="background:linear-gradient(to right,var(--accent) 0%,var(--accent) '+Math.round((m.importance||0.5)*100)+'%,#ece4de '+Math.round((m.importance||0.5)*100)+'%,#ece4de 100%)" oninput="memImpInput(this,\''+m.id+'\')" onchange="updateMemImportance(\''+m.id+'\',this.value)" title="重要性: '+((m.importance||0.5).toFixed(2))+'">'+
+        '<span id="impv-'+m.id+'" class="mem-imp-val">'+(m.importance||0.5).toFixed(2)+'</span>'+
+        '<button class="mem-act-btn edit" onclick="openEditMem(\''+m.id+'\')">编辑</button>'+
+        '<button class="mem-act-btn del" onclick="deleteMem(\''+m.id+'\')">删除</button>'+
         '</div></div></div></div>';
     }).join('');
   }catch(e){
@@ -1082,10 +1544,18 @@ function updateMemItemInDom(id, data){
   if(data.content!==undefined){var c=el.querySelector('.mem-content');if(c)c.textContent=data.content;}
   if(data.importance!==undefined){
     var slider=el.querySelector('.mem-imp-slider');
-    if(slider){slider.value=data.importance;slider.title='重要性: '+data.importance.toFixed(2);}
+    if(slider){slider.value=data.importance;slider.title='重要性: '+data.importance.toFixed(2);memImpInput(slider,id);}
     var lbl=document.getElementById('impv-'+id);
     if(lbl)lbl.textContent=data.importance.toFixed(2);
   }
+}
+
+function editMemImp(input){
+  const v=parseFloat(input.value)||0;
+  const pct=Math.round(v*100);
+  const val=document.getElementById('edit-mem-imp-val');
+  if(val)val.textContent=v.toFixed(2);
+  input.style.background='linear-gradient(to right,var(--accent) 0%,var(--accent) '+pct+'%,#e8e0d8 '+pct+'%,#e8e0d8 100%)';
 }
 
 function openEditMem(id){
@@ -1098,7 +1568,7 @@ function openEditMem(id){
     document.getElementById('edit-mem-content').value=mem.content||'';
     const imp=mem.importance||0.5;
     document.getElementById('edit-mem-importance').value=imp;
-    document.getElementById('edit-mem-imp-val').textContent=imp;
+    editMemImp(document.getElementById('edit-mem-importance'));
     openModal('editMemModal');
   }).catch(()=>toast('加载失败'));
 }
@@ -1213,8 +1683,7 @@ function memSwipeEnd(){
   const dx=ctx.dx||0;
   ctx.item.style.transform='';
   closeMemSwipes(ctx.wrap);
-  if(dx<=-80){sinkMem(ctx.wrap.dataset.mid);}
-  else if(dx<=-40){ctx.wrap.classList.add('swiped');}
+  if(dx<=-55){ctx.wrap.classList.add('swiped');}
   else{ctx.wrap.classList.remove('swiped');}
 }
 
@@ -1244,6 +1713,597 @@ async function sinkMem(id){
 // ============ Logs / Tab 4 ============
 let logsRefreshTimer = null;
 
+// ============ Tab 5: 上下文压缩 ============
+let compactionPlan = null;
+let compactionCutPoints = [];
+let ccExpanded = new Set();
+let ccGenerating = new Set();
+let ccGeneratingAll = false;
+let ccSummaryOpen = new Set();
+let ccDraft = {};
+let ccHistoryOpen = new Set();
+let ccMsgBySig = {};
+let ccMsgsHtmlCache = {};
+let ccMsgFetching = false;
+let ccMsgFetchDone = false;
+let ccPollTimer = null;
+
+function escHtml(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function fmtCcNum(n){n=Number(n)||0;if(n>=10000)return (n/10000).toFixed(1).replace(/\.0$/,'')+'万';return String(n);}
+
+function loadCompactionPreview(){
+  const el=document.getElementById('compaction-chunks');
+  const sum=document.getElementById('compaction-summary');
+  const msg=document.getElementById('compaction-msg');
+  if(el) el.innerHTML='<div class="loading">计算中...</div>';
+  if(sum) sum.textContent='';
+  if(msg) msg.textContent='';
+  fetch(ADMIN_API + '/context-compaction/preview').then(function(r){return r.json()}).then(function(d){
+    compactionPlan=d;
+    compactionCutPoints=(d.chunks||[]).map(function(c){return c.lastIdx+1;});
+    renderCompaction();
+  }).catch(function(e){
+    if(el) el.innerHTML='<div class="empty">加载失败: '+e.message+'</div>';
+  });
+}
+
+function renderCompaction(){
+  const el=document.getElementById('compaction-chunks');
+  const sum=document.getElementById('compaction-summary');
+  if(!el) return;
+  const d=compactionPlan;
+  if(!d){ el.innerHTML='<div class="empty">暂无数据</div>'; return; }
+  const t=d.totals;
+  const msg=document.getElementById('compaction-msg');
+  if(msg) msg.textContent='';
+  const pageScrollY=(window.pageYOffset!==undefined)?window.pageYOffset:(document.documentElement.scrollTop||0);
+  const innerScrolls={};
+  (d.chunks||[]).forEach(function(c){
+    const box=document.getElementById('cc-msg-scroll-'+c.index);
+    if(box) innerScrolls[c.index]=box.scrollTop;
+  });
+  let html='';
+  if(!t || t.chunkCount===0){
+    html+='<div class="empty">当前消息数未达到压缩阈值（'+(d.config?d.config.compaction_min_messages:'')+' 条），或全部保留原文，无需压缩。</div>';
+  }
+  const ccList=(d.chunks||[]);
+  const ccCount=Math.min(ccList.length, compactionCutPoints.length);
+  for(let i=0;i<ccCount;i++){
+    const c=ccList[i]||{};
+    const start=i===0?1:(compactionCutPoints[i-1]||0)+1;
+    const end=compactionCutPoints[i]||start;
+    const count=end-start+1;
+    const generating=ccGenerating.has(c.index)||(ccGeneratingAll&&!c.cached);
+    const queued=ccGeneratingAll&&!c.cached&&!ccGenerating.has(c.index);
+    const expanded=ccExpanded.has(c.index);
+    const badge=generating
+      ? '<span class="cc-badge gen"><span class="cc-spin"></span>'+(queued?'排队中':'生成中')+'</span>'
+      : (c.cached
+        ? '<span class="cc-badge done">✓ 已缓存</span>'
+        : '<span class="cc-badge todo">待生成</span>');
+    html+='<div class="card cc-chunk'+(c.cached?'':' pending')+'">'
+      +'<div class="cc-chunk-head" onclick="toggleCcExpand('+c.index+')">'
+      +'<span class="cc-chunk-title">'+(expanded?'▾':'▸')+' 块 #'+c.index+'</span>'
+      +'<span class="cc-chunk-count">'+count+' 条</span>'
+      +badge
+      +'<span class="cc-chunk-chars">'+fmtCcNum(c.chars)+' 字</span>'
+      +'</div>'
+      +'<div class="cc-meta">'+(c.startTime||'?')+' ~ '+(c.endTime||'?')+'</div>'
+      +'<div class="cc-preview">'+escHtml(c.head||'')+'</div>'
+      +'<div class="cc-controls">'
+      +'<span class="cc-label">开头</span>'
+      +'<input class="cc-num" type="number" min="1" max="'+d.compactCount+'" value="'+start+'"'+(generating?' disabled':'')+' oninput="ccNumLiveCheck(this,'+d.compactCount+')" onchange="updateCompactionBoundary('+i+',0,this.value)" onblur="clampCcInput(this,'+i+',0,'+d.compactCount+')">'
+      +'<span class="cc-label">结尾</span>'
+      +'<input class="cc-num" type="number" min="1" max="'+d.compactCount+'" value="'+end+'"'+(generating?' disabled':'')+' oninput="ccNumLiveCheck(this,'+d.compactCount+')" onchange="updateCompactionBoundary('+i+',1,this.value)" onblur="clampCcInput(this,'+i+',1,'+d.compactCount+')">'
+      +(generating
+        ? ''
+        : '<button class="cc-btn '+(c.cached?'secondary':'primary')+'" onclick="generateCompactionChunk('+c.index+')">'+(c.cached?'↻ 重新生成':'✦ 生成摘要')+'</button>')
+      +(c.cached&&!generating
+        ? '<button class="cc-btn secondary'+(c.forceReplaced?' on':'')+'" onclick="toggleCcForce('+c.index+')">'+(c.forceReplaced?'✓ 已替换':'⇄ 替换')+'</button>'
+        : '')
+      +'</div>'
+      +(expanded?renderCcMessagesLazy(c):'')
+      +(c.cached&&c.summary
+        ? '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">'
+          +'<div class="cc-summary-toggle" onclick="toggleCcSummary('+c.index+')">'+(ccSummaryOpen.has(c.index)?'▾ 收起摘要':'▸ 查看摘要')+(c.history&&c.history.length?'（共 '+(c.history.length+1)+' 版）':'')+'</div>'
+          +(ccSummaryOpen.has(c.index)
+            ? '<div class="cc-summary-open">'+renderCcSummaryEditor(c)+renderCcHistory(c)+'</div>'
+            : '')
+          +'</div>'
+        : '')
+      +'</div>';
+  }
+  if(d.uncovered && d.uncovered.count>0){
+    html+='<div class="cc-uncovered">'
+      +'<div class="cc-uncovered-ic">📥</div>'
+      +'<div class="cc-uncovered-tx"><b>未覆盖 · 待纳入分块</b><br>第 '+d.uncovered.startIdx+'–'+d.uncovered.endIdx+' 条 · '+d.uncovered.count+' 条'+(d.uncovered.startTime?'（'+d.uncovered.startTime+' ~ '+d.uncovered.endTime+'）':'')+'</div>'
+      +'</div>';
+  }
+  if(sum){
+    sum.innerHTML='<div class="cc-stats">'
+      +'<div class="cc-stat-main"><div class="l">摘要后约</div><div class="v">'+fmtCcNum(t.estCompressedChars)+'<span class="unit">字</span></div><div class="d">压缩后预计保留的上下文规模</div></div>'
+      +'<div class="cc-stat-grid">'
+      +'<div class="cc-stat"><div class="v">'+d.totalCompressible+'</div><div class="l">对话条数</div></div>'
+      +'<div class="cc-stat"><div class="v">'+t.chunkCount+'</div><div class="l">分块</div></div>'
+      +'<div class="cc-stat"><div class="v">'+t.cachedCount+'</div><div class="l">已缓存</div></div>'
+      +'<div class="cc-stat"><div class="v">'+fmtCcNum(t.totalChars)+'</div><div class="l">原始字数</div></div>'
+      +'</div>'
+      +'</div>';
+  }
+  el.innerHTML=html;
+  if(window.scrollTo) window.scrollTo(0,pageScrollY);
+  (d.chunks||[]).forEach(function(c){
+    const box=document.getElementById('cc-msg-scroll-'+c.index);
+    if(box && innerScrolls[c.index]!==undefined) box.scrollTop=innerScrolls[c.index];
+  });
+  const genAllBtn=document.getElementById('cc-genall-btn');
+  if(genAllBtn){
+    const pending=(d.chunks||[]).filter(function(c){return !c.cached;}).length;
+    genAllBtn.disabled=ccGeneratingAll||pending===0;
+    const label=genAllBtn.querySelector('.cc-genall-label');
+    const badge=genAllBtn.querySelector('.cc-genall-badge');
+    if(label) label.textContent=ccGeneratingAll
+      ? '正在生成'+(pending>0?' '+pending+' 块':'')+'...'
+      : (pending>0?'✦ 生成全部未生成':'全部已生成');
+    if(badge){
+      if(ccGeneratingAll||pending===0){ badge.style.display='none'; badge.textContent=''; }
+      else { badge.style.display='inline-flex'; badge.textContent=pending; }
+    }
+  }
+  const expandAllBtn=document.getElementById('cc-expandall-btn');
+  if(expandAllBtn && d.chunks && d.chunks.length){
+    const allOpen=d.chunks.every(function(c){return ccExpanded.has(c.index);});
+    expandAllBtn.textContent=allOpen?'全部收起':'全部展开';
+  }
+  const addBtn=document.getElementById('cc-add-btn');
+  const remBtn=document.getElementById('cc-remove-btn');
+  const rstBtn=document.getElementById('cc-reset-btn');
+  const saveBtn=document.getElementById('cc-save-btn');
+  if(addBtn){
+    addBtn.disabled=ccGeneratingAll||d.compactCount<=0||!(d.uncovered&&d.uncovered.count>0);
+    remBtn.disabled=ccGeneratingAll||d.compactCount<=0||!d.cutPointsActive;
+    rstBtn.disabled=ccGeneratingAll||d.compactCount<=0||!d.cutPointsActive;
+    if(saveBtn) saveBtn.disabled=ccGeneratingAll||d.compactCount<=0;
+  }
+}
+
+function ccBlockOp(action){
+  resetCcMsgCache();
+  const msg=document.getElementById('compaction-msg');
+  if(msg) msg.textContent='处理中...';
+  fetch(ADMIN_API + '/context-compaction/blocks',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({action:action})
+  }).then(function(r){return r.json()}).then(function(d){
+    if(d && d.error) throw new Error(d.error);
+    if(d && d.ok===false){ if(msg) msg.textContent=(d.message||'操作未完成'); loadCompactionPreview(); return; }
+    if(msg){
+      if(action==='reset') msg.textContent='已恢复自动分块。';
+      else if(action==='add') msg.textContent=d.fixed?(d.message||'已固定边界。'):('已添加一块（约 '+d.addedCount+' 条），旧块边界不变。');
+      else if(action==='remove') msg.textContent='已移除最后一块，内容退回未覆盖区。';
+    }
+    loadCompactionPreview();
+  }).catch(function(e){
+    if(msg) msg.textContent='操作失败: '+e.message;
+  });
+}
+
+function ccNumLiveCheck(input, max){
+  const v=Number(input.value);
+  const ok=!input.value||(v>=1&&v<=Number(max));
+  input.classList.toggle('warn', !ok);
+}
+
+function clampCcInput(input, i, field, max){
+  const raw=Number(input.value);
+  const clamped=Math.min(Math.max(1, Math.floor(raw)||1), Number(max)||1);
+  if(String(clamped)!==String(input.value)){
+    input.value=clamped;
+    const msg=document.getElementById('compaction-msg');
+    if(msg){ setTimeout(function(){ msg.textContent='输入超出范围，已自动修正为第 '+clamped+' 条。'; }, 0); }
+  }
+  updateCompactionBoundary(i, field, input.value);
+}
+
+function updateCompactionBoundary(i, field, raw){
+  const v=Math.max(1, Math.floor(Number(raw)||1));
+  const d=compactionPlan;
+  if(!d) return;
+  const ends=compactionCutPoints;
+  if(field===1){
+    // 编辑第 i 块结尾：改大可自动吞并后面相邻的块（合并）
+    const prev=i===0?0:(ends[i-1]||0);
+    const clamped=Math.min(Math.max(v, prev+1), d.compactCount);
+    ends[i]=clamped;
+    for(let j=ends.length-1;j>i;j--){ if(ends[j]<=clamped) ends.splice(j,1); }
+  }else{
+    // 编辑第 i 块开头（即上一块结尾+1）：改到超过当前块结尾时自动吞并当前块
+    if(i===0) return;
+    const prev=i===1?0:(ends[i-2]||0);
+    const clamped=Math.min(Math.max(v, prev+1), d.compactCount);
+    if(clamped>ends[i]){
+      ends[i-1]=clamped-1;
+      for(let j=ends.length-1;j>=i;j--){ if(ends[j]<=clamped-1) ends.splice(j,1); }
+    }else{
+      ends[i-1]=clamped-1;
+    }
+  }
+  renderCompaction();
+}
+
+function saveCompactionBoundaries(){
+  const msg=document.getElementById('compaction-msg');
+  if(!compactionCutPoints.length){ if(msg) msg.textContent='当前没有可保存的边界。'; return; }
+  const cut=compactionCutPoints.map(function(e){return e-1;});
+  fetch(ADMIN_API + '/context-compaction/overrides',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({cutPoints:cut})
+  }).then(function(r){return r.json()}).then(function(d){
+    if(d && d.error) throw new Error(d.error);
+    if(msg) msg.textContent='边界已保存，已按新边界重新分块。';
+    resetCcMsgCache();
+    loadCompactionPreview();
+  }).catch(function(e){
+    if(msg) msg.textContent='保存失败: '+e.message;
+  });
+}
+
+function generateCompactionChunk(idx){
+  const msg=document.getElementById('compaction-msg');
+  ccGenerating.add(idx);
+  renderCompaction();
+  if(msg) msg.textContent='块 #'+idx+'：正在生成摘要（约几十秒），完成后自动刷新…';
+  fetch(ADMIN_API + '/context-compaction/generate',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({chunkIndex:idx})
+  }).then(function(r){return r.json()}).then(function(d){
+    ccGenerating.delete(idx);
+    if(d && d.error){ if(msg) msg.textContent='生成失败: '+d.error; renderCompaction(); return; }
+    if(msg) msg.textContent='块 #'+idx+' 摘要已生成（'+d.length+' 字），下次请求生效。';
+    loadCompactionPreview();
+  }).catch(function(e){
+    ccGenerating.delete(idx);
+    renderCompaction();
+    if(msg) msg.textContent='生成失败: '+e.message;
+  });
+}
+
+
+function renderCcHistory(c){
+  const h=c.history||[];
+  if(!h.length) return '';
+  const open=ccHistoryOpen.has(c.index);
+  let html='<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px">'
+    +'<div style="font-size:12px;color:var(--tab-active);cursor:pointer;user-select:none;display:inline-flex;align-items:center;gap:4px" onclick="toggleCcHistory('+c.index+')">'+(open?'▾ 收起历史':'▸ 历史版本（'+h.length+' 份，新→旧）')+'</div>';
+  if(!open) return html+'</div>';
+  h.forEach(function(v){
+    let t='未知时间';
+    if(v.generatedAt){ try{ t=new Date(v.generatedAt).toLocaleString(); }catch(e){} }
+    html+='<div style="margin-bottom:8px;border:1px solid var(--border);border-radius:8px;padding:8px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">'
+      +'<span style="font-size:11px;color:var(--text3)">'+t+(v.mode==='edited'?' · 手动编辑':(v.mode==='auto'?' · 自动':' · 手动'))+'</span>'
+      +'<div style="display:flex;gap:6px;flex-shrink:0">'
+      +'<button class="cc-btn secondary" onclick="restoreCompactionSummary('+c.index+','+v.index+')">恢复此版</button>'
+      +'<button class="cc-btn danger" onclick="deleteCcHistoryVersion('+c.index+','+v.index+')">删除</button>'
+      +'</div>'
+      +'</div>'
+      +'<div style="font-size:12px;color:var(--text);white-space:pre-wrap;line-height:1.6;max-height:160px;overflow-y:auto;background:rgba(0,0,0,0.02);border-radius:6px;padding:8px">'+escHtml(v.summary)+'</div>'
+      +'</div>';
+  });
+  return html+'</div>';
+}
+
+function restoreCompactionSummary(idx, hi){
+  const msg=document.getElementById('compaction-msg');
+  if(msg) msg.textContent='正在恢复块 #'+idx+' 的历史版本...';
+  fetch(ADMIN_API + '/context-compaction/restore',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({chunkIndex:idx,historyIndex:hi})
+  }).then(function(r){return r.json()}).then(function(d){
+    if(d && d.error){ if(msg) msg.textContent='恢复失败: '+d.error; return; }
+    ccDraft[idx]=undefined;
+    const chunk=ccFindChunk(idx);
+    if(chunk && chunk.history && chunk.history[hi]){
+      const target=chunk.history[hi];
+      const cur={ summary:chunk.summary, generatedAt:chunk.generatedAt, mode:chunk.mode, manual:chunk.manual };
+      chunk.history=ccRenumberHistory([cur].concat(chunk.history.filter(function(h,i){return i!==hi;})));
+      chunk.summary=target.summary;
+      chunk.generatedAt=target.generatedAt;
+      chunk.mode=target.mode;
+      chunk.manual=target.manual;
+      chunk.cached=true;
+    }
+    if(msg) msg.textContent='块 #'+idx+' 已恢复历史版本（'+d.length+' 字），下次请求生效。';
+    renderCompaction();
+  }).catch(function(e){
+    if(msg) msg.textContent='恢复失败: '+e.message;
+  });
+}
+
+function toggleCcHistory(idx){
+  if(ccHistoryOpen.has(idx)) ccHistoryOpen.delete(idx); else ccHistoryOpen.add(idx);
+  renderCompaction();
+}
+
+function deleteCcHistoryVersion(idx, hi){
+  if(!confirm('删除这份历史版本？删除后不可恢复。')) return;
+  const msg=document.getElementById('compaction-msg');
+  if(msg) msg.textContent='正在删除块 #'+idx+' 的历史版本...';
+  fetch(ADMIN_API + '/context-compaction/history/delete',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({chunkIndex:idx,historyIndex:hi})
+  }).then(function(r){return r.json()}).then(function(d){
+    if(d && d.error){ if(msg) msg.textContent='删除失败: '+d.error; return; }
+    const chunk=ccFindChunk(idx);
+    if(chunk && chunk.history){
+      chunk.history=ccRenumberHistory(chunk.history.filter(function(h,i){return i!==hi;}));
+    }
+    if(msg) msg.textContent='已删除一份历史版本，剩余 '+d.remaining+' 份。';
+    renderCompaction();
+  }).catch(function(e){
+    if(msg) msg.textContent='删除失败: '+e.message;
+  });
+}
+
+function toggleCcForce(idx){
+  const chunk=ccFindChunk(idx);
+  if(!chunk) return;
+  const next=!chunk.forceReplaced;
+  const msg=document.getElementById('compaction-msg');
+  if(msg) msg.textContent=next?'正在设置块 #'+idx+' 替换...':'正在取消块 #'+idx+' 的替换...';
+  fetch(ADMIN_API + '/context-compaction/force',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({chunkIndex:idx,on:next})
+  }).then(function(r){return r.json()}).then(function(d){
+    if(d && d.error){ if(msg) msg.textContent='设置失败: '+d.error; return; }
+    chunk.forceReplaced=next;
+    if(msg) msg.textContent=next?'块 #'+idx+' 已设为「替换」，下次请求生效。':'块 #'+idx+' 已取消替换。';
+    renderCompaction();
+  }).catch(function(e){
+    if(msg) msg.textContent='设置失败: '+e.message;
+  });
+}
+
+function toggleCcSummary(idx){
+  if(ccSummaryOpen.has(idx)) ccSummaryOpen.delete(idx); else ccSummaryOpen.add(idx);
+  renderCompaction();
+}
+
+function ccSummaryValue(c){
+  return (ccDraft[c.index]!==undefined)?ccDraft[c.index]:c.summary;
+}
+
+function ccFindChunk(idx){
+  return ((compactionPlan && compactionPlan.chunks)||[]).find(function(x){return x.index===idx;});
+}
+
+function ccRenumberHistory(h){
+  return h.map(function(x,i){ return { index:i, summary:x.summary, generatedAt:x.generatedAt, mode:x.mode, manual:x.manual }; }).slice(0,8);
+}
+
+function renderCcSummaryEditor(c){
+  const cur=ccSummaryValue(c)||'';
+  return '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">'
+    +'<span style="font-size:11px;color:var(--text3)">可直接编辑，点「保存修改」生效 · <span id="cc-edit-count-'+c.index+'">'+cur.length+'</span> 字</span>'
+    +'<button class="cc-btn secondary" onclick="openCcEditModal('+c.index+')" title="放大编辑">⤢ 放大</button>'
+    +'</div>'
+    +'<textarea id="cc-edit-sel-'+c.index+'" rows="8" oninput="ccDraft['+c.index+']=this.value;updateCcCharCount('+c.index+')" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;font-family:monospace;line-height:1.6;resize:vertical;margin-top:6px">'+escHtml(cur)+'</textarea>'
+    +'<div style="display:flex;gap:6px;margin-top:6px">'
+    +'<button class="cc-btn primary" onclick="saveCcSummaryEdit('+c.index+')">保存修改</button>'
+    +'<button class="cc-btn secondary" onclick="revertCcSummaryDraft('+c.index+')">还原</button>'
+    +'</div>';
+}
+
+function updateCcCharCount(idx){
+  const ta=document.getElementById('cc-edit-sel-'+idx);
+  const cnt=document.getElementById('cc-edit-count-'+idx);
+  if(ta && cnt) cnt.textContent=ta.value.length;
+}
+
+function saveCcSummaryEdit(idx){
+  const ta=document.getElementById('cc-edit-sel-'+idx);
+  if(!ta) return;
+  saveCcSummaryText(idx, ta.value);
+}
+
+let ccEditModalIdx=null;
+function saveCcSummaryText(idx, text){
+  if(!text.trim()){ toast('摘要内容不能为空'); return; }
+  const msg=document.getElementById('compaction-msg');
+  if(msg) msg.textContent='正在保存块 #'+idx+' 的摘要修改...';
+  fetch(ADMIN_API + '/context-compaction/update',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({chunkIndex:idx,summary:text})
+  }).then(function(r){return r.json()}).then(function(d){
+    if(d && d.error){ if(msg) msg.textContent='保存失败: '+d.error; return; }
+    ccDraft[idx]=undefined;
+    ccSummaryOpen.add(idx);
+    closeModal('ccEditModal');
+    ccEditModalIdx=null;
+    const chunk=ccFindChunk(idx);
+    if(chunk){
+      const cur={ summary:chunk.summary, generatedAt:chunk.generatedAt, mode:chunk.mode, manual:chunk.manual };
+      chunk.history=ccRenumberHistory([cur].concat(chunk.history||[]));
+      chunk.summary=text;
+      chunk.generatedAt=new Date().toISOString();
+      chunk.mode='edited';
+      chunk.manual=true;
+      chunk.cached=true;
+    }
+    if(msg) msg.textContent='块 #'+idx+' 摘要已保存修改（'+d.length+' 字），下次请求生效。';
+    renderCompaction();
+  }).catch(function(e){
+    if(msg) msg.textContent='保存失败: '+e.message;
+  });
+}
+
+function openCcEditModal(idx){
+  const inline=document.getElementById('cc-edit-sel-'+idx);
+  const ta=document.getElementById('cc-edit-modal-sel');
+  if(!ta) return;
+  ta.value=inline ? inline.value : (((compactionPlan.chunks||[]).find(function(x){return x.index===idx;})||{}).summary||'');
+  ccEditModalIdx=idx;
+  openModal('ccEditModal');
+  setTimeout(function(){ ta.focus(); }, 80);
+}
+
+function closeCcEditModal(){
+  const idx=ccEditModalIdx;
+  if(idx!==null){
+    const inline=document.getElementById('cc-edit-sel-'+idx);
+    const ta=document.getElementById('cc-edit-modal-sel');
+    if(inline && ta){ inline.value=ta.value; ccDraft[idx]=ta.value; }
+  }
+  ccEditModalIdx=null;
+  closeModal('ccEditModal');
+}
+
+function saveCcEditModal(){
+  const ta=document.getElementById('cc-edit-modal-sel');
+  if(ccEditModalIdx===null || !ta) return;
+  saveCcSummaryText(ccEditModalIdx, ta.value);
+}
+
+function revertCcSummaryDraft(idx){
+  ccDraft[idx]=undefined;
+  renderCompaction();
+}
+
+function generateAllCompaction(){
+  if(ccGeneratingAll) return;
+  const msg=document.getElementById('compaction-msg');
+  ccGeneratingAll=true;
+  renderCompaction();
+  if(msg) msg.textContent='正在逐个生成未生成的块（每块需几十秒，进度自动刷新，可切到其他页）...';
+  if(ccPollTimer) clearInterval(ccPollTimer);
+  ccPollTimer=setInterval(function(){
+    fetch(ADMIN_API + '/context-compaction/preview').then(function(r){return r.json()}).then(function(d){
+      compactionPlan=d;
+      compactionCutPoints=(d.chunks||[]).map(function(c){return c.lastIdx+1;});
+      renderCompaction();
+    }).catch(function(){});
+  }, 4000);
+  fetch(ADMIN_API + '/context-compaction/generate',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({all:true})
+  }).then(function(r){return r.json()}).then(function(d){
+    stopCcPoll();
+    ccGeneratingAll=false;
+    if(d && d.error){ if(msg) msg.textContent='生成失败: '+d.error; renderCompaction(); return; }
+    const list=d.generated||[];
+    const okCount=list.filter(function(g){return !g.error}).length;
+    const errCount=list.length-okCount;
+    const errs=list.filter(function(g){return g.error}).map(function(g){return '#'+g.index}).join(',');
+    if(msg) msg.textContent='完成：成功 '+okCount+' 块'+(errCount?('，失败 '+errCount+' 块（'+errs+'）'):'')+'。';
+    loadCompactionPreview();
+  }).catch(function(e){
+    stopCcPoll();
+    ccGeneratingAll=false;
+    renderCompaction();
+    if(msg) msg.textContent='生成失败: '+e.message;
+  });
+}
+
+function stopCcPoll(){
+  if(ccPollTimer){ clearInterval(ccPollTimer); ccPollTimer=null; }
+}
+
+function toggleCcExpand(cidx){
+  if(ccExpanded.has(cidx)) ccExpanded.delete(cidx); else ccExpanded.add(cidx);
+  renderCompaction();
+}
+
+function toggleCcExpandAll(){
+  const d=compactionPlan;
+  if(!d || !d.chunks || !d.chunks.length) return;
+  const allOpen=d.chunks.every(function(c){return ccExpanded.has(c.index);});
+  d.chunks.forEach(function(c){ if(allOpen) ccExpanded.delete(c.index); else ccExpanded.add(c.index); });
+  if(!allOpen) ensureCcMessages();
+  renderCompaction();
+}
+
+function renderCcMessagesLazy(c){
+  const sig=c.signature;
+  if(c.msgs) ccMsgBySig[sig]=c.msgs;
+  if(ccMsgsHtmlCache[sig]) return ccMsgsHtmlCache[sig];
+  const msgs=ccMsgBySig[sig];
+  if(!msgs){
+    ensureCcMessages();
+    return '<div style="margin-top:8px;font-size:12px;color:var(--text3)">消息加载中...</div>';
+  }
+  ccMsgsHtmlCache[sig]=buildCcMessagesHtml(c, msgs);
+  return ccMsgsHtmlCache[sig];
+}
+
+function ensureCcMessages(){
+  if(ccMsgFetchDone || ccMsgFetching) return;
+  ccMsgFetching=true;
+  fetch(ADMIN_API + '/context-compaction/preview?includeMessages=1').then(function(r){return r.json()}).then(function(d){
+    ccMsgFetching=false;
+    ccMsgFetchDone=true;
+    (d.chunks||[]).forEach(function(c){ if(c.msgs) ccMsgBySig[c.signature]=c.msgs; });
+    renderCompaction();
+  }).catch(function(){
+    ccMsgFetching=false;
+  });
+}
+
+function resetCcMsgCache(){
+  ccMsgBySig={};
+  ccMsgsHtmlCache={};
+  ccMsgFetching=false;
+  ccMsgFetchDone=false;
+}
+
+function buildCcMessagesHtml(c, msgs){
+  if(!msgs.length) return '<div style="margin-top:8px;font-size:12px;color:var(--text3)">（该块无可展开内容）</div>';
+  const baseNum=(typeof c.firstIdx==='number'&&c.firstIdx>=0)?c.firstIdx:null;
+  let html='<div class="cc-msg-hint">左侧数字＝全局消息编号，「开头/结尾」边界就填这个编号。</div>'
+    +'<div class="cc-msg-list" id="cc-msg-scroll-'+c.index+'">';
+  msgs.forEach(function(m,i){
+    const marked=!!m.marked;
+    const num=baseNum===null?null:(baseNum+i+1);
+    html+='<div class="cc-msg-item'+(marked?' marked':'')+'">'
+      +'<div class="cc-msg-head">'
+      +'<span class="cc-msg-num">'+(num!==null?('# '+num+' · '):'')+(m.role==='user'?'她':'我')+'</span>'
+      +'<button class="cc-msg-mark'+(marked?' on':'')+'" onclick="toggleCcMark('+c.index+','+i+')" title="标记为重要内容，写摘要时重点保留">'+(marked?'★ 已标记':'☆ 标记')+'</button>'
+      +'</div>'
+      +'<div class="cc-msg-body">'+escHtml(m.content)+'</div>'
+      +'</div>';
+  });
+  html+='</div>';
+  return html;
+}
+
+function toggleCcMark(cidx, i){
+  const c=(compactionPlan.chunks||[]).find(function(x){return x.index===cidx;});
+  if(!c) return;
+  const msgs=c.msgs||ccMsgBySig[c.signature];
+  if(!msgs || !msgs[i]) return;
+  const m=msgs[i];
+  const next=!m.marked;
+  fetch(ADMIN_API + '/context-compaction/mark',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({key:m.key, marked:next})
+  }).then(function(r){return r.json()}).then(function(d){
+    if(d && d.error){ alert('标记失败: '+d.error); return; }
+    m.marked=next;
+    if(ccMsgsHtmlCache[c.signature]) delete ccMsgsHtmlCache[c.signature];
+    renderCompaction();
+  }).catch(function(e){ alert('标记失败: '+e.message); });
+}
+
+window.addEventListener('scroll',function(){
+  const b=document.getElementById('backTopBtn');
+  if(!b)return;
+  const y=(window.pageYOffset!==undefined)?window.pageYOffset:(document.documentElement.scrollTop||0);
+  if(y>window.innerHeight*0.8)b.classList.add('show');
+  else b.classList.remove('show');
+});
+function scrollToTop(){
+  window.scrollTo({top:0,behavior:'smooth'});
+}
 function switchTab(name){
   try{localStorage.setItem('adminTab',name)}catch(e){}
   document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
@@ -1252,6 +2312,7 @@ function switchTab(name){
   document.querySelector('.tab-item[data-tab="'+name+'"]').classList.add('active');
   if(name==='config') loadConfig();
   if(name==='memories'){loadMemStats();if(typeof memView!=='undefined'&&memView==='cloud')loadMemCloud();else loadMemories();}
+  if(name==='compaction') loadCompactionPreview();
   if(name==='logs'){startLogsAutoRefresh();}
   else{stopLogsAutoRefresh();}
 }
@@ -1263,6 +2324,7 @@ function startLogsAutoRefresh(){
   loadLLMContext();
   loadWakePrompt();
   loadSummaryPrompt();
+  loadCompactionPrompt();
   loadSummaryStatus(true);
   if(logsRefreshTimer) clearInterval(logsRefreshTimer);
   logsRefreshTimer = setInterval(() => {
@@ -1345,6 +2407,62 @@ async function resetSummaryPrompt(){
     if(j.ok){toast('已恢复默认');loadSummaryPrompt();}
     else toast('失败: '+(j.error||''));
   }catch(e){toast('网络错误')}
+}
+
+// 压缩上下文提示词
+async function loadCompactionPrompt(){
+  const se=document.getElementById('cc-prompt-system-edit');
+  const pe=document.getElementById('cc-prompt-edit');
+  if(!se||!pe)return;
+  try{
+    const r=await fetch(ADMIN_API + '/logs/compaction-prompt');
+    const j=await r.json();
+    se.value=j.system||'';
+    pe.value=j.template||j.prompt||'';
+  }catch(e){se.value='加载失败';pe.value=''}
+}
+
+async function saveCompactionPrompt(){
+  const se=document.getElementById('cc-prompt-system-edit');
+  const pe=document.getElementById('cc-prompt-edit');
+  if(!pe.value.trim()){toast('模板不能为空');return}
+  try{
+    const r=await fetch(ADMIN_API + '/logs/compaction-prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({system:se.value,template:pe.value})});
+    const j=await r.json();
+    if(j.ok) toast('已保存，生成压缩摘要时生效');
+    else toast('保存失败: '+(j.error||''));
+  }catch(e){toast('网络错误')}
+}
+
+async function resetCompactionPrompt(){
+  if(!confirm('恢复默认压缩上下文提示词？'))return;
+  try{
+    const r=await fetch(ADMIN_API + '/logs/compaction-prompt',{method:'DELETE'});
+    const j=await r.json();
+    if(j.ok){toast('已恢复默认');loadCompactionPrompt();}
+    else toast('失败: '+(j.error||''));
+  }catch(e){toast('网络错误')}
+}
+
+// 后台页板块折叠
+function toggleCard(header){
+  const card=header.closest('.card');
+  if(!card)return;
+  const id=card.getAttribute('data-collapse-id');
+  const nowCollapsed=card.classList.contains('collapsed');
+  card.classList.toggle('collapsed',!nowCollapsed);
+  if(id){try{localStorage.setItem('card-collapse-'+id,nowCollapsed?'open':'collapsed')}catch(e){}}
+}
+
+function initCollapsibleCards(){
+  document.querySelectorAll('#tab-logs .card[data-collapse-id]').forEach(function(card){
+    const id=card.getAttribute('data-collapse-id');
+    const def=card.getAttribute('data-default')||'collapsed';
+    let state=null;
+    try{state=localStorage.getItem('card-collapse-'+id)}catch(e){}
+    const collapsed=state? (state==='collapsed') : (def!=='open');
+    card.classList.toggle('collapsed',collapsed);
+  });
 }
 
 async function loadSummaryStatus(renderContent){
@@ -1713,6 +2831,8 @@ async function deleteSimilarMem(id) {
 
 // 沉底记忆面板
 async function openInactivePanel(){
+  const ov=document.getElementById('inactiveModal');
+  ov.onclick=function(e){if(e.target===ov)closeModal('inactiveModal')};
   openModal('inactiveModal');
   await loadInactiveMemories();
 }
@@ -1728,54 +2848,81 @@ async function loadInactiveMemories(){
     const j=await r.json();
     const mems=j.memories||[];
     countEl.textContent='('+mems.length+' 条)';
-    if(!mems.length){el.innerHTML='<div class="similar-empty">没有沉底的记忆</div>';return}
+    if(!mems.length){el.innerHTML='<div class="similar-empty">暂无沉底记忆</div>';updateInactiveButtons();return}
     el.innerHTML=mems.map(m=>{
       const time=m.timestamp?new Date(m.timestamp).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
-      const superseded=m.superseded_by?'<span style="font-size:10px;color:var(--text3)">被 '+m.superseded_by+' 覆盖</span>':'';
+      const superseded=m.superseded_by?'<div class="inactive-meta">被 '+m.superseded_by+' 覆盖</div>':'';
       const content=(m.content||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      return '<div class="similar-cluster-member" style="align-items:flex-start;gap:8px">'+
-        '<input type="checkbox" class="inactive-check" value="'+m.id+'" style="margin-top:3px;flex-shrink:0">'+
+      return '<div class="similar-cluster-member inactive-item" onclick="toggleInactiveCheck(this)">'+
+        '<input type="checkbox" class="inactive-check" value="'+m.id+'" onchange="updateInactiveButtons()">'+
         '<div style="flex:1;min-width:0">'+
-          '<div>'+
+          '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'+
           ((m.keywords||[]).slice(0,4).map(function(kw){return '<span class="mem-tag kw" onclick="event.stopPropagation();filterMemByKeyword(this.textContent,this)">'+kw+'</span>'}).join(''))+
-          '<span style="font-size:10px;color:var(--text3);margin-left:6px">'+time+'</span>'+(superseded?' '+superseded:'')+'</div>'+
-          '<div class="similar-member-content" style="margin-top:4px">'+content+'</div>'+
+          '<span style="margin-left:auto;font-size:10px;color:var(--text3);flex-shrink:0">'+time+'</span>'+
+          '</div>'+
+          superseded+
+          '<div class="inactive-content">'+content+'</div>'+
         '</div>'+
-        '<button class="btn btn-sm" style="background:var(--accent);color:#fff;border:none;padding:6px 12px;border-radius:6px;font-size:11px;cursor:pointer;flex-shrink:0" onclick="restoreInactiveMem(\''+m.id+'\')">恢复</button>'+
       '</div>';
     }).join('');
+    updateInactiveButtons();
   }catch(e){el.innerHTML='<div class="similar-empty">加载失败: '+e.message+'</div>'}
 }
 
 function toggleSelectAllInactive(checked){
   document.querySelectorAll('#inactive-list .inactive-check').forEach(function(cb){cb.checked=checked});
+  updateInactiveButtons();
 }
 
 async function purgeSelectedInactive(){
   const ids=Array.from(document.querySelectorAll('#inactive-list .inactive-check:checked')).map(function(cb){return cb.value});
   if(!ids.length){toast('请先勾选要删除的记忆');return}
-  if(!confirm('确定永久删除选中的 '+ids.length+' 条沉底记忆？删除后不可恢复。'))return;
-  try{
-    const r=await fetch(ADMIN_API + '/memories/batch/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:ids})});
-    const j=await r.json();
-    if(!r.ok||!j.success)throw new Error(j.error||('HTTP '+r.status));
-    toast('已永久删除 '+j.removed+' 条');
-    loadMemStats();
-    await loadInactiveMemories();
-  }catch(e){toast('删除失败: '+e.message)}
+  showConfirm('确认永久删除？','将永久删除选中的 '+ids.length+' 条沉底记忆，删除后无法找回，是否继续？','确认删除',true,async function(){
+    try{
+      const r=await fetch(ADMIN_API + '/memories/batch/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:ids})});
+      const j=await r.json();
+      if(!r.ok||!j.success)throw new Error(j.error||('HTTP '+r.status));
+      toast('已永久删除 '+j.removed+' 条');
+      loadMemStats();
+      await loadInactiveMemories();
+    }catch(e){toast('删除失败: '+e.message)}
+  });
 }
 
-async function restoreInactiveMem(id){
-  if(!confirm('把这条记忆恢复为活跃？恢复后会重新参与检索和浮现。'))return;
-  try{
-    const r=await fetch(ADMIN_API + '/memories/'+encodeURIComponent(id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:true})});
-    const j=await r.json();
-    if(!r.ok||!j.success)throw new Error(j.error||('HTTP '+r.status));
-    toast('已恢复');
-    loadMemStats();
-    await loadInactiveMemories();
-  }catch(e){toast('恢复失败: '+e.message)}
+function toggleInactiveCheck(card){
+  const cb=card.querySelector('.inactive-check');
+  if(cb)cb.checked=!cb.checked;
+  updateInactiveButtons();
 }
+
+function updateInactiveButtons(){
+  const n=document.querySelectorAll('#inactive-list .inactive-check:checked').length;
+  const restoreBtn=document.getElementById('inactive-restore-btn');
+  const purgeBtn=document.getElementById('inactive-purge-btn');
+  if(restoreBtn)restoreBtn.disabled=!n;
+  if(purgeBtn)purgeBtn.disabled=!n;
+  document.querySelectorAll('#inactive-list .inactive-item').forEach(function(card){
+    const cb=card.querySelector('.inactive-check');
+    card.classList.toggle('selected',!!(cb&&cb.checked));
+  });
+}
+
+let _confirmCb=null;
+function showConfirm(title,text,okLabel,danger,onOk){
+  document.getElementById('confirm-title').textContent=title;
+  document.getElementById('confirm-text').textContent=text;
+  const ok=document.getElementById('confirm-ok');
+  ok.textContent=okLabel||'确认';
+  ok.style.background=danger?'#c05050':'var(--accent)';
+  _confirmCb=onOk||null;
+  openModal('confirmModal');
+}
+document.getElementById('confirm-ok').addEventListener('click',function(){
+  const cb=_confirmCb;
+  _confirmCb=null;
+  closeModal('confirmModal');
+  if(cb)cb();
+});
 
 async function restoreSelectedInactive(){
   const ids=Array.from(document.querySelectorAll('#inactive-list .inactive-check:checked')).map(function(cb){return cb.value});
@@ -1793,8 +2940,10 @@ async function restoreSelectedInactive(){
 
 // ============ 记忆词云卡片 ============
 let memView='cloud';
+let cloudWord='';
 function switchMemView(v){
   memView=v;
+  closeCloudDrawer();
   const cloud=document.getElementById('mem-cloud-wrap');
   const list=document.getElementById('mem-list-wrap');
   const letter=document.getElementById('mem-letter-wrap');
@@ -1803,7 +2952,7 @@ function switchMemView(v){
   if(letter)letter.style.display=v==='letter'?'':'none';
   const styleBtn=function(id,active){
     const b=document.getElementById(id);
-    if(b)b.style.cssText='padding:5px 14px;font-size:12px;border-radius:12px;border:1px solid '+(active?'var(--accent)':'var(--border)')+';background:'+(active?'var(--accent)':'rgba(255,255,255,0.6)')+';color:'+(active?'#fff':'var(--text2)')+';cursor:pointer';
+    if(b)b.classList.toggle('active',active);
   };
   styleBtn('mem-view-cloud',v==='cloud');
   styleBtn('mem-view-list',v==='list');
@@ -1820,13 +2969,13 @@ async function loadLetters(){
   const el=document.getElementById('mem-letter-list');
   if(!el)return;
   const seq=++letterSeq;
-  el.innerHTML='<div class="loading">加载中...</div>';
+  el.innerHTML=skeletonHtml(4);
   try{
     const r=await fetch(ADMIN_API + '/letters');
     const j=await r.json();
     if(seq!==letterSeq)return;
     const letters=j.letters||[];
-    if(!letters.length){el.innerHTML='<div class="empty">还没有信。信由对话中的谢意行写好，写完后会出现在这里。</div>';return}
+    if(!letters.length){el.innerHTML='<div class="empty">暂无</div>';return}
     el.innerHTML=letters.map(function(l){
       const time=l.created_at?new Date(l.created_at).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
       const title=l.title||'给下一个窗口的我';
@@ -1858,7 +3007,7 @@ function openLetter(id){
 async function loadMemCloud(){
   const el=document.getElementById('mem-cloud');
   if(!el)return;
-  el.innerHTML='<div class="loading">统计中...</div>';
+  el.innerHTML=skeletonHtml(6);
   try{
     const r=await fetch(ADMIN_API + '/memories/keywords?limit=80');
     const j=await r.json();
@@ -1869,12 +3018,18 @@ function renderWordCloud(el,words){
   el.innerHTML='';
   if(!words.length){el.innerHTML='<div class="empty">暂无记忆可统计</div>';return}
   const max=words[0].weight||1;
-  const palette=['#6a4848','#a05c5c','#c89098','#b98a8a','#8a6a5a','#6a7a8a','#7a8a6a'];
-  const W=Math.max(320,el.clientWidth||320), H=400;
+  const pad=18;
+  const W=Math.max(300,(el.clientWidth||320)-pad*2), H=Math.max(360,Math.min(540,Math.round(W*0.55)));
+  const pickColor=function(ratio){
+    if(ratio>=0.72)return '#6a4848';
+    if(ratio>=0.45)return '#a5827f';
+    if(ratio>=0.22)return '#c3a8a4';
+    return '#cdbeb9';
+  };
   // 自动缩放字号：按预估占用面积，超出画布 80% 就整体缩小，保证都能放下
   const est=words.reduce(function(s,k){
     const ratio=k.weight/max, size=13+26*ratio;
-    return s+(k.word.length*size*0.92+6)*(size+6);
+    return s+(k.word.length*size*0.92+12)*(size+10);
   },0);
   const avail=(W-10)*(H-10)*0.8;
   const scaleF=Math.min(1,Math.sqrt(avail/Math.max(1,est)));
@@ -1902,7 +3057,7 @@ function renderWordCloud(el,words){
   }
   const placed=[];
   const R=Math.hypot(W,H)/2;
-  const fontFamily='"Noto Sans SC","PingFang SC",sans-serif';
+  const fontFamily='"YouYuan","幼圆","Yuanti SC","STYuanti","圆体-简",sans-serif';
   words.forEach(function(k,i){
     const ratio=k.weight/max;
     let done=false;
@@ -1910,7 +3065,7 @@ function renderWordCloud(el,words){
     for(const scl of [1,0.85,0.7]){
       const size=Math.max(11,Math.round((13+26*ratio)*scaleF*scl));
       const w=k.word.length*size*0.92;
-      const bw=w+6, bh=size+6;
+      const bw=w+12, bh=size+10;
       let found=false,px=0,py=0;
       for(let rad=8;rad<R&&!found;rad+=2){
         const arc=Math.max(1,Math.round(rad*2*Math.PI/5));
@@ -1918,25 +3073,48 @@ function renderWordCloud(el,words){
           const theta=(a/arc)*Math.PI*2+(rad%7)*0.17;
           const x=W/2+rad*Math.cos(theta);
           const y=H/2+rad*Math.sin(theta);
-          if(x-bw/2>=2&&x+bw/2<=W-2&&y-bh/2>=2&&y+bh/2<=H-2){
+          if(x-bw/2>=8&&x+bw/2<=W-8&&y-bh/2>=8&&y+bh/2<=H-8){
             if(cellFree(x,y,bw,bh)){found=true;px=x;py=y}
           }
         }
       }
       if(found){
-        placed.push({word:k.word,x:px,y:py,bw:bw,bh:bh});
+        placed.push({word:k.word,x:px,y:py,bw:bw,bh:bh,size:size,color:pickColor(ratio),alpha:0.62+0.38*ratio,hoverColor:(ratio>=0.72?'#5a3a3a':'#6a4848')});
         markCells(px,py,bw,bh);
-        ctx.font=(ratio>0.7?'700':'500')+' '+size+'px '+fontFamily;
-        ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.globalAlpha=0.62+0.38*ratio;
-        ctx.fillStyle=palette[i%palette.length];
-        ctx.fillText(k.word,px,py);
-        ctx.globalAlpha=1;
         done=true;
         break;
       }
     }
     if(!done)return;
+  });
+  let hoverIdx=-1;
+  const draw=function(hover){
+    ctx.clearRect(0,0,W,H);
+    placed.forEach(function(p,idx){
+      const s=hover===idx?Math.round(p.size*1.14):p.size;
+      ctx.font=s+'px '+fontFamily;
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.globalAlpha=p.alpha;
+      ctx.fillStyle=(hover===idx?p.hoverColor:p.color);
+      ctx.fillText(p.word,p.x,p.y);
+      ctx.globalAlpha=1;
+    });
+  };
+  draw(-1);
+  canvas.addEventListener('mousemove',function(e){
+    const rect=canvas.getBoundingClientRect();
+    const x=e.clientX-rect.left, y=e.clientY-rect.top;
+    let hit=-1;
+    for(let k2=0;k2<placed.length;k2++){
+      const p=placed[k2];
+      if(x>=p.x-p.bw/2&&x<=p.x+p.bw/2&&y>=p.y-p.bh/2&&y<=p.y+p.bh/2){hit=k2;break;}
+    }
+    if(hit!==hoverIdx){hoverIdx=hit;draw(hit);}
+    canvas.style.cursor=hit>=0?'pointer':'default';
+  });
+  canvas.addEventListener('mouseleave',function(){
+    if(hoverIdx!==-1){hoverIdx=-1;draw(-1);}
+    canvas.style.cursor='default';
   });
   canvas.addEventListener('click',function(e){
     const rect=canvas.getBoundingClientRect();
@@ -1951,32 +3129,55 @@ function renderWordCloud(el,words){
 }
 
 async function selectCloudWord(word){
+  cloudWord=word;
+  const drawer=document.getElementById('cloudDrawer');
+  const title=document.getElementById('cloudDrawerTitle');
   const el=document.getElementById('cloud-results');
   if(!el)return;
-  el.innerHTML='<div class="loading">检索「'+word+'」...</div>';
+  if(drawer)drawer.classList.add('open');
+  if(title)title.textContent='关键词「'+word+'」';
+  el.innerHTML=skeletonHtml(4);
+  el.scrollTop=0;
   try{
     const r=await fetch(ADMIN_API + '/memories?active=true&pageSize=50&search='+encodeURIComponent(word));
     const j=await r.json();
     const mems=j.memories||[];
     if(!mems.length){el.innerHTML='<div class="similar-empty">没有找到相关记忆</div>';return}
-    el.innerHTML='<div style="font-size:12px;color:var(--text2);margin-bottom:6px">关键词「'+word+'」相关 '+mems.length+' 条记忆</div>'+
+    const safeWord=word.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    el.innerHTML='<div class="cloud-results-title">关键词「<b>'+safeWord+'</b>」相关 '+mems.length+' 条记忆</div>'+
+      '<div class="cloud-results">'+
       mems.map(m=>{
         const time=m.timestamp?new Date(m.timestamp).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-';
         const content=(m.content||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        return '<div class="similar-cluster-member" style="align-items:flex-start;gap:8px">'+
-          '<div style="flex:1;min-width:0">'+
+        let kwHtml='',kwLen=0;
+        (m.keywords||[]).forEach(function(kw){
+          const s=String(kw||'');
+          if(kwLen+s.length>8)return;
+          kwLen+=s.length;
+          kwHtml+='<span class="mem-tag kw" onclick="event.stopPropagation();filterMemByKeyword(this.textContent,this)">'+s+'</span>';
+        });
+        return '<div class="cloud-res-item">'+
+          '<div class="cloud-res-meta">'+
+          '<span class="cloud-res-left">'+
+          '<span class="cloud-res-imp">♥ '+(m.importance||0).toFixed(2)+'</span>'+
           (m.active===false?'<span class="mem-tag inactive">沉底</span>':'')+
-          ((m.keywords||[]).slice(0,4).map(function(kw){return '<span class="mem-tag kw" onclick="event.stopPropagation();filterMemByKeyword(this.textContent,this)">'+kw+'</span>'}).join(''))+
-          '<span style="font-size:10px;color:var(--text3);margin-left:6px">'+time+'</span>'+
-          '<span style="font-size:10px;color:var(--text3);margin-left:6px">重要:'+(m.importance||0).toFixed(2)+'</span>'+
-          '<div class="similar-member-content" style="margin-top:4px">'+content+'</div></div>'+
-          '<div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">'+
-          '<button class="btn btn-sm" style="background:var(--accent);color:#fff;border:none;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer" onclick="openEditMem(\''+m.id+'\')">编辑</button>'+
-          '<button class="btn btn-sm" style="background:#c05050;color:#fff;border:none;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer" onclick="cloudSinkMem(\''+m.id+'\')">沉底</button>'+
-          '</div></div>';
-      }).join('');
-    el.scrollIntoView({behavior:'smooth',block:'nearest'});
+          '</span>'+
+          '<span class="cloud-res-time">'+time+'</span>'+
+          '</div>'+
+          '<div class="cloud-res-content">'+content+'</div>'+
+          '<div class="cloud-res-actions">'+
+          '<span class="kw-wrap">'+kwHtml+'</span>'+
+          '<span class="cloud-res-btn-group">'+
+          '<button class="cloud-res-btn edit" onclick="openEditMem(\''+m.id+'\')">编辑</button>'+
+          '<button class="cloud-res-btn sink" onclick="cloudSinkMem(\''+m.id+'\')">沉底</button>'+
+          '</span></div></div>';
+      }).join('')+
+      '</div>';
   }catch(e){el.innerHTML='<div class="similar-empty">加载失败: '+e.message+'</div>'}
+}
+function closeCloudDrawer(){
+  const d=document.getElementById('cloudDrawer');
+  if(d)d.classList.remove('open');
 }
 async function cloudSinkMem(id){
   if(!confirm('把这条记忆沉底？沉底后不再被检索浮现，可在「沉底记忆」里恢复。'))return;
@@ -1986,9 +3187,7 @@ async function cloudSinkMem(id){
     if(j.success){
       toast('已沉底');
       loadMemStats();
-      const cr=document.getElementById('cloud-results');
-      if(cr)cr.innerHTML='';
-      await loadMemCloud();
+      if(cloudWord) selectCloudWord(cloudWord);
     }else{toast('操作失败: '+(j.error||''));}
   }catch(e){toast('网络错误')}
 }
