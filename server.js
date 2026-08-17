@@ -3612,7 +3612,11 @@ app.post("/internal/co/chat", async (req, reply) => {
       const userDisplay = readEnvValue("USER_DISPLAY_NAME") || "涵";
       const displayName = readEnvValue("AI_DISPLAY_NAME") || "谢";
       const nowText = coNowText();
-      appendCoRecordLine(`${nowText} ${userDisplay}：${userText}\n${nowText} ${displayName}：${clean}`, videoTitle || undefined);
+      // 画面/字幕信息一并写入共影记录，不再过滤
+      let coUserRecord = `${nowText} ${userDisplay}：${userText}`;
+      if (frameDescription) coUserRecord += `\n（画面：${frameDescription}）`;
+      if (body.subtitle && String(body.subtitle).trim()) coUserRecord += `\n（字幕：${String(body.subtitle).trim()}）`;
+      appendCoRecordLine(`${coUserRecord}\n${nowText} ${displayName}：${clean}`, videoTitle || undefined);
     }
     console.log(`[co/chat] user chars ${userText.length}, reply chars ${clean.length}`);
     reply.send({ reply: clean, frameDescription });
