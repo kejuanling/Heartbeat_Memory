@@ -3344,9 +3344,9 @@ function coTimelineMessages(maxChars) {
   return out;
 }
 
-// 共影历史组装：人设+永久上下文 + 完整时间线 → 应用统一上下文替换（AI 记忆 + 手工块）→ 再按字符上限截断
+// 共影历史组装：人设+永久上下文 + 完整时间线 → 应用统一上下文替换（AI 记忆 + 手工块）→ 全量返回（与主聊天一致）
 function coBuildHistory() {
-  // 与主聊天一致：基于完整时间线先做上下文替换（早期大块压成摘要），再按 co_ctx_chars 截断
+  // 与主聊天一致：基于完整时间线做上下文替换（早期大块压成摘要），替换后全量返回，不按字符截断
   const messages = [{ role: "system", content: coPersonaWithPinned() }].concat(coTimelineMessages(Number.MAX_SAFE_INTEGER));
   try {
     const before = messages.length;
@@ -3361,29 +3361,8 @@ function coBuildHistory() {
   } catch (e) {
     console.warn('[co] 上下文替换失败（跳过）:', e.message);
   }
-  const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
-  const cap = Math.max(2000, Number(cfg.co_ctx_chars) || 50000);
-  const head = [];
-  const rest = [];
-  for (const m of messages) {
-    // 压缩/记忆摘要与 system 一样始终保留，避免被尾部截断二次丢弃
-    if (m && (m.role === 'system' || contextReplacements.isReplacementMemoryMessage(m)) && head.length < 12) head.push(m);
-    else rest.push(m);
-  }
-  const out = [];
-  let total = head.reduce(function (sum, m) { return sum + String(m.content || '').length + 8; }, 0);
-  for (let i = rest.length - 1; i >= 0; i--) {
-    const m = rest[i];
-    const c = String(m.content || '');
-    const cost = c.length + 8;
-    if (total + cost > cap) {
-      if (out.length === 0) out.unshift({ role: 'user', content: '（历史过长，仅保留最近内容）' });
-      break;
-    }
-    out.unshift(m);
-    total += cost;
-  }
-  return head.concat(out);
+  // 与主聊天一致：压缩替换组装后全量返回，不按字符截断（压缩摘要自然保留在序列中）
+  return messages;
 }
 
 // 共影：画面描述提示词（视觉模型用，管理台可编辑）
@@ -3434,7 +3413,6 @@ app.delete("/admin/logs/co-vision-prompt", { preHandler: basicAuth }, async (req
 let coFrameCache = { at: 0, key: "", description: "" };
 // 视觉模型列表 + 解析（共影 / 截图上传 各自选择模型，以后可加更多模型）
 function getVisionModels() {
-  const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
   const list = Array.isArray(cfg.vision_models) ? cfg.vision_models.slice() : [];
   // 兼容旧的单一视觉模型配置：列表为空但有旧配置时，作为隐式默认模型
   if (list.length === 0 && cfg.co_vision_api_key && String(cfg.co_vision_api_key).trim()) {
@@ -3444,7 +3422,6 @@ function getVisionModels() {
 }
 
 function resolveVisionModel(feature) {
-  const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
   const models = getVisionModels();
   if (!models.length) return null;
   const selId = feature === "co" ? cfg.co_vision_model_id : cfg.screenshot_vision_model_id;
@@ -3461,7 +3438,6 @@ async function describeCoFrame({ image, frames, subtitle, duration, noPrompt }) 
   if (coFrameCache.key && coFrameCache.key === imgKey && now - coFrameCache.at < 5000) {
     return coFrameCache.description;
   }
-  const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
   const vm = resolveVisionModel("co");
   const apiUrl = String((vm && vm.api_url) || "https://open.bigmodel.cn/api/paas/v4/chat/completions").trim();
   const apiKey = String((vm && vm.api_key) || "").trim();
