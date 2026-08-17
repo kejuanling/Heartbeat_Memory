@@ -2364,8 +2364,16 @@ function buildUnifiedReplacementPreview(includeMessages) {
     const matched = (Array.isArray(it.matched) && it.matched.length > 0) ? it.matched : [];
     if (matched.length === 0) return;
     const fl = locate(matched[0]);
-    const ll = locate(matched[matched.length - 1]);
-    if (fl.compIdx < 0 || ll.compIdx < 0) return;
+    if (fl.compIdx < 0) return;
+    // 末条可能是 AI 过程性话术（不在时间线）：向前回退到最后一个能定位的消息
+    let ll = locate(matched[matched.length - 1]);
+    if (ll.compIdx < 0) {
+      for (let k = matched.length - 2; k >= 0; k--) {
+        const ck = locate(matched[k]);
+        if (ck.compIdx >= 0) { ll = ck; break; }
+      }
+    }
+    if (ll.compIdx < 0 || ll.compIdx < fl.compIdx) return;
     const text = contextReplacements.recordText(it);
     const tl = String(it.range_label || "").split(" ~ ");
     const manual = it.source === "manual";
