@@ -3413,6 +3413,7 @@ app.delete("/admin/logs/co-vision-prompt", { preHandler: basicAuth }, async (req
 let coFrameCache = { at: 0, key: "", description: "" };
 // 视觉模型列表 + 解析（共影 / 截图上传 各自选择模型，以后可加更多模型）
 function getVisionModels() {
+  const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
   const list = Array.isArray(cfg.vision_models) ? cfg.vision_models.slice() : [];
   // 兼容旧的单一视觉模型配置：列表为空但有旧配置时，作为隐式默认模型
   if (list.length === 0 && cfg.co_vision_api_key && String(cfg.co_vision_api_key).trim()) {
@@ -3422,6 +3423,7 @@ function getVisionModels() {
 }
 
 function resolveVisionModel(feature) {
+  const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
   const models = getVisionModels();
   if (!models.length) return null;
   const selId = feature === "co" ? cfg.co_vision_model_id : cfg.screenshot_vision_model_id;
