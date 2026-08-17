@@ -3346,7 +3346,8 @@ function coTimelineMessages(maxChars) {
 
 // 共影历史组装：人设+永久上下文 + 完整时间线 → 应用统一上下文替换（AI 记忆 + 手工块）→ 再按字符上限截断
 function coBuildHistory() {
-  const messages = [{ role: "system", content: coPersonaWithPinned() }].concat(coTimelineMessages());
+  // 与主聊天一致：基于完整时间线先做上下文替换（早期大块压成摘要），再按 co_ctx_chars 截断
+  const messages = [{ role: "system", content: coPersonaWithPinned() }].concat(coTimelineMessages(Number.MAX_SAFE_INTEGER));
   try {
     const before = messages.length;
     const replaced = contextReplacements.applyReplacements(messages);
@@ -3365,7 +3366,8 @@ function coBuildHistory() {
   const head = [];
   const rest = [];
   for (const m of messages) {
-    if (m && m.role === 'system' && head.length < 3) head.push(m);
+    // 压缩/记忆摘要与 system 一样始终保留，避免被尾部截断二次丢弃
+    if (m && (m.role === 'system' || contextReplacements.isReplacementMemoryMessage(m)) && head.length < 12) head.push(m);
     else rest.push(m);
   }
   const out = [];
