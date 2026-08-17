@@ -2562,7 +2562,7 @@
    document.querySelector('.tab-item[data-tab="'+name+'"]').classList.add('active');
   if(name==='memory'){switchMemView(memView);loadImportedList();}
   if(name==='compaction'){loadCompactionPreview(); if(compactionPlan) renderCompactionConfig();}
-  if(name==='prompts'){loadWakePrompt();loadCompactionPrompt();loadCoWakePrompt();loadCoVisionPrompt();}
+  if(name==='prompts'){loadWakePrompt();loadCompactionPrompt();loadCoWakePrompt();loadCoVisionPrompt();loadPinned();}
   if(name==='system'){loadToolsConfig();loadServices();loadToolsHistory();startLogsAutoRefresh();}
   if(name!=='system'){stopLogsAutoRefresh();}
   }
