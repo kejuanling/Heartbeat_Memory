@@ -2066,6 +2066,30 @@ app.post("/admin/context-replacements/update", { preHandler: basicAuth }, async 
   }
 });
 
+// 手动新增摘要：创建一个 manual 块并直接填入指定内容（不调模型；默认未启用，点块上「替换」才生效）
+app.post("/admin/context-replacements/add-manual", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const body = req.body || {};
+    const start = parseInt(body.start, 10);
+    const end = parseInt(body.end, 10);
+    const memory = String(body.memory || "").trim();
+    const enabled = body.enabled === true;
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
+      return reply.send({ ok: false, error: "无效的范围（start/end 为第几条，从 1 开始）" });
+    }
+    if (!memory) return reply.send({ ok: false, error: "摘要内容不能为空" });
+    const r = contextReplacements.addManualRecord(start - 1, end - 1, enabled);
+    if (!r.ok) return reply.send({ ok: false, error: r.message || r.error || "创建失败" });
+    const upd = contextReplacements.updateReplacement(r.record.id, memory);
+    if (!upd.ok) return reply.send({ ok: false, error: upd.error || "填写摘要失败" });
+    console.log("[POST /admin/context-replacements/add-manual] 已新增摘要：", start, "-", end, "->", String(memory.slice(0, 40)), "...");
+    reply.send({ ok: true, id: r.record.id, count: r.record.count, message: "已新增摘要：第 " + start + "–" + end + " 条" });
+  } catch (err) {
+    console.error("[POST /admin/context-replacements/add-manual] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
 
 // ========================
 // 工具集管理（mcp-tools）：停用工具 / 改说明 / 改 schema + 服务启停
@@ -2348,6 +2372,7 @@ function buildUnifiedReplacementPreview(includeMessages) {
     chunks.push({
       aiRep: !manual,
       repId: manual ? undefined : it.id,
+      id: it.id,
       source: it.source || "ai",
       index: 0,
       blockStart: fl.compIdx,
@@ -2369,7 +2394,7 @@ function buildUnifiedReplacementPreview(includeMessages) {
       enabled: it.enabled !== false,
       range_label: it.range_label || "",
       original_preview: matched.slice(0, 2).map(m => ({ role: m.role, content: String(m.content || "").slice(0, 150) })),
-      history: [],
+      history: (Array.isArray(it.history) ? it.history : []).map(function (h, i) { return { index: i, summary: h.summary, generatedAt: h.generatedAt, mode: h.mode || (manual ? "edited" : "ai"), manual: h.manual === true || manual }; }).slice(0, 8),
       msgs: includeMessages ? matched.map(m => {
         const _key = contextCompactor.contentKey(m);
         return { role: m.role, content: typeof m.content === "string" ? m.content : "", key: _key, marked: !!contextCompactor.loadMarks()[_key] };
@@ -2589,16 +2614,12 @@ app.post("/admin/context-compaction/restore", { preHandler: basicAuth }, async (
   const chunkIndex = Number(body.chunkIndex);
   const historyIndex = Number(body.historyIndex);
   try {
-    const plan = contextCompactor.preview({ includeMessages: false });
-    const chunk = (plan.chunks || []).find(function (c) { return c.index === chunkIndex; });
-    if (!chunk) return reply.code(404).send({ error: "块 #" + chunkIndex + " 不存在" });
-    const restored = contextCompactor.restoreSummary(chunk.signature, historyIndex);
-    reply.send({
-      ok: true,
-      summary: restored.summary,
-      generatedAt: restored.generatedAt,
-      length: restored.summary.length
-    });
+    const preview = buildUnifiedReplacementPreview(false);
+    const chunk = (preview.chunks || []).find(function (c) { return c.index === chunkIndex; });
+    if (!chunk || !chunk.id) return reply.code(404).send({ error: "块 #" + chunkIndex + " 不存在" });
+    const restored = contextReplacements.restoreHistory(chunk.id, historyIndex);
+    if (!restored.ok) return reply.code(400).send({ error: restored.error || restored.message });
+    reply.send({ ok: true, summary: restored.summary, generatedAt: restored.generatedAt, length: restored.summary.length });
   } catch (err) {
     reply.code(400).send({ error: err.message });
   }
@@ -2609,10 +2630,11 @@ app.post("/admin/context-compaction/history/delete", { preHandler: basicAuth }, 
   const chunkIndex = Number(body.chunkIndex);
   const historyIndex = Number(body.historyIndex);
   try {
-    const plan = contextCompactor.preview({ includeMessages: false });
-    const chunk = (plan.chunks || []).find(function (c) { return c.index === chunkIndex; });
-    if (!chunk) return reply.code(404).send({ error: "块 #" + chunkIndex + " 不存在" });
-    const r = contextCompactor.removeHistoryVersion(chunk.signature, historyIndex);
+    const preview = buildUnifiedReplacementPreview(false);
+    const chunk = (preview.chunks || []).find(function (c) { return c.index === chunkIndex; });
+    if (!chunk || !chunk.id) return reply.code(404).send({ error: "块 #" + chunkIndex + " 不存在" });
+    const r = contextReplacements.removeHistory(chunk.id, historyIndex);
+    if (!r.ok) return reply.code(400).send({ error: r.error || r.message });
     reply.send({ ok: true, remaining: r.remaining });
   } catch (err) {
     reply.code(400).send({ error: err.message });

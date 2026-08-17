@@ -556,6 +556,64 @@ function splitRangeByGaps(start, end, gapMinutes) {
 }
 
 // 给手工记录写入/更新替换正文（摘要生成后调用）
+// ========================
+// 历史版本（记录内 history 数组；编辑/覆盖前把旧版归档）
+// ========================
+const MAX_HISTORY_VERSIONS = 8;
+
+function historyEntryOf(it) {
+  return {
+    summary: recordText(it),
+    generatedAt: it.updated_at || it.created_at || nowIso(),
+    mode: it.source === "manual" ? "edited" : "ai",
+    manual: it.source === "manual"
+  };
+}
+
+// 更新 newText 之前，把当前正文归档为新的历史版本
+function archiveHistory(item, newText) {
+  if (!item || newText === undefined) return;
+  const cur = recordText(item);
+  if (!cur) return; // 首次填写，无旧版可归档
+  const hist = Array.isArray(item.history) ? item.history.slice() : [];
+  hist.unshift(historyEntryOf(item));
+  if (hist.length > MAX_HISTORY_VERSIONS) hist.length = MAX_HISTORY_VERSIONS;
+  item.history = hist;
+}
+
+// 恢复某历史版本：当前正文推入历史（成为新版），目标版成为当前正文
+function restoreHistory(id, historyIndex) {
+  const items = loadItems();
+  const it = items.find(function (x) { return x && x.id === id; });
+  if (!it) return { ok: false, error: "记录不存在" };
+  const hist = Array.isArray(it.history) ? it.history : [];
+  const idx = Number(historyIndex);
+  if (!Number.isInteger(idx) || idx < 0 || idx >= hist.length) return { ok: false, error: "历史版本不存在" };
+  const target = hist[idx];
+  const newHistory = [historyEntryOf(it)].concat(hist.filter(function (_, i) { return i !== idx; }));
+  if (newHistory.length > MAX_HISTORY_VERSIONS) newHistory.length = MAX_HISTORY_VERSIONS;
+  it.history = newHistory;
+  it.text = target.summary;
+  it.memory = target.summary;
+  it.updated_at = nowIso();
+  saveItems(items);
+  return { ok: true, summary: target.summary, generatedAt: target.generatedAt, mode: target.mode, history: newHistory };
+}
+
+// 删除某条历史版本
+function removeHistory(id, historyIndex) {
+  const items = loadItems();
+  const it = items.find(function (x) { return x && x.id === id; });
+  if (!it) return { ok: false, error: "记录不存在" };
+  const hist = Array.isArray(it.history) ? it.history : [];
+  if (!hist.length) return { ok: false, error: "该块没有历史版本" };
+  const idx = Number(historyIndex);
+  if (!Number.isInteger(idx) || idx < 0 || idx >= hist.length) return { ok: false, error: "历史版本不存在" };
+  it.history = hist.filter(function (_, i) { return i !== idx; });
+  saveItems(items);
+  return { ok: true, remaining: it.history.length };
+}
+
 function setManualRecordText(index, text) {
   const found = manualRecordAt(index);
   if (!found) return { ok: false, message: "块不存在" };
@@ -567,6 +625,7 @@ function setManualRecordText(index, text) {
   const items = loadItems();
   const it = items.find(x => x.id === found.record.id);
   if (!it) return { ok: false, message: "块不存在" };
+  archiveHistory(it, t);
   it.text = t;
   it.memory = t;
   it.updated_at = nowIso();
@@ -613,6 +672,7 @@ function updateReplacement(id, text) {
   const items = loadItems();
   const idx = items.findIndex(it => it.id === id);
   if (idx < 0) return { ok: false, error: "未找到该记录" };
+  archiveHistory(items[idx], t);
   items[idx].text = t;
   items[idx].memory = t;
   items[idx].updated_at = nowIso();
@@ -769,13 +829,29 @@ function applyReplacements(messages) {
       if (blkMax === null || v > blkMax) blkMax = v;
     });
 
-    replacements.push({
-      startIdx: srcStart,
-      endIdx: srcEnd,
-      message: buildMemoryMessage(item),
-      minT: blkMin,
-      maxT: blkMax
+    const curMsg = buildMemoryMessage(item);
+    const curSer = String(item.created_at || "") + "|" + (item.id || "");
+    const dup = replacements.find(function (rp) {
+      return !(rp.endIdx < srcStart || rp.startIdx > srcEnd);
     });
+    if (dup) {
+      const curNewer = String(item.created_at || "") >= String(dup.itemSer || "|");
+      if (curNewer) {
+        dup.message = curMsg;
+        dup.minT = blkMin;
+        dup.maxT = blkMax;
+        dup.itemSer = curSer;
+      }
+    } else {
+      replacements.push({
+        startIdx: srcStart,
+        endIdx: srcEnd,
+        message: curMsg,
+        minT: blkMin,
+        maxT: blkMax,
+        itemSer: curSer
+      });
+    }
     searchStart = ei + 1;
   });
 
@@ -1105,6 +1181,8 @@ module.exports = {
   updateManualRecordRange,
   splitRangeByGaps,
   setManualRecordText,
+  restoreHistory,
+  removeHistory,
   manualRecordsSorted,
   compressibleItems,
   removeAllManualRecords,
