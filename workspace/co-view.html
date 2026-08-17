@@ -626,25 +626,29 @@ function sendChatText(text, fromPip){
   var attach = fromPip ? document.getElementById('fp-attach').checked : document.getElementById(mode === 'float' ? 'fp-attach' : 'attach-frame').checked;
   var image = null, subtitle = '';
   var mergedFrame = false;
+  var note = null;
   if (attach) {
-    if (shareMode) {
-      var nowS = Date.now();
-      if (lastWakeAt && nowS - lastWakeAt < 1000) {
-        mergedFrame = true;
-        image = null;
-      } else {
+    try {
+      if (shareMode) {
+        var nowS = Date.now();
+        if (lastWakeAt && nowS - lastWakeAt < 1000) {
+          mergedFrame = true;
+          image = null;
+        } else {
+          image = captureFrame();
+          if (!image) addMsg('sys', '还没截到屏幕画面，先点「截屏」开始共享');
+        }
+      } else if (videoEl && !videoEl.paused && !videoEl.ended) {
         image = captureFrame();
-        if (!image) addMsg('sys', '还没截到屏幕画面，先点「截屏」开始共享');
+        subtitle = currentSubtitle();
       }
-    } else if (videoEl && !videoEl.paused && !videoEl.ended) {
-      image = captureFrame();
-      subtitle = currentSubtitle();
+    } catch (err) {
+      note = '画面截取失败（' + (err && err.name || '异常') + '），已改为仅发送文字';
     }
   }
-  var note = null;
   if (mergedFrame) note = '画面刚看过，未重复解析';
   else if (attach && image) note = '附带当前画面';
-  else if (attach && !image) note = shareMode ? '未截到画面' : '视频未在播放，未附画面';
+  else if (attach && !image) note = note || (shareMode ? '未截到画面' : '视频未在播放，未附画面');
   addMsg('user', text, { frameNote: note });
   lastChatAt = Date.now();
   sending = true;
