@@ -92,12 +92,13 @@ body{
 .msg .who{display:block;font-size:0.6rem;color:var(--soft);margin-bottom:3px;letter-spacing:1px}
 .msg.user .who{color:rgba(255,255,255,0.75)}
 .msg .frame-note{display:block;font-size:0.6rem;color:var(--soft);margin-top:4px}
-.chat-input-row{display:flex;gap:8px;align-items:flex-end;padding-top:10px;border-top:1px dashed var(--line)}
+.chat-input-row{display:flex;gap:8px;align-items:flex-end;padding-top:8px}
 #chat-input{
   flex:1;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:10px;
   background:rgba(255,255,255,0.7);font-size:0.75rem;font-family:inherit;color:var(--ink);resize:none;line-height:1.5;
 }
 #send-btn{padding:8px 16px;flex-shrink:0}
+.meta-row{display:flex;align-items:center;gap:10px;padding-top:10px;border-top:1px dashed var(--line)}
 .frame-chk{display:flex;align-items:center;gap:4px;font-size:0.62rem;color:var(--soft);white-space:nowrap;cursor:pointer;padding-bottom:6px}
 .frame-chk input{accent-color:var(--accent)}
 .modal-overlay{
@@ -198,10 +199,12 @@ body{
     <div class="card chat-card">
       <div class="chat-head">🎬 一起看 · 聊天</div>
       <div class="chat-list" id="chat-list"></div>
-      <div class="chat-input-row">
+      <div class="meta-row">
         <label class="frame-chk"><input type="checkbox" id="attach-frame" checked> 附带画面</label>
-        <textarea id="chat-input" rows="2" placeholder="跟 AI 聊这部电影…（Enter 发送）"></textarea>
         <button class="btn" id="embed-peek" onclick="manualWakePeek()" title="手动截取几秒画面给 AI 看">👁 看一眼</button>
+      </div>
+      <div class="chat-input-row">
+        <textarea id="chat-input" rows="2" placeholder="跟 AI 聊这部电影…（Enter 发送）"></textarea>
         <button class="btn btn-primary" id="send-btn" onclick="sendChat()">发送</button>
       </div>
     </div>
