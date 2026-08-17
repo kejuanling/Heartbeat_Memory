@@ -29,18 +29,11 @@ function reloadEnvFromFile() {
   }
 }
 const memoryEngine = require("./memory-engine");
-// 唤醒注入分类白名单：与对话侧共用 config.context_injection_types，
-// 关闭的分类在唤醒时同样不注入（含随机记忆），保证「关闭的分类不会注入」全局一致
-const WAKE_ALL_INJECTION_TYPES = ["fact", "preference", "emotion", "summary", "moment"];
-function getWakeInjectionTypes() {
-  const t = memoryEngine.getConfig ? memoryEngine.getConfig().context_injection_types : null;
-  if (Array.isArray(t)) return t.filter(x => WAKE_ALL_INJECTION_TYPES.includes(x));
-  return WAKE_ALL_INJECTION_TYPES.slice();
-}
 const tagParser = require("./tag-parser");
+// 旧压缩器已统一进「上下文替换」，唤醒侧不再使用
+// const contextCompactor = require("./context-compactor");
+const contextReplacements = require("./context-replacements");
 let memoryReady = false;
-// 防重复：最近 N 次唤醒浮现过的记忆 id（每格=一次唤醒），下次唤醒排除
-let recentWakeMemoryIds = [];
 memoryEngine.init().then(() => {
   memoryReady = true;
   console.log("[wake-up] 记忆引擎就绪");
@@ -58,6 +51,8 @@ const {
 } = require("./time_utils");
 
 const TIMELINE_PATH = path.join(__dirname, "enhanced_messages.json");
+const WAKE_SCHEDULE_PATH = path.join(__dirname, "data", "wake_schedule.json");
+let timedWakeTimer = null;
 const PORT = Number(process.env.PORT) || 3000;
 const GATEWAY_BASE_URL = (process.env.GATEWAY_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
 const GATEWAY_URL = `${GATEWAY_BASE_URL}/internal/wake-event`;
@@ -397,6 +392,90 @@ function loadTimelineMessages() {
     return null;
   }
 }
+// <wake> 标签：AI 在唤醒时设置「下一次主动唤醒时间」（分钟，1~1440）：到点前定时检查跳过，到点主动唤醒一次
+function readWakeScheduleRaw() {
+  try {
+    if (!fs.existsSync(WAKE_SCHEDULE_PATH)) return null;
+    const data = JSON.parse(fs.readFileSync(WAKE_SCHEDULE_PATH, "utf-8"));
+    return data && data.next_wake_at ? data : null;
+  } catch (err) {
+    console.warn("[wake-up] 读取定时唤醒失败:", err.message);
+    return null;
+  }
+}
+
+function readWakeSchedule() {
+  const data = readWakeScheduleRaw();
+  if (!data) return null;
+  const t = new Date(data.next_wake_at);
+  return isNaN(t.getTime()) ? null : t;
+}
+
+// 设定之后用户是否已主动找过 AI（时间线里出现更新的用户消息）：是则定时作废
+function isUserActiveSince(schedule) {
+  if (!schedule || !schedule.updated_at) return false;
+  const setTime = new Date(schedule.updated_at);
+  if (isNaN(setTime.getTime())) return false;
+  const messages = loadTimelineMessages();
+  if (!messages) return false;
+  const lastUserTime = getLastUserTime(messages);
+  return !!lastUserTime && lastUserTime.getTime() > setTime.getTime();
+}
+
+function saveWakeSchedule(nextWakeAtIso) {
+  fs.mkdirSync(path.dirname(WAKE_SCHEDULE_PATH), { recursive: true });
+  const tmp = WAKE_SCHEDULE_PATH + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify({ next_wake_at: nextWakeAtIso, updated_at: new Date().toISOString() }, null, 2), "utf-8");
+  fs.renameSync(tmp, WAKE_SCHEDULE_PATH);
+}
+// 清理定时唤醒：取消内存定时器 + 删除记录（触发后 / 已过期 / 作废时调用）
+function clearWakeSchedule() {
+  if (timedWakeTimer) {
+    clearTimeout(timedWakeTimer);
+    timedWakeTimer = null;
+  }
+  try {
+    if (fs.existsSync(WAKE_SCHEDULE_PATH)) fs.unlinkSync(WAKE_SCHEDULE_PATH);
+  } catch (err) {
+    console.warn("[wake-up] 清理定时唤醒失败:", err.message);
+  }
+}
+
+// 装载定时唤醒：从文件读取时间，在内存里挂一个到点触发的定时器（进程重启后由 startAfterInit 重新装载）
+function armTimedWake() {
+  if (timedWakeTimer) {
+    clearTimeout(timedWakeTimer);
+    timedWakeTimer = null;
+  }
+  let nextWakeAt = null;
+  try { nextWakeAt = readWakeSchedule(); } catch (err) { /* 读取失败按无定时处理 */ }
+  if (!nextWakeAt) return;
+  const delayMs = nextWakeAt.getTime() - Date.now();
+  if (delayMs <= 0) {
+    // 已过期（例如进程重启错过了到点时刻）：清理，恢复正常检查节奏
+    try { clearWakeSchedule(); } catch (err) { /* 忽略 */ }
+    return;
+  }
+  timedWakeTimer = setTimeout(runTimedWake, delayMs);
+  console.log(`[wake-up] 已设定定时唤醒：${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}（${Math.round(delayMs / 60000)} 分钟后）`);
+}
+
+// 定时唤醒到点：若设定后用户已主动找过 AI 则作废；否则清理记录后执行一次唤醒流程（是否发推送仍由 AI 自行决定）
+async function runTimedWake() {
+  timedWakeTimer = null;
+  try {
+    if (isUserActiveSince(readWakeScheduleRaw())) {
+      console.log("\n===== 定时唤醒作废 =====\n设定后用户已主动找过 AI，本次定时唤醒取消\n");
+      try { clearWakeSchedule(); } catch (err) { /* 忽略 */ }
+      return;
+    }
+  } catch (voidErr) {
+    console.warn("[wake-up] 检查定时是否作废失败（按到点执行）:", voidErr.message);
+  }
+  try { clearWakeSchedule(); } catch (err) { /* 忽略 */ }
+  console.log("\n===== 定时唤醒到点 =====\n");
+  await runWakeUp();
+}
 
 function getNow() {
   return new Date();
@@ -418,10 +497,25 @@ function shouldWake(lastUserTime) {
 
 function parseTimelineTimestamp(value) {
   const text = String(value || "");
+  // 兼容 Kelivo 新格式：<current_time>Sat 26-08-15 22:10:29</current_time>
+  // （两位年份 + 可选星期前缀 + 可选秒），客户端更新后每条消息末尾都会注入
+  const tagMatch = text.match(/<\s*current_time\s*>\s*(?:[A-Za-z]{2,4}\s+)?(\d{2})[-/](\d{1,2})[-/](\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})(?::(\d{2}))?/);
+  if (tagMatch) {
+    const [, yy, month, day, hour, minute] = tagMatch;
+    return zonedWallTimeToDate({ year: 2000 + Number(yy), month: Number(month), day: Number(day), hour: Number(hour), minute: Number(minute) }, TIME_ZONE);
+  }
   const match = text.match(/^（?\s*(\d{4})([-/])(\d{1,2})\2(\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})/);
-  if (!match) return null;
-  const [, yyyy, , month, day, hour, minute] = match;
-  return zonedWallTimeToDate({ year: yyyy, month, day, hour, minute }, TIME_ZONE);
+  if (match) {
+    const [, yyyy, , month, day, hour, minute] = match;
+    return zonedWallTimeToDate({ year: Number(yyyy), month: Number(month), day: Number(day), hour: Number(hour), minute: Number(minute) }, TIME_ZONE);
+  }
+  // 兼容正文末尾时间缀（客户端自动注入的墙上时间）
+  const tail = text.match(/(\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[ T]?)\d{1,2}[:：]\d{2})\s*$/);
+  if (tail) {
+    const p = tail[1].match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})/);
+    if (p) return zonedWallTimeToDate({ year: Number(p[1]), month: Number(p[2]), day: Number(p[3]), hour: Number(p[4]), minute: Number(p[5]) }, TIME_ZONE);
+  }
+  return null;
 }
 
 // 优先读取消息自带的 time 字段（2026-08 起时间线统一补充该字段）
@@ -503,13 +597,53 @@ ${weatherContext ? `\n${weatherContext}\n` : ""}
 - 如果想联系用户，直接写你想说的话。系统会自动打包成手机推送发送。可以是一句话，也可以第一行作为标题、第二行作为正文。
 - 如果不想联系，只输出：[NO_ACTION]，可附带简短原因（10字以内）。
 - 如果你想写日记，可以额外输出 [DIARY]...[/DIARY]。只有想写时才写，不必每次都写。
+- 你可以设置下一次系统主动唤醒你的时间，格式为 <wake>数值</wake>，单位为分钟。设置后这段时间内系统不会再唤醒你，时间一到会主动唤醒你一次；如果到点前她主动找过你，这个定时会自动作废。不想设置就不输出这个标签。
 `;
 }
 
+let wakeRunning = false;
 async function runWakeUp() {
+  if (wakeRunning) {
+    console.log("[wake-up] 上一次唤醒仍在进行，本次跳过");
+    return;
+  }
+  wakeRunning = true;
+  try {
+    await runWakeUpInner();
+  } finally {
+    wakeRunning = false;
+  }
+}
+
+async function runWakeUpInner() {
   console.log("\n==========================");
   console.log("开始自动唤醒");
   console.log("==========================\n");
+
+  // AI 设置的「下一次主动唤醒时间」：设定后用户一旦主动找过 AI 则定时作废；
+  // 未到点之前定时检查跳过（不影响对话）；已过期则清理
+  try {
+    const schedule = readWakeScheduleRaw();
+    if (schedule) {
+      if (isUserActiveSince(schedule)) {
+        console.log("\n用户已主动找过 AI，定时唤醒作废，恢复正常唤醒节奏\n");
+        try { clearWakeSchedule(); } catch (voidErr) {
+          console.warn("[wake-up] 清理作废定时失败:", voidErr.message);
+        }
+      } else {
+        const nextWakeAt = new Date(schedule.next_wake_at);
+        if (!isNaN(nextWakeAt.getTime()) && nextWakeAt.getTime() > Date.now()) {
+          console.log(`\n下一次主动唤醒时间未到（${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}），本次跳过唤醒\n`);
+          return;
+        }
+        try { clearWakeSchedule(); } catch (expireErr) {
+          console.warn("[wake-up] 清理过期唤醒时间失败:", expireErr.message);
+        }
+      }
+    }
+  } catch (scheduleErr) {
+    console.warn("[wake-up] 检查下次唤醒时间失败（忽略）:", scheduleErr.message);
+  }
 
   const messages = loadTimelineMessages();
   if (!messages) return;
@@ -530,68 +664,6 @@ async function runWakeUp() {
 
   const weatherContext = await fetchWeatherContext();
 
-  // ========================
-  // 记忆检索：唤醒时携带相关记忆
-  // ========================
-  let memoryContext = "";
-  // 记忆浮现写入对话：开启时记录本次浮现的记忆，唤醒结束后随事件一起写入对话
-  let surfacedMemoriesForConversation = [];
-  try {
-    // 每次唤醒前刷新配置，让管理台开关即时生效（config.json 由 gateway 写入）
-    try {
-      if (memoryEngine.refreshConfig) await memoryEngine.refreshConfig();
-    } catch { }
-    const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
-    // 记忆检索开关（唤醒时）：独立于对话开关；未设置时沿用原总开关，保持旧行为
-    const wakeRetrievalEnabled = cfg.memory_retrieval_wake_enabled !== undefined
-      ? cfg.memory_retrieval_wake_enabled !== false
-      : cfg.memory_retrieval_enabled !== false;
-    if (!wakeRetrievalEnabled) {
-      console.log("[memory] 唤醒时记忆检索已关闭，跳过记忆检索");
-    } else {
-    // Use recent user+AI messages as query (wider context than chat mode)
-    const windowSize = cfg.wake_query_window || 3;
-    const recentMsgs = messages.slice(-windowSize)
-      .filter(m => (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
-      .map(m => normalizeContentToText(m.content));
-    const query = recentMsgs.length > 0 ? recentMsgs.join(" ") : "最近情况";
-    // Wake-up: more memories (topK=8, totalLimit=12) + 4 random memories for broader perspective
-    // 防重复：最近 N 次唤醒看过的记忆不重复浮现（0=关闭）
-    const repeatWindow = Math.max(0, Number(cfg.wake_repeat_window) || 0);
-    const excludeIds = new Set(repeatWindow > 0 ? recentWakeMemoryIds.flat() : []);
-    const buffer = repeatWindow > 0 ? excludeIds.size : 0;
-    const memResults = await memoryEngine.buildContext(query, {
-      topK: cfg.wake_top_k || 8,
-      totalLimit: (cfg.wake_total_limit || 12) + buffer,
-      randomCount: (cfg.wake_random_count || 4) + buffer,
-      threshold: Number.isFinite(Number(cfg.wake_relevance_threshold)) ? Number(cfg.wake_relevance_threshold) : 0.3,
-      types: getWakeInjectionTypes(),
-      excludeIds: excludeIds.size > 0 ? excludeIds : null
-    });
-    const memList = memResults.slice(0, cfg.wake_total_limit || 12);
-    if (repeatWindow > 0 && memList.length > 0) {
-      recentWakeMemoryIds.push(memList.map(m => m.id));
-      while (recentWakeMemoryIds.length > repeatWindow) recentWakeMemoryIds.shift();
-    }
-    // 记忆浮现写入对话（唤醒）：独立于对话开关；未设置时沿用旧开关保持原行为
-    const persistWakeSurface = cfg.wake_memory_persist_on_surface_enabled !== undefined
-      ? cfg.wake_memory_persist_on_surface_enabled
-      : cfg.memory_persist_on_surface_enabled !== false;
-    if (persistWakeSurface) {
-      surfacedMemoriesForConversation = memList
-        .filter(m => m && m.id && typeof m.content === "string" && m.content)
-        .map(m => ({ id: m.id, content: m.content, type: m.type }));
-    }
-    const memStr = memoryEngine.formatContext(memList);
-    if (memStr) {
-      memoryContext = "\n\n## 我回忆起的关于她的事\n" + memStr;
-      console.log("[memory] 唤醒时携带记忆上下文");
-    }
-    }
-  } catch (memErr) {
-    console.error("[memory] 唤醒时记忆检索失败:", memErr.message);
-  }
-
   // 永久注入上下文
   let pinnedContext = "";
   try {
@@ -605,38 +677,47 @@ async function runWakeUp() {
   }
 
   const wakePrompt = buildWakePrompt(getChinaTimeString(), diffMinutes, weatherContext);
-  const cleanMessages = stripPosition(messages);
+  let cleanMessages = stripPosition(messages);
 
-  const historyMsgs = cleanMessages
-    .filter(msg => msg.role !== "system")
-    .filter(msg => {
+  // 上下文记忆替换：唤醒时看到的也是 AI 写好的记忆而不是原文（源文件不动）
+  try {
+    const beforeWake = cleanMessages.length;
+    cleanMessages = contextReplacements.applyReplacements(cleanMessages);
+    if (cleanMessages.length !== beforeWake) {
+      console.log("[wake-up] 上下文记忆替换生效: 消息 " + beforeWake + " -> " + cleanMessages.length);
+    }
+  } catch (repErr) {
+    console.warn("[wake-up] 上下文记忆替换失败（按原样处理）:", repErr.message);
+  }
+
+  // 唤醒历史消息：与主聊天同一套组装（统一替换已在上面生效），保留结构化消息；
+  // 与对话的唯一区别：不含工具调用链（唤醒不需要工具），末尾多注入一条唤醒提示词。
+  function filterMemoryMsgs(msgs) {
+    return msgs.filter(msg => {
       const c = normalizeContentToText(msg.content);
       return !c.includes("<memories>") && !c.includes("记忆库使用策略");
     });
-  const historyText = historyMsgs
-    .map(msg => {
-      const userDisplay = process.env.USER_DISPLAY_NAME || "用户";
-      const aiDisplay = process.env.AI_DISPLAY_NAME || "AI";
-      const role = msg.role === "user" ? userDisplay : aiDisplay;
-      let content = normalizeContentToText(msg.content);
-      if (content.includes("## Memories")) {
-        content = content.split("## Memories")[0];
-      }
-      return `[${role}] ${content}`;
-    })
-    .join("\n\n");
+  }
+
+  // 上下文压缩已统一进「上下文替换」：历史 = 替换后的非 system 消息，不做条数上限，与对话侧一致
+  let historyMsgs = filterMemoryMsgs(cleanMessages.filter(msg => msg.role !== "system"));
+
+  // 唤醒不需要工具调用链（对话侧才有）；历史内容统一为纯文本
+  historyMsgs = historyMsgs
+    .filter(m => m.role !== "tool" && !m.tool_calls && !m.tool_call_id)
+    .map(m => (Array.isArray(m.content) ? { ...m, content: normalizeContentToText(m.content) } : m));
 
   const baseSystemPrompt = cleanMessages.find(msg => msg.role === "system");
-  const cleanSP = baseSystemPrompt 
-    ? normalizeContentToText(baseSystemPrompt.content).split("## Memories")[0].split("## search_web 工具使用说明")[0].trim()
+  const cleanSP = baseSystemPrompt
+    ? normalizeContentToText(baseSystemPrompt.content).split("## search_web 工具使用说明")[0].trim()
     : "";
 
-  // 方案A：稳定 system = 规则(cleanSP) + 永久上下文(pinned)；动态 system = 唤醒信息(wakePrompt) + 记忆(memory)，插到 user 之后
+  // 稳定 system = 人设(cleanSP) + 永久上下文(pinned)，与主聊天一致
   const stableSystem = [cleanSP, pinnedContext].filter(Boolean).join("\n\n");
+  // 唤醒提示词：作为最后一条 system 注入，贴近生成位置
   const dynamicContent = [
     `（系统提示：以下内容${process.env.USER_DISPLAY_NAME || "用户"}不可见，仅供你参考）`,
-    wakePrompt,
-    memoryContext
+    wakePrompt
   ].filter(Boolean).join("\n\n");
 
   const wakeMessages = [
@@ -644,23 +725,8 @@ async function runWakeUp() {
       role: "system",
       content: stableSystem
     },
+    ...historyMsgs,
     {
-      // 批注 2026-07-15：Claude/部分 New API 适配器会把 system 抽成独立字段；
-      // 唤醒请求如果全是 system，上游 messages 会变空，因此最近记录必须作为 user 任务输入发送。
-      role: "user",
-      content: `以下是你与用户最近的聊天记录，仅供回忆和参考。
-
-这些内容不是正在发生的实时对话。
-用户并没有给你发消息。
-
-你现在处于后台自主唤醒状态。
-
-最近记录：
-
-${historyText}`
-    },
-    {
-      // 方案A：动态上下文（唤醒信息+记忆）放在 user 之后，贴近生成位置
       role: "system",
       content: dynamicContent
     }
@@ -711,7 +777,29 @@ ${historyText}`
     throw new Error(`模型请求失败（HTTP ${response.status}）：${responseText.slice(0, 300)}`);
   }
 
-  const rawAiText = normalizeContentToText(data.choices?.[0]?.message?.content).trim();
+  const rawAiTextFull = normalizeContentToText(data.choices?.[0]?.message?.content).trim();
+
+  // <wake> 标签：AI 可设置下次唤醒时间（分钟，1~1440，0 忽略）；标签不进入推送正文和时间线
+  const wakeTagMatch = rawAiTextFull.match(/<wake>\s*(\d+)\s*<\/wake>/i);
+  let wakeScheduleNote = "";
+  if (wakeTagMatch) {
+    const wakeMinutes = Number(wakeTagMatch[1]);
+    if (Number.isInteger(wakeMinutes) && wakeMinutes >= 1) {
+      const clamped = Math.min(1440, wakeMinutes);
+      const nextWakeAt = new Date(Date.now() + clamped * 60 * 1000);
+      try {
+        saveWakeSchedule(nextWakeAt.toISOString());
+        wakeScheduleNote = `，且设定了主动唤醒时间：${clamped} 分钟后（至 ${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}）`;
+        console.log(`[wake-up] AI 设定主动唤醒时间：${clamped} 分钟后（${nextWakeAt.toISOString()}）`);
+        armTimedWake();
+      } catch (wakeErr) {
+        console.warn("[wake-up] 保存下次唤醒时间失败:", wakeErr.message);
+      }
+    } else {
+      console.log("[wake-up] <wake> 数值无效（忽略）:", wakeTagMatch[1]);
+    }
+  }
+  const rawAiText = rawAiTextFull.replace(/<wake>[\s\S]*?<\/wake>/gi, "").trim();
   console.log("\nWake Result Summary:\n");
   console.log(JSON.stringify({ choices: Array.isArray(data.choices) ? data.choices.length : 0, ai_text_chars: rawAiText.length }));
 
@@ -793,6 +881,10 @@ ${historyText}`
     }
   }
 
+  if (wakeScheduleNote && eventContent) {
+    eventContent += wakeScheduleNote;
+  }
+
   // 保存 AI 的完整回复到时间线
   if (rawAiText) {
     // 提取 <memory> 和 <pin> 标签（唤醒时也允许 AI 写记忆和钉选）
@@ -810,8 +902,7 @@ ${historyText}`
         body: JSON.stringify({
           content: rawAiText,
           event: eventContent,
-          diary: diaryResult.diaryContent || "",
-          ...(surfacedMemoriesForConversation.length > 0 ? { memories: surfacedMemoriesForConversation } : {})
+          diary: diaryResult.diaryContent || ""
         })
       });
       if (aiReplyResponse.ok) {
@@ -850,6 +941,7 @@ function startAfterInit() {
     setTimeout(startAfterInit, 500);
     return;
   }
+  armTimedWake();
   setTimeout(scheduleNextCheck, 10_000);
 }
 startAfterInit();

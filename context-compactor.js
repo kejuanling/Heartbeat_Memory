@@ -10,23 +10,27 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { resolveTimeZone, zonedWallTimeToDate, formatDateTimeInTimeZone } = require("./time_utils");
+const contextReplacements = require("./context-replacements");
 
 const DATA_DIR = path.join(__dirname, "data");
+const TIME_ZONE = resolveTimeZone();
 const TIMELINE_FILE = path.join(__dirname, "enhanced_messages.json");
 const CACHE_FILE = path.join(DATA_DIR, "context_compaction.json");
 const OVERRIDES_FILE = path.join(DATA_DIR, "context_compaction_overrides.json");
 const COMPACTION_PROMPT_FILE = path.join(DATA_DIR, "compaction_prompt.json");
 const MARKS_FILE = path.join(DATA_DIR, "context_compaction_marks.json");
 const FORCE_FILE = path.join(DATA_DIR, "context_compaction_force.json");
+const BLOCKS_FILE = path.join(DATA_DIR, "context_compaction_blocks.json");
 const CACHE_MAX_ENTRIES = 500;
-const SUMMARY_HISTORY_MAX = 8;
+const SUMMARY_HISTORY_MAX = 2;
 
 const DEFAULT_CONFIG = {
   compaction_chunk_size: 100,
   compaction_chunk_min: 40,
   compaction_chunk_max: 160,
-  compaction_keep_recent_messages: 150,
-  compaction_min_messages: 250,
+  compaction_keep_recent_messages: 0,
+  compaction_min_messages: 0,
   compaction_gap_minutes: 30,
   compaction_summary_max_chars: 1200,
   compaction_summary_min_chars: 250,
@@ -62,6 +66,35 @@ function loadConfig() {
     }
   } catch (err) { /* 配置文件缺失时使用默认 */ }
   return cfg;
+}
+
+
+// 保存压缩参数（只更新 compaction_* 键，保留 data/config.json 中其它模块配置）
+function saveConfig(updates) {
+  const file = path.join(DATA_DIR, "config.json");
+  let current = {};
+  try { current = JSON.parse(fs.readFileSync(file, "utf-8")); } catch (err) { current = {}; }
+  if (!current || typeof current !== "object" || Array.isArray(current)) current = {};
+  let changed = false;
+  for (const k of Object.keys(DEFAULT_CONFIG)) {
+    if (updates[k] !== undefined) {
+      const v = updates[k];
+      if (typeof DEFAULT_CONFIG[k] === "number") {
+        current[k] = Math.max(0, Math.floor(Number(v) || 0));
+      } else if (typeof DEFAULT_CONFIG[k] === "boolean") {
+        current[k] = v === true || v === "true" || v === 1 || v === "1";
+      } else {
+        current[k] = v;
+      }
+      changed = true;
+    }
+  }
+  if (!changed) return { ok: false, message: "没有可更新的压缩参数" };
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  const tmp = file + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(current, null, 2), "utf-8");
+  fs.renameSync(tmp, file);
+  return { ok: true, config: loadConfig() };
 }
 
 function loadTimeline() {
@@ -100,7 +133,8 @@ function isSpecialEvent(msg) {
     c.indexOf("自动写了日记") !== -1 ||
     c.indexOf("记忆浮现") !== -1 ||
     c.indexOf("时间标记") !== -1 ||
-    c.indexOf("摘要）") !== -1
+    c.indexOf("摘要）") !== -1 ||
+    c.indexOf("共影）") !== -1
   );
 }
 
@@ -132,8 +166,16 @@ function isCompressible(msg, includeEvents) {
 function parseLeadingTime(text) {
   const m = String(text || "").match(/^（?\s*(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})/);
   if (!m) return null;
-  const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5])));
-  return isNaN(dt.getTime()) ? null : dt;
+  return zonedWallTimeToDate({ year: Number(m[1]), month: Number(m[2]), day: Number(m[3]), hour: Number(m[4]), minute: Number(m[5]) }, TIME_ZONE);
+}
+
+// 解析正文末尾的时间缀（客户端自动注入的墙上时间），按 TIME_ZONE 转 UTC
+function parseTrailingTime(text) {
+  const m = String(text || "").match(/(\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[ T]?)\d{1,2}[:：]\d{2})\s*$/);
+  if (!m) return null;
+  const p = m[1].match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})/);
+  if (!p) return null;
+  return zonedWallTimeToDate({ year: Number(p[1]), month: Number(p[2]), day: Number(p[3]), hour: Number(p[4]), minute: Number(p[5]) }, TIME_ZONE);
 }
 
 function msgTime(msg) {
@@ -141,16 +183,24 @@ function msgTime(msg) {
     const d = new Date(msg.time);
     if (!isNaN(d.getTime())) return d;
   }
-  return parseLeadingTime(contentToText(msg));
+  const text = contentToText(msg);
+  const fromTag = parseCurrentTimeTag(text);
+  if (fromTag) return fromTag;
+  const fromTrailing = parseTrailingTime(text);
+  if (fromTrailing) return fromTrailing;
+  return parseLeadingTime(text);
+}
+
+// 解析 <current_time>Sat 26-08-15 12:37:16</current_time> 里的时间（两位年份补全）
+function parseCurrentTimeTag(text) {
+  const m = String(text || "").match(/<current_time>[\s\S]*?(\d{2})[-/](\d{1,2})[-/](\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})/);
+  if (!m) return null;
+  return zonedWallTimeToDate({ year: 2000 + Number(m[1]), month: Number(m[2]), day: Number(m[3]), hour: Number(m[4]), minute: Number(m[5]) }, TIME_ZONE);
 }
 
 function formatTime(d) {
   if (!d) return "";
-  const p = function (n) { return String(n).padStart(2, "0"); };
-  return (
-    d.getUTCFullYear() + "-" + p(d.getUTCMonth() + 1) + "-" + p(d.getUTCDate()) +
-    " " + p(d.getUTCHours()) + ":" + p(d.getUTCMinutes())
-  );
+  return formatDateTimeInTimeZone(d, TIME_ZONE);
 }
 
 function snippet(text, max) {
@@ -203,8 +253,11 @@ function computeChunks(items, cfg, includeMsgs) {
 }
 
 function makeChunk(items, index, includeMsgs, manual) {
+  // 签名只统计普通对话内容：特殊事件（记忆浮现/推送/共影/唤醒等）会被后台流程增删移动，
+  // 若计入签名会导致块签名漂移、缓存摘要全部失配。
+  const sigTexts = items.filter(function (it) { return !isSpecialEvent(it.msg); }).map(function (it) { return contentToText(it.msg); });
   const texts = items.map(function (it) { return contentToText(it.msg); });
-  const sig = crypto.createHash("sha256").update(texts.join("\u0001")).digest("hex").slice(0, 32);
+  const sig = crypto.createHash("sha256").update(sigTexts.join("\u0001")).digest("hex").slice(0, 32);
   const times = items.map(function (it) { return msgTime(it.msg); }).filter(Boolean);
   let minT = null;
   let maxT = null;
@@ -292,6 +345,151 @@ function setForceReplace(signature, on) {
   return arr;
 }
 
+// =============================================================
+// 块存储（v2）：独立起止范围，取代旧 cutPoints 连续边界
+// =============================================================
+
+function loadBlocks() {
+  // 1) 尝试加载新格式
+  try {
+    const data = JSON.parse(fs.readFileSync(BLOCKS_FILE, "utf-8"));
+    if (data && data.version === 2 && Array.isArray(data.blocks)) {
+      return data.blocks.map(function(b, i) {
+        return {
+          start: Math.max(0, Math.floor(Number(b.start) || 0)),
+          end: Math.max(0, Math.floor(Number(b.end) || 0)),
+          enabled: b.enabled !== false
+        };
+      }).filter(function(b) { return b.start <= b.end; });
+    }
+  } catch (err) { /* 无新格式文件 */ }
+
+  // 2) 从旧 cutPoints + forceReplace 迁移
+  try {
+    const oldCutPoints = loadCutPoints();
+    const forceSet = new Set(loadForceReplace());
+    if (Array.isArray(oldCutPoints) && oldCutPoints.length > 0) {
+      const blocks = [];
+      let prev = -1;
+      const cfg2 = loadConfig();
+      const timeline = loadTimeline();
+      const entries = [];
+      (Array.isArray(timeline) ? timeline : []).forEach(function(m, i) {
+        if (m && m.role !== "system" && isCompressible(m, cfg2.compaction_compress_events !== false)) {
+          entries.push({ msg: m, idx: i });
+        }
+      });
+      const compactCount = Math.max(0, entries.length - Math.max(0, Number(cfg2.compaction_keep_recent_messages) || 0));
+      oldCutPoints.forEach(function(cp) {
+        if (cp <= prev) return;
+        const s = prev + 1;
+        const e = Math.min(cp, compactCount - 1);
+        if (s <= e && s < entries.length) {
+          const group = entries.slice(s, e + 1);
+          const sig = chunkSignatureOf(group);
+          blocks.push({ start: s, end: e, enabled: forceSet.has(sig) });
+        }
+        prev = cp;
+      });
+      if (blocks.length > 0) {
+        saveBlocks(blocks);
+        console.log("[context-compactor] 已从旧 cutPoints 迁移 " + blocks.length + " 个块到新格式");
+      }
+      return blocks;
+    }
+  } catch (err) {
+    console.warn("[context-compactor] 旧 cutPoints 迁移失败:", err.message);
+  }
+  return [];
+}
+
+function saveBlocks(blocks) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    const tmp = BLOCKS_FILE + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify({
+      version: 2,
+      blocks: blocks.map(function(b) {
+        return { start: b.start, end: b.end, enabled: b.enabled !== false };
+      })
+    }, null, 2), "utf-8");
+    fs.renameSync(tmp, BLOCKS_FILE);
+  } catch (err) {
+    console.error("[context-compactor] 块保存失败:", err.message);
+  }
+}
+
+function removeBlock(index) {
+  const blocks = loadBlocks();
+  if (index < 0 || index >= blocks.length) return { ok: false, message: "块不存在" };
+  blocks.splice(index, 1);
+  saveBlocks(blocks);
+  return { ok: true, blocks: blocks };
+}
+
+// 新增块：与已有块重叠的部分，旧块会被移除（被新块吞并或拆出未覆盖区）
+function addBlockRange(start, end, enabled) {
+  if (start < 0 || end < 0 || start > end) return { ok: false, message: "无效的范围" };
+  const blocks = loadBlocks();
+  const filtered = [];
+  let removedCount = 0;
+  for (const b of blocks) {
+    if (b.start <= end && b.end >= start) {
+      removedCount++;
+    } else {
+      filtered.push(b);
+    }
+  }
+  // enabled 默认 false：新块不自动替换，用户点「替换」后才生效
+  filtered.push({ start: start, end: end, enabled: enabled === true });
+  filtered.sort(function(a, b) { return a.start - b.start; });
+  saveBlocks(filtered);
+  return { ok: true, blocks: filtered, removedCount: removedCount };
+}
+
+function toggleBlock(index, enabled) {
+  const blocks = loadBlocks();
+  if (index < 0 || index >= blocks.length) return { ok: false, message: "块不存在" };
+  blocks[index].enabled = enabled !== false;
+  saveBlocks(blocks);
+  return { ok: true, block: blocks[index] };
+}
+
+function getBlockGaps(blocks, compactCount) {
+  if (!blocks || blocks.length === 0) return [{ start: 0, end: compactCount - 1 }];
+  const gaps = [];
+  let prevEnd = -1;
+  for (const b of blocks) {
+    if (b.start > prevEnd + 1) gaps.push({ start: prevEnd + 1, end: b.start - 1 });
+    prevEnd = Math.max(prevEnd, b.end);
+  }
+  if (prevEnd < compactCount - 1) gaps.push({ start: prevEnd + 1, end: compactCount - 1 });
+  return gaps.filter(g => g.start <= g.end);
+}
+
+// 更新某块的起止范围；被新范围覆盖（重叠）的旧块自动移除/吞并
+function updateBlockRange(index, start, end) {
+  if (start < 0 || end < 0 || start > end) return { ok: false, message: "无效的范围" };
+  const blocks = loadBlocks();
+  if (index < 0 || index >= blocks.length) return { ok: false, message: "块不存在" };
+  const filtered = [];
+  let removedCount = 0;
+  for (let k = 0; k < blocks.length; k++) {
+    if (k === index) continue;
+    const b = blocks[k];
+    if (b.start <= end && b.end >= start) {
+      removedCount++; // 重叠：吞并/移除
+    } else {
+      filtered.push(b);
+    }
+  }
+  filtered.push({ start: start, end: end, enabled: blocks[index].enabled !== false });
+  filtered.sort(function(a, b) { return a.start - b.start; });
+  saveBlocks(filtered);
+  return { ok: true, blocks: filtered, removedCount: removedCount };
+}
+
+
 function attachCache(chunks) {
   const cache = loadCache();
   const forceSet = new Set(loadForceReplace());
@@ -343,7 +541,8 @@ function storeSummary(signature, summary, meta) {
     manual: !!(meta && meta.manual),
     range: (meta && meta.range) || null,
     timeRange: (meta && meta.timeRange) || null,
-    history: history
+    history: history,
+    normKeys: (meta && meta.normKeys) || null
   };
   const keys = Object.keys(cache);
   if (keys.length > CACHE_MAX_ENTRIES) {
@@ -357,14 +556,13 @@ function storeSummary(signature, summary, meta) {
 }
 
 // 手动编辑摘要：旧版压入历史，写入编辑后的内容
-function updateSummary(signature, summary) {
+function updateSummary(signature, summary, meta) {
   const text = String(summary || "").trim();
   if (!text) throw new Error("摘要内容不能为空");
   const cache = loadCache();
   const prev = cache[signature];
-  if (!prev || !prev.summary) throw new Error("该块没有缓存摘要，请先生成摘要再编辑");
   let history = [];
-  if (prev.summary) {
+  if (prev && prev.summary) {
     history = [{
       summary: prev.summary,
       generatedAt: prev.generatedAt,
@@ -378,8 +576,37 @@ function updateSummary(signature, summary) {
     generatedAt: new Date().toISOString(),
     mode: "edited",
     manual: true,
-    range: prev.range || null,
-    timeRange: prev.timeRange || null,
+    range: (prev && prev.range) || (meta && meta.range) || null,
+    timeRange: (prev && prev.timeRange) || (meta && meta.timeRange) || null,
+    history: history
+  };
+  saveCache(cache);
+  return cache[signature];
+}
+
+// 手动「添加摘要」：已有摘要时新增一个历史版本（不覆盖当前生效摘要）；无摘要时直接创建
+function addSummaryVersion(signature, summary, meta) {
+  const text = String(summary || "").trim();
+  if (!text) throw new Error("摘要内容不能为空");
+  const cache = loadCache();
+  const prev = cache[signature];
+  if (!prev || !prev.summary) {
+    return updateSummary(signature, text, meta);
+  }
+  const history = [{
+    summary: text,
+    generatedAt: new Date().toISOString(),
+    mode: "manual",
+    manual: true
+  }].concat(Array.isArray(prev.history) ? prev.history : []);
+  if (history.length > SUMMARY_HISTORY_MAX) history.length = SUMMARY_HISTORY_MAX;
+  cache[signature] = {
+    summary: prev.summary,
+    generatedAt: prev.generatedAt,
+    mode: prev.mode,
+    manual: prev.manual,
+    range: prev.range || (meta && meta.range) || null,
+    timeRange: prev.timeRange || (meta && meta.timeRange) || null,
     history: history
   };
   saveCache(cache);
@@ -480,30 +707,219 @@ function removeCutPoint() {
   return { ok: true, cutPoints: newCutPoints };
 }
 
-function loadCutPoints() {
+// ---------------- 多套边界配置（分窗口） ----------------
+// 每套配置对应一个窗口的边界；请求/预览时自动选用「命中缓存摘要最多」的那套，
+// 避免换窗口生成新摘要时把另一窗口的边界覆盖掉。
+
+let ACTIVE_CUTPOINT_CONFIG_ID = null;
+
+function normalizeCutPoints(points) {
+  return Array.from(new Set((Array.isArray(points) ? points : [])
+    .map(Number)
+    .filter(function (v) { return Number.isInteger(v) && v >= 0; })))
+    .sort(function (a, b) { return a - b; });
+}
+
+function loadCutPointConfigs() {
   try {
     const data = JSON.parse(fs.readFileSync(OVERRIDES_FILE, "utf-8"));
+    if (data && data.version === 2 && Array.isArray(data.configs)) {
+      return data.configs
+        .filter(function (c) { return c && Array.isArray(c.cutPoints); })
+        .map(function (c) {
+          return {
+            id: String(c.id || ("cfg-" + Math.random().toString(36).slice(2, 8))),
+            cutPoints: c.cutPoints.map(Number).filter(function (v) { return Number.isInteger(v) && v >= 0; }),
+            updatedAt: String(c.updatedAt || ""),
+            blockAnchors: Array.isArray(c.blockAnchors) ? c.blockAnchors : null
+          };
+        });
+    }
     if (data && Array.isArray(data.cutPoints)) {
-      return data.cutPoints.map(Number).filter(function (v) { return Number.isInteger(v) && v >= 0; });
+      // v1 单套配置 → 迁移为 v2
+      return [{
+        id: "cfg-default",
+        cutPoints: data.cutPoints.map(Number).filter(function (v) { return Number.isInteger(v) && v >= 0; }),
+        updatedAt: ""
+      }];
     }
   } catch (err) { /* 无边界配置 */ }
   return [];
 }
 
-function saveCutPoints(points) {
-  const list = (Array.isArray(points) ? points : [])
-    .map(Number)
-    .filter(function (v) { return Number.isInteger(v) && v >= 0; });
-  const uniq = Array.from(new Set(list)).sort(function (a, b) { return a - b; });
+function saveCutPointConfigs(configs) {
   try {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
     const tmp = OVERRIDES_FILE + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify({ version: 1, cutPoints: uniq }, null, 2), "utf-8");
+    fs.writeFileSync(tmp, JSON.stringify({ version: 2, configs: configs }, null, 2), "utf-8");
     fs.renameSync(tmp, OVERRIDES_FILE);
   } catch (err) {
-    console.error("[context-compactor] 边界保存失败:", err.message);
+    console.error("[context-compactor] 边界配置保存失败:", err.message);
   }
-  return uniq;
+}
+
+function arraysEqual(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+// 给一套边界打分：在当前时间线下能命中多少块「有摘要且被强制替换」的块
+function scoreCutPointConfig(config, timeline, cfg, cache, forceSet) {
+  const compressEvents = cfg.compaction_compress_events !== false;
+  const entries = [];
+  (Array.isArray(timeline) ? timeline : []).forEach(function (m, i) {
+    if (m && m.role !== "system" && isCompressible(m, compressEvents)) entries.push({ msg: m, arrIdx: i });
+  });
+  const total = entries.length;
+  const minMessages = Number(cfg.compaction_min_messages) || 0;
+  const keepRecent = Math.max(0, Number(cfg.compaction_keep_recent_messages) || 0);
+  const compactCount = total >= minMessages ? Math.max(0, total - keepRecent) : 0;
+  let matched = 0;
+  let totalBlocks = 0;
+  if (compactCount > 0) {
+    const compactEntries = entries.slice(0, compactCount);
+    const cutPoints = (Array.isArray(config.cutPoints) ? config.cutPoints : [])
+      .filter(function (cp) { return cp < compactCount; });
+    const anchors = (config.blockAnchors || []).slice(0, cutPoints.length);
+    const blocks = contentAnchoredBlocks(compactEntries, cutPoints, anchors);
+    for (const b of blocks) {
+      const g = b.group;
+      if (g.length === 0) continue;
+      totalBlocks++;
+      const sig = chunkSignatureOf(g);
+      if (cache[sig] && cache[sig].summary && forceSet.has(sig)) matched++;
+    }
+  }
+  return { matched: matched, totalBlocks: totalBlocks };
+}
+
+// 选出当前时间线最匹配的一套边界；返回 { id, cutPoints, matched, configCount }
+function resolveCutPointConfig(opts) {
+  const configs = loadCutPointConfigs();
+  if (configs.length === 0) {
+    ACTIVE_CUTPOINT_CONFIG_ID = null;
+    return { id: null, cutPoints: [], matched: 0, configCount: 0 };
+  }
+  const o = opts || {};
+  const timeline = o.timeline || loadTimeline();
+  const cfg = o.cfg || loadConfig();
+  const cache = o.cache || loadCache();
+  const force = o.forceReplace || new Set(loadForceReplace());
+  // 当前时间线可压缩消息数，用来判断一套边界是否仍适配当前窗口
+  const compressEvents = cfg.compaction_compress_events !== false;
+  const entries = [];
+  (Array.isArray(timeline) ? timeline : []).forEach(function (m, i) {
+    if (m && m.role !== "system" && isCompressible(m, compressEvents)) entries.push(m);
+  });
+  const total = entries.length;
+  const minMessages = Number(cfg.compaction_min_messages) || 0;
+  const keepRecent = Math.max(0, Number(cfg.compaction_keep_recent_messages) || 0);
+  const compactCount = total >= minMessages ? Math.max(0, total - keepRecent) : 0;
+  function fitCountOf(cps) {
+    return (Array.isArray(cps) ? cps : []).filter(function (cp) { return cp < compactCount; }).length;
+  }
+  if (configs.length === 1) {
+    ACTIVE_CUTPOINT_CONFIG_ID = configs[0].id;
+    return { id: configs[0].id, cutPoints: configs[0].cutPoints, matched: 0, configCount: 1, blockAnchors: configs[0].blockAnchors || null };
+  }
+  let best = configs[0];
+  let bestScore = -1;
+  let bestFit = -1;
+  const scored = [];
+  for (const c of configs) {
+    const r = scoreCutPointConfig(c, timeline, cfg, cache, force);
+    const fit = fitCountOf(c.cutPoints);
+    scored.push({ id: c.id, score: r.matched, fit: fit });
+    if (r.matched > bestScore || (r.matched === bestScore && fit > bestFit)) {
+      bestScore = r.matched;
+      bestFit = fit;
+      best = c;
+    }
+  }
+  // 平分（包括 force 为空时全部 0 分）优先上一次活动的配置，避免窗口来回跳
+  if (ACTIVE_CUTPOINT_CONFIG_ID) {
+    const activeScore = scored.find(function (s) { return s.id === ACTIVE_CUTPOINT_CONFIG_ID; });
+    const activeCfg = configs.find(function (c) { return c.id === ACTIVE_CUTPOINT_CONFIG_ID; });
+    if (activeScore && activeCfg && activeScore.score === bestScore && activeScore.fit > 0) {
+      best = activeCfg;
+    }
+  }
+  ACTIVE_CUTPOINT_CONFIG_ID = best.id;
+  return { id: best.id, cutPoints: best.cutPoints, matched: bestScore, configCount: configs.length, blockAnchors: best.blockAnchors || null };
+}
+
+function listCutPointConfigs() {
+  return loadCutPointConfigs().map(function (c) {
+    return { id: c.id, cutPoints: c.cutPoints, updatedAt: c.updatedAt };
+  });
+}
+
+function loadCutPoints() {
+  return resolveCutPointConfig().cutPoints;
+}
+
+
+function deriveAnchorsForConfig(cutPointList) {
+  try {
+    const cfg = loadConfig();
+    const entries = [];
+    loadTimeline().forEach(function (m, i) {
+      if (m && m.role !== "system" && isCompressible(m, cfg.compaction_compress_events !== false)) entries.push({ msg: m, arrIdx: i });
+    });
+    const list = normalizeCutPoints(cutPointList);
+    const cache = loadCache();
+    const forceSet = new Set(loadForceReplace());
+    return deriveBlockAnchors(entries, list, cache, forceSet);
+  } catch (err) {
+    console.error("[context-compactor] 边界锚点派生失败:", err.message);
+    return null;
+  }
+}
+
+function saveCutPoints(points, configId) {
+  const list = normalizeCutPoints(points);
+  const configs = loadCutPointConfigs();
+  const now = new Date().toISOString();
+  // 0) 前端显式指定当前窗口的配置（预览里展示的那套）→ 直接更新它
+  if (configId) {
+    const byId = configs.find(function (c) { return c.id === configId; });
+    if (byId) {
+      byId.cutPoints = list;
+      byId.updatedAt = now;
+      byId.blockAnchors = deriveAnchorsForConfig(list);
+      saveCutPointConfigs(configs);
+      ACTIVE_CUTPOINT_CONFIG_ID = byId.id;
+      return list;
+    }
+  }
+  // 1) 与某套已有配置完全相同 → 只更新时间戳
+  const exact = configs.find(function (c) { return arraysEqual(c.cutPoints, list); });
+  if (exact) {
+    exact.updatedAt = now;
+    saveCutPointConfigs(configs);
+    ACTIVE_CUTPOINT_CONFIG_ID = exact.id;
+    return list;
+  }
+  // 2) 当前时间线选中的配置（命中或按适配度/活动状态选出的）→ 视为在编辑该窗口的边界
+  const resolved = resolveCutPointConfig();
+  if (resolved.id) {
+    const target = configs.find(function (c) { return c.id === resolved.id; });
+    if (target) {
+      target.cutPoints = list;
+      target.updatedAt = now;
+      target.blockAnchors = deriveAnchorsForConfig(list);
+      saveCutPointConfigs(configs);
+      ACTIVE_CUTPOINT_CONFIG_ID = target.id;
+      return list;
+    }
+  }
+  // 3) 新窗口（没有可编辑的配置）→ 新建一套，绝不覆盖旧窗口
+  const id = "cfg-" + Date.now().toString(36);
+  configs.push({ id: id, cutPoints: list, updatedAt: now, blockAnchors: deriveAnchorsForConfig(list) });
+  saveCutPointConfigs(configs);
+  ACTIVE_CUTPOINT_CONFIG_ID = id;
+  return list;
 }
 
 // ---------------- 摘要长度（自适应） ----------------
@@ -604,16 +1020,14 @@ function resetCompactionPromptConfig() {
 
 // ---------------- 摘要生成（调用上游模型） ----------------
 
-async function generateSummary(chunk, meta) {
-  const cfg = loadConfig();
-  if (!chunk.msgs || chunk.msgs.length === 0) throw new Error("块内没有可摘要的消息");
+// 调用上游模型生成摘要文本（不含落盘）：手动块与未覆盖区生成共用
+async function callCompactionLLM(built, label) {
   const targetUrl = process.env.TARGET_API_URL;
   const targetKey = process.env.TARGET_API_KEY;
   const model = process.env.MODEL_NAME;
   if (!targetUrl || !targetKey || !model) {
     throw new Error("TARGET_API_URL / TARGET_API_KEY / MODEL_NAME 未配置");
   }
-  const built = buildCompactionPrompt(chunk, cfg);
   const outputBudgets = [8000, 16000];
   let lastErr = null;
   for (let attempt = 0; attempt < outputBudgets.length; attempt++) {
@@ -648,30 +1062,94 @@ async function generateSummary(chunk, meta) {
         if (attempt >= outputBudgets.length - 1) {
           throw new Error(why);
         }
-        console.warn("[context-compactor] 块 #" + chunk.index + " " + why + "，增大输出预算重试");
+        console.warn("[context-compactor] " + (label || "摘要") + " " + why + "，增大输出预算重试");
         lastErr = new Error(why);
         continue;
       }
-      storeSummary(chunk.signature, summary, {
-        mode: (meta && meta.mode) || "manual",
-        manual: !!(meta && meta.manual),
-        range: { start: chunk.firstIdx + 1, end: chunk.lastIdx + 1 },
-        timeRange: (chunk.startTime || "") + " ~ " + (chunk.endTime || "")
-      });
-      console.log("[context-compactor] 块 #" + chunk.index + " 摘要已生成（" + summary.length + " 字）");
-      return {
-        index: chunk.index,
-        signature: chunk.signature,
-        summary: summary,
-        cached: true,
-        length: summary.length,
-        truncated: false
-      };
+      return summary;
     } finally {
       clearTimeout(timeout);
     }
   }
   throw lastErr || new Error("摘要生成失败");
+}
+
+async function generateSummary(chunk, meta) {
+  const cfg = loadConfig();
+  if (!chunk.msgs || chunk.msgs.length === 0) throw new Error("块内没有可摘要的消息");
+  const built = buildCompactionPrompt(chunk, cfg);
+  const summary = await callCompactionLLM(built, "块 #" + chunk.index);
+  storeSummary(chunk.signature, summary, {
+    mode: (meta && meta.mode) || "manual",
+    manual: !!(meta && meta.manual),
+    range: { start: chunk.firstIdx + 1, end: chunk.lastIdx + 1 },
+    timeRange: (chunk.startTime || "") + " ~ " + (chunk.endTime || ""),
+    normKeys: blockNormKeys(chunk.msgs.map(function (it) { return { msg: it.msg }; }))
+  });
+  console.log("[context-compactor] 块 #" + chunk.index + " 摘要已生成（" + summary.length + " 字）");
+  return {
+    index: chunk.index,
+    signature: chunk.signature,
+    summary: summary,
+    cached: true,
+    length: summary.length,
+    truncated: false
+  };
+}
+
+// 已有手动块（0-based index）重新生成摘要：按块范围取消息 → 压缩提示词生成 → 覆盖写入摘要缓存（旧摘要进历史）
+async function generateBlockSummary(blockIndex) {
+  const cfg = loadConfig();
+  const blocks = loadBlocks();
+  if (blockIndex < 0 || blockIndex >= blocks.length) return { ok: false, message: "块不存在" };
+  const b = blocks[blockIndex];
+  const timeline = loadTimeline();
+  const dialog = (Array.isArray(timeline) ? timeline : []).filter(function (m) { return m && m.role !== "system"; });
+  const items = [];
+  dialog.forEach(function (m, idx) {
+    if (isCompressible(m, cfg.compaction_compress_events !== false)) items.push({ msg: m, idx: idx });
+  });
+  const minMessages = Number(cfg.compaction_min_messages) || 0;
+  const keepRecent = Math.max(0, Number(cfg.compaction_keep_recent_messages) || 0);
+  const compactCount = items.length >= minMessages ? Math.max(0, items.length - keepRecent) : 0;
+  if (compactCount <= 0) return { ok: false, message: "当前没有可压缩内容" };
+  if (b.start >= compactCount) return { ok: false, message: "该块超出当前可压缩范围" };
+  const end = Math.min(b.end, compactCount - 1);
+  const chunk = makeChunk(items.slice(b.start, end + 1), 0, true, true);
+  const built = buildCompactionPrompt(chunk, cfg);
+  const summary = await callCompactionLLM(built, "块 #" + (blockIndex + 1));
+  storeSummary(chunk.signature, summary, {
+    mode: "manual",
+    manual: true,
+    range: { start: chunk.firstIdx + 1, end: chunk.lastIdx + 1 },
+    timeRange: (chunk.startTime || "") + " ~ " + (chunk.endTime || ""),
+    normKeys: blockNormKeys(chunk.msgs.map(function (it) { return { msg: it.msg }; }))
+  });
+  console.log("[context-compactor] 手动块 #" + (blockIndex + 1) + " 摘要已生成（" + summary.length + " 字）");
+  return { ok: true, blockIndex: blockIndex, length: summary.length };
+}
+
+// 按压缩索引范围直接生成摘要文字（统一替换用：不写块、不写缓存，只返回文字）
+async function generateSummaryForRange(start, end) {
+  const cfg = loadConfig();
+  const timeline = loadTimeline();
+  const items = [];
+  (Array.isArray(timeline) ? timeline : []).forEach(function (m, idx) {
+    if (m && m.role !== "system" && isCompressible(m, cfg.compaction_compress_events !== false)) items.push({ msg: m, idx: idx });
+  });
+  const minMessages = Number(cfg.compaction_min_messages) || 0;
+  const keepRecent = Math.max(0, Number(cfg.compaction_keep_recent_messages) || 0);
+  const compactCount = items.length >= minMessages ? Math.max(0, items.length - keepRecent) : 0;
+  if (compactCount <= 0) return { ok: false, message: "当前没有可压缩内容" };
+  const s = Math.max(0, Math.floor(Number(start) || 0));
+  let e = Math.floor(Number(end));
+  if (!Number.isInteger(e) || e < s) e = s;
+  if (s >= compactCount) return { ok: false, message: "起始编号超出当前可压缩范围" };
+  e = Math.min(e, compactCount - 1);
+  const chunk = makeChunk(items.slice(s, e + 1), 0, true, true);
+  const built = buildCompactionPrompt(chunk, cfg);
+  const summary = await callCompactionLLM(built, "块");
+  return { ok: true, summary: summary, length: summary.length, count: chunk.count };
 }
 
 function removeSummaries(signatures) {
@@ -722,12 +1200,110 @@ function setMark(key, marked) {
 // ---------------- 转发前压缩（替换缓存摘要） ----------------
 
 function isEnabled() {
-  return loadForceReplace().length > 0;
+  // 手动块（新模型）有启用替换的，或旧 forceReplace 存在 → 启用
+  const blocks = loadBlocks();
+  return blocks.some(function (b) { return b.enabled !== false; }) || loadForceReplace().length > 0;
 }
 
 function chunkSignatureOf(entries) {
-  const texts = entries.map(function (e) { return contentToText(e.msg); });
+  // 与 makeChunk 一致：签名只统计普通对话内容，特殊事件不计入，避免后台增删特殊事件导致签名漂移
+  const texts = entries.filter(function (e) { return !isSpecialEvent(e.msg); }).map(function (e) { return contentToText(e.msg); });
   return crypto.createHash("sha256").update(texts.join("\u0001")).digest("hex").slice(0, 32);
+}
+
+
+// ---------------- 内容锚定分块 ----------------
+// 块边界以「内容 key」锚定而非固定索引：时间线里特殊事件/客户端历史组合变化
+// 会让固定索引切片漂移，导致块签名失配、缓存摘要整块失效。
+// 锚定后块的纯对话跨度稳定，签名只随真实对话内容变化。
+
+function deriveBlockAnchors(entries, cutPoints, cache, forceSet) {
+  const anchors = [];
+  let s = 0;
+  for (const cp of cutPoints) {
+    if (cp < s) continue;
+    const slice = entries.slice(s, cp + 1);
+    const nonSpecial = [];
+    for (let i = slice.length - 1; i >= 0 && nonSpecial.length < 6; i--) {
+      if (!isSpecialEvent(slice[i].msg)) nonSpecial.push(slice[i]);
+    }
+    let chosen = null;
+    if (cache && forceSet && nonSpecial.length > 0) {
+      for (const cand of nonSpecial) {
+        const key = normalizedCompareKey(cand.msg);
+        let endIdx = -1;
+        for (let j = s; j < entries.length; j++) {
+          if (!isSpecialEvent(entries[j].msg) && normalizedCompareKey(entries[j].msg) === key) { endIdx = j; break; }
+        }
+        if (endIdx === -1) continue;
+        const sig = chunkSignatureOf(entries.slice(s, endIdx + 1));
+        if (cache[sig] && cache[sig].summary && forceSet.has(sig)) { chosen = key; break; }
+      }
+    }
+    if (!chosen && nonSpecial.length > 0) chosen = normalizedCompareKey(nonSpecial[0].msg);
+    anchors.push(chosen ? { end: chosen } : null);
+    s = cp + 1;
+  }
+  return anchors;
+}
+
+function contentAnchoredBlocks(entries, cutPoints, blockAnchors) {
+  const blocks = [];
+  let s = 0;
+  cutPoints.forEach(function (cp, i) {
+    if (cp < s) return;
+    const anchor = blockAnchors && blockAnchors[i];
+    let endIdx = -1;
+    if (anchor && anchor.end) {
+      for (let j = s; j < entries.length; j++) {
+        if (!isSpecialEvent(entries[j].msg) && normalizedCompareKey(entries[j].msg) === anchor.end) { endIdx = j; break; }
+      }
+    }
+    if (endIdx === -1) endIdx = Math.min(cp, entries.length - 1);
+    if (endIdx < s) { s = cp + 1; return; }
+    blocks.push({ startIdx: s, endIdx: endIdx, group: entries.slice(s, endIdx + 1) });
+    s = endIdx + 1;
+  });
+  return blocks;
+}
+
+
+// 序列相似度：允许少量跳过（客户端合并/拆分消息、边界微漂移），
+// 用于「签名失配但内容基本一致」时仍能命中缓存摘要。
+function sequenceSimilarity(keys, refKeys) {
+  if (keys.length === 0 || refKeys.length === 0) return 0;
+  let j = 0;
+  let matched = 0;
+  for (const key of keys) {
+    const limit = Math.min(refKeys.length, j + 8);
+    let found = -1;
+    for (let k = j; k < limit; k++) {
+      if (refKeys[k] === key) { found = k; break; }
+    }
+    if (found >= 0) { matched++; j = found + 1; }
+  }
+  return matched / keys.length;
+}
+
+// 块的纯对话归一化键序列（与摘要生成时缓存的口径一致）
+function blockNormKeys(group) {
+  return group.filter(function (e) { return !isSpecialEvent(e.msg); }).map(function (e) { return normalizedCompareKey(e.msg); });
+}
+
+// 精确签名未命中时，在 force 集合里找内容高度相似的缓存摘要
+function findFuzzySummary(group, cache, forceSet) {
+  const keys = blockNormKeys(group);
+  if (keys.length === 0) return null;
+  let best = null;
+  let bestSim = 0;
+  forceSet.forEach(function (s) {
+    const e = cache[s];
+    if (!e || !e.summary || !Array.isArray(e.normKeys) || e.normKeys.length === 0) return;
+    const sim = sequenceSimilarity(keys, e.normKeys);
+    if (sim > bestSim) { bestSim = sim; best = s; }
+  });
+  if (best && bestSim >= 0.93) return { sig: best, similarity: bestSim };
+  return null;
 }
 
 function buildSummaryMessage(entries, summary) {
@@ -756,10 +1332,10 @@ function mergeAdjacentSameRole(messages) {
     if (!m) continue;
     if ((m.role === "user" || m.role === "assistant") &&
         !m.tool_calls && !m.tool_call_id &&
-        typeof m.content === "string" && !m._ccSummary) {
+        typeof m.content === "string" && !m._ccSummary && !m._ctxRep) {
       const prev = out[out.length - 1];
       if (prev && prev.role === m.role && !prev.tool_calls && !prev.tool_call_id &&
-          typeof prev.content === "string" && !prev._ccSummary) {
+          typeof prev.content === "string" && !prev._ccSummary && !prev._ctxRep) {
         prev.content = prev.content + "\n\n" + m.content;
         continue;
       }
@@ -783,14 +1359,14 @@ function normalizedCompareKey(msg) {
   const stripped = c
     .replace(/<memory>[\s\S]*?<\/memory>/gi, "")
     .replace(/<pin>[\s\S]*?<\/pin>/gi, "")
+    .replace(/<current_time>[\s\S]*?<\/current_time>/gi, "")
+    .replace(/\s+/g, " ")
     .trim();
   return role + "\u0000" + stripped;
 }
 
 function compactMessages(messages, opts) {
   const cfg = Object.assign(loadConfig(), (opts && opts.config) || {});
-  const forceReplace = new Set(loadForceReplace());
-  if (forceReplace.size === 0) return messages;
   const compressEvents = cfg.compaction_compress_events !== false;
   const src = Array.isArray(messages) ? messages : [];
   const minMessages = Number(cfg.compaction_min_messages) || 0;
@@ -806,36 +1382,89 @@ function compactMessages(messages, opts) {
     }
   });
   const total = tlEntries.length;
-  if (total < minMessages && forceReplace.size === 0) return messages;
+  if (total < minMessages) return messages;
   const compactCount = Math.max(0, total - keepRecent);
-  if (compactCount === 0 && forceReplace.size === 0) return messages;
+  if (compactCount === 0) return messages;
   const compactEntries = tlEntries.slice(0, compactCount);
 
+  // 手动块（独立起止范围）：只处理开启了 enabled 的块
+  const cache = loadCache();
+  const forceReplace = new Set(loadForceReplace());
+  const blocks = loadBlocks().filter(function(b) { return b.enabled !== false; });
   let groups = [];
-  const cutPoints = loadCutPoints().filter(function (cp) { return cp < compactCount; });
-  if (cutPoints.length > 0) {
-    let s = 0;
-    for (const cp of cutPoints) {
-      if (cp >= s) {
-        groups.push(compactEntries.slice(s, cp + 1));
-        s = cp + 1;
+  if (blocks.length > 0) {
+    for (const b of blocks) {
+      if (b.start < compactCount) {
+        const end = Math.min(b.end, compactCount - 1);
+        if (b.start <= end) {
+          const slice = compactEntries.slice(b.start, end + 1);
+          if (slice.length > 0) groups.push(slice);
+        }
       }
     }
-    // 最后一个已定块之后的内容保持原文，作为「未覆盖内容」等待用户点「添加一块」再切
-  } else {
+  }
+  // 没有启用了替换的手动块 → 不压缩（块只来自手动划分，没有自动分块）
+  // 兼容旧 forceReplace：若旧签名仍存在且有缓存摘要，用自然分块匹配（迁移过渡期）
+  if (groups.length === 0 && forceReplace.size > 0) {
     groups = naturalGroups(compactEntries, cfg);
   }
+  if (groups.length === 0) return messages;
 
-  const cache = loadCache();
+  // 锚点视图：请求里只有「纯对话」消息参与定位（与时间线块签名口径一致），
+  // 工具消息 / 空消息 / 按时间重排的特殊事件全部排除，避免它们干扰块边界定位
+  const srcAnchorIdx = [];
+  const srcAnchorKeys = [];
+  src.forEach(function (m, i) {
+    if (!m) return;
+    if (m.role === "system") return;
+    if (m.role === "tool" || m.tool_calls || m.tool_call_id) return;
+    if (isSpecialEvent(m)) return;
+    if (contextReplacements.isReplacementMemoryMessage(m)) return;
+    if (!String(contentToText(m)).trim()) return;
+    srcAnchorIdx.push(i);
+    srcAnchorKeys.push(normalizedCompareKey(m));
+  });
+  if (srcAnchorIdx.length === 0) return messages;
+
+  // 时间线纯对话序列（内容锚点失败时做位置近似兜底）
+  const tlPurePos = [];
+  tlEntries.forEach(function (e, i) { if (!isSpecialEvent(e.msg)) tlPurePos.push(i); });
+
+  // 特殊事件精确时间：客户端请求不带 time 字段，正文时间只有分钟粒度，
+  // 优先用时间线保存的精确时间（带秒），避免事件落在块起点前几秒被误判为块外
+  const tlEventTimeByKey = new Map();
+  tlEntries.forEach(function (e) {
+    if (!isSpecialEvent(e.msg)) return;
+    const t = e.msg && e.msg.time ? new Date(e.msg.time) : null;
+    if (t && !isNaN(t.getTime()) && !tlEventTimeByKey.has(normalizedCompareKey(e.msg))) {
+      tlEventTimeByKey.set(normalizedCompareKey(e.msg), t);
+    }
+  });
+
   const replacements = [];
-  const srcKeys = src.map(normalizedCompareKey);
   let searchStart = 0;
   groups.forEach(function (g, gi) {
     if (!g || g.length === 0) return;
     const sig = chunkSignatureOf(g);
-    const entry = cache[sig];
-    const hit = !!(entry && entry.summary && forceReplace.has(sig));
+    let entry = cache[sig];
+    // 手动块：enabled 即替换（无需再查 forceReplace）；自然分块：需 forceReplace（旧逻辑）
+    let hit = blocks.length > 0
+      ? !!(entry && entry.summary)
+      : !!(entry && entry.summary && forceReplace.has(sig));
+
+    if (!hit) {
+      const fuzzy = findFuzzySummary(g, cache, forceReplace);
+      if (fuzzy && fuzzy.sig !== sig) {
+        entry = cache[fuzzy.sig];
+        hit = true;
+        if (process.env.CC_DEBUG === '1') console.log('[CC-DEBUG]   fuzzy hit gi', gi, 'sig', sig, '->', fuzzy.sig, 'sim', fuzzy.similarity.toFixed(3));
+      }
+    }
+    if (process.env.CC_DEBUG === '1') {
+      console.log('[CC-DEBUG] group', gi, 'size', g.length, 'sig', sig, 'cache', !!(entry && entry.summary),'hit', hit);
+    }
     if (!hit) return;
+
     // 用内容锚点把时间线块映射到本次请求消息中的位置（容忍重复消息/注入事件造成的偏移）
     let aStart = null, aEnd = null;
     for (const e of g) {
@@ -847,23 +1476,63 @@ function compactMessages(messages, opts) {
     if (!aStart || !aEnd) return;
     const startKey = normalizedCompareKey(aStart.msg);
     const endKey = normalizedCompareKey(aEnd.msg);
-    const si = srcKeys.indexOf(startKey, searchStart);
-    if (si === -1) return;
-    let ei = srcKeys.indexOf(endKey, si + 1);
-    if (ei === -1) ei = srcKeys.lastIndexOf(endKey);
-    if (ei === -1 || ei < si) return;
+
+    let si = srcAnchorKeys.indexOf(startKey, searchStart);
+    if (si === -1) {
+      // 兜底：块首条纯对话在时间线纯对话序列中的位置 → 近似映射到请求锚点视图
+      let firstNonSpecialTlIdx = -1;
+      for (const e of g) {
+        if (!isSpecialEvent(e.msg)) { firstNonSpecialTlIdx = tlEntries.indexOf(e); break; }
+      }
+      const purePos = firstNonSpecialTlIdx >= 0 ? tlPurePos.indexOf(firstNonSpecialTlIdx) : -1;
+      if (purePos >= searchStart && purePos < srcAnchorIdx.length) si = purePos;
+      else return;
+    }
+
+    let ei = srcAnchorKeys.indexOf(endKey, si + 1);
+    if (ei === -1) ei = srcAnchorKeys.lastIndexOf(endKey);
+
+    if (ei === -1 || ei < si) {
+      // 兜底：块尾锚点在请求里可能被过滤/变形，向前找替代锚点（最多 8 条非特殊事件）
+      let found = -1;
+      let tried = 0;
+      for (let k = g.length - 2; k >= 0 && tried < 8; k--) {
+        if (isSpecialEvent(g[k].msg)) continue;
+        tried++;
+        const alt = normalizedCompareKey(g[k].msg);
+        let ae = srcAnchorKeys.indexOf(alt, si + 1);
+        if (ae === -1) ae = srcAnchorKeys.lastIndexOf(alt);
+        if (ae >= si) { found = ae; break; }
+      }
+      if (found === -1) return;
+      ei = found;
+    }
+
+    // 映射回请求原始索引
+    const srcStart = srcAnchorIdx[si];
+    let srcEnd = srcAnchorIdx[ei];
     // 块尾常跟着工具调用链（tool_calls + tool 返回），属于机械痕迹，一并纳入替换区间
-    while (ei + 1 < src.length) {
-      const nxt = src[ei + 1];
+    while (srcEnd + 1 < src.length) {
+      const nxt = src[srcEnd + 1];
       if (!nxt) break;
-      if (nxt.role === "tool") { ei++; continue; }
-      if (nxt.role === "assistant" && nxt.tool_calls && !String(nxt.content || "").trim()) { ei++; continue; }
+      if (nxt.role === "tool") { srcEnd++; continue; }
+      if (nxt.role === "assistant" && nxt.tool_calls && !String(nxt.content || "").trim()) { srcEnd++; continue; }
       break;
     }
+    let blkMin = null, blkMax = null;
+    g.forEach(function (e) {
+      const t = msgTime(e.msg);
+      if (!t) return;
+      const v = t.getTime();
+      if (blkMin === null || v < blkMin) blkMin = v;
+      if (blkMax === null || v > blkMax) blkMax = v;
+    });
     replacements.push({
-      startIdx: si,
-      endIdx: ei,
-      message: buildSummaryMessage(g, entry.summary)
+      startIdx: srcStart,
+      endIdx: srcEnd,
+      message: buildSummaryMessage(g, entry.summary),
+      minT: blkMin,
+      maxT: blkMax
     });
     searchStart = ei + 1;
   });
@@ -873,15 +1542,31 @@ function compactMessages(messages, opts) {
   const out = [];
   let r = 0;
   for (let i = 0; i < src.length; i++) {
+    // 块时间范围清理：只要特殊事件的时间落在已被摘要覆盖的块范围内，一并清掉
+    const m0 = src[i];
+    if (m0 && isSpecialEvent(m0)) {
+      let t0 = null;
+      if (m0.time) { const d = new Date(m0.time); if (!isNaN(d.getTime())) t0 = d; }
+      if (!t0) t0 = tlEventTimeByKey.get(normalizedCompareKey(m0)) || null;
+      if (!t0) t0 = msgTime(m0);
+      if (t0) {
+        const tv = t0.getTime();
+        const inBlock = replacements.some(function (rp) {
+          return rp.minT !== null && rp.maxT !== null && tv >= rp.minT && tv <= rp.maxT;
+        });
+        if (inBlock) continue; // 特殊事件在块范围内 → 与对话一起被压缩掉
+      }
+    }
     if (r < replacements.length && replacements[r].startIdx === i) {
       out.push(replacements[r].message);
       // 被摘要区间内：记忆浮现与工具痕迹（调用/返回）直接删除，由摘要覆盖；
       // 其余不可压缩消息（如罕见的内嵌系统消息）保留，避免永久事件被摘要吞掉
-      for (let j = replacements[r].startIdx + 1; j <= replacements[r].endIdx; j++) {
+      for (let j = replacements[r].startIdx; j <= replacements[r].endIdx; j++) {
         const m = src[j];
         if (!m) continue;
         if (isMemoryFlash(m)) continue; // 浮现的记忆：被摘要时段内直接删除
         if (m.role === "tool" || m.tool_calls) continue; // 工具痕迹：被摘要覆盖，删除
+        if (contextReplacements.isReplacementMemoryMessage(m)) { out.push(m); continue; } // 记忆替换：保留在摘要之后，避免被吞
         if (!isCompressible(m, compressEvents)) out.push(m);
       }
       i = replacements[r].endIdx;
@@ -912,23 +1597,36 @@ function buildPlan(messages, opts) {
   const compactCount = total >= minMessages ? Math.max(0, total - keepRecent) : 0;
 
   let chunks = [];
-  let cutPointsActive = false;
+  let hasManualBlocks = false;
   let uncovered = null;
+  let cutPointConfig = { id: null, matched: 0, configCount: 0 };
   if (compactCount > 0) {
     const compactItems = items.slice(0, compactCount);
-    const cutPoints = loadCutPoints().filter(function (cp) { return cp < compactCount; });
-    if (cutPoints.length > 0) {
-      cutPointsActive = true;
-      let s = 0;
-      for (const cp of cutPoints) {
-        if (cp >= s) {
-          chunks.push(makeChunk(compactItems.slice(s, cp + 1), 0, includeMsgs, true));
-          s = cp + 1;
+    const blocks = loadBlocks();
+    hasManualBlocks = blocks.length > 0;
+    // 手动块：只在用户/AI 明确划分的位置生成块，不再自动分块
+    for (const b of blocks) {
+      if (b.start < compactCount) {
+        const end = Math.min(b.end, compactCount - 1);
+        if (b.start <= end) {
+          const group = compactItems.slice(b.start, end + 1);
+          if (group.length > 0) {
+            const chunk = makeChunk(group, 0, includeMsgs, true);
+            chunk.blockStart = b.start;
+            chunk.blockEnd = b.end;
+            chunk.enabled = b.enabled !== false;
+            chunks.push(chunk);
+          }
         }
       }
-      if (s < compactCount) {
-        // 最后一个已定块之后的内容保持原文，作为「未覆盖内容」展示，等待用户点「添加一块」
-        const uc = makeChunk(compactItems.slice(s), 0, includeMsgs, true);
+    }
+    // 未覆盖区：块与块之间的所有间隙 + 尾部（无块时整个 compactCount 都是未覆盖区）
+    const gaps = getBlockGaps(blocks, compactCount);
+    if (gaps.length > 0) {
+      const g = gaps[0];
+      const ucGroup = compactItems.slice(g.start, g.end + 1);
+      if (ucGroup.length > 0) {
+        const uc = makeChunk(ucGroup, 0, includeMsgs, true);
         uncovered = {
           startIdx: uc.firstIdx + 1,
           endIdx: uc.lastIdx + 1,
@@ -937,11 +1635,21 @@ function buildPlan(messages, opts) {
           startTime: uc.startTime,
           endTime: uc.endTime,
           head: uc.head,
-          tail: uc.tail
+          tail: uc.tail,
+          gaps: gaps.map(function(gg) {
+            const ggGroup = compactItems.slice(gg.start, gg.end + 1);
+            const ggc = makeChunk(ggGroup, 0, false, true);
+            return {
+              startIdx: gg.start + 1,
+              endIdx: gg.end + 1,
+              count: ggc.count,
+              chars: ggc.chars,
+              startTime: ggc.startTime,
+              endTime: ggc.endTime
+            };
+          })
         };
       }
-    } else {
-      chunks = computeChunks(compactItems, cfg, includeMsgs);
     }
     chunks.forEach(function (c, i) { c.index = i + 1; });
     chunks = attachCache(chunks);
@@ -956,12 +1664,13 @@ function buildPlan(messages, opts) {
   const keptRawCount = total - chunks.reduce(function (s, c) { return s + c.count; }, 0);
 
   return {
-    enabled: loadForceReplace().length > 0,
+    enabled: hasManualBlocks || loadForceReplace().length > 0,
     config: cfg,
     totalCompressible: total,
     compactCount: compactCount,
     keptRawCount: keptRawCount,
-    cutPointsActive: cutPointsActive,
+    cutPointsActive: hasManualBlocks,
+    cutPointConfig: cutPointConfig,
     uncovered: uncovered,
     chunks: chunks,
     totals: {
@@ -978,8 +1687,129 @@ function preview(opts) {
   return buildPlan(loadTimeline(), opts);
 }
 
+
+// 编号范围预览（1-based）：返回范围内每条消息（编号/角色/时间/内容/标记），供未覆盖区滚动窗使用
+function rangePreview(start, end) {
+  const cfg = loadConfig();
+  const timeline = loadTimeline();
+  const dialog = (Array.isArray(timeline) ? timeline : []).filter(function (m) { return m && m.role !== "system"; });
+  const items = [];
+  dialog.forEach(function (m, idx) {
+    if (isCompressible(m, cfg.compaction_compress_events !== false)) items.push({ msg: m, idx: idx });
+  });
+  const minMessages = Number(cfg.compaction_min_messages) || 0;
+  const keepRecent = Math.max(0, Number(cfg.compaction_keep_recent_messages) || 0);
+  const compactCount = items.length >= minMessages ? Math.max(0, items.length - keepRecent) : 0;
+  let s = Math.max(1, Math.floor(Number(start) || 1));
+  let e = Math.max(s, Math.floor(Number(end) || s));
+  if (compactCount <= 0) return { start: 0, end: 0, count: 0, compactCount: 0, items: [] };
+  e = Math.min(e, compactCount);
+  s = Math.min(s, e);
+  const marks = loadMarks();
+  const slice = items.slice(s - 1, e);
+  const out = slice.map(function (it) {
+    const m = it.msg;
+    const t = msgTime(m);
+    return {
+      num: it.idx + 1,
+      role: m.role,
+      content: contentToText(m),
+      thinking: m.thinking,
+      time: t ? formatTime(t) : "",
+      key: contentKey(m),
+      marked: !!marks[contentKey(m)]
+    };
+  });
+  let minT = null;
+  let maxT = null;
+  slice.forEach(function (it) {
+    const t = msgTime(it.msg);
+    if (t) {
+      if (minT === null || t < minT) minT = t;
+      if (maxT === null || t > maxT) maxT = t;
+    }
+  });
+  return {
+    start: s,
+    end: e,
+    count: out.length,
+    compactCount: compactCount,
+    startTime: minT ? formatTime(minT) : "",
+    endTime: maxT ? formatTime(maxT) : "",
+    items: out
+  };
+}
+
+// 按时间间隔自动分块：在 [start,end]（1-based）范围内，相邻消息时间间隔超过 gapMinutes 分钟即自然切分，
+// 切成多块并落成手动块（可再改范围/加摘要/替换）
+function splitRangeByGaps(start, end, gapMinutes) {
+  const cfg = loadConfig();
+  const gapMin = Math.max(1, Number(gapMinutes) || 30);
+  const timeline = loadTimeline();
+  const dialog = (Array.isArray(timeline) ? timeline : []).filter(function (m) { return m && m.role !== "system"; });
+  const items = [];
+  dialog.forEach(function (m, idx) {
+    if (isCompressible(m, cfg.compaction_compress_events !== false)) items.push({ msg: m, idx: idx });
+  });
+  const minMessages = Number(cfg.compaction_min_messages) || 0;
+  const keepRecent = Math.max(0, Number(cfg.compaction_keep_recent_messages) || 0);
+  const compactCount = items.length >= minMessages ? Math.max(0, items.length - keepRecent) : 0;
+  if (compactCount <= 0) return { ok: false, message: "当前没有可压缩内容" };
+  let s = Math.max(1, Math.floor(Number(start) || 1));
+  let e = Math.max(s, Math.floor(Number(end) || s));
+  e = Math.min(e, compactCount);
+  s = Math.min(s, e);
+  if (s > e) return { ok: false, message: "无效的范围" };
+  const slice = items.slice(s - 1, e);
+  const cuts = [];
+  let lastT = null;
+  for (let i = 0; i < slice.length; i++) {
+    const t = msgTime(slice[i].msg);
+    if (t) {
+      if (lastT) {
+        const deltaMin = (t - lastT) / 60000;
+        if (deltaMin > gapMin) cuts.push(s - 1 + i);
+      }
+      lastT = t;
+    }
+  }
+  const subRanges = [];
+  let rangeStart = s - 1;
+  cuts.forEach(function (c) {
+    subRanges.push({ start: rangeStart, end: c - 1 });
+    rangeStart = c;
+  });
+  subRanges.push({ start: rangeStart, end: e - 1 });
+  const created = [];
+  subRanges.forEach(function (r) {
+    if (r.start > r.end) return;
+    const res = addBlockRange(r.start, r.end);
+    if (res.ok) {
+      const g = items.slice(r.start, r.end + 1);
+      let minT = null;
+      let maxT = null;
+      g.forEach(function (it) {
+        const t = msgTime(it.msg);
+        if (t) {
+          if (minT === null || t < minT) minT = t;
+          if (maxT === null || t > maxT) maxT = t;
+        }
+      });
+      created.push({
+        start: items[r.start].idx + 1,
+        end: items[r.end].idx + 1,
+        count: r.end - r.start + 1,
+        startTime: minT ? formatTime(minT) : "",
+        endTime: maxT ? formatTime(maxT) : ""
+      });
+    }
+  });
+  return { ok: true, count: created.length, blocks: created, gapMinutes: gapMin };
+}
+
 module.exports = {
   loadConfig,
+  saveConfig,
   loadTimeline,
   loadPersona,
   contentToText,
@@ -992,18 +1822,32 @@ module.exports = {
   removeCutPoint,
   buildPlan,
   preview,
+  rangePreview,
+  splitRangeByGaps,
   getCachedSummary,
   storeSummary,
   loadCutPoints,
   saveCutPoints,
+  resolveCutPointConfig,
+  listCutPointConfigs,
   buildCompactionPrompt,
   generateSummary,
+  generateBlockSummary,
+  generateSummaryForRange,
   isEnabled,
   compactMessages,
   removeSummaries,
   restoreSummary,
   updateSummary,
+  addSummaryVersion,
   removeHistoryVersion,
+  loadBlocks,
+  saveBlocks,
+  removeBlock,
+  addBlockRange,
+  toggleBlock,
+  getBlockGaps,
+  updateBlockRange,
   loadForceReplace,
   setForceReplace,
   contentKey,

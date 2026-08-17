@@ -2,7 +2,6 @@
 
 const memoryEngine = require("./memory-engine");
 
-const TAG_RE = /<\s*memory\b[^>]*>([\s\S]*?)<\s*\/memory\s*>/gi;
 const PIN_TAG_RE = /<\s*pin\b[^>]*>([\s\S]*?)<\s*\/pin\s*>/gi;
 
 // 剥离所有 <memory>/<pin> 标签（含属性写法、未闭合标签），供流式过滤/时间线匹配复用
@@ -10,8 +9,9 @@ function stripTags(text) {
   return String(text || "")
     .replace(/<\s*memory\b[^>]*>([\s\S]*?)<\s*\/memory\s*>/gi, "")
     .replace(/<\s*pin\b[^>]*>([\s\S]*?)<\s*\/pin\s*>/gi, "")
-    .replace(/<\s*(?:memory|pin)\b[^>]*>/gi, "")
-    .replace(/<\s*(?:memory|pin)\b[^>]*$/gi, "");
+    .replace(/<\s*wake\b[^>]*>([\s\S]*?)<\s*\/wake\s*>/gi, "")
+    .replace(/<\s*(?:memory|pin|wake)\b[^>]*>/gi, "")
+    .replace(/<\s*(?:memory|pin|wake)\b[^>]*$/gi, "");
 }
 
 // 宽松解析 {key:value,...}：值可不带引号，值里含逗号也能正确处理；
@@ -34,30 +34,6 @@ function parseKeyValueBlock(raw, keys) {
     }
   }
   return out;
-}
-
-function parseTagContent(raw) {
-  try {
-    const parsed = JSON.parse(raw.trim());
-    if (parsed.content) {
-      return {
-        content: parsed.content.trim(),
-        type: parsed.type,
-        importance: parsed.importance
-      };
-    }
-  } catch {}
-
-  const out = parseKeyValueBlock(raw, ["type", "content", "importance"]);
-  if (out.content) {
-    return {
-      content: out.content.trim(),
-      type: out.type,
-      importance: out.importance
-    };
-  }
-
-  return null;
 }
 
 function parsePinContent(raw) {
@@ -86,41 +62,12 @@ function parsePinContent(raw) {
   return null;
 }
 
-const VALID_TYPES = ["fact", "preference", "emotion"];
-
 async function extractAndStore(text) {
   if (!text) return text;
 
   const promises = [];
 
-  // --- <memory> tags ---
-  const memMatches = text.matchAll(TAG_RE);
-
-  for (const match of memMatches) {
-    const raw = match[1];
-    const parsed = parseTagContent(raw);
-
-    if (parsed) {
-      // 类型不再由 AI 判断：未写 type 或类型非法时兜底为 fact
-      const memType = parsed.type && VALID_TYPES.includes(parsed.type) ? parsed.type : "fact";
-      const entry = {
-        content: parsed.content,
-        type: memType,
-        importance: parsed.importance !== undefined ? parsed.importance : 0.5,
-        source: "inline"
-      };
-      promises.push(
-        memoryEngine.addMemory(entry).catch(err => {
-          console.warn("[tag-parser] 记忆写入失败:", err.message);
-        })
-      );
-    } else {
-      console.warn("[tag-parser] 标签解析失败:", raw.slice(0, 80));
-    }
-
-  }
-
-  // --- <pin> tags ---
+  // --- <pin> tags ---（<memory> 已废弃：不再写入记忆池，标签由 stripTags 剥离）
   const pinMatches = text.matchAll(PIN_TAG_RE);
 
   for (const match of pinMatches) {

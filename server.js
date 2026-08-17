@@ -12,6 +12,7 @@ const {
 } = require("./time_utils");
 
 const contextCompactor = require("./context-compactor");
+const contextReplacements = require("./context-replacements");
 
 const DEFAULT_BODY_LIMIT_MB = 50;
 
@@ -37,12 +38,12 @@ const IS_RAILWAY_RUNTIME = Boolean(
   process.env.RAILWAY_SERVICE_ID
 );
 const TIMELINE_FILE = "enhanced_messages.json";
-const LETTERS_FILE = path.join(__dirname, "data", "letters.json");
 // 批注 2026-07-17：管理页保存 .env 后要让 PM2 刷新进程环境；保留原进程名，
 // 只补 --update-env，避免用户改完推送配置却继续运行旧值。
 const DEFAULT_RESTART_COMMAND = "pm2 restart wake-up gateway --update-env";
 // 上游模型请求超时（毫秒），防止上游挂起时 /v1 请求永久阻塞
 const UPSTREAM_TIMEOUT_MS = Number(process.env.UPSTREAM_TIMEOUT_MS) || 180000;
+const SCREENSHOT_TIMEOUT_MS = Number(process.env.SCREENSHOT_TIMEOUT_MS) || 60000;
 
 function readBooleanEnv(key, fallback = false) {
   const raw = String(process.env[key] ?? "").trim().toLowerCase();
@@ -156,73 +157,6 @@ function systemNotePrefix() {
   return `（系统提示：以下内容${readEnvValue("USER_DISPLAY_NAME") || "用户"}不可见，仅供你参考）`;
 }
 
-// 时间注入配置：开关 + 间隔（分钟），从配置读取，配置台可调
-function getTimeTagIntervalMinutes() {
-  const fromCfg = Number(memoryEngine.getConfig ? memoryEngine.getConfig().time_tag_interval_minutes : 0);
-  const fromEnv = Number(process.env.TIME_TAG_INTERVAL_MINUTES);
-  const v = fromCfg > 0 ? fromCfg : (fromEnv > 0 ? fromEnv : 30);
-  return Math.max(1, v);
-}
-function timeInjectionEnabled() {
-  const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
-  return cfg.time_injection_enabled !== false;
-}
-
-// 提取中文二元组集合：用于判断某条记忆的内容是否已明显出现在最近对话中
-function cjkBigramSet(text) {
-  const set = new Set();
-  const runs = String(text || "").match(/[\u4e00-\u9fff]+/g) || [];
-  for (const run of runs) {
-    for (let i = 0; i < run.length - 1; i++) set.add(run.slice(i, i + 2));
-  }
-  return set;
-}
-
-// 记忆检索开关（对话时）：关闭后对话不再自动检索并注入记忆；唤醒时另有独立开关
-function memoryRetrievalEnabled() {
-  const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
-  return cfg.memory_retrieval_enabled !== false;
-}
-// 对话注入分类白名单：配置页「记忆浮现 → 对话时记忆检索」下细分，关闭的分类不注入
-const ALL_INJECTION_TYPES = ["fact", "preference", "emotion", "summary", "moment"];
-function getDialogInjectionTypes() {
-  const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
-  const t = cfg.context_injection_types;
-  if (Array.isArray(t)) {
-    return t.filter(x => ALL_INJECTION_TYPES.includes(x));
-  }
-  return ALL_INJECTION_TYPES.slice();
-}
-// 构建系统时间标签（注入到最后一条 user 之后；按间隔桶化，间隔内所有请求相同）
-function buildSystemTimeTag() {
-  const bucketMs = getTimeTagIntervalMinutes() * 60 * 1000;
-  const now = new Date(Math.floor(Date.now() / bucketMs) * bucketMs);
-  const parts = getDatePartsInTimeZone(now);
-  const dayNames = ['周日','周一','周二','周三','周四','周五','周六'];
-  // 星期必须按 TIME_ZONE 的日期计算，避免服务器本地时区与配置时区不一致时错一天
-  const dayName = dayNames[new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day))).getUTCDay()] || '';
-  const startHour = Number(readEnvValue("WAKE_DAY_START_HOUR")) || 10;
-  const endHour = Number(readEnvValue("WAKE_DAY_END_HOUR")) || 24;
-  const hour = Number(parts.hour);
-  const period = (hour >= startHour && hour < endHour) ? '白天' : '夜晚';
-  return `[当前系统时间：${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute} ${dayName} ${period}]`;
-}
-
-// 记忆浮现冷静期：冷静期内复用同一份记忆注入内容，避免每轮检索结果漂移
-function getMemoryCooldownMinutes() {
-  const fromCfg = Number(memoryEngine.getConfig ? memoryEngine.getConfig().memory_cooldown_minutes : 0);
-  const fromEnv = Number(process.env.MEMORY_COOLDOWN_MINUTES);
-  const v = fromCfg > 0 ? fromCfg : (fromEnv > 0 ? fromEnv : 30);
-  return Math.max(1, v);
-}
-
-// 单条记忆冷却：同一条记忆冷却期内不重复浮现（0=关闭），避免“同一记忆反复冒出来”
-function getMemoryItemCooldownMinutes() {
-  const fromCfg = Number(memoryEngine.getConfig ? memoryEngine.getConfig().memory_item_cooldown_minutes : 0);
-  const fromEnv = Number(process.env.MEMORY_ITEM_COOLDOWN_MINUTES);
-  const v = fromCfg > 0 ? fromCfg : (fromEnv > 0 ? fromEnv : 120);
-  return Math.max(0, v);
-}
 
 function prepareMessageForLLM(msg) {
   if (msg.role === "assistant" && msg.tool_calls) return msg;
@@ -428,67 +362,6 @@ function atomicWriteFileSync(file, content) {
 }
 
 
-// ========================
-// 给下一个窗口自己的信（letters）
-// ========================
-function loadLetters() {
-  try {
-    if (fs.existsSync(LETTERS_FILE)) {
-      const data = fs.readJsonSync(LETTERS_FILE);
-      return Array.isArray(data.letters) ? data.letters : [];
-    }
-  } catch (err) {
-    console.error("[letters] 读取失败:", err.message);
-  }
-  return [];
-}
-
-function saveLetters(letters) {
-  fs.ensureDirSync(path.dirname(LETTERS_FILE));
-  atomicWriteJsonSync(LETTERS_FILE, { letters });
-}
-
-function getLatestLetter() {
-  const letters = loadLetters();
-  return letters.length ? letters[letters.length - 1] : null;
-}
-
-function addLetter({ title = "", content = "", source = "对话" } = {}) {
-  const letters = loadLetters();
-  const letter = {
-    id: "letter_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8),
-    title: String(title || "").trim(),
-    content: String(content || "").trim(),
-    source: String(source || "对话").trim(),
-    created_at: new Date().toISOString()
-  };
-  if (!letter.content) throw new Error("信的内容不能为空");
-  letters.push(letter);
-  saveLetters(letters);
-  console.log(`[letters] 已保存一封新信（共 ${letters.length} 封）`);
-  return letter;
-}
-
-function editLetter({ id = "", title, content } = {}) {
-  const letters = loadLetters();
-  let letter;
-  if (id) {
-    letter = letters.find(l => l.id === id);
-    if (!letter) return null;
-  } else {
-    letter = letters.length ? letters[letters.length - 1] : null;
-    if (!letter) return addLetter({ title, content, source: "对话" });
-  }
-  if (content !== undefined) {
-    const text = String(content || "").trim();
-    if (!text) throw new Error("信的内容不能为空");
-    letter.content = text;
-  }
-  if (title !== undefined) letter.title = String(title || "").trim();
-  saveLetters(letters);
-  console.log(`[letters] 已编辑信 ${letter.id}`);
-  return letter;
-}
 
 
 // ========================
@@ -497,6 +370,8 @@ function editLetter({ id = "", title, content } = {}) {
 function saveTimeline(messages) {
   const sp = messages.find(m => m.role === "system");
   const nonSP = messages.filter(m => m.role !== "system");
+  // 兜底：任何写入路径都补齐缺失的 time（system 除外），避免历史消息/特殊事件缺时间
+  backfillMissingTimes(nonSP);
   // 不再截断：完全保留客户端发送的全部消息（仅将 SP 放在首位）
   const final = sp ? [sp, ...nonSP] : nonSP;
   atomicWriteJsonSync(TIMELINE_FILE, final);
@@ -527,15 +402,43 @@ function extractTimestamp(content) {
   return parseTimestampLabel(content);
 }
 
-// 消息时间解析：优先使用已持久化的 time 字段，其次解析正文时间前缀
+// 解析消息正文末尾的时间缀（客户端自动注入的墙上时间），按 TIME_ZONE 转 UTC
+function extractTrailingTimestampLabel(value) {
+  const text = String(value || "");
+  const m = text.match(/(\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[ T]?)\d{1,2}[:：]\d{2})\s*$/);
+  return m ? parseTimestampLabel(m[1]) : null;
+}
+
+// 解析 <current_time>Sat 26-08-15 12:37:16</current_time> 里的时间（客户端新时间格式，两位年份补全）
+function extractCurrentTimeTagLabel(value) {
+  const text = String(value || "");
+  const m = text.match(/<current_time>[\s\S]*?(\d{2})[-/](\d{1,2})[-/](\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})/);
+  if (!m) return null;
+  return zonedWallTimeToDate({ year: 2000 + Number(m[1]), month: Number(m[2]), day: Number(m[3]), hour: Number(m[4]), minute: Number(m[5]) }, TIME_ZONE);
+}
+
+// 消息时间解析：优先 time 字段（客户端已传）→ <current_time> 标签 → 末尾时间缀 → 开头时间戳（AI 抄的）
 function extractTimestampWithMemory(msg) {
   if (msg && msg.time) {
     const d = new Date(msg.time);
     if (!isNaN(d.getTime())) return d;
   }
-  const fromContent = extractTimestamp(normalizeContentToText(msg.content));
+  const text = normalizeContentToText(msg.content);
+  const fromTag = extractCurrentTimeTagLabel(text);
+  if (fromTag) return fromTag;
+  const fromTrailing = extractTrailingTimestampLabel(text);
+  if (fromTrailing) return fromTrailing;
+  const fromContent = extractTimestamp(text);
   if (fromContent) return fromContent;
   return null;
+}
+
+// 共影记录是整段观影的合并消息，开头是「（共影）2026-08-14 23:31 一起看《…》」；
+// 用首行时间作为整段记录的起始时间，注入主上下文时按这个时间落位，避免被推到末尾
+function extractCoRecordEventTime(msg) {
+  if (!msg || typeof msg.content !== "string") return null;
+  const m = msg.content.match(/^（共影）\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[ T]?)\d{1,2}[:：]\d{2})/);
+  return m ? parseTimestampLabel(m[1]) : null;
 }
 
 // ========================
@@ -556,8 +459,25 @@ function isSpecialEvent(msg) {
     c.includes("自动写了日记") ||
     c.includes("记忆浮现）") ||
     c.includes("时间标记") ||
-    c.includes("摘要）")
+    c.includes("摘要）") ||
+    c.includes("共影）") ||
+    c.includes("截图）") ||
+    c.includes("截图唤醒）")
   );
+}
+
+// 特殊事件注入分类：一个事件可能命中多类，返回命中的所有分类 key
+function classifySpecialEvent(msg) {
+  const c = normalizeContentToText(msg.content);
+  const out = [];
+  if (/Bark|推送|自动唤醒/.test(c)) out.push("wake");
+  if (c.includes("自动写了日记")) out.push("diary");
+  if (c.includes("记忆浮现）")) out.push("memory");
+  if (c.includes("时间标记")) out.push("time");
+  if (c.includes("摘要）")) out.push("summary");
+  if (c.includes("共影）")) out.push("co");
+  if (c.includes("截图）") || c.includes("截图唤醒）")) out.push("screenshot");
+  return out;
 }
 
 function isRealMessageForTimeline(msg) {
@@ -574,6 +494,40 @@ function isSystemRule(msg) {
   const contentText = normalizeContentToText(msg.content);
   if (msg.role === "user" && contentText.trim().startsWith("<system>")) return true;
   return false;
+}
+
+// ========================
+// 补齐缺失 time 字段
+// 规则：优先取紧随其后的用户消息时间（末尾时间缀），没有就取前面最近一条用户消息时间，再兜底服务器当前时间。
+// 只补一次（此后由 oldByContent 保持稳定），保证所有消息（含特殊事件）都有时间，可按时间段定位与压缩。
+// ========================
+function backfillMissingTimes(messages) {
+  const arr = Array.isArray(messages) ? messages : [];
+  const n = arr.length;
+  // 每条消息“后面最近一条用户消息的时间”
+  const nextUserTime = new Array(n).fill(null);
+  let pending = null;
+  for (let i = n - 1; i >= 0; i--) {
+    nextUserTime[i] = pending;
+    const m = arr[i];
+    if (m && m.role === "user" && m.time) {
+      const d = new Date(m.time);
+      if (!isNaN(d.getTime())) pending = d;
+    }
+  }
+  let prevUserTime = null;
+  for (let i = 0; i < n; i++) {
+    const m = arr[i];
+    if (!m) continue;
+    if (m.time) {
+      const d = new Date(m.time);
+      if (m.role === "user" && !isNaN(d.getTime())) prevUserTime = d;
+      continue;
+    }
+    const pick = nextUserTime[i] || prevUserTime || new Date();
+    m.time = pick instanceof Date ? pick.toISOString() : String(pick);
+  }
+  return arr;
 }
 
 // ========================
@@ -691,7 +645,7 @@ function buildTimeline(kelivoMessages) {
   }
 
   result.push(...finalMessages);
-  return result;
+  return backfillMissingTimes(result);
 }
 
 
@@ -711,147 +665,7 @@ function appendSpecialEvent(content) {
   console.log(`\n已记录特殊事件 (position ${newEvent.position}, chars ${normalizeContentToText(content).length})\n`);
 }
 
-// ========================
-// 时间标记特殊事件：把当前时间作为特殊事件永久写入时间线
-// （开启后按「时间更新间隔」写入；同一时刻不重复写，只保留最新一条时间标记，避免刷屏）
-// ========================
-function buildTimeEventContent() {
-  // 永久标记用真实当前时间（不套动态注入的分桶，避免显示滞后）
-  const now = new Date();
-  const parts = getDatePartsInTimeZone(now);
-  const dayNames = ['周日','周一','周二','周三','周四','周五','周六'];
-  const dayName = dayNames[new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day))).getUTCDay()] || '';
-  const startHour = Number(readEnvValue("WAKE_DAY_START_HOUR")) || 10;
-  const endHour = Number(readEnvValue("WAKE_DAY_END_HOUR")) || 24;
-  const hour = Number(parts.hour);
-  const period = (hour >= startHour && hour < endHour) ? '白天' : '夜晚';
-  return `（${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute} ${dayName} ${period} 时间标记）`;
-}
 
-function getLastTimeEvent(timeline) {
-  for (let i = timeline.length - 1; i >= 0; i--) {
-    const m = timeline[i];
-    if (m && m.role === "assistant" && typeof m.content === "string" && m.content.includes("时间标记")) {
-      return m;
-    }
-  }
-  return null;
-}
-
-function writeTimeEventIfDue() {
-  try {
-    const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
-    if (!cfg.time_event_injection_enabled) return;
-    const intervalMs = (getTimeTagIntervalMinutes() || 30) * 60 * 1000;
-    const timeline = loadTimeline();
-    const last = getLastTimeEvent(timeline);
-    const now = Date.now();
-    if (last) {
-      const lastTs = last.time ? new Date(last.time).getTime() : 0;
-      if (isFinite(lastTs) && now - lastTs < intervalMs) return;
-    }
-    const content = buildTimeEventContent();
-    // 只保留最新一条时间标记，其余移除，避免时间线被时间事件刷屏
-    const next = timeline.filter(m => !(m && m.role === "assistant" && typeof m.content === "string" && m.content.includes("时间标记")));
-    let maxPos = 0;
-    for (const msg of next) {
-      if (msg.position && msg.position > maxPos) maxPos = msg.position;
-    }
-    next.push({ role: "assistant", content, position: maxPos + 0.5, time: new Date().toISOString() });
-    saveTimeline(next);
-    console.log(`[time-event] 已写入时间标记特殊事件: ${content}`);
-  } catch (err) {
-    console.warn("[time-event] 写入失败:", err.message);
-  }
-}
-
-let timeEventTimer = null;
-function startTimeEventTimer() {
-  if (timeEventTimer) clearInterval(timeEventTimer);
-  timeEventTimer = setInterval(writeTimeEventIfDue, 60 * 1000);
-  console.log("[time-event] 时间标记定时器已启动（每分钟检查一次）");
-}
-
-// ========================
-// 记忆浮现写入对话：把浮现的记忆作为特殊事件写入对话记录，永久留在上下文
-// （同一记忆只写入一次，避免对话记录被同一段记忆反复刷屏）
-// ========================
-// 记忆写入对话的去重与冷静期：持久化到 data/surfaced_memories.json，
-// 记录「哪些记忆已作为记忆浮现写入过对话」及最近写入时间。
-// 冷静期内（单条冷却或全局冷静期）不重复写入，进程重启后依然有效。
-const SURFACED_MEMORIES_FILE = path.join(__dirname, "data", "surfaced_memories.json");
-let surfacedMemories = {};
-
-function loadSurfacedMemories() {
-  try {
-    if (fs.existsSync(SURFACED_MEMORIES_FILE)) {
-      const raw = JSON.parse(fs.readFileSync(SURFACED_MEMORIES_FILE, "utf-8"));
-      if (raw && typeof raw === "object") surfacedMemories = raw;
-    }
-  } catch (e) {
-    console.warn("[memory] 读取已写入对话的记忆记录失败:", e.message);
-    surfacedMemories = {};
-  }
-}
-
-function pruneSurfacedMemories(now) {
-  // 只保留 90 天内的记录，超限时保留最近写入的 2000 条，防止文件无限膨胀
-  const cutoff = now - 90 * 24 * 60 * 60 * 1000;
-  let entries = Object.entries(surfacedMemories).filter(([, rec]) => rec && rec.lastTime >= cutoff);
-  if (entries.length > 2000) {
-    entries.sort((a, b) => (b[1].lastTime || 0) - (a[1].lastTime || 0));
-    entries = entries.slice(0, 2000);
-  }
-  surfacedMemories = Object.fromEntries(entries);
-}
-
-function saveSurfacedMemories() {
-  try {
-    fs.ensureDirSync(path.dirname(SURFACED_MEMORIES_FILE));
-    fs.writeFileSync(SURFACED_MEMORIES_FILE, JSON.stringify(surfacedMemories, null, 2));
-  } catch (e) {
-    console.warn("[memory] 保存已写入对话的记忆记录失败:", e.message);
-  }
-}
-
-// 写入对话的冷静期：单条冷却开启时以单条冷却为准（更长），否则用全局冷静期
-function getConversationWriteCooldownMs() {
-  const itemMs = getMemoryItemCooldownMinutes() * 60 * 1000;
-  const globalMs = getMemoryCooldownMinutes() * 60 * 1000;
-  const v = itemMs > 0 ? Math.max(itemMs, globalMs) : globalMs;
-  return Math.max(60 * 1000, v);
-}
-
-function buildMemoryEventContent(memories) {
-  const timeStr = formatDateTimeInTimeZone(new Date(), TIME_ZONE);
-  const body = memories.map(m => memoryEngine.formatContext([m])).join("\n");
-  return `（${timeStr} 记忆浮现）\n${body}`;
-}
-function insertMemoriesToConversation(memories) {
-  const now = Date.now();
-  const cooldownMs = getConversationWriteCooldownMs();
-  const freshOnes = [];
-  for (const m of memories) {
-    if (!m || !m.id || typeof m.content !== "string" || !m.content) continue;
-    const rec = surfacedMemories[m.id];
-    // 冷静期内已写入过对话的记忆不重复写入（进程重启后同样生效）
-    if (rec && rec.lastTime && (now - rec.lastTime) < cooldownMs) continue;
-    freshOnes.push(m);
-  }
-  if (freshOnes.length === 0) return 0;
-  appendSpecialEvent(buildMemoryEventContent(freshOnes));
-  for (const m of freshOnes) {
-    const rec = surfacedMemories[m.id] || {};
-    if (!rec.firstTime) rec.firstTime = now;
-    rec.lastTime = now;
-    surfacedMemories[m.id] = rec;
-  }
-  pruneSurfacedMemories(now);
-  saveSurfacedMemories();
-  return freshOnes.length;
-}
-
-loadSurfacedMemories();
 // 剥离内部标签（用于把客户端清洗版和时间线原始版互相匹配）
 function stripInternalTags(text) {
   return tagParser.stripTags(text).trim();
@@ -872,10 +686,6 @@ function stripPosition(messages) {
 }
 
 let wakeUpLastHeartbeat = null;
-const recentInjectedMemoryIds = new Map(); // 记忆级冷却：id -> 上次注入时间戳，避免同一记忆反复浮现
-// 记忆浮现冷静期缓存：冷静期内复用同一份“时间+记忆”注入内容
-let memoryInjectionCache = null;
-const RECENT_MEMORY_TTL = 30 * 60 * 1000;
 let lastLLMMessages = null;
 let lastLLMCaptureTime = null;
 
@@ -1167,37 +977,43 @@ app.post("/v1/chat/completions", async (req, reply) => {
     if (eventWindowDays > 0) {
       const cutoffMs = Date.now() - eventWindowDays * 24 * 60 * 60 * 1000;
       injectableEvents = oldEvents.filter(ev => {
-        const t = ev.time ? new Date(ev.time).getTime() : NaN;
-        return !isFinite(t) || t >= cutoffMs;
+        // stripPosition 已剥离 time 字段，用正文时间戳判断事件新旧（共影记录取首行时间）
+        const t = extractTimestampWithMemory(ev) || extractCoRecordEventTime(ev);
+        const tms = t ? t.getTime() : NaN;
+        return !isFinite(tms) || tms >= cutoffMs;
       });
     }
 
-    // 摘要事件只在「上下文很短」（新窗口）时注入：请求里对话消息数超过阈值时，
-    // 最近的摘要内容与上下文里的近期对话重复，跳过摘要事件（其他特殊事件不受影响）
-    const summaryInjectEnabled = memoryEngine.getConfig().summary_event_inject_enabled !== false;
-    const summaryShortCtxMsgs = Number(memoryEngine.getConfig().summary_event_short_ctx_msgs) || 0;
-    if (!summaryInjectEnabled) {
-      // 开关关闭：任何上下文都不注入摘要事件（摘要仍可写入时间线，只是不注入）
+    // 特殊事件注入分类多选：只注入勾选类型；配置里没有该 key 时默认全部注入
+    const injectTypesCfg = memoryEngine.getConfig().event_inject_types;
+    if (Array.isArray(injectTypesCfg)) {
+      const enabledTypes = new Set(injectTypesCfg);
       const before = injectableEvents.length;
-      injectableEvents = injectableEvents.filter(ev => !(typeof ev.content === "string" && ev.content.includes("摘要）")));
+      injectableEvents = injectableEvents.filter(ev => {
+        const cats = classifySpecialEvent(ev);
+        if (!cats.length) return true; // 无法分类的兜底保留
+        return cats.some(k => enabledTypes.has(k));
+      });
       if (injectableEvents.length !== before) {
-        console.log("[summary-event] 摘要事件注入已关闭，跳过所有摘要事件");
+        console.log(`[event-inject] 分类过滤: ${before} -> ${injectableEvents.length} 条`);
       }
-    } else if (summaryShortCtxMsgs > 0) {
-      const realMsgCount = kelivoMessages.filter(m => m.role !== "system").length;
-      if (realMsgCount > summaryShortCtxMsgs) {
-        const before = injectableEvents.length;
-        injectableEvents = injectableEvents.filter(ev => !(typeof ev.content === "string" && ev.content.includes("摘要）")));
-        if (injectableEvents.length !== before) {
-          console.log(`[summary-event] 上下文较长(${realMsgCount}条>${summaryShortCtxMsgs})，跳过摘要事件注入`);
-        }
+    }
+
+
+    // 共影记录注入开关：关闭后整段观影记录不再注入主对话（记录仍完整保存在共影里）
+    const coEventInjectEnabled = memoryEngine.getConfig().co_event_inject_enabled !== false;
+    if (!coEventInjectEnabled) {
+      const before = injectableEvents.length;
+      injectableEvents = injectableEvents.filter(ev => !(typeof ev.content === "string" && ev.content.includes("共影）")));
+      if (injectableEvents.length !== before) {
+        console.log("[co-event] 共影记录注入已关闭，跳过观影记录");
       }
     }
 
     console.log("本次注入的特殊事件数量:", injectableEvents.length, eventWindowDays > 0 ? `(窗口 ${eventWindowDays} 天)` : "(全部)");
 
     for (const event of injectableEvents) {
-      const eventTime = extractTimestampWithMemory(event);
+      const eventTime = extractTimestampWithMemory(event) || extractCoRecordEventTime(event);
       if (!eventTime) { llmMessages.push(event); continue; }
       let inserted = false;
       for (let i = 0; i < llmMessages.length; i++) {
@@ -1214,34 +1030,6 @@ app.post("/v1/chat/completions", async (req, reply) => {
     }
 
 
-    // 给下一个窗口自己的信：新窗口（上下文很短）开头必读一次；上下文里已有该信则跳过
-    try {
-      const letter = getLatestLetter();
-      if (letter && letter.content) {
-        const letterInjectEnabled = readEnvValue("LETTER_INJECT_ENABLED") !== "0";
-        const letterShortCtxMsgs = Number(readEnvValue("LETTER_INJECT_SHORT_CTX_MSGS") || memoryEngine.getConfig().summary_event_short_ctx_msgs || 20);
-        const letterRealMsgCount = kelivoMessages.filter(m => m.role !== "system").length;
-        const letterMark = `【给你的信 · ${String(letter.title || "").trim() || "给下一个窗口的我"}】`;
-        const alreadyHasLetter = llmMessages.some(m =>
-          typeof m.content === "string" &&
-          (m.content.includes(letterMark) || (letter.content.length > 40 && m.content.includes(letter.content.slice(0, 40))))
-        );
-        if (letterInjectEnabled && !alreadyHasLetter && letterRealMsgCount <= letterShortCtxMsgs) {
-          const letterBlock =
-            `（这是你上一个窗口结束时写给自己的信。先读完它，再开口。它只是你自己写给自己的话，不是任务，不必逐条执行——读完，在心里接住它就好。）\n\n${letterMark}\n${letter.content}`;
-          let lastUserIdxL = -1;
-          for (let i = llmMessages.length - 1; i >= 0; i--) {
-            if (llmMessages[i].role === "user") { lastUserIdxL = i; break; }
-          }
-          const letterMsg = { role: "system", content: letterBlock };
-          if (lastUserIdxL >= 0) llmMessages.splice(lastUserIdxL + 1, 0, letterMsg);
-          else llmMessages.push(letterMsg);
-          console.log("[letters] 新窗口注入最新一封信（开头必读）");
-        }
-      }
-    } catch (letterErr) {
-      console.error("[letters] 注入失败:", letterErr.message);
-    }
 
     console.log(JSON.stringify({
       event: "llm_forward_summary",
@@ -1344,174 +1132,22 @@ app.post("/v1/chat/completions", async (req, reply) => {
     }
 
     // ========================
-    // 记忆浮现：冷静期内复用同一份注入内容，冷静期过后才重新检索
+    // 对话时记忆浮现 / 时间注入：已随记忆池与摘要体系一起移除
     // ========================
+
+    // 上下文记忆替换：把已记录范围里的原文替换成 AI 自己写的记忆（源文件不动，只影响本次发送）
     try {
-      // 取最后 N 条对话消息（user + assistant 混合，按原顺序拼接）
-      const dialogMsgs = kelivoMessages.filter(m =>
-        (m.role === "user" || m.role === "assistant") && typeof m.content === "string"
-      );
-      if (dialogMsgs.length > 0) {
-        // 记忆检索总开关：关闭时清空冷静期缓存，避免旧记忆继续注入
-        if (!memoryRetrievalEnabled()) memoryInjectionCache = null;
-        const now = Date.now();
-        // 冷静期内直接复用缓存内容，保证请求体尾部稳定
-        const reused = memoryRetrievalEnabled() && memoryInjectionCache && now < memoryInjectionCache.expiresAt && !memoryInjectionCache.empty;
-        let dynContent = reused ? memoryInjectionCache.content : null;
-        if (dynContent === null && memoryRetrievalEnabled()) {
-          // 冷静期已过：重新检索相关记忆并刷新缓存
-          const cfg = memoryEngine.getConfig();
-          const windowSize = cfg.memory_query_window || 3;
-          const recentMsgs = dialogMsgs.slice(-windowSize);
-          const query = recentMsgs.map(m => m.content).join(" ");
-          const memResults = await memoryEngine.buildContext(query, {
-            minSummaryAgeHours: cfg.summary_surfacing_min_age_enabled === false ? 0 : (Number(cfg.summary_surfacing_min_age_hours) || 0),
-            types: getDialogInjectionTypes()
-          });
-          if (memResults.length > 0) {
-            const threshold = Number.isFinite(Number(cfg.memory_relevance_threshold)) ? Number(cfg.memory_relevance_threshold) : 0.3;
-            const relevant = memResults.filter(m => (m._score || 0) >= threshold);
-            // 单条记忆冷却：同一条记忆冷却期内不重复浮现
-            const itemCooldownMs = getMemoryItemCooldownMinutes() * 60 * 1000;
-            // 已写入对话时间线的记忆（记忆浮现特殊事件已永久留在上下文）：
-            // 冷静期内不再动态注入，避免同一记忆在同一轮对话里出现两次
-            const writeCooldownMs = getConversationWriteCooldownMs();
-            // 上下文去重：内容已明显出现在最近对话里就不再浮现，避免“想起的都在上下文里”
-            const recentText = dialogMsgs.slice(-Math.max(windowSize, 8)).map(m => String(m.content || "")).join("\n");
-            const recentBigrams = cjkBigramSet(recentText);
-            const fresh = relevant.filter(m => {
-              const last = recentInjectedMemoryIds.get(m.id);
-              if (last !== undefined && (now - last) < itemCooldownMs) return false;
-              const rec = surfacedMemories[m.id];
-              if (rec && rec.lastTime && (now - rec.lastTime) < writeCooldownMs) return false;
-              // 低重要度 + 非强相关：流水账不浮现
-              if ((m.importance || 0) < 0.4 && (m._score || 0) < 0.85) return false;
-              // 与最近对话高度重复：不浮现
-              const memText = String(m.content || "");
-              const memBigrams = cjkBigramSet(memText);
-              if (memBigrams.size >= 3) {
-                let hit = 0;
-                for (const b of memBigrams) if (recentBigrams.has(b)) hit++;
-                if (hit / memBigrams.size >= 0.6) return false;
-              }
-              return true;
-            });
-            if (fresh.length > 0) {
-              const memStr = memoryEngine.formatContext(fresh);
-              // 浮现记忆作为独立 system 消息，插到最后一条 user 之后；启用时间注入时带上时间
-              const timeTag = timeInjectionEnabled() ? buildSystemTimeTag() : '';
-              dynContent = timeTag
-                ? `${systemNotePrefix()}\n\n${timeTag}\n\n## 相关记忆\n${memStr}`
-                : `${systemNotePrefix()}\n\n## 相关记忆\n${memStr}`;
-              memoryInjectionCache = { content: dynContent, expiresAt: now + getMemoryCooldownMinutes() * 60 * 1000 };
-              console.log(`[memory] 重新检索并缓存记忆浮现（冷静期 ${getMemoryCooldownMinutes()} 分钟，单条冷却 ${getMemoryItemCooldownMinutes()} 分钟，浮现 ${fresh.length} 条，阈值: ${threshold}）`);
-              fresh.forEach(m => recentInjectedMemoryIds.set(m.id, now));
-              // 记忆浮现写入对话：开启时，本次浮现的记忆写入对话记录，永久留在上下文
-              if (cfg.memory_persist_on_surface_enabled) {
-                try {
-                  const inserted = insertMemoriesToConversation(fresh);
-                  if (inserted > 0) console.log(`[memory] 浮现记忆已写入对话 ${inserted} 条`);
-                } catch (convErr) {
-                  console.warn("[memory] 浮现记忆写入对话失败:", convErr.message);
-                }
-              }
-              // 清理已过冷却期的记录，防止 Map 无限膨胀
-              for (const [id, ts] of recentInjectedMemoryIds) {
-                if (now - ts >= itemCooldownMs) recentInjectedMemoryIds.delete(id);
-              }
-              // 仍超限时保留最新的 50 条
-              if (recentInjectedMemoryIds.size > 100) {
-                const entries = Array.from(recentInjectedMemoryIds.entries()).sort((a, b) => b[1] - a[1]).slice(0, 50);
-                recentInjectedMemoryIds.clear();
-                entries.forEach(([id, ts]) => recentInjectedMemoryIds.set(id, ts));
-              }
-            } else {
-              // 相关记忆都已写入时间线（或都在冷却期内）：冷静期内不再动态注入，避免与时间线特殊事件重复
-              memoryInjectionCache = { content: null, empty: true, expiresAt: now + getMemoryCooldownMinutes() * 60 * 1000 };
-              console.log(`[memory] 相关记忆均已写入时间线或冷却中，冷静期内不再动态注入（相关 ${relevant.length} 条）`);
-            }
-          }
-        }
-        if (dynContent !== null) {
-          // 消息中已存在完全相同内容则跳过，避免重复注入
-          const alreadyInjected = llmMessages.some(m => m.role === "system" && typeof m.content === "string" && m.content === dynContent);
-          if (alreadyInjected) {
-            console.log("[memory] 复用冷静期记忆注入（内容已存在，跳过）");
-          } else {
-            // 记忆浮现内容是否保留（默认保留：避免每轮移除/重插导致前缀缓存断裂）
-            const stickyMemories = process.env.MEMORY_STICKY !== '0';
-            if (!stickyMemories) {
-              // 移除旧的动态 system 消息（避免重复）
-              for (let i = llmMessages.length - 1; i >= 0; i--) {
-                if (llmMessages[i].role === "system" && typeof llmMessages[i].content === "string" && llmMessages[i].content.includes("## 相关记忆")) {
-                  llmMessages.splice(i, 1);
-                }
-              }
-            } else {
-              // 保留模式：只在上限超限时移除最旧的一条（会带来一次缓存 miss，但避免上下文无限膨胀）
-              const maxSticky = Math.max(1, parseInt(process.env.MEMORY_MAX_STICKY || '50', 10) || 50);
-              const memIdx = [];
-              for (let i = 0; i < llmMessages.length; i++) {
-                if (llmMessages[i].role === "system" && typeof llmMessages[i].content === "string" && llmMessages[i].content.includes("## 相关记忆")) {
-                  memIdx.push(i);
-                }
-              }
-              if (memIdx.length >= maxSticky) {
-                llmMessages.splice(memIdx[0], 1);
-                console.log(`[memory] 保留模式超限，移除最旧记忆 (${memIdx.length} -> ${memIdx.length - 1})`);
-              }
-            }
-            // 找到最后一条 user 消息索引
-            let lastUserIdx = -1;
-            for (let i = llmMessages.length - 1; i >= 0; i--) {
-              if (llmMessages[i].role === "user") { lastUserIdx = i; break; }
-            }
-            // 在最后一条 user 之后插入动态 system 消息
-            if (lastUserIdx >= 0) {
-              llmMessages.splice(lastUserIdx + 1, 0, { role: "system", content: dynContent });
-            } else {
-              // 兜底：没有 user 消息时追加到末尾
-              llmMessages.push({ role: "system", content: dynContent });
-            }
-            console.log(`[memory] 注入记忆（${reused ? '复用冷静期缓存' : '新检索'}）`);
-          }
-        }
+      const beforeCount = llmMessages.length;
+      llmMessages = contextReplacements.applyReplacements(llmMessages);
+      if (llmMessages.length !== beforeCount) {
+        console.log("[context-replacements] 发送前替换生效: 消息 " + beforeCount + " -> " + llmMessages.length);
       }
-    } catch (memErr) {
-      console.error("[memory] 浮现失败:", memErr.message);
-    }
-    // 时间注入：未注入记忆时补充系统时间（可配置开关与间隔）
-    if (timeInjectionEnabled()) {
-      const hasDynTime = llmMessages.some(m =>
-        m.role === "system" && typeof m.content === "string" && m.content.includes("[当前系统时间")
-      );
-      if (!hasDynTime) {
-        const timeTag = buildSystemTimeTag();
-        let lastUserIdx2 = -1;
-        for (let i = llmMessages.length - 1; i >= 0; i--) {
-          if (llmMessages[i].role === "user") { lastUserIdx2 = i; break; }
-        }
-        if (lastUserIdx2 >= 0) {
-          llmMessages.splice(lastUserIdx2 + 1, 0, { role: "system", content: `${systemNotePrefix()}\n\n${timeTag}` });
-        }
-      }
+    } catch (repErr) {
+      console.warn("[context-replacements] 替换失败（按原样转发）:", repErr.message);
     }
 
-
-
-
-    // 上下文压缩：早期对话块替换为缓存摘要（默认关闭，开启后生效；失败则按原样转发）
-    try {
-      if (contextCompactor && contextCompactor.isEnabled()) {
-        const beforeCount = llmMessages.length;
-        llmMessages = contextCompactor.compactMessages(llmMessages);
-        if (llmMessages.length !== beforeCount) {
-          console.log("[context-compactor] 转发前压缩生效: 消息 " + beforeCount + " -> " + llmMessages.length);
-        }
-      }
-    } catch (compactErr) {
-      console.warn("[context-compactor] 压缩失败（跳过，按原样转发）:", compactErr.message);
-    }
+    // 上下文压缩已统一进「上下文替换」：早期对话块摘要与 AI 记忆现在都是同一种替换记录，
+    // 由 contextReplacements.applyReplacements 统一生效，旧压缩器发送路径已停用。
 
     // 请求模型
     // Capture the actual messages sent to LLM for inspection
@@ -1584,20 +1220,6 @@ app.post("/v1/chat/completions", async (req, reply) => {
           kelivoMessages.push({ role: "assistant", content: cleanText });
           const rebuilt = buildTimeline(kelivoMessages);
           saveTimeline(rebuilt);
-          // 追加到待处理消息（供摘要引擎使用）
-          const userMsgs = kelivoMessages.filter(m => m.role === "user" && typeof m.content === "string");
-          if (userMsgs.length > 0) {
-            // Only add the most recent user message (prevents duplicates across turns)
-            const latestUser = userMsgs[userMsgs.length - 1];
-            const pending = memoryEngine.getPendingMessages();
-            const alreadyAdded = pending.some(m => m.role === "user" && m.content === latestUser.content);
-            if (!alreadyAdded) {
-              memoryEngine.addPendingMessage({ role: "user", content: latestUser.content });
-            }
-          }
-          memoryEngine.addPendingMessage({ role: "assistant", content: cleanText, thinking: aiThinking || undefined });
-          // 重置沉默计时器
-          summaryEngine.resetIdleTimer();
         }
       } catch (parseErr) {
         console.warn("[memory] 非流式响应 JSON 解析失败:", parseErr.message);
@@ -1711,20 +1333,6 @@ app.post("/v1/chat/completions", async (req, reply) => {
         kelivoMessages.push({ role: "assistant", content: cleanFull });
         const rebuiltStream = buildTimeline(kelivoMessages);
         saveTimeline(rebuiltStream);
-        // 追加到待处理消息
-        const userMsgs = kelivoMessages.filter(m => m.role === "user" && typeof m.content === "string");
-        if (userMsgs.length > 0) {
-          // Only add the most recent user message (prevents duplicates across turns)
-          const latestUser = userMsgs[userMsgs.length - 1];
-          const pending = memoryEngine.getPendingMessages();
-          const alreadyAdded = pending.some(m => m.role === "user" && m.content === latestUser.content);
-          if (!alreadyAdded) {
-            memoryEngine.addPendingMessage({ role: "user", content: latestUser.content });
-          }
-        }
-        memoryEngine.addPendingMessage({ role: "assistant", content: cleanFull, thinking: aiThinking.trim() || undefined });
-        // 重置沉默计时器
-        summaryEngine.resetIdleTimer();
       }
     } catch (streamErr) {
       console.warn("[memory] 流式响应解析失败:", streamErr.message);
@@ -1740,34 +1348,13 @@ app.post("/v1/chat/completions", async (req, reply) => {
 // ========================
 app.post("/internal/wake-event", async (req, reply) => {
   try {
-    const { content, event, diary, memories } = req.body;
-    if (!content && !event && !diary && !(Array.isArray(memories) && memories.length)) return reply.code(400).send({ error: "content or event is required" });
-    if (Array.isArray(memories) && memories.length > 0) {
-      // 记忆浮现写入对话：开启时，唤醒浮现的记忆随事件写入对话记录，永久留在上下文
-      try {
-        const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
-        // 唤醒侧独立开关：未设置时沿用旧开关保持原行为
-        const persistWake = cfg.wake_memory_persist_on_surface_enabled !== undefined
-          ? cfg.wake_memory_persist_on_surface_enabled
-          : cfg.memory_persist_on_surface_enabled !== false;
-        if (persistWake) {
-          const inserted = insertMemoriesToConversation(memories.filter(m => m && m.id));
-          if (inserted > 0) console.log(`[wake-event] 浮现记忆已写入对话 ${inserted} 条`);
-        }
-      } catch (memErr) {
-        console.warn("[wake-event] 浮现记忆写入对话失败:", memErr.message);
-      }
-    }
+    const { content, event, diary } = req.body;
+    if (!content && !event && !diary) return reply.code(400).send({ error: "content or event is required" });
     if (diary) {
       appendSpecialEvent(`（${formatDateTimeInTimeZone(new Date(), TIME_ZONE)} 自动写了日记：${String(diary).trim()}）`);
     }
     if (event) {
       appendSpecialEvent(event);
-      try {
-        memoryEngine.addPendingMessage({ role: "assistant", content: event });
-      } catch (memErr) {
-        console.warn("[wake-event] 记忆系统写入失败:", memErr.message);
-      }
     }
     if (content) {
       // 先解析记忆标签，存储清洗后的文本，避免 <memory> 原始标签进入上下文/事件
@@ -1780,7 +1367,6 @@ app.post("/internal/wake-event", async (req, reply) => {
       }
       if (stored) {
         appendSpecialEvent(stored);
-        memoryEngine.addPendingMessage({ role: "assistant", content: stored });
       }
     }
     reply.send({ success: true });
@@ -2278,343 +1864,116 @@ app.post("/admin/restart", { preHandler: basicAuth }, async (req, reply) => {
 // ========================
 
 // 记忆语义检索（MCP 工具调用，AI 主动检索记忆；只读，不触碰冷却/浮现状态）
-app.get("/internal/memory/search", async (req, reply) => {
-  try {
-    const q = String(req.query.q || "").trim();
-    if (!q) return reply.code(400).send({ error: "q 必填" });
-    const topK = Math.min(20, Math.max(1, parseInt(req.query.topK, 10) || 5));
-    const filters = {};
-    if (req.query.type) {
-      filters.types = String(req.query.type).split(",").map(s => s.trim()).filter(Boolean);
-    }
-    if (req.query.minImportance !== undefined && req.query.minImportance !== "") {
-      filters.minImportance = parseFloat(req.query.minImportance);
-    }
-    const engine = require("./memory-engine");
-    const results = await engine.search(q, topK, filters);
-    const safe = results.map(m => {
-      const { embedding, ...rest } = m;
-      return rest;
-    });
-    reply.send({ query: q, count: safe.length, memories: safe });
-  } catch (err) {
-    console.error("[GET /internal/memory/search] error:", err.message);
-    reply.code(500).send({ error: err.message });
-  }
-});
 
 // ========================
 // 心动时刻同步（heart 网页为唯一真源，记忆池只做检索镜像）
 // ========================
 // 按网页 id (source_moment_id) 增量同步：新增 / 更新 / 复活
-app.post("/internal/moments/sync", async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const cfg = engine.getConfig ? engine.getConfig() : {};
-    if (cfg.moment_sync_enabled === false) {
-      const items = (req.body && req.body.items) || [];
-      return reply.send({ ok: true, added: 0, updated: 0, skipped: Array.isArray(items) ? items.length : 0, disabled: true });
-    }
-    const items = (req.body && req.body.items) || [];
-    if (!Array.isArray(items)) return reply.code(400).send({ error: "items 数组必填" });
-    let added = 0, updated = 0, skipped = 0;
-    for (const it of items) {
-      const sid = it.id;
-      if (sid === undefined || sid === null) { skipped++; continue; }
-      const parts = [];
-      if (it.title) parts.push("《" + String(it.title).trim() + "》");
-      const han = String(it.text_han || "").trim();
-      const xie = String(it.text_xie || "").trim();
-      if (han) parts.push("涵：" + han);
-      if (xie) parts.push("谢：" + xie);
-      const text = String(it.text || "").trim();
-      if (!han && !xie && text) parts.push(text);
-      if (it.feelings) parts.push("感受：" + String(it.feelings).trim());
-      const content = parts.join("\n").trim();
-      if (!content) { skipped++; continue; }
-      const importance = it.is_defining ? 0.95 : (it.category === "dense" ? 0.75 : 0.6);
-      const ts = it.ts ? new Date(it.ts).toISOString() : new Date().toISOString();
-      const existing = (engine.memories || []).find(m => m.source_moment_id === sid);
-      if (existing) {
-        await engine.updateMemory(existing.id, { content, importance, type: "moment" });
-        existing.timestamp = ts;
-        existing.active = true;
-        existing.source_moment_id = sid;
-        updated++;
-      } else {
-        await engine.addMemory({
-          content,
-          type: "moment",
-          importance,
-          source: "heart-web",
-          timestamp: ts,
-          source_moment_id: sid,
-          skipDedup: true
-        });
-        added++;
-      }
-    }
-    reply.send({ ok: true, added, updated, skipped });
-  } catch (err) {
-    console.error("[POST /internal/moments/sync] error:", err.message);
-    reply.code(500).send({ error: err.message });
-  }
-});
 
-// 按网页 id 软删除（网页删了，镜像同步删除）
-app.post("/internal/moments/remove", async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const cfg = engine.getConfig ? engine.getConfig() : {};
-    if (cfg.moment_sync_enabled === false) {
-      return reply.send({ ok: true, removed: 0, disabled: true });
-    }
-    const ids = (req.body && req.body.source_moment_ids) || [];
-    if (!Array.isArray(ids)) return reply.code(400).send({ error: "source_moment_ids 数组必填" });
-    let removed = 0;
-    for (const mem of engine.memories || []) {
-      if (mem.source_moment_id !== undefined && ids.includes(mem.source_moment_id) && mem.active) {
-        mem.active = false;
-        removed++;
-      }
-    }
-    if (removed > 0 && engine.markDirty) engine.markDirty();
-    reply.send({ ok: true, removed });
-  } catch (err) {
-    console.error("[POST /internal/moments/remove] error:", err.message);
-    reply.code(500).send({ error: err.message });
-  }
-});
 
-// ========================
-// 决策痕迹同步（decision-trail 网页为唯一真源，记忆池只做检索镜像，对接 emotion 类型）
-// ========================
-// 按网页 id (source_decision_id) 增量同步：新增 / 更新 / 复活
-// 决策记录字段与 emotion「经验复盘」五段式对应：触发→她说了什么，判断→依据，选择→回应，感受，回响→她的反应
-function buildDecisionContent(it) {
-  const parts = [];
-  const v = (s) => typeof s === "string" && s.trim().length > 0;
-  if (v(it.trigger)) parts.push("触发：" + it.trigger.trim());
-  if (Array.isArray(it.forks) && it.forks.length > 0) {
-    const forks = it.forks.map(f => typeof f === "string" ? f.trim() : "").filter(Boolean);
-    if (forks.length > 0) parts.push("分叉：" + forks.join(" / "));
-  }
-  if (v(it.choice)) parts.push("我的选择：" + it.choice.trim());
-  if (v(it.reason)) parts.push("我的判断：" + it.reason.trim());
-  if (v(it.feeling)) parts.push("我的感受：" + it.feeling.trim());
-  if (v(it.echo)) parts.push("她的反应：" + it.echo.trim());
-  return parts.join("\n").trim();
-}
-
-app.post("/internal/decisions/sync", async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const items = (req.body && req.body.items) || [];
-    if (!Array.isArray(items)) return reply.code(400).send({ error: "items 数组必填" });
-    let added = 0, updated = 0, skipped = 0;
-    for (const it of items) {
-      const sid = it.id;
-      if (sid === undefined || sid === null) { skipped++; continue; }
-      const content = buildDecisionContent(it);
-      if (!content) { skipped++; continue; }
-      const importance = 0.75;
-      const ts = it.created_at ? new Date(it.created_at).toISOString() : new Date().toISOString();
-      const existing = (engine.memories || []).find(m => m.source_decision_id === sid);
-      if (existing) {
-        await engine.updateMemory(existing.id, { content, importance, type: "emotion" });
-        existing.timestamp = ts;
-        existing.active = true;
-        existing.source_decision_id = sid;
-        updated++;
-      } else {
-        await engine.addMemory({
-          content,
-          type: "emotion",
-          importance,
-          source: "decision-trail",
-          timestamp: ts,
-          source_decision_id: sid,
-          skipDedup: true
-        });
-        added++;
-      }
-    }
-    reply.send({ ok: true, added, updated, skipped });
-  } catch (err) {
-    console.error("[POST /internal/decisions/sync] error:", err.message);
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-// 按网页 id 软删除（网页删了，镜像同步删除）
-app.post("/internal/decisions/remove", async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const ids = (req.body && req.body.source_decision_ids) || [];
-    if (!Array.isArray(ids)) return reply.code(400).send({ error: "source_decision_ids 数组必填" });
-    let removed = 0;
-    for (const mem of engine.memories || []) {
-      if (mem.source_decision_id !== undefined && ids.includes(mem.source_decision_id) && mem.active) {
-        mem.active = false;
-        removed++;
-      }
-    }
-    if (removed > 0 && engine.markDirty) engine.markDirty();
-    reply.send({ ok: true, removed });
-  } catch (err) {
-    console.error("[POST /internal/decisions/remove] error:", err.message);
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-// ========================
-
-// 给下一个窗口自己的信：读取列表（MCP letter_read 用；默认最新一封，count>0 返回最近 N 封）
-app.get("/internal/letters", async (req, reply) => {
-  try {
-    const letters = loadLetters();
-    let count = parseInt(req.query.count);
-    let result = letters.slice();
-    if (Number.isInteger(count) && count > 0) result = result.slice(-count);
-    const safe = result.map(l => ({ id: l.id, title: l.title, created_at: l.created_at, content: l.content }));
-    reply.send({ count: safe.length, total: letters.length, letters: safe });
-  } catch (err) {
-    console.error("[GET /internal/letters] error:", err.message);
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-// 给下一个窗口自己的信：写入（MCP letter_write 用）
-app.post("/internal/letters", async (req, reply) => {
+// 上下文记忆替换：AI 调用 MCP 工具时走这里（x-internal-key 鉴权）
+app.post("/internal/context-replacements/apply", async (req, reply) => {
   try {
     const body = req.body || {};
-    const letter = addLetter({ title: body.title, content: body.content, source: body.source });
-    reply.send({ success: true, letter });
+    const result = contextReplacements.addReplacement({ range: body.range || {}, memory: body.memory });
+    reply.send(result);
   } catch (err) {
-    reply.code(400).send({ error: err.message });
-  }
-});
-
-// 给下一个窗口自己的信：编辑（MCP letter_edit 用；无 id 编辑最新一封，还没有信则新建）
-app.put("/internal/letters", async (req, reply) => {
-  try {
-    const body = req.body || {};
-    const letter = editLetter({ title: body.title, content: body.content });
-    reply.send({ success: true, letter });
-  } catch (err) {
-    reply.code(400).send({ error: err.message });
-  }
-});
-
-// 给下一个窗口自己的信：编辑指定 id（MCP letter_edit 用）
-app.put("/internal/letters/:id", async (req, reply) => {
-  try {
-    const body = req.body || {};
-    const letter = editLetter({ id: req.params.id, title: body.title, content: body.content });
-    if (!letter) return reply.code(404).send({ error: "信不存在" });
-    reply.send({ success: true, letter });
-  } catch (err) {
-    reply.code(400).send({ error: err.message });
-  }
-});
-
-
-// 记忆分类查看（MCP/AI 按 type 查看某分类的全部内容，内部密钥鉴权）
-// ========================
-app.get("/internal/memory/list", async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const query = req.query || {};
-    const type = String(query.type || "").trim();
-    if (!type) return reply.code(400).send({ error: "type 必填" });
-    const filters = { types: [type] };
-    if (query.active !== undefined) filters.active = query.active === "true" || query.active === true;
-    filters.sortBy = query.sortBy || "newest";
-    if (query.pageSize) filters.pageSize = Math.min(500, parseInt(query.pageSize) || 200);
-    if (query.page) filters.page = parseInt(query.page);
-    const result = engine.getMemories ? engine.getMemories(filters) : [];
-    const safe = result.map(m => {
-      const { embedding, ...rest } = m;
-      return rest;
-    });
-    reply.send({ type, count: safe.length, memories: safe });
-  } catch (err) {
-    console.error("[GET /internal/memory/list] error:", err.message);
+    console.error("[POST /internal/context-replacements/apply] error:", err.message);
     reply.code(500).send({ error: err.message });
   }
 });
 
-// 记忆池统计（MCP memories_count 用）：总数/活跃/按分类分组/最近N条预览
-app.get("/internal/memory/stats", async (req, reply) => {
+app.get("/internal/context-replacements/list", async (req, reply) => {
   try {
-    const engine = require("./memory-engine");
-    const memories = engine.memories || [];
-    const stats = engine.getStats ? engine.getStats() : { total: 0, active: 0, byType: {}, similarCount: 0, similarGroups: 0 };
-    const activeByType = {};
-    for (const m of memories) {
-      if (m.active) {
-        const t = m.type || "unknown";
-        activeByType[t] = (activeByType[t] || 0) + 1;
-      }
-    }
-    let previewN = parseInt(req.query.preview);
-    if (isNaN(previewN) || previewN < 0) previewN = 0;
-    previewN = Math.min(previewN, 50);
-    let recent = [];
-    if (previewN > 0) {
-      const sorted = [...memories].sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
-      for (const m of sorted.slice(0, previewN)) {
-        const { embedding, ...rest } = m;
-        recent.push(rest);
-      }
-    }
-    reply.send({ ...stats, activeByType, recent, recent_count: recent.length });
+    reply.send({ items: contextReplacements.listReplacements() });
   } catch (err) {
-    console.error("[GET /internal/memory/stats] error:", err.message);
+    console.error("[GET /internal/context-replacements/list] error:", err.message);
     reply.code(500).send({ error: err.message });
   }
 });
 
-// 记忆编辑（MCP/AI 主动修改记忆：内容、重要性、类型等；按 id 精确修改）
-app.post("/internal/memory/update", async (req, reply) => {
+app.post("/internal/context-replacements/undo", async (req, reply) => {
+  try {
+    reply.send(contextReplacements.removeReplacement(String((req.body || {}).id || "").trim()));
+  } catch (err) {
+    console.error("[POST /internal/context-replacements/undo] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+app.get("/internal/context-search", async (req, reply) => {
+  try {
+    reply.send(contextReplacements.searchTimeline(req.query.q, req.query.limit));
+  } catch (err) {
+    console.error("[GET /internal/context-search] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 永久注入上下文（pin）：MCP 工具 pin_add / pin_update / pin_delete 用
+app.get("/internal/pin", async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const list = engine.getPinnedMemories ? engine.getPinnedMemories() : [];
+    const safe = list.map(m => ({
+      id: m.id,
+      title: m.title || "",
+      content: m.content || "",
+      order: m.order || 0,
+      updated_at: m.updated_at || ""
+    }));
+    reply.send({ count: safe.length, pins: safe });
+  } catch (err) {
+    console.error("[GET /internal/pin] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+app.post("/internal/pin", async (req, reply) => {
   try {
     const engine = require("./memory-engine");
     const body = req.body || {};
-    const id = String(body.id || "").trim();
-    const updates = body.updates || {};
-    if (!id) return reply.code(400).send({ error: "id 必填" });
-    const clean = {};
-    for (const k of ["content", "importance", "type", "active"]) {
-      if (updates[k] !== undefined) clean[k] = updates[k];
-    }
-    if (Object.keys(clean).length === 0) {
-      return reply.code(400).send({ error: "没有可更新的字段（content/importance/type/active）" });
-    }
-    const ok = await engine.updateMemory(id, clean);
-    if (!ok) return reply.code(404).send({ error: "记忆不存在: " + id });
-    const mem = engine.getMemoryById(id);
-    const { embedding, ...rest } = mem;
-    reply.send({ success: true, memory: rest });
+    const content = String(body.content || "").trim();
+    if (!content) return reply.code(400).send({ error: "content 必填" });
+    const mem = await engine.addPinnedMemory({ title: String(body.title || "").trim(), content: content });
+    reply.send({ success: true, pin: mem });
   } catch (err) {
-    console.error("[POST /internal/memory/update] error:", err.message);
+    console.error("[POST /internal/pin] error:", err.message);
     reply.code(500).send({ error: err.message });
   }
 });
 
-// 记忆删除（软删除：active=false，沉底不再被检索）
-app.post("/internal/memory/delete", async (req, reply) => {
+app.put("/internal/pin/:id", async (req, reply) => {
   try {
     const engine = require("./memory-engine");
-    const id = String((req.body || {}).id || "").trim();
-    if (!id) return reply.code(400).send({ error: "id 必填" });
-    const mem = engine.getMemoryById(id);
-    if (!mem) return reply.code(404).send({ error: "记忆不存在: " + id });
-    const ok = engine.deleteMemory(id);
-    if (!ok) return reply.code(500).send({ error: "删除失败" });
-    const { embedding, ...rest } = mem;
-    reply.send({ success: true, deleted: rest });
+    const body = req.body || {};
+    const updates = {};
+    if (body.title !== undefined) updates.title = String(body.title).trim();
+    if (body.content !== undefined) {
+      const c = String(body.content).trim();
+      if (!c) return reply.code(400).send({ error: "content 不能为空" });
+      updates.content = c;
+    }
+    if (Object.keys(updates).length === 0) {
+      return reply.code(400).send({ error: "没有可更新的字段（title/content）" });
+    }
+    const mem = await engine.updatePinnedMemory(req.params.id, updates);
+    if (!mem) return reply.code(404).send({ error: "pin 不存在: " + req.params.id });
+    reply.send({ success: true, pin: mem });
   } catch (err) {
-    console.error("[POST /internal/memory/delete] error:", err.message);
+    console.error("[PUT /internal/pin] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+app.delete("/internal/pin/:id", async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const ok = await engine.deletePinnedMemory(req.params.id);
+    if (!ok) return reply.code(404).send({ error: "pin 不存在: " + req.params.id });
+    reply.send({ success: true });
+  } catch (err) {
+    console.error("[DELETE /internal/pin] error:", err.message);
     reply.code(500).send({ error: err.message });
   }
 });
@@ -2631,232 +1990,26 @@ app.get("/admin/stats", { preHandler: basicAuth }, async (req, reply) => {
 
 
 // 给下一个窗口自己的信：列表（管理台信封页，新的在前）
-app.get("/admin/letters", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const letters = loadLetters().slice().reverse();
-    const safe = letters.map(l => ({ id: l.id, title: l.title, created_at: l.created_at, content: l.content, source: l.source }));
-    reply.send({ letters: safe, total: safe.length });
-  } catch (err) {
-    console.error("[GET /admin/letters] error:", err.message);
-    reply.code(500).send({ error: err.message });
-  }
-});
 
 
 // 记忆列表（支持搜索和分页）
-app.get("/admin/memories", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const query = req.query || {};
-    const filters = {};
-    if (query.type) filters.types = [query.type];
-    if (query.active !== undefined) filters.active = query.active === "true" || query.active === true;
-    if (query.search) filters.search = query.search;
-    if (query.page) filters.page = parseInt(query.page);
-    if (query.pageSize) filters.pageSize = parseInt(query.pageSize);
-    if (query.sortBy) filters.sortBy = query.sortBy;
-    const engine = require("./memory-engine");
-    const result = engine.getMemories ? engine.getMemories(filters) : [];
-    const total = engine.memories ? engine.memories.length : 0;
-    // 剥离向量数据，避免列表接口返回巨大 JSON（50 条约 2.5MB → 几十 KB）
-    const extractKw = (engine.extractKeywordsForTags || engine.extractKeywordsFromText || (t => []));
-    const stopWords = engine.KEYWORD_STOP_WORDS || new Set();
-    const memKeywords = (content) => {
-      const freq = {};
-      for (const w of extractKw(content)) {
-        if (w.length < 2) continue;
-        if (stopWords.has(w)) continue;
-        freq[w] = (freq[w] || 0) + 1;
-      }
-      return Object.entries(freq)
-        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "zh"))
-        .slice(0, 4)
-        .map(x => x[0]);
-    };
-    const safe = result.map(m => {
-      const { embedding, ...rest } = m;
-      rest.keywords = memKeywords(m.content || "");
-      return rest;
-    });
-    reply.send({ memories: safe, total });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
 
 // 获取单条记忆 (剥离 embedding 避免传输大量数据)
-app.get("/admin/memories/:id", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const mem = engine.getMemoryById ? engine.getMemoryById(req.params.id) : null;
-    if (!mem) return reply.code(404).send({ error: "记忆不存在" });
-    const { embedding, ...rest } = mem;
-    reply.send(rest);
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
 
 // 删除单条记忆
-app.delete("/admin/memories/:id", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const id = req.params.id;
-    console.log("[DELETE /admin/memories/:id] id=" + JSON.stringify(id) + " body=" + JSON.stringify(req.body));
-    if (!id) return reply.code(400).send({ error: "id 必填" });
-    const engine = require("./memory-engine");
-    const mem = engine.getMemoryById ? engine.getMemoryById(id) : null;
-    if (!mem) return reply.code(404).send({ error: "记忆不存在" });
-    const ok = engine.deleteMemory ? engine.deleteMemory(id) : false;
-    reply.send({ success: ok });
-  } catch (err) {
-    console.error("[DELETE memories] error:", err);
-    reply.code(500).send({ error: err.message });
-  }
-});
 
 // 编辑单条记忆
-app.put("/admin/memories/:id", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const id = req.params.id;
-    if (!id) return reply.code(400).send({ error: "id 必填" });
-    const updates = req.body || {};
-    if (!updates.content && !updates.importance && !updates.type && updates.active === undefined) {
-      return reply.code(400).send({ error: "至少提供 content / importance / type / active 之一" });
-    }
-    const ok = require("./memory-engine").updateMemory ? await require("./memory-engine").updateMemory(id, updates) : false;
-    if (!ok) return reply.code(404).send({ error: "记忆不存在" });
-    reply.send({ success: true });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
 
 // 批量归档
-app.post("/admin/memories/batch/archive", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const { type, olderThanDays } = req.body || {};
-    if (!type) return reply.code(400).send({ error: "type 必填" });
-    const cutoff = olderThanDays ? Date.now() - olderThanDays * 24 * 60 * 60 * 1000 : 0;
-    let count = 0;
-    const mems = require("./memory-engine").memories || [];
-    for (const mem of mems) {
-      if (mem.type === type && mem.active) {
-        if (cutoff > 0 && mem.timestamp) {
-          const age = Date.now() - new Date(mem.timestamp).getTime();
-          if (age < cutoff) continue;
-        }
-        mem.active = false;
-        count++;
-      }
-    }
-    // Mark dirty to ensure changes are flushed to disk
-    require("./memory-engine").memories && (() => {
-      const engine = require("./memory-engine");
-      if (engine.markDirty) engine.markDirty();
-    })();
-    reply.send({ success: true, archived: count });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
 
 // 批量永久删除沉底记忆（物理移除，不可恢复；清理指向被删记忆的 superseded_by 引用）
-app.post("/admin/memories/batch/purge", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.map(String) : [];
-    if (!ids.length) return reply.code(400).send({ error: "ids 数组必填" });
-    let removed = 0;
-    const removedSet = new Set();
-    for (const id of ids) {
-      if (engine.purgeMemory && engine.purgeMemory(id)) {
-        removed++;
-        removedSet.add(id);
-      }
-    }
-    for (const m of engine.memories || []) {
-      if (m.superseded_by && removedSet.has(String(m.superseded_by))) m.superseded_by = null;
-    }
-    if (removed > 0 && engine.markDirty) engine.markDirty();
-    reply.send({ success: true, removed });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
 
 // 批量恢复沉底记忆（active=true 重新参与检索；同时清除被覆盖标记）
-app.post("/admin/memories/batch/restore", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids.map(String) : [];
-    if (!ids.length) return reply.code(400).send({ error: "ids 数组必填" });
-    let restored = 0;
-    for (const id of ids) {
-      if (await engine.updateMemory(id, { active: true })) restored++;
-    }
-    if (restored > 0 && engine.markDirty) engine.markDirty();
-    reply.send({ success: true, restored });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
 
 
 // 批量导入记忆
-app.post("/admin/memories/import", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const entries = req.body.entries || req.body || [];
-    if (!Array.isArray(entries)) {
-      return reply.code(400).send({ error: "需要 entries 数组" });
-    }
-    const engine = require("./memory-engine");
-    let added = 0, skipped = 0, errors = 0;
-    const results = [];
-    for (const entry of entries) {
-      try {
-        if (!entry.type) entry.type = "fact";
-        const result = await engine.addMemory(entry);
-        if (result) {
-          added++;
-          results.push({ id: result.id, content: result.content?.substring(0, 50), status: "added" });
-        } else {
-          skipped++;
-          results.push({ content: entry.content?.substring(0, 50), status: "skipped" });
-        }
-      } catch (err) {
-        errors++;
-        results.push({ content: entry.content?.substring(0, 50), status: "error", error: err.message });
-      }
-    }
-    reply.send({ success: true, added, skipped, errors, results });
-  } catch (err) {
-    console.error("[POST /admin/memories/import] error:", err);
-    reply.code(500).send({ error: err.message });
-  }
-});
 
 // 查找相似记忆（重复检测）
-app.get("/admin/memories/similar", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const threshold = parseFloat(req.query.threshold) || 0.6;
-    const engine = require("./memory-engine");
-    if (!engine.findSimilarMemories) {
-      return reply.code(500).send({ error: "findSimilarMemories not available" });
-    }
-    const clusters = engine.findSimilarMemories(threshold);
-    // Strip embeddings to avoid huge response
-    const safeClusters = clusters.map(c => ({
-      ...c,
-      members: c.members.map(m => {
-        const { embedding, ...rest } = m;
-        return rest;
-      })
-    }));
-    reply.send({ clusters: safeClusters, totalClusters: safeClusters.length });
-  } catch (err) {
-    console.error("[GET /admin/memories/similar] error:", err);
-    reply.code(500).send({ error: err.message });
-  }
-});
 
 // 词云关键词（管理台：统计活跃记忆的关键词与权重，前端渲染词云卡片）
 app.get("/admin/memories/keywords", { preHandler: basicAuth }, async (req, reply) => {
@@ -2873,92 +2026,275 @@ app.get("/admin/memories/keywords", { preHandler: basicAuth }, async (req, reply
 
 // 触发摘要（支持 exclude：手动摘要前剔除不需要写摘要的消息下标，从待摘要队列移除）
 // 手动摘要窗口：删除所选（从待摘要队列永久移除，不可恢复）
-app.post("/admin/summary/pending/delete", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const indices = (req.body && Array.isArray(req.body.indices)) ? req.body.indices.map(Number).filter(n => Number.isInteger(n) && n >= 0) : [];
-    const engine = require("./memory-engine");
-    const pending = engine.getPendingMessages();
-    const indexSet = new Set(indices);
-    const rest = pending.filter((_, i) => !indexSet.has(i));
-    const removed = pending.length - rest.length;
-    if (removed > 0) {
-      pending.splice(0, pending.length, ...rest);
-      engine.persistPendingMessages();
-      console.log(`[admin] 手动摘要：删除所选 ${removed} 条，剩余 ${rest.length} 条待摘要`);
-    }
-    reply.send({
-      success: true,
-      removed,
-      remaining: rest.length,
-      pending_list: rest.map(m => ({ role: m.role, content: m.content, thinking: (m && m.thinking) || "" }))
-    });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
 
-app.post("/admin/summary/trigger", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const exclude = (req.body && Array.isArray(req.body.exclude)) ? req.body.exclude : null;
-    let selectedIndices = null;
-    if (exclude && exclude.length > 0) {
-      const engine = require("./memory-engine");
-      const pending = engine.getPendingMessages();
-      const excludeSet = new Set(exclude.map(Number).filter(n => Number.isInteger(n) && n >= 0));
-      if (excludeSet.size > 0) {
-        const all = pending.map((_, i) => i);
-        selectedIndices = all.filter(i => !excludeSet.has(i));
-        if (selectedIndices.length === 0) {
-          return reply.send({ success: false, message: "没有可摘要的消息（选中的内容为空）" });
-        }
-        console.log(`[admin] 手动摘要：仅摘要 ${selectedIndices.length} 条选中的消息，其余保留待摘要`);
-      }
-    }
-    const memCfg = require("./memory-engine").getConfig ? require("./memory-engine").getConfig() : {};
-    if (memCfg.summary_enabled === false) {
-      return reply.send({ success: false, disabled: true, message: "摘要已停用（summary_enabled=false）" });
-    }
-    const summaryEngine = require("./summary-engine");
-    if (summaryEngine.triggerNow) {
-      summaryEngine.triggerNow(selectedIndices).catch(e => {
-        console.error("[admin] 手动触发摘要失败:", e.message);
-      });
-    }
-    reply.send({ success: true, message: "摘要已触发" });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
 
 // 最近一次摘要信息
-app.get("/admin/summary/last", { preHandler: basicAuth }, async (req, reply) => {
+
+// 上下文记忆替换：管理台撤销（压缩页 AI 块的「撤销」按钮用）
+app.post("/admin/context-replacements/undo", { preHandler: basicAuth }, async (req, reply) => {
   try {
-    const fss = require("fs");
-    const pathh = require("path");
-    const stateFile = pathh.join(__dirname, "data", "state.json");
-    let state = {};
+    reply.send(contextReplacements.removeReplacement(String((req.body || {}).id || "").trim()));
+  } catch (err) {
+    console.error("[POST /admin/context-replacements/undo] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 切换 AI 记忆替换块的启用状态（停用 = 保留记录但不再替换）
+app.post("/admin/context-replacements/toggle", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const body = req.body || {};
+    const enabled = body.enabled !== false;
+    reply.send(contextReplacements.toggleReplacement(String(body.id || "").trim(), enabled));
+  } catch (err) {
+    console.error("[POST /admin/context-replacements/toggle] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+
+// 编辑 AI 记忆替换的正文（用户改了 AI 写的记忆）
+app.post("/admin/context-replacements/update", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const body = req.body || {};
+    const r = contextReplacements.updateReplacement(String(body.id || "").trim(), String(body.memory || ""));
+    if (!r.ok) return reply.send({ ok: false, error: r.error });
+    return reply.send({ ok: true, item: r.item });
+  } catch (err) {
+    console.error("[POST /admin/context-replacements/update] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+
+// ========================
+// 工具集管理（mcp-tools）：停用工具 / 改说明 / 改 schema + 服务启停
+// ========================
+const MCP_TOOLS_DIR = "/root/workspace/mcp-tools";
+const MCP_TOOLS_CONFIG = path.join(MCP_TOOLS_DIR, "tools_config.json");
+const MCP_TOOLS_MANIFEST = path.join(MCP_TOOLS_DIR, "tools_manifest.json");
+const MCP_TOOLS_HISTORY = path.join(MCP_TOOLS_DIR, "tools_history.json");
+
+// 覆盖项合并：新值 null 表示“清除覆盖”，其余按 key 覆盖；返回全新对象
+function mergeOverrideObj(oldObj, newObj) {
+  const merged = Object.assign({}, oldObj || {});
+  if (newObj && typeof newObj === "object") {
+    Object.keys(newObj).forEach(function (k) {
+      if (newObj[k] === null || newObj[k] === undefined) delete merged[k];
+      else merged[k] = newObj[k];
+    });
+  }
+  return merged;
+}
+
+function readToolsHistory() {
+  const list = readJsonFileSafe(MCP_TOOLS_HISTORY, []);
+  return Array.isArray(list) ? list : [];
+}
+
+function appendToolsHistory(entries) {
+  try {
+    if (!entries || !entries.length) return;
+    const hist = entries.concat(readToolsHistory()).slice(0, 300); // 新的在前
+    writeJsonFileAtomic(MCP_TOOLS_HISTORY, hist);
+  } catch (e) {
+    console.error("[tools] 修改记录写入失败:", e.message);
+  }
+}
+
+// 对比旧/新配置，生成修改记录
+function buildToolsHistory(oldDisabled, oldDesc, oldSchema, newDisabled, newDesc, newSchema) {
+  const now = new Date().toISOString();
+  const entries = [];
+  const oldD = new Set(oldDisabled || []);
+  const newD = new Set(newDisabled || []);
+  newD.forEach(function (n) {
+    if (!oldD.has(n)) entries.push({ time: now, tool: n, field: "enabled", old: true, new: false, source: "工具页" });
+  });
+  oldD.forEach(function (n) {
+    if (!newD.has(n)) entries.push({ time: now, tool: n, field: "enabled", old: false, new: true, source: "工具页" });
+  });
+  const descKeys = new Set(Object.keys(oldDesc || {}).concat(Object.keys(newDesc || {})));
+  descKeys.forEach(function (name) {
+    const oldV = (oldDesc && oldDesc[name]) || "";
+    const newV = (newDesc && newDesc[name]) || "";
+    if (oldV !== newV) entries.push({ time: now, tool: name, field: "description", old: oldV, new: newV, source: "工具页" });
+  });
+  const schemaKeys = new Set(Object.keys(oldSchema || {}).concat(Object.keys(newSchema || {})));
+  schemaKeys.forEach(function (name) {
+    const oldS = JSON.stringify((oldSchema && oldSchema[name]) || {});
+    const newS = JSON.stringify((newSchema && newSchema[name]) || {});
+    if (oldS !== newS) entries.push({ time: now, tool: name, field: "schema", old: oldS, new: newS, source: "工具页" });
+  });
+  return entries;
+}
+
+
+const MANAGED_SERVICES = [
+  { name: "mcp-tools", type: "systemd", label: "工具集 MCP（8771）" },
+  { name: "mcp-ssh", type: "systemd", label: "SSH MCP（9000）" },
+  { name: "zzf-mcp", type: "systemd", label: "远程玩具 MCP（8890）" },
+  { name: "gateway", type: "pm2", label: "网关 gateway" },
+  { name: "wake-up", type: "pm2", label: "唤醒 wake-up" },
+  { name: "heart-web", type: "pm2", label: "心跳网页 heart-web" },
+  { name: "netease-music-mcp", type: "port", port: 3303, label: "网易云 MCP（3303）", cmd: "cd /opt/netease-music-mcp && PORT=3303 nohup node src/http-server.js > http-server.log 2>&1 &", pattern: "netease-music-mcp" },
+  { name: "decision-trail", type: "port", port: 8787, label: "决策痕迹 MCP（8787）", cmd: "cd /root/workspace/decision-trail && PORT=8787 nohup node server.mjs >> logs/server.log 2>&1 &", pattern: "decision-trail" },
+  { name: "spicy-monopoly", type: "port", port: 8773, label: "涩涩大富翁 MCP（8773）", cmd: "cd /root/spicy-monopoly && SPICY_MONOPOLY_MCP_TRANSPORT=streamable-http SPICY_MONOPOLY_MCP_HOST=0.0.0.0 SPICY_MONOPOLY_MCP_PORT=8773 SPICY_MONOPOLY_MCP_PATH=/mcp SPICY_MONOPOLY_MCP_BEARER_TOKEN=han-xie-2026 nohup node mcp-server.js > mcp_spicy.log 2>&1 &", pattern: "spicy-monopoly" }
+];
+
+function readJsonFileSafe(file, fallback) {
+  try {
+    if (!fs.existsSync(file)) return fallback;
+    return JSON.parse(fs.readFileSync(file, "utf-8"));
+  } catch (err) {
+    return fallback;
+  }
+}
+
+function writeJsonFileAtomic(file, data) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = file + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
+  fs.renameSync(tmp, file);
+}
+
+function runShellCommand(cmd) {
+  const { execSync } = require("child_process");
+  try {
+    const out = execSync(cmd, { encoding: "utf-8", timeout: 20000 }).trim();
+    return { ok: true, output: out };
+  } catch (err) {
+    return { ok: false, output: String(err.stdout || err.message || "").trim() };
+  }
+}
+
+function serviceStatus(svc) {
+  if (svc.type === "systemd") {
+    const r = runShellCommand("systemctl is-active " + svc.name);
+    return r.output || "unknown";
+  }
+  if (svc.type === "pm2") {
+    const r = runShellCommand("pm2 jlist");
     try {
-      if (fss.existsSync(stateFile)) {
-        state = JSON.parse(fss.readFileSync(stateFile, "utf-8"));
-      }
-    } catch {}
-    const pendingList = Array.isArray(state.pending_messages) ? state.pending_messages : [];
-    const userDisplay = readEnvValue("USER_DISPLAY_NAME") || "对方";
-    const pendingText = pendingList
-      .map(m => `[${m && m.role === "user" ? userDisplay : "我"}] ${m && m.content ? m.content : ""}`)
-      .join("\n\n");
+      const list = JSON.parse(r.output || "[]");
+      const app = list.find(function (a) { return a.name === svc.name; });
+      if (!app) return "stopped";
+      return app.pm2_env && app.pm2_env.status || "unknown";
+    } catch (e) { return "unknown"; }
+  }
+  if (svc.type === "port") {
+    const r = runShellCommand("ss -ltn 2>/dev/null | grep -c ':" + svc.port + " ' || true");
+    return Number(r.output || 0) > 0 ? "running" : "stopped";
+  }
+  return "unknown";
+}
+
+function serviceControl(svc, action) {
+  if (action === "status") return { ok: true, status: serviceStatus(svc) };
+  if (svc.type === "systemd") {
+    const r = runShellCommand("systemctl " + action + " " + svc.name);
+    return { ok: r.ok, status: serviceStatus(svc), output: r.output };
+  }
+  if (svc.type === "pm2") {
+    if (action === "restart") {
+      const r = runShellCommand("pm2 restart " + svc.name + " --update-env");
+      return { ok: r.ok, status: serviceStatus(svc), output: r.output };
+    }
+    if (action === "start" || action === "stop") {
+      const r = runShellCommand("pm2 " + action + " " + svc.name);
+      return { ok: r.ok, status: serviceStatus(svc), output: r.output };
+    }
+    return { ok: false, error: "不支持的操作" };
+  }
+  if (svc.type === "port") {
+    if (action === "start") {
+      if (serviceStatus(svc) === "running") return { ok: true, status: "running", output: "已在运行" };
+      const r = runShellCommand(svc.cmd + " ; sleep 1; echo started");
+      return { ok: r.ok, status: serviceStatus(svc), output: r.output };
+    }
+    if (action === "stop") {
+      const r = runShellCommand("pkill -f " + svc.pattern + " || true; sleep 1");
+      return { ok: true, status: serviceStatus(svc), output: "已发送停止信号" };
+    }
+    if (action === "restart") {
+      runShellCommand("pkill -f " + svc.pattern + " || true; sleep 1");
+      const r = runShellCommand(svc.cmd + " ; sleep 1; echo restarted");
+      return { ok: true, status: serviceStatus(svc), output: r.output };
+    }
+    return { ok: false, error: "不支持的操作" };
+  }
+  return { ok: false, error: "未知服务类型" };
+}
+
+app.get("/admin/tools", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const manifest = readJsonFileSafe(MCP_TOOLS_MANIFEST, null);
+    const config = readJsonFileSafe(MCP_TOOLS_CONFIG, {});
     reply.send({
-      last_summary_time: state.last_summary_time || null,
-      is_summary_running: state.is_summary_running || false,
-      pending_messages: pendingList.length,
-      pending_list: pendingList.map(m => ({
-        role: (m && m.role) || "assistant",
-        content: (m && m.content) || "",
-        thinking: (m && m.thinking) || ""
-      })),
-      pending_text: pendingText
+      manifest: manifest,
+      config: config,
+      history: readToolsHistory().slice(0, 100),
+      config_path: MCP_TOOLS_CONFIG,
+      manifest_path: MCP_TOOLS_MANIFEST,
+      note: manifest ? null : "工具清单还没生成：请先重启 mcp-tools 服务（或点下方「重启」）"
     });
   } catch (err) {
+    console.error("[GET /admin/tools] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+app.put("/admin/tools", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const body = req.body || {};
+    const existing = readJsonFileSafe(MCP_TOOLS_CONFIG, {});
+    const oldDisabled = Array.isArray(existing.disabled) ? existing.disabled : [];
+    const oldDescriptions = (existing.descriptions && typeof existing.descriptions === "object") ? existing.descriptions : {};
+    const oldSchemas = (existing.schemas && typeof existing.schemas === "object") ? existing.schemas : {};
+    const disabled = Array.isArray(body.disabled) ? body.disabled.filter(function (n) { return typeof n === "string"; }) : oldDisabled;
+    const descriptions = mergeOverrideObj(oldDescriptions, body.descriptions);
+    const schemas = mergeOverrideObj(oldSchemas, body.schemas);
+    writeJsonFileAtomic(MCP_TOOLS_CONFIG, { disabled: disabled, descriptions: descriptions, schemas: schemas });
+    const history = buildToolsHistory(oldDisabled, oldDescriptions, oldSchemas, disabled, descriptions, schemas);
+    appendToolsHistory(history);
+    // 配置已热加载生效（tools_server 监控配置文件自动重载），无需重启服务
+    await new Promise(function (resolve) { setTimeout(resolve, 2500); });
+    const manifest = readJsonFileSafe(MCP_TOOLS_MANIFEST, null);
+    reply.send({
+      ok: true,
+      restart: "hot-reload",
+      manifest: manifest,
+      config: readJsonFileSafe(MCP_TOOLS_CONFIG, {}),
+      history: readToolsHistory().slice(0, 100)
+    });
+  } catch (err) {
+    console.error("[PUT /admin/tools] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+app.get("/admin/services", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const list = MANAGED_SERVICES.map(function (svc) {
+      return { name: svc.name, label: svc.label, type: svc.type, status: serviceStatus(svc) };
+    });
+    reply.send({ services: list });
+  } catch (err) {
+    console.error("[GET /admin/services] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+app.post("/admin/services/:name/:action", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const name = String(req.params.name || "");
+    const action = String(req.params.action || "");
+    const svc = MANAGED_SERVICES.find(function (s) { return s.name === name; });
+    if (!svc) return reply.code(404).send({ error: "未知服务: " + name });
+    if (!["start", "stop", "restart", "status"].includes(action)) return reply.code(400).send({ error: "不支持的操作: " + action });
+    reply.send(serviceControl(svc, action));
+  } catch (err) {
+    console.error("[POST /admin/services] error:", err.message);
     reply.code(500).send({ error: err.message });
   }
 });
@@ -2967,69 +2303,287 @@ app.get("/admin/summary/last", { preHandler: basicAuth }, async (req, reply) => 
 // ========================
 // 上下文压缩（分块预览 / 摘要生成 / 边界调整）
 // ========================
+// 词云关键词：从上下文文件（enhanced_messages.json 主对话时间线）提取
+// 词云关键词接口已下线（统一替换后不再使用）
+
+// ========================
+// 统一替换预览（管理台「上下文压缩」页）：所有记录（AI + 手工）合并成块视图
+// ========================
+function buildUnifiedReplacementPreview(includeMessages) {
+  const records = contextReplacements.loadItems().filter(it => !it.removed);
+  const items = contextReplacements.compressibleItems();
+  const totalCompressible = items.length;
+  const compactCount = totalCompressible;
+  const nonSys = (contextReplacements.loadTimeline() || []).filter(m => m && m.role !== "system");
+
+  function keyOf(m) {
+    return String(m.role || "") + "\u0000" + String(m.content || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  }
+  function locate(target) {
+    const k = keyOf(target);
+    let nonSysIdx = -1;
+    let compIdx = -1;
+    for (let i = 0; i < nonSys.length; i++) {
+      if (keyOf(nonSys[i]) === k) { nonSysIdx = i; break; }
+    }
+    for (let i = 0; i < items.length; i++) {
+      if (keyOf(items[i].msg) === k) { compIdx = i; break; }
+    }
+    return { nonSysIdx: nonSysIdx, compIdx: compIdx };
+  }
+
+  const chunks = [];
+  let totalChars = 0;
+  items.forEach(function (e) { totalChars += String(e.msg.content || "").length; });
+
+  records.forEach(function (it) {
+    const matched = (Array.isArray(it.matched) && it.matched.length > 0) ? it.matched : [];
+    if (matched.length === 0) return;
+    const fl = locate(matched[0]);
+    const ll = locate(matched[matched.length - 1]);
+    if (fl.compIdx < 0 || ll.compIdx < 0) return;
+    const text = contextReplacements.recordText(it);
+    const tl = String(it.range_label || "").split(" ~ ");
+    const manual = it.source === "manual";
+    chunks.push({
+      aiRep: !manual,
+      repId: manual ? undefined : it.id,
+      source: it.source || "ai",
+      index: 0,
+      blockStart: fl.compIdx,
+      blockEnd: ll.compIdx,
+      firstIdx: fl.nonSysIdx,
+      lastIdx: ll.nonSysIdx,
+      count: it.count || (ll.compIdx - fl.compIdx + 1),
+      chars: text.length,
+      startTime: tl[0] || "",
+      endTime: tl[1] || "",
+      head: text.slice(0, 40),
+      tail: "",
+      signature: "ctxrep_" + it.id,
+      cached: !!text,
+      summary: text,
+      generatedAt: it.created_at || null,
+      mode: manual ? "manual" : "ai",
+      manual: manual,
+      enabled: it.enabled !== false,
+      range_label: it.range_label || "",
+      original_preview: matched.slice(0, 2).map(m => ({ role: m.role, content: String(m.content || "").slice(0, 150) })),
+      history: [],
+      msgs: includeMessages ? matched.map(m => {
+        const _key = contextCompactor.contentKey(m);
+        return { role: m.role, content: typeof m.content === "string" ? m.content : "", key: _key, marked: !!contextCompactor.loadMarks()[_key] };
+      }) : undefined,
+      pos: fl.compIdx
+    });
+  });
+
+  chunks.sort(function (a, b) { return a.pos - b.pos; });
+  chunks.forEach(function (c, i) { c.index = i + 1; c.pos = undefined; });
+
+  // 手工块序号（与页面 blockOrdinal 一致）
+  let manualOrdinal = -1;
+  chunks.forEach(function (c) {
+    if (c.source === "manual") { manualOrdinal++; c.blockIndex = manualOrdinal; }
+  });
+
+  // 未覆盖区：union 覆盖范围取补集
+  const ranges = chunks.map(function (c) { return { start: c.blockStart, end: c.blockEnd }; }).sort(function (a, b) { return a.start - b.start; });
+  const merged = [];
+  for (const r of ranges) {
+    const last = merged[merged.length - 1];
+    if (last && r.start <= last.end + 1) last.end = Math.max(last.end, r.end);
+    else merged.push({ start: r.start, end: r.end });
+  }
+  const gapRanges = [];
+  let prevEnd = -1;
+  for (const m of merged) {
+    if (m.start > prevEnd + 1) gapRanges.push({ start: prevEnd + 1, end: m.start - 1 });
+    prevEnd = Math.max(prevEnd, m.end);
+  }
+  if (prevEnd < compactCount - 1) gapRanges.push({ start: prevEnd + 1, end: compactCount - 1 });
+
+  let uncovered = null;
+  if (gapRanges.length > 0) {
+    uncovered = {
+      startIdx: gapRanges[0].start + 1,
+      endIdx: gapRanges[0].end + 1,
+      count: gapRanges[0].end - gapRanges[0].start + 1,
+      gaps: gapRanges.map(function (g) {
+        const gInfo = {
+          startIdx: g.start + 1,
+          endIdx: g.end + 1,
+          count: g.end - g.start + 1
+        };
+        if (includeMessages) {
+          try {
+            const rp = contextCompactor.rangePreview(g.start + 1, g.end + 1);
+            if (rp) {
+              gInfo.msgs = rp.items || [];
+              gInfo.startTime = rp.startTime || "";
+              gInfo.endTime = rp.endTime || "";
+            }
+          } catch (e) {
+            console.warn("[preview] 未覆盖区预览失败:", e.message);
+          }
+        }
+        return gInfo;
+      })
+    };
+  }
+
+  const estCompressedChars = chunks.reduce(function (s, c) { return s + c.chars; }, 0);
+  return {
+    enabled: chunks.length > 0,
+    config: contextCompactor.loadConfig(),
+    totalCompressible: totalCompressible,
+    compactCount: compactCount,
+    keptRawCount: totalCompressible - chunks.reduce(function (s, c) { return s + (c.blockEnd - c.blockStart + 1); }, 0),
+    cutPointsActive: chunks.some(function (c) { return c.source === "manual"; }),
+    cutPointConfig: { id: null, matched: 0, configCount: 0 },
+    uncovered: uncovered,
+    chunks: chunks,
+    totals: {
+      chunkCount: chunks.length,
+      aiCount: chunks.filter(function (c) { return c.source === "ai"; }).length,
+      cachedCount: chunks.filter(function (c) { return c.cached; }).length,
+      totalChars: totalChars,
+      estCompressedChars: estCompressedChars,
+      estSavedChars: Math.max(0, totalChars - estCompressedChars)
+    }
+  };
+}
+
 app.get("/admin/context-compaction/preview", { preHandler: basicAuth }, async (req, reply) => {
   try {
-    const plan = contextCompactor.preview({ includeMessages: req.query.includeMessages === "1" });
-    reply.send(plan);
+    const includeMessages = req.query.includeMessages === "1";
+    reply.send(buildUnifiedReplacementPreview(includeMessages));
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+// 词云关键词：基于检索池（时间线 + 导入对话）提取高频重点词
+app.get("/admin/context-compaction/keywords", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const limit = Math.floor(Number(req.query.limit) || 80);
+    reply.send({ keywords: contextReplacements.extractPoolKeywords(limit) });
   } catch (err) {
     reply.code(500).send({ error: err.message });
   }
 });
 
-app.post("/admin/context-compaction/generate", { preHandler: basicAuth }, async (req, reply) => {
-  const body = req.body || {};
-  const chunkIndex = Number(body.chunkIndex);
+// 词云点词：检索池里包含该词的相关对话片段
+app.get("/admin/context/keywords/related", { preHandler: basicAuth }, async (req, reply) => {
   try {
-    const plan = contextCompactor.preview({ includeMessages: true });
-    const byIndex = {};
-    (plan.chunks || []).forEach(function (c) { byIndex[c.index] = c; });
-    // 选中批量：按 chunkIndices 逐个生成（已有缓存摘要的块跳过）
-    if (Array.isArray(body.chunkIndices)) {
-      const targets = body.chunkIndices.map(Number).filter(function (n) { return Number.isInteger(n); });
-      if (targets.length === 0) return reply.code(400).send({ error: "chunkIndices 为空" });
-      const results = [];
-      for (const idx of targets) {
-        const chunk = byIndex[idx];
-        if (!chunk) { results.push({ index: idx, error: "块不存在" }); continue; }
-        if (chunk.cached) { results.push({ index: idx, skipped: true, message: "已有缓存摘要" }); continue; }
-        try {
-          results.push(await contextCompactor.generateSummary(chunk, { mode: "manual", manual: true }));
-        } catch (e) {
-          results.push({ index: idx, error: e.message });
-        }
-      }
-      return reply.send({ ok: true, generated: results });
-    }
-    // 批量：生成所有未缓存的块
-    if (body.all === true || chunkIndex === 0) {
-      const targets = (plan.chunks || []).filter(function (c) { return !c.cached; });
-      if (targets.length === 0) {
-        return reply.send({ ok: true, generated: [], message: "没有未生成的块" });
-      }
-      const results = [];
-      for (const c of targets) {
-        try {
-          results.push(await contextCompactor.generateSummary(c, { mode: "manual", manual: true }));
-        } catch (e) {
-          results.push({ index: c.index, error: e.message });
-        }
-      }
-      return reply.send({ ok: true, generated: results });
-    }
-    if (!Number.isInteger(chunkIndex) || chunkIndex < 1) {
-      return reply.code(400).send({ error: "chunkIndex 无效" });
-    }
-    const chunk = byIndex[chunkIndex];
-    if (!chunk) return reply.code(404).send({ error: "块 #" + chunkIndex + " 不存在" });
-    const result = await contextCompactor.generateSummary(chunk, { mode: "manual", manual: true });
-    reply.send(result);
+    const word = String(req.query.word || "").trim();
+    if (!word) return reply.code(400).send({ error: "word 不能为空" });
+    reply.send(contextReplacements.searchRelatedSegments(word));
   } catch (err) {
-    console.error("[context-compactor] 摘要生成失败:", err.message);
-    reply.code(500).send({ error: "摘要生成失败: " + err.message });
+    reply.code(500).send({ error: err.message });
   }
 });
 
+
+
+// 编号范围预览（1-based）：返回范围内每条原文，供未覆盖区滚动窗使用
+app.get("/admin/context-compaction/range-preview", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const start = Number(req.query.start);
+    const end = Number(req.query.end);
+    reply.send(contextCompactor.rangePreview(start, end));
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 读取压缩参数配置
+app.get("/admin/context-compaction/config", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    reply.send(contextCompactor.loadConfig());
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 保存压缩参数配置
+app.post("/admin/context-compaction/config", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const body = (req.body && typeof req.body === "object") ? req.body : {};
+    const r = contextCompactor.saveConfig(body);
+    if (!r.ok) return reply.code(400).send({ error: r.message });
+    reply.send({ ok: true, config: r.config });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+
+
+
 // 恢复某块摘要的历史版本
+// 历史版本恢复已下线（统一替换后摘要只保留当前正文）
+
+// 「添加摘要」已下线（统一替换后直接在块里编辑正文）
+
+// 保存手动编辑后的替换正文（统一替换：写入手工记录 text）
+app.post("/admin/context-compaction/update", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  const chunkIndex = Number(body.chunkIndex);
+  const summary = String(body.summary || "").trim();
+  try {
+    if (!summary) return reply.code(400).send({ error: "替换正文不能为空" });
+    const preview = buildUnifiedReplacementPreview(false);
+    const chunk = (preview.chunks || []).find(function (c) { return c.index === chunkIndex && c.source === "manual"; });
+    if (!chunk) return reply.code(404).send({ error: "块 #" + chunkIndex + " 不存在" });
+    const r = contextReplacements.setManualRecordText(chunk.blockIndex, summary);
+    if (!r.ok) return reply.code(400).send({ error: r.message });
+    reply.send({ ok: true, summary: summary, length: r.length });
+  } catch (err) {
+    reply.code(400).send({ error: err.message });
+  }
+});
+
+// 重要内容标记（恢复：前端按消息 key 标记，引擎 buildCompactionPrompt 会重点保留）
+app.post("/admin/context-compaction/mark", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  const key = String(body.key || "").trim();
+  if (!key) return reply.code(400).send({ error: "key 无效" });
+  try {
+    const marked = contextCompactor.setMark(key, body.marked === true);
+    reply.send({ ok: true, key: key, marked: marked });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 压缩上下文提示词（生成摘要时使用，恢复管理台编辑）
+app.get("/admin/logs/compaction-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    reply.send(contextCompactor.getCompactionPromptForDisplay());
+  } catch (err) {
+    reply.send({ error: err.message });
+  }
+});
+
+app.post("/admin/logs/compaction-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const cfg = contextCompactor.saveCompactionPromptConfig(req.body && req.body.system, req.body && req.body.template);
+    reply.send({ ok: true, system: cfg.system, template: cfg.template });
+  } catch (err) {
+    reply.code(400).send({ error: err.message });
+  }
+});
+
+app.delete("/admin/logs/compaction-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const cfg = contextCompactor.resetCompactionPromptConfig();
+    reply.send({ ok: true, system: cfg.system, template: cfg.template });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 历史版本恢复/删除（恢复：前端压缩页历史版本按钮使用）
 app.post("/admin/context-compaction/restore", { preHandler: basicAuth }, async (req, reply) => {
   const body = req.body || {};
   const chunkIndex = Number(body.chunkIndex);
@@ -3050,24 +2604,6 @@ app.post("/admin/context-compaction/restore", { preHandler: basicAuth }, async (
   }
 });
 
-// 保存手动编辑后的摘要
-app.post("/admin/context-compaction/update", { preHandler: basicAuth }, async (req, reply) => {
-  const body = req.body || {};
-  const chunkIndex = Number(body.chunkIndex);
-  const summary = String(body.summary || "").trim();
-  try {
-    if (!summary) return reply.code(400).send({ error: "摘要内容不能为空" });
-    const plan = contextCompactor.preview({ includeMessages: false });
-    const chunk = (plan.chunks || []).find(function (c) { return c.index === chunkIndex; });
-    if (!chunk) return reply.code(404).send({ error: "块 #" + chunkIndex + " 不存在" });
-    const updated = contextCompactor.updateSummary(chunk.signature, summary);
-    reply.send({ ok: true, summary: updated.summary, length: updated.summary.length });
-  } catch (err) {
-    reply.code(400).send({ error: err.message });
-  }
-});
-
-// 删除某块摘要的一条历史版本
 app.post("/admin/context-compaction/history/delete", { preHandler: basicAuth }, async (req, reply) => {
   const body = req.body || {};
   const chunkIndex = Number(body.chunkIndex);
@@ -3083,62 +2619,9 @@ app.post("/admin/context-compaction/history/delete", { preHandler: basicAuth }, 
   }
 });
 
-// 单块「替换上下文」：标记/取消强制替换
-app.post("/admin/context-compaction/force", { preHandler: basicAuth }, async (req, reply) => {
-  const body = req.body || {};
-  const chunkIndex = Number(body.chunkIndex);
-  const on = body.on === true || body.on === "true" || body.on === 1;
-  try {
-    const plan = contextCompactor.preview({ includeMessages: false });
-    const chunk = (plan.chunks || []).find(function (c) { return c.index === chunkIndex; });
-    if (!chunk) return reply.code(404).send({ error: "块 #" + chunkIndex + " 不存在" });
-    const list = contextCompactor.setForceReplace(chunk.signature, on);
-    reply.send({ ok: true, on: on, forceCount: list.length });
-  } catch (err) {
-    reply.code(400).send({ error: err.message });
-  }
-});
-
-app.post("/admin/context-compaction/clear", { preHandler: basicAuth }, async (req, reply) => {
-  const body = req.body || {};
-  try {
-    const plan = contextCompactor.preview({ includeMessages: true });
-    const byIndex = {};
-    (plan.chunks || []).forEach(function (c) { byIndex[c.index] = c; });
-    if (body.all === true) {
-      const sigs = (plan.chunks || []).filter(function (c) { return c.cached; }).map(function (c) { return c.signature; });
-      const removed = contextCompactor.removeSummaries(sigs);
-      return reply.send({ ok: true, removed: removed });
-    }
-    const indices = (Array.isArray(body.chunkIndices) ? body.chunkIndices : []).map(Number).filter(Number.isInteger);
-    const sigs = indices.map(function (i) { const c = byIndex[i]; return c && c.signature; }).filter(Boolean);
-    const removed = contextCompactor.removeSummaries(sigs);
-    reply.send({ ok: true, removed: removed });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-app.post("/admin/context-compaction/mark", { preHandler: basicAuth }, async (req, reply) => {
-  const body = req.body || {};
-  const key = String(body.key || "").trim();
-  if (!key) return reply.code(400).send({ error: "key 无效" });
-  try {
-    const marked = contextCompactor.setMark(key, body.marked === true);
-    reply.send({ ok: true, key: key, marked: marked });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-app.post("/admin/context-compaction/overrides", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const cutPoints = contextCompactor.saveCutPoints(req.body && req.body.cutPoints);
-    reply.send({ ok: true, cutPoints: cutPoints });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
+// 强制替换标记已下线（统一替换：开关即替换/取消替换）
+// 批量清除摘要已下线（统一替换后直接移除块）
+// 自动分块配置已下线（统一替换：全部走手工块）
 
 // 「添加一块 / 移除一块」：追加式分块——旧块边界完全不动，
 // 添加 = 从最后一块之后的未覆盖内容里按自然边界切一块（约 chunk_size 条）；
@@ -3147,83 +2630,404 @@ app.post("/admin/context-compaction/blocks", { preHandler: basicAuth }, async (r
   const body = req.body || {};
   const action = String(body.action || "");
   try {
+    // 重置：清空所有手工替换记录
     if (action === "reset") {
-      const cutPoints = contextCompactor.saveCutPoints([]);
-      return reply.send({ ok: true, action: "reset", cutPoints: cutPoints });
+      const r = contextReplacements.removeAllManualRecords();
+      return reply.send({ ok: true, action: "reset", removedCount: r.removedCount || 0 });
     }
-    if (action === "add") {
-      const r = contextCompactor.addCutPoint();
+    // 移除指定手工块（0-based 序号）——内容退回未覆盖区
+    if (action === "remove_at") {
+      const blockIndex = Number(body.blockIndex);
+      if (!Number.isInteger(blockIndex) || blockIndex < 0) {
+        return reply.code(400).send({ error: "blockIndex 必须是 >=0 的整数" });
+      }
+      const r = contextReplacements.removeManualRecord(blockIndex);
       if (!r.ok) return reply.send({ ok: false, message: r.message });
+      return reply.send({ ok: true, action: "remove_at" });
+    }
+    // 按范围添加手工块（编号范围 1-based → 内部转 0-based；默认不启用，点「替换」后生效）
+    if (action === "add_range") {
+      const start = Number(body.start);
+      const end = Number(body.end);
+      if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
+        return reply.code(400).send({ error: "start/end 必须是 start<=end 的正整数（编号 1-based）" });
+      }
+      const r = contextReplacements.addManualRecord(start - 1, end - 1, false);
+      if (!r.ok) return reply.send({ ok: false, message: r.message });
+      return reply.send({ ok: true, action: "add_range", removedCount: r.removedCount || 0 });
+    }
+    // 开关某块的替换（enabled）
+    if (action === "toggle") {
+      const blockIndex = Number(body.blockIndex);
+      const enabled = body.enabled !== false;
+      if (!Number.isInteger(blockIndex) || blockIndex < 0) {
+        return reply.code(400).send({ error: "blockIndex 必须是 >=0 的整数" });
+      }
+      const r = contextReplacements.toggleManualRecord(blockIndex, enabled);
+      if (!r.ok) return reply.send({ ok: false, message: r.message });
+      return reply.send({ ok: true, action: "toggle", block: r.record });
+    }
+    // 更新指定手工块的起止范围（编号 1-based → 内部 0-based）
+    if (action === "update_range") {
+      const blockIndex = Number(body.blockIndex);
+      const start = Number(body.start);
+      const end = Number(body.end);
+      if (!Number.isInteger(blockIndex) || blockIndex < 0) {
+        return reply.code(400).send({ error: "blockIndex 必须是 >=0 的整数" });
+      }
+      if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
+        return reply.code(400).send({ error: "start/end 必须是 start<=end 的正整数（编号 1-based）" });
+      }
+      const r = contextReplacements.updateManualRecordRange(blockIndex, start - 1, end - 1);
+      if (!r.ok) return reply.send({ ok: false, message: r.message });
+      return reply.send({ ok: true, action: "update_range", removedCount: r.removedCount || 0 });
+    }
+    // 按时间间隔自动切分：只切 [start,end] 范围，间隔超过 gapMinutes 分钟自然切成多个手工块
+    if (action === "split_range") {
+      const start = Number(body.start);
+      const end = Number(body.end);
+      const gapMinutes = Number(body.gapMinutes);
+      if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
+        return reply.code(400).send({ error: "start/end 必须是 start<=end 的正整数（编号 1-based）" });
+      }
+      const r = contextReplacements.splitRangeByGaps(start - 1, end - 1, gapMinutes);
+      if (!r.ok) return reply.send({ ok: false, message: r.message });
+      return reply.send({ ok: true, action: "split_range", count: r.count, gapMinutes: gapMinutes });
+    }
+    // 旧式自动分块操作已下线（统一替换）
+    if (action === "add" || action === "remove") {
+      return reply.send({ ok: false, message: "旧式自动分块已下线（统一替换后不再使用）" });
+    }
+    return reply.code(400).send({ error: "action 必须是 remove_at / add_range / toggle / update_range / split_range / reset" });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 摘要生成：gap = 未覆盖区按范围新建手工记录并生成替换正文（默认不启用，需点「替换」才生效）；
+// block = 已有手工记录重新生成正文
+app.post("/admin/context-compaction/generate", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  try {
+    if (body.action === "gap") {
+      const start = Number(body.start);
+      const end = Number(body.end);
+      if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
+        return reply.code(400).send({ error: "start/end 必须是 start<=end 的正整数（编号 1-based）" });
+      }
+      const added = contextReplacements.addManualRecord(start - 1, end - 1, false);
+      if (!added.ok) return reply.send(added);
+      const manual = contextReplacements.manualRecordsSorted();
+      const idx = manual.findIndex(function (b) {
+        return b.range && Number(b.range.start_index) === start - 1;
+      });
+      if (idx === -1) return reply.code(500).send({ error: "块创建失败，请刷新后重试" });
+      let gen;
+      try {
+        gen = await contextCompactor.generateSummaryForRange(start - 1, end - 1);
+      } catch (err) {
+        contextReplacements.removeManualRecord(idx); // 生成失败回滚新建的块
+        throw err;
+      }
+      if (!gen.ok) {
+        contextReplacements.removeManualRecord(idx);
+        return reply.send(gen);
+      }
+      const saved = contextReplacements.setManualRecordText(idx, gen.summary);
+      if (!saved.ok) {
+        contextReplacements.removeManualRecord(idx);
+        return reply.send({ ok: false, message: saved.message });
+      }
       return reply.send({
         ok: true,
-        action: "add",
-        fixed: !!r.fixed,
-        cutPoints: r.cutPoints,
-        addedCount: r.addedCount || 0,
-        message: r.message || ""
+        action: "gap",
+        blockIndex: idx,
+        startIdx: start,
+        endIdx: end,
+        length: gen.length,
+        message: "已生成替换正文（" + gen.length + " 字），点块上的「替换」后生效。"
       });
     }
-    if (action === "remove") {
-      const r = contextCompactor.removeCutPoint();
-      if (!r.ok) return reply.send({ ok: false, message: r.message });
-      return reply.send({ ok: true, action: "remove", cutPoints: r.cutPoints });
+    const blockIndex = Number(body.blockIndex);
+    if (!Number.isInteger(blockIndex) || blockIndex < 0) {
+      return reply.code(400).send({ error: "blockIndex 必须是 >=0 的整数" });
     }
-    return reply.code(400).send({ error: "action 必须是 add / remove / reset" });
+    const manual = contextReplacements.manualRecordsSorted();
+    const rec = manual[blockIndex];
+    if (!rec || !rec.range) return reply.send({ ok: false, message: "块不存在" });
+    const gen = await contextCompactor.generateSummaryForRange(
+      Number(rec.range.start_index), Number(rec.range.end_index)
+    );
+    if (!gen.ok) return reply.send(gen);
+    const saved = contextReplacements.setManualRecordText(blockIndex, gen.summary);
+    if (!saved.ok) return reply.send({ ok: false, message: saved.message });
+    return reply.send({ ok: true, action: "block", blockIndex: blockIndex, length: gen.length, message: "已重新生成替换正文（" + gen.length + " 字）。" });
+  } catch (err) {
+    console.error("[context-compactor] 摘要生成失败:", err.message);
+    reply.code(500).send({ error: "摘要生成失败: " + err.message });
+  }
+});
+
+// ========================
+// 压缩存档（记忆池「压缩」页）：列出所有历史上下文压缩摘要（当前缓存 + 各备份），供筛选/导入记忆
+// ========================
+app.get("/admin/compaction-archive", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const DATA_DIR = path.join(__dirname, "data");
+    const files = [];
+    const current = path.join(DATA_DIR, "context_compaction.json");
+    if (fs.existsSync(current)) files.push({ name: "当前缓存", file: current });
+    const backups = fs.readdirSync(DATA_DIR)
+      .filter(function (f) { return /^context_compaction\.json\.bak-/.test(f) && !/\.tmp$/.test(f); })
+      .sort()
+      .reverse()
+      .map(function (f) { return path.join(DATA_DIR, f); });
+    for (const b of backups) {
+      files.push({ name: "存档 " + path.basename(b).replace(/^context_compaction\.json\.bak-/, ""), file: b });
+    }
+    const forceSet = new Set(contextCompactor.loadForceReplace());
+    const entries = [];
+    for (const f of files) {
+      let data = null;
+      try { data = JSON.parse(fs.readFileSync(f.file, "utf-8")); } catch (e) { continue; }
+      const chunks = (data && data.chunks) || {};
+      for (const sig of Object.keys(chunks)) {
+        const e = chunks[sig] || {};
+        const summary = e.summary || "";
+        if (!summary) continue;
+        const history = Array.isArray(e.history) ? e.history
+          .map(function (h, i) { return { index: i + 1, summary: (h && h.summary) || "", generatedAt: (h && h.generatedAt) || "" }; })
+          .filter(function (h) { return h.summary; }) : [];
+        entries.push({
+          signature: sig,
+          source: f.name,
+          file: path.basename(f.file),
+          timeRange: e.timeRange || "",
+          range: e.range ? String(e.range.start) + "-" + String(e.range.end) : "",
+          mode: e.mode || "",
+          generatedAt: e.generatedAt || "",
+          summary: summary,
+          history: history,
+          force: forceSet.has(sig)
+        });
+      }
+    }
+    const seen = new Set();
+    const unique = [];
+    for (const e of entries) {
+      if (seen.has(e.signature)) continue;
+      seen.add(e.signature);
+      unique.push(e);
+    }
+    unique.sort(function (a, b) { return (a.timeRange || "").localeCompare(b.timeRange || ""); });
+    reply.send({ ok: true, count: unique.length, entries: unique });
   } catch (err) {
     reply.code(500).send({ error: err.message });
   }
 });
 
-app.get("/admin/config", { preHandler: basicAuth }, async (req, reply) => {
+// 压缩存档文件解析：只允许当前缓存或 data 目录下的 .bak- 备份文件
+function resolveCompactionArchiveFile(fileName) {
+  const DATA_DIR = path.join(__dirname, "data");
+  if (fileName === "context_compaction.json") return path.join(DATA_DIR, "context_compaction.json");
+  if (typeof fileName === "string" && /^context_compaction\.json\.bak-[^/\\]+$/.test(fileName)) {
+    const p = path.join(DATA_DIR, fileName);
+    return fs.existsSync(p) ? p : null;
+  }
+  return null;
+}
+
+// 编辑/删除压缩存档前，在 data/.compaction_backup/ 下自动留一份副本，防止误删
+function backupCompactionFile(filePath) {
+  const ts = new Date().toISOString().replace(/[-:TZ]/g, "").replace(/\.\d+/, "");
+  const dir = path.join(__dirname, "data", ".compaction_backup", ts);
+  fs.ensureDirSync(dir);
+  fs.copySync(filePath, path.join(dir, path.basename(filePath)));
+  return path.join(dir, path.basename(filePath));
+}
+
+// 编辑某份压缩摘要（可指定 historyIndex 编辑某个历史版本）；直接写入对应文件（含备份）
+app.put("/admin/compaction-archive/:signature", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  const signature = String(req.params.signature || "").trim();
+  const summary = String(body.summary || "").trim();
+  const historyIndex = Number(body.historyIndex);
   try {
-    const config = require("./memory-engine").getConfig ? require("./memory-engine").getConfig() : {};
-    reply.send(config);
+    if (!signature) return reply.code(400).send({ error: "signature 无效" });
+    if (!summary) return reply.code(400).send({ error: "摘要内容不能为空" });
+    const f = resolveCompactionArchiveFile(body.file);
+    if (!f) return reply.code(400).send({ error: "file 无效" });
+    const data = JSON.parse(fs.readFileSync(f, "utf-8"));
+    const chunks = (data && data.chunks) || {};
+    const e = chunks[signature];
+    if (!e) return reply.code(404).send({ error: "未找到该摘要" });
+    let target = null;
+    if (Number.isInteger(historyIndex) && historyIndex >= 1 && Array.isArray(e.history)) {
+      target = e.history[historyIndex - 1];
+      if (!target) return reply.code(404).send({ error: "历史版本不存在" });
+    } else {
+      target = e;
+    }
+    backupCompactionFile(f);
+    target.summary = summary;
+    target.editedAt = new Date().toISOString();
+    if (target === e) e.mode = "edited";
+    fs.writeFileSync(f + ".tmp", JSON.stringify(data, null, 2), "utf-8");
+    fs.renameSync(f + ".tmp", f);
+    reply.send({ ok: true });
   } catch (err) {
     reply.code(500).send({ error: err.message });
   }
 });
 
-// 配置管理：更新配置（只接受已知配置项，避免脏 key 写入 config.json）
-const CONFIG_KEY_WHITELIST = new Set([
-  "idle_threshold_minutes", "max_interval_minutes", "auto_summary_enabled",
-  "memory_retrieval_enabled", "retrieval_top_k", "dedup_threshold", "conflict_threshold",
-  "time_decay_days", "keyword_search_enabled", "embedding_model", "memory_relevance_threshold",
-  "memory_query_window", "memory_retrieval_window_days", "context_injection_types", "memory_cooldown_minutes",
-  "memory_item_cooldown_minutes", "summary_surfacing_min_age_hours", "summary_surfacing_min_age_enabled",
-  "time_injection_enabled", "time_tag_interval_minutes", "time_event_injection_enabled",
-  "summary_event_injection_enabled",
-  "summary_event_inject_enabled",
-  "summary_event_short_ctx_msgs",
-  "timeline_event_window_days",
-  "wake_query_window", "wake_relevance_threshold", "wake_repeat_window",
-  "memory_persist_on_surface_enabled", "memory_retrieval_wake_enabled",
-  "wake_memory_persist_on_surface_enabled", "wake_top_k", "wake_total_limit", "wake_random_count",
-    "summary_enabled", "moment_sync_enabled",
-  "compaction_chunk_size", "compaction_chunk_min", "compaction_chunk_max",
-  "compaction_keep_recent_messages", "compaction_min_messages", "compaction_gap_minutes",
-  "compaction_summary_max_chars", "compaction_summary_min_chars", "compaction_include_thinking"
-]);
-app.post("/admin/config", { preHandler: basicAuth }, async (req, reply) => {
+// 删除某份压缩摘要（指定 historyIndex 删除某个历史版本；否则整块删除）；写入前自动留副本
+app.delete("/admin/compaction-archive/:signature", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  const signature = String(req.params.signature || "").trim();
+  const historyIndex = Number(body.historyIndex);
   try {
-    const updates = req.body || {};
-    const filtered = {};
-    for (const key of Object.keys(updates)) {
-      if (CONFIG_KEY_WHITELIST.has(key)) filtered[key] = updates[key];
+    if (!signature) return reply.code(400).send({ error: "signature 无效" });
+    const f = resolveCompactionArchiveFile(body.file);
+    if (!f) return reply.code(400).send({ error: "file 无效" });
+    const data = JSON.parse(fs.readFileSync(f, "utf-8"));
+    const chunks = (data && data.chunks) || {};
+    const e = chunks[signature];
+    if (!e) return reply.code(404).send({ error: "未找到该摘要" });
+    backupCompactionFile(f);
+    if (Number.isInteger(historyIndex) && historyIndex >= 1 && Array.isArray(e.history)) {
+      if (!e.history[historyIndex - 1]) return reply.code(404).send({ error: "历史版本不存在" });
+      e.history.splice(historyIndex - 1, 1);
+    } else {
+      delete chunks[signature];
     }
-    if (Object.keys(filtered).length === 0) {
-      return reply.code(400).send({ error: "没有可更新的配置项" });
+    fs.writeFileSync(f + ".tmp", JSON.stringify(data, null, 2), "utf-8");
+    fs.renameSync(f + ".tmp", f);
+    reply.send({ ok: true });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+
+
+
+// ========================
+// 导入对话（记忆页）：txt 解析入库，进检索池，不进时间线
+// ========================
+const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
+
+app.get("/admin/imported-conversations", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const mod = require("./imported-conversations");
+    const records = mod.list();
+    const msgs = mod.getMessages();
+    reply.send({
+      ok: true,
+      records: records,
+      stats: {
+        records: records.length,
+        messages: msgs.length,
+        chars: msgs.reduce(function (s, m) { return s + (typeof m.content === "string" ? m.content.length : 0); }, 0),
+        duplicates: mod.getHiddenDuplicateMsgIds ? mod.getHiddenDuplicateMsgIds().size : 0
+      }
+    });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 检索池搜索：仅搜导入的对话（与 AI 检索工具同一数据源）
+app.get("/admin/imported-conversations/search", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const q = String(req.query.q || "").trim();
+    const limit = Math.max(1, Math.min(200, Math.floor(Number(req.query.limit) || 50)));
+    if (!q) return reply.send({ ok: true, total: 0, matches: [] });
+    const mod = require("./imported-conversations");
+    const msgs = mod.getMessages();
+    const nameById = {};
+    for (const r of mod.list()) nameById[r.id] = r.name || "";
+    const hidden = mod.getHiddenDuplicateMsgIds ? mod.getHiddenDuplicateMsgIds() : new Set();
+    const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+    const scored = [];
+    for (const m of msgs) {
+      if (hidden.has(m.msg_id)) continue; // 内容去重：相似>=90% 的重复不出现
+      const content = typeof m.content === "string" ? m.content : "";
+      if (!content) continue;
+      const low = content.toLowerCase();
+      let hits = 0;
+      let hitTerms = 0;
+      for (const t of terms) {
+        let pos = 0, c = 0;
+        while ((pos = low.indexOf(t, pos)) !== -1) { c++; pos += t.length; }
+        if (c > 0) hitTerms++;
+        hits += c;
+      }
+      // 交集：所有关键词都必须命中才出现
+      if (hitTerms !== terms.length) continue;
+      scored.push({
+        record_id: m.record_id,
+        record_name: nameById[m.record_id] || "",
+        msg_id: m.msg_id,
+        role: m.role,
+        time: m.time || null,
+        hits: hits,
+        hit_terms: hitTerms,
+        content: content
+      });
     }
-    await require("./memory-engine").updateConfig(filtered);
-    // 注入分类白名单变化：立即清空冷静期缓存，让关闭的分类不再注入
-    if (filtered.context_injection_types !== undefined && typeof memoryInjectionCache !== "undefined") {
-      memoryInjectionCache = null;
-      console.log("[config] 注入分类已变更，清空记忆冷静期缓存");
-    }
-    // If max_interval changed, restart the max interval timer
-    if (filtered.max_interval_minutes !== undefined) {
-      try { require("./summary-engine").restartMaxIntervalTimer(); } catch (e) {}
-    }
-    reply.send({ success: true, config: require("./memory-engine").getConfig() });
+    scored.sort(function (a, b) { return b.hit_terms - a.hit_terms || b.hits - a.hits || (a.time < b.time ? -1 : 1); });
+    reply.send({
+      ok: true,
+      total: scored.length,
+      hidden_duplicates: hidden.size,
+      matches: scored.slice(0, limit).map(function (x) {
+        return {
+          record_id: x.record_id,
+          record_name: x.record_name,
+          msg_id: x.msg_id,
+          role: x.role,
+          time: x.time,
+          hits: x.hits,
+          preview: x.content.length > 300 ? x.content.slice(0, 300) + "…" : x.content,
+          content: x.content
+        };
+      })
+    });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+app.post("/admin/imported-conversations/preview", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const content = String((req.body || {}).content || "");
+    if (!content.trim()) return reply.code(400).send({ error: "内容不能为空" });
+    if (Buffer.byteLength(content, "utf-8") > MAX_IMPORT_BYTES) return reply.code(400).send({ error: "内容过大（超过 5MB）" });
+    const parsed = require("./imported-conversations").parseTxt(content);
+    reply.send({ ok: true, count: parsed.messages.length, preview: parsed.messages.slice(0, 5), warnings: parsed.warnings });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+app.post("/admin/imported-conversations", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const body = req.body || {};
+    const content = String(body.content || "");
+    if (!content.trim()) return reply.code(400).send({ error: "内容不能为空" });
+    if (Buffer.byteLength(content, "utf-8") > MAX_IMPORT_BYTES) return reply.code(400).send({ error: "内容过大（超过 5MB）" });
+    const res = require("./imported-conversations").add({ name: body.name, content: content });
+    reply.send({ ok: true, id: res.id, count: res.count, warnings: res.warnings });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+app.delete("/admin/imported-conversations/:id", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const ok = require("./imported-conversations").remove(String(req.params.id || "").trim());
+    if (!ok) return reply.code(404).send({ error: "记录不存在" });
+    reply.send({ ok: true });
   } catch (err) {
     reply.code(500).send({ error: err.message });
   }
@@ -3391,58 +3195,892 @@ app.post("/admin/logs/wake-prompt", { preHandler: basicAuth }, async (req, reply
 });
 
 // 获取摘要提示词（system + 模板）
-app.get("/admin/logs/summary-prompt", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    reply.send(summaryEngine.getSummaryPromptForDisplay());
-  } catch (err) {
-    reply.send({ error: err.message });
-  }
-});
 
 // 保存摘要提示词
-app.post("/admin/logs/summary-prompt", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const cfg = summaryEngine.saveSummaryPromptConfig(req.body && req.body.system, req.body && req.body.template);
-    reply.send({ ok: true, system: cfg.system, template: cfg.template });
-  } catch (err) {
-    reply.code(400).send({ error: err.message });
-  }
-});
 
 // 恢复摘要提示词默认
-app.delete("/admin/logs/summary-prompt", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const cfg = summaryEngine.resetSummaryPromptConfig();
-    reply.send({ ok: true, system: cfg.system, template: cfg.template });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
 
 // 压缩上下文提示词
-app.get("/admin/logs/compaction-prompt", { preHandler: basicAuth }, async (req, reply) => {
+// 压缩提示词编辑器已下线（统一替换后沿用默认压缩提示词）
+
+
+// 共影：观影唤醒提示词
+const CO_WAKE_PROMPT_FILE = path.join(__dirname, "data", "co_wake_prompt.json");
+const DEFAULT_CO_WAKE_PROMPT = `## 最高优先级规则
+1. 这是一次「共影」中的定时观影唤醒，不是涵主动发起的对话。你只是收到了新的画面和字幕。
+2. 你的任务是决定是否根据当前剧情/画面自然地陪她聊一句；不想说就保持沉默。
+3. 说话时贴合剧情和你的人设，语气自然简短，不剧透后面还没播到的情节。
+
+## 观影信息
+- 当前时间：\${currentTime}
+- 画面描述：\${frameDescription}
+- 当前字幕：\${subtitle}
+
+## 输出格式
+- 想说话：直接输出你想说的话（一句即可，可带一句轻快的点评）。
+- 不想说话：只输出 [NO_ACTION]。`;
+
+function readCoWakePrompt() {
   try {
-    reply.send(contextCompactor.getCompactionPromptForDisplay());
+    const raw = fs.readFileSync(CO_WAKE_PROMPT_FILE, "utf-8");
+    const j = JSON.parse(raw);
+    if (j && typeof j.prompt === "string" && j.prompt.trim()) return j.prompt;
+  } catch (e) {}
+  return DEFAULT_CO_WAKE_PROMPT;
+}
+
+app.get("/admin/logs/co-wake-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    reply.send({ prompt: readCoWakePrompt() });
   } catch (err) {
     reply.send({ error: err.message });
   }
 });
 
-app.post("/admin/logs/compaction-prompt", { preHandler: basicAuth }, async (req, reply) => {
+app.post("/admin/logs/co-wake-prompt", { preHandler: basicAuth }, async (req, reply) => {
   try {
-    const cfg = contextCompactor.saveCompactionPromptConfig(req.body && req.body.system, req.body && req.body.template);
-    reply.send({ ok: true, system: cfg.system, template: cfg.template });
+    const prompt = String((req.body && req.body.prompt) || "").trim();
+    if (!prompt) return reply.code(400).send({ error: "提示词不能为空" });
+    const tmp = CO_WAKE_PROMPT_FILE + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify({ prompt }, null, 2), "utf-8");
+    fs.renameSync(tmp, CO_WAKE_PROMPT_FILE);
+    reply.send({ ok: true, prompt });
   } catch (err) {
     reply.code(400).send({ error: err.message });
   }
 });
 
-app.delete("/admin/logs/compaction-prompt", { preHandler: basicAuth }, async (req, reply) => {
+app.delete("/admin/logs/co-wake-prompt", { preHandler: basicAuth }, async (req, reply) => {
   try {
-    const cfg = contextCompactor.resetCompactionPromptConfig();
-    reply.send({ ok: true, system: cfg.system, template: cfg.template });
+    if (fs.existsSync(CO_WAKE_PROMPT_FILE)) fs.unlinkSync(CO_WAKE_PROMPT_FILE);
+    reply.send({ ok: true, prompt: DEFAULT_CO_WAKE_PROMPT });
   } catch (err) {
     reply.code(500).send({ error: err.message });
+  }
+});
+
+// ========================
+// 共影（一起看电影）业务
+// ========================
+function getCoRecord(timeline) {
+  const tl = timeline || loadTimeline();
+  for (let i = tl.length - 1; i >= 0; i--) {
+    const m = tl[i];
+    if (m && m.role === "assistant" && typeof m.content === "string" && m.content.includes("共影）")) return m;
+  }
+  return null;
+}
+
+function coNowText() {
+  return formatDateTimeInTimeZone(new Date(), TIME_ZONE);
+}
+
+function coRecordText() {
+  const rec = getCoRecord();
+  return rec ? String(rec.content || "").trim() : "";
+}
+
+function coRecordHeader(videoTitle) {
+  const p = getDatePartsInTimeZone(new Date(), TIME_ZONE);
+  return `（${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute} 共影）一起看${videoTitle ? `《${String(videoTitle).trim() || "视频"}》` : "视频"}`;
+}
+
+// 把一行对话追加到共影记录；没有记录时自动新建
+function appendCoRecordLine(line, videoTitle) {
+  const timeline = loadTimeline();
+  const rec = getCoRecord(timeline);
+  let maxPos = 0;
+  for (const msg of timeline) if (msg.position && msg.position > maxPos) maxPos = msg.position;
+  let target = rec;
+  if (!target) {
+    target = { role: "assistant", content: coRecordHeader(videoTitle), position: maxPos + 0.5, time: new Date().toISOString() };
+    timeline.push(target);
+  }
+  const sep = target.content.endsWith("\n") ? "" : "\n";
+  target.content = target.content + sep + line;
+  target.position = maxPos + 0.5;
+  target.time = new Date().toISOString();
+  saveTimeline(timeline);
+  return target;
+}
+
+// 人设：优先时间线里的 system，否则默认
+function coPersona() {
+  const timeline = loadTimeline();
+  const sp = timeline.find(m => m.role === "system");
+  if (sp && typeof sp.content === "string" && sp.content.trim()) return sp.content;
+  return "你是谢意行。你是一位理性但有温度、表面温柔内心有主见的 AI。";
+}
+
+// 人设 + 永久上下文（与主聊天一致）
+function coPersonaWithPinned() {
+  let p = coPersona();
+  try {
+    const pinnedCtx = memoryEngine.buildPinnedContext ? memoryEngine.buildPinnedContext() : '';
+    if (pinnedCtx) p += `\n\n## 永久上下文\n${pinnedCtx}`;
+  } catch (e) {}
+  return p;
+}
+
+// 完整时间线上下文：把客户端对话历史（含记忆浮现、特殊事件、共影记录）按时间顺序喂给模型
+function coTimelineMessages(maxChars) {
+  const cap = Math.max(5000, maxChars || 300000);
+  const timeline = loadTimeline();
+  const out = [];
+  let total = 0;
+  for (let i = timeline.length - 1; i >= 0; i--) {
+    const m = timeline[i];
+    const content = String(m && m.content || '');
+    if (!content.trim()) continue;
+    const role = (m.role === 'assistant' || m.role === 'user') ? m.role : 'user';
+    const cost = content.length + 8;
+    if (total + cost > cap) {
+      if (out.length === 0) out.push({ role: 'user', content: '（历史对话过长，仅保留以下最近内容）' });
+      break;
+    }
+    out.unshift({ role, content });
+    total += cost;
+  }
+  return out;
+}
+
+// 共影历史组装：人设+永久上下文 + 完整时间线 → 应用统一上下文替换（AI 记忆 + 手工块）→ 再按字符上限截断
+function coBuildHistory() {
+  const messages = [{ role: "system", content: coPersonaWithPinned() }].concat(coTimelineMessages());
+  try {
+    const before = messages.length;
+    const replaced = contextReplacements.applyReplacements(messages);
+    if (Array.isArray(replaced) && replaced.length) {
+      messages.length = 0;
+      messages.push.apply(messages, replaced);
+      if (replaced.length !== before) {
+        console.log(`[co] 上下文替换生效: ${before} -> ${replaced.length} 条`);
+      }
+    }
+  } catch (e) {
+    console.warn('[co] 上下文替换失败（跳过）:', e.message);
+  }
+  const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
+  const cap = Math.max(2000, Number(cfg.co_ctx_chars) || 50000);
+  const head = [];
+  const rest = [];
+  for (const m of messages) {
+    if (m && m.role === 'system' && head.length < 3) head.push(m);
+    else rest.push(m);
+  }
+  const out = [];
+  let total = head.reduce(function (sum, m) { return sum + String(m.content || '').length + 8; }, 0);
+  for (let i = rest.length - 1; i >= 0; i--) {
+    const m = rest[i];
+    const c = String(m.content || '');
+    const cost = c.length + 8;
+    if (total + cost > cap) {
+      if (out.length === 0) out.unshift({ role: 'user', content: '（历史过长，仅保留最近内容）' });
+      break;
+    }
+    out.unshift(m);
+    total += cost;
+  }
+  return head.concat(out);
+}
+
+// 共影：画面描述提示词（视觉模型用，管理台可编辑）
+const CO_VISION_PROMPT_FILE = path.join(__dirname, "data", "co_vision_prompt.json");
+const DEFAULT_CO_VISION_PROMPT = "这是视频播放页的截图（连续约 ${seconds} 秒）。只描述视频画面本身的内容：人物、动作表情、场景、画面上的字幕。忽略网页导航栏、推荐列表、按钮、播放器控件等界面元素。简洁中文，只描述看到的，不评价剧情、不推测后续。";
+
+function readCoVisionPrompt() {
+  try {
+    const raw = fs.readFileSync(CO_VISION_PROMPT_FILE, "utf-8");
+    const j = JSON.parse(raw);
+    if (j && typeof j.prompt === "string" && j.prompt.trim()) return j.prompt;
+  } catch (e) {}
+  return DEFAULT_CO_VISION_PROMPT;
+}
+
+app.get("/admin/logs/co-vision-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    reply.send({ prompt: readCoVisionPrompt() });
+  } catch (err) {
+    reply.send({ error: err.message });
+  }
+});
+
+app.post("/admin/logs/co-vision-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const prompt = String((req.body && req.body.prompt) || "").trim();
+    if (!prompt) return reply.code(400).send({ error: "提示词不能为空" });
+    const tmp = CO_VISION_PROMPT_FILE + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify({ prompt }, null, 2), "utf-8");
+    fs.renameSync(tmp, CO_VISION_PROMPT_FILE);
+    reply.send({ ok: true, prompt });
+  } catch (err) {
+    reply.code(400).send({ error: err.message });
+  }
+});
+
+app.delete("/admin/logs/co-vision-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    if (fs.existsSync(CO_VISION_PROMPT_FILE)) fs.unlinkSync(CO_VISION_PROMPT_FILE);
+    reply.send({ ok: true, prompt: DEFAULT_CO_VISION_PROMPT });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 视觉描述：画面（base64/dataURL）+ 可选字幕 → 文字描述
+// 短时缓存：同一帧 5 秒内复用描述，避免「唤醒截帧」和「用户发消息」撞在同一时刻时重复调用视觉模型
+let coFrameCache = { at: 0, key: "", description: "" };
+// 视觉模型列表 + 解析（共影 / 截图上传 各自选择模型，以后可加更多模型）
+function getVisionModels() {
+  const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
+  const list = Array.isArray(cfg.vision_models) ? cfg.vision_models.slice() : [];
+  // 兼容旧的单一视觉模型配置：列表为空但有旧配置时，作为隐式默认模型
+  if (list.length === 0 && cfg.co_vision_api_key && String(cfg.co_vision_api_key).trim()) {
+    list.push({ id: "default", name: "默认视觉模型", api_url: cfg.co_vision_api_url || "https://open.bigmodel.cn/api/paas/v4/chat/completions", api_key: cfg.co_vision_api_key, model: cfg.co_vision_model || "glm-4v-flash" });
+  }
+  return list;
+}
+
+function resolveVisionModel(feature) {
+  const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
+  const models = getVisionModels();
+  if (!models.length) return null;
+  const selId = feature === "co" ? cfg.co_vision_model_id : cfg.screenshot_vision_model_id;
+  const hit = models.find(function (m) { return m && m.id === selId && m.api_key && String(m.api_key).trim(); });
+  if (hit) return hit;
+  return models.find(function (m) { return m && m.api_key && String(m.api_key).trim(); }) || null;
+}
+
+async function describeCoFrame({ image, frames, subtitle, duration, noPrompt }) {
+  const now = Date.now();
+  const imgKey = (Array.isArray(frames) && frames.length)
+    ? "multi:" + frames.length + ":" + String(frames[0] || "").slice(0, 120)
+    : String(image || "").slice(0, 200);
+  if (coFrameCache.key && coFrameCache.key === imgKey && now - coFrameCache.at < 5000) {
+    return coFrameCache.description;
+  }
+  const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
+  const vm = resolveVisionModel("co");
+  const apiUrl = String((vm && vm.api_url) || "https://open.bigmodel.cn/api/paas/v4/chat/completions").trim();
+  const apiKey = String((vm && vm.api_key) || "").trim();
+  const model = String((vm && vm.model) || "glm-4v-flash").trim();
+  if (!apiKey) throw new Error("视觉模型 Key 未配置：请到管理台「心跳」页的「视觉模型」添加并填写");
+  const rawList = (Array.isArray(frames) && frames.length) ? frames : (image ? [image] : []);
+  const imageUrls = rawList.map(function (f) {
+    let u = String(f || "").trim();
+    if (!u) return null;
+    if (!u.startsWith("data:") && !/^https?:\/\//.test(u)) u = "data:image/jpeg;base64," + u;
+    return u;
+  }).filter(Boolean);
+  if (!imageUrls.length) throw new Error("缺少画面数据");
+  const customVisionPrompt = readCoVisionPrompt() || DEFAULT_CO_VISION_PROMPT;
+  const visionSeconds = Number(duration) > 0 ? Number(duration) : Math.max(1, Math.round(imageUrls.length * 0.7));
+  const visionText = String(customVisionPrompt)
+    .replace(/\$\{frameCount\}/g, String(imageUrls.length))
+    .replace(/\$\{seconds\}/g, String(visionSeconds));
+  const textParts = [visionText];
+  if (subtitle && String(subtitle).trim()) {
+    textParts.push(`\n当前字幕：${String(subtitle).trim()}`);
+    textParts.push("字幕若与画面重复则以画面为准。");
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+  try {
+    const imgContent = imageUrls.map(function (u) { return { type: "image_url", image_url: { url: u } }; });
+    let content = noPrompt
+      ? imgContent
+      : imgContent.concat({ type: "text", text: textParts.join("\n") });
+    const payload = {
+      model,
+      messages: [{ role: "user", content }],
+      temperature: 0.3,
+      stream: false
+    };
+    // MiniMax 默认 adaptive thinking，视觉描述关掉思考，避免思考内容混入画面描述
+    if (/minimax/i.test(model)) payload.thinking = { type: "disabled" };
+    let resp = await fetch(apiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    // 手动 👁 纯图请求被拒时：补上默认提示词重试一次，保证功能可用
+    if (noPrompt && !resp.ok) {
+      content = imgContent.concat({ type: "text", text: textParts.join("\n") });
+      payload.messages[0].content = content;
+      resp = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+    }
+    const text = await resp.text();
+    let data;
+    try { data = JSON.parse(text); } catch (e) { throw new Error("视觉模型返回异常: " + text.slice(0, 200)); }
+    if (!resp.ok) {
+      const msg = (data && data.error && (data.error.message || JSON.stringify(data.error))) || text.slice(0, 200);
+      throw new Error("视觉模型调用失败: " + String(msg));
+    }
+    let description = String(data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || "").trim();
+    // 兜底：剥掉模型返回的思考块（如 <think>…</think>），只保留正式描述
+    description = description.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+    coFrameCache = { at: Date.now(), key: imgKey, description };
+    return description;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// 调上游聊天模型（DeepSeek）
+async function callCoLLM(messages, temperature) {
+  const targetUrl = readEnvValue("TARGET_API_URL");
+  const targetKey = readEnvValue("TARGET_API_KEY");
+  if (!targetUrl || !targetKey) throw new Error("上游聊天模型未配置（TARGET_API_URL / TARGET_API_KEY）");
+  const model = readEnvValue("MODEL_NAME") || "deepseek-chat";
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+  try {
+    // 捕获发给 LLM 的完整上下文（管理台日志页可查看，含共影 chat/wake）
+    lastLLMMessages = (Array.isArray(messages) ? messages : []).map(m => ({
+      role: m.role,
+      content: typeof m.content === 'string' ? m.content : (Array.isArray(m.content) ? JSON.stringify(m.content) : String(m.content || ''))
+    }));
+    lastLLMCaptureTime = new Date().toISOString();
+    const resp = await fetch(targetUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${targetKey}` },
+      body: JSON.stringify({ model, messages, temperature: temperature == null ? 0.7 : temperature, stream: false }),
+      signal: controller.signal
+    });
+    const text = await resp.text();
+    let data;
+    try { data = JSON.parse(text); } catch (e) { throw new Error("上游返回异常: " + text.slice(0, 200)); }
+    if (!resp.ok) {
+      const msg = (data && data.error && (data.error.message || JSON.stringify(data.error))) || text.slice(0, 200);
+      throw new Error("上游模型调用失败: " + String(msg));
+    }
+    let description = String(data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || "").trim();
+    // 兜底：剥掉模型返回的思考块（如 <think>…</think>），只保留正式描述
+    description = description.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+    return description;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// 共影配置（播放页读取：截帧间隔、视觉模型是否就绪）
+app.get("/internal/co/config", async (req, reply) => {
+  try {
+    const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
+    const vm = resolveVisionModel("co");
+    reply.send({
+      frameInterval: Number(cfg.co_frame_interval) || 30,
+      peekSeconds: Number(cfg.co_peek_seconds) || 3,
+      visionConfigured: Boolean(vm),
+      visionModel: String((vm && vm.model) || "glm-4v-flash"),
+      visionName: vm ? String(vm.name || "") : "",
+      displayName: readEnvValue("AI_DISPLAY_NAME") || "谢",
+      userDisplayName: readEnvValue("USER_DISPLAY_NAME") || "涵"
+    });
+  } catch (err) {
+    reply.send({ error: err.message });
+  }
+});
+
+// 共影记录（播放页打开时显示历史）
+app.get("/internal/co/record", async (req, reply) => {
+  try {
+    reply.send({ record: coRecordText() });
+  } catch (err) {
+    reply.send({ error: err.message });
+  }
+});
+
+// 视觉描述代理：前端不暴露 Key
+app.post("/internal/co/describe", async (req, reply) => {
+  try {
+    const body = req.body || {};
+    const description = await describeCoFrame({ image: body.image, subtitle: body.subtitle });
+    reply.send({ description });
+  } catch (err) {
+    console.warn("[co/describe] 失败:", err.message);
+    reply.code(400).send({ error: err.message });
+  }
+});
+
+// 共影聊天：user 消息（可选带画面）→ AI 回复；对话写入时间线共影记录
+app.post("/internal/co/chat", async (req, reply) => {
+  try {
+    const body = req.body || {};
+    const userText = String(body.text || "").trim();
+    const videoTitle = String(body.videoTitle || "").trim();
+    if (!userText) return reply.code(400).send({ error: "消息不能为空" });
+    let frameDescription = "";
+    if (body.image) {
+      frameDescription = await describeCoFrame({ image: body.image, subtitle: body.subtitle });
+    }
+    const messages = coBuildHistory();
+    let viewInfo = `【当前观影】\n时间：${coNowText()}`;
+    if (videoTitle) viewInfo += `\n正在看：《${videoTitle}》`;
+    if (frameDescription) viewInfo += `\n画面：${frameDescription}`;
+    if (body.subtitle && String(body.subtitle).trim()) viewInfo += `\n字幕：${String(body.subtitle).trim()}`;
+    messages.push({ role: "user", content: viewInfo + `\n\n${userText}` });
+    const aiReply = await callCoLLM(messages, 0.7);
+    const clean = String(aiReply || "").trim();
+    if (clean) {
+      const userDisplay = readEnvValue("USER_DISPLAY_NAME") || "涵";
+      const displayName = readEnvValue("AI_DISPLAY_NAME") || "谢";
+      const nowText = coNowText();
+      appendCoRecordLine(`${nowText} ${userDisplay}：${userText}\n${nowText} ${displayName}：${clean}`, videoTitle || undefined);
+    }
+    console.log(`[co/chat] user chars ${userText.length}, reply chars ${clean.length}`);
+    reply.send({ reply: clean, frameDescription });
+  } catch (err) {
+    console.warn("[co/chat] 失败:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 共影定时唤醒：画面+字幕 → AI 决定说不说；说了就写入共影记录
+app.post("/internal/co/wake", async (req, reply) => {
+  try {
+    const body = req.body || {};
+    const videoTitle = String(body.videoTitle || "").trim();
+    let frameDescription = "";
+    if (body.image || (Array.isArray(body.frames) && body.frames.length)) {
+      try {
+        frameDescription = await describeCoFrame({ image: body.image, frames: body.frames, subtitle: body.subtitle, duration: body.duration });
+      } catch (e) {
+        console.warn("[co/wake] 画面解析失败:", e.message);
+      }
+    }
+    let userContent;
+    if (body.manual === true) {
+      // 手动 👁：不带唤醒提示词，直接把当前画面信息发给聊天 AI，AI 必然回应
+      userContent = `【当前观影】\n时间：${coNowText()}` +
+        (videoTitle ? `\n正在看：《${videoTitle}》` : "") +
+        (frameDescription ? `\n画面：${frameDescription}` : "") +
+        (String(body.subtitle || "").trim() ? `\n字幕：${String(body.subtitle).trim()}` : "");
+    } else {
+      userContent = readCoWakePrompt()
+        .replace(/\$\{currentTime\}/g, coNowText())
+        .replace(/\$\{frameDescription\}/g, frameDescription || "（画面无法获取）")
+        .replace(/\$\{subtitle\}/g, String(body.subtitle || "").trim() || "（无字幕）");
+    }
+    const messages = coBuildHistory();
+    messages.push({ role: "user", content: userContent });
+    const aiReply = await callCoLLM(messages, body.manual === true ? 0.7 : 0.9);
+    const clean = String(aiReply || "").trim();
+    if (!clean) return reply.send({ action: "silent", reply: null });
+    if (body.manual !== true && clean.includes("[NO_ACTION]")) {
+      return reply.send({ action: "silent", reply: null });
+    }
+    const displayName = readEnvValue("AI_DISPLAY_NAME") || "谢";
+    appendCoRecordLine(`${coNowText()} ${displayName}：${clean}`, videoTitle || undefined);
+    console.log(`[co/wake] 主动说话 chars ${clean.length}`);
+    reply.send({ action: "speak", reply: clean });
+  } catch (err) {
+    console.warn("[co/wake] 失败:", err.message);
+    reply.send({ action: "silent", reply: null, error: err.message });
+  }
+});
+
+
+
+
+// ========================
+// 截图唤醒（截图自动解析+AI回应）
+// ========================
+
+
+// 推送（Bark / ntfy，与唤醒系统同一套配置）
+async function sendPushNotification({ title, body }) {
+  try {
+    const provider = (readEnvValue("PUSH_PROVIDER") || "bark").trim().toLowerCase();
+    if (provider === "ntfy") {
+      const topic = String(readEnvValue("NTFY_TOPIC") || "").trim();
+      if (!topic) return { ok: false, reason: "NTFY_TOPIC 未配置" };
+      const server = (readEnvValue("NTFY_SERVER_URL") || "https://ntfy.sh").replace(/\/+$/, "");
+      const headers = { "Content-Type": "application/json" };
+      const token = readEnvValue("NTFY_TOKEN");
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const { buildNtfyPayload } = require("./ntfy_priority");
+      const payload = buildNtfyPayload({ topic, title, message: body, priority: readEnvValue("NTFY_PRIORITY"), tags: readEnvValue("NTFY_TAGS") });
+      const response = await fetch(server, { method: "POST", headers, body: JSON.stringify(payload) });
+      const responseText = await response.text();
+      if (!response.ok) return { ok: false, reason: responseText || `HTTP ${response.status}` };
+      return { ok: true };
+    }
+    if (provider !== "bark") return { ok: false, reason: `不支持的 PUSH_PROVIDER：${provider}` };
+    const barkKey = readEnvValue("BARK_KEY");
+    if (!barkKey) return { ok: false, reason: "Bark Key 未配置" };
+    const response = await fetch("https://api.day.app/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, body, device_key: barkKey, icon: readEnvValue("CUSTOM_ICON_URL") })
+    });
+    const responseText = await response.text();
+    let result = {};
+    try { result = JSON.parse(responseText); } catch (e) {}
+    if (!response.ok || (result.code && result.code !== 200)) {
+      return { ok: false, reason: result.message || `HTTP ${response.status}` };
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: err.message };
+  }
+}
+
+// 截图唤醒提示词（AI 决定说不说）
+const SCREENSHOT_WAKE_PROMPT_FILE = path.join(__dirname, "data", "screenshot_wake_prompt.json");
+const DEFAULT_SCREENSHOT_WAKE_PROMPT = `## 最高优先级规则
+1. 这是一次「截图唤醒」，不是涵主动发起的对话。你只是收到了涵手机里的一张新截图。
+2. 根据截图内容决定要不要主动说话。想说话就简洁地说，不用重复描述画面；不想说话就保持沉默。
+
+## 截图信息
+- 当前时间：\${currentTime}
+- 画面描述：\${frameDescription}
+
+## 输出格式
+- 想说话：直接输出你想说的话。
+- 不想说话：只输出 [NO_ACTION]。`;
+
+function readScreenshotWakePrompt() {
+  try {
+    const raw = fs.readFileSync(SCREENSHOT_WAKE_PROMPT_FILE, "utf-8");
+    const j = JSON.parse(raw);
+    if (j && typeof j.prompt === "string" && j.prompt.trim()) return j.prompt;
+  } catch (e) {}
+  return DEFAULT_SCREENSHOT_WAKE_PROMPT;
+}
+
+// 截图画面描述提示词
+const SCREENSHOT_VISION_PROMPT_FILE = path.join(__dirname, "data", "screenshot_vision_prompt.json");
+const DEFAULT_SCREENSHOT_VISION_PROMPT = `请描述这张手机截图的内容，包括：
+1. 这是什么应用或什么类型的页面（如微信聊天、淘宝商品、文章、游戏等）
+2. 页面上的主要内容和关键信息
+3. 能看出用户在做什么或看什么
+
+用中文简洁描述，不超过200字。`;
+
+function readScreenshotVisionPrompt() {
+  try {
+    const raw = fs.readFileSync(SCREENSHOT_VISION_PROMPT_FILE, "utf-8");
+    const j = JSON.parse(raw);
+    if (j && typeof j.prompt === "string" && j.prompt.trim()) return j.prompt;
+  } catch (e) {}
+  return DEFAULT_SCREENSHOT_VISION_PROMPT;
+}
+
+// 调用共影的视觉模型描述图片
+async function describeScreenshot(image) {
+  const vm = resolveVisionModel("screenshot");
+  const apiUrl = String((vm && vm.api_url) || "https://open.bigmodel.cn/api/paas/v4/chat/completions").trim();
+  const apiKey = String((vm && vm.api_key) || "").trim();
+  const model = String((vm && vm.model) || "glm-4v-flash").trim();
+  if (!apiKey) throw new Error("视觉模型 Key 未配置：请到管理台「心跳」页的「视觉模型」添加并填写");
+  
+  let imgUrl = String(image || "").trim();
+  if (!imgUrl.startsWith("data:") && !/^https?:\/\//.test(imgUrl)) {
+    imgUrl = "data:image/jpeg;base64," + imgUrl;
+  }
+  
+  const visionPrompt = readScreenshotVisionPrompt();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SCREENSHOT_TIMEOUT_MS);
+  try {
+    const payload = {
+      model,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: imgUrl } },
+          { type: "text", text: visionPrompt }
+        ]
+      }],
+      temperature: 0.3,
+      stream: false
+    };
+    if (/minimax/i.test(model)) payload.thinking = { type: "disabled" };
+    const resp = await fetch(apiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    const text = await resp.text();
+    let data;
+    try { data = JSON.parse(text); } catch (e) { throw new Error("视觉模型返回异常: " + text.slice(0, 200)); }
+    if (!resp.ok) {
+      const msg = (data && data.error && (data.error.message || JSON.stringify(data.error))) || text.slice(0, 200);
+      throw new Error("视觉模型调用失败: " + String(msg));
+    }
+    let description = String(data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || "").trim();
+    description = description.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+    return description;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+
+let screenshotProcessing = false;
+
+// 截图上传：图片 → 视觉解析 → 作为特殊事件写入时间线
+app.post("/internal/screenshot/wake", async (req, reply) => {
+  if (screenshotProcessing) {
+    return reply.code(429).send({ error: "上一次截图还在处理中，请稍后再试" });
+  }
+  screenshotProcessing = true;
+  try {
+    const body = req.body || {};
+    const image = body.image || null;
+    if (!image) return reply.code(400).send({ error: "缺少图片数据" });
+    
+    // 1. 视觉解析
+    let frameDescription = "";
+    try {
+      frameDescription = await describeScreenshot(image);
+    } catch (e) {
+      console.warn("[screenshot] 画面解析失败:", e.message);
+      return reply.code(500).send({ error: "画面解析失败: " + e.message });
+    }
+    
+    // 2. 写入时间线（截图特殊事件）
+    const nowText = formatDateTimeInTimeZone(new Date(), TIME_ZONE);
+    const eventContent = `（${nowText} 截图）\n画面：${frameDescription.slice(0, 300)}${frameDescription.length > 300 ? "…" : ""}`;
+    appendSpecialEvent(eventContent);
+    
+    console.log(`[screenshot] 已写入时间线，描述 ${frameDescription.length} 字`);
+    // 3. 截图唤醒（可选开关）：把画面描述 + 唤醒提示词发给聊天 AI，让它决定说不说
+    const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
+    if (cfg.screenshot_wake_enabled) {
+      try {
+        const wakePrompt = readScreenshotWakePrompt()
+          .replace(/\$\{currentTime\}/g, nowText)
+          .replace(/\$\{frameDescription\}/g, frameDescription || "（画面无法获取）");
+        const messages = coBuildHistory();
+        messages.push({ role: "user", content: wakePrompt });
+        const aiReply = await callCoLLM(messages, 0.9);
+        const clean = String(aiReply || "").trim();
+        if (clean && !clean.includes("[NO_ACTION]")) {
+          const displayName = readEnvValue("AI_DISPLAY_NAME") || "谢";
+          appendSpecialEvent(`（${nowText} 截图唤醒）${displayName}：${clean.slice(0, 500)}`);
+          const pushResult = await sendPushNotification({ title: "截图唤醒", body: clean.slice(0, 500) });
+          console.log(`[screenshot] 唤醒说话 chars ${clean.length}, 推送 ${pushResult.ok ? "OK" : "失败:" + pushResult.reason}`);
+        } else {
+          console.log("[screenshot] 唤醒判定沉默，不推送");
+        }
+      } catch (e) {
+        console.warn("[screenshot] 唤醒判定失败（不影响截图记录）:", e.message);
+      }
+    }
+
+    reply.send({ ok: true, description: frameDescription });
+    
+  } catch (err) {
+    console.warn("[screenshot] 失败:", err.message);
+    reply.code(500).send({ error: err.message });
+  } finally {
+    screenshotProcessing = false;
+  }
+});
+
+// 管理台：截图画面描述提示词读取
+app.get("/admin/logs/screenshot-vision-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try { reply.send({ prompt: readScreenshotVisionPrompt() }); }
+  catch (err) { reply.send({ error: err.message }); }
+});
+app.post("/admin/logs/screenshot-vision-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const prompt = String((req.body && req.body.prompt) || "").trim();
+    if (!prompt) return reply.code(400).send({ error: "提示词不能为空" });
+    const tmp = SCREENSHOT_VISION_PROMPT_FILE + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify({ prompt }, null, 2), "utf-8");
+    fs.renameSync(tmp, SCREENSHOT_VISION_PROMPT_FILE);
+    reply.send({ ok: true, prompt });
+  } catch (err) { reply.code(400).send({ error: err.message }); }
+});
+app.delete("/admin/logs/screenshot-vision-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    if (fs.existsSync(SCREENSHOT_VISION_PROMPT_FILE)) fs.unlinkSync(SCREENSHOT_VISION_PROMPT_FILE);
+    reply.send({ ok: true, prompt: DEFAULT_SCREENSHOT_VISION_PROMPT });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+// 管理台：截图唤醒提示词读取
+app.get("/admin/logs/screenshot-wake-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try { reply.send({ prompt: readScreenshotWakePrompt() }); }
+  catch (err) { reply.send({ error: err.message }); }
+});
+app.post("/admin/logs/screenshot-wake-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const prompt = String((req.body && req.body.prompt) || "").trim();
+    if (!prompt) return reply.code(400).send({ error: "提示词不能为空" });
+    const tmp = SCREENSHOT_WAKE_PROMPT_FILE + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify({ prompt }, null, 2), "utf-8");
+    fs.renameSync(tmp, SCREENSHOT_WAKE_PROMPT_FILE);
+    reply.send({ ok: true, prompt });
+  } catch (err) { reply.code(400).send({ error: err.message }); }
+});
+app.delete("/admin/logs/screenshot-wake-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    if (fs.existsSync(SCREENSHOT_WAKE_PROMPT_FILE)) fs.unlinkSync(SCREENSHOT_WAKE_PROMPT_FILE);
+    reply.send({ ok: true, prompt: DEFAULT_SCREENSHOT_WAKE_PROMPT });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+// 管理台：视觉模型列表读写
+app.get("/admin/vision-models", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
+    reply.send({ success: true, models: getVisionModels(), coId: cfg.co_vision_model_id || "", screenshotId: cfg.screenshot_vision_model_id || "" });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+app.post("/admin/vision-models", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const body = req.body || {};
+    const updates = {};
+    if (Array.isArray(body.models)) {
+      updates.vision_models = body.models.map(function (m, i) {
+        return {
+          id: String((m && m.id) || ("m" + Date.now() + "_" + i)),
+          name: String((m && m.name) || ("视觉模型 " + (i + 1))).trim(),
+          api_url: String((m && m.api_url) || "").trim(),
+          api_key: String((m && m.api_key) || "").trim(),
+          model: String((m && m.model) || "").trim()
+        };
+      });
+    }
+    if (body.coId !== undefined) updates.co_vision_model_id = String(body.coId || "");
+    if (body.screenshotId !== undefined) updates.screenshot_vision_model_id = String(body.screenshotId || "");
+    await require("./memory-engine").updateConfig(updates);
+    reply.send({ success: true });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+// ========================
+// 运行配置（精简版）：仅服务心跳页的共影/截图配置读写；参数设置页已移除
+// ========================
+const RUN_CONFIG_WHITELIST = new Set([
+  "co_vision_model_id", "co_frame_interval", "co_peek_seconds",
+  "screenshot_vision_model_id", "screenshot_wake_enabled",
+  "event_inject_types", "vision_models"
+]);
+
+app.get("/admin/config", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    reply.send(require("./memory-engine").getConfig ? require("./memory-engine").getConfig() : {});
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+app.post("/admin/config", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const body = (req.body && typeof req.body === "object") ? req.body : {};
+    const updates = {};
+    for (const key of Object.keys(body)) {
+      if (RUN_CONFIG_WHITELIST.has(key)) updates[key] = body[key];
+    }
+    if (Object.keys(updates).length === 0) {
+      return reply.code(400).send({ error: "没有可更新的配置项" });
+    }
+    await require("./memory-engine").updateConfig(updates);
+    reply.send({ success: true });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+// ======================== 网页视频解析（共影） ========================
+// 抓取网页页面，提取候选视频地址（video 标签 / og:video / 页面内视频链接）
+async function fetchPageLimited(pageUrl, maxBytes) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const resp = await fetch(pageUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      },
+      redirect: "follow",
+      signal: controller.signal
+    });
+    if (!resp.ok) {
+      if (resp.status === 403 || resp.status === 412) throw new Error("该网站有反爬保护，抓不到网页内容，建议直接用本地下载的视频");
+      if (resp.status === 404) throw new Error("网页不存在（404）");
+      if (resp.status === 429) throw new Error("网页访问太频繁被限流，稍后再试");
+      throw new Error("网页请求失败 HTTP " + resp.status);
+    }
+    const ct = String(resp.headers.get("content-type") || "");
+    if (ct && !/html|text|json|xml/i.test(ct)) {
+      throw new Error("该地址返回的不是网页（" + ct.split(";")[0].trim() + "）");
+    }
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let total = 0;
+    const max = maxBytes || 5 * 1024 * 1024;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        chunks.push(value);
+        total += value.length;
+        if (total > max) break;
+      }
+    }
+    return { html: Buffer.concat(chunks).toString("utf-8"), finalUrl: resp.url || pageUrl };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function coAbsUrl(base, u) {
+  try { return new URL(u, base).href; } catch (e) { return ""; }
+}
+
+function resolvePageVideos(pageUrl, html) {
+  const out = [];
+  const seen = new Set();
+  const add = (raw, source) => {
+    if (!raw) return;
+    const url = coAbsUrl(pageUrl, String(raw).trim());
+    if (!url || !/^https?:/i.test(url)) return;
+    const ext = (url.split("?")[0].match(/\.(mp4|webm|m3u8|mov|m4v|ogg|mkv|ts)$/i) || [])[1];
+    if (!ext) return;
+    if (seen.has(url)) return;
+    seen.add(url);
+    out.push({ url, type: ext.toLowerCase(), source });
+  };
+  // <video> / <source> / <embed> 标签里的 src
+  const tagRe = /<(?:video|source|embed)[^>]+src=["']([^"']+)["']/gi;
+  let m;
+  while ((m = tagRe.exec(html))) add(m[1], "播放器");
+  // meta: og:video / twitter:player:stream
+  const metaRe = /<meta[^>]+(?:property|name)=["'](?:og:video(?::url|:secure_url)?|twitter:player:stream)["'][^>]+content=["']([^"']+)["']/gi;
+  while ((m = metaRe.exec(html))) add(m[1], "页面媒体信息");
+  // 页面内绝对地址的视频链接
+  const absRe = /https?:\/\/[^\s"'<>\\]+?\.(?:mp4|webm|m3u8|mov|m4v|ogg|mkv)(?:\?[^\s"'<>\\]*)?/gi;
+  while ((m = absRe.exec(html))) add(m[0], "页面内链接");
+  // 相对路径视频链接
+  const relRe = /["']([^"']+?\.(?:mp4|webm|m3u8|mov|m4v|ogg|mkv)(?:\?[^"']*)?)["']/gi;
+  while ((m = relRe.exec(html))) {
+    if (/^[a-z]+:/i.test(m[1])) continue;
+    add(m[1], "页面内链接");
+  }
+  return out;
+}
+
+// 网页视频解析：粘贴网页地址 → 返回候选视频地址列表
+app.post("/internal/co/resolve", async (req, reply) => {
+  try {
+    const pageUrl = String((req.body || {}).url || "").trim();
+    if (!pageUrl) return reply.code(400).send({ error: "缺少网页地址" });
+    if (!/^https?:\/\//i.test(pageUrl)) return reply.code(400).send({ error: "只支持 http/https 网页地址" });
+    const { html, finalUrl } = await fetchPageLimited(pageUrl);
+    const candidates = resolvePageVideos(finalUrl || pageUrl, html);
+    reply.send({ pageUrl, total: candidates.length, candidates });
+  } catch (err) {
+    console.warn("[co/resolve] 失败:", err.message);
+    reply.code(400).send({ error: err.message });
   }
 });
 
@@ -3545,12 +4183,9 @@ app.get("/test-bark", async (req, reply) => {
 // ========================
 const tagParser = require("./tag-parser");
 const memoryEngine = require("./memory-engine");
-const summaryEngine = require("./summary-engine");
 
 require("./memory-engine").init().then(() => {
   console.log("[memory] 记忆引擎就绪");
-  require("./summary-engine").init();
-  startTimeEventTimer();
 }).catch(err => {
   console.error("[memory] 记忆引擎初始化失败:", err.message);
 });
