@@ -1749,9 +1749,11 @@
            ? '<button class="cc-btn cc-head-toggle'+(enabled?' on':'')+'" onclick="event.stopPropagation();toggleCcReplace('+c.index+','+blockIndex+',0)">'+(enabled?'取消替换':'替换')+'</button>'
            : '<button class="cc-btn cc-head-toggle'+(enabled?'':' off')+'" onclick="event.stopPropagation();toggleCcReplace('+c.index+','+blockIndex+',0)">'+(enabled?'停用':'启用')+'</button>'))
        +(!isAi && !c.cached ? '<button class="cc-btn cc-act-add cc-head-add" onclick="event.stopPropagation();regenerateBlockSummary('+c.index+','+blockIndex+')">✦ 生成摘要</button>' : '')
+        +(!isAi && !c.cached ? '<button class="cc-btn cc-act-add cc-head-add" onclick="event.stopPropagation();openCcAddManual('+c.index+','+blockIndex+')">＋新增摘要</button>' : '')
        +'</div>'
        +'<div class="cc-meta">第 '+start+'~'+end+' 条 · '+escHtml(timeLabel)+'</div>'
        +'<div class="cc-preview">'+escHtml(c.head||'')+'</div>'
+         +(!isAi ? '<div id="cc-addman-'+c.index+'"></div>' : '')
  +(!isAi
          ? '<div class="cc-boundary">'
            +'<input class="cc-num" type="number" min="1" max="'+d.totalCompressible+'" value="'+start+'" title="开头" oninput="ccNumLiveCheck(this,'+d.totalCompressible+')" onchange="updateCompactionBoundary('+blockIndex+',0,this.value)" onblur="clampCcInput(this,'+blockIndex+',0,'+d.totalCompressible+')">'
@@ -1975,6 +1977,7 @@
  }
  
  // 未覆盖区：一键生成摘要（新建手动块 + 调模型生成；生成后点块上的「替换」才生效）
+
  function generateGapSummary(start, end){
    const key=(start||0)+'-'+(end||0);
    if(ccGapGenerating.has(key)) return;
@@ -2001,6 +2004,26 @@
  }
  
  // 手动块：重新生成摘要（调模型重写，旧摘要保留进历史版本）
+  // 手动块：直接新增/填写摘要（不调模型），适用于切分后尚未写摘要的块
+  function openCcAddManual(idx, blockIndex){
+    const w=document.getElementById('cc-addman-'+idx);
+    if(!w) return;
+    if(w.dataset.open==='1'){ w.innerHTML=''; w.dataset.open='0'; return; }
+    w.dataset.open='1';
+    const c=ccFindChunk(idx);
+    const cur=((c&&c.summary)||(ccDraft[idx]||''));
+    w.innerHTML='<div class="cc-sum-ta-wrap">'
+      +'<textarea id="cc-edit-sel-'+idx+'" rows="6" oninput="ccDraft['+idx+']=this.value;updateCcCharCount('+idx+')" class="cc-sum-ta" placeholder="填写摘要内容（不调模型）">'+escHtml(cur)+'</textarea>'
+      +'</div>'
+      +'<div class="cc-sum-editor-btns">'
+      +'<span class="cc-sum-count" id="cc-edit-count-'+idx+'">'+cur.length+' 字</span>'
+      +'<button class="cc-btn primary" onclick="saveCcSummaryEdit('+idx+')">保存</button>'
+      +'<button class="cc-btn secondary" onclick="openCcAddManual('+idx+','+blockIndex+')">收起</button>'
+      +'</div>';
+    const ta=document.getElementById('cc-edit-sel-'+idx);
+    if(ta){ ta.focus(); }
+  }
+
  function regenerateBlockSummary(idx, blockIndex){
    if(blockIndex===undefined || blockIndex===null || blockIndex<0) return;
    if(!confirm('重新生成块 #'+idx+' 的摘要？现有摘要会保留在历史版本里。')) return;
