@@ -1684,6 +1684,7 @@
          '<span class="mem-tag">'+escapeHtml(x.role||'')+'</span>' +
          '<span class="mem-time">'+escapeHtml(x.time||'')+'</span>' +
          chunkTag +
+         '<button class="cc-msg-mark'+(x.marked?' on':'')+'" data-key="'+x.key+'" style="margin-left:auto" onclick="toggleCcOrigMark(this)" title="标星：压缩后以原句保留，不被摘要覆盖">'+(x.marked?'★':'☆')+'</button>' +
          '</div>' +
          '<div class="cc-orig-content">'+escapeHtml(x.content)+'</div>' +
          '</div>';
@@ -1692,6 +1693,20 @@
      if(seq === ccOriginalSeq) box.innerHTML='<div class="empty">搜索失败: '+escapeHtml(err.message)+'</div>';
      if(info) info.textContent='';
    }
+ }
+
+ function toggleCcOrigMark(btn){
+   if(!btn) return;
+   const key = btn.getAttribute('data-key');
+   const next = !(btn.classList.contains('on'));
+   fetch(ADMIN_API + '/context-compaction/mark',{
+     method:'POST',headers:{'Content-Type':'application/json'},
+     body:JSON.stringify({key:key, marked:next})
+   }).then(function(r){return r.json()}).then(function(d){
+     if(d && d.error){ alert('标记失败: '+d.error); return; }
+     btn.classList.toggle('on', next);
+     btn.textContent = next ? '★' : '☆';
+   }).catch(function(e){ alert('标记失败: '+e.message); });
  }
 
  function loadCompactionPreview(){

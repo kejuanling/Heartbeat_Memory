@@ -979,8 +979,8 @@ function applyReplacements(messages) {
       for (let j = replacements[r].startIdx; j <= replacements[r].endIdx; j++) {
         const sm = out[j];
         if (!sm) continue;
-        if (isMemoryFlash(sm)) continue;
         if (sm.role === "tool" || sm.tool_calls) continue;
+        // 标星优先：标星的记忆浮现/特殊事件也以原句保留（与特殊事件清理口径一致）
         if (marks[contentKey(sm)]) starred.push(sm);
       }
       starred.forEach(function (sm) { final.push(sm); });
@@ -1350,11 +1350,14 @@ function searchCompactionOriginal(keyword, maxResults) {
     if (!allHit) return;
     const t = messageTime(e.msg);
     const info = map[i];
+    const key = contentKey(e.msg);
     results.push({
       index: i + 1,
       role: e.msg.role || "",
       time: t ? fmtWall(t) : "",
       content: content.length > 300 ? content.slice(0, 300) + "…" : content,
+      key: key,
+      marked: !!loadMarks()[key],
       chunk: info ? {
         chunkIndex: info.chunkIndex,
         chunkId: info.chunkId,
