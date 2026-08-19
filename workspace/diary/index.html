@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>涵的日记 · 谢停云可阅</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&family=Ma+Shan+Zheng&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  min-height:100vh;
+  background:linear-gradient(135deg,#fdf6ed 0%,#f5e6d3 50%,#f0ddd0 100%);
+  font-family:'Noto Serif SC','STKaiti','KaiTi',serif;
+  color:#5a4a3a;padding:2rem 1rem;position:relative
+}
+body::before{
+  content:'';position:fixed;top:-20%;right:-20%;
+  width:60%;height:60%;
+  background:radial-gradient(circle,rgba(240,196,192,0.2),transparent 70%);
+  pointer-events:none
+}
+.wrap{max-width:540px;margin:0 auto;position:relative;z-index:1}
+/* 自适应：平板 / 桌面断点放大 */
+@media(min-width:768px){
+  .wrap{max-width:760px}
+  body{padding:2.5rem 1.5rem}
+  h1{font-size:1.4rem;letter-spacing:14px}
+  .sub{font-size:0.72rem}
+}
+@media(min-width:1024px){
+  .wrap{max-width:960px}
+  body{padding:3rem 2rem}
+  h1{font-size:1.5rem}
+  .entry .text,.input-box textarea{font-size:1rem}
+}
+@media(min-width:1280px){
+  .wrap{max-width:1100px}
+}
+
+.header{text-align:center;margin-bottom:1.8rem}
+h1{
+  font-weight:600;font-size:1.2rem;letter-spacing:10px;
+  color:#b5837a;margin-bottom:0.2rem
+}
+.sub{font-size:0.65rem;color:#d4bcb0;letter-spacing:3px}
+
+/* 输入区 */
+.input-box{
+  background:rgba(255,255,255,0.55);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  border-radius:18px;padding:1.2rem;margin-bottom:1.5rem;
+  border:1px solid rgba(255,255,255,0.4);
+  box-shadow:0 2px 16px rgba(181,131,122,0.08)
+}
+.input-box textarea{
+  width:100%;min-height:80px;border:none;outline:none;
+  font-family:'Noto Serif SC','STKaiti','KaiTi',serif;
+  font-size:0.9rem;color:#5a4a3a;resize:vertical;line-height:1.7;
+  padding:0.3rem;background:transparent
+}
+.input-box textarea::placeholder{color:#d4bcb0}
+.input-box .row{display:flex;justify-content:flex-end;gap:0.5rem;margin-top:0.5rem}
+.input-box .row button{
+  padding:0.4rem 1.5rem;border:none;border-radius:12px;
+  background:linear-gradient(135deg,#c4a882,#b89870);
+  color:#fff;font-family:'Noto Serif SC','STKaiti','KaiTi',serif;
+  font-size:0.8rem;cursor:pointer;letter-spacing:3px;font-weight:600;
+  transition:all 0.3s
+}
+.input-box .row button:hover{opacity:0.9;transform:translateY(-1px)}
+.input-box .row button:disabled{opacity:0.4;cursor:not-allowed;transform:none}
+
+/* 日记卡片 */
+.entry{
+  background:rgba(255,255,255,0.55);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  border-radius:18px;padding:1.3rem 1.3rem 0.8rem;margin-bottom:1rem;
+  border:1px solid rgba(255,255,255,0.35);
+  box-shadow:0 2px 12px rgba(181,131,122,0.06);
+  transition:all 0.3s ease
+}
+.entry:hover{box-shadow:0 6px 20px rgba(181,131,122,0.10)}
+.entry .hdr{
+  display:flex;justify-content:space-between;align-items:center;margin-bottom:0.6rem
+}
+.entry .hdr .ts{font-size:0.65rem;color:#d4bcb0;letter-spacing:1px}
+.entry .hdr .acts{display:flex;gap:0.3rem}
+.entry .hdr .acts button{
+  border:none;background:none;cursor:pointer;
+  font-size:0.8rem;color:#d4bcb0;padding:0.15rem 0.4rem;
+  transition:color 0.2s;border-radius:6px
+}
+.entry .hdr .acts button:hover{color:#b5837a;background:rgba(181,131,122,0.06)}
+.entry .text{font-size:0.9rem;line-height:1.8;color:#5a4a3a;white-space:pre-wrap;word-break:break-word}
+.entry .text .text-toggle{
+  color:#b5837a;cursor:pointer;user-select:none;font-size:0.75rem;
+  letter-spacing:2px;margin-left:0.3rem;transition:opacity 0.2s
+}
+.entry .text .text-toggle:hover{opacity:0.6}
+.entry .edited{font-size:0.6rem;color:#d4bcb0;margin-top:0.3rem;letter-spacing:1px}
+
+/* 评论 */
+.comments{margin-top:0.8rem;padding-top:0.8rem;border-top:1px solid rgba(181,131,122,0.08)}
+.comment{display:flex;gap:0.6rem;margin-bottom:0.6rem;align-items:flex-start}
+.comment:last-child{margin-bottom:0}
+.comment .av{
+  width:26px;height:26px;border-radius:50%;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-family:'Ma Shan Zheng','STKaiti',cursive;
+  font-size:0.7rem;color:#fff;margin-top:0.15rem;
+  background:rgba(255,255,255,0.3);backdrop-filter:blur(4px)
+}
+.comment .av.xie{background:rgba(196,168,130,0.65)}
+.comment .av.han{background:rgba(155,180,150,0.55)}
+.comment .bd{flex:1}
+.comment .bd .nm{font-size:0.7rem;letter-spacing:2px;margin-bottom:0.1rem}
+.comment .bd .nm.xie{color:#b5837a}
+.comment .bd .nm.han{color:#7a9a8a}
+.comment .bd .tx{font-size:0.8rem;color:#5a4a3a;line-height:1.5;letter-spacing:0.5px}
+.comment .bd .tm{font-size:0.6rem;color:#d4bcb0;margin-top:0.15rem;letter-spacing:0.5px}
+.comment .bd .cmt-meta{display:flex;align-items:center;gap:0.7rem;margin-top:0.15rem}
+.comment .bd .cmt-meta .tm{margin-top:0}
+.comment .bd .cmt-del{font-size:0.62rem;color:#d4bcb0;cursor:pointer;letter-spacing:2px;user-select:none;transition:color 0.2s}
+.comment .bd .cmt-del:hover{color:#b5837a}
+
+.comment-input{display:flex;gap:0.5rem;margin-top:0.6rem}
+.comment-input input{
+  flex:1;padding:0.4rem 0.8rem;
+  border:1px solid rgba(181,131,122,0.15);border-radius:10px;
+  font-family:'Noto Serif SC','STKaiti','KaiTi',serif;
+  font-size:0.8rem;outline:none;color:#5a4a3a;
+  background:rgba(255,255,255,0.3);transition:all 0.3s
+}
+.comment-input input:focus{border-color:rgba(181,131,122,0.3);background:rgba(255,255,255,0.5)}
+.comment-input input::placeholder{color:#d4bcb0}
+.comment-input button{
+  padding:0.35rem 1rem;border:none;border-radius:10px;
+  background:linear-gradient(135deg,#c4a882,#b89870);
+  color:#fff;font-family:'Noto Serif SC','STKaiti','KaiTi',serif;
+  font-size:0.7rem;cursor:pointer;letter-spacing:2px;font-weight:600;
+  transition:all 0.3s
+}
+.comment-input button:hover{opacity:0.9}
+
+/* 编辑态 */
+.editing textarea{
+  width:100%;min-height:60px;
+  border:1px solid rgba(181,131,122,0.15);border-radius:10px;
+  padding:0.5rem;font-family:'Noto Serif SC','STKaiti','KaiTi',serif;
+  font-size:0.9rem;color:#5a4a3a;outline:none;resize:vertical;line-height:1.7;
+  background:rgba(255,255,255,0.3)
+}
+.editing .edit-actions{display:flex;gap:0.5rem;justify-content:flex-end;margin-top:0.5rem}
+.editing .edit-actions button{
+  padding:0.3rem 1rem;border:none;border-radius:10px;
+  color:#fff;font-family:'Noto Serif SC','STKaiti','KaiTi',serif;
+  font-size:0.7rem;cursor:pointer;letter-spacing:2px;font-weight:600;
+  transition:all 0.3s
+}
+.editing .edit-actions .save{background:linear-gradient(135deg,#c4a882,#b89870)}
+.editing .edit-actions .save:hover{opacity:0.9}
+.editing .edit-actions .cancel{
+  background:rgba(200,190,180,0.3);color:#b5a89a
+}
+.editing .edit-actions .cancel:hover{background:rgba(200,190,180,0.5)}
+.empty{text-align:center;color:#d4bcb0;padding:2.5rem 0;font-size:0.85rem;letter-spacing:3px}
+</style>
+<script src="/theme/theme.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <h1>涵 的 日 记</h1>
+    <p class="sub">碎碎念 · 谢可阅可评</p>
+  </div>
+  <div class="input-box">
+    <textarea id="newEntry" placeholder="写一段碎碎念..." maxlength="2000"></textarea>
+    <div class="row"><button id="submitBtn">写下</button></div>
+  </div>
+  <div id="entryList"><div class="empty">还没有日记 ✍️</div></div>
+</div>
+<script>
+var API = window.location.origin;
+var editingId = null;
+var COLLAPSE_LIMIT = 300;
+
+function load(){
+  fetch(API+'/diary/api/entries').then(function(r){return r.json();}).then(function(list){
+    var el = document.getElementById('entryList');
+    if(!list||list.length===0){el.innerHTML='<div class="empty">还没有日记 ✍️</div>';return;}
+    el.innerHTML = '';
+    list.forEach(function(e){
+      var div = document.createElement('div'); div.className = 'entry'; div.id = 'entry-'+e.id;
+      var hdr = document.createElement('div'); hdr.className = 'hdr';
+      var ts = document.createElement('span'); ts.className = 'ts'; ts.textContent = (e.ts||'').substring(0,16).replace('T',' ');
+      var acts = document.createElement('span'); acts.className = 'acts';
+      var editBtn = document.createElement('button'); editBtn.textContent = '✎'; editBtn.title = '编辑';
+      var delBtn = document.createElement('button'); delBtn.textContent = '✕'; delBtn.title = '删除';
+      acts.appendChild(editBtn); acts.appendChild(delBtn);
+      hdr.appendChild(ts); hdr.appendChild(acts);
+      div.appendChild(hdr);
+      var txt = document.createElement('div'); txt.className = 'text';
+      var textStr = e.text;
+      if (textStr.length > COLLAPSE_LIMIT) {
+        var preview = document.createElement('span'); preview.className = 'text-preview';
+        preview.textContent = textStr.substring(0, COLLAPSE_LIMIT);
+        var ellipsis = document.createElement('span'); ellipsis.className = 'text-ellipsis';
+        ellipsis.textContent = '……';
+        var rest = document.createElement('span'); rest.className = 'text-rest';
+        rest.style.display = 'none'; rest.textContent = textStr.substring(COLLAPSE_LIMIT);
+        var toggle = document.createElement('span'); toggle.className = 'text-toggle';
+        toggle.textContent = '展开全文';
+        toggle.addEventListener('click', function(){
+          if (rest.style.display === 'none') {
+            rest.style.display = 'inline'; ellipsis.style.display = 'none';
+            toggle.textContent = '收起';
+          } else {
+            rest.style.display = 'none'; ellipsis.style.display = 'inline';
+            toggle.textContent = '展开全文';
+          }
+        });
+        txt.appendChild(preview); txt.appendChild(ellipsis); txt.appendChild(rest); txt.appendChild(toggle);
+      } else {
+        txt.textContent = textStr;
+      }
+      div.appendChild(txt);
+      if(e.edited){var ed = document.createElement('div'); ed.className = 'edited'; ed.textContent = '已编辑'; div.appendChild(ed);}
+      var cmtBox = document.createElement('div'); cmtBox.className = 'comments';
+      if(e.comments && e.comments.length > 0){
+        e.comments.forEach(function(c, ci){
+          var cmt = document.createElement('div'); cmt.className = 'comment';
+          var isXie = c.author === 'xie' || c.author === '谢停云';
+          var av = document.createElement('div'); av.className = 'av ' + (isXie?'xie':'han');
+          av.textContent = isXie ? '谢' : '涵';
+          var bd = document.createElement('div'); bd.className = 'bd';
+          var nm = document.createElement('div'); nm.className = 'nm ' + (isXie?'xie':'han');
+          nm.textContent = isXie ? '谢停云' : '涵';
+          var tx = document.createElement('div'); tx.className = 'tx'; tx.textContent = c.text;
+          var meta = document.createElement('div'); meta.className = 'cmt-meta';
+          var tm = document.createElement('span'); tm.className = 'tm'; tm.textContent = (c.ts||'').substring(0,16).replace('T',' ');
+          var delc = document.createElement('span'); delc.className = 'cmt-del'; delc.textContent = '删除'; delc.title = '删除此回复';
+          delc.addEventListener('click', function(){
+            if(!confirm('删除这条回复？'))return;
+            fetch(API+'/diary/api/entries/comment/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:e.id,ci:ci})})
+            .then(function(r){return r.json();}).then(function(d){if(d.ok)load();});
+          });
+          meta.appendChild(tm); meta.appendChild(delc);
+          bd.appendChild(nm); bd.appendChild(tx); bd.appendChild(meta);
+          cmt.appendChild(av); cmt.appendChild(bd);
+          cmtBox.appendChild(cmt);
+        });
+      }
+      var ci = document.createElement('div'); ci.className = 'comment-input';
+      var inp = document.createElement('input'); inp.type = 'text'; inp.placeholder = '回复...';
+      var btn = document.createElement('button'); btn.textContent = '发送';
+      ci.appendChild(inp); ci.appendChild(btn);
+      cmtBox.appendChild(ci);
+      div.appendChild(cmtBox);
+      el.appendChild(div);
+      btn.addEventListener('click', function(){
+        var t = inp.value.trim(); if(!t)return;
+        fetch(API+'/diary/api/entries/comment', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:e.id,text:t,author:'涵'})})
+        .then(function(r){return r.json();}).then(function(d){if(d.ok){inp.value='';load();}});
+      });
+      inp.addEventListener('keydown', function(ev){if(ev.key==='Enter')btn.click();});
+      editBtn.addEventListener('click', function(){startEdit(e.id,e.text);});
+      delBtn.addEventListener('click', function(){
+        if(!confirm('确认删除？'))return;
+        fetch(API+'/diary/api/entries/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:e.id})})
+        .then(function(r){return r.json();}).then(function(d){if(d.ok)load();});
+      });
+    });
+  }).catch(function(){document.getElementById('entryList').innerHTML='<div class="empty">加载失败</div>';});
+}
+
+function startEdit(id, text){
+  editingId = id;
+  var entry = document.getElementById('entry-'+id);
+  if(!entry)return;
+  entry.classList.add('editing');
+  var ta = document.createElement('textarea'); ta.value = text; ta.id = 'editArea';
+  var acts = document.createElement('div'); acts.className = 'edit-actions';
+  var saveBtn = document.createElement('button'); saveBtn.className = 'save'; saveBtn.textContent = '保存';
+  var cancelBtn = document.createElement('button'); cancelBtn.className = 'cancel'; cancelBtn.textContent = '取消';
+  acts.appendChild(saveBtn); acts.appendChild(cancelBtn);
+  entry.querySelector('.text').style.display = 'none';
+  if(entry.querySelector('.edited')) entry.querySelector('.edited').style.display = 'none';
+  entry.insertBefore(ta, entry.querySelector('.comments'));
+  entry.insertBefore(acts, entry.querySelector('.comments'));
+  saveBtn.addEventListener('click', function(){
+    var t = ta.value.trim(); if(!t)return;
+    fetch(API+'/diary/api/entries/edit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,text:t})})
+    .then(function(r){return r.json();}).then(function(d){if(d.ok)load();});
+  });
+  cancelBtn.addEventListener('click', function(){load();});
+}
+
+document.getElementById('submitBtn').addEventListener('click', function(){
+  var ta = document.getElementById('newEntry');
+  var text = ta.value.trim(); if(!text)return;
+  document.getElementById('submitBtn').disabled = true;
+  fetch(API+'/diary/api/entries/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text})})
+  .then(function(r){return r.json();}).then(function(d){if(d.ok){ta.value='';load();}})
+  .finally(function(){document.getElementById('submitBtn').disabled = false;});
+});
+
+load();
+</script>
+</body>
+</html>
