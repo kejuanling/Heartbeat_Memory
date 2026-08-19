@@ -2505,6 +2505,17 @@ app.get("/admin/context-compaction/keywords", { preHandler: basicAuth }, async (
   }
 });
 
+// 压缩页搜索：搜全部原文，返回命中消息的原文编号(第X条) + 所属块
+app.get("/admin/context-compaction/search", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const q = String(req.query.q || "").trim();
+    const limit = Math.floor(Number(req.query.limit) || 50);
+    reply.send(contextReplacements.searchCompactionOriginal(q, limit));
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
 // 词云点词：检索池里包含该词的相关对话片段
 app.get("/admin/context/keywords/related", { preHandler: basicAuth }, async (req, reply) => {
   try {

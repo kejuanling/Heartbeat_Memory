@@ -492,28 +492,42 @@ function toggleManualRecord(index, enabled) {
 function updateManualRecordRange(index, start, end) {
   const found = manualRecordAt(index);
   if (!found) return { ok: false, message: "块不存在" };
-  const built = buildManualRecord(start, end, found.record.enabled !== false);
-  if (!built.ok) return built;
   const items = loadItems();
-  const filtered = [];
-  let removedCount = 0;
+  const cur = items.find(function (x) { return x.id === found.record.id; });
+  if (!cur) return { ok: false, message: "块不存在" };
+  const compItems = compressibleItems();
+  const curRange = recordCompRange(cur, compItems);
+  if (!curRange) return { ok: false, message: "无法定位该块的原文范围" };
+  // 计算并集范围：吸收所有与 [start,end] 重叠的其他块（手工 + AI）
+  let mergedStart = Math.min(start, curRange.start);
+  let mergedEnd = Math.max(end, curRange.end);
+  const absorbed = [];
   for (const it of items) {
-    if (it.id === found.record.id) {
-      filtered.push(built.record);
-      continue;
+    if (it.id === cur.id || it.removed) continue;
+    const r = recordCompRange(it, compItems);
+    if (!r) continue;
+    if (r.start <= mergedEnd && r.end >= mergedStart) {
+      absorbed.push({ it: it, r: r });
+      if (r.end > mergedEnd) mergedEnd = r.end;
+      if (r.start < mergedStart) mergedStart = r.start;
     }
-    if (it.source === "manual") {
-      const rs = it.range && it.range.start_index;
-      const re = it.range && it.range.end_index;
-      if (Number.isInteger(rs) && Number.isInteger(re) && rs <= built.record.range.end_index && re >= built.record.range.start_index) {
-        removedCount++;
-        continue;
-      }
-    }
-    filtered.push(it);
   }
+  const built = buildManualRecord(mergedStart, mergedEnd, cur.enabled !== false);
+  if (!built.ok) return built;
+  // 摘要拼接：当前块 + 被吸收块（按原文位置顺序）
+  absorbed.sort(function (a, b) { return a.r.start - b.r.start; });
+  const parts = [recordText(cur)].concat(absorbed.map(function (a) { return recordText(a.it); })).filter(Boolean);
+  const mergedText = parts.join("\n\n");
+  cur.range = built.record.range;
+  cur.range_label = built.record.range_label;
+  cur.matched = built.record.matched;
+  cur.count = built.record.count;
+  cur.enabled = cur.enabled !== false;
+  if (mergedText) { cur.text = mergedText; cur.memory = mergedText; }
+  cur.updated_at = nowIso();
+  const filtered = items.filter(function (it) { return !absorbed.some(function (a) { return a.it.id === it.id; }); });
   saveItems(filtered);
-  return { ok: true, record: built.record, removedCount: removedCount };
+  return { ok: true, record: publicItem(cur), removedCount: absorbed.length, merged: absorbed.map(function (a) { return a.it.id; }) };
 }
 
 
@@ -527,12 +541,28 @@ function updateAiRecordRange(repId, startIdx, endIdx) {
   if (!Number.isInteger(s) || !Number.isInteger(e) || s < 0 || e < s) return { ok: false, message: '无效的编号范围' };
   if (s >= items.length) return { ok: false, message: '起始编号超出当前消息总数' };
   const ee = Math.min(e, items.length - 1);
-  const slice = items.slice(s, ee + 1);
-  if (slice.length === 0) return { ok: false, message: '范围内没有可压缩消息' };
   const list = loadItems();
   const idx = list.findIndex(it => it && it.id === repId && !it.removed);
   if (idx < 0) return { ok: false, message: '记录不存在' };
   const rec = list[idx];
+  const curRange = recordCompRange(rec, items);
+  if (!curRange) return { ok: false, message: '无法定位该块的原文范围' };
+  // 计算并集：吸收所有与 [s, ee] 重叠的其他块（手工 + AI）
+  let mergedStart = Math.min(s, curRange.start);
+  let mergedEnd = Math.max(ee, curRange.end);
+  const absorbed = [];
+  for (const it of list) {
+    if (it.id === repId || it.removed) continue;
+    const r = recordCompRange(it, items);
+    if (!r) continue;
+    if (r.start <= mergedEnd && r.end >= mergedStart) {
+      absorbed.push({ it: it, r: r });
+      if (r.end > mergedEnd) mergedEnd = r.end;
+      if (r.start < mergedStart) mergedStart = r.start;
+    }
+  }
+  const slice = items.slice(mergedStart, mergedEnd + 1);
+  if (slice.length === 0) return { ok: false, message: '范围内没有可压缩消息' };
   let minT = null, maxT = null;
   slice.forEach(function (r) {
     const m = r.msg;
@@ -549,9 +579,15 @@ function updateAiRecordRange(repId, startIdx, endIdx) {
     return { role: r.msg.role, content: typeof r.msg.content === 'string' ? r.msg.content : contentToText(r.msg) };
   });
   rec.count = slice.length;
+  // 摘要拼接：当前块 + 被吸收块（按原文位置顺序）
+  absorbed.sort(function (a, b) { return a.r.start - b.r.start; });
+  const parts = [recordText(rec)].concat(absorbed.map(function (a) { return recordText(a.it); })).filter(Boolean);
+  const mergedText = parts.join("\n\n");
+  if (mergedText) { rec.text = mergedText; rec.memory = mergedText; }
   rec.updated_at = nowIso();
-  saveItems(list);
-  return { ok: true, count: slice.length, record: publicItem(rec) };
+  const filtered = list.filter(function (it) { return !absorbed.some(function (a) { return a.it.id === it.id; }); });
+  saveItems(filtered);
+  return { ok: true, count: slice.length, record: publicItem(rec), removedCount: absorbed.length, merged: absorbed.map(function (a) { return a.it.id; }) };
 }
 
 // 按时间间隔自动切分 [start,end]（1-based 转 0-based），生成多个手工块
@@ -1233,6 +1269,104 @@ function searchRelatedSegments(word, maxSegments) {
   };
 }
 
+// ========================
+// 压缩页搜索：搜全部原文，返回命中消息的原文编号(第X条) + 所属块
+// ========================
+function compactionKeyOf(m) {
+  return String(m.role || "") + "\u0000" + String(m.content || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function locateCompIdx(target, items) {
+  const k = compactionKeyOf(target);
+  for (let i = 0; i < items.length; i++) {
+    if (compactionKeyOf(items[i].msg) === k) return i;
+  }
+  return -1;
+}
+
+// 解析记录在压缩索引空间(compressibleItems)中的覆盖范围
+function recordCompRange(it, items) {
+  const compItems = items || compressibleItems();
+  const matched = (Array.isArray(it.matched) && it.matched.length > 0) ? it.matched : [];
+  if (matched.length === 0) return null;
+  const fl = locateCompIdx(matched[0], compItems);
+  if (fl < 0) return null;
+  let ll = locateCompIdx(matched[matched.length - 1], compItems);
+  if (ll < 0) {
+    for (let k = matched.length - 2; k >= 0; k--) {
+      const ck = locateCompIdx(matched[k], compItems);
+      if (ck >= 0) { ll = ck; break; }
+    }
+  }
+  if (ll < 0 || ll < fl) return null;
+  return { start: fl, end: ll };
+}
+
+// 构建「原文编号(1-based) -> 所属块」映射，编号与压缩页显示一致
+function buildCompactionChunkMap() {
+  const items = compressibleItems();
+  const records = loadItems().filter(function (it) { return !it.removed; });
+  const map = new Array(items.length).fill(null);
+  const positioned = [];
+  records.forEach(function (it) {
+    const r = recordCompRange(it, items);
+    if (!r) return;
+    positioned.push({ it: it, r: r });
+  });
+  positioned.sort(function (a, b) { return a.r.start - b.r.start; });
+  let displayIndex = 0;
+  positioned.forEach(function (p) {
+    displayIndex++;
+    const text = recordText(p.it);
+    const info = {
+      chunkIndex: displayIndex,
+      chunkId: p.it.id,
+      source: p.it.source || "ai",
+      enabled: p.it.enabled !== false,
+      summary: text.slice(0, 80)
+    };
+    for (let i = p.r.start; i <= p.r.end; i++) map[i] = info;
+  });
+  return { items: items, map: map };
+}
+
+// 压缩页搜索：搜全部原文，返回命中消息的原文编号(第X条) + 所属块
+function searchCompactionOriginal(keyword, maxResults) {
+  const q = String(keyword || "").trim();
+  if (!q) return { ok: false, error: "关键词不能为空", total: 0, results: [] };
+  const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return { ok: false, error: "关键词不能为空", total: 0, results: [] };
+  const { items, map } = buildCompactionChunkMap();
+  const maxReturn = Math.max(1, Math.min(200, Math.floor(Number(maxResults) || 50)));
+  const results = [];
+  items.forEach(function (e, i) {
+    const content = typeof e.msg.content === "string" ? e.msg.content : contentToText(e.msg);
+    if (!content) return;
+    const low = content.toLowerCase();
+    let allHit = true;
+    for (const t of terms) {
+      if (low.indexOf(t) === -1) { allHit = false; break; }
+    }
+    if (!allHit) return;
+    const t = messageTime(e.msg);
+    const info = map[i];
+    results.push({
+      index: i + 1,
+      role: e.msg.role || "",
+      time: t ? fmtWall(t) : "",
+      content: content.length > 300 ? content.slice(0, 300) + "…" : content,
+      chunk: info ? {
+        chunkIndex: info.chunkIndex,
+        chunkId: info.chunkId,
+        source: info.source,
+        enabled: info.enabled,
+        summary: info.summary
+      } : null
+    });
+  });
+  return { ok: true, total: results.length, results: results.slice(0, maxReturn) };
+}
+
 module.exports = {
   isReplacementMemoryMessage,
   addReplacement,
@@ -1261,5 +1395,6 @@ module.exports = {
   removeAllManualRecords,
   loadTimeline,
   extractPoolKeywords,
-  searchRelatedSegments
+  searchRelatedSegments,
+  searchCompactionOriginal
 };

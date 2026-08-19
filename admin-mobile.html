@@ -152,6 +152,12 @@
  .search-bar{display:flex;gap:8px;margin-bottom:12px;overflow:hidden}
  .search-bar input{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:rgba(255,255,255,0.7);font-family:"Noto Sans SC",sans-serif;font-size:13px;color:var(--text);outline:none}
  .search-bar select{padding:10px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);background:rgba(255,255,255,0.7);font-family:"Noto Sans SC",sans-serif;font-size:12px;color:var(--text);outline:none;max-width:120px;flex-shrink:0;white-space:nowrap}
+ .cc-orig-search-wrap{margin-top:8px;margin-bottom:4px}
+ .cc-orig-item{padding:10px 0;border-bottom:1px solid var(--border)}
+ .cc-orig-item:last-child{border-bottom:none}
+ .cc-orig-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+ .cc-orig-content{font-size:12px;color:var(--text);line-height:1.6;white-space:pre-wrap;word-break:break-word}
+ .cc-orig-sum{font-size:11px;color:var(--text3);margin-left:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%;display:inline-block;vertical-align:middle}
  .mem-tabs{display:inline-flex;gap:6px;margin-bottom:12px;padding:0 2px;flex-wrap:wrap;max-width:100%}
  .mem-tab{flex:0 0 auto;height:30px;display:inline-flex;align-items:center;justify-content:center;padding:0 12px;font-size:11px;border-radius:999px;border:1px solid var(--border);background:#fff;color:var(--text2);cursor:pointer;font-family:inherit;transition:all .2s;white-space:nowrap}
  .mem-tab.active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
@@ -696,6 +702,13 @@
        </div>
      </div>
      <div id="compaction-summary" style="margin-top:4px"></div>
+     <div class="cc-orig-search-wrap">
+       <div class="search-bar" style="margin-bottom:6px">
+         <input type="text" id="cc-original-search" placeholder="搜索原文：输入关键词，返回原文编号与所属块..." oninput="scheduleCcOriginalSearch()">
+       </div>
+       <div id="cc-original-search-info" style="font-size:11px;color:var(--text3);margin-bottom:4px"></div>
+       <div id="cc-original-results"></div>
+     </div>
      <div id="compaction-chunks" style="margin-top:4px"></div>
      <div id="compaction-msg" style="margin-top:12px;font-size:12px;color:var(--accent);min-height:18px;text-align:center"></div>
      <div id="compaction-cfg-tip" style="margin-top:8px;font-size:12px;color:var(--text3);text-align:center"></div>
@@ -1635,6 +1648,52 @@
  
  function fmtCcNum(n){n=Number(n)||0;if(n>=10000)return (n/10000).toFixed(1).replace(/\.0$/,'')+'万';return String(n);}
  
+ let ccOriginalTimer = null;
+ let ccOriginalSeq = 0;
+ function scheduleCcOriginalSearch(){
+   clearTimeout(ccOriginalTimer);
+   ccOriginalTimer = setTimeout(ccOriginalSearch, 300);
+ }
+ async function ccOriginalSearch(){
+   const el = document.getElementById('cc-original-search');
+   const box = document.getElementById('cc-original-results');
+   const info = document.getElementById('cc-original-search-info');
+   const q = el ? el.value.trim() : '';
+   if(!box) return;
+   if(!q){ box.innerHTML=''; if(info) info.textContent=''; return; }
+   const seq = ++ccOriginalSeq;
+   box.innerHTML = skeletonHtml(3);
+   if(info) info.textContent='搜索中…';
+   try{
+     const r = await fetch(ADMIN_API + '/context-compaction/search?q=' + encodeURIComponent(q) + '&limit=50');
+     const j = await r.json();
+     if(seq !== ccOriginalSeq) return;
+     if(!j.ok){ box.innerHTML='<div class="empty">' + escapeHtml(j.error||'搜索失败') + '</div>'; if(info) info.textContent=''; return; }
+     if(info) info.textContent='共命中 ' + j.total + ' 条（显示前 ' + j.results.length + ' 条）';
+     if(!j.results.length){ box.innerHTML='<div class="empty">没有命中「'+escapeHtml(q)+'」的原文</div>'; return; }
+     box.innerHTML = j.results.map(function(x){
+       const chunk = x.chunk;
+       let chunkTag = '<span class="mem-tag" style="background:#7f8c8d;color:#fff">未覆盖</span>';
+       if(chunk){
+         chunkTag = '<span class="mem-tag" style="background:'+(chunk.source==='manual'?'#8e44ad':'#2980b9')+';color:#fff">块 #'+chunk.chunkIndex+'</span>'
+           + (chunk.summary ? '<span class="cc-orig-sum" title="'+escapeHtml(chunk.summary)+'">'+escapeHtml(chunk.summary)+'</span>' : '');
+       }
+       return '<div class="cc-orig-item">' +
+         '<div class="cc-orig-meta">' +
+         '<span class="mem-tag">第 '+x.index+' 条</span>' +
+         '<span class="mem-tag">'+escapeHtml(x.role||'')+'</span>' +
+         '<span class="mem-time">'+escapeHtml(x.time||'')+'</span>' +
+         chunkTag +
+         '</div>' +
+         '<div class="cc-orig-content">'+escapeHtml(x.content)+'</div>' +
+         '</div>';
+     }).join('');
+   }catch(err){
+     if(seq === ccOriginalSeq) box.innerHTML='<div class="empty">搜索失败: '+escapeHtml(err.message)+'</div>';
+     if(info) info.textContent='';
+   }
+ }
+
  function loadCompactionPreview(){
    const el=document.getElementById('compaction-chunks');
    const sum=document.getElementById('compaction-summary');
@@ -2321,7 +2380,7 @@
     }).then(function(r){return r.json()}).then(function(d2){
       if(d2 && d2.error){ if(msg) msg.textContent='操作失败: '+d2.error; return; }
       if(d2 && d2.ok===false){ if(msg) msg.textContent=(d2.message||'操作未完成'); return; }
-      if(msg) msg.textContent='AI 块 #'+chunk.index+' 已保存为 '+newStart+'-'+newEnd+'（'+d2.count+' 条）。';
+      if(msg) msg.textContent='AI 块 #'+chunk.index+' 已保存为 '+newStart+'-'+newEnd+'（'+d2.count+' 条）。'+(d2.removedCount?('（自动合并 '+d2.removedCount+' 个重叠块）'):'');
       resetCcMsgCache();
       loadCompactionPreview();
     }).catch(function(e){ if(msg) msg.textContent='操作失败: '+e.message; });
