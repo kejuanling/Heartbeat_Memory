@@ -46,6 +46,7 @@ const {
   formatDateTimeInTimeZone,
   getDatePartsInTimeZone,
   getHourInTimeZone,
+  parseWakeTarget,
   resolveTimeZone,
   zonedWallTimeToDate
 } = require("./time_utils");
@@ -786,24 +787,30 @@ async function runWakeUpInner() {
 
   const rawAiTextFull = normalizeContentToText(data.choices?.[0]?.message?.content).trim();
 
-  // <wake> 标签：AI 可设置下次唤醒时间（分钟，1~1440，0 忽略）；标签不进入推送正文和时间线
-  const wakeTagMatch = rawAiTextFull.match(/<wake>\s*(\d+)\s*<\/wake>/i);
+  // <wake> 标签：AI 可设置下次主动唤醒时间（日期时间或分钟）；标签不进入推送正文和时间线
+  const wakeTagMatch = rawAiTextFull.match(/<wake>([\s\S]*?)<\/wake>/i);
   let wakeScheduleNote = "";
   if (wakeTagMatch) {
-    const wakeMinutes = Number(wakeTagMatch[1]);
-    if (Number.isInteger(wakeMinutes) && wakeMinutes >= 1) {
-      const clamped = Math.min(1440, wakeMinutes);
-      const nextWakeAt = new Date(Date.now() + clamped * 60 * 1000);
-      try {
-        saveWakeSchedule(nextWakeAt.toISOString());
-        wakeScheduleNote = `，且设定了主动唤醒时间：${clamped} 分钟后（至 ${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}）`;
-        console.log(`[wake-up] AI 设定主动唤醒时间：${clamped} 分钟后（${nextWakeAt.toISOString()}）`);
-        armTimedWake();
-      } catch (wakeErr) {
-        console.warn("[wake-up] 保存下次唤醒时间失败:", wakeErr.message);
+    const target = parseWakeTarget(wakeTagMatch[1], TIME_ZONE);
+    if (target) {
+      const nextWakeAt = target.at || new Date(Date.now() + target.minutes * 60 * 1000);
+      if (nextWakeAt.getTime() > Date.now()) {
+        const label = target.at
+          ? formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)
+          : `${target.minutes} 分钟后（至 ${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}）`;
+        try {
+          saveWakeSchedule(nextWakeAt.toISOString());
+          wakeScheduleNote = `，且设定了主动唤醒时间：${label}`;
+          console.log(`[wake-up] AI 设定主动唤醒时间：${label}（${nextWakeAt.toISOString()}）`);
+          armTimedWake();
+        } catch (wakeErr) {
+          console.warn("[wake-up] 保存下次唤醒时间失败:", wakeErr.message);
+        }
+      } else {
+        console.log("[wake-up] <wake> 时间已过（忽略）:", wakeTagMatch[1]);
       }
     } else {
-      console.log("[wake-up] <wake> 数值无效（忽略）:", wakeTagMatch[1]);
+      console.log("[wake-up] <wake> 内容无效（忽略）:", wakeTagMatch[1]);
     }
   }
   const rawAiText = rawAiTextFull.replace(/<wake>[\s\S]*?<\/wake>/gi, "").trim();
@@ -942,6 +949,25 @@ async function scheduleNextCheck() {
 }
 
 // 潮水记得第一次没过礁石的时间。之后每一次涨落，都是同一片海在确认边界。
+// 对话侧（gateway）写入 wake_schedule.json 后，靠轻量轮询感知变化并重新挂定时器
+let lastWakeScheduleFingerprint = null;
+function fingerprintWakeSchedule() {
+  try {
+    if (!fs.existsSync(WAKE_SCHEDULE_PATH)) return null;
+    const stat = fs.statSync(WAKE_SCHEDULE_PATH);
+    return `${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    return null;
+  }
+}
+function pollWakeScheduleFile() {
+  const fp = fingerprintWakeSchedule();
+  if (fp !== lastWakeScheduleFingerprint) {
+    lastWakeScheduleFingerprint = fp;
+    armTimedWake();
+  }
+}
+
 // 启动第一次检查：等记忆引擎初始化完成后再执行
 function startAfterInit() {
   if (!memoryReady) {
@@ -949,6 +975,8 @@ function startAfterInit() {
     return;
   }
   armTimedWake();
+  lastWakeScheduleFingerprint = fingerprintWakeSchedule();
+  setInterval(pollWakeScheduleFile, 20_000);
   setTimeout(scheduleNextCheck, 10_000);
 }
 startAfterInit();

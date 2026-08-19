@@ -76,11 +76,54 @@ function zonedWallTimeToDate({ year, month, day, hour, minute }, timeZone = reso
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+// 闹钟目标解析：优先日期时间（YYYY-MM-DD HH:mm，按 timeZone 墙上时间），纯数字按分钟（1~1440）。
+// 返回 { at: Date }（日期时间）或 { minutes: number }（分钟）；无法解析返回 null。
+function parseWakeTarget(raw, timeZone = resolveTimeZone()) {
+  const s = String(raw || "").trim();
+  if (!s) return null;
+  // 纯数字 → 分钟（1~1440，与旧 <wake> 语义一致）
+  if (/^\d+$/.test(s)) {
+    const n = Number(s);
+    if (Number.isInteger(n) && n >= 1) return { minutes: Math.min(1440, n) };
+    return null;
+  }
+  // 日期时间 → 按 TIME_ZONE 解析墙上时间（先校验字段范围，避免 JS Date 自动进位把非法日期静默解析）
+  const m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})[T\s]+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/);
+  if (m) {
+    const month = Number(m[2]);
+    const day = Number(m[3]);
+    const hour = Number(m[4]);
+    const minute = Number(m[5]);
+    if (month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+      return null;
+    }
+    const date = zonedWallTimeToDate(
+      { year: m[1], month, day, hour, minute },
+      timeZone
+    );
+    if (date && !Number.isNaN(date.getTime())) {
+      // 回读校验：防止 2026-02-30 这类不存在的日期被 JS Date 进位到 3 月
+      const parts = getDatePartsInTimeZone(date, timeZone);
+      if (
+        Number(parts.year) === Number(m[1]) &&
+        Number(parts.month) === month &&
+        Number(parts.day) === day &&
+        Number(parts.hour) === hour &&
+        Number(parts.minute) === minute
+      ) {
+        return { at: date };
+      }
+    }
+  }
+  return null;
+}
+
 module.exports = {
   DEFAULT_TIME_ZONE,
   formatDateTimeInTimeZone,
   getDatePartsInTimeZone,
   getHourInTimeZone,
+  parseWakeTarget,
   resolveTimeZone,
   zonedWallTimeToDate
 };

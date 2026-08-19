@@ -7,6 +7,7 @@ const crypto = require("crypto");
 const {
   getDatePartsInTimeZone,
   formatDateTimeInTimeZone,
+  parseWakeTarget,
   resolveTimeZone,
   zonedWallTimeToDate
 } = require("./time_utils");
@@ -38,6 +39,8 @@ const IS_RAILWAY_RUNTIME = Boolean(
   process.env.RAILWAY_SERVICE_ID
 );
 const TIMELINE_FILE = "enhanced_messages.json";
+// 对话侧闹钟与唤醒侧共用同一份调度文件：gateway 写入，wake-up 轮询感知后挂定时器
+const WAKE_SCHEDULE_PATH = path.join(__dirname, "data", "wake_schedule.json");
 // 批注 2026-07-17：管理页保存 .env 后要让 PM2 刷新进程环境；保留原进程名，
 // 只补 --update-env，避免用户改完推送配置却继续运行旧值。
 const DEFAULT_RESTART_COMMAND = "pm2 restart wake-up gateway --update-env";
@@ -251,18 +254,52 @@ function safeJsonForInlineScript(value) {
 // 上游（如 DeepSeek）会把 <memory>/<pin> 拆成 <、memory、> 等多个 SSE 事件，
 // 字节层找不到完整标签，必须在 content 文本层做带缓冲的过滤。
 // ========================
+// 与 wake-up 进程共用同一份 wake_schedule.json：原子写入，wake-up 轮询感知后重新挂定时器
+function saveWakeSchedule(nextWakeAtIso) {
+  fs.ensureDirSync(path.dirname(WAKE_SCHEDULE_PATH));
+  const tmp = WAKE_SCHEDULE_PATH + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify({ next_wake_at: nextWakeAtIso, updated_at: new Date().toISOString() }, null, 2), "utf-8");
+  fs.renameSync(tmp, WAKE_SCHEDULE_PATH);
+}
+
+// 对话侧 <wake> 闹钟标签：AI 在对话里设置闹钟（日期时间或分钟）；标签不显示给用户。
+// 返回剥离标签后的文本；同时把闹钟写入 wake_schedule.json（wake-up 进程轮询感知后挂定时器）。
+function parseWakeTagAndSchedule(text) {
+  const cleaned = String(text || "").replace(/<wake>[\s\S]*?<\/wake>/gi, "").trim();
+  const m = String(text || "").match(/<wake>([\s\S]*?)<\/wake>/i);
+  if (!m) return cleaned;
+  const target = parseWakeTarget(m[1], TIME_ZONE);
+  if (!target) {
+    console.log("[wake] <wake> 内容无效（忽略）:", m[1]);
+    return cleaned;
+  }
+  const nextWakeAt = target.at || new Date(Date.now() + target.minutes * 60 * 1000);
+  if (nextWakeAt.getTime() <= Date.now()) {
+    console.log("[wake] <wake> 时间已过（忽略）:", m[1]);
+    return cleaned;
+  }
+  try {
+    saveWakeSchedule(nextWakeAt.toISOString());
+    console.log(`[wake] 对话设置闹钟：${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}（${nextWakeAt.toISOString()}）`);
+  } catch (err) {
+    console.warn("[wake] 保存闹钟失败:", err.message);
+  }
+  return cleaned;
+}
+
 function createContentTagFilter() {
   let buf = "";
   let inTag = false;
-  let tagType = ""; // "memory" | "pin"
+  let tagType = ""; // "memory" | "pin" | "wake"
 
-  // 判断 tail（从某个 "<" 开始的小写文本）是否可能是 memory/pin 开标签
+  // 判断 tail（从某个 "<" 开始的小写文本）是否可能是 memory/pin/wake 开标签
   function isPotentialOpen(tail) {
-    if (/^<(memory|pin)(\s[^>]*)?>/.test(tail)) return true; // 完整开标签（可带属性）
-    if (/^<(memory|pin)\s[^>]*$/.test(tail)) return true;     // 属性写法进行中
-    if (/^<(memory|pin)$/.test(tail)) return true;            // 恰好 <memory / <pin
+    if (/^<(memory|pin|wake)(\s[^>]*)?>/.test(tail)) return true; // 完整开标签（可带属性）
+    if (/^<(memory|pin|wake)\s[^>]*$/.test(tail)) return true;     // 属性写法进行中
+    if (/^<(memory|pin|wake)$/.test(tail)) return true;            // 恰好 <memory / <pin / <wake
     if (/^<m(?:e(?:m(?:o(?:r)?)?)?)?$/.test(tail)) return true; // <m <me <mem <memo <memor
     if (/^<p(?:i)?$/.test(tail)) return true;                  // <p <pi
+    if (/^<w(?:a(?:k)?)?$/.test(tail)) return true;            // <w <wa <wak
     if (tail === "<") return true;
     return false;
   }
@@ -271,7 +308,7 @@ function createContentTagFilter() {
   function findOpenIndex(str) {
     const lower = str.toLowerCase();
     const candidates = [];
-    const re = /<(?=[mp])/g;
+    const re = /<(?=[mpw])/g;
     let m;
     while ((m = re.exec(lower)) !== null) {
       candidates.push(m.index);
@@ -292,7 +329,7 @@ function createContentTagFilter() {
       buf += delta;
       for (;;) {
         if (inTag) {
-          const closeRe = tagType === "memory" ? /<\/memory>/i : /<\/pin>/i;
+          const closeRe = tagType === "memory" ? /<\/memory>/i : tagType === "pin" ? /<\/pin>/i : /<\/wake>/i;
           const m = closeRe.exec(buf);
           if (m) {
             buf = buf.slice(m.index + m[0].length);
@@ -308,9 +345,10 @@ function createContentTagFilter() {
         if (open !== -1) {
           if (open > 0) emit(buf.slice(0, open));
           buf = buf.slice(open);
-          if (/^<(memory|pin)(\s[^>]*)?>/.test(buf.toLowerCase())) {
+          if (/^<(memory|pin|wake)(\s[^>]*)?>/.test(buf.toLowerCase())) {
             inTag = true;
-            tagType = buf.toLowerCase().startsWith("<pin") ? "pin" : "memory";
+            const lowerBuf = buf.toLowerCase();
+            tagType = lowerBuf.startsWith("<pin") ? "pin" : lowerBuf.startsWith("<wake") ? "wake" : "memory";
           }
           return;
         }
@@ -1209,6 +1247,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
         const aiContent = aiMessage.content || "";
         const aiThinking = extractAssistantThinking(aiMessage);
         if (aiContent) {
+          // 解析 <wake> 闹钟标签并写入调度（标签随后被剥离，不显示给用户）
+          parseWakeTagAndSchedule(aiContent);
           // 提取并存储记忆，同时拿到清洗后的文本
           const cleanText = await tagParser.extractAndStore(aiContent);
           // 用清洗后的文本替换 JSON 中的 content
@@ -1324,6 +1364,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
         }
       }
       if (aiFullContent) {
+        // 解析 <wake> 闹钟标签并写入调度（标签随后被剥离，不显示给用户）
+        parseWakeTagAndSchedule(aiFullContent);
         // 提取并存储记忆，并拿到清洗后的文本
         const cleanFull = await tagParser.extractAndStore(aiFullContent).catch(err => {
           console.warn("[memory] 流式标签解析失败:", err.message);
