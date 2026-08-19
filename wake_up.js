@@ -707,6 +707,13 @@ async function runWakeUpInner() {
     .filter(m => m.role !== "tool" && !m.tool_calls && !m.tool_call_id)
     .map(m => (Array.isArray(m.content) ? { ...m, content: normalizeContentToText(m.content) } : m));
 
+  // 批注 2026-08-19 唐山：唤醒侧兜底——历史末尾若仍是用户最新未回复消息，则剔除这些尾部 user 消息，
+  // 保证发给 AI 的最后一条始终是 AI 自己的回复（正常对话最后一条都是 assistant），
+  // 避免 AI 把最后一条用户消息当成未回答而去生成对话回复。
+  while (historyMsgs.length && historyMsgs[historyMsgs.length - 1].role === "user") {
+    historyMsgs.pop();
+  }
+
   const baseSystemPrompt = cleanMessages.find(msg => msg.role === "system");
   const cleanSP = baseSystemPrompt
     ? normalizeContentToText(baseSystemPrompt.content).split("## search_web 工具使用说明")[0].trim()
@@ -714,7 +721,7 @@ async function runWakeUpInner() {
 
   // 稳定 system = 人设(cleanSP) + 永久上下文(pinned)，与主聊天一致
   const stableSystem = [cleanSP, pinnedContext].filter(Boolean).join("\n\n");
-  // 唤醒提示词：作为最后一条 system 注入，贴近生成位置
+  // 唤醒提示词：提到最前面（紧随人设之后、历史之前），让 AI 先读后台唤醒规则再读历史
   const dynamicContent = [
     `（系统提示：以下内容${process.env.USER_DISPLAY_NAME || "用户"}不可见，仅供你参考）`,
     wakePrompt
@@ -725,11 +732,11 @@ async function runWakeUpInner() {
       role: "system",
       content: stableSystem
     },
-    ...historyMsgs,
     {
       role: "system",
       content: dynamicContent
-    }
+    },
+    ...historyMsgs
   ];
 
   // 批注 2026-07-15：wake-up prompt 会包含最近聊天记录；
