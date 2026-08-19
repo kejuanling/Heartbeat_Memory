@@ -1616,6 +1616,7 @@
  let ccGapTimeByKey = {};
  let ccGapCollapsed = new Set();
  let ccGapGenerating = new Set();
+ let ccBlockGenerating = new Set();
  let ccAiSummaryOpen = new Set();
  let ccAnimateOpen = new Set();
  let ccAiEditTarget = null;
@@ -1747,12 +1748,10 @@
        +'<span class="cc-chunk-title '+(isAi?'ai':'manual')+'">块 #'+c.index+'</span>'
        +'<span class="cc-badge '+(isAi?(enabled?'done':'off'):(enabled?(c.cached?'done':'todo'):(c.cached?'todo':'off')))+'">'+(isAi?(enabled?'已替换':'已停用'):(enabled?(c.cached?'已替换':'待生成'):(c.cached?'待替换':'已停用')))+'</span>'
        +'<span class="cc-chunk-stat">'+count+' 条 · '+fmtCcNum(c.chars)+' 字</span>'
-       +(isAi
-         ? '<button class="cc-btn cc-head-toggle'+(enabled?' on':'')+'" onclick="event.stopPropagation();toggleCcReplace('+c.index+','+blockIndex+',1)">'+(enabled?'取消替换':'替换')+'</button>'
-         : (c.cached
-           ? '<button class="cc-btn cc-head-toggle'+(enabled?' on':'')+'" onclick="event.stopPropagation();toggleCcReplace('+c.index+','+blockIndex+',0)">'+(enabled?'取消替换':'替换')+'</button>'
-           : '<button class="cc-btn cc-head-toggle'+(enabled?'':' off')+'" onclick="event.stopPropagation();toggleCcReplace('+c.index+','+blockIndex+',0)">'+(enabled?'停用':'启用')+'</button>'))
-       +(!isAi && !c.cached ? '<button class="cc-btn cc-act-add cc-head-add" onclick="event.stopPropagation();regenerateBlockSummary('+c.index+','+blockIndex+')">✦ 生成摘要</button>' : '')
+       +((isAi||c.cached)
+         ? '<button class="cc-btn cc-head-toggle'+(enabled?' on':'')+'" onclick="event.stopPropagation();toggleCcReplace('+c.index+','+blockIndex+','+(isAi?1:0)+')">'+(enabled?'取消替换':'替换')+'</button>'
+         : '')
+       +(!isAi && !c.cached ? '<button class="cc-btn cc-act-add cc-head-add" onclick="event.stopPropagation();regenerateBlockSummary('+c.index+','+blockIndex+')"'+(ccBlockGenerating.has(c.index)?' disabled':'')+'>'+(ccBlockGenerating.has(c.index)?'生成中…':'✦ 生成摘要')+'</button>' : '')
         +(!isAi && !c.cached ? '<button class="cc-btn cc-act-add cc-head-add" onclick="event.stopPropagation();openCcAddManual('+c.index+','+blockIndex+')">＋新增摘要</button>' : '')
        +'</div>'
        +'<div class="cc-meta">第 '+start+'~'+end+' 条 · '+escHtml(timeLabel)+'</div>'
@@ -1770,7 +1769,7 @@
          ? '<div class="cc-ai-summary-wrap">'
            +'<div class="cc-sum-toggle-row">'
            +'<div class="cc-summary-toggle" onclick="toggleCcAiSummary('+c.index+')">'+(ccAiSummaryOpen.has(c.index)?'▾ 收起摘要':'▸ 查看摘要')+'</div>'
-           +'<button class="cc-sum-toggle-btn" onclick="event.stopPropagation();regenerateAiBlockSummary('+c.repId+','+c.index+')">✦ 重新生成摘要</button>'
+           +'<button class="cc-sum-toggle-btn" onclick="event.stopPropagation();regenerateAiBlockSummary('+c.repId+','+c.index+')"'+(ccBlockGenerating.has(c.index)?' disabled':'')+'>'+(ccBlockGenerating.has(c.index)?'生成中…':'✦ 重新生成摘要')+'</button>'
            +'</div>'
            +'<div id="cc-collapse-ai-'+c.index+'" class="cc-collapse'+(ccAiSummaryOpen.has(c.index)&&(prevOpenCol['cc-collapse-ai-'+c.index]||!ccAnimateOpen.has('cc-collapse-ai-'+c.index))?' open':'')+'"><div class="cc-collapse-inner">'+renderCcAiSummary(c)+'</div></div>'
            +'</div>'
@@ -1779,7 +1778,7 @@
          ? '<div class="cc-ai-summary-wrap">'
            +'<div class="cc-sum-toggle-row">'
            +'<div class="cc-summary-toggle" onclick="toggleCcSummary('+c.index+')">'+(ccSummaryOpen.has(c.index)?'▾ 收起摘要':'▸ 查看摘要')+(c.history&&c.history.length?'（共 '+(c.history.length+1)+' 版）':'')+'</div>'
-           +'<button class="cc-sum-toggle-btn" onclick="event.stopPropagation();regenerateBlockSummary('+c.index+','+blockIndex+')">✦ 重新生成摘要</button>'
+           +'<button class="cc-sum-toggle-btn" onclick="event.stopPropagation();regenerateBlockSummary('+c.index+','+blockIndex+')"'+(ccBlockGenerating.has(c.index)?' disabled':'')+'>'+(ccBlockGenerating.has(c.index)?'生成中…':'✦ 重新生成摘要')+'</button>'
            +'</div>'
            +'<div id="cc-collapse-sum-'+c.index+'" class="cc-collapse'+(ccSummaryOpen.has(c.index)&&(prevOpenCol['cc-collapse-sum-'+c.index]||!ccAnimateOpen.has('cc-collapse-sum-'+c.index))?' open':'')+'"><div class="cc-collapse-inner">'+renderCcSummaryEditor(c, blockIndex)+renderCcHistory(c)+'</div></div>'
            +'</div>'
@@ -2038,11 +2037,14 @@
    if(blockIndex===undefined || blockIndex===null || blockIndex<0) return;
    if(!confirm('重新生成块 #'+idx+' 的摘要？现有摘要会保留在历史版本里。')) return;
    const msg=document.getElementById('compaction-msg');
+   ccBlockGenerating.add(idx);
+   renderCompaction();
    if(msg) msg.textContent='块 #'+idx+'：正在重新生成摘要（约几十秒）…';
    fetch(ADMIN_API + '/context-compaction/generate',{
      method:'POST',headers:{'Content-Type':'application/json'},
      body:JSON.stringify({action:'block', blockIndex: blockIndex})
    }).then(function(r){return r.json()}).then(function(d){
+     ccBlockGenerating.delete(idx);
      if(d && d.error){ if(msg) msg.textContent='生成失败: '+d.error; return; }
      if(d && d.ok===false){ if(msg) msg.textContent=(d.message||'生成失败'); return; }
      ccDraft[idx]=undefined;
@@ -2050,27 +2052,28 @@
      ccAnimateOpen.add('cc-collapse-sum-'+idx);
      if(msg) msg.textContent='块 #'+idx+' 摘要已重新生成（'+d.length+' 字）。';
      resetCcMsgCache();
-     loadCompactionPreview();
-   }).catch(function(e){ if(msg) msg.textContent='生成失败: '+e.message; });
+   }).catch(function(e){ if(msg) msg.textContent='生成失败: '+e.message; }).finally(function(){ loadCompactionPreview(); });
  }
  
  function regenerateAiBlockSummary(repId, idx){
    if(!repId) return;
    if(!confirm('重新生成块 #'+idx+'（AI 记忆）的摘要？现有摘要会保留在历史版本里。')) return;
    const msg=document.getElementById('compaction-msg');
+   ccBlockGenerating.add(idx);
+   renderCompaction();
    if(msg) msg.textContent='块 #'+idx+'：正在重新生成摘要（约几十秒）…';
    fetch(ADMIN_API + '/context-compaction/generate',{
      method:'POST',headers:{'Content-Type':'application/json'},
      body:JSON.stringify({action:'block', repId: repId})
    }).then(function(r){return r.json()}).then(function(d){
+     ccBlockGenerating.delete(idx);
      if(d && d.error){ if(msg) msg.textContent='生成失败: '+d.error; return; }
      if(d && d.ok===false){ if(msg) msg.textContent=(d.message||'生成失败'); return; }
      ccAiSummaryOpen.add(idx);
      ccAnimateOpen.add('cc-collapse-ai-'+idx);
      if(msg) msg.textContent='块 #'+idx+' 摘要已重新生成（'+d.length+' 字）。';
      resetCcMsgCache();
-     loadCompactionPreview();
-   }).catch(function(e){ if(msg) msg.textContent='生成失败: '+e.message; });
+   }).catch(function(e){ if(msg) msg.textContent='生成失败: '+e.message; }).finally(function(){ loadCompactionPreview(); });
  }
 
 // AI 块：查看摘要
@@ -2388,7 +2391,7 @@
      +'<span class="cc-sum-count" id="cc-edit-count-'+c.index+'">'+cur.length+' 字</span>'
      +'<button class="cc-btn primary" onclick="saveCcSummaryEdit('+c.index+')">保存</button>'
      +'<button class="cc-btn secondary" onclick="revertCcSummaryDraft('+c.index+')">还原</button>'
-     +'<button class="cc-btn secondary" onclick="regenerateBlockSummary('+c.index+','+blockIndex+')">重新生成</button>'
+     +'<button class="cc-btn secondary" onclick="regenerateBlockSummary('+c.index+','+blockIndex+')"'+(ccBlockGenerating.has(c.index)?' disabled':'')+'>'+(ccBlockGenerating.has(c.index)?'生成中…':'重新生成')+'</button>'
      +'</div>';
  }
  
