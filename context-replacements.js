@@ -938,6 +938,16 @@ function applyReplacements(messages) {
       }
     }
     if (r < replacements.length && replacements[r].startIdx === i) {
+      // 标星原句先收集，放到摘要前面
+      const starred = [];
+      for (let j = replacements[r].startIdx; j <= replacements[r].endIdx; j++) {
+        const sm = out[j];
+        if (!sm) continue;
+        if (isMemoryFlash(sm)) continue;
+        if (sm.role === "tool" || sm.tool_calls) continue;
+        if (marks[contentKey(sm)]) starred.push(sm);
+      }
+      starred.forEach(function (sm) { final.push(sm); });
       final.push(replacements[r].message);
       // 区间内：记忆浮现与工具痕迹直接删除；替换占位消息保留；其余不可压缩消息保留
       for (let j = replacements[r].startIdx; j <= replacements[r].endIdx; j++) {
@@ -946,7 +956,7 @@ function applyReplacements(messages) {
         if (isMemoryFlash(m)) continue;
         if (m.role === "tool" || m.tool_calls) continue;
         if (isReplacementMemoryMessage(m)) { final.push(m); continue; }
-        if (marks[contentKey(m)]) { final.push(m); continue; } // 标星消息：以原句保留在摘要之后
+        if (marks[contentKey(m)]) continue; // 标星原句已放到摘要前
         if (!isCompressible(m, true)) final.push(m);
       }
       i = replacements[r].endIdx;
