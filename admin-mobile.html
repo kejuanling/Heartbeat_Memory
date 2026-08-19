@@ -2557,7 +2557,7 @@
      ensureCcMessages();
      return '<div style="margin-top:8px;font-size:12px;color:var(--text3)">消息加载中...</div>';
    }
-   ccMsgsHtmlCache[sig]=buildCcMessagesHtml(c, msgs, !!c.aiRep);
+   ccMsgsHtmlCache[sig]=buildCcMessagesHtml(c, msgs, false); // AI 块/手工块都显示标星
    return ccMsgsHtmlCache[sig];
  }
  
@@ -2604,7 +2604,7 @@
        +'</span>'
        +'<span class="cc-msg-right">'
        +(m.time?'<span class="cc-msg-time">'+escHtml(m.time)+'</span>':'')
-       +(noMark?'':'<button class="cc-msg-mark'+(marked?' on':'')+'" onclick="toggleCcMark('+c.index+','+i+')" title="标记为重要内容，写摘要时重点保留">'+(marked?'★':'☆')+'</button>')
+       +(noMark?'':'<button class="cc-msg-mark'+(marked?' on':'')+'" onclick="toggleCcMark('+c.index+','+i+')" title="标星：压缩后以原句保留，不被摘要覆盖">'+(marked?'★':'☆')+'</button>')
        +'</span>'
        +'</div>'
        +'<div class="cc-msg-body">'+escHtml(m.content)+'</div>'

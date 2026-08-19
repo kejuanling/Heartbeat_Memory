@@ -734,11 +734,27 @@ function buildMemoryMessage(item) {
   return { role: "assistant", _ctxRep: true, content: "（对话摘要" + label + "）\n" + recordText(item) };
 }
 
+// ---------------- 重要内容标记（星星） ----------------
+// 与 context-compactor 共用 data/context_compaction_marks.json，key 用 contentKey
+const MARKS_FILE = path.join(DATA_DIR, "context_compaction_marks.json");
+function loadMarks() {
+  try {
+    const data = JSON.parse(fs.readFileSync(MARKS_FILE, "utf-8"));
+    if (data && data.marks && typeof data.marks === "object") return data.marks;
+  } catch (err) { /* 无标记 */ }
+  return {};
+}
+function contentKey(msg) {
+  const text = contentToText(msg);
+  return crypto.createHash("sha256").update((msg && msg.role ? msg.role : "") + "\u0000" + text).digest("hex").slice(0, 32);
+}
+
 function applyReplacements(messages) {
   let items = loadItems().filter(it => !it.removed && it.enabled !== false && recordText(it));
   if (items.length === 0) return messages;
 
   const out = Array.isArray(messages) ? messages.slice() : [];
+  const marks = loadMarks();
 
   // 锚点视图：请求里只有「纯对话」消息参与定位（工具/特殊事件/已替换占位全部排除）
   const srcAnchorIdx = [];
@@ -908,7 +924,7 @@ function applyReplacements(messages) {
   for (let i = 0; i < out.length; i++) {
     // 特殊事件时间落在已替换范围内 → 一并清掉
     const m0 = out[i];
-    if (m0 && !isDiaryEvent(m0) && isSpecialEvent(m0)) {
+    if (m0 && !isDiaryEvent(m0) && !marks[contentKey(m0)] && isSpecialEvent(m0)) {
       let t0 = null;
       if (m0.time) { const d = new Date(m0.time); if (!isNaN(d.getTime())) t0 = d; }
       if (!t0) t0 = tlEventTimeByKey.get(normalizedCompareKey(m0)) || null;
@@ -930,6 +946,7 @@ function applyReplacements(messages) {
         if (isMemoryFlash(m)) continue;
         if (m.role === "tool" || m.tool_calls) continue;
         if (isReplacementMemoryMessage(m)) { final.push(m); continue; }
+        if (marks[contentKey(m)]) { final.push(m); continue; } // 标星消息：以原句保留在摘要之后
         if (!isCompressible(m, true)) final.push(m);
       }
       i = replacements[r].endIdx;

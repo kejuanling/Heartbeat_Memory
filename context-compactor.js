@@ -961,7 +961,6 @@ function buildCompactionPrompt(chunk, cfg) {
   const normalChars = Math.max(minChars, Math.min(maxChars, Math.round((chunk.chars || 0) / 50)));
   const promptCfg = loadCompactionPromptConfig();
   const msgs = chunk.msgs || [];
-  const marks = loadMarks();
   // 浮现的记忆不参与摘要（它们是记忆池注入内容，不是对话本身）；整块只有记忆浮现时退回原文保底
   const usable = msgs.filter(function (m) { return !isMemoryFlash(m); });
   const targetMsgs = usable.length > 0 ? usable : msgs;
@@ -970,14 +969,11 @@ function buildCompactionPrompt(chunk, cfg) {
     const body = contentToText(m);
     const think = cfg.compaction_include_thinking && m.thinking ? "\n（内心活动）" + String(m.thinking) : "";
     const line = "[" + role + "] " + body + think;
-    return marks[contentKey(m)] ? "【重要·务必完整保留】" + line + "【/重要】" : line;
+    return line;
   });
   let conversationText = lines.join("\n\n");
   if (usable.length > 0 && usable.length !== msgs.length) {
     conversationText += "\n\n（注：本段内有 " + (msgs.length - usable.length) + " 条「记忆浮现」系统事件，属于记忆池注入内容，未纳入摘要；被摘要时它们会直接从上下文中移除。）";
-  }
-  if (msgs.some(function (m) { return marks[contentKey(m)]; })) {
-    conversationText += "\n\n注意：对话原文中带有【重要·务必完整保留】标记的部分，是你标记过的重要内容，写摘要时必须逐条完整保留其中的关键细节、数字、约定和情绪转折，重点提炼，不能遗漏、不能简化成一句话。";
   }
   const chunkInfo = (chunk.startTime || "未知") + " ~ " + (chunk.endTime || "未知") + "，共 " + chunk.count + " 条";
   return {
