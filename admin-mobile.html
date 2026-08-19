@@ -2646,11 +2646,19 @@
    const t=e.touches[0];
    ccSwipeState.dx=t.clientX-ccSwipeState.x;
    const dy=t.clientY-ccSwipeState.y;
+   // 已展开的块不再响应左滑（防误触），也不拦截纵向滚动
+   if(ccSwipeState.w.classList.contains('swiped') && ccSwipeState.dx<0) return;
    if(Math.abs(ccSwipeState.dx)>Math.abs(dy)&&Math.abs(ccSwipeState.dx)>10) e.preventDefault();
  },{passive:false});
  document.addEventListener('touchend',function(){
    if(!ccSwipeState) return;
    const s=ccSwipeState; ccSwipeState=null;
+   const alreadySwiped=s.w.classList.contains('swiped');
+   if(alreadySwiped){
+     // 已展开：只响应右滑收回，左滑不响应（防误触）
+     if(s.dx>40) s.w.classList.remove('swiped');
+     return;
+   }
    if(s.dx<-40) s.w.classList.add('swiped');
    else if(s.dx>40) s.w.classList.remove('swiped');
  });
