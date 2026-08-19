@@ -2778,18 +2778,64 @@ app.post("/admin/context-compaction/generate", { preHandler: basicAuth }, async 
         message: "已生成替换正文（" + gen.length + " 字），点块上的「替换」后生效。"
       });
     }
-    const blockIndex = Number(body.blockIndex);
-    if (!Number.isInteger(blockIndex) || blockIndex < 0) {
-      return reply.code(400).send({ error: "blockIndex 必须是 >=0 的整数" });
+    // 支持手动块（blockIndex）或任意记录（repId，含 AI 块）重新生成摘要
+    const blocks = contextReplacements.manualRecordsSorted();
+    let rec = null;
+    let writeBack = null;
+    let isManual = true;
+    const repId = String(body.repId || "").trim();
+    if (repId) {
+      const items = contextReplacements.loadItems();
+      rec = (items || []).filter(it => !it.removed).find(it => String(it.id || "") === repId) || null;
+      if (!rec) return reply.send({ ok: false, message: "记录不存在" });
+      isManual = rec.source === "manual";
+      if (!isManual) writeBack = "updateReplacement";
+    } else {
+      const blockIndex = Number(body.blockIndex);
+      if (!Number.isInteger(blockIndex) || blockIndex < 0) {
+        return reply.code(400).send({ error: "blockIndex 必须是 >=0 的整数" });
+      }
+      rec = blocks[blockIndex];
+      if (!rec) return reply.send({ ok: false, message: "块不存在" });
+      writeBack = "manualText";
     }
-    const manual = contextReplacements.manualRecordsSorted();
-    const rec = manual[blockIndex];
-    if (!rec || !rec.range) return reply.send({ ok: false, message: "块不存在" });
-    const gen = await contextCompactor.generateSummaryForRange(
-      Number(rec.range.start_index), Number(rec.range.end_index)
-    );
+    // 计算要传给压缩器的 compressible 序号区间
+    // 手动块：range.start_index/end_index 即 compressible 序号；
+    // AI 块 / 时间范围块：range 无 start_index，需用 matched 内容反查当前 compressible 序号
+    let gStart = Number(rec.range.start_index);
+    let gEnd = Number(rec.range.end_index);
+    if (!Number.isInteger(gStart) || !Number.isInteger(gEnd) || gStart < 0 || gEnd < gStart) {
+      const matched = (Array.isArray(rec.matched) && rec.matched.length > 0) ? rec.matched : null;
+      if (!matched) return reply.send({ ok: false, message: "块没有可用的序号范围，无法重新生成" });
+      const comp = contextReplacements.compressibleItems();
+      function keyRange(m) {
+        const t = String((m && m.content) || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+        const role = m && m.role ? m.role : "";
+        return role + "\u0000" + t;
+      }
+      const firstKey = keyRange(matched[0]);
+      const lastKey = keyRange(matched[matched.length - 1]);
+      let fi = -1;
+      let li = -1;
+      for (let ci = 0; ci < comp.length; ci++) {
+        const ck = keyRange(comp[ci].msg);
+        if (ck === firstKey && fi === -1) fi = ci;
+        if (ck === lastKey) li = ci;
+      }
+      if (fi < 0 || li < fi) return reply.send({ ok: false, message: "块内消息在当前时间线定位失败，无法重新生成" });
+      gStart = fi;
+      gEnd = li;
+    }
+    const gen = await contextCompactor.generateSummaryForRange(gStart, gEnd);
     if (!gen.ok) return reply.send(gen);
-    const saved = contextReplacements.setManualRecordText(blockIndex, gen.summary);
+    let saved;
+    if (writeBack === "updateReplacement") {
+      saved = contextReplacements.updateReplacement(rec.id, gen.summary);
+      if (!saved.ok) return reply.send({ ok: false, message: saved.error });
+      return reply.send({ ok: true, action: "block", repId: rec.id, length: gen.length, message: "已重新生成替换正文（" + gen.length + " 字）。" });
+    }
+    const blockIndex = Number(body.blockIndex);
+    saved = contextReplacements.setManualRecordText(blockIndex, gen.summary);
     if (!saved.ok) return reply.send({ ok: false, message: saved.message });
     return reply.send({ ok: true, action: "block", blockIndex: blockIndex, length: gen.length, message: "已重新生成替换正文（" + gen.length + " 字）。" });
   } catch (err) {
