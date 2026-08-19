@@ -154,8 +154,15 @@ function contentToText(msg) {
   return "";
 }
 
+// 日记特殊事件：AI 唤醒时自动写的日记，永远不参与压缩，单独保留在上下文
+function isDiaryEvent(msg) {
+  if (!msg || msg.role !== "assistant") return false;
+  return String(msg.content || "").indexOf("自动写了日记") !== -1;
+}
+
 function isCompressible(msg, includeEvents) {
   if (!msg || (msg.role !== "user" && msg.role !== "assistant")) return false;
+  if (isDiaryEvent(msg)) return false; // 日记永远不压缩
   if (!includeEvents && msg.role === "assistant" && isSpecialEvent(msg)) return false;
   if (msg.tool_calls || msg.tool_call_id) return false;
   return contentToText(msg).trim().length > 0;
@@ -1544,7 +1551,7 @@ function compactMessages(messages, opts) {
   for (let i = 0; i < src.length; i++) {
     // 块时间范围清理：只要特殊事件的时间落在已被摘要覆盖的块范围内，一并清掉
     const m0 = src[i];
-    if (m0 && isSpecialEvent(m0)) {
+    if (m0 && !isDiaryEvent(m0) && isSpecialEvent(m0)) {
       let t0 = null;
       if (m0.time) { const d = new Date(m0.time); if (!isNaN(d.getTime())) t0 = d; }
       if (!t0) t0 = tlEventTimeByKey.get(normalizedCompareKey(m0)) || null;
