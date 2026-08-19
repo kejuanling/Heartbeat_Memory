@@ -1763,13 +1763,17 @@
            +'<span class="cc-boundary-arrow">→</span>'
            +'<input class="cc-num" type="number" min="1" max="'+d.totalCompressible+'" value="'+end+'" title="结尾" oninput="ccNumLiveCheck(this,'+d.totalCompressible+')" onchange="updateCompactionBoundary('+blockIndex+',1,this.value)" onblur="clampCcInput(this,'+blockIndex+',1,'+d.totalCompressible+')">'
            +'</div>'
-         : '')
+         : '<div class="cc-boundary">'
+          +'<input class="cc-num" type="number" min="1" max="'+d.totalCompressible+'" value="'+(((typeof c.blockStart==='number'?c.blockStart:0)+1))+'" title="开头" oninput="ccNumLiveCheck(this,'+d.totalCompressible+')" onchange="updateAiBoundary('+c.index+',0,this.value)" onblur="clampAiCcInput(this,'+c.index+',0,'+d.totalCompressible+')">'
+           +'<span class="cc-boundary-arrow">→</span>'
+          +'<input class="cc-num" type="number" min="1" max="'+d.totalCompressible+'" value="'+(((typeof c.blockEnd==='number'?c.blockEnd:0)+1))+'" title="结尾" oninput="ccNumLiveCheck(this,'+d.totalCompressible+')" onchange="updateAiBoundary('+c.index+',1,this.value)" onblur="clampAiCcInput(this,'+c.index+',1,'+d.totalCompressible+')">'
+          +'</div>')
        +(expanded?renderCcMessagesLazy(c):'')
        +(isAi
          ? '<div class="cc-ai-summary-wrap">'
            +'<div class="cc-sum-toggle-row">'
            +'<div class="cc-summary-toggle" onclick="toggleCcAiSummary('+c.index+')">'+(ccAiSummaryOpen.has(c.index)?'▾ 收起摘要':'▸ 查看摘要')+'</div>'
-           +'<button class="cc-sum-toggle-btn" onclick="event.stopPropagation();regenerateAiBlockSummary('+c.repId+','+c.index+')"'+(ccBlockGenerating.has(c.index)?' disabled':'')+'>'+(ccBlockGenerating.has(c.index)?'生成中…':'✦ 重新生成摘要')+'</button>'
+           +'<button class="cc-sum-toggle-btn" onclick="event.stopPropagation();regenerateAiBlockSummary(\''+c.repId+'\','+c.index+')"'+(ccBlockGenerating.has(c.index)?' disabled':'')+'>'+(ccBlockGenerating.has(c.index)?'生成中…':'✦ 重新生成摘要')+'</button>'
            +'</div>'
            +'<div id="cc-collapse-ai-'+c.index+'" class="cc-collapse'+(ccAiSummaryOpen.has(c.index)&&(prevOpenCol['cc-collapse-ai-'+c.index]||!ccAnimateOpen.has('cc-collapse-ai-'+c.index))?' open':'')+'"><div class="cc-collapse-inner">'+renderCcAiSummary(c)+'</div></div>'
            +'</div>'
@@ -2099,6 +2103,7 @@
      +'<div class="cc-actions" style="border-top:none;margin-top:10px;padding-top:0">'
      +'<button class="cc-btn cc-act-edit" onclick="openCcAiEditModal('+c.index+')">编辑记忆</button>'
      +'<button class="cc-btn secondary" onclick="toggleCcAiSummary('+c.index+')">收起</button>'
+      +renderCcHistory(c);
      +'</div>';
  }
  
@@ -2271,6 +2276,57 @@
  }
  
  
+  function clampAiCcInput(input, index, field, max){
+    const raw=Number(input.value);
+    const clamped=Math.min(Math.max(1, Math.floor(raw)||1), Number(max)||1);
+    if(String(clamped)!==String(input.value)){
+      input.value=clamped;
+      const msg=document.getElementById('compaction-msg');
+      if(msg){ setTimeout(function(){ msg.textContent='输入超出范围，已自动修正为第 '+clamped+' 条。'; }, 0); }
+    }
+    updateAiBoundary(index, field, input.value);
+  }
+
+  function updateAiBoundary(index, field, raw){
+    const d=compactionPlan;
+    if(!d) return;
+    const chunk=(d.chunks||[]).find(function(x){ return x.index===index; });
+    if(!chunk || !chunk.repId) return;
+    const repId=chunk.repId;
+    const v=Math.max(1, Math.floor(Number(raw)||1));
+    if(!chunk) return;
+    let curStart, curEnd;
+    if(typeof chunk.blockStart==='number'){
+      curStart=chunk.blockStart+1;
+      curEnd=chunk.blockEnd+1;
+    }else{
+      curStart=(chunk.firstIdx>=0?chunk.firstIdx:0)+1;
+      curEnd=(chunk.lastIdx>=0?chunk.lastIdx:curStart-1)+1;
+    }
+    let newStart=curStart, newEnd=curEnd;
+    if(field===0) newStart=v; else newEnd=v;
+    if(newStart>newEnd){
+      const msg=document.getElementById('compaction-msg');
+      if(msg) msg.textContent='开头不能大于结尾。';
+      loadCompactionPreview();
+      return;
+    }
+    if(newEnd>d.totalCompressible){ newEnd=d.totalCompressible; }
+    if(newStart<1){ newStart=1; }
+    const msg=document.getElementById('compaction-msg');
+    if(msg) msg.textContent='正在更新 AI 块 #'+chunk.index+' 为 '+newStart+'-'+newEnd+' ...';
+    fetch(ADMIN_API + '/context-compaction/blocks',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'update_ai_range', repId:repId, start:newStart, end:newEnd})
+    }).then(function(r){return r.json()}).then(function(d2){
+      if(d2 && d2.error){ if(msg) msg.textContent='操作失败: '+d2.error; return; }
+      if(d2 && d2.ok===false){ if(msg) msg.textContent=(d2.message||'操作未完成'); return; }
+      if(msg) msg.textContent='AI 块 #'+chunk.index+' 已保存为 '+newStart+'-'+newEnd+'（'+d2.count+' 条）。';
+      resetCcMsgCache();
+      loadCompactionPreview();
+    }).catch(function(e){ if(msg) msg.textContent='操作失败: '+e.message; });
+  }
+
  function renderCcHistory(c){
    const h=c.history||[];
    if(!h.length) return '';
@@ -2283,7 +2339,7 @@
      if(v.generatedAt){ try{ t=new Date(v.generatedAt).toLocaleString(); }catch(e){} }
      html+='<div class="cc-hist-item">'
        +'<div class="cc-hist-head">'
-       +'<span class="cc-hist-time">'+t+(v.mode==='edited'?' · 手动编辑':(v.mode==='auto'?' · 自动':' · 手动'))+'</span>'
+       +'<span class="cc-hist-time">'+t+(v.mode==='edited'?' · 手动编辑':(v.mode==='ai'?' · AI':(v.mode==='auto'?' · 自动':' · 手动')))+'</span>'
        +'<div class="cc-hist-btns">'
        +'<button class="cc-hist-restore" onclick="restoreCompactionSummary('+c.index+','+v.index+')">恢复此版</button>'
        +'<button class="cc-hist-del" onclick="deleteCcHistoryVersion('+c.index+','+v.index+')">删除</button>'

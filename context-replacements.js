@@ -509,6 +509,44 @@ function updateManualRecordRange(index, start, end) {
   return { ok: true, record: built.record, removedCount: removedCount };
 }
 
+
+// AI 块：按编号范围更新覆盖区间（前端管理台用）。编号为 compressibleItems 下标（与手动块一致）。
+// 保留 source=ai，时间范围由新编号段内消息的实际时间重算回写；只改自身，不吞并其他块。
+function updateAiRecordRange(repId, startIdx, endIdx) {
+  const items = compressibleItems();
+  if (!repId) return { ok: false, message: '缺少记录 id' };
+  const s = Math.floor(Number(startIdx));
+  const e = Math.floor(Number(endIdx));
+  if (!Number.isInteger(s) || !Number.isInteger(e) || s < 0 || e < s) return { ok: false, message: '无效的编号范围' };
+  if (s >= items.length) return { ok: false, message: '起始编号超出当前消息总数' };
+  const ee = Math.min(e, items.length - 1);
+  const slice = items.slice(s, ee + 1);
+  if (slice.length === 0) return { ok: false, message: '范围内没有可压缩消息' };
+  const list = loadItems();
+  const idx = list.findIndex(it => it && it.id === repId && !it.removed);
+  if (idx < 0) return { ok: false, message: '记录不存在' };
+  const rec = list[idx];
+  let minT = null, maxT = null;
+  slice.forEach(function (r) {
+    const m = r.msg;
+    const t = messageTime && typeof messageTime === 'function' ? messageTime(m) : null;
+    if (!t) return;
+    const v = t.getTime();
+    if (minT === null || v < minT) minT = v;
+    if (maxT === null || v > maxT) maxT = v;
+  });
+  if (minT === null) return { ok: false, message: '新范围内消息缺少时间，无法映射时间范围' };
+  rec.range = { start_time: fmtWall(new Date(minT)), end_time: fmtWall(new Date(maxT)) };
+  rec.range_label = rangeLabelOf(slice);
+  rec.matched = slice.map(function (r) {
+    return { role: r.msg.role, content: typeof r.msg.content === 'string' ? r.msg.content : contentToText(r.msg) };
+  });
+  rec.count = slice.length;
+  rec.updated_at = nowIso();
+  saveItems(list);
+  return { ok: true, count: slice.length, record: publicItem(rec) };
+}
+
 // 按时间间隔自动切分 [start,end]（1-based 转 0-based），生成多个手工块
 function splitRangeByGaps(start, end, gapMinutes) {
   if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start) {
@@ -1179,6 +1217,7 @@ module.exports = {
   removeManualRecord,
   toggleManualRecord,
   updateManualRecordRange,
+  updateAiRecordRange,
   splitRangeByGaps,
   setManualRecordText,
   restoreHistory,

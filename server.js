@@ -2712,6 +2712,20 @@ app.post("/admin/context-compaction/blocks", { preHandler: basicAuth }, async (r
       if (!r.ok) return reply.send({ ok: false, message: r.message });
       return reply.send({ ok: true, action: "update_range", removedCount: r.removedCount || 0 });
     }
+    // 更新指定 AI 块的编号范围（1-based → 内部 0-based；保留时间范围存储，只改自身不吞并）
+    if (action === "update_ai_range") {
+      const repId = String(body.repId || "").trim();
+      const start = Number(body.start);
+      const end = Number(body.end);
+      if (!repId) return reply.code(400).send({ error: "repId 不能为空" });
+      if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
+        return reply.code(400).send({ error: "start/end 必须是 start<=end 的正整数（编号 1-based）" });
+      }
+      const r = contextReplacements.updateAiRecordRange(repId, start - 1, end - 1);
+      if (!r.ok) return reply.send({ ok: false, message: r.message });
+      return reply.send({ ok: true, action: "update_ai_range", count: r.count });
+    }
+
     // 按时间间隔自动切分：只切 [start,end] 范围，间隔超过 gapMinutes 分钟自然切成多个手工块
     if (action === "split_range") {
       const start = Number(body.start);
