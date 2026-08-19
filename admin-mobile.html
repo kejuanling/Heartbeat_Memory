@@ -335,6 +335,10 @@
  .cc-label{font-size:11px;color:var(--text3)}
  .cc-summary-toggle{display:flex;align-items:center;gap:6px;width:100%;padding:9px 4px;margin:2px -4px 0;font-size:12px;color:var(--tab-active);cursor:pointer;user-select:none;-webkit-user-select:none;transition:color .2s;font-weight:500}
  .cc-summary-toggle:active{color:var(--accent)}
+ .cc-sum-toggle-row{display:flex;align-items:center;gap:8px;width:100%}
+ .cc-sum-toggle-row .cc-summary-toggle{flex:1 1 auto;min-width:0}
+ .cc-sum-toggle-btn{flex-shrink:0;padding:4px 10px;border:1px solid var(--border);background:#fff;color:var(--text2);border-radius:999px;font-size:11px;cursor:pointer;font-family:inherit;line-height:1.4;transition:background .2s,color .2s}
+ .cc-sum-toggle-btn:hover{background:rgba(106,154,90,.1);color:#5c8a4e;border-color:rgba(106,154,90,.4)}
  .cc-collapse{display:grid;grid-template-rows:0fr;opacity:0;visibility:hidden;transition:grid-template-rows .3s ease,opacity .25s ease,visibility 0s linear .3s}
  .cc-collapse.open{grid-template-rows:1fr;opacity:1;visibility:visible;transition:grid-template-rows .3s ease,opacity .25s ease,visibility 0s}
  .cc-collapse>.cc-collapse-inner{overflow:hidden;min-height:0}
@@ -1748,9 +1752,7 @@
          : (c.cached
            ? '<button class="cc-btn cc-head-toggle'+(enabled?' on':'')+'" onclick="event.stopPropagation();toggleCcReplace('+c.index+','+blockIndex+',0)">'+(enabled?'取消替换':'替换')+'</button>'
            : '<button class="cc-btn cc-head-toggle'+(enabled?'':' off')+'" onclick="event.stopPropagation();toggleCcReplace('+c.index+','+blockIndex+',0)">'+(enabled?'停用':'启用')+'</button>'))
-       +(!isAi
-          ? '<button class="cc-btn cc-act-add cc-head-add" onclick="event.stopPropagation();regenerateBlockSummary('+c.index+','+blockIndex+')">✦ 重新生成摘要</button>'
-          : '<button class="cc-btn cc-act-add cc-head-add" onclick="event.stopPropagation();regenerateAiBlockSummary('+c.repId+','+c.index+')">✦ 重新生成摘要</button>')
+       +(!isAi && !c.cached ? '<button class="cc-btn cc-act-add cc-head-add" onclick="event.stopPropagation();regenerateBlockSummary('+c.index+','+blockIndex+')">✦ 生成摘要</button>' : '')
         +(!isAi && !c.cached ? '<button class="cc-btn cc-act-add cc-head-add" onclick="event.stopPropagation();openCcAddManual('+c.index+','+blockIndex+')">＋新增摘要</button>' : '')
        +'</div>'
        +'<div class="cc-meta">第 '+start+'~'+end+' 条 · '+escHtml(timeLabel)+'</div>'
@@ -1766,13 +1768,19 @@
        +(expanded?renderCcMessagesLazy(c):'')
        +(isAi
          ? '<div class="cc-ai-summary-wrap">'
+           +'<div class="cc-sum-toggle-row">'
            +'<div class="cc-summary-toggle" onclick="toggleCcAiSummary('+c.index+')">'+(ccAiSummaryOpen.has(c.index)?'▾ 收起摘要':'▸ 查看摘要')+'</div>'
+           +'<button class="cc-sum-toggle-btn" onclick="event.stopPropagation();regenerateAiBlockSummary('+c.repId+','+c.index+')">✦ 重新生成摘要</button>'
+           +'</div>'
            +'<div id="cc-collapse-ai-'+c.index+'" class="cc-collapse'+(ccAiSummaryOpen.has(c.index)&&(prevOpenCol['cc-collapse-ai-'+c.index]||!ccAnimateOpen.has('cc-collapse-ai-'+c.index))?' open':'')+'"><div class="cc-collapse-inner">'+renderCcAiSummary(c)+'</div></div>'
            +'</div>'
          : '')
        +(!isAi&&c.cached&&c.summary
          ? '<div class="cc-ai-summary-wrap">'
+           +'<div class="cc-sum-toggle-row">'
            +'<div class="cc-summary-toggle" onclick="toggleCcSummary('+c.index+')">'+(ccSummaryOpen.has(c.index)?'▾ 收起摘要':'▸ 查看摘要')+(c.history&&c.history.length?'（共 '+(c.history.length+1)+' 版）':'')+'</div>'
+           +'<button class="cc-sum-toggle-btn" onclick="event.stopPropagation();regenerateBlockSummary('+c.index+','+blockIndex+')">✦ 重新生成摘要</button>'
+           +'</div>'
            +'<div id="cc-collapse-sum-'+c.index+'" class="cc-collapse'+(ccSummaryOpen.has(c.index)&&(prevOpenCol['cc-collapse-sum-'+c.index]||!ccAnimateOpen.has('cc-collapse-sum-'+c.index))?' open':'')+'"><div class="cc-collapse-inner">'+renderCcSummaryEditor(c, blockIndex)+renderCcHistory(c)+'</div></div>'
            +'</div>'
          : '')
