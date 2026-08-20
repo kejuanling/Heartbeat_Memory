@@ -1659,6 +1659,10 @@
  let ccGapMsgByKey = {};
  let ccGapTimeByKey = {};
  let ccGapCollapsed = new Set();
+ let ccGapPageOffset = {};
+ let ccGapHasMore = {};
+ let ccGapLoadingKey = null;
+ const CC_GAP_PAGE = 200;
  let ccGapGenerating = new Set();
  let ccBlockGenerating = new Set();
  let ccAiSummaryOpen = new Set();
