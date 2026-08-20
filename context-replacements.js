@@ -1439,8 +1439,8 @@ function listMarked() {
       } : null
     });
   });
-  // 按星时间倒序，最新标的在前
-  results.sort(function (a, b) { return String(b.markedAt || "").localeCompare(String(a.markedAt || "")); });
+  // 按消息在对话中的位置（编号）升序，编号从小到大连续
+  results.sort(function (a, b) { return a.index - b.index; });
   return { ok: true, total: results.length, results: results };
 }
 
