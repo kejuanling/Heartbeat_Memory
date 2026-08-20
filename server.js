@@ -2384,7 +2384,7 @@ app.post("/admin/services/:name/:action", { preHandler: basicAuth }, async (req,
 // ========================
 // 统一替换预览（管理台「上下文压缩」页）：所有记录（AI + 手工）合并成块视图
 // ========================
-function buildUnifiedReplacementPreview(includeMessages) {
+function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
   const records = contextReplacements.loadItems().filter(it => !it.removed);
   const items = contextReplacements.compressibleItems();
   const totalCompressible = items.length;
@@ -2499,7 +2499,7 @@ function buildUnifiedReplacementPreview(includeMessages) {
           endIdx: g.end + 1,
           count: g.end - g.start + 1
         };
-        if (includeMessages) {
+        if (includeMessages && !excludeGapMsgs) {
           try {
             const rp = contextCompactor.rangePreview(g.start + 1, g.end + 1);
             if (rp) {
@@ -2541,7 +2541,8 @@ function buildUnifiedReplacementPreview(includeMessages) {
 app.get("/admin/context-compaction/preview", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const includeMessages = req.query.includeMessages === "1";
-    reply.send(buildUnifiedReplacementPreview(includeMessages));
+    const excludeGapMsgs = req.query.excludeGapMsgs === "1";
+    reply.send(buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs));
   } catch (err) {
     reply.code(500).send({ error: err.message });
   }
@@ -2594,7 +2595,9 @@ app.get("/admin/context-compaction/range-preview", { preHandler: basicAuth }, as
   try {
     const start = Number(req.query.start);
     const end = Number(req.query.end);
-    reply.send(contextCompactor.rangePreview(start, end));
+    const limit = req.query.limit !== undefined ? Number(req.query.limit) : 0;
+    const offset = req.query.offset !== undefined ? Number(req.query.offset) : 0;
+    reply.send(contextCompactor.rangePreview(start, end, { limit: limit, offset: offset }));
   } catch (err) {
     reply.code(500).send({ error: err.message });
   }

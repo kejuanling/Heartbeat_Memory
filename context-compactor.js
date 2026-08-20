@@ -1692,7 +1692,7 @@ function preview(opts) {
 
 
 // 编号范围预览（1-based）：返回范围内每条消息（编号/角色/时间/内容/标记），供未覆盖区滚动窗使用
-function rangePreview(start, end) {
+function rangePreview(start, end, opts) {
   const cfg = loadConfig();
   const timeline = loadTimeline();
   const dialog = (Array.isArray(timeline) ? timeline : []).filter(function (m) { return m && m.role !== "system"; });
@@ -1708,12 +1708,20 @@ function rangePreview(start, end) {
   e = Math.min(e, compactCount);
   s = Math.min(s, e);
   const marks = loadMarks();
-  const slice = items.slice(s - 1, e);
+  const pageLimit = opts ? (Math.max(0, Math.floor(Number(opts.limit) || 0)) || 0) : 0;
+  const pageOffset = opts ? (Math.max(0, Math.floor(Number(opts.offset) || 0)) || 0) : 0;
+  const total = e - s + 1;
+  let ps = s - 1 + pageOffset;          // 起始压缩下标（0-based 偏移后的绝对位）
+  let pe = e;
+  const hasMore = pageLimit > 0 && (pageOffset + pageLimit) < total;
+  if (pageLimit > 0) pe = Math.min(pe, ps + pageLimit);
+  if (ps >= pe) return { start: s, end: e, count: 0, compactCount: total, items: [], hasMore: false };
+  const slice = items.slice(ps, pe);
   const out = slice.map(function (it, i) {
     const m = it.msg;
     const t = msgTime(m);
     return {
-      num: s + i,
+      num: ps + i + 1,
       role: m.role,
       content: contentToText(m),
       thinking: m.thinking,
@@ -1738,7 +1746,8 @@ function rangePreview(start, end) {
     compactCount: compactCount,
     startTime: minT ? formatTime(minT) : "",
     endTime: maxT ? formatTime(maxT) : "",
-    items: out
+    items: out,
+    hasMore: hasMore
   };
 }
 

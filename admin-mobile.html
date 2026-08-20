@@ -2082,7 +2082,7 @@
    const key=(g.startIdx||0)+'-'+(g.endIdx||0);
    const msgs=ccGapMsgByKey[key];
    if(!msgs){
-     ensureCcMessages();
+     loadGapPage(key, g.startIdx, g.endIdx);
      return '<div class="cc-gap-scroll"><div style="padding:14px;text-align:center;font-size:12px;color:var(--text3)">消息加载中...</div></div>';
    }
    if(!msgs.length) return '<div class="cc-gap-scroll"><div style="padding:14px;text-align:center;font-size:12px;color:var(--text3)">（该范围无可展开内容）</div></div>';
@@ -2102,9 +2102,31 @@
        +'</div>';
    });
    html+='</div>';
+    if(ccGapHasMore[key]){
+      html+='<div style="text-align:center;padding:8px"><button class="cc-btn secondary" id="cc-gap-more-'+key+'" onclick="loadGapPage(\''+key+'\','+g.startIdx+','+g.endIdx+')">加载更多（已加载 '+(ccGapPageOffset[key]||ccGapMsgByKey[key].length)+'/'+(g.count||'')+'）</button></div>';
+    }
    return html;
  }
  
+ function loadGapPage(key, startIdx, endIdx){
+   if(ccGapLoadingKey===key) return;
+   if(ccGapHasMore[key]===false) return;
+   ccGapLoadingKey=key;
+   const startVal=(typeof startIdx==='number'?startIdx:parseInt(startIdx,10))||0;
+   const endVal=(typeof endIdx==='number'?endIdx:parseInt(endIdx,10))||0;
+   const offset=ccGapPageOffset[key]||0;
+   const url=ADMIN_API+'/context-compaction/range-preview?start='+startVal+'&end='+endVal+'&limit='+CC_GAP_PAGE+'&offset='+offset;
+   fetch(url).then(function(r){return r.json()}).then(function(d){
+     ccGapLoadingKey=null;
+     const arr=(d&&d.items)||[];
+     const prev=ccGapMsgByKey[key]||[];
+     ccGapMsgByKey[key]=prev.concat(arr);
+     ccGapPageOffset[key]=offset+arr.length;
+     ccGapHasMore[key]=!!(d&&d.hasMore);
+     renderCompaction();
+   }).catch(function(){ ccGapLoadingKey=null; });
+ }
+
  function toggleCcGapCollapse(gs, ge){
    const key=(gs||0)+'-'+(ge||0);
    if(ccGapCollapsed.has(key)) ccGapCollapsed.delete(key); else ccGapCollapsed.add(key);
@@ -2717,7 +2739,7 @@
  function ensureCcMessages(){
    if(ccMsgFetchDone || ccMsgFetching) return;
    ccMsgFetching=true;
-   fetch(ADMIN_API + '/context-compaction/preview?includeMessages=1').then(function(r){return r.json()}).then(function(d){
+   fetch(ADMIN_API + '/context-compaction/preview?includeMessages=1&excludeGapMsgs=1').then(function(r){return r.json()}).then(function(d){
      ccMsgFetching=false;
      ccMsgFetchDone=true;
      (d.chunks||[]).forEach(function(c){ if(c.msgs) ccMsgBySig[c.signature]=c.msgs; });
@@ -2737,6 +2759,9 @@
    ccMsgBySig={};
    ccGapMsgByKey={};
    ccGapTimeByKey={};
+   ccGapPageOffset={};
+   ccGapHasMore={};
+   ccGapLoadingKey=null;
    ccMsgsHtmlCache={};
    ccMsgFetching=false;
    ccMsgFetchDone=false;
