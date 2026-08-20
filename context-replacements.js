@@ -1404,6 +1404,39 @@ function buildCompactionChunkMap() {
   return { items: items, map: map };
 }
 
+// 已标星消息列表：遍历原文池，返回所有被标星（marks 命中）的消息，统一管理、便于取消
+function listMarked() {
+  const { items, map } = buildCompactionChunkMap();
+  const marks = loadMarks();
+  const results = [];
+  items.forEach(function (e, i) {
+    const key = contentKey(e.msg);
+    if (!marks[key]) return;
+    const content = typeof e.msg.content === "string" ? e.msg.content : contentToText(e.msg);
+    if (!content) return;
+    const t = messageTime(e.msg);
+    const info = map[i];
+    results.push({
+      index: i + 1,
+      role: e.msg.role || "",
+      time: t ? fmtWall(t) : "",
+      content: content.length > 300 ? content.slice(0, 300) + "…" : content,
+      key: key,
+      markedAt: (marks[key] && marks[key].markedAt) || "",
+      chunk: info ? {
+        chunkIndex: info.chunkIndex,
+        chunkId: info.chunkId,
+        source: info.source,
+        enabled: info.enabled,
+        summary: info.summary
+      } : null
+    });
+  });
+  // 按星时间倒序，最新标的在前
+  results.sort(function (a, b) { return String(b.markedAt || "").localeCompare(String(a.markedAt || "")); });
+  return { ok: true, total: results.length, results: results };
+}
+
 // 压缩页搜索：搜全部原文，返回命中消息的原文编号(第X条) + 所属块
 function searchCompactionOriginal(keyword, maxResults) {
   const q = String(keyword || "").trim();
@@ -1474,5 +1507,6 @@ module.exports = {
   loadTimeline,
   extractPoolKeywords,
   searchRelatedSegments,
-  searchCompactionOriginal
+  searchCompactionOriginal,
+  listMarked
 };

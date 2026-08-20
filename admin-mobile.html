@@ -713,6 +713,18 @@
      <div id="compaction-msg" style="margin-top:12px;font-size:12px;color:var(--accent);min-height:18px;text-align:center"></div>
      <div id="compaction-cfg-tip" style="margin-top:8px;font-size:12px;color:var(--text3);text-align:center"></div>
 
+   <div class="card" data-collapse-id="cc-marked" data-default="collapsed">
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>已标星消息</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-body">
+       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+         <button class="cc-btn secondary" onclick="loadMarkedList()">刷新</button>
+         <span id="cc-marked-info" style="font-size:11px;color:var(--text3)"></span>
+       </div>
+       <div id="cc-marked-list" style="max-height:400px;overflow-y:auto;padding-right:4px"></div>
+       <div style="font-size:11px;color:var(--text3);margin-top:6px">标星的消息会在压缩/替换时以原句保留在上下文中，不被摘要覆盖。点星可取消标记。</div>
+     </div>
+   </div>
+
    <div class="card" data-collapse-id="cc-config" data-default="collapsed">
      <div class="card-title collapsible" onclick="toggleCard(this)"><span>压缩参数配置</span><span class="collapse-arrow">▾</span></div>
      <div class="card-body">
@@ -1726,6 +1738,54 @@
      btn.classList.toggle('on', next);
      btn.textContent = next ? '★' : '☆';
    }).catch(function(e){ alert('标记失败: '+e.message); });
+ }
+
+ // 已标星消息卡片：加载列表
+ async function loadMarkedList(){
+   const el=document.getElementById('cc-marked-list');
+   if(!el) return;
+   const info=document.getElementById('cc-marked-info');
+   if(info) info.textContent='加载中...';
+   try{
+     const r=await fetch(ADMIN_API + '/context-compaction/marked-list');
+     const j=await r.json();
+     const list=j.results||[];
+     el.innerHTML='';
+     if(info) info.textContent='共 ' + list.length + ' 条已标星消息';
+     if(!list.length){ el.innerHTML='<div class="empty">暂无标星消息（在上方原文搜索里点星可以标记）</div>'; return; }
+     el.innerHTML=list.map(function(x){
+       let tH=''; try{ tH=x.markedAt?new Date(x.markedAt).toLocaleString('zh-CN',{hour12:false}) : (x.time||''); }catch(err){}
+       const roleCls = x.role==='user' ? 'color:var(--accent)' : (x.role==='system' ? 'color:var(--tab-active)' : 'color:var(--text)');
+       const chunkTag = x.chunk
+         ? '<span class="mem-tag" style="background:'+(x.chunk.source==='manual'?'#8e44ad':'#2980b9')+';color:#fff">块 #'+x.chunk.chunkIndex+'</span>'
+         : '<span class="mem-tag" style="background:#7f8c8d;color:#fff">未覆盖</span>';
+       return '<div style="padding:8px 0;border-bottom:1px dashed var(--border)">'
+         +'<div style="display:flex;align-items:center;gap:6px">'
+         +'<button class="cc-msg-mark on" data-key="'+x.key+'" onclick="unmarkMsg(this)" title="取消标星：将后此消息可被摘要覆盖">★</button>'
+         +'<span style="font-size:11px;color:var(--text3)">第 '+x.index+' 条</span>'
+         +'<span style="font-size:11px;'+roleCls+'">'+escHtml2(x.role||'')+'</span>'
+         +chunkTag
+         +'</div>'
+         +'<div style="font-size:11px;color:var(--text3);margin-top:2px">'+tH+'</div>'
+         +'<div style="font-size:12px;margin-top:2px;word-break:break-all">'+escHtml2(x.content)+'</div>'
+         +'</div>';
+     }).join('');
+   }catch(e){ el.innerHTML='<div class="empty">加载失败</div>'; if(info) info.textContent=''; }
+ }
+
+ // 取消标星（卡片内）
+ function unmarkMsg(btn){
+   if(!btn) return;
+   if(!confirm('取消标星该条消息？取消后它可能会被压缩/替换为摘要。')) return;
+   const key=btn.getAttribute('data-key');
+   btn.disabled=true;
+   fetch(ADMIN_API + '/context-compaction/mark',{
+     method:'POST',headers:{'Content-Type':'application/json'},
+     body:JSON.stringify({key:key, marked:false})
+   }).then(function(r){return r.json()}).then(function(d){
+     if(d && d.error){ alert('取消失败: '+d.error); btn.disabled=false; return; }
+     loadMarkedList();
+   }).catch(function(e){ alert('取消失败: '+e.message); btn.disabled=false; });
  }
 
  function loadCompactionPreview(){

@@ -2567,6 +2567,15 @@ app.get("/admin/context-compaction/search", { preHandler: basicAuth }, async (re
   }
 });
 
+// 已标星消息列表：统一管理所有被标星的原正文
+app.get("/admin/context-compaction/marked-list", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    reply.send(contextReplacements.listMarked());
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
 // 词云点词：检索池里包含该词的相关对话片段
 app.get("/admin/context/keywords/related", { preHandler: basicAuth }, async (req, reply) => {
   try {
