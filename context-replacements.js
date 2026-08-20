@@ -55,10 +55,18 @@ function getReplaceLog(cap) {
 // ========================
 // 基础工具
 // ========================
+// mtime 感知文件缓存：文件未变化（mtime+size 相同）时复用内存结果，避免对同一份大盘内容反复读盘
+const _readJsonCache = new Map();
 function readJson(file, fallback) {
   try {
     if (!fs.existsSync(file)) return fallback;
-    return JSON.parse(fs.readFileSync(file, "utf-8"));
+    const st = fs.statSync(file);
+    const ck = st.mtimeMs + ':' + st.size;
+    const hit = _readJsonCache.get(file);
+    if (hit && hit.ck === ck) return hit.data;
+    const data = JSON.parse(fs.readFileSync(file, "utf-8"));
+    _readJsonCache.set(file, { ck: ck, data: data });
+    return data;
   } catch (err) {
     console.warn("[context-replacements] 读取失败:", file, err.message);
     return fallback;
@@ -70,6 +78,7 @@ function writeJsonAtomic(file, data) {
   const tmp = file + ".tmp";
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
   fs.renameSync(tmp, file);
+  _readJsonCache.delete(file);
 }
 
 function backupFile(file) {
@@ -877,6 +886,14 @@ function applyReplacements(messages, source) {
     }
   });
 
+  // 性能：预构建时间线位置索引，把「块首条 → tlEntries 位置」的全扫降为 O(1) 查表
+  const tlKeyToPos = new Map();
+  tlEntries.forEach(function (e, idx) {
+    if (isSpecialEvent(e.msg)) return;
+    const k = normalizedCompareKey(e.msg);
+    if (!tlKeyToPos.has(k)) tlKeyToPos.set(k, idx);
+  });
+
   // 按时间线位置给记录排序（文件顺序 ≠ 时间线顺序，AI 记录可能排在手工块之后/之前），
   // 保证处理顺序与对话位置一致，搜索起点单调推进
   const tlPos = new Map(); // record.id -> 首条非特殊事件消息在 tlEntries 中的位置
@@ -886,14 +903,8 @@ function applyReplacements(messages, source) {
     let pos = -1;
     for (const m of matched) {
       if (isSpecialEvent(m)) continue;
-      const key2 = normalizedCompareKey(m);
-      for (let j = 0; j < tlEntries.length; j++) {
-        if (!isSpecialEvent(tlEntries[j].msg) && normalizedCompareKey(tlEntries[j].msg) === key2) {
-          pos = j;
-          break;
-        }
-      }
-      if (pos >= 0) break;
+      const k = tlKeyToPos.get(normalizedCompareKey(m));
+      if (k !== undefined) { pos = k; break; }
     }
     tlPos.set(item.id, pos);
   });
@@ -925,14 +936,8 @@ function applyReplacements(messages, source) {
       let firstNonSpecialTlIdx = -1;
       for (const m of matched) {
         if (isSpecialEvent(m)) continue;
-        const key2 = normalizedCompareKey(m);
-        for (let j = 0; j < tlEntries.length; j++) {
-          if (!isSpecialEvent(tlEntries[j].msg) && normalizedCompareKey(tlEntries[j].msg) === key2) {
-            firstNonSpecialTlIdx = j;
-            break;
-          }
-        }
-        if (firstNonSpecialTlIdx >= 0) break;
+        const k = tlKeyToPos.get(normalizedCompareKey(m));
+        if (k !== undefined) { firstNonSpecialTlIdx = k; break; }
       }
       const purePos = firstNonSpecialTlIdx >= 0 ? tlPurePos.indexOf(firstNonSpecialTlIdx) : -1;
       if (purePos >= searchStart && purePos < srcAnchorIdx.length) si = purePos;
