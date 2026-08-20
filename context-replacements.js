@@ -20,6 +20,39 @@ const TIMELINE_FILE = path.join(__dirname, "enhanced_messages.json");
 const MAX_MEMORY_CHARS = 100000;
 
 // ========================
+// 每次请求的替换/压缩记录（供管理台查看；含对话/共影/唤醒等所有来源）
+// ========================
+const REPLACE_LOG_FILE = path.join(DATA_DIR, "context_replace_log.json");
+const REPLACE_LOG_CAP = 200;
+let _replaceLogCache = null;
+
+function _ensureReplaceLog(force) {
+  if (_replaceLogCache === null || force) {
+    let v = readJson(REPLACE_LOG_FILE, []);
+    _replaceLogCache = Array.isArray(v) ? v : [];
+  }
+  return _replaceLogCache;
+}
+
+function appendReplaceLog(entry) {
+  try {
+    const log = _ensureReplaceLog();
+    log.push(entry);
+    if (log.length > REPLACE_LOG_CAP) log.splice(0, log.length - REPLACE_LOG_CAP);
+    writeJsonAtomic(REPLACE_LOG_FILE, log);
+  } catch (e) {
+    console.warn("[context-replacements] 替换日志写入失败:", e.message);
+  }
+}
+
+function getReplaceLog(cap) {
+  // 每次从磁盘重读，确保查询结果与持久化记录一致
+  const log = _ensureReplaceLog(true);
+  const n = Math.max(0, Math.min(Number(cap) > 0 ? Number(cap) : 50, log.length));
+  return log.slice(log.length - n).reverse();
+}
+
+// ========================
 // 基础工具
 // ========================
 function readJson(file, fallback) {
@@ -785,7 +818,7 @@ function contentKey(msg) {
   return crypto.createHash("sha256").update((msg && msg.role ? msg.role : "") + "\u0000" + text).digest("hex").slice(0, 32);
 }
 
-function applyReplacements(messages) {
+function applyReplacements(messages, source) {
   let items = loadItems().filter(it => !it.removed && it.enabled !== false && recordText(it));
   if (items.length === 0) return messages;
 
@@ -1001,7 +1034,32 @@ function applyReplacements(messages) {
       final.push(out[i]);
     }
   }
-  return mergeAdjacentSameRole(final);
+  const result = mergeAdjacentSameRole(final);
+  try {
+    const itemById = new Map((loadItems() || []).map(function (it) { return [it.id, it]; }));
+    const applied = replacements.map(function (rp) {
+      const rid = String(rp.itemSer || "").split("|").pop();
+      const it = rid ? itemById.get(rid) : null;
+      return {
+        id: it ? it.id : rid,
+        title: (it && it.title) || "",
+        startIdx: rp.startIdx,
+        endIdx: rp.endIdx,
+        contentLen: String((rp.message && rp.message.content) || "").length
+      };
+    });
+    appendReplaceLog({
+      time: nowIso(),
+      source: source || "对话",
+      before: out.length,
+      after: result.length,
+      replaced: replacements.length,
+      applied: applied
+    });
+  } catch (e) {
+    console.warn("[context-replacements] 记录替换日志失败:", e.message);
+  }
+  return result;
 }
 
 // ========================
@@ -1379,6 +1437,7 @@ module.exports = {
   listReplacements,
   listReplacementsForPreview,
   applyReplacements,
+  getReplaceLog,
   searchTimeline,
   resolveRange,
   loadItems,

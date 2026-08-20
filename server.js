@@ -2133,6 +2133,15 @@ app.post("/admin/context-replacements/add-manual", { preHandler: basicAuth }, as
 });
 
 
+app.get("/admin/context-replacements/logs", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const cap = Number((req.query && req.query.limit) || 0);
+    reply.send({ entries: contextReplacements.getReplaceLog(cap) });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
 // ========================
 // 工具集管理（mcp-tools）：停用工具 / 改说明 / 改 schema + 服务启停
 // ========================
@@ -3493,7 +3502,7 @@ function coBuildHistory() {
   const messages = [{ role: "system", content: coPersonaWithPinned() }].concat(coTimelineMessages(Number.MAX_SAFE_INTEGER));
   try {
     const before = messages.length;
-    const replaced = contextReplacements.applyReplacements(messages);
+    const replaced = contextReplacements.applyReplacements(messages, "共影");
     if (Array.isArray(replaced) && replaced.length) {
       messages.length = 0;
       messages.push.apply(messages, replaced);

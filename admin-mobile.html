@@ -747,6 +747,18 @@
    </div>
 </div>
 
+   <div class="card" data-collapse-id="cc-replacelog" data-default="collapsed">
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>每次请求的替换/压缩记录</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-body">
+       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+         <button class="cc-btn secondary" onclick="loadReplaceLog()">刷新</button>
+         <span id="cc-replacelog-info" style="font-size:11px;color:var(--text3)"></span>
+       </div>
+       <div id="cc-replacelog-list" style="max-height:360px;overflow-y:auto;padding-right:4px"><div class="loading">加载中...</div></div>
+       <div style="font-size:11px;color:var(--text3);margin-top:6px">记录每次请求发送给模型前实际发生上下文替换的情况：时间、来源、消息数与替换块数、每块覆盖的原文范围与新正文字数。</div>
+     </div>
+   </div>
+
 <div class="tab-content" id="tab-prompts">
    <div class="card" data-collapse-id="wake-prompt" data-default="collapsed">
      <div class="card-title collapsible" onclick="toggleCard(this)"><span>唤醒提示词</span><span class="collapse-arrow">▾</span></div>
@@ -841,6 +853,19 @@
    </div>
 </div>
 
+<!-- 编辑永久注入上下文 -->
+<div class="modal-overlay" id="editPinnedModal">
+  <div class="modal" style="max-width:min(94vw,560px)">
+    <h3 style="margin:0 0 12px;font-size:15px;color:var(--tab-active)">编辑永久上下文</h3>
+    <input type="text" id="edit-pinned-title" placeholder="标题 (可选)" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;margin-bottom:10px;">
+    <textarea id="edit-pinned-content" rows="5" placeholder="内容..." style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;resize:vertical;margin-bottom:12px;"></textarea>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal('editPinnedModal')">取消</button>
+      <button class="btn btn-primary" onclick="saveEditPinned()">保存</button>
+    </div>
+  </div>
+</div>
+
 <!-- Tab 5: 系统 -->
 <div class="tab-content" id="tab-system">
    <div class="card" data-collapse-id="wake-log" data-default="open">
@@ -876,13 +901,7 @@
      </div>
      <div id="tools-msg" class="tools-msg"></div>
    </div>
-   <div class="card" style="margin-bottom:14px">
-     <div class="card-title" style="display:flex;align-items:center;justify-content:space-between">
-       <span>修改记录</span>
-       <button class="cc-btn secondary" onclick="loadToolsHistory()">刷新</button>
-     </div>
-     <div id="tools-history" style="max-height:320px;overflow-y:auto;padding-right:4px"><div class="loading">加载中...</div></div>
-   </div>
+
    <div class="card">
      <div class="card-title" style="display:flex;align-items:center;justify-content:space-between">
        <span>服务管理</span>
@@ -2754,9 +2773,9 @@
    document.getElementById('tab-'+name).classList.add('active');
    document.querySelector('.tab-item[data-tab="'+name+'"]').classList.add('active');
   if(name==='memory'){switchMemView(memView);loadImportedList();}
-  if(name==='compaction'){loadCompactionPreview(); if(compactionPlan) renderCompactionConfig();}
+  if(name==='compaction'){loadCompactionPreview(); if(compactionPlan) renderCompactionConfig(); loadReplaceLog();}
   if(name==='prompts'){loadWakePrompt();loadCompactionPrompt();loadCoWakePrompt();loadCoVisionPrompt();loadPinned();}
-  if(name==='system'){loadToolsConfig();loadServices();loadToolsHistory();startLogsAutoRefresh();}
+  if(name==='system'){loadToolsConfig();loadServices();startLogsAutoRefresh();}
   if(name!=='system'){stopLogsAutoRefresh();}
   }
  
@@ -3044,8 +3063,7 @@
    setTimeout(function(){ if(btn.parentNode) btn.textContent='复制'; },1600);
  }
  
- let _toolsHist = [];
- 
+  
  function jsonEq(a, b) {
    function sortKeys(o) {
      if (Array.isArray(o)) return o.map(sortKeys);
@@ -3120,87 +3138,11 @@
      if (j.error) { msg.textContent = '保存失败: ' + j.error; return; }
      msg.textContent = '已保存 ' + label + ' ✓（即时生效）';
      loadToolsConfig();
-     loadToolsHistory();
    } catch (e) { msg.textContent = '网络错误'; }
  }
  
  function saveOneTool(name) {
    saveToolsConfig(name);
- }
- 
- async function loadToolsHistory() {
-   const el = document.getElementById('tools-history');
-   if (!el) return;
-   try {
-     const r = await fetch(ADMIN_API + '/tools');
-     const j = await r.json();
-     const list = (j && j.history) || [];
-     _toolsHist = list;
-     if (!list.length) { el.innerHTML = '<div class="empty">还没有修改记录，改完点保存就会记在这里</div>'; return; }
-     const fieldName = { description: '说明', schema: '参数JSON', enabled: '启用/停用' };
-     el.innerHTML = list.map(function (e, i) {
-       let time = '';
-       try { time = new Date(e.time).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch (err) {}
-       let oldV = '', newV = '';
-       if (e.field === 'enabled') {
-         oldV = e.old ? '启用' : '停用';
-         newV = e.new ? '启用' : '停用';
-       } else {
-         oldV = e.old || '';
-         newV = e.new || '';
-       }
-       const oldHtml = oldV === '' ? '<i>(默认/无)</i>' : escHtml2(oldV);
-       const newHtml = newV === '' ? '<i>(默认/无)</i>' : escHtml2(newV);
-       return '<div class="hist-item">'
-         + '<div class="hist-meta" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-         + '<span class="mem-tag">' + (fieldName[e.field] || e.field) + '</span>'
-         + '<b style="color:var(--tab-active)">' + escHtml2(e.tool) + '</b>'
-         + '<span style="font-size:10px;color:var(--text3)">' + time + '</span>'
-         + '<button class="svc-btn" onclick="restoreHistoryEntry(' + i + ')">还原</button></div>'
-         + '<div class="hist-diff" style="font-size:11px;color:var(--text2);word-break:break-all;margin-top:2px">'
-         + '<span style="color:#c89098">' + oldHtml + '</span> → <span style="color:var(--accent)">' + newHtml + '</span>'
-         + '</div></div>';
-     }).join('');
-   } catch (e) { el.innerHTML = '<span class="empty">网络错误</span>'; }
- }
- 
- async function restoreHistoryEntry(i) {
-   const e = _toolsHist[i];
-   if (!e) return;
-   const cfg = (toolsDraft && toolsDraft.config) || {};
-   const disabled = (cfg.disabled || []).slice();
-   const descriptions = {}, schemas = {};
-   let tip = '';
-   if (e.field === 'enabled') {
-     tip = e.old ? '启用' : '停用';
-     if (e.old) { const idx = disabled.indexOf(e.tool); if (idx >= 0) disabled.splice(idx, 1); }
-     else if (disabled.indexOf(e.tool) < 0) disabled.push(e.tool);
-   } else if (e.field === 'description') {
-     tip = e.old || '(默认/无)';
-     descriptions[e.tool] = e.old === '' ? null : e.old;
-   } else if (e.field === 'schema') {
-     tip = (e.old && e.old !== '{}') ? e.old : '(默认/无)';
-     try { schemas[e.tool] = JSON.parse(e.old); if (JSON.stringify(schemas[e.tool]) === '{}') schemas[e.tool] = null; }
-     catch (err) { schemas[e.tool] = null; }
-   } else {
-     return;
-   }
-   const fieldLabel = { description: '说明', schema: '参数JSON', enabled: '启用/停用' }[e.field] || e.field;
-   if (!confirm('把「' + e.tool + '」的' + fieldLabel + '还原为：' + tip + '？')) return;
-   const msg = document.getElementById('tools-msg');
-   if (msg) msg.textContent = '还原中...';
-   try {
-     const r = await fetch(ADMIN_API + '/tools', {
-       method: 'PUT',
-       headers: { 'Content-Type': 'application/json' },
-       body: JSON.stringify({ disabled: disabled, descriptions: descriptions, schemas: schemas })
-     });
-     const j = await r.json();
-     if (j.error) { if (msg) msg.textContent = '还原失败: ' + j.error; return; }
-     if (msg) msg.textContent = '已还原「' + e.tool + '」✓';
-     loadToolsConfig();
-     loadToolsHistory();
-   } catch (err) { if (msg) msg.textContent = '网络错误'; }
  }
  
  async function loadServices(){
@@ -3292,7 +3234,7 @@
    try{
      const r=await fetch(ADMIN_API + '/logs/pinned');
      const j=await r.json();
-     const item=(j.list||[]).find(m=>m.id===id);
+     const item=(j.list||[]).find(m=>String(m.id)===String(id));
      if(!item){toast('未找到');return}
      document.getElementById('edit-pinned-title').value=item.title||'';
      document.getElementById('edit-pinned-content').value=item.content||'';
@@ -3311,6 +3253,30 @@
      if(j.success){toast('已更新');closeModal('editPinnedModal');loadPinned();}
      else toast('更新失败: '+(j.error||''));
    }catch(e){toast('网络错误')}
+ }
+
+ async function loadReplaceLog(){
+   const el=document.getElementById('cc-replacelog-list');
+   if(!el)return;
+   const info=document.getElementById('cc-replacelog-info');
+   try{
+     const r=await fetch(ADMIN_API + '/context-replacements/logs?limit=50');
+     const j=await r.json();
+     const list=j.entries||[];
+     if(!list.length){el.innerHTML='<div class="empty">暂无替换记录（有请求发生过上下文替换后会出现在这里）</div>';if(info)info.textContent='';return;}
+     if(info)info.textContent='共记录最近 '+list.length+' 次请求';
+     el.innerHTML=list.map(e=>{
+       let t='';try{t=new Date(e.time).toLocaleString('zh-CN',{hour12:false});}catch(err){}
+       const src=e.source||'对话';
+       const applied=(e.applied||[]).map(a=>{
+         const title=a.title?('【'+escHtml2(a.title)+'】'):'';
+         return title+'<span style="color:var(--text3)">范围['+((a.startIdx||0)+1)+'..'+((a.endIdx||0)+1)+'] '+a.contentLen+'字</span>';
+       }).join('；');
+       return '<div style="padding:8px 0;border-bottom:1px dashed var(--border)">'
+         +'<div style="font-size:11px;color:var(--text3)">'+t+' · '+escHtml2(src)+' · 消息 '+e.before+' → '+e.after+' 条 · 替换 '+e.replaced+' 块</div>'
+         +'<div style="font-size:12px;margin-top:2px;word-break:break-all">'+(applied||'<i style="color:var(--text3)">(无明细)</i>')+'</div></div>';
+     }).join('');
+   }catch(e){el.innerHTML='<div class="empty">加载失败</div>';}
  }
  
  async function loadLLMContext(){
