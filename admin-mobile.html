@@ -2790,6 +2790,9 @@
  document.addEventListener('touchstart',function(e){
    const w=e.target.closest?e.target.closest('.cc-chunk-swipe'):null;
    if(!w) return;
+   // 块展开时禁止左滑（只有收起时才允许滑出“移除”按钮）
+   const cid=Number((w.getAttribute('data-cid')||'').trim());
+   if(!isNaN(cid) && ccExpanded.has(cid)){ w.classList.remove('swiped'); return; }
    document.querySelectorAll('.cc-chunk-swipe.swiped').forEach(function(x){ if(x!==w) x.classList.remove('swiped'); });
    const t=e.touches[0];
    ccSwipeState={x:t.clientX,y:t.clientY,w:w,dx:0};
