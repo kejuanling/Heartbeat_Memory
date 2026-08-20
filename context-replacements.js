@@ -531,9 +531,10 @@ function updateManualRecordRange(index, start, end) {
   const compItems = compressibleItems();
   const curRange = recordCompRange(cur, compItems);
   if (!curRange) return { ok: false, message: "无法定位该块的原文范围" };
-  // 计算并集范围：吸收所有与 [start,end] 重叠的其他块（手工 + AI）
-  let mergedStart = Math.min(start, curRange.start);
-  let mergedEnd = Math.max(end, curRange.end);
+  // 收缩支持：新范围端点即目标边界（改小结尾 = 尾部让出，退回未覆盖区）；
+  // 再吸收所有与 [start,end] 真正重叠的其他块（手工 + AI）
+  let mergedStart = start;
+  let mergedEnd = end;
   const absorbed = [];
   for (const it of items) {
     if (it.id === cur.id || it.removed) continue;
@@ -580,9 +581,10 @@ function updateAiRecordRange(repId, startIdx, endIdx) {
   const rec = list[idx];
   const curRange = recordCompRange(rec, items);
   if (!curRange) return { ok: false, message: '无法定位该块的原文范围' };
-  // 计算并集：吸收所有与 [s, ee] 重叠的其他块（手工 + AI）
-  let mergedStart = Math.min(s, curRange.start);
-  let mergedEnd = Math.max(ee, curRange.end);
+  // 收缩支持：新范围端点即目标边界（改小结尾 = 尾部让出，退回未覆盖区）；
+  // 再吸收所有与 [s, ee] 真正重叠的其他块（手工 + AI）
+  let mergedStart = s;
+  let mergedEnd = ee;
   const absorbed = [];
   for (const it of list) {
     if (it.id === repId || it.removed) continue;
