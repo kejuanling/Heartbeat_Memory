@@ -1700,9 +1700,8 @@ function rangePreview(start, end) {
   dialog.forEach(function (m, idx) {
     if (isCompressible(m, cfg.compaction_compress_events !== false)) items.push({ msg: m, idx: idx });
   });
-  const minMessages = Number(cfg.compaction_min_messages) || 0;
-  const keepRecent = Math.max(0, Number(cfg.compaction_keep_recent_messages) || 0);
-  const compactCount = items.length >= minMessages ? Math.max(0, items.length - keepRecent) : 0;
+  // 预览展示完整压缩区间：keepRecent/minMessages 属于实际替换语义，不在此截断
+  const compactCount = items.length;
   let s = Math.max(1, Math.floor(Number(start) || 1));
   let e = Math.max(s, Math.floor(Number(end) || s));
   if (compactCount <= 0) return { start: 0, end: 0, count: 0, compactCount: 0, items: [] };
@@ -1710,11 +1709,11 @@ function rangePreview(start, end) {
   s = Math.min(s, e);
   const marks = loadMarks();
   const slice = items.slice(s - 1, e);
-  const out = slice.map(function (it) {
+  const out = slice.map(function (it, i) {
     const m = it.msg;
     const t = msgTime(m);
     return {
-      num: it.idx + 1,
+      num: s + i,
       role: m.role,
       content: contentToText(m),
       thinking: m.thinking,
