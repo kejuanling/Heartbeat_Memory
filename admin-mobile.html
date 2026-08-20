@@ -647,6 +647,38 @@
      <button class="btn btn-outline" onclick="openScreenshotEditor()">编辑截图上传</button>
    </div>
    <div class="card"><div class="card-title">日记阅览</div><div id="diary-list"></div></div>
+   <div class="card" data-collapse-id="cc-config" data-default="collapsed">
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>压缩参数配置</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-body">
+       <div class="cc-cfg-grid">
+         <label class="cc-cfg-field">保留最近 N 条不压缩
+           <input type="number" id="cc-cfg-keep" min="0" step="1"></label>
+         <label class="cc-cfg-field">消息少于 N 条时不压缩
+           <input type="number" id="cc-cfg-min" min="0" step="1"></label>
+         <label class="cc-cfg-field">摘要最少字数
+           <input type="number" id="cc-cfg-sum-min" min="0" step="1"></label>
+         <label class="cc-cfg-field">摘要最多字数
+           <input type="number" id="cc-cfg-sum-max" min="0" step="1"></label>
+         <label class="cc-cfg-field">自动分块间隔（分钟）
+           <input type="number" id="cc-cfg-gap" min="1" step="1"></label>
+         <label class="cc-cfg-field">自动分块目标条数
+           <input type="number" id="cc-cfg-chunk" min="1" step="1"></label>
+         <label class="cc-cfg-field">块最少条数
+           <input type="number" id="cc-cfg-chunk-min" min="1" step="1"></label>
+         <label class="cc-cfg-field">块最多条数
+           <input type="number" id="cc-cfg-chunk-max" min="1" step="1"></label>
+         <label class="cc-cfg-field cc-cfg-check">摘要包含思考内容
+           <input type="checkbox" id="cc-cfg-think"></label>
+         <label class="cc-cfg-field cc-cfg-check">压缩特殊事件
+           <input type="checkbox" id="cc-cfg-events"></label>
+       </div>
+       <div class="cc-cfg-btns">
+         <button class="cc-btn primary" onclick="saveCompactionConfig()">保存参数</button>
+         <button class="cc-btn secondary" onclick="renderCompactionConfig()">重新载入</button>
+       </div>
+       <div id="cc-config-msg" class="cc-cfg-msg"></div>
+     </div>
+   </div>
 </div>
 
 <!-- Tab 3: 记忆 -->
@@ -713,38 +745,6 @@
      <div id="compaction-msg" style="margin-top:12px;font-size:12px;color:var(--accent);min-height:18px;text-align:center"></div>
      <div id="compaction-cfg-tip" style="margin-top:8px;font-size:12px;color:var(--text3);text-align:center"></div>
 
-   <div class="card" data-collapse-id="cc-config" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>压缩参数配置</span><span class="collapse-arrow">▾</span></div>
-     <div class="card-body">
-       <div class="cc-cfg-grid">
-         <label class="cc-cfg-field">保留最近 N 条不压缩
-           <input type="number" id="cc-cfg-keep" min="0" step="1"></label>
-         <label class="cc-cfg-field">消息少于 N 条时不压缩
-           <input type="number" id="cc-cfg-min" min="0" step="1"></label>
-         <label class="cc-cfg-field">摘要最少字数
-           <input type="number" id="cc-cfg-sum-min" min="0" step="1"></label>
-         <label class="cc-cfg-field">摘要最多字数
-           <input type="number" id="cc-cfg-sum-max" min="0" step="1"></label>
-         <label class="cc-cfg-field">自动分块间隔（分钟）
-           <input type="number" id="cc-cfg-gap" min="1" step="1"></label>
-         <label class="cc-cfg-field">自动分块目标条数
-           <input type="number" id="cc-cfg-chunk" min="1" step="1"></label>
-         <label class="cc-cfg-field">块最少条数
-           <input type="number" id="cc-cfg-chunk-min" min="1" step="1"></label>
-         <label class="cc-cfg-field">块最多条数
-           <input type="number" id="cc-cfg-chunk-max" min="1" step="1"></label>
-         <label class="cc-cfg-field cc-cfg-check">摘要包含思考内容
-           <input type="checkbox" id="cc-cfg-think"></label>
-         <label class="cc-cfg-field cc-cfg-check">压缩特殊事件
-           <input type="checkbox" id="cc-cfg-events"></label>
-       </div>
-       <div class="cc-cfg-btns">
-         <button class="cc-btn primary" onclick="saveCompactionConfig()">保存参数</button>
-         <button class="cc-btn secondary" onclick="renderCompactionConfig()">重新载入</button>
-       </div>
-       <div id="cc-config-msg" class="cc-cfg-msg"></div>
-     </div>
-   </div>
 </div>
 
 
