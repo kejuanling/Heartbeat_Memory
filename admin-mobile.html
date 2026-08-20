@@ -1761,10 +1761,10 @@
          : '<span class="mem-tag" style="background:#7f8c8d;color:#fff">未覆盖</span>';
        return '<div style="padding:8px 0;border-bottom:1px dashed var(--border)">'
          +'<div style="display:flex;align-items:center;gap:6px">'
-         +'<button class="cc-msg-mark on" data-key="'+x.key+'" onclick="unmarkMsg(this)" title="取消标星：将后此消息可被摘要覆盖">★</button>'
          +'<span style="font-size:11px;color:var(--text3)">第 '+x.index+' 条</span>'
          +'<span style="font-size:11px;'+roleCls+'">'+escHtml2(x.role||'')+'</span>'
          +chunkTag
+         +'<button style="margin-left:auto;flex-shrink:0" class="cc-msg-mark on" data-key="'+x.key+'" onclick="unmarkMsg(this)" title="取消标星：将后此消息可被摘要覆盖">★</button>'
          +'</div>'
          +'<div style="font-size:11px;color:var(--text3);margin-top:2px">'+tH+'</div>'
          +'<div style="font-size:12px;margin-top:2px;word-break:break-all">'+escHtml2(x.content)+'</div>'
