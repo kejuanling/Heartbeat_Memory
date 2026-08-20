@@ -713,18 +713,6 @@
      <div id="compaction-msg" style="margin-top:12px;font-size:12px;color:var(--accent);min-height:18px;text-align:center"></div>
      <div id="compaction-cfg-tip" style="margin-top:8px;font-size:12px;color:var(--text3);text-align:center"></div>
 
-   <div class="card" data-collapse-id="cc-marked" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>已标星消息</span><span class="collapse-arrow">▾</span></div>
-     <div class="card-body">
-       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-         <button class="cc-btn secondary" onclick="loadMarkedList()">刷新</button>
-         <span id="cc-marked-info" style="font-size:11px;color:var(--text3)"></span>
-       </div>
-       <div id="cc-marked-list" style="max-height:400px;overflow-y:auto;padding-right:4px"></div>
-       <div style="font-size:11px;color:var(--text3);margin-top:6px">标星的消息会在压缩/替换时以原句保留在上下文中，不被摘要覆盖。点星可取消标记。</div>
-     </div>
-   </div>
-
    <div class="card" data-collapse-id="cc-config" data-default="collapsed">
      <div class="card-title collapsible" onclick="toggleCard(this)"><span>压缩参数配置</span><span class="collapse-arrow">▾</span></div>
      <div class="card-body">
@@ -759,17 +747,6 @@
    </div>
 </div>
 
-   <div class="card" data-collapse-id="cc-replacelog" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>每次请求的替换/压缩记录</span><span class="collapse-arrow">▾</span></div>
-     <div class="card-body">
-       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-         <button class="cc-btn secondary" onclick="loadReplaceLog()">刷新</button>
-         <span id="cc-replacelog-info" style="font-size:11px;color:var(--text3)"></span>
-       </div>
-       <div id="cc-replacelog-list" style="max-height:360px;overflow-y:auto;padding-right:4px"><div class="loading">加载中...</div></div>
-       <div style="font-size:11px;color:var(--text3);margin-top:6px">记录每次请求发送给模型前实际发生上下文替换的情况：时间、来源、消息数与替换块数、每块覆盖的原文范围与新正文字数。</div>
-     </div>
-   </div>
 
 <div class="tab-content" id="tab-prompts">
    <div class="card" data-collapse-id="wake-prompt" data-default="collapsed">
@@ -894,6 +871,29 @@
          <div class="env-row" style="margin-top:8px;">
            <span class="env-key" id="ctx-time" style="font-size:11px;color:var(--text3)"></span>
          </div>
+     </div>
+   </div>
+   <div class="card" data-collapse-id="cc-marked" data-default="collapsed">
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>已标星消息</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-body">
+       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+         <button class="cc-btn secondary" onclick="loadMarkedList()">刷新</button>
+         <span id="cc-marked-info" style="font-size:11px;color:var(--text3)"></span>
+       </div>
+       <div id="cc-marked-list" style="max-height:400px;overflow-y:auto;padding-right:4px"></div>
+       <div style="font-size:11px;color:var(--text3);margin-top:6px">标星的消息会在压缩/替换时以原句保留在上下文中，不被摘要覆盖。点星可取消标记。</div>
+     </div>
+   </div>
+
+   <div class="card" data-collapse-id="cc-replacelog" data-default="collapsed">
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>每次请求的替换/压缩记录</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-body">
+       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+         <button class="cc-btn secondary" onclick="loadReplaceLog()">刷新</button>
+         <span id="cc-replacelog-info" style="font-size:11px;color:var(--text3)"></span>
+       </div>
+       <div id="cc-replacelog-list" style="max-height:360px;overflow-y:auto;padding-right:4px"><div class="loading">加载中...</div></div>
+       <div style="font-size:11px;color:var(--text3);margin-top:6px">记录每次请求发送给模型前实际发生上下文替换的情况：时间、来源、消息数与替换块数、每块覆盖的原文范围与新正文字数。</div>
      </div>
    </div>
    <div class="cc-head">
