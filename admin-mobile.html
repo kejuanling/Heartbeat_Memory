@@ -3263,7 +3263,7 @@
      const r=await fetch(ADMIN_API + '/context-replacements/logs?limit=50');
      const j=await r.json();
      const list=j.entries||[];
-     if(!list.length){el.innerHTML='<div class="empty">暂无替换记录（有请求发生过上下文替换后会出现在这里）</div>';if(info)info.textContent='';return;}
+     if(!list.length){el.innerHTML='<div class="empty">暂无记录（有对话请求发送后，每次都会留一条，包括未触发替换的情况）</div>';if(info)info.textContent='';return;}
      if(info)info.textContent='共记录最近 '+list.length+' 次请求';
      el.innerHTML=list.map(e=>{
        let t='';try{t=new Date(e.time).toLocaleString('zh-CN',{hour12:false});}catch(err){}
@@ -3274,7 +3274,7 @@
        }).join('；');
        return '<div style="padding:8px 0;border-bottom:1px dashed var(--border)">'
          +'<div style="font-size:11px;color:var(--text3)">'+t+' · '+escHtml2(src)+' · 消息 '+e.before+' → '+e.after+' 条 · 替换 '+e.replaced+' 块</div>'
-         +'<div style="font-size:12px;margin-top:2px;word-break:break-all">'+(applied||'<i style="color:var(--text3)">(无明细)</i>')+'</div></div>';
+         +'<div style="font-size:12px;margin-top:2px;word-break:break-all">'+(applied||(e.replaced===0?'<i style="color:var(--text3)">本次未发生上下文替换</i>':'<i style="color:var(--text3)">(无明细)</i>'))+'</div></div>';
      }).join('');
    }catch(e){el.innerHTML='<div class="empty">加载失败</div>';}
  }

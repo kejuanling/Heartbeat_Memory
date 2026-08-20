@@ -818,9 +818,25 @@ function contentKey(msg) {
   return crypto.createHash("sha256").update((msg && msg.role ? msg.role : "") + "\u0000" + text).digest("hex").slice(0, 32);
 }
 
+// 未发生替换时统一留痕：让每次请求都有记录，便于了解哪些请求没触发上下文替换
+function logNoReplace(count, source) {
+  try {
+    appendReplaceLog({
+      time: nowIso(),
+      source: source || "对话",
+      before: count,
+      after: count,
+      replaced: 0,
+      applied: []
+    });
+  } catch (e) {
+    console.warn("[context-replacements] 记录未替换留痕失败:", e.message);
+  }
+}
+
 function applyReplacements(messages, source) {
   let items = loadItems().filter(it => !it.removed && it.enabled !== false && recordText(it));
-  if (items.length === 0) return messages;
+  if (items.length === 0) { logNoReplace(messages.length, source); return messages; }
 
   const out = Array.isArray(messages) ? messages.slice() : [];
   const marks = loadMarks();
@@ -838,7 +854,7 @@ function applyReplacements(messages, source) {
     srcAnchorIdx.push(i);
     srcAnchorKeys.push(normalizedCompareKey(m));
   });
-  if (srcAnchorIdx.length === 0) return messages;
+  if (srcAnchorIdx.length === 0) { logNoReplace(messages.length, source); return messages; }
 
   // 时间线纯对话序列（内容锚点失败时做位置近似兜底）
   const timeline = loadTimeline();
@@ -985,7 +1001,7 @@ function applyReplacements(messages, source) {
     searchStart = ei + 1;
   });
 
-  if (replacements.length === 0) return messages;
+  if (replacements.length === 0) { logNoReplace(out.length, source); return messages; }
   replacements.sort(function (a, b) { return a.startIdx - b.startIdx; });
 
   const final = [];
