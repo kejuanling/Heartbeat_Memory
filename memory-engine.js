@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("fs-extra");
+const fsp = require("fs").promises;
 const path = require("path");
 const crypto = require("crypto");
 
@@ -8,9 +9,11 @@ const DATA_DIR = process.env.MEMORY_DATA_DIR || path.join(__dirname, "data");
 const MEMORIES_FILE = path.join(DATA_DIR, "memories.json");
 const CONFIG_FILE = path.join(DATA_DIR, "config.json");
 const PINNED_FILE = path.join(DATA_DIR, "pinned.json");
+const DELETED_PINS_FILE = path.join(DATA_DIR, "deleted_pins.json");
 
 let config = {};
 let pinnedMemories = [];
+let deletedPinSignatures = new Set();
 let flushTimer = null;
 let dirty = false;
 
@@ -42,6 +45,7 @@ async function init() {
     const rawPinned = await fs.readJson(PINNED_FILE);
     pinnedMemories = Array.isArray(rawPinned) ? rawPinned : [];
   } catch { pinnedMemories = []; }
+  await loadDeletedSignatures();
   flushTimer = setInterval(flush, 5000);
   if (READONLY) {
     console.log("[memory-engine] 只读模式：pin/状态由 gateway 进程负责写盘");
@@ -52,40 +56,103 @@ async function init() {
 // Pinned Memories (永久注入上下文)
 // ========================
 
-async function addPinnedMemory(entry) {
-  const { title, content, order } = entry;
+function contentSignature(content) {
+  return String(content || "").trim();
+}
+
+function withPinnedLock(fn, timeoutMs) {
+  if (timeoutMs === undefined) timeoutMs = 8000;
+  const lockFile = PINNED_FILE + ".lock";
+  const start = Date.now();
+  return (async () => {
+    for (;;) {
+      let fd = null;
+      try {
+        try { fd = await fsp.open(lockFile, "wx"); } catch (e) { if (e.code !== "EEXIST") throw e; }
+        if (fd) { await fd.close(); break; }
+        if (Date.now() - start > timeoutMs) {
+          try { await fsp.unlink(lockFile); } catch (e) {}
+          continue;
+        }
+        await new Promise(r => setTimeout(r, 40));
+      } catch (err) { throw err; }
+    }
+    try { return await fn(); } finally { try { await fsp.unlink(lockFile); } catch (e) {} }
+  })();
+}
+
+async function loadPinnedFromDisk() {
+  try {
+    const raw = await fs.readJson(PINNED_FILE);
+    return Array.isArray(raw) ? raw : [];
+  } catch (e) { return []; }
+}
+
+async function loadDeletedSignatures() {
+  try {
+    const raw = await fs.readJson(DELETED_PINS_FILE);
+    deletedPinSignatures = new Set(Array.isArray(raw) ? raw : []);
+  } catch (e) { deletedPinSignatures = new Set(); }
+}
+
+async function saveDeletedSignatures() {
+  await atomicWriteJson(DELETED_PINS_FILE, Array.from(deletedPinSignatures).slice(-400));
+}
+
+async function addPinnedMemory(entry, opts) {
+  if (READONLY) { console.warn("[memory-engine] 只读模式，忽略新增 pin"); return null; }
+  const { title, content } = entry;
   if (!content) return null;
-  const id = crypto.randomUUID();
-  const now = new Date().toISOString();
-  const mem = {
-    id,
-    title: title || '',
-    content,
-    order: order || pinnedMemories.length,
-    created_at: now,
-    updated_at: now
-  };
-  pinnedMemories.push(mem);
-  await fs.writeJson(PINNED_FILE, pinnedMemories, { spaces: 2 });
-  return mem;
+  const sig = contentSignature(content);
+  const allowDeleted = !!(opts && opts.allowDeleted);
+  return withPinnedLock(async () => {
+    const fresh = await loadPinnedFromDisk();
+    pinnedMemories = fresh;
+    const dup = fresh.some(function(m) { return contentSignature(m.content) === sig; });
+    if (dup) return null;
+    if (!allowDeleted && deletedPinSignatures.has(sig)) { return null; }
+    if (allowDeleted && deletedPinSignatures.delete(sig)) { await saveDeletedSignatures(); }
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const ord = (entry.order !== undefined && entry.order !== null) ? entry.order : fresh.length;
+    const mem = { id: id, title: title || '', content: content, order: ord, created_at: now, updated_at: now };
+    fresh.push(mem);
+    pinnedMemories = fresh;
+    await atomicWriteJson(PINNED_FILE, fresh);
+    return mem;
+  });
 }
 
 async function updatePinnedMemory(id, updates) {
-  const idx = pinnedMemories.findIndex(m => m.id === id);
-  if (idx === -1) return null;
-  pinnedMemories[idx] = { ...pinnedMemories[idx], ...updates, updated_at: new Date().toISOString() };
-  await atomicWriteJson(PINNED_FILE, pinnedMemories);
-  return pinnedMemories[idx];
+  if (READONLY) { console.warn("[memory-engine] 只读模式，忽略更新 pin"); return null; }
+  return withPinnedLock(async () => {
+    const fresh = await loadPinnedFromDisk();
+    pinnedMemories = fresh;
+    const idx = fresh.findIndex(function(m) { return m.id === id; });
+    if (idx === -1) return null;
+    fresh[idx] = Object.assign({}, fresh[idx], updates, { updated_at: new Date().toISOString() });
+    pinnedMemories = fresh;
+    await atomicWriteJson(PINNED_FILE, fresh);
+    return fresh[idx];
+  });
 }
 
 async function deletePinnedMemory(id) {
-  const before = pinnedMemories.length;
-  pinnedMemories = pinnedMemories.filter(m => m.id !== id);
-  if (pinnedMemories.length < before) {
-    await atomicWriteJson(PINNED_FILE, pinnedMemories);
-    return true;
-  }
-  return false;
+  if (READONLY) { console.warn("[memory-engine] 只读模式，忽略删除 pin"); return false; }
+  return withPinnedLock(async () => {
+    const fresh = await loadPinnedFromDisk();
+    pinnedMemories = fresh;
+    const before = fresh.length;
+    const removed = fresh.filter(function(m) { return m.id === id; });
+    pinnedMemories = fresh.filter(function(m) { return m.id !== id; });
+    if (pinnedMemories.length < before) {
+      removed.forEach(function(m) { deletedPinSignatures.add(contentSignature(m.content || '')); });
+      await atomicWriteJson(PINNED_FILE, pinnedMemories);
+      await saveDeletedSignatures();
+      return true;
+    }
+    return false;
+  });
 }
 
 function getPinnedMemories() {

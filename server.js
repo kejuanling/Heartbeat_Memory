@@ -1977,7 +1977,7 @@ app.post("/internal/pin", async (req, reply) => {
     const body = req.body || {};
     const content = String(body.content || "").trim();
     if (!content) return reply.code(400).send({ error: "content 必填" });
-    const mem = await engine.addPinnedMemory({ title: String(body.title || "").trim(), content: content });
+    const mem = await engine.addPinnedMemory({ title: String(body.title || "").trim(), content: content }, { allowDeleted: true });
     reply.send({ success: true, pin: mem });
   } catch (err) {
     console.error("[POST /internal/pin] error:", err.message);
@@ -2589,6 +2589,26 @@ app.get("/admin/context/keywords/related", { preHandler: basicAuth }, async (req
 });
 
 
+
+// 块原文分页：按块 id 定位 matched 区间，供块展开惰性加载
+app.get("/admin/context-compaction/block-messages", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const id = String(req.query.id || "").trim();
+    const limit = Math.max(1, Math.min(500, Math.floor(Number(req.query.limit) || 200)));
+    const offset = Math.max(0, Math.floor(Number(req.query.offset) || 0));
+    const rec = (contextReplacements.loadItems() || []).find(function (it) { return !it.removed && it.id === id; });
+    if (!rec) return reply.code(404).send({ error: "块不存在: " + id });
+    const matched = Array.isArray(rec.matched) ? rec.matched : [];
+    const total = matched.length;
+    const slice = (offset < total) ? matched.slice(offset, offset + limit) : [];
+    const marks = contextCompactor.loadMarks();
+    const items = slice.map(function (m) {
+      const _key = contextCompactor.contentKey(m);
+      return { role: m.role || "", time: (m && m.time) || "", content: typeof m.content === "string" ? m.content : "", key: _key, marked: !!marks[_key] };
+    });
+    reply.send({ ok: true, id: id, total: total, offset: offset, returned: items.length, hasMore: (offset + items.length) < total, items: items });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
 
 // 编号范围预览（1-based）：返回范围内每条原文，供未覆盖区滚动窗使用
 app.get("/admin/context-compaction/range-preview", { preHandler: basicAuth }, async (req, reply) => {
@@ -4264,7 +4284,7 @@ app.post("/admin/logs/pinned", { preHandler: basicAuth }, async (req, reply) => 
   try {
     const engine = require("./memory-engine");
     const { title, content, order } = req.body || {};
-    const mem = await engine.addPinnedMemory({ title, content, order });
+    const mem = await engine.addPinnedMemory({ title, content, order }, { allowDeleted: true });
     reply.send({ success: true, memory: mem });
   } catch (err) {
     reply.code(500).send({ error: err.message });
