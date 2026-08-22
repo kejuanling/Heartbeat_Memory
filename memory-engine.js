@@ -154,6 +154,27 @@ async function deletePinnedMemory(id) {
     return false;
   });
 }
+async function reorderPinnedMemory(ids) {
+  if (READONLY) { console.warn("[memory-engine] 只读模式，忽略重排 pin"); return null; }
+  if (!Array.isArray(ids) || ids.length === 0) return null;
+  return withPinnedLock(async () => {
+    const fresh = await loadPinnedFromDisk();
+    const byId = new Map();
+    fresh.forEach(function(m) { byId.set(m.id, m); });
+    const next = [];
+    const seen = new Set();
+    // 优先按传入顺序排列已存在 id
+    ids.forEach(function(id) {
+      if (byId.has(id) && !seen.has(id)) { next.push(byId.get(id)); seen.add(id); }
+    });
+    // 追加未在 ids 中的条目（保证不丢数据）
+    fresh.forEach(function(m) { if (!seen.has(m.id)) { next.push(m); seen.add(m.id); } });
+    next.forEach(function(m, i) { m.order = i; });
+    pinnedMemories = next;
+    await atomicWriteJson(PINNED_FILE, next);
+    return next;
+  });
+}
 
 function getPinnedMemories() {
   return pinnedMemories.slice().sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -278,7 +299,7 @@ module.exports = {
   get config() { return config; },
   getConfig() { return config; },
   get memories() { return loadLegacyMemories(); },
-  addPinnedMemory, updatePinnedMemory, deletePinnedMemory, getPinnedMemories, buildPinnedContext,
+  addPinnedMemory, updatePinnedMemory, deletePinnedMemory, reorderPinnedMemory, getPinnedMemories, buildPinnedContext,
   async updateConfig(updates) {
     Object.assign(config, updates);
     await atomicWriteJson(CONFIG_FILE, config);

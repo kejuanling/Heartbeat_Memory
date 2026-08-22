@@ -3299,6 +3299,8 @@
          (title?'<span class="mem-time" style="font-weight:500;color:var(--tab-active);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+title+'</span>':'')+
          '</div>'+
          "<div style=\"display:flex;gap:4px;flex-shrink:0\">"+
+         "<button class=\"btn btn-sm\" style=\"background:none;border:none;font-size:13px;color:var(--text2);cursor:pointer;padding:0 5px;line-height:1\" onclick=\"movePinned('" + mid + "','up')\" title=\"上移\">&#9650;</button>"+
+         "<button class=\"btn btn-sm\" style=\"background:none;border:none;font-size:13px;color:var(--text2);cursor:pointer;padding:0 5px;line-height:1\" onclick=\"movePinned('" + mid + "','down')\" title=\"下移\">&#9660;</button>"+
          "<button class=\"btn btn-sm\" style=\"background:none;border:none;font-size:14px;color:var(--text3);cursor:pointer;padding:2px 6px;line-height:1\" onclick=\"openEditPinned('" + mid + "')\" title=\"编辑\">&#9998;</button>"+
          "<button class=\"btn btn-sm\" style=\"background:none;border:none;font-size:16px;color:var(--text3);cursor:pointer;padding:2px 6px;line-height:1\" onclick=\"deletePinned('" + mid + "')\">&times;</button>"+
          "</div>"+
@@ -3319,7 +3321,25 @@
    }catch(e){toast('网络错误')}
  }
  
- async function deletePinned(id){
+ async function movePinned(id, dir){
+  if(dir!=='up'&&dir!=='down')return;
+  try{
+    const r=await fetch(ADMIN_API + '/logs/pinned');
+    const j=await r.json();
+    const list=j.list||[];
+    const idx=list.findIndex(m=>String(m.id)===String(id));
+    if(idx<0)return;
+    const tgt=dir==='up'?idx-1:idx+1;
+    if(tgt<0||tgt>=list.length){toast('已到边界，无法移动');return}
+    const tmp=list[idx];list[idx]=list[tgt];list[tgt]=tmp;
+    const rr=await fetch(ADMIN_API + '/logs/pinned/reorder',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:list.map(m=>m.id)})});
+    const jj=await rr.json();
+    if(jj.success){toast('已重排');loadPinned();}
+    else toast('重排失败：'+(jj.error||''));
+  }catch(e){toast('网络错误')}
+}
+
+async function deletePinned(id){
    if(!confirm('确认删除？'))return;
    try{
      const r=await fetch(ADMIN_API + '/logs/pinned/'+id,{method:'DELETE'});

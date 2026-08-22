@@ -4308,6 +4308,18 @@ app.put("/admin/logs/pinned/:id", { preHandler: basicAuth }, async (req, reply) 
     reply.code(500).send({ error: err.message });
   }
 });
+
+app.post("/admin/logs/pinned/reorder", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const ids = (req.body || {}).ids;
+    const list = await engine.reorderPinnedMemory(ids);
+    if (!list) return reply.code(400).send({ error: "无效的排序数据" });
+    reply.send({ success: true, list: list });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
 app.delete("/admin/logs/pinned/:id", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const engine = require("./memory-engine");
