@@ -722,7 +722,7 @@ async function runWakeUpInner() {
 
   // 稳定 system = 人设(cleanSP) + 永久上下文(pinned)，与主聊天一致
   const stableSystem = [cleanSP, pinnedContext].filter(Boolean).join("\n\n");
-  // 唤醒提示词：提到最前面（紧随人设之后、历史之前），让 AI 先读后台唤醒规则再读历史
+  // 唤醒提示词：改到最后一条消息之下（历史之后），AI 读完历史再读后台唤醒规则
   const dynamicContent = [
     `（系统提示：以下内容${process.env.USER_DISPLAY_NAME || "用户"}不可见，仅供你参考）`,
     wakePrompt
@@ -733,11 +733,11 @@ async function runWakeUpInner() {
       role: "system",
       content: stableSystem
     },
+    ...historyMsgs,
     {
       role: "system",
       content: dynamicContent
-    },
-    ...historyMsgs
+    }
   ];
 
   // 批注 2026-07-15：wake-up prompt 会包含最近聊天记录；
