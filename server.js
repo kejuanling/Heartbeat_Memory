@@ -2910,6 +2910,30 @@ app.post("/admin/services/:name/:action", { preHandler: basicAuth }, async (req,
 // ========================
 // 统一替换预览（管理台「上下文压缩」页）：所有记录（AI + 手工）合并成块视图
 // ========================
+// 归一化内容键：去 memory/pin/current_time 块 + 压缩空白（与发送侧 applyReplacements 同口径）
+function nKeyOfMsg(m) {
+  const c = typeof (m && m.content) === "string" ? m.content : JSON.stringify((m && m.content) || "");
+  const stripped = c
+    .replace(/<memory>[\s\S]*?<\/memory>/gi, "")
+    .replace(/<pin>[\s\S]*?<\/pin>/gi, "")
+    .replace(/<current_time>[\s\S]*?<\/current_time>/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return String((m && m.role) || "") + "\u0000" + stripped;
+}
+
+// 压缩索引位置表：非特殊事件的可压缩消息 -> 压缩空间下标（0 起）
+function compressiblePosMap() {
+  const items = contextReplacements.compressibleItems();
+  const map = new Map();
+  items.forEach(function (e, idx) {
+    if (contextReplacements.isSpecialEvent(e.msg)) return;
+    const k = nKeyOfMsg(e.msg);
+    if (!map.has(k)) map.set(k, idx);
+  });
+  return map;
+}
+
 function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
   const records = contextReplacements.loadItems().filter(it => !it.removed);
   const items = contextReplacements.compressibleItems();
@@ -2920,25 +2944,10 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
   function keyOf(m) {
     return String(m.role || "") + "\u0000" + String(m.content || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   }
-  // 与发送侧 applyReplacements 同口径的归一化键：去 memory/pin/current_time 块 + 压缩空白，
-  // 用于锚点定位。预览按首尾锚点匹配，和实际发送的替换范围一致，避免“发送生效但预览未覆盖”。
-  function nKeyOf(m) {
-    const c = typeof (m && m.content) === "string" ? m.content : JSON.stringify((m && m.content) || "");
-    const stripped = c
-      .replace(/<memory>[\s\S]*?<\/memory>/gi, "")
-      .replace(/<pin>[\s\S]*?<\/pin>/gi, "")
-      .replace(/<current_time>[\s\S]*?<\/current_time>/gi, "")
-      .replace(/\s+/g, " ")
-      .trim();
-    return String((m && m.role) || "") + "\u0000" + stripped;
-  }
+  // 与发送侧 applyReplacements 同口径的归一化键，用于锚点定位（见模块级 nKeyOfMsg）
+  const nKeyOf = nKeyOfMsg;
   // 压缩索引位置表：非特殊事件消息按归一化键定位（与发送侧 tlKeyToPos 同口径）
-  const itemPosByKey = new Map();
-  items.forEach(function (e, idx) {
-    if (contextReplacements.isSpecialEvent(e.msg)) return;
-    const k = nKeyOf(e.msg);
-    if (!itemPosByKey.has(k)) itemPosByKey.set(k, idx);
-  });
+  const itemPosByKey = compressiblePosMap();
 
   const chunks = [];
   let totalChars = 0;
@@ -3012,7 +3021,8 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
       history: (Array.isArray(it.history) ? it.history : []).map(function (h, i) { return { index: i, summary: h.summary, generatedAt: h.generatedAt, mode: h.mode || (manual ? "edited" : "ai"), manual: h.manual === true || manual }; }).slice(0, 8),
       msgs: includeMessages ? matched.map(m => {
         const _key = contextCompactor.contentKey(m);
-        return { role: m.role, content: typeof m.content === "string" ? m.content : "", key: _key, marked: !!contextCompactor.loadMarks()[_key] };
+        const _k = nKeyOf(m);
+        return { role: m.role, content: typeof m.content === "string" ? m.content : "", key: _key, marked: !!contextCompactor.loadMarks()[_key], num: itemPosByKey.has(_k) ? itemPosByKey.get(_k) : null };
       }) : undefined,
       pos: compStart
     });
@@ -3158,9 +3168,11 @@ app.get("/admin/context-compaction/block-messages", { preHandler: basicAuth }, a
     const total = matched.length;
     const slice = (offset < total) ? matched.slice(offset, offset + limit) : [];
     const marks = contextCompactor.loadMarks();
+    const posByKey = compressiblePosMap();
     const items = slice.map(function (m) {
       const _key = contextCompactor.contentKey(m);
-      return { role: m.role || "", time: (m && m.time) || "", content: typeof m.content === "string" ? m.content : "", key: _key, marked: !!marks[_key] };
+      const _k = nKeyOfMsg(m);
+      return { role: m.role || "", time: (m && m.time) || "", content: typeof m.content === "string" ? m.content : "", key: _key, marked: !!marks[_key], num: posByKey.has(_k) ? posByKey.get(_k) : null };
     });
     reply.send({ ok: true, id: id, total: total, offset: offset, returned: items.length, hasMore: (offset + items.length) < total, items: items });
   } catch (err) { reply.code(500).send({ error: err.message }); }

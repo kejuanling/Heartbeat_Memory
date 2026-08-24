@@ -3407,7 +3407,7 @@ function updateCcStatusBar(d){
      allTxt += '========================================\n\n';
      msgs.forEach(function(m, i){
        const role = m.role === 'user' ? '她' : '我';
-       const num = baseNum === null ? '' : ('# ' + (baseNum + i + 1) + ' ');
+       const num = (m && ('num' in m)) ? ((typeof m.num === 'number' && m.num >= 0) ? ('# ' + (m.num + 1) + ' ') : '') : (baseNum === null ? '' : ('# ' + (baseNum + i + 1) + ' '));
        const t = m.time ? (' [' + m.time + ']') : '';
        allTxt += num + role + t + '：' + (m.content || '') + '\n\n';
      });
@@ -3969,7 +3969,7 @@ function ccArmAllGapAutoLoad(){
     txt+='========================================\n\n';
     msgs.forEach(function(m,i){
       const role=m.role==='user'?'她':'我';
-      const num=baseNum===null?'':('# '+(baseNum+i+1)+' ');
+      const num=(m&&('num' in m))?((typeof m.num==='number'&&m.num>=0)?('# '+(m.num+1)+' '):''):(baseNum===null?'':('# '+(baseNum+i+1)+' '));
       const t=m.time?(' ['+m.time+']'):'';
       txt+=num+role+t+'：'+(m.content||'')+'\n\n';
     });
@@ -4608,7 +4608,7 @@ function ccArmAllGapAutoLoad(){
    let html='<div class="cc-msg-list" id="cc-msg-scroll-'+c.index+'">';
    msgs.forEach(function(m,i){
      const marked=!!m.marked;
-     const num=baseNum===null?null:(baseNum+i+1);
+     const num=(m&&('num' in m))?((typeof m.num==='number'&&m.num>=0)?(m.num+1):null):(baseNum===null?null:(baseNum+i+1));
      html+='<div class="cc-msg-item'+(marked?' marked':'')+'">'
        +'<div class="cc-msg-head">'
        +'<span class="cc-msg-left">'
