@@ -1346,7 +1346,6 @@ app.post("/v1/chat/completions", async (req, reply) => {
       }
       let sysExtra = "";
       if (pinnedCtx) sysExtra += '\n\n## 永久上下文\n' + pinnedCtx;
-      if (crossCtx) sysExtra += '\n\n' + crossCtx;
       if (isMainChat) sysExtra += '\n\n（可选记忆）如果你觉得某一点值得长期记住，可以在回复里顺手用 <memory>…</memory> 标记，例如 <memory>她说：她需要反复确认才敢靠近。</memory>。系统会收进长期记忆池并自动去重；不写也不影响主流程。只标真正重要的点，别把整段话包进去。';
       if (sysExtra) {
         const sysIdx = llmMessages.findIndex(m => m.role === "system");
@@ -1356,7 +1355,17 @@ app.post("/v1/chat/completions", async (req, reply) => {
           llmMessages.unshift({ role: "system", content: sysExtra.trim() });
         }
         if (pinnedCtx) console.log('[pinned] 注入永久上下文');
-        if (crossCtx) console.log('[cross-inject] 注入跨窗口记忆');
+      }
+      // 跨窗口注入：不进系统提示，作为上下文消息拼在 system 之后（与当前时间线特殊事件同属上下文层）
+      if (isMainChat && crossCtx) {
+        const sysIdx = llmMessages.findIndex(m => m.role === "system");
+        const bg = { role: "assistant", content: crossCtx };
+        if (sysIdx >= 0) {
+          llmMessages.splice(sysIdx + 1, 0, bg);
+        } else {
+          llmMessages.unshift(bg);
+        }
+        console.log('[cross-inject] 注入跨窗口记忆（上下文）');
       }
     } catch (pinErr) {
       console.warn('[pinned] 注入失败:', pinErr.message);
