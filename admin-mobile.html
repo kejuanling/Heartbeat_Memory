@@ -1635,7 +1635,6 @@ async function apiRequest(method, url, body, opts) {
 }
  // 全局拦截：任何表单提交/默认按钮行为都不允许触发整页刷新
 document.addEventListener('submit',function(e){e.preventDefault();},true);
- let INITIAL_DATA = null;
  let configData = null;
  // ============ AppState：压缩/记忆业务状态集中管理 ============
  const AppState = {
@@ -1675,7 +1674,13 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
   memPoolEditId: null,             // 记忆池编辑中的记忆 id（null=新增）
   memPoolSearchTimer: null,        // 记忆池搜索防抖定时器
   editingMemId: null,              // 导入/编辑中的记忆 id
-  editingPinnedId: null            // 置顶编辑中的 pinned id
+  editingPinnedId: null,           // 置顶编辑中的 pinned id
+  INITIAL_DATA: null,              // 初始环境数据（登录后拉取一次）
+  memView: "cloud",                // 记忆视图: cloud/memory/pinned
+  visionModels: [],                // 视觉模型列表
+  toolsDraft: null,                // 工具集配置草稿 { manifest, config }
+  logPanelOpen: false,             // 日志面板是否打开
+  unreadLogCount: 0                // 日志未读数（角标）
  };
 
  
@@ -1695,7 +1700,7 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    }catch(e){}
    try{
      const r = await fetch(ADMIN_API + '/env');
-     if(r.ok) { INITIAL_DATA = await r.json(); }
+     if(r.ok) { AppState.INITIAL_DATA = await r.json(); }
      else {
        document.getElementById('headerSub').textContent = '认证失败，请刷新页面';
        return;
@@ -1716,11 +1721,9 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
  }
  
   // ---------- 摘要生成日志（悬浮球 + 弹窗，可拖动） ----------
- let logPanelOpen = false;
  let lastLogId = null;
  let logPollTimer = null;
  let unreadPollTimer = null;
- let unreadLogCount = 0;
  let fabDragging = false;
  let fabStartX = 0, fabStartY = 0;
  let fabOrigX = 0, fabOrigY = 0;
@@ -1810,12 +1813,12 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    const panel = document.getElementById('logPanel');
    const fab = document.getElementById('logFab');
    if(!panel || !fab) return;
-   logPanelOpen = !logPanelOpen;
-   if(logPanelOpen){
+   AppState.logPanelOpen = !AppState.logPanelOpen;
+   if(AppState.logPanelOpen){
      const rect = fab.getBoundingClientRect();
      positionLogPanel(rect.left, rect.top);
      panel.classList.add('show');
-     unreadLogCount = 0;
+     AppState.unreadLogCount = 0;
      updateLogBadge();
      loadCompactionLogs();
      startLogPolling();
@@ -1828,16 +1831,16 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
  function closeLogPanel(){
    const panel = document.getElementById('logPanel');
    if(panel) panel.classList.remove('show');
-   logPanelOpen = false;
+   AppState.logPanelOpen = false;
    stopLogPolling();
  }
 
  function updateLogBadge(){
    const badge = document.getElementById('logFabBadge');
    if(!badge) return;
-   if(unreadLogCount > 0){
+   if(AppState.unreadLogCount > 0){
      badge.classList.add('show');
-     badge.textContent = unreadLogCount > 99 ? '99+' : unreadLogCount;
+     badge.textContent = AppState.unreadLogCount > 99 ? '99+' : AppState.unreadLogCount;
    } else {
      badge.classList.remove('show');
    }
@@ -1878,8 +1881,8 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
      if(d && d.logs){
        renderLogs(d.logs);
        if(d.logs.length > 0 && d.logs[0].id !== lastLogId){
-         if(lastLogId && !logPanelOpen){
-           unreadLogCount++;
+         if(lastLogId && !AppState.logPanelOpen){
+           AppState.unreadLogCount++;
            updateLogBadge();
          }
          lastLogId = d.logs[0].id;
@@ -1904,7 +1907,7 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    const body = document.getElementById('logPanelBody');
    if(body) body.innerHTML = '<div class="log-panel-empty">暂无生成记录</div>';
    lastLogId = null;
-   unreadLogCount = 0;
+   AppState.unreadLogCount = 0;
    updateLogBadge();
    toast('日志列表已清空');
  }
@@ -1916,11 +1919,11 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
  });
 
  function checkUnreadLogs(){
-   if(document.hidden || logPanelOpen) return;
+   if(document.hidden || AppState.logPanelOpen) return;
    fetch(ADMIN_API + '/context-compaction/logs').then(r=>r.json()).then(function(d){
      if(d && d.logs && d.logs.length > 0){
        if(lastLogId && d.logs[0].id !== lastLogId){
-         unreadLogCount++;
+         AppState.unreadLogCount++;
          updateLogBadge();
        }
        if(!lastLogId) lastLogId = d.logs[0].id;
@@ -1943,7 +1946,7 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
      stopLogsAutoRefresh();
    }else{
      startUnreadPoll();
-     if(logPanelOpen) startLogPolling();
+     if(AppState.logPanelOpen) startLogPolling();
      let cur=''; try{ cur=localStorage.getItem('adminTab')||''; }catch(e){}
      if(cur==='system') startLogsAutoRefresh();
    }
@@ -1970,7 +1973,7 @@ function toast(msg){
  
  // ============ Heartbeat ============
  function renderHeartbeat(){
-   const d=INITIAL_DATA;
+   const d=AppState.INITIAL_DATA;
    const wk=d.wake||{};
    const we=d.weather||{};
    document.getElementById('st-uptime').textContent=formatUptime(d.uptime);
@@ -1999,10 +2002,10 @@ function toast(msg){
    const keys=['TARGET_API_URL','TARGET_API_KEY','MODEL_NAME','BARK_KEY','GATEWAY_API_KEY','CUSTOM_ICON_URL','ALLOW_PUBLIC_API','PUSH_PROVIDER','NTFY_SERVER_URL','NTFY_TOPIC','NTFY_TOKEN','NTFY_PRIORITY','NTFY_TAGS','USER_DISPLAY_NAME','AI_DISPLAY_NAME','WEATHER_ENABLED','WEATHER_LOCATION_NAME','WEATHER_LAT','WEATHER_LON','DIARY_ENABLED','DIARY_DIR','PORT'];
    const SECRET_KEYS=new Set(['TARGET_API_KEY','BARK_KEY','GATEWAY_API_KEY','NTFY_TOKEN']);
    document.getElementById('env-list').innerHTML=keys.map(k=>{
-     const v=INITIAL_DATA.env[k]||'';
+     const v=AppState.INITIAL_DATA.env[k]||'';
      let display;
      if(SECRET_KEYS.has(k)){
-       display=INITIAL_DATA.env[k+'_SET']?'<span style="color:var(--accent)">已设置</span>':'<span style="color:var(--text3)">未设置</span>';
+       display=AppState.INITIAL_DATA.env[k+'_SET']?'<span style="color:var(--accent)">已设置</span>':'<span style="color:var(--text3)">未设置</span>';
      }else if(v==='true'||v==='false'){
        display=v==='true'?'<span style="color:var(--accent)">开启</span>':'<span style="color:var(--text3)">关闭</span>';
      }else{
@@ -2017,14 +2020,14 @@ function toast(msg){
    const keys=['TARGET_API_URL','TARGET_API_KEY','GATEWAY_API_KEY','MODEL_NAME','BARK_KEY','CUSTOM_ICON_URL','DAY_WAKE_AFTER_MINUTES','NIGHT_WAKE_AFTER_MINUTES','DAY_CHECK_INTERVAL_MINUTES','NIGHT_CHECK_INTERVAL_MINUTES','WAKE_DAY_START_HOUR','WAKE_DAY_END_HOUR','WEATHER_ENABLED','WEATHER_LOCATION_NAME','WEATHER_LAT','WEATHER_LON','WEATHER_UNITS','ALLOW_PUBLIC_API','PUSH_PROVIDER','NTFY_SERVER_URL','NTFY_TOPIC','NTFY_TOKEN','NTFY_PRIORITY','NTFY_TAGS','USER_DISPLAY_NAME','AI_DISPLAY_NAME','DIARY_ENABLED'];
    const SECRET_KEYS=new Set(['TARGET_API_KEY','BARK_KEY','GATEWAY_API_KEY','NTFY_TOKEN']);
    document.getElementById('env-editor-fields').innerHTML=keys.map(k=>{
-     const v=INITIAL_DATA.env[k]||'';
+     const v=AppState.INITIAL_DATA.env[k]||'';
      if(k==='ALLOW_PUBLIC_API'){
        return '<div class="form-group"><label>ALLOW_PUBLIC_API <span style="color:var(--text3);font-size:11px">公网 /v1 开关</span></label><select id="env-'+k+'"><option value="true"'+(v==='true'?' selected':'')+'>开启（需 GATEWAY_API_KEY）</option><option value="false"'+(v!=='true'?' selected':'')+'>关闭（仅内网）</option></select></div>';
      }
      if(k==='PUSH_PROVIDER'){
        return '<div class="form-group"><label>PUSH_PROVIDER <span style="color:var(--text3);font-size:11px">推送渠道</span></label><select id="env-'+k+'"><option value="bark"'+(v==='bark'||!v?' selected':'')+'>bark</option><option value="ntfy"'+(v==='ntfy'?' selected':'')+'>ntfy</option></select></div>';
      }
-     const ph=SECRET_KEYS.has(k)?' placeholder="'+(INITIAL_DATA.env[k+'_SET']?'已设置，留空不修改':'未设置，留空保存')+'"':'';
+     const ph=SECRET_KEYS.has(k)?' placeholder="'+(AppState.INITIAL_DATA.env[k+'_SET']?'已设置，留空不修改':'未设置，留空保存')+'"':'';
      return '<div class="form-group"><label>'+k+'</label><input type="text" id="env-'+k+'" value="'+escapeHtml(v)+'"'+ph+'></div>';
    }).join('');
    openModal('envModal');
@@ -2038,7 +2041,7 @@ function toast(msg){
      const r=await apiRequest('POST', ADMIN_API + '/save', body, {busy:document.getElementById('env-save-btn')});
      if(!r.ok) return;
      const j=r.data||{};
-     if(j.success){toast('已保存，已热生效');closeModal('envModal');fetch(ADMIN_API+'/env').then(r=>r.json()).then(d=>{INITIAL_DATA=d;}).catch(()=>{});}
+     if(j.success){toast('已保存，已热生效');closeModal('envModal');fetch(ADMIN_API+'/env').then(r=>r.json()).then(d=>{AppState.INITIAL_DATA=d;}).catch(()=>{});}
      else toast('保存失败: '+j.error);
    }catch(e){toast('网络错误: '+e.message)}
  }
@@ -2085,7 +2088,6 @@ function toast(msg){
  }
  
  // ============ 视觉模型 ============
- let visionModels = [];
  
  function renderVisionModels(){
    const el=document.getElementById('vision-models-list');
@@ -2094,7 +2096,7 @@ function toast(msg){
    el.innerHTML='<div class="empty">加载中…</div>';
    fetch(ADMIN_API + '/vision-models').then(r=>r.json()).then(j=>{
      if(!j.success){el.innerHTML='<div class="empty">加载失败</div>';return}
-     visionModels=Array.isArray(j.models)?j.models:[];
+     AppState.visionModels=Array.isArray(j.models)?j.models:[];
      paintVisionModels(el,count);
      renderCoView();
      renderScreenshotStatus();
@@ -2102,9 +2104,9 @@ function toast(msg){
  }
  
  function paintVisionModels(el,count){
-   if(count)count.textContent=visionModels.length+' 个';
-   if(!visionModels.length){el.innerHTML='<div class="empty">还没有视觉模型，点「编辑视觉模型」添加</div>';return}
-   el.innerHTML=visionModels.map(m=>{
+   if(count)count.textContent=AppState.visionModels.length+' 个';
+   if(!AppState.visionModels.length){el.innerHTML='<div class="empty">还没有视觉模型，点「编辑视觉模型」添加</div>';return}
+   el.innerHTML=AppState.visionModels.map(m=>{
      const ok=!!(m.api_key&&String(m.api_key).trim());
      return '<div class="vm-row"><span class="vm-dot" style="background:'+(ok?'#2ecc71':'#bbb')+'"></span><span class="vm-name">'+escapeHtml(m.name||'未命名')+'</span><span class="vm-model">'+escapeHtml(m.model||'')+'</span></div>';
    }).join('');
@@ -2118,8 +2120,8 @@ function toast(msg){
  }
  
  function paintVisionModelsEdit(el){
-   if(!visionModels.length){el.innerHTML='<div class="empty">还没有视觉模型，点「新增视觉模型」添加</div>';return}
-   el.innerHTML=visionModels.map(m=>visionModelRow(m)).join('');
+   if(!AppState.visionModels.length){el.innerHTML='<div class="empty">还没有视觉模型，点「新增视觉模型」添加</div>';return}
+   el.innerHTML=AppState.visionModels.map(m=>visionModelRow(m)).join('');
  }
  
  function visionModelRow(m){
@@ -2146,7 +2148,7 @@ function toast(msg){
  }
  
  function addVisionModel(){
-   visionModels.push({id:'m'+Date.now(),name:'',api_url:'',api_key:'',model:'',_new:true});
+   AppState.visionModels.push({id:'m'+Date.now(),name:'',api_url:'',api_key:'',model:'',_new:true});
    const el=document.getElementById('vision-models-edit-list');
    paintVisionModelsEdit(el);
    const items=el.querySelectorAll('.vm-item');
@@ -2158,14 +2160,14 @@ function toast(msg){
    const item=btn.closest('.vm-item');
    if(!item)return;
    const id=item.getAttribute('data-id');
-   visionModels=visionModels.filter(m=>m.id!==id);
+   AppState.visionModels=AppState.visionModels.filter(m=>m.id!==id);
    paintVisionModelsEdit(document.getElementById('vision-models-edit-list'));
  }
  
  function collectVisionModels(){
    document.querySelectorAll('#vision-models-edit-list .vm-item').forEach(item=>{
      const id=item.getAttribute('data-id');
-     const m=visionModels.find(x=>x.id===id);
+     const m=AppState.visionModels.find(x=>x.id===id);
      if(!m)return;
      item.querySelectorAll('input[data-f]').forEach(inp=>{
        m[inp.getAttribute('data-f')]=inp.value.trim();
@@ -2176,7 +2178,7 @@ function toast(msg){
  
  async function saveVisionModels(){
    collectVisionModels();
-   const clean=visionModels.map(m=>({id:m.id,name:m.name,api_url:m.api_url,api_key:m.api_key,model:m.model}));
+   const clean=AppState.visionModels.map(m=>({id:m.id,name:m.name,api_url:m.api_url,api_key:m.api_key,model:m.model}));
    try{
      const r=await apiRequest('POST', ADMIN_API + '/vision-models', {models:clean}, {busy:document.getElementById('vm-save-btn')});
      if(!r.ok) return;
@@ -2191,14 +2193,14 @@ function toast(msg){
  
  function visionModelsOptionHtml(selId){
    let s='<option value="">未选择</option>';
-   visionModels.forEach(m=>{
+   AppState.visionModels.forEach(m=>{
      s+='<option value="'+escapeHtml(m.id)+'"'+(m.id===selId?' selected':'')+'>'+escapeHtml((m.name||'未命名')+(m.model?'（'+m.model+'）':''))+'</option>';
    });
    return s;
  }
  
  function selectedVisionModelName(id){
-   const m=visionModels.find(x=>x.id===id);
+   const m=AppState.visionModels.find(x=>x.id===id);
    if(!m)return '未选择';
    return (m.name||'未命名')+(m.model?'（'+m.model+'）':'');
  }
@@ -2210,7 +2212,7 @@ function toast(msg){
    el.innerHTML='<div class="empty">加载中…</div>';
    fetch(ADMIN_API + '/config').then(r=>r.json()).then(cfg=>{
      if(!cfg||typeof cfg!=='object'){el.innerHTML='<div class="empty">加载失败</div>';return}
-     const vm=visionModels.find(m=>m.id===cfg.co_vision_model_id);
+     const vm=AppState.visionModels.find(m=>m.id===cfg.co_vision_model_id);
      const ok=!!(vm&&vm.api_key&&String(vm.api_key).trim());
      let rows='';
      rows+='<div class="env-row"><span class="env-key">视觉模型</span><span class="env-val">'+escapeHtml(selectedVisionModelName(cfg.co_vision_model_id))+'</span></div>';
@@ -2257,7 +2259,7 @@ function toast(msg){
    el.innerHTML='<div class="empty">加载中…</div>';
    fetch(ADMIN_API + '/config').then(r=>r.json()).then(cfg=>{
      if(!cfg||typeof cfg!=='object'){el.innerHTML='<div class="empty">加载失败</div>';return}
-     const vm=visionModels.find(m=>m.id===cfg.screenshot_vision_model_id);
+     const vm=AppState.visionModels.find(m=>m.id===cfg.screenshot_vision_model_id);
      const ok=!!(vm&&vm.api_key&&String(vm.api_key).trim());
      const wake=!!cfg.screenshot_wake_enabled;
      const inject=!!(cfg.event_inject_types&&cfg.event_inject_types.includes&&cfg.event_inject_types.includes('screenshot'));
@@ -2509,7 +2511,7 @@ function toast(msg){
  
  let editingDiaryName = null;
  function renderDiary(){
-   const entries=INITIAL_DATA.diary||[];
+   const entries=AppState.INITIAL_DATA.diary||[];
    const el=document.getElementById('diary-list');
    if(!entries.length){el.innerHTML='<div class="empty">暂无日记</div>';return}
    el.innerHTML=entries.map(e=>{
@@ -2520,7 +2522,7 @@ function toast(msg){
  
  function openDiaryEditor(name){
    editingDiaryName=name;
-   const entries=INITIAL_DATA.diary||[];
+   const entries=AppState.INITIAL_DATA.diary||[];
    const entry=entries.find(e=>e.name===name);
    document.getElementById('diary-edit-name').textContent=name;
    document.getElementById('diary-edit-content').value=entry?entry.content:'';
@@ -2538,7 +2540,7 @@ function toast(msg){
        closeModal('diaryEditModal');
        try{
          const dr=await fetch(ADMIN_API+'/env');
-         if(dr.ok){const d=await dr.json();INITIAL_DATA=d;}
+         if(dr.ok){const d=await dr.json();AppState.INITIAL_DATA=d;}
        }catch(e){}
        renderDiary();
      }else{
@@ -2562,7 +2564,7 @@ function toast(msg){
        editingDiaryName=null;
        try{
          const dr=await fetch(ADMIN_API+'/env');
-         if(dr.ok){const d=await dr.json();INITIAL_DATA=d;}
+         if(dr.ok){const d=await dr.json();AppState.INITIAL_DATA=d;}
        }catch(e){}
        renderDiary();
      }else{
@@ -4712,7 +4714,7 @@ function ccArmAllGapAutoLoad(){
    document.querySelectorAll('.tab-item').forEach(el=>el.classList.remove('active'));
    document.getElementById('tab-'+name).classList.add('active');
    document.querySelector('.tab-item[data-tab="'+name+'"]').classList.add('active');
-  if(name==='memory'){switchMemView(memView);loadImportedList();}
+  if(name==='memory'){switchMemView(AppState.memView);loadImportedList();}
   if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
   if(name==='prompts'){loadWakePrompt();loadCompactionPrompt();loadCoWakePrompt();loadCoVisionPrompt();loadReparsePrompt();}
   if(name==='config'){loadToolsConfig();loadServices();}
@@ -5028,7 +5030,6 @@ let lastPendingCount = null;
  }
  
  // ============ 工具集 + 服务管理 ============
- let toolsDraft = null; // { manifest, config }
  
  function escHtml2(v){
    return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -5041,7 +5042,7 @@ let lastPendingCount = null;
      const r=await fetch(ADMIN_API + '/tools');
      const j=await r.json();
      if(j.error){el.innerHTML='<span class="empty">加载失败: '+escHtml2(j.error)+'</span>';return}
-     toolsDraft=j;
+     AppState.toolsDraft=j;
      const tEl=document.getElementById('tools-manifest-time');
      if(tEl) tEl.textContent = j.manifest && j.manifest.generated_at ? ('清单生成于 '+j.manifest.generated_at) : '';
      if(!j.manifest){
@@ -5137,8 +5138,8 @@ let lastPendingCount = null;
  // 收集页面当前完整状态：停用列表 + 所有与源码默认不同的说明/参数覆盖
  function collectToolsState() {
    const disabled = [], descriptions = {}, schemas = {};
-   const tlist = (toolsDraft && toolsDraft.manifest && toolsDraft.manifest.tools) || [];
-   const cfg = (toolsDraft && toolsDraft.config) || {};
+   const tlist = (AppState.toolsDraft && AppState.toolsDraft.manifest && AppState.toolsDraft.manifest.tools) || [];
+   const cfg = (AppState.toolsDraft && AppState.toolsDraft.config) || {};
    const cfgDesc = cfg.descriptions || {};
    const cfgSchemas = cfg.schemas || {};
    tlist.forEach(function (t) {
@@ -5170,7 +5171,7 @@ let lastPendingCount = null;
  }
  
  async function saveToolsConfig(scopeName) {
-   if (!toolsDraft) return;
+   if (!AppState.toolsDraft) return;
    const msg = document.getElementById('tools-msg');
    if (!msg) return;
    const label = scopeName ? '「' + scopeName + '」' : '全部改动';
@@ -5420,10 +5421,9 @@ async function deletePinned(id){
  
  
  // ============ 记忆词云卡片 ============
- let memView='cloud';
  let cloudWord='';
  function switchMemView(v){
-  memView=v;
+  AppState.memView=v;
   closeCloudDrawer();
   const cloud=document.getElementById('mem-cloud-wrap');
   const pool=document.getElementById('mem-pool-wrap');
