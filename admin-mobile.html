@@ -5865,7 +5865,6 @@ async function deletePinned(id){
  }
 
  // ============ 检索池：统计 / 搜索导入的对话 ============
- let poolFullCache={};
  let poolSearchTimer=null;
  async function loadSearchPool(){
    loadPoolStats();
@@ -5902,18 +5901,20 @@ async function deletePinned(id){
      if(!r.ok){el.innerHTML='<div class="empty">搜索失败: '+escapeHtml(j.error||'')+'</div>';return;}
      const ms=j.matches||[];
      if(!ms.length){el.innerHTML='<div class="empty">没有找到匹配</div>';return;}
-     poolFullCache={};
-     el.innerHTML='<div style="font-size:12px;color:var(--text3);margin-bottom:8px">命中 '+j.total+' 条消息 · 显示前 '+ms.length+' 条</div>'+
+     window.__poolMatches=ms;
+     el.innerHTML='<div style="font-size:12px;color:var(--text3);margin-bottom:8px">命中 '+j.total+' 条消息 · 显示前 '+ms.length+' 条 · 点 ☆ 可标星</div>'+
        ms.map(function(m,i){
-         poolFullCache['k'+i]=m.content||'';
          const who=(m.role==='assistant')?'谢意行':'用户';
          const time=m.time?fmtCcClock(m.time):'';
          return '<div class="cloud-res-item" style="margin-bottom:8px">'+
            '<div class="cloud-res-meta">'+
            '<span class="mem-tag">'+escapeHtml(m.record_name||'未命名')+'</span>'+
+           '<span style="display:inline-flex;align-items:center;gap:8px">'+
            '<span class="cloud-res-time">'+escapeHtml(time)+' · '+who+' · 命中 '+m.hits+'</span>'+
+           '<button class="cc-msg-mark'+(m.marked?' on':'')+'" onclick="togglePoolStar('+i+')" title="'+(m.marked?'取消标星：该消息可被压缩覆盖':'标星：跨窗口注入保留原文，压缩不被覆盖')+'" aria-pressed="'+(m.marked?'true':'false')+'">'+(m.marked?'★':'☆')+'</button>'+
+           '</span>'+
            '</div>'+
-           '<div class="cloud-res-content" id="pool-body-'+i+'" onclick="togglePoolFull('+i+')" style="cursor:pointer;-webkit-line-clamp:4">'+escapeHtml(m.preview)+'</div>'+
+           '<div style="font-size:13px;color:var(--text);line-height:1.7;word-break:break-all;white-space:pre-wrap">'+escapeHtml(m.preview)+'</div>'+
            '</div>';
        }).join('');
    }catch(e){el.innerHTML='<div class="empty">搜索失败: '+e.message+'</div>'}
