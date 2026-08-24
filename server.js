@@ -1329,7 +1329,10 @@ app.post("/v1/chat/completions", async (req, reply) => {
       if (isMainChat) {
         try {
           const ctxMsgCount = (Array.isArray(kelivoMessages) ? kelivoMessages : []).filter(function (m) { return m && m.role !== "system" && !(m.role === "assistant" && isSpecialEvent(m)) && !m.tool_calls && !m.tool_call_id; }).length;
-          if (ctxMsgCount < 2) { crossCtx = buildCrossWindowInjection(); }
+          const crossCfg = memoryPool.getConfig();
+          const crossAlways = crossCfg.cross_inject_always === true;
+          const crossMaxMsgs = Math.max(1, Number(crossCfg.cross_inject_max_msgs) || 2);
+          if (crossAlways || ctxMsgCount < crossMaxMsgs) { crossCtx = buildCrossWindowInjection(); }
         } catch (cx) { console.warn("[cross-inject] 失败:", cx.message); }
       }
       let sysExtra = "";

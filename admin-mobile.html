@@ -950,6 +950,8 @@
           <label class="cc-cfg-field">再解析·每段最多条数<input type="number" id="mw-reparse-maxitems" min="1" step="1"></label>
           <div class="cc-cfg-group-title">跨窗口注入</div>
           <label class="cc-cfg-field cc-cfg-check">总开关<span class="cc-sw"><input type="checkbox" id="mw-cross-enabled"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
+          <label class="cc-cfg-field cc-cfg-check">固定注入(整场会话一直带)<span class="cc-sw"><input type="checkbox" id="mw-cross-always"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
+          <label class="cc-cfg-field">消息少于 N 条才注入<input type="number" id="mw-cross-maxmsgs" min="1" step="1"></label>
           <label class="cc-cfg-field cc-cfg-check">日记<span class="cc-sw"><input type="checkbox" id="mw-cross-diary"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
           <label class="cc-cfg-field cc-cfg-check">高重要记忆<span class="cc-sw"><input type="checkbox" id="mw-cross-memory"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
           <label class="cc-cfg-field cc-cfg-check">标星<span class="cc-sw"><input type="checkbox" id="mw-cross-starred"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
@@ -2368,6 +2370,8 @@ function toast(msg){
       document.getElementById('mw-cross-diary').checked=c.cross_inject_diary!==false;
       document.getElementById('mw-cross-memory').checked=c.cross_inject_memory!==false;
       document.getElementById('mw-cross-starred').checked=c.cross_inject_starred!==false;
+      document.getElementById('mw-cross-always').checked=c.cross_inject_always===true;
+      document.getElementById('mw-cross-maxmsgs').value=c.cross_inject_max_msgs!=null?c.cross_inject_max_msgs:2;
        document.getElementById('mw-cross-days').value=c.cross_inject_diary_days!=null?c.cross_inject_diary_days:3;
        document.getElementById('mw-cross-mempercat').value=c.cross_inject_memory_per_category!=null?c.cross_inject_memory_per_category:2;
        document.getElementById('mw-cross-summary-days').value=c.cross_inject_summary_days!=null?c.cross_inject_summary_days:7;
@@ -2398,6 +2402,8 @@ function toast(msg){
     up2.cross_inject_diary=document.getElementById('mw-cross-diary').checked;
     up2.cross_inject_memory=document.getElementById('mw-cross-memory').checked;
     up2.cross_inject_starred=document.getElementById('mw-cross-starred').checked;
+    up2.cross_inject_always=document.getElementById('mw-cross-always').checked;
+    up2.cross_inject_max_msgs=Number(document.getElementById('mw-cross-maxmsgs').value)||2;
      up2.cross_inject_diary_days=Number(document.getElementById('mw-cross-days').value)||3;
      up2.cross_inject_memory_per_category=Number(document.getElementById('mw-cross-mempercat').value)||2;
      up2.cross_inject_summary_days=Number(document.getElementById('mw-cross-summary-days').value)||7;
