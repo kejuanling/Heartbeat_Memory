@@ -1643,7 +1643,7 @@ function listMarked() {
       index: displayIndex,
       role: entry.role || "assistant",
       time: t ? fmtWall(new Date(t)) : "",
-      content: entry.content.length > 300 ? entry.content.slice(0, 300) + "…" : entry.content,
+      content: entry.content,
       key: key,
       markedAt: t || "",
       // 无对应块信息，标记为"已存原文"
@@ -1677,7 +1677,7 @@ function listMarked() {
         index: displayIndex,
         role: m.role || "",
         time: t ? fmtWall(t) : "",
-        content: content.length > 300 ? content.slice(0, 300) + "…" : content,
+        content: content,
         key: key,
         markedAt: (marks[key] && marks[key].markedAt) || "",
         chunk: info
