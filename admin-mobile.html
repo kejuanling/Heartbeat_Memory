@@ -1630,6 +1630,7 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
  let logPanelOpen = false;
  let lastLogId = null;
  let logPollTimer = null;
+ let unreadPollTimer = null;
  let unreadLogCount = 0;
  let fabDragging = false;
  let fabStartX = 0, fabStartY = 0;
@@ -1819,20 +1820,43 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
  document.addEventListener('DOMContentLoaded', function(){
    initLogFab();
    loadCompactionLogs();
-   setInterval(function(){
-     if(!logPanelOpen){
-       fetch(ADMIN_API + '/context-compaction/logs').then(r=>r.json()).then(function(d){
-         if(d && d.logs && d.logs.length > 0){
-           if(lastLogId && d.logs[0].id !== lastLogId){
-             unreadLogCount++;
-             updateLogBadge();
-           }
-           if(!lastLogId) lastLogId = d.logs[0].id;
-         }
-       }).catch(()=>{});
-     }
-   }, 5000);
+   startUnreadPoll();
  });
+
+ function checkUnreadLogs(){
+   if(document.hidden || logPanelOpen) return;
+   fetch(ADMIN_API + '/context-compaction/logs').then(r=>r.json()).then(function(d){
+     if(d && d.logs && d.logs.length > 0){
+       if(lastLogId && d.logs[0].id !== lastLogId){
+         unreadLogCount++;
+         updateLogBadge();
+       }
+       if(!lastLogId) lastLogId = d.logs[0].id;
+     }
+   }).catch(()=>{});
+ }
+ function startUnreadPoll(){
+   if(unreadPollTimer) return;
+   unreadPollTimer = setInterval(checkUnreadLogs, 5000);
+ }
+ function stopUnreadPoll(){
+   if(unreadPollTimer){ clearInterval(unreadPollTimer); unreadPollTimer=null; }
+ }
+
+ // 页面切到后台/切回时暂停或恢复后台轮询，避免隐藏页持续请求
+ document.addEventListener('visibilitychange', function(){
+   if(document.hidden){
+     stopUnreadPoll();
+     stopLogPolling();
+     stopLogsAutoRefresh();
+   }else{
+     startUnreadPoll();
+     if(logPanelOpen) startLogPolling();
+     let cur=''; try{ cur=localStorage.getItem('adminTab')||''; }catch(e){}
+     if(cur==='system') startLogsAutoRefresh();
+   }
+ });
+
 
 function toast(msg){
    const el=document.getElementById('toast');
@@ -2461,6 +2485,7 @@ function toast(msg){
  let ccFilter = null; // 当前筛选状态: null/gap/pending/replace/replaced
 
  let compactionPlan = null;
+let ccPreviewLoadedAt = 0;
  let compactionCutPoints = [];
  let ccExpanded = new Set();
  let ccFresh = new Set();
@@ -2486,6 +2511,7 @@ function toast(msg){
  let ccMsgFetchDone = false;
 let ccGapCutsOff = new Set();
  let ccPollTimer = null;
+ let ccLastRenderedHtml = null;
  
  function escHtml(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
  
@@ -2641,6 +2667,7 @@ function loadCompactionPreview(){
       return;
     }
     compactionPlan=d;
+    ccPreviewLoadedAt=Date.now();
     if(!ccGapCollapsedInit){ccGapCollapsedInit=true;Array.prototype.forEach.call((d.uncovered&&d.uncovered.gaps)||[],function(g){ccGapCollapsed.add((g.startIdx||0)+'-'+(g.endIdx||0));});}
     renderCompaction(savedY, savedInner);
     renderCompactionConfig();
@@ -2863,6 +2890,8 @@ function ccNodeKey(n){
 }
 function reconcileCcList(el, html){
   if(!el) return;
+  if(ccLastRenderedHtml === html) return;
+  ccLastRenderedHtml = html;
   const ae=document.activeElement;
   if(ae && el.contains(ae) && /^(TEXTAREA|INPUT)$/.test(ae.tagName)) return;
   const tmp=document.createElement('div');
@@ -4542,7 +4571,7 @@ function ccArmAllGapAutoLoad(){
    document.getElementById('tab-'+name).classList.add('active');
    document.querySelector('.tab-item[data-tab="'+name+'"]').classList.add('active');
   if(name==='memory'){switchMemView(memView);loadImportedList();}
-  if(name==='compaction'){loadCompactionPreview(); if(compactionPlan) renderCompactionConfig();}
+  if(name==='compaction'){ if(!compactionPlan || !ccPreviewLoadedAt || Date.now()-ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(compactionPlan) renderCompactionConfig(); }
   if(name==='prompts'){loadWakePrompt();loadCompactionPrompt();loadCoWakePrompt();loadCoVisionPrompt();loadReparsePrompt();}
   if(name==='config'){loadToolsConfig();loadServices();}
   if(name==='system'){startLogsAutoRefresh(); loadReplaceLog();}
