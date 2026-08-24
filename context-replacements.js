@@ -1569,6 +1569,14 @@ function locateCompIdx(target, items) {
 // 解析记录在压缩索引空间(compressibleItems)中的覆盖范围
 function recordCompRange(it, items) {
   const compItems = items || compressibleItems();
+  // 手工块等带精确压缩索引的记录：直接信任存储范围（锚点定位遇重复内容/特殊事件会漂移）
+  const rng = it && it.range;
+  if (rng && Number.isInteger(rng.start_index) && Number.isInteger(rng.end_index)) {
+    const s = Math.max(0, rng.start_index);
+    const e = Math.min(rng.end_index, compItems.length - 1);
+    if (s >= compItems.length || e < s) return null;
+    return { start: s, end: e };
+  }
   const matched = (Array.isArray(it.matched) && it.matched.length > 0) ? it.matched : [];
   if (matched.length === 0) return null;
   const fl = locateCompIdx(matched[0], compItems);

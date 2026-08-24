@@ -2969,22 +2969,33 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
       if (m && m.role !== "system" && !contextReplacements.isSpecialEvent(m)) { aEnd = m; break; }
     }
     if (!aStart || !aEnd) return;
+    // 手工块：直接信任创建时落库的精确压缩索引（0 起）。锚点定位在块首尾含特殊事件、
+    // 或短消息归一化后撞键（如「哥哥 <current_time>…」）时会漂移，导致块被削头尾或整块丢弃。
+    const storedStart = it.range && it.range.start_index;
+    const storedEnd = it.range && it.range.end_index;
+    const hasStoredIdx = Number.isInteger(storedStart) && Number.isInteger(storedEnd);
     let compStart = -1;
-    for (let i = 0; i < matched.length; i++) {
-      const m = matched[i];
-      if (!m || m.role === "system" || contextReplacements.isSpecialEvent(m)) continue;
-      const k = itemPosByKey.get(nKeyOf(m));
-      if (k !== undefined) { compStart = k; break; }
-    }
-    if (compStart < 0) return;
     let compEnd = -1;
-    for (let i = matched.length - 1; i >= 0; i--) {
-      const m = matched[i];
-      if (!m || m.role === "system" || contextReplacements.isSpecialEvent(m)) continue;
-      const k = itemPosByKey.get(nKeyOf(m));
-      if (k !== undefined) { compEnd = k; break; }
+    if (hasStoredIdx) {
+      compStart = Math.max(0, storedStart);
+      compEnd = Math.min(storedEnd, items.length - 1);
+      if (compStart >= items.length || compEnd < compStart) return;
+    } else {
+      for (let i = 0; i < matched.length; i++) {
+        const m = matched[i];
+        if (!m || m.role === "system" || contextReplacements.isSpecialEvent(m)) continue;
+        const k = itemPosByKey.get(nKeyOf(m));
+        if (k !== undefined) { compStart = k; break; }
+      }
+      if (compStart < 0) return;
+      for (let i = matched.length - 1; i >= 0; i--) {
+        const m = matched[i];
+        if (!m || m.role === "system" || contextReplacements.isSpecialEvent(m)) continue;
+        const k = itemPosByKey.get(nKeyOf(m));
+        if (k !== undefined) { compEnd = k; break; }
+      }
+      if (compEnd < compStart) return;
     }
-    if (compEnd < compStart) return;
     const headK = keyOf(aStart);
     const tailK = keyOf(aEnd);
     let nsHi = -1, nsTi = -1;
@@ -3019,10 +3030,11 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
       range_label: it.range_label || "",
       original_preview: matched.slice(0, 2).map(m => ({ role: m.role, content: String(m.content || "").slice(0, 150) })),
       history: (Array.isArray(it.history) ? it.history : []).map(function (h, i) { return { index: i, summary: h.summary, generatedAt: h.generatedAt, mode: h.mode || (manual ? "edited" : "ai"), manual: h.manual === true || manual }; }).slice(0, 8),
-      msgs: includeMessages ? matched.map(m => {
+      msgs: includeMessages ? matched.map(function (m, i) {
         const _key = contextCompactor.contentKey(m);
-        const _k = nKeyOf(m);
-        return { role: m.role, content: typeof m.content === "string" ? m.content : "", key: _key, marked: !!contextCompactor.loadMarks()[_key], num: itemPosByKey.has(_k) ? itemPosByKey.get(_k) : null };
+        // 手工块：编号=存储起点+块内序号（matched 与压缩切片一一对应），避免锚点撞键漂移
+        const _num = hasStoredIdx ? (storedStart + i) : (itemPosByKey.has(nKeyOf(m)) ? itemPosByKey.get(nKeyOf(m)) : null);
+        return { role: m.role, content: typeof m.content === "string" ? m.content : "", key: _key, marked: !!contextCompactor.loadMarks()[_key], num: _num };
       }) : undefined,
       pos: compStart
     });
