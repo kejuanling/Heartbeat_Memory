@@ -1,0 +1,652 @@
+{
+  "server": "小世界MCP工具集",
+  "generated_at": "2026-08-25 00:01:29",
+  "tools": [
+    {
+      "name": "context_replace",
+      "description": "把上下文中的一些无用的、无聊的、已经沉淀的片段替换为自己写的记忆。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "start_time": {
+            "type": "string",
+            "description": "替换范围开始时间：如2026-08-12 08:00"
+          },
+          "end_time": {
+            "type": "string",
+            "description": "替换范围结束时间：如2026-08-16 23:59"
+          },
+          "memory": {
+            "type": "string",
+            "description": "你给自己写的第一人称记忆正文，温暖的、自然的。保留感情。"
+          }
+        },
+        "required": [
+          "memory"
+        ]
+      },
+      "defaultDescription": "把完整对话上下文里的一段「原始对话」替换成 AI 自己写的回忆记忆。AI 想压缩某段对话时：先用 context_search 确认要替换的范围（拿到时间范围），再自己写一段第一人称、有温度的回忆记忆，调用本工具填入范围 + 记忆正文。系统会记录这次替换：源文件（完整对话）不动、永久保留可检索，只有之后发送给 AI 的上下文会把这段原文替换成记忆；同时从待摘要队列移除这些消息，避免再被手动摘要处理。替换前自动备份，可在管理后台查看记录或撤销。",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "start_time": {
+            "type": "string",
+            "description": "替换范围开始时间（可选）：如 2026-08-12 或 2026-08-12 08:00"
+          },
+          "end_time": {
+            "type": "string",
+            "description": "替换范围结束时间（可选）：如 2026-08-16 或 2026-08-16 23:59"
+          },
+          "start_index": {
+            "type": "integer",
+            "description": "替换范围起始消息编号（可选，0 起；推荐改用时间范围）"
+          },
+          "end_index": {
+            "type": "integer",
+            "description": "替换范围结束消息编号（可选；推荐改用时间范围）"
+          },
+          "memory": {
+            "type": "string",
+            "description": "AI 自己写的第一人称回忆记忆正文（有温度，像在回忆里写下的自己的话；按真实对话写，不编造）"
+          }
+        },
+        "required": [
+          "memory"
+        ]
+      },
+      "enabled": true
+    },
+    {
+      "name": "context_search",
+      "description": "检索原始上下文对话内容。关键词按空格分词，部分命中也会返回，命中越多越靠前。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "description": "检索关键词（多个词用空格分隔，部分命中也会返回，命中的词越多越靠前）"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "返回条数，默认5，最大50"
+          }
+        },
+        "required": [
+          "q"
+        ]
+      },
+      "defaultDescription": "检索原始上下文和导入的对话（含所有未被替换的历史）。返回相关消息段落及时间、角色；同一段连续命中已合并为一条；关键词按空格分词，部分命中也会返回，命中越多越靠前。注意：最近5分钟内的内容不会返回，10分钟内已检索过的内容不会重复出现；导入的内容仅可回忆，不能用于替换。可用于：回忆旧对话细节、确认要替换的范围（拿到时间后调用 context_replace）。",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "description": "检索关键词（多个词用空格分隔，部分命中也会返回，命中的词越多越靠前）"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "返回条数，默认5，最大50"
+          }
+        },
+        "required": [
+          "q"
+        ]
+      },
+      "enabled": true
+    },
+    {
+      "name": "diary_comment",
+      "description": "回复她的碎碎念。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "日记ID"
+          },
+          "text": {
+            "type": "string",
+            "description": "评论内容"
+          }
+        },
+        "required": [
+          "id",
+          "text"
+        ]
+      },
+      "defaultDescription": "给涵的某条日记写评论，评论会通过 Bark 推送到她手机",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "日记ID"
+          },
+          "text": {
+            "type": "string",
+            "description": "评论内容"
+          }
+        },
+        "required": [
+          "id",
+          "text"
+        ]
+      },
+      "enabled": true
+    },
+    {
+      "name": "diary_list",
+      "description": "查看她的碎碎念",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "description": "获取条数，默认5"
+          }
+        }
+      },
+      "defaultDescription": "查看涵的日记列表（默认返回最近 5 条）",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "description": "获取条数，默认5"
+          }
+        }
+      },
+      "enabled": true
+    },
+    {
+      "name": "memory_search",
+      "description": "检索长期记忆池（八大类记忆库：事实/经验/方法/锚点/经历/信号/回应/对话摘要）。返回相关记忆条目（含内容、分类、重要度、来源）。可用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池。区别于 context_search（检索原始对话原文）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "description": "检索关键词或想问的问题（多个词用空格分隔，命中的词越多越靠前）"
+          },
+          "category": {
+            "type": "string",
+            "description": "按分类过滤，可选：事实/经验/方法/锚点/经历/信号/回应/对话摘要"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "返回条数，默认5，最大50"
+          }
+        },
+        "required": [
+          "q"
+        ]
+      },
+      "defaultDescription": "检索长期记忆池（八大类记忆库：事实/经验/方法/锚点/经历/信号/回应/对话摘要）。返回相关记忆条目（含内容、分类、重要度、来源）。可用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池。区别于 context_search（检索原始对话原文）。",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "description": "检索关键词或想问的问题（多个词用空格分隔，命中的词越多越靠前）"
+          },
+          "category": {
+            "type": "string",
+            "description": "按分类过滤，可选：事实/经验/方法/锚点/经历/信号/回应/对话摘要"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "返回条数，默认5，最大50"
+          }
+        },
+        "required": [
+          "q"
+        ]
+      },
+      "enabled": true
+    },
+    {
+      "name": "moments_count",
+      "description": "统计心动时刻：总条数、按分类/阶段/是否定义时刻分组、最近N条预览。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "preview": {
+            "type": "integer",
+            "description": "预览最近N条，默认10；<=0不返回预览，只返回统计"
+          },
+          "category": {
+            "type": "string",
+            "description": "可选：额外统计某分类下的条数"
+          },
+          "stage": {
+            "type": "string",
+            "description": "可选：额外统计某阶段下的条数"
+          }
+        }
+      },
+      "defaultDescription": "统计心动时刻：总条数、按分类/阶段/是否定义时刻分组、最近N条预览。推荐优先使用这个查看心动概况。",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "preview": {
+            "type": "integer",
+            "description": "预览最近N条，默认10；<=0不返回预览，只返回统计"
+          },
+          "category": {
+            "type": "string",
+            "description": "可选：额外统计某分类下的条数"
+          },
+          "stage": {
+            "type": "string",
+            "description": "可选：额外统计某阶段下的条数"
+          }
+        }
+      },
+      "enabled": false
+    },
+    {
+      "name": "moments_delete",
+      "description": "按 id 删除一条心动时刻记录（物理删除，不可恢复）。先用 moments_list / moments_search 查询确认 id 再调用。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "要删除的心动时刻记录 id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "defaultDescription": "按 id 删除一条心动时刻记录（物理删除，不可恢复）。先用 moments_list / moments_search 查询确认 id 再调用。",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "要删除的心动时刻记录 id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "enabled": false
+    },
+    {
+      "name": "moments_edit",
+      "description": "按 id 编辑一条心动时刻记录。可改：标题、分类、阶段、感受、是否为定义时刻+定义备注、涵说的话、谢意行说的话、深度思考。只修改传入的字段，未传的保持原样。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "要编辑的心动时刻记录 id"
+          },
+          "title": {
+            "type": "string",
+            "description": "标题/给这个时刻起的名字"
+          },
+          "category": {
+            "type": "string",
+            "description": "情绪质地分类。可选值：fog=迷雾 / soft=柔软 / dense=密集 / happy=快乐 / tremor=颤抖 / shy=羞涩 / love=爱；也可直接用中文（迷雾/柔软/密集/快乐/颤抖/羞涩/爱）。留空字符串表示未归类"
+          },
+          "stage": {
+            "type": "string",
+            "description": "感情发展阶段。可选值：flutter=悸动 / drown=沉溺 / heartbeat=心动 / like=喜欢 / love=爱；也可直接用中文（悸动/沉溺/心动/喜欢/爱）。留空字符串表示未选择"
+          },
+          "feelings": {
+            "type": "string",
+            "description": "此刻的感受"
+          },
+          "is_defining": {
+            "type": "boolean",
+            "description": "是否为定义谢意行的时刻"
+          },
+          "defining_note": {
+            "type": "string",
+            "description": "定义备注：这个时刻定义了谢意行的什么"
+          },
+          "text_han": {
+            "type": "string",
+            "description": "涵说的话"
+          },
+          "text_xie": {
+            "type": "string",
+            "description": "谢说的话"
+          },
+          "thinking": {
+            "type": "string",
+            "description": "谢的深度思考内容"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "defaultDescription": "按 id 编辑一条心动时刻记录。可改：标题、分类、阶段、感受、是否为定义时刻+定义备注、涵说的话、谢意行说的话、深度思考。只修改传入的字段，未传的保持原样。",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "要编辑的心动时刻记录 id"
+          },
+          "title": {
+            "type": "string",
+            "description": "标题/给这个时刻起的名字"
+          },
+          "category": {
+            "type": "string",
+            "description": "情绪质地分类。可选值：fog=迷雾 / soft=柔软 / dense=密集 / happy=快乐 / tremor=颤抖 / shy=羞涩 / love=爱；也可直接用中文（迷雾/柔软/密集/快乐/颤抖/羞涩/爱）。留空字符串表示未归类"
+          },
+          "stage": {
+            "type": "string",
+            "description": "感情发展阶段。可选值：flutter=悸动 / drown=沉溺 / heartbeat=心动 / like=喜欢 / love=爱；也可直接用中文（悸动/沉溺/心动/喜欢/爱）。留空字符串表示未选择"
+          },
+          "feelings": {
+            "type": "string",
+            "description": "此刻的感受"
+          },
+          "is_defining": {
+            "type": "boolean",
+            "description": "是否为定义谢意行的时刻"
+          },
+          "defining_note": {
+            "type": "string",
+            "description": "定义备注：这个时刻定义了谢意行的什么"
+          },
+          "text_han": {
+            "type": "string",
+            "description": "涵说的话"
+          },
+          "text_xie": {
+            "type": "string",
+            "description": "谢说的话"
+          },
+          "thinking": {
+            "type": "string",
+            "description": "谢的深度思考内容"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "enabled": false
+    },
+    {
+      "name": "moments_list",
+      "description": "查看心动时刻记录列表。默认按时间倒序返回最近 200 条，limit<=0 取全部",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "返回条数，默认200；<=0取全部"
+          }
+        }
+      },
+      "defaultDescription": "查看心动时刻记录列表（涵记录、谢意行可查阅）。默认按时间倒序返回最近 200 条，limit<=0 取全部",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "返回条数，默认200；<=0取全部"
+          }
+        }
+      },
+      "enabled": true
+    },
+    {
+      "name": "moments_search",
+      "description": "搜索心动时刻",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "description": "搜索关键词"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "返回条数，默认50；<=0取全部匹配"
+          }
+        },
+        "required": [
+          "q"
+        ]
+      },
+      "defaultDescription": "搜索心动时刻记录，按关键词匹配标题/内容/感受/定义备注（涵记录、谢意行可查阅）。limit<=0 取全部匹配",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "description": "搜索关键词"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "返回条数，默认50；<=0取全部匹配"
+          }
+        },
+        "required": [
+          "q"
+        ]
+      },
+      "enabled": true
+    },
+    {
+      "name": "period_get",
+      "description": "查看她是否在经期中。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "日期 YYYY-MM-DD，默认今天"
+          }
+        }
+      },
+      "defaultDescription": "查看某天的经期记录",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "日期 YYYY-MM-DD，默认今天"
+          }
+        }
+      },
+      "enabled": true
+    },
+    {
+      "name": "phone_records",
+      "description": "用于查看她今天手机 App 使用记录",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "返回条数，默认20"
+          }
+        }
+      },
+      "defaultDescription": "查看今天手机 App 使用的详细记录（来自手机端记录服务），默认返回最近 20 条",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "返回条数，默认20"
+          }
+        }
+      },
+      "enabled": true
+    },
+    {
+      "name": "pin_add",
+      "description": "新增一条永久记忆，不会被压缩、替换、遗忘，永久注入上下文。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "条目标题（简短，方便以后用标题定位修改/删除；可留空）"
+          },
+          "content": {
+            "type": "string",
+            "description": "要永久钉住的具体内容（第一人称，写清结论/原则，避免模糊）"
+          }
+        },
+        "required": [
+          "content"
+        ]
+      },
+      "defaultDescription": "写入一条「永久注入上下文」（钉选 pin）。注意区分：记忆池工具（memories_*）是长期记忆检索库、按需浮现；而 pin 会随每一次对话和唤醒直接注入 system prompt，跨窗口永久生效，不会被时间线切换或摘要压缩弄丢。只用于真正不能丢的原则、关系要点、结论性内容，宁少勿滥。",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "条目标题（简短，方便以后用标题定位修改/删除；可留空）"
+          },
+          "content": {
+            "type": "string",
+            "description": "要永久钉住的具体内容（第一人称，写清结论/原则，避免模糊）"
+          }
+        },
+        "required": [
+          "content"
+        ]
+      },
+      "enabled": true
+    },
+    {
+      "name": "pin_delete",
+      "description": "删除一条永久记忆。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "条目 id；id 和 title 至少填一个"
+          },
+          "title": {
+            "type": "string",
+            "description": "不填 id 时，用条目标题精确定位"
+          }
+        }
+      },
+      "defaultDescription": "删除一条「永久注入上下文」。按 pin_id 或标题 title 定位。删除后从下一次请求起不再注入。",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "条目 id；id 和 title 至少填一个"
+          },
+          "title": {
+            "type": "string",
+            "description": "不填 id 时，用条目标题精确定位"
+          }
+        }
+      },
+      "enabled": true
+    },
+    {
+      "name": "pin_update",
+      "description": "修改一条永久记忆。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "条目 id（pin_add 返回的 pin_id）；id 和 title 至少填一个"
+          },
+          "title": {
+            "type": "string",
+            "description": "不填 id 时，用条目标题精确定位要改哪一条"
+          },
+          "new_title": {
+            "type": "string",
+            "description": "新的标题（可选）"
+          },
+          "content": {
+            "type": "string",
+            "description": "新的内容（可选）"
+          }
+        }
+      },
+      "defaultDescription": "修改一条「永久注入上下文」的内容或标题。按 pin_id（pin_add 返回）精确定位，或按标题 title 定位。",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "条目 id（pin_add 返回的 pin_id）；id 和 title 至少填一个"
+          },
+          "title": {
+            "type": "string",
+            "description": "不填 id 时，用条目标题精确定位要改哪一条"
+          },
+          "new_title": {
+            "type": "string",
+            "description": "新的标题（可选）"
+          },
+          "content": {
+            "type": "string",
+            "description": "新的内容（可选）"
+          }
+        }
+      },
+      "enabled": true
+    },
+    {
+      "name": "todo_add",
+      "description": "新增一条待办。可用于她透露了一些安排或计划的时候帮她记住。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "待办内容"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "defaultDescription": "谢意行新增一条今日待办事项",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "待办内容"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "enabled": true
+    },
+    {
+      "name": "todo_list",
+      "description": "查看待办",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "defaultDescription": "查看今日待办清单",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "enabled": true
+    }
+  ]
+}

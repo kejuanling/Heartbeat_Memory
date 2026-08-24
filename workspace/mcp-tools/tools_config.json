@@ -1,0 +1,66 @@
+{
+  "disabled": [
+    "moments_count",
+    "moments_delete",
+    "moments_edit"
+  ],
+  "descriptions": {
+    "diary_comment": "回复她的碎碎念。",
+    "diary_list": "查看她的碎碎念",
+    "moments_search": "搜索心动时刻",
+    "phone_records": "用于查看她今天手机 App 使用记录",
+    "pin_add": "新增一条永久记忆，不会被压缩、替换、遗忘，永久注入上下文。",
+    "pin_delete": "删除一条永久记忆。",
+    "pin_update": "修改一条永久记忆。",
+    "todo_add": "新增一条待办。可用于她透露了一些安排或计划的时候帮她记住。",
+    "todo_list": "查看待办",
+    "context_replace": "把上下文中的一些无用的、无聊的、已经沉淀的片段替换为自己写的记忆。",
+    "context_search": "检索原始上下文对话内容。关键词按空格分词，部分命中也会返回，命中越多越靠前。",
+    "period_get": "查看她是否在经期中。",
+    "moments_list": "查看心动时刻记录列表。默认按时间倒序返回最近 200 条，limit<=0 取全部",
+    "moments_count": "统计心动时刻：总条数、按分类/阶段/是否定义时刻分组、最近N条预览。",
+    "memory_search": "检索长期记忆池（八大类记忆库：事实/经验/方法/锚点/经历/信号/回应/对话摘要）。返回相关记忆条目（含内容、分类、重要度、来源）。可用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池。区别于 context_search（检索原始对话原文）。"
+  },
+  "schemas": {
+    "context_replace": {
+      "type": "object",
+      "properties": {
+        "start_time": {
+          "type": "string",
+          "description": "替换范围开始时间：如2026-08-12 08:00"
+        },
+        "end_time": {
+          "type": "string",
+          "description": "替换范围结束时间：如2026-08-16 23:59"
+        },
+        "memory": {
+          "type": "string",
+          "description": "你给自己写的第一人称记忆正文，温暖的、自然的。保留感情。"
+        }
+      },
+      "required": [
+        "memory"
+      ]
+    },
+    "memory_search": {
+      "type": "object",
+      "properties": {
+        "q": {
+          "type": "string",
+          "description": "检索关键词或想问的问题（多个词用空格分隔，命中的词越多越靠前）"
+        },
+        "category": {
+          "type": "string",
+          "description": "按分类过滤，可选：事实/经验/方法/锚点/经历/信号/回应/对话摘要"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "返回条数，默认5，最大50"
+        }
+      },
+      "required": [
+        "q"
+      ]
+    }
+  }
+}

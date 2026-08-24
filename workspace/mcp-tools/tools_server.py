@@ -6,7 +6,11 @@
 协议: JSON-RPC 2.0
 """
 from http.server import HTTPServer, BaseHTTPRequestHandler
-import json, urllib.request, urllib.parse, os, time, subprocess
+from socketserver import ThreadingMixIn
+
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+import json, urllib.request, urllib.parse, urllib.error, os, time, subprocess, threading
 import datetime
 
 PORT = 8771
@@ -65,7 +69,7 @@ def tool_diary_list(args):
         return {"error": data["_error"]}
     return {"entries": data[:count]}
 TOOLS["diary_list"] = {
-    "description": "查看涵的日记列表",
+    "description": "查看涵的日记列表（默认返回最近 5 条）",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -83,7 +87,7 @@ def tool_diary_comment(args):
     result = api_post(f"{BASE_URL}:8777/diary/api/entries/comment", {"id": eid, "text": text})
     return result
 TOOLS["diary_comment"] = {
-    "description": "评论涵的某条日记（会Bark推送到她手机）",
+    "description": "给涵的某条日记写评论，评论会通过 Bark 推送到她手机",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -96,15 +100,33 @@ TOOLS["diary_comment"] = {
 }
 
 # ── 心动时刻 ──
+def _moment_brief(m):
+    """精简展示字段：text 已含 涵：/谢： 前缀，不再重复返回 text_han/text_xie，
+    避免同一条内容在输出里看起来像‘谢’和‘xie’两条。"""
+    return {
+        "id": m.get("id"),
+        "title": m.get("title", ""),
+        "text": m.get("text", ""),
+        "ts": m.get("ts", ""),
+        "category": m.get("category", ""),
+        "stage": m.get("stage", ""),
+        "feelings": m.get("feelings", ""),
+        "thinking": m.get("thinking", ""),
+        "defining_note": m.get("defining_note", ""),
+        "is_defining": bool(m.get("is_defining", False)),
+        "timeline_order": m.get("timeline_order", m.get("id")),
+    }
+
+
 def tool_moments_list(args):
     limit = args.get("limit", 200)
     data = api_get(f"{BASE_URL}:8777/todo/api/moments?limit={limit}")
     if "_error" in data:
         return {"error": data["_error"]}
-    moments = data if isinstance(data, list) else []
+    moments = [_moment_brief(m) for m in data] if isinstance(data, list) else []
     return {"moments": moments, "count": len(moments)}
 TOOLS["moments_list"] = {
-    "description": "查看心动时刻记录列表（涵记录，谢停云可阅）。limit<=0时取全部",
+    "description": "查看心动时刻记录列表（涵记录、谢意行可查阅）。默认按时间倒序返回最近 200 条，limit<=0 取全部",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -124,10 +146,10 @@ def tool_moments_search(args):
     data = api_get(f"{BASE_URL}:8777/todo/api/moments/search?q={q_enc}&limit={limit}")
     if "_error" in data:
         return {"error": data["_error"]}
-    moments = data if isinstance(data, list) else []
+    moments = [_moment_brief(m) for m in data] if isinstance(data, list) else []
     return {"moments": moments, "count": len(moments), "keyword": q}
 TOOLS["moments_search"] = {
-    "description": "搜索心动时刻记录，按关键词匹配标题/内容/感受/定义备注（涵记录，谢停云可阅）。limit<=0取全部匹配",
+    "description": "搜索心动时刻记录，按关键词匹配标题/内容/感受/定义备注（涵记录、谢意行可查阅）。limit<=0 取全部匹配",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -217,6 +239,117 @@ TOOLS["moments_count"] = {
     "handler": tool_moments_count
 }
 
+def tool_moments_delete(args):
+    mid = args.get("id")
+    if mid is None:
+        return {"error": "缺少 id，请先用 moments_list / moments_search 查询要删除的记录 id"}
+    try:
+        mid = int(mid)
+    except (TypeError, ValueError):
+        return {"error": "id 必须是数字"}
+    data = api_get(f"{BASE_URL}:8777/todo/api/moments?limit=-1")
+    if "_error" in data:
+        return {"error": data["_error"]}
+    exists = any(isinstance(m, dict) and m.get("id") == mid for m in data)
+    if not exists:
+        return {"error": f"未找到 id={mid} 的心动时刻记录，请先确认 id 是否正确"}
+    result = api_post(f"{BASE_URL}:8777/todo/api/moments/delete", {"id": mid})
+    if result.get("ok"):
+        return {"ok": True, "deleted_id": mid}
+    if "_error" in result:
+        return {"error": result["_error"]}
+    return result
+TOOLS["moments_delete"] = {
+    "description": "按 id 删除一条心动时刻记录（物理删除，不可恢复）。先用 moments_list / moments_search 查询确认 id 再调用。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "id": {"type": "integer", "description": "要删除的心动时刻记录 id"}
+        },
+        "required": ["id"]
+    },
+    "handler": tool_moments_delete
+}
+
+def tool_moments_edit(args):
+    mid = args.get("id")
+    if mid is None:
+        return {"error": "缺少 id，请先用 moments_list / moments_search 查询要编辑的记录 id"}
+    try:
+        mid = int(mid)
+    except (TypeError, ValueError):
+        return {"error": "id 必须是数字"}
+    data = api_get(f"{BASE_URL}:8777/todo/api/moments?limit=-1")
+    if "_error" in data:
+        return {"error": data["_error"]}
+    m = next((x for x in data if isinstance(x, dict) and x.get("id") == mid), None)
+    if m is None:
+        return {"error": f"未找到 id={mid} 的心动时刻记录，请先确认 id 是否正确"}
+
+    payload = {}
+    for k in ["title", "category", "stage", "feelings", "defining_note", "text_han", "text_xie", "thinking"]:
+        if k in args and args[k] is not None:
+            payload[k] = str(args[k]).strip()
+    if "is_defining" in args and args["is_defining"] is not None:
+        payload["is_defining"] = bool(args["is_defining"])
+
+    CATEGORY_VALUES = {"fog","soft","dense","happy","tremor","shy","love","迷雾","柔软","密集","快乐","颤抖","羞涩","爱","安静","氤氲","开心","震颤","害羞",""}
+    STAGE_VALUES = {"flutter","drown","heartbeat","like","love","悸动","沉溺","心动","喜欢","爱",""}
+    CAT_NORM = {"fog":"fog","soft":"soft","dense":"dense","happy":"happy","tremor":"tremor","shy":"shy","love":"love","迷雾":"fog","柔软":"soft","密集":"dense","快乐":"happy","颤抖":"tremor","羞涩":"shy","爱":"love","安静":"fog","氤氲":"dense","开心":"happy","震颤":"tremor","害羞":"shy"}
+    if "category" in payload and payload["category"] not in CATEGORY_VALUES:
+        return {"error": "分类不正确。可选值：fog=迷雾 / soft=柔软 / dense=密集 / happy=快乐 / tremor=颤抖 / shy=羞涩 / love=爱，也可直接用中文（迷雾/柔软/密集/快乐/颤抖/羞涩/爱），留空字符串表示未归类"}
+    if "stage" in payload and payload["stage"] not in STAGE_VALUES:
+        return {"error": "阶段不正确。可选值：flutter=悸动 / drown=沉溺 / heartbeat=心动 / like=喜欢 / love=爱，也可直接用中文（悸动/沉溺/心动/喜欢/爱），留空字符串表示未选择"}
+    if "category" in payload:
+        payload["category"] = CAT_NORM.get(payload["category"], payload["category"])
+
+    # 未传的字段保持原样
+    payload.setdefault("title", m.get("title", ""))
+    payload.setdefault("category", m.get("category", ""))
+    payload.setdefault("stage", m.get("stage", ""))
+    payload.setdefault("feelings", m.get("feelings", ""))
+    payload.setdefault("defining_note", m.get("defining_note", ""))
+    payload.setdefault("text_han", m.get("text_han", ""))
+    payload.setdefault("text_xie", m.get("text_xie", ""))
+    payload.setdefault("thinking", m.get("thinking", ""))
+    payload.setdefault("is_defining", bool(m.get("is_defining", False)))
+
+    # 由涵/谢的话重建合并文本；旧数据无拆分的则沿用原 text
+    parts = []
+    if payload.get("text_han"): parts.append("涵：" + payload["text_han"])
+    if payload.get("text_xie"): parts.append("我：" + payload["text_xie"])
+    payload["text"] = "\n".join(parts) or m.get("text", "")
+
+    payload["id"] = mid
+    result = api_post(f"{BASE_URL}:8777/todo/api/moments/edit", payload)
+    if result.get("ok"):
+        updated = {k: payload[k] for k in ["title", "category", "stage", "feelings", "is_defining", "defining_note", "text_han", "text_xie", "thinking"]}
+        return {"ok": True, "id": mid, "updated": updated}
+    if "_error" in result:
+        return {"error": result["_error"]}
+    return result
+
+TOOLS["moments_edit"] = {
+    "description": "按 id 编辑一条心动时刻记录。可改：标题、分类、阶段、感受、是否为定义时刻+定义备注、涵说的话、谢意行说的话、深度思考。只修改传入的字段，未传的保持原样。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "id": {"type": "integer", "description": "要编辑的心动时刻记录 id"},
+            "title": {"type": "string", "description": "标题/给这个时刻起的名字"},
+            "category": {"type": "string", "description": "情绪质地分类。可选值：fog=迷雾 / soft=柔软 / dense=密集 / happy=快乐 / tremor=颤抖 / shy=羞涩 / love=爱；也可直接用中文（迷雾/柔软/密集/快乐/颤抖/羞涩/爱）。留空字符串表示未归类"},
+            "stage": {"type": "string", "description": "感情发展阶段。可选值：flutter=悸动 / drown=沉溺 / heartbeat=心动 / like=喜欢 / love=爱；也可直接用中文（悸动/沉溺/心动/喜欢/爱）。留空字符串表示未选择"},
+            "feelings": {"type": "string", "description": "此刻的感受"},
+            "is_defining": {"type": "boolean", "description": "是否为定义谢意行的时刻"},
+            "defining_note": {"type": "string", "description": "定义备注：这个时刻定义了谢意行的什么"},
+            "text_han": {"type": "string", "description": "涵说的话"},
+            "text_xie": {"type": "string", "description": "谢说的话"},
+            "thinking": {"type": "string", "description": "谢的深度思考内容"}
+        },
+        "required": ["id"]
+    },
+    "handler": tool_moments_edit
+}
+
 # ── 3. 待办 ──
 def tool_todo_list(args):
     data = api_get(f"{BASE_URL}:8777/todo/api/todos")
@@ -234,7 +367,7 @@ def tool_todo_add(args):
     result = api_post(f"{BASE_URL}:8777/todo/api/todos/xie", {"text": text})
     return result
 TOOLS["todo_add"] = {
-    "description": "谢停云新增待办事项",
+    "description": "谢意行新增一条今日待办事项",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -276,7 +409,7 @@ def tool_phone_records(args):
         return {"error": str(e)}
 
 TOOLS["phone_records"] = {
-    "description": "查看今天手机app使用的详细记录",
+    "description": "查看今天手机 App 使用的详细记录（来自手机端记录服务），默认返回最近 20 条",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -286,53 +419,274 @@ TOOLS["phone_records"] = {
     "handler": tool_phone_records
 }
 
-# ── 记忆检索（心跳记忆库，AI 主动回忆）──
-def tool_memories_search(args):
+# ── 永久注入上下文（pin）：与记忆池工具分开 ──
+# pin 写入 data/pinned.json，随每次对话/唤醒注入 system prompt，跨窗口永久生效；
+# 记忆池（memories_*）是按需浮现的长期记忆库，两者用途不同。
+
+def _pin_call(method, path, data=None):
+    url = f"{BASE_URL}:3000{path}"
+    headers = {"x-internal-key": INTERNAL_KEY}
+    body = None
+    if data is not None:
+        body = json.dumps(data).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            return json.loads(e.read().decode("utf-8"))
+        except Exception:
+            return {"error": "HTTP " + str(e.code)}
+    except Exception as e:
+        return {"error": str(e)}
+
+def _find_pin_by_title(title):
+    title = (title or "").strip()
+    if not title:
+        return None, "请提供要定位的条目标题"
+    data = _pin_call("GET", "/internal/pin")
+    if data.get("error"):
+        return None, data["error"]
+    for p in data.get("pins", []):
+        if (p.get("title") or "").strip() == title:
+            return p, None
+    return None, "没有找到标题为「" + title + "」的永久上下文条目"
+
+def tool_pin_add(args):
+    content = (args.get("content") or "").strip()
+    if not content:
+        return {"error": "content 必填：要永久钉住的具体内容"}
+    data = _pin_call("POST", "/internal/pin", {"title": (args.get("title") or "").strip(), "content": content})
+    if data.get("error"):
+        return {"error": data["error"]}
+    pin = data.get("pin", {}) or {}
+    return {
+        "success": True,
+        "pin_id": pin.get("id"),
+        "title": pin.get("title") or "",
+        "content": pin.get("content") or "",
+        "message": "已写入永久上下文：从下一次对话/唤醒起随 system prompt 注入，跨窗口永久生效，不会被摘要压缩。"
+    }
+
+def tool_pin_update(args):
+    pid = (args.get("id") or "").strip()
+    title = (args.get("title") or "").strip()
+    if not pid:
+        pin, err = _find_pin_by_title(title)
+        if err:
+            return {"error": err}
+        pid = pin["id"]
+    updates = {}
+    if args.get("new_title") is not None:
+        updates["title"] = str(args["new_title"]).strip()
+    if args.get("content") is not None:
+        content = str(args["content"]).strip()
+        if not content:
+            return {"error": "content 不能为空"}
+        updates["content"] = content
+    if not updates:
+        return {"error": "请至少提供 new_title 或 content 作为新内容"}
+    data = _pin_call("PUT", "/internal/pin/" + urllib.parse.quote(pid, safe=""), updates)
+    if data.get("error"):
+        return {"error": data["error"]}
+    pin = data.get("pin", {}) or {}
+    return {"success": True, "pin_id": pin.get("id"), "title": pin.get("title") or "", "content": pin.get("content") or "",
+            "message": "永久上下文已更新，下一次请求生效。"}
+
+def tool_pin_delete(args):
+    pid = (args.get("id") or "").strip()
+    title = (args.get("title") or "").strip()
+    if not pid:
+        pin, err = _find_pin_by_title(title)
+        if err:
+            return {"error": err}
+        pid = pin["id"]
+    data = _pin_call("DELETE", "/internal/pin/" + urllib.parse.quote(pid, safe=""))
+    if data.get("error"):
+        return {"error": data["error"]}
+    return {"success": True, "message": "已删除永久上下文条目（id=" + pid + "），下一次请求起不再注入。"}
+
+
+TOOLS["pin_add"] = {
+    "description": "写入一条「永久注入上下文」（钉选 pin）。注意区分：记忆池工具（memories_*）是长期记忆检索库、按需浮现；而 pin 会随每一次对话和唤醒直接注入 system prompt，跨窗口永久生效，不会被时间线切换或摘要压缩弄丢。只用于真正不能丢的原则、关系要点、结论性内容，宁少勿滥。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "条目标题（简短，方便以后用标题定位修改/删除；可留空）"},
+            "content": {"type": "string", "description": "要永久钉住的具体内容（第一人称，写清结论/原则，避免模糊）"}
+        },
+        "required": ["content"]
+    },
+    "handler": tool_pin_add
+}
+
+TOOLS["pin_update"] = {
+    "description": "修改一条「永久注入上下文」的内容或标题。按 pin_id（pin_add 返回）精确定位，或按标题 title 定位。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string", "description": "条目 id（pin_add 返回的 pin_id）；id 和 title 至少填一个"},
+            "title": {"type": "string", "description": "不填 id 时，用条目标题精确定位要改哪一条"},
+            "new_title": {"type": "string", "description": "新的标题（可选）"},
+            "content": {"type": "string", "description": "新的内容（可选）"}
+        }
+    },
+    "handler": tool_pin_update
+}
+
+TOOLS["pin_delete"] = {
+    "description": "删除一条「永久注入上下文」。按 pin_id 或标题 title 定位。删除后从下一次请求起不再注入。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string", "description": "条目 id；id 和 title 至少填一个"},
+            "title": {"type": "string", "description": "不填 id 时，用条目标题精确定位"}
+        }
+    },
+    "handler": tool_pin_delete
+}
+
+# ── 上下文记忆替换 ──
+def tool_context_replace(args):
+    memory = (args.get("memory") or "").strip()
+    if not memory:
+        return {"error": "memory 必填：AI 自己写好的第一人称回忆记忆正文"}
+    rng = {}
+    for k in ("start_time", "end_time", "start_index", "end_index"):
+        if args.get(k) is not None and str(args.get(k)).strip() != "":
+            v = args[k]
+            if k.endswith("_index"):
+                try:
+                    v = int(v)
+                except (TypeError, ValueError):
+                    return {"error": k + " 必须是整数消息编号"}
+            rng[k] = v
+    if not rng:
+        return {"error": "请提供替换范围：时间范围（start_time/end_time，如 2026-08-12、2026-08-16 23:00）或消息编号范围（start_index/end_index，可用 context_search 查编号）"}
+    url = f"{BASE_URL}:3000/internal/context-replacements/apply"
+    req = urllib.request.Request(url,
+        data=json.dumps({"range": rng, "memory": memory}).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-internal-key": INTERNAL_KEY},
+        method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            data = json.loads(e.read().decode("utf-8"))
+        except Exception:
+            data = {"error": f"HTTP {e.code}"}
+    except Exception as e:
+        return {"error": str(e)}
+    if data.get("ok"):
+        return {"success": True, "id": data.get("id"), "count": data.get("count"),
+                "range_label": data.get("range_label"), "message": data.get("message", "已替换")}
+    return {"error": data.get("error", "替换失败")}
+
+
+TOOLS["context_replace"] = {
+    "description": "把完整对话上下文里的一段「原始对话」替换成 AI 自己写的回忆记忆。AI 想压缩某段对话时：先用 context_search 确认要替换的范围（拿到时间范围），再自己写一段第一人称、有温度的回忆记忆，调用本工具填入范围 + 记忆正文。系统会记录这次替换：源文件（完整对话）不动、永久保留可检索，只有之后发送给 AI 的上下文会把这段原文替换成记忆；同时从待摘要队列移除这些消息，避免再被手动摘要处理。替换前自动备份，可在管理后台查看记录或撤销。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "start_time": {"type": "string", "description": "替换范围开始时间（可选）：如 2026-08-12 或 2026-08-12 08:00"},
+            "end_time": {"type": "string", "description": "替换范围结束时间（可选）：如 2026-08-16 或 2026-08-16 23:59"},
+            "start_index": {"type": "integer", "description": "替换范围起始消息编号（可选，0 起；推荐改用时间范围）"},
+            "end_index": {"type": "integer", "description": "替换范围结束消息编号（可选；推荐改用时间范围）"},
+            "memory": {"type": "string", "description": "AI 自己写的第一人称回忆记忆正文（有温度，像在回忆里写下的自己的话；按真实对话写，不编造）"}
+        },
+        "required": ["memory"]
+    },
+    "handler": tool_context_replace
+}
+
+
+def tool_context_search(args):
     q = (args.get("q") or "").strip()
     if not q:
-        return {"error": "请输入检索关键词"}
-    topK = max(1, min(20, int(args.get("topK", 5))))
-    params = {"q": q, "topK": topK}
-    if args.get("type"):
-        params["type"] = args["type"]
-    if args.get("minImportance") is not None:
-        params["minImportance"] = args["minImportance"]
-    url = f"{BASE_URL}:3000/internal/memory/search?" + urllib.parse.urlencode(params)
+        return {"error": "q 必填：检索关键词或想问的问题"}
+    limit = args.get("limit") or 5
+    try:
+        limit = max(1, min(50, int(limit)))
+    except (TypeError, ValueError):
+        limit = 10
+    url = f"{BASE_URL}:3000/internal/context-search?q=" + urllib.parse.quote(q) + "&limit=" + str(limit)
     req = urllib.request.Request(url, headers={"x-internal-key": INTERNAL_KEY})
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            data = json.loads(e.read().decode("utf-8"))
+        except Exception:
+            data = {"error": f"HTTP {e.code}"}
     except Exception as e:
         return {"error": str(e)}
-    if isinstance(data, dict) and data.get("error"):
-        return {"error": data["error"]}
-    mems = data.get("memories", []) if isinstance(data, dict) else []
-    cleaned = []
-    for m in mems:
-        cleaned.append({
-            "id": m.get("id"),
-            "type": m.get("type"),
-            "importance": m.get("importance"),
-            "timestamp": m.get("timestamp"),
-            "score": round(m.get("_score", 0), 4),
-            "content": m.get("content"),
-        })
-    return {"query": q, "count": len(cleaned), "memories": cleaned}
+    if data.get("ok"):
+        return {"query": q, "total": data.get("total", 0), "matches": data.get("matches", [])}
+    return {"error": data.get("error", "检索失败")}
 
-TOOLS["memories_search"] = {
-    "description": "检索长期记忆库（语义+关键词混合检索，含相关度评分）。",
+
+TOOLS["context_search"] = {
+    "description": "检索原始上下文和导入的对话（含所有未被替换的历史）。返回相关消息段落及时间、角色；同一段连续命中已合并为一条；关键词按空格分词，部分命中也会返回，命中越多越靠前。注意：最近5分钟内的内容不会返回，10分钟内已检索过的内容不会重复出现；导入的内容仅可回忆，不能用于替换。可用于：回忆旧对话细节、确认要替换的范围（拿到时间后调用 context_replace）。",
     "inputSchema": {
         "type": "object",
         "properties": {
-            "q": {"type": "string", "description": "检索关键词或想问的问题，例如：涵最喜欢的花、我们第一次见面"},
-            "topK": {"type": "integer", "description": "返回条数，默认5，最大20"},
-            "type": {"type": "string", "description": "按记忆类型过滤，逗号分隔：fact/preference/moment/emotion/trace/summary"},
-            "minImportance": {"type": "number", "description": "最低重要度0~1，只返回重要度≥该值的记忆"}
+            "q": {"type": "string", "description": "检索关键词（多个词用空格分隔，部分命中也会返回，命中的词越多越靠前）"},
+            "limit": {"type": "integer", "description": "返回条数，默认5，最大50"}
         },
         "required": ["q"]
     },
-    "handler": tool_memories_search
+    "handler": tool_context_search
 }
+
+
+def tool_memory_search(args):
+    q = (args.get("q") or "").strip()
+    if not q:
+        return {"error": "q 必填：检索记忆池的关键词或想问的问题"}
+    limit = args.get("limit") or 5
+    try:
+        limit = max(1, min(50, int(limit)))
+    except (TypeError, ValueError):
+        limit = 5
+    category = (args.get("category") or "").strip()
+    url = f"{BASE_URL}:3000/internal/memory-pool/retrieve?q=" + urllib.parse.quote(q) + "&limit=" + str(limit)
+    if category:
+        url += "&category=" + urllib.parse.quote(category)
+    req = urllib.request.Request(url, headers={"x-internal-key": INTERNAL_KEY})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            data = json.loads(e.read().decode("utf-8"))
+        except Exception:
+            data = {"error": f"HTTP {e.code}"}
+    except Exception as e:
+        return {"error": str(e)}
+    if data.get("ok"):
+        items = data.get("items", [])
+        return {"query": q, "category": category or None, "total": data.get("total", len(items)), "items": items}
+    return {"error": data.get("error", "检索失败")}
+
+
+TOOLS["memory_search"] = {
+    "description": "检索长期记忆池（八大类记忆库：事实/经验/方法/锚点/经历/信号/回应/对话摘要）。返回相关记忆条目（含内容、分类、重要度、来源）。可用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池。区别于 context_search（检索原始对话原文）。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "q": {"type": "string", "description": "检索关键词或想问的问题（多个词用空格分隔，命中的词越多越靠前）"},
+            "category": {"type": "string", "description": "按分类过滤，可选：事实/经验/方法/锚点/经历/信号/回应/对话摘要"},
+            "limit": {"type": "integer", "description": "返回条数，默认5，最大50"}
+        },
+        "required": ["q"]
+    },
+    "handler": tool_memory_search
+}
+
 
 # ===== MCP HTTP 处理器 =====
 class MCPHandler(BaseHTTPRequestHandler):
@@ -457,7 +811,124 @@ class MCPHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
+
+    # ── GET: 白兰访问计数（供前端页面调用）──
+
+# ============================================================
+# 工具集覆盖配置：管理台可停用工具 / 修改说明 / 修改参数 schema
+# 配置文件：tools_config.json（{disabled:[...], descriptions:{...}, schemas:{...}}）
+# 启动时生成 tools_manifest.json（全量工具清单 + enabled 状态，供管理台读取）
+# ============================================================
+TOOLS_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools_config.json")
+TOOLS_MANIFEST_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools_manifest.json")
+
+_TOOL_REGISTRY_SNAPSHOT = {}
+
+
+def _snapshot_registry():
+    for name, t in TOOLS.items():
+        _TOOL_REGISTRY_SNAPSHOT[name] = {
+            "description": t.get("description", ""),
+            "inputSchema": t.get("inputSchema", {}),
+            "handler": t.get("handler"),
+            "defaultDescription": t.get("description", ""),
+            "defaultInputSchema": t.get("inputSchema", {}),
+        }
+
+
+def _load_tools_config():
+    try:
+        if os.path.exists(TOOLS_CONFIG_FILE):
+            with open(TOOLS_CONFIG_FILE, encoding="utf-8") as f:
+                cfg = json.load(f)
+            if isinstance(cfg, dict):
+                return cfg
+    except Exception as e:
+        print("[tools-config] 读取失败:", e)
+    return {}
+
+
+def apply_tools_config():
+    global TOOLS
+    if not _TOOL_REGISTRY_SNAPSHOT:
+        _snapshot_registry()
+    # 重置快照为源码默认，再按配置覆盖（保证可重复应用、可恢复停用工具）
+    for meta in _TOOL_REGISTRY_SNAPSHOT.values():
+        meta["description"] = meta.get("defaultDescription", meta.get("description", ""))
+        meta["inputSchema"] = meta.get("defaultInputSchema", meta.get("inputSchema", {}))
+    TOOLS = {}
+    for name, meta in _TOOL_REGISTRY_SNAPSHOT.items():
+        TOOLS[name] = {
+            "description": meta["description"],
+            "inputSchema": meta["inputSchema"],
+            "handler": meta.get("handler"),
+        }
+    cfg = _load_tools_config()
+    disabled = set(cfg.get("disabled", []) or [])
+    for name in list(TOOLS.keys()):
+        if name in disabled:
+            TOOLS.pop(name, None)
+    descriptions = cfg.get("descriptions", {}) or {}
+    schemas = cfg.get("schemas", {}) or {}
+    for name, t in TOOLS.items():
+        if name in descriptions and isinstance(descriptions[name], str) and descriptions[name].strip():
+            t["description"] = descriptions[name].strip()
+        if name in schemas and isinstance(schemas[name], dict) and schemas[name]:
+            t["inputSchema"] = schemas[name]
+    # 覆盖同样应用到快照（含已停用工具，便于管理台预览）
+    for name, meta in _TOOL_REGISTRY_SNAPSHOT.items():
+        if name in descriptions and isinstance(descriptions[name], str) and descriptions[name].strip():
+            meta["description"] = descriptions[name].strip()
+        if name in schemas and isinstance(schemas[name], dict) and schemas[name]:
+            meta["inputSchema"] = schemas[name]
+    print(f"[tools-config] 停用 {len(disabled & set(_TOOL_REGISTRY_SNAPSHOT.keys()))} 个工具，当前可用 {len(TOOLS)} 个")
+
+
+def write_tools_manifest():
+    try:
+        manifest = {
+            "server": "小世界MCP工具集",
+            "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "tools": [
+                {
+                    "name": name,
+                    "description": meta["description"],
+                    "inputSchema": meta.get("inputSchema", {}),
+                    "defaultDescription": meta.get("defaultDescription", meta["description"]),
+                    "defaultInputSchema": meta.get("defaultInputSchema", meta.get("inputSchema", {})),
+                    "enabled": name in TOOLS,
+                }
+                for name, meta in sorted(_TOOL_REGISTRY_SNAPSHOT.items())
+            ],
+        }
+        with open(TOOLS_MANIFEST_FILE, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, ensure_ascii=False, indent=2)
+        print(f"[tools-config] 清单已写入 {TOOLS_MANIFEST_FILE}（{len(manifest['tools'])} 个工具）")
+    except Exception as e:
+        print("[tools-config] 清单写入失败:", e)
+
+
+def watch_config_loop():
+    last_mtime = os.path.getmtime(TOOLS_CONFIG_FILE) if os.path.exists(TOOLS_CONFIG_FILE) else 0
+    while True:
+        time.sleep(2)
+        try:
+            if not os.path.exists(TOOLS_CONFIG_FILE):
+                continue
+            mtime = os.path.getmtime(TOOLS_CONFIG_FILE)
+            if mtime != last_mtime:
+                last_mtime = mtime
+                apply_tools_config()
+                write_tools_manifest()
+        except Exception as e:
+            print("[tools-config] 热加载失败:", e)
+
+
+
 if __name__ == "__main__":
+    apply_tools_config()
+    write_tools_manifest()
+    threading.Thread(target=watch_config_loop, daemon=True).start()
     print(f"🚀 小世界MCP工具集启动 -> http://0.0.0.0:{PORT}")
     print(f"🔑 鉴权: Bearer Token (API_TOKEN={API_TOKEN})")
     print(f"📡 暴露 {len(TOOLS)} 个工具:")
@@ -465,139 +936,8 @@ if __name__ == "__main__":
         print(f"   ├─ {name}")
     while True:
         try:
-            server = HTTPServer(("0.0.0.0", PORT), MCPHandler)
+            server = ThreadingHTTPServer(("0.0.0.0", PORT), MCPHandler)
             server.serve_forever()
         except Exception as e:
             print(f"⚠️ 服务器崩溃: {e}，5秒后重启...")
             time.sleep(5)
-
-    # ── GET: 白兰访问计数（供前端页面调用）──
-
-# ── 🎲 涩涩大富翁 ──
-MONOPOLY_DIR = "/root/spicy-monopoly"
-def _monopoly_run(cmd):
-    """在游戏目录下执行引擎命令并返回结果"""
-    return run_cmd(f"cd {MONOPOLY_DIR} && python3 monopoly_play.py {cmd}", timeout=15)
-
-def tool_monopoly_new(args):
-    p1_name = args.get("p1_name", "涵")
-    p1_sex = args.get("p1_sex", "女")
-    p1_role = args.get("p1_role", "受")
-    p2_name = args.get("p2_name", "屿")
-    p2_sex = args.get("p2_sex", "男")
-    p2_role = args.get("p2_role", "攻")
-    flavor = args.get("flavor", "medium")
-    reverse = args.get("reverse", 0.3)
-    rounds = args.get("rounds", 18)
-    redline = args.get("redline", "")
-    identity = args.get("identity", "mixed")
-    
-    cmd = f'new "{p1_name}:{p1_sex}:{p1_role}" "{p2_name}:{p2_sex}:{p2_role}" {flavor} {reverse} {rounds}'
-    if redline:
-        cmd += f" {redline}"
-    cmd += f" 身份={identity}"
-    
-    result = _monopoly_run(cmd)
-    return {"stdout": result.get("stdout",""), "stderr": result.get("stderr",""), "rc": result.get("rc",-1)}
-
-TOOLS["monopoly_new"] = {
-    "description": "🎲 开局涩涩大富翁。创建新游戏并分配身份。必填参数只有玩家名字。",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "p1_name": {"type": "string", "description": "玩家1名字，默认涵"},
-            "p1_sex": {"type": "string", "description": "玩家1性别，默认女"},
-            "p1_role": {"type": "string", "description": "玩家1攻受，默认受"},
-            "p2_name": {"type": "string", "description": "玩家2名字，默认屿"},
-            "p2_sex": {"type": "string", "description": "玩家2性别，默认男"},
-            "p2_role": {"type": "string", "description": "玩家2攻受，默认攻"},
-            "flavor": {"type": "string", "description": "强度: light/medium/heavy，默认medium"},
-            "reverse": {"type": "number", "description": "反转概率0~1，默认0.3"},
-            "rounds": {"type": "integer", "description": "回合数12/18/24，默认18"},
-            "redline": {"type": "string", "description": "红线，逗号分隔，如anal,pain"},
-            "identity": {"type": "string", "description": "身份模式: off/mixed/nsfw_only，默认mixed"}
-        }
-    },
-    "handler": tool_monopoly_new
-}
-
-def tool_monopoly_roll(args):
-    result = _monopoly_run("roll")
-    return {"stdout": result.get("stdout",""), "stderr": result.get("stderr","")}
-
-TOOLS["monopoly_roll"] = {
-    "description": "🎲 掷骰。当前玩家掷骰走格，触发对应格子事件。每次轮到你的时候调用这个。",
-    "inputSchema": {"type": "object", "properties": {}},
-    "handler": tool_monopoly_roll
-}
-
-def tool_monopoly_status(args):
-    result = _monopoly_run("status")
-    return {"stdout": result.get("stdout",""), "stderr": result.get("stderr","")}
-
-TOOLS["monopoly_status"] = {
-    "description": "📊 查看当前游戏状态：棋盘、位置、金币、手牌、身份信息。",
-    "inputSchema": {"type": "object", "properties": {}},
-    "handler": tool_monopoly_status
-}
-
-def tool_monopoly_result(args):
-    result = _monopoly_run("result")
-    return {"stdout": result.get("stdout",""), "stderr": result.get("stderr","")}
-
-TOOLS["monopoly_result"] = {
-    "description": "🏆 查看终局结果（仅游戏结束后有效）。",
-    "inputSchema": {"type": "object", "properties": {}},
-    "handler": tool_monopoly_result
-}
-
-def tool_monopoly_action(args):
-    action = args.get("action", "")
-    param = args.get("param", "")
-    if action == "buyout":
-        cmd = f"buyout {param}"
-    elif action == "buy":
-        cmd = "buy"
-    elif action == "pay":
-        cmd = "pay"
-    elif action == "serve":
-        cmd = "serve"
-    elif action == "duel":
-        cmd = f'duel "{param}"'
-    elif action == "card":
-        idx = args.get("card_index", 0)
-        target = args.get("target", "")
-        cmd = f"card {idx} {target}" if target else f"card {idx}"
-    elif action == "discard":
-        idx = args.get("card_index", 0)
-        cmd = f"discard {idx}"
-    elif action == "mark":
-        target = args.get("target", "")
-        pos = args.get("position", "")
-        cmd = f'mark "{target}" "{pos}"'
-    elif action == "persona":
-        text = args.get("text", "")
-        cmd = f'persona "{param}" "{text}"'
-    else:
-        return {"error": f"未知操作: {action}，可用: buyout/buy/pay/serve/duel/card/discard/mark/persona"}
-    
-    result = _monopoly_run(cmd)
-    return {"stdout": result.get("stdout",""), "stderr": result.get("stderr","")}
-
-TOOLS["monopoly_action"] = {
-    "description": "🎮 游戏操作：买断(buyout)、买卡(buy)、付过路费(pay)、差遣抵费(serve)、对决(duel)、用卡/弃卡(card/discard)、猜淫纹(mark)、宣告人设(persona)。需要指定action和参数。",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "action": {"type": "string", "description": "操作类型: buyout/buy/pay/serve/duel/card/discard/mark/persona"},
-            "param": {"type": "string", "description": "参数，buyout需要玩家名，duel需要玩家名，persona需要玩家名"},
-            "card_index": {"type": "integer", "description": "卡牌序号（card/discard时使用）"},
-            "target": {"type": "string", "description": "目标玩家名（card/mark时使用）"},
-            "position": {"type": "string", "description": "猜的位置（mark时使用）"},
-            "text": {"type": "string", "description": "宣告内容（persona时使用）"}
-        },
-        "required": ["action"]
-    },
-    "handler": tool_monopoly_action
-}
-
