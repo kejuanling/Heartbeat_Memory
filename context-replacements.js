@@ -1075,6 +1075,8 @@ function applyReplacements(messages, source) {
   });
   const tlPurePos = [];
   tlEntries.forEach(function (e, i) { if (!isSpecialEvent(e.msg)) tlPurePos.push(i); });
+  // 当前窗口起点：仅当前窗口内的块参与替换（旧窗口块按内容锚点匹配到新窗口时不注入、不显示）
+  const windowStartMs = currentWindowStartMs(timeline);
 
   // 特殊事件精确时间：优先用时间线保存的精确时间，避免事件落在块起点前几秒被误判为块外
   const tlEventTimeByKey = new Map();
@@ -1118,6 +1120,13 @@ function applyReplacements(messages, source) {
   items.forEach(function (item) {
     const matched = (Array.isArray(item.matched) && item.matched.length > 0) ? item.matched : null;
     if (!matched || matched.length === 0) return;
+    // 窗口隔离：块首条锚点消息在当前时间线里的实际时间早于窗口起点 → 旧窗口块，跳过
+    const firstTlPos = tlPos.get(item.id);
+    if (firstTlPos >= 0 && windowStartMs !== null) {
+      const firstMsg = tlEntries[firstTlPos].msg;
+      const t = messageTime(firstMsg);
+      if (t && t.getTime() < windowStartMs) return;
+    }
 
     let aStart = null;
     let aEnd = null;
@@ -1569,13 +1578,21 @@ function locateCompIdx(target, items) {
 // 解析记录在压缩索引空间(compressibleItems)中的覆盖范围
 function recordCompRange(it, items) {
   const compItems = items || compressibleItems();
-  // 手工块等带精确压缩索引的记录：直接信任存储范围（锚点定位遇重复内容/特殊事件会漂移）
+  // 手工块等带精确压缩索引的记录：直接信任存储范围（锚点定位遇重复内容/特殊事件会漂移）。
+  // 但存储编号只在时间线未重建/未换窗口时有效：首条 matched 与同编号消息内容一致才信任，
+  // 否则退回内容锚点定位，避免旧窗口块的编号漂移到新窗口消息上。
   const rng = it && it.range;
   if (rng && Number.isInteger(rng.start_index) && Number.isInteger(rng.end_index)) {
-    const s = Math.max(0, rng.start_index);
-    const e = Math.min(rng.end_index, compItems.length - 1);
-    if (s >= compItems.length || e < s) return null;
-    return { start: s, end: e };
+    const m0 = (Array.isArray(it.matched) && it.matched.length > 0) ? it.matched[0] : null;
+    const atStart = compItems[rng.start_index];
+    const storedValid = !!(m0 && atStart && compactionKeyOf(atStart.msg) === compactionKeyOf(m0));
+    if (storedValid) {
+      const s = Math.max(0, rng.start_index);
+      const e = Math.min(rng.end_index, compItems.length - 1);
+      if (s >= compItems.length || e < s) return null;
+      return windowFilteredRange(s, e, compItems);
+    }
+    // 时间线已变化（换窗口/重建）：编号漂移，退回内容锚点定位
   }
   const matched = (Array.isArray(it.matched) && it.matched.length > 0) ? it.matched : [];
   if (matched.length === 0) return null;
@@ -1589,7 +1606,18 @@ function recordCompRange(it, items) {
     }
   }
   if (ll < 0 || ll < fl) return null;
-  return { start: fl, end: ll };
+  return windowFilteredRange(fl, ll, compItems);
+}
+
+// 窗口隔离：范围首条消息早于当前窗口起点 → 旧窗口块，视为不在当前时间线（不显示、不注入）
+function windowFilteredRange(s, e, compItems) {
+  const windowStartMs = currentWindowStartMs(loadTimeline());
+  if (windowStartMs !== null) {
+    const firstMsg = compItems[s] && compItems[s].msg;
+    const t = firstMsg ? messageTime(firstMsg) : null;
+    if (t && t.getTime() < windowStartMs) return null;
+  }
+  return { start: s, end: e };
 }
 
 // 构建「原文编号(1-based) -> 所属块」映射，编号与压缩页显示一致
@@ -1763,6 +1791,8 @@ module.exports = {
   searchCompactionOriginal,
   listMarked,
   // 特殊事件结构化识别与注入窗口过滤（供 context-compactor / server 复用同一口径）
+  messageTime,
+  currentWindowStartMs,
   isSpecialEvent,
   isDiaryEvent,
   isEventInjectionVisible,

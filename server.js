@@ -2982,7 +2982,10 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
   const items = contextReplacements.compressibleItems();
   const totalCompressible = items.length;
   const compactCount = totalCompressible;
-  const nonSys = (contextReplacements.loadTimeline() || []).filter(m => m && m.role !== "system");
+  const timeline = contextReplacements.loadTimeline() || [];
+  const nonSys = timeline.filter(m => m && m.role !== "system");
+  // 当前窗口起点：旧窗口块不显示（首条锚点消息早于窗口起点的块视为不在当前时间线）
+  const windowStartMs = contextReplacements.currentWindowStartMs(timeline);
 
   function keyOf(m) {
     return String(m.role || "") + "\u0000" + String(m.content || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
@@ -3012,32 +3015,48 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
       if (m && m.role !== "system" && !contextReplacements.isSpecialEvent(m)) { aEnd = m; break; }
     }
     if (!aStart || !aEnd) return;
-    // 手工块：直接信任创建时落库的精确压缩索引（0 起）。锚点定位在块首尾含特殊事件、
+    // 手工块：优先信任创建时落库的精确压缩索引（0 起）。锚点定位在块首尾含特殊事件、
     // 或短消息归一化后撞键（如「哥哥 <current_time>…」）时会漂移，导致块被削头尾或整块丢弃。
+    // 但存储编号只在时间线未重建/未换窗口时有效：首条 matched 与同编号消息内容一致才信任，
+    // 否则退回内容锚点定位，避免旧窗口块的编号漂移到新窗口消息上（与发送侧 recordCompRange 同口径）。
     const storedStart = it.range && it.range.start_index;
     const storedEnd = it.range && it.range.end_index;
     const hasStoredIdx = Number.isInteger(storedStart) && Number.isInteger(storedEnd);
+    let storedValid = false;
+    if (hasStoredIdx) {
+      const m0 = matched[0];
+      const atStart = items[storedStart];
+      storedValid = !!(m0 && atStart && nKeyOf(m0) === nKeyOf(atStart.msg));
+    }
     let compStart = -1;
     let compEnd = -1;
-    if (hasStoredIdx) {
+    if (hasStoredIdx && storedValid) {
       compStart = Math.max(0, storedStart);
       compEnd = Math.min(storedEnd, items.length - 1);
       if (compStart >= items.length || compEnd < compStart) return;
     } else {
-      for (let i = 0; i < matched.length; i++) {
-        const m = matched[i];
-        if (!m || m.role === "system" || contextReplacements.isSpecialEvent(m)) continue;
-        const k = itemPosByKey.get(nKeyOf(m));
-        if (k !== undefined) { compStart = k; break; }
+      // 与发送侧 applyReplacements 同口径：用首/末条非特殊事件 matched 定位块边界。
+      // 不整段扫描 matched，避免短消息归一化撞键（如「哥哥」）把旧窗口块错配到新窗口。
+      const kStart = itemPosByKey.get(nKeyOf(aStart));
+      if (kStart === undefined) return;
+      compStart = kStart;
+      let kEnd = itemPosByKey.get(nKeyOf(aEnd));
+      if (kEnd === undefined) {
+        for (let i = matched.length - 2; i >= 0; i--) {
+          const m = matched[i];
+          if (!m || m.role === "system" || contextReplacements.isSpecialEvent(m)) continue;
+          kEnd = itemPosByKey.get(nKeyOf(m));
+          if (kEnd !== undefined) break;
+        }
       }
-      if (compStart < 0) return;
-      for (let i = matched.length - 1; i >= 0; i--) {
-        const m = matched[i];
-        if (!m || m.role === "system" || contextReplacements.isSpecialEvent(m)) continue;
-        const k = itemPosByKey.get(nKeyOf(m));
-        if (k !== undefined) { compEnd = k; break; }
-      }
-      if (compEnd < compStart) return;
+      if (kEnd === undefined || kEnd < compStart) return;
+      compEnd = kEnd;
+    }
+    // 窗口隔离：块首条消息的实际时间早于当前窗口起点 → 旧窗口块，不显示（发送侧同样不注入）
+    if (windowStartMs !== null) {
+      const firstMsg = items[compStart] && items[compStart].msg;
+      const t = firstMsg ? contextReplacements.messageTime(firstMsg) : null;
+      if (t && t.getTime() < windowStartMs) return;
     }
     const headK = keyOf(aStart);
     const tailK = keyOf(aEnd);
@@ -3075,8 +3094,9 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
       history: (Array.isArray(it.history) ? it.history : []).map(function (h, i) { return { index: i, summary: h.summary, generatedAt: h.generatedAt, mode: h.mode || (manual ? "edited" : "ai"), manual: h.manual === true || manual }; }).slice(0, 8),
       msgs: includeMessages ? matched.map(function (m, i) {
         const _key = contextCompactor.contentKey(m);
-        // 手工块：编号=存储起点+块内序号（matched 与压缩切片一一对应），避免锚点撞键漂移
-        const _num = hasStoredIdx ? (storedStart + i) : (itemPosByKey.has(nKeyOf(m)) ? itemPosByKey.get(nKeyOf(m)) : null);
+        // 手工块：编号=存储起点+块内序号（matched 与压缩切片一一对应），避免锚点撞键漂移；
+        // 存储编号失效（换窗口）时退回内容锚点编号
+        const _num = (hasStoredIdx && storedValid) ? (storedStart + i) : (itemPosByKey.has(nKeyOf(m)) ? itemPosByKey.get(nKeyOf(m)) : null);
         return { role: m.role, content: typeof m.content === "string" ? m.content : "", key: _key, marked: !!contextCompactor.loadMarks()[_key], num: _num };
       }) : undefined,
       pos: compStart
