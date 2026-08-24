@@ -5917,17 +5917,18 @@ async function deletePinned(id){
        }).join('');
    }catch(e){el.innerHTML='<div class="empty">搜索失败: '+e.message+'</div>'}
  }
- function togglePoolFull(i){
-   const el=document.getElementById('pool-body-'+i);
-   if(!el)return;
-   const full=poolFullCache['k'+i]||'';
-   if(el.dataset.expanded==='1'){
-     el.innerHTML=escapeHtml(full.length>300?full.slice(0,300)+'…':full);
-     el.dataset.expanded='0';
-   }else{
-     el.innerHTML=escapeHtml(full);
-     el.dataset.expanded='1';
-   }
+ async function togglePoolStar(i){
+   const m=(window.__poolMatches||[])[i];
+   if(!m) return;
+   const willMark=!m.marked;
+   if(willMark && !confirm('标星这条消息？标星后跨窗口注入会带上它，压缩/替换时也不会被摘要覆盖。')) return;
+   try{
+     const r=await fetch(ADMIN_API+'/context-compaction/mark',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:m.key, marked:willMark, content:m.content, role:m.role})});
+     const d=await r.json();
+     if(d.error){ toast('标星失败: '+d.error); return; }
+     toast(willMark?'已标星（跨窗口注入会带上，压缩时保留原文）':'已取消标星');
+     runPoolSearch();
+   }catch(e){ toast('标星失败: '+e.message); }
  }
  async function impDelete(id){
    if(!confirm('删除这条导入记录？删除后将从检索池移除。'))return;

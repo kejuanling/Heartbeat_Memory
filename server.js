@@ -3301,9 +3301,12 @@ app.post("/admin/context-compaction/mark", { preHandler: basicAuth }, async (req
   try {
     // 标星时把原文一并传给 setMark 存进 marks 文件，
     // 跨窗口注入就能直接读原文，不再依赖回查时间线/替换池
-    let content = "", role = "";
-    try {
-      const items = (contextReplacements.loadItems ? contextReplacements.loadItems() : []) || [];
+    let content = String(body.content || "");
+    let role = String(body.role || "").trim();
+    if (!content.trim()) {
+      content = "";
+      try {
+        const items = (contextReplacements.loadItems ? contextReplacements.loadItems() : []) || [];
       for (const it of items) {
         const matched = Array.isArray(it.matched) ? it.matched : [];
         for (const m of matched) {
@@ -3318,7 +3321,8 @@ app.post("/admin/context-compaction/mark", { preHandler: basicAuth }, async (req
         }
         if (content) break;
       }
-    } catch (e) { /* 查找失败不阻断标星 */ }
+      } catch (e) { /* 查找失败不阻断标星 */ }
+    }
     const markRes = contextCompactor.setMark(key, body.marked === true, { content: content, role: role });
     if (!markRes || markRes.ok === false) {
       return reply.code(400).send({ error: (markRes && markRes.error) || "标星失败" });
@@ -3728,6 +3732,7 @@ app.get("/admin/imported-conversations/search", { preHandler: basicAuth }, async
       total: scored.length,
       hidden_duplicates: hidden.size,
       matches: scored.slice(0, limit).map(function (x) {
+        const mkey = crypto.createHash("sha256").update((x.role || "") + "\u0000" + x.content).digest("hex").slice(0, 32);
         return {
           record_id: x.record_id,
           record_name: x.record_name,
@@ -3735,8 +3740,10 @@ app.get("/admin/imported-conversations/search", { preHandler: basicAuth }, async
           role: x.role,
           time: x.time,
           hits: x.hits,
-          preview: x.content.length > 300 ? x.content.slice(0, 300) + "…" : x.content,
-          content: x.content
+          preview: x.content,
+          content: x.content,
+          key: mkey,
+          marked: !!(contextCompactor.loadMarks())[mkey]
         };
       })
     });
