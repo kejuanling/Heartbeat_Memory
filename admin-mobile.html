@@ -3108,16 +3108,20 @@ function updateCcStatusBar(d){
  function toggleSelectAllCc(){
    const d = AppState.compactionPlan;
    if(!d) return;
-   const chunks = d.chunks || [];
-   const gaps = (d.uncovered && d.uncovered.gaps) || [];
-   const totalCount = chunks.length + gaps.length;
-   // 如果已选数量等于总数，则取消全选
-   if(AppState.ccSelectedChunks.size >= totalCount){
-     AppState.ccSelectedChunks.clear();
+   // 全选范围 = 当前状态筛选下的可见项（未筛选时 = 全部）
+   const visible = ccBuildMergedItems(d);
+   const keys = visible.map(function(it){
+     return it.type === 'gap'
+       ? 'gap-' + (it.gap.startIdx||0) + '-' + (it.gap.endIdx||0)
+       : it.chunk.index;
+   });
+   const visibleSelected = keys.filter(function(k){ return AppState.ccSelectedChunks.has(k); }).length;
+   if(keys.length > 0 && visibleSelected >= keys.length){
+     // 当前筛选下已全选 → 只取消可见项
+     keys.forEach(function(k){ AppState.ccSelectedChunks.delete(k); });
    }else{
      AppState.ccSelectedChunks.clear();
-     chunks.forEach(function(c){ AppState.ccSelectedChunks.add(c.index); });
-     gaps.forEach(function(g){ AppState.ccSelectedChunks.add('gap-' + (g.startIdx||0) + '-' + (g.endIdx||0)); });
+     keys.forEach(function(k){ AppState.ccSelectedChunks.add(k); });
    }
    renderCompaction();
    updateMultiSelectBar();
@@ -3135,9 +3139,17 @@ function updateCcStatusBar(d){
    if(!bar) return;
    const d = AppState.compactionPlan;
    const chunks = d ? (d.chunks || []) : [];
-   const totalCount = chunks.length + ((d && d.uncovered && d.uncovered.gaps) ? d.uncovered.gaps.length : 0);
+   // 全选勾选状态以「当前筛选下的可见项」为准：全部可见项都选中才打勾
+   const visible = d ? ccBuildMergedItems(d) : [];
+   const visibleCount = visible.length;
+   const visibleSelected = visible.filter(function(it){
+     const k = it.type === 'gap'
+       ? 'gap-' + (it.gap.startIdx||0) + '-' + (it.gap.endIdx||0)
+       : it.chunk.index;
+     return AppState.ccSelectedChunks.has(k);
+   }).length;
    if(countEl) countEl.textContent = '已选 ' + AppState.ccSelectedChunks.size + ' 项';
-   if(selectAllEl) selectAllEl.checked = AppState.ccSelectedChunks.size > 0 && AppState.ccSelectedChunks.size >= totalCount;
+   if(selectAllEl) selectAllEl.checked = visibleCount > 0 && visibleSelected >= visibleCount;
    // 统计选中的块中各状态数量
    let canGenerate = 0, canReplace = 0, canReparse = 0, canExport = 0, canRemove = 0;
    AppState.ccSelectedChunks.forEach(function(key){
