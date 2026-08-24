@@ -1006,7 +1006,7 @@ function starredContextText(limit) {
   try { marks = contextCompactor.loadMarks ? contextCompactor.loadMarks() : {}; } catch (e) { marks = {}; }
   const keys = Object.keys(marks || {});
   if (!keys.length) return "";
-  const out = [];
+  const items = [];
   const seenKeys = new Set();
   // 第一遍：优先用标星时存的原文 marks[key].content —— 与已标星列表 listMarked 口径一致。
   // 时间线/替换池查不到的历史标星也能注入，避免“近期新标不在标星内容段”。
@@ -1016,12 +1016,12 @@ function starredContextText(limit) {
     if (seenKeys.has(key)) return;
     seenKeys.add(key);
     const role = (entry.role === "user") ? "她" : "我";
-    out.push(role + "：" + entry.content);
+    items.push({ text: role + "：" + entry.content, markedAt: entry.markedAt || "" });
   });
   // 第二遍：兜底扫替换记录 matched，补早期没存原文的存量标星（按 key 去重）
-  let items = [];
-  try { items = (contextReplacements.loadItems ? contextReplacements.loadItems() : []) || []; } catch (e) { items = []; }
-  for (const it of items) {
+  let replItems = [];
+  try { replItems = (contextReplacements.loadItems ? contextReplacements.loadItems() : []) || []; } catch (e) { replItems = []; }
+  for (const it of replItems) {
     const matched = Array.isArray(it.matched) ? it.matched : [];
     for (const m of matched) {
       if (!m || m.role === "system") continue;
@@ -1031,11 +1031,20 @@ function starredContextText(limit) {
         seenKeys.add(k);
         const role = m.role === "user" ? "她" : "我";
         const c = typeof m.content === "string" ? m.content : "";
-        if (c) out.push(role + "：" + c);
+        if (c) items.push({ text: role + "：" + c, markedAt: (marks[k] && marks[k].markedAt) || "" });
       }
     }
   }
-  return out.slice(-(Number(limit) || 10)).join("\n");
+  const n = Number(limit) || 10;
+  items.sort(function (a, b) {
+    const ta = a.markedAt || "";
+    const tb = b.markedAt || "";
+    if (ta === tb) return 0;
+    if (!ta) return 1;
+    if (!tb) return -1;
+    return ta < tb ? 1 : -1;
+  });
+  return items.slice(0, n).map(function (x) { return x.text; }).join("\n");
 }
 
 function buildCrossWindowInjection() {
@@ -1089,7 +1098,7 @@ function buildCrossWindowInjection() {
     }
   }
   if (cfg.cross_inject_starred !== false) {
-    const st = starredContextText(Math.min(Number(cfg.cross_inject_starred_topk) || 10, 10));
+    const st = starredContextText(Number(cfg.cross_inject_starred_topk) || 10);
     if (st) parts.push("## 标星内容\n" + st);
   }
   return parts.join("\n\n");
