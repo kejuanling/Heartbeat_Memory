@@ -1533,6 +1533,18 @@
  <!-- 粘贴导入弹窗 -->
  
  <script>
+// ============================================================================
+// 心跳唤醒管理台 · 移动端（admin-mobile.html）
+// 单文件模板：样式 / 结构 / 逻辑集中在同一文件，由 server.js 每请求读取下发。
+// 结构约定：
+//   1. 业务状态统一放 AppState（压缩/记忆域），其他全局仅限 UI 基础设施。
+//   2. 写操作统一走 apiRequest()（自动 CSRF、错误提示、busy 禁用）。
+//   3. 渲染类函数只负责“状态 -> DOM”，相同 HTML 由 reconcileCcList 短路。
+//   4. 用户输入渲染一律经 escHtml/escHtml2/escJsStr 转义，禁止直接拼接。
+// 主要模块：初始化(initApp) / 心跳 / 环境变量 / 网易云 / 记忆池 / 压缩预览 /
+//           上下文替换 / 提示词 / 工具集 / 服务管理 / 日志面板 / 设置。
+// ============================================================================
+
  // API 基址：兼容 nginx 反代前缀（/heartbeat/admin）与直连（/admin）
  const ADMIN_API = location.pathname.indexOf('/heartbeat/admin/') === 0 ? '/heartbeat/admin' : '/admin';
 
@@ -1587,6 +1599,15 @@ function getCookie(name) {
 })();
 
 // 统一 API 请求封装：自动 JSON、集中错误提示、可选 busy 按钮禁用
+/**
+ * 统一 API 请求封装：自动 JSON、集中错误提示、可选 busy 按钮禁用。
+ * 401 自动跳登录页，403 提示 CSRF 校验失败。
+ * @param {string} method HTTP 方法
+ * @param {string} url 请求地址
+ * @param {Object|null} body 请求体（自动 JSON.stringify）
+ * @param {Object} [opts] 选项：{ busy: 保存按钮元素, throwError: 失败时抛异常 }
+ * @returns {Promise<{ok:boolean,status:number,data:Object,error?:string}>}
+ */
 async function apiRequest(method, url, body, opts) {
   opts = opts || {};
   const btn = opts.busy || null;
@@ -1615,11 +1636,54 @@ async function apiRequest(method, url, body, opts) {
  // 全局拦截：任何表单提交/默认按钮行为都不允许触发整页刷新
 document.addEventListener('submit',function(e){e.preventDefault();},true);
  let INITIAL_DATA = null;
- let editingMemId = null;
- let editingPinnedId = null;
  let configData = null;
+ // ============ AppState：压缩/记忆业务状态集中管理 ============
+ const AppState = {
+  compactionPlan: null,            // 压缩预览原始数据
+  ccPreviewLoadedAt: 0,            // 预览加载时间戳（15s TTL 去重）
+  compactionCutPoints: [],         // 当前生效的切分点
+  ccExpanded: new Set(),           // 已展开的压缩块 index
+  ccFresh: new Set(),              // 新生成的块（首次渲染需展开动画）
+  ccSummaryOpen: new Set(),        // 已展开的摘要面板
+  ccDraft: {},                     // 摘要编辑草稿
+  ccHistoryOpen: new Set(),        // 已展开的摘要历史
+  ccMsgBySig: {},                  // 块消息按签名缓存
+  ccGapMsgByKey: {},               // 未覆盖区消息缓存
+  ccGapTimeByKey: {},              // 未覆盖区时间范围缓存
+  ccGapCollapsed: new Set(),       // 已折叠的未覆盖区 gkey
+  ccGapCollapsedInit: false,       // 未覆盖区折叠初值是否已按数据初始化
+  ccGapPageOffset: {},             // 未覆盖区分页偏移
+  ccGapHasMore: {},                // 未覆盖区是否还有下一页
+  ccGapLoadingKey: null,           // 正在加载消息的 gkey
+  ccGapGenerating: new Set(),      // 正在生成摘要的 gkey
+  ccBlockGenerating: new Set(),    // 正在重新生成摘要的块 index
+  ccAiSummaryOpen: new Set(),      // 已展开的 AI 摘要面板
+  ccAnimateOpen: new Set(),        // 待播放展开动画的节点 id
+  ccAiEditTarget: null,            // AI 摘要编辑中的块 index
+  ccMsgsHtmlCache: {},             // 各 chunk 已渲染 HTML 缓存（失效即重绘）
+  ccMsgFetching: false,            // 是否正在拉取块消息
+  ccMsgFetchDone: false,           // 块消息是否已拉取完成
+  ccGapCutsOff: new Set(),         // 手动关闭（不再自动分块）的 gkey
+  ccPollTimer: null,               // 块消息轮询定时器
+  ccLastRenderedHtml: null,        // 最近一次渲染 HTML（重绘短路）
+  ccOriginalTimer: null,           // 原文搜索防抖定时器
+  ccOriginalSeq: 0,                // 原文搜索请求序号（防乱序）
+  ccMultiSelectMode: false,        // 是否处于多选模式
+  ccSelectedChunks: new Set(),     // 多选选中的 chunk index / gap key
+  ccFilter: null,                  // 筛选: null/gap/pending/replace/replaced
+  ccSwipeState: null,              // 压缩块左滑状态
+  memPoolEditId: null,             // 记忆池编辑中的记忆 id（null=新增）
+  memPoolSearchTimer: null,        // 记忆池搜索防抖定时器
+  editingMemId: null,              // 导入/编辑中的记忆 id
+  editingPinnedId: null            // 置顶编辑中的 pinned id
+ };
+
  
  // ============ Init ============
+/**
+ * 应用初始化：恢复上次导航 tab、拉取初始环境数据、渲染各模块。
+ * 认证失败时在 headerSub 给出提示并停止后续加载。
+ */
  async function initApp(){
    initCollapsibleCards();
    // 恢复上次停留的导航 tab（刷新后不再回到心跳页）
@@ -2520,38 +2584,8 @@ function toast(msg){
  
  // ============ Tab 5: 上下文压缩 ============
  // 多选模式状态
- let ccMultiSelectMode = false;
- let ccSelectedChunks = new Set(); // 存 chunk index 或 gap key
- let ccFilter = null; // 当前筛选状态: null/gap/pending/replace/replaced
 
- let compactionPlan = null;
-let ccPreviewLoadedAt = 0;
- let compactionCutPoints = [];
- let ccExpanded = new Set();
- let ccFresh = new Set();
- let ccSummaryOpen = new Set();
- let ccDraft = {};
- let ccHistoryOpen = new Set();
- let ccMsgBySig = {};
- let ccGapMsgByKey = {};
- let ccGapTimeByKey = {};
- let ccGapCollapsed = new Set();
- let ccGapCollapsedInit = false;
- let ccGapPageOffset = {};
- let ccGapHasMore = {};
- let ccGapLoadingKey = null;
  const CC_GAP_PAGE = 200;
- let ccGapGenerating = new Set();
- let ccBlockGenerating = new Set();
- let ccAiSummaryOpen = new Set();
- let ccAnimateOpen = new Set();
- let ccAiEditTarget = null;
- let ccMsgsHtmlCache = {};
- let ccMsgFetching = false;
- let ccMsgFetchDone = false;
-let ccGapCutsOff = new Set();
- let ccPollTimer = null;
- let ccLastRenderedHtml = null;
  
  function escHtml(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
  
@@ -2563,11 +2597,9 @@ let ccGapCutsOff = new Set();
  
  function fmtCcNum(n){n=Number(n)||0;if(n>=10000)return (n/10000).toFixed(1).replace(/\.0$/,'')+'万';return String(n);}
  
- let ccOriginalTimer = null;
- let ccOriginalSeq = 0;
  function scheduleCcOriginalSearch(){
-   clearTimeout(ccOriginalTimer);
-   ccOriginalTimer = setTimeout(ccOriginalSearch, 300);
+   clearTimeout(AppState.ccOriginalTimer);
+   AppState.ccOriginalTimer = setTimeout(ccOriginalSearch, 300);
  }
  async function ccOriginalSearch(){
    const el = document.getElementById('cc-original-search');
@@ -2576,13 +2608,13 @@ let ccGapCutsOff = new Set();
    const q = el ? el.value.trim() : '';
    if(!box) return;
    if(!q){ box.innerHTML=''; if(info) info.textContent=''; return; }
-   const seq = ++ccOriginalSeq;
+   const seq = ++AppState.ccOriginalSeq;
    box.innerHTML = skeletonHtml(3);
    if(info) info.textContent='搜索中…';
    try{
      const r = await fetch(ADMIN_API + '/context-compaction/search?q=' + encodeURIComponent(q) + '&limit=50');
      const j = await r.json();
-     if(seq !== ccOriginalSeq) return;
+     if(seq !== AppState.ccOriginalSeq) return;
      if(!j.ok){ box.innerHTML='<div class="empty">' + escapeHtml(j.error||'搜索失败') + '</div>'; if(info) info.textContent=''; return; }
      if(info) info.textContent='共命中 ' + j.total + ' 条（显示前 ' + j.results.length + ' 条）';
      if(!j.results.length){ box.innerHTML='<div class="empty">没有命中「'+escapeHtml(q)+'」的原文</div>'; return; }
@@ -2606,10 +2638,14 @@ let ccGapCutsOff = new Set();
          '</div>';
      }).join('');
    }catch(err){
-     if(seq === ccOriginalSeq) box.innerHTML='<div class="empty">搜索失败: '+escapeHtml(err.message)+'</div>';
+     if(seq === AppState.ccOriginalSeq) box.innerHTML='<div class="empty">搜索失败: '+escapeHtml(err.message)+'</div>';
      if(info) info.textContent='';
    }
  }
+/**
+ * 原文搜索结果标星/取消标星：成功后同步按钮 aria-pressed 状态。
+ * @param {HTMLElement} btn 标星按钮
+ */
 
  function toggleCcOrigMark(btn){
    if(!btn) return;
@@ -2681,6 +2717,10 @@ function setCcSyncing(on){
   const s=document.getElementById('cc-syncing');
   if(s) s.style.display=on?'inline-flex':'none';
 }
+/**
+ * 拉取压缩预览数据并渲染；带 15 秒 TTL 去重（AppState.ccPreviewLoadedAt）。
+ * 数据就绪后写入 AppState.compactionPlan 并调用 renderCompaction。
+ */
 function loadCompactionPreview(){
   if(ccPreviewInflight){ ccPreviewDirty=true; return Promise.resolve(); }
   ccPreviewInflight=true;
@@ -2691,7 +2731,7 @@ function loadCompactionPreview(){
   const msg=document.getElementById('compaction-msg');
   const savedY=(window.pageYOffset!==undefined)?window.pageYOffset:(document.documentElement.scrollTop||0);
   const savedInner={};
-  ((compactionPlan&&compactionPlan.chunks)||[]).forEach(function(c){
+  ((AppState.compactionPlan&&AppState.compactionPlan.chunks)||[]).forEach(function(c){
     const box=document.getElementById('cc-msg-scroll-'+c.index);
     if(box) savedInner[c.index]=box.scrollTop;
   });
@@ -2707,9 +2747,9 @@ function loadCompactionPreview(){
       if(el && (!el.innerHTML.trim() || el.querySelector('.cc-loading'))) el.innerHTML='<div class="empty">加载失败: '+escHtml(em)+'</div>';
       return;
     }
-    compactionPlan=d;
-    ccPreviewLoadedAt=Date.now();
-    if(!ccGapCollapsedInit){ccGapCollapsedInit=true;Array.prototype.forEach.call((d.uncovered&&d.uncovered.gaps)||[],function(g){ccGapCollapsed.add((g.startIdx||0)+'-'+(g.endIdx||0));});}
+    AppState.compactionPlan=d;
+    AppState.ccPreviewLoadedAt=Date.now();
+    if(!AppState.ccGapCollapsedInit){AppState.ccGapCollapsedInit=true;Array.prototype.forEach.call((d.uncovered&&d.uncovered.gaps)||[],function(g){AppState.ccGapCollapsed.add((g.startIdx||0)+'-'+(g.endIdx||0));});}
     renderCompaction(savedY, savedInner);
     renderCompactionConfig();
     updateCcStatusBar(d);
@@ -2721,17 +2761,97 @@ function loadCompactionPreview(){
   }).finally(function(){
     if(seq===ccPreviewSeq){ ccPreviewInflight=false; }
     setCcSyncing(false);
-    if(ccMultiSelectMode){ updateMultiSelectBar(); }
+    if(AppState.ccMultiSelectMode){ updateMultiSelectBar(); }
     if(!ccPreviewInflight && ccPreviewDirty){ ccPreviewDirty=false; loadCompactionPreview(); }
   });
 }
 
+/**
+ * 压缩预览子构建函数：纯 HTML 生成，便于 renderCompaction 聚焦“状态 -> DOM”编排。
+ */
+
+/**
+ * 未触发自动压缩时的提示卡片 HTML。
+ * @param {Object} d 压缩预览数据
+ * @param {number} ccGaps 未覆盖区数量
+ * @param {number} ccMin 自动压缩阈值
+ * @returns {string}
+ */
+function ccBuildEmptyNoticeHtml(d, ccGaps, ccMin){
+  let html='';
+  if(ccGaps>0){
+    html+='<div class="cc-notice" data-cid="cc-empty">'
+      +'<div class="cc-notice-head" onclick="toggleCcNotice(this)">'
+      +'<span class="cc-notice-icon">⚠</span>'
+      +'<span class="cc-notice-txt">未触发自动压缩 · 点击查看说明</span>'
+      +'<span class="cc-notice-arrow">▾</span>'
+      +'</div>'
+      +'<div class="cc-notice-body">当前共 '+(d.totalCompressible||0)+' 条消息，未达自动压缩阈值（'+(ccMin||0)+' 条），故未自动分块。仍可手动压缩：在下方未覆盖区点「生成摘要」逐区压缩，或点「自动分块」按时间/条数切块；也可到下方参数配置里把该阈值调小或改为 0。</div>'
+      +'</div>';
+  }else if(ccMin>0){
+    html+='<div class="cc-notice" data-cid="cc-empty">'
+      +'<div class="cc-notice-head" onclick="toggleCcNotice(this)">'
+      +'<span class="cc-notice-icon">⚠</span>'
+      +'<span class="cc-notice-txt">当前消息未达压缩阈值（'+(d.config.compaction_min_messages||0)+' 条）· 点击查看说明</span>'
+      +'<span class="cc-notice-arrow">▾</span>'
+      +'</div>'
+      +'<div class="cc-notice-body">当前消息数未达到压缩阈值（'+(d.config.compaction_min_messages||0)+' 条），暂不压缩。可到下方参数配置里把该值调小或改为 0。</div>'
+      +'</div>';
+  }
+  return html;
+}
+
+/**
+ * 把压缩块（手动/AI）与未覆盖区合并成一条流，按消息位置排序并应用筛选。
+ * @param {Object} d 压缩预览数据
+ * @returns {Array} 筛选后的合并项列表
+ */
+function ccBuildMergedItems(d){
+  const ccList=(d.chunks||[]);
+  const gaps=(d.uncovered&&d.uncovered.gaps&&d.uncovered.gaps.length)?d.uncovered.gaps:[];
+  const merged=[];
+  ccList.forEach(function(c){
+    const isAi=!!c.aiRep;
+    if(!isAi && typeof c.blockStart!=='number') return; // 忽略任何遗留的自动块
+    const st=((typeof c.blockStart==='number'&&c.blockStart>=0)?c.blockStart+1:((c.firstIdx>=0?c.firstIdx:0)+1));
+    merged.push({type:'block', chunk:c, isAi:isAi, start:st});
+  });
+  gaps.forEach(function(g){
+    merged.push({type:'gap', gap:g, start:g.startIdx});
+  });
+  merged.sort(function(a,b){return a.start-b.start;});
+  return applyCcFilter(merged, d);
+}
+
+/**
+ * 顶部摘要统计条 HTML（摘要后字数 / 条数 / 块数 / 缓存数 / 原始字数）。
+ * @param {Object} d 压缩预览数据
+ * @param {Object} t 汇总统计（d.totals）
+ * @returns {string}
+ */
+function ccBuildSummaryStatsHtml(d, t){
+  return '<div class="cc-stats">'
+    +'<span class="cc-mini-main"><span class="l">摘要后约</span><b>'+fmtCcNum(t.estCompressedChars||0)+'</b><span class="unit">字</span></span>'
+    +'<span class="cc-mini-item"><b>'+d.totalCompressible+'</b><i>条</i></span>'
+    +'<span class="cc-mini-item'+(t.chunkCount?'':' zero')+'"><b>'+(t.chunkCount||0)+'</b><i>块</i></span>'
+    +'<span class="cc-mini-item'+(t.cachedCount?'':' zero')+'"><b>'+(t.cachedCount||0)+'</b><i>缓存</i></span>'
+    +'<span class="cc-mini-item"><b>'+fmtCcNum(t.totalChars||0)+'</b><i>字</i></span>'
+    +'</div>';
+}
+
+/**
+ * 渲染压缩预览：把压缩块（手动/AI）与未覆盖区按消息位置合并成一条流。
+ * 重绘前先保存页面/内部滚动位置与已展开面板，拼完 HTML 后通过
+ * reconcileCcList 短路相同结果，再恢复滚动与展开动画。
+ * @param {number|undefined} savedY 重绘前捕获的页面滚动位置
+ * @param {Object|undefined} savedInner 各消息列表滚动位置缓存
+ */
   function renderCompaction(savedY, savedInner){
    const el=document.getElementById('compaction-chunks');
    const sum=document.getElementById('compaction-summary');
-   if(el){ el.classList.toggle('cc-multi-select', ccMultiSelectMode); }
+   if(el){ el.classList.toggle('cc-multi-select', AppState.ccMultiSelectMode); }
    if(!el) return;
-   const d=compactionPlan;
+   const d=AppState.compactionPlan;
    if(!d){ el.innerHTML='<div class="empty">暂无数据</div>'; return; }
     const t=d.totals||{};
    const msg=document.getElementById('compaction-msg');
@@ -2747,62 +2867,31 @@ function loadCompactionPreview(){
    const prevOpenCol={};
    document.querySelectorAll('.cc-collapse.open').forEach(function(w){ prevOpenCol[w.id]=true; });
    let html='';
-    if(!t.chunkCount){
+   if(!t.chunkCount){
      const ccGaps=(d.uncovered&&d.uncovered.gaps&&d.uncovered.gaps.length)||0;
      const ccMin=Number((d.config&&d.config.compaction_min_messages)||0);
-     if(ccGaps>0){
-       html+='<div class="cc-notice" data-cid="cc-empty">'
-         +'<div class="cc-notice-head" onclick="toggleCcNotice(this)">'
-         +'<span class="cc-notice-icon">⚠</span>'
-         +'<span class="cc-notice-txt">未触发自动压缩 · 点击查看说明</span>'
-         +'<span class="cc-notice-arrow">▾</span>'
-         +'</div>'
-         +'<div class="cc-notice-body">当前共 '+(d.totalCompressible||0)+' 条消息，未达自动压缩阈值（'+(ccMin||0)+' 条），故未自动分块。仍可手动压缩：在下方未覆盖区点「生成摘要」逐区压缩，或点「自动分块」按时间/条数切块；也可到下方参数配置里把该阈值调小或改为 0。</div>'
-         +'</div>';
-     }else if(ccMin>0){
-       html+='<div class="cc-notice" data-cid="cc-empty">'
-         +'<div class="cc-notice-head" onclick="toggleCcNotice(this)">'
-         +'<span class="cc-notice-icon">⚠</span>'
-         +'<span class="cc-notice-txt">当前消息未达压缩阈值（'+(d.config.compaction_min_messages||0)+' 条）· 点击查看说明</span>'
-         +'<span class="cc-notice-arrow">▾</span>'
-         +'</div>'
-         +'<div class="cc-notice-body">当前消息数未达到压缩阈值（'+(d.config.compaction_min_messages||0)+' 条），暂不压缩。可到下方参数配置里把该值调小或改为 0。</div>'
-         +'</div>';
-     }
+     html+=ccBuildEmptyNoticeHtml(d, ccGaps, ccMin);
    }
    // 块（手动/AI）与未覆盖区合并成一条流，按消息位置穿插显示
-   const ccList=(d.chunks||[]);
-   const gaps=(d.uncovered&&d.uncovered.gaps&&d.uncovered.gaps.length)?d.uncovered.gaps:[];
-   const merged=[];
+   const filtered = ccBuildMergedItems(d);
    let blockOrdinal=-1;
-   ccList.forEach(function(c){
-     const isAi=!!c.aiRep;
-     if(!isAi && typeof c.blockStart!=='number') return; // 忽略任何遗留的自动块
-     const st=((typeof c.blockStart==='number'&&c.blockStart>=0)?c.blockStart+1:((c.firstIdx>=0?c.firstIdx:0)+1));
-     merged.push({type:'block', chunk:c, isAi:isAi, start:st});
-   });
-   gaps.forEach(function(g){
-     merged.push({type:'gap', gap:g, start:g.startIdx});
-   });
-   merged.sort(function(a,b){return a.start-b.start;});
-   const filtered = applyCcFilter(merged, d);
    filtered.forEach(function(it){
      if(it.type==='gap'){
        const g=it.gap;
        const gkey=(g.startIdx||0)+'-'+(g.endIdx||0);
-       const gt=ccGapTimeByKey[gkey]||{};
+       const gt=AppState.ccGapTimeByKey[gkey]||{};
        const gtime=((g.startTime||gt.startTime)?'（'+(g.startTime||gt.startTime)+' ~ '+(g.endTime||gt.endTime)+'）':'');
        html+='<div class="cc-uncovered" data-gkey="'+gkey+'">'
-         + (ccMultiSelectMode?'<input type="checkbox" class="cc-chk" '+(ccSelectedChunks.has('gap-'+gkey)?'checked':'')+' onclick="event.stopPropagation();toggleCcChunkSelect(\'gap\',\''+gkey+'\')" title="选中此未覆盖区">':'')+'<div class="cc-uncovered-head cc-uncovered-head-click" onclick="toggleCcGapCollapse('+g.startIdx+','+g.endIdx+')">'
-         +'<span class="cc-uncovered-arrow">'+(ccGapCollapsed.has(gkey)?'▸':'▾')+'</span>'
+         + (AppState.ccMultiSelectMode?'<input type="checkbox" class="cc-chk" '+(AppState.ccSelectedChunks.has('gap-'+gkey)?'checked':'')+' onclick="event.stopPropagation();toggleCcChunkSelect(\'gap\',\''+gkey+'\')" title="选中此未覆盖区">':'')+'<div class="cc-uncovered-head cc-uncovered-head-click" onclick="toggleCcGapCollapse('+g.startIdx+','+g.endIdx+')">'
+         +'<span class="cc-uncovered-arrow">'+(AppState.ccGapCollapsed.has(gkey)?'▸':'▾')+'</span>'
          +'<span class="cc-uncovered-dot"></span>'
          +'<span class="cc-uncovered-title">未覆盖</span>'
          +'<span class="cc-uncovered-meta">第 '+g.startIdx+'–'+g.endIdx+' 条 · '+g.count+' 条'+gtime+'</span>'
          +'</div>'
-         +(ccGapCollapsed.has(gkey)?'':renderCcGapMessages(g))
+         +(AppState.ccGapCollapsed.has(gkey)?'':renderCcGapMessages(g))
          +'<div class="cc-uncovered-actions">'
          +'<button class="cc-btn secondary" onclick="autoSplitGap('+g.startIdx+','+g.endIdx+')">自动分块</button>'
-         +'<button class="cc-btn soft" onclick="generateGapSummary('+g.startIdx+','+g.endIdx+')"'+(ccGapGenerating.has(gkey)?' disabled':'')+'>'+(ccGapGenerating.has(gkey)?'生成中…':'生成摘要')+'</button>'
+         +'<button class="cc-btn soft" onclick="generateGapSummary('+g.startIdx+','+g.endIdx+')"'+(AppState.ccGapGenerating.has(gkey)?' disabled':'')+'>'+(AppState.ccGapGenerating.has(gkey)?'生成中…':'生成摘要')+'</button>'
          +'<input type="text" id="cc-add-range-'+g.startIdx+'-'+g.endIdx+'" placeholder="如 '+g.startIdx+'-'+g.endIdx+'" oninput="ccRangeWarn(this,'+g.startIdx+','+g.endIdx+')">'
          +'<button class="cc-btn secondary" onclick="addBlockByRange('+g.startIdx+','+g.endIdx+')">切分</button>'
          +'</div>'
@@ -2824,19 +2913,19 @@ function loadCompactionPreview(){
        end=c.blockEnd+1;
        count=end-start+1;
      }
-     const expanded=ccExpanded.has(c.index);
+     const expanded=AppState.ccExpanded.has(c.index);
      const enabled = c.enabled!==false;
      const timeLabel = isAi
        ? (c.range_label||'')
        : ((c.startTime||'?')+' ~ '+(c.endTime||'?'));
      html+='<div class="cc-chunk-swipe" data-cid="'+c.index+'">'
        +'<div class="card cc-chunk'+(c.cached?'':' pending')+'">'
-       + (ccMultiSelectMode?'<input type="checkbox" class="cc-chk" '+(ccSelectedChunks.has(c.index)?'checked':'')+' onclick="event.stopPropagation();toggleCcChunkSelect(\'chunk\','+c.index+')" title="选中此块">':'')+'<div class="cc-chunk-head" onclick="toggleCcExpand('+c.index+')">'
+       + (AppState.ccMultiSelectMode?'<input type="checkbox" class="cc-chk" '+(AppState.ccSelectedChunks.has(c.index)?'checked':'')+' onclick="event.stopPropagation();toggleCcChunkSelect(\'chunk\','+c.index+')" title="选中此块">':'')+'<div class="cc-chunk-head" onclick="toggleCcExpand('+c.index+')">'
        +(c.cached?'<span class="cc-chunk-arrow">'+(expanded?'▾':'▸')+'</span>':'')
        +'<span class="cc-chunk-title '+(isAi?'ai':'manual')+'">块 #'+c.index+'</span>'
        +'<span class="cc-badge '+(isAi?(enabled?'done':'off'):(c.cached?(enabled?'done':'warn'):'todo'))+'">'+(isAi?(enabled?'已替换':'已停用'):(c.cached?(enabled?'已替换':'待替换'):'待生成'))+'</span>'
        +'<span class="cc-chunk-stat">'+count+' 条 · '+fmtCcNum(c.chars)+' 字</span>'
-       +'<button class="cc-btn cc-head-toggle'+(enabled?' on':'')+(c.cached?'':' gen')+'" onclick="event.stopPropagation();'+(c.cached?'toggleCcReplace('+c.index+','+blockIndex+','+(isAi?1:0)+')':'regenerateBlockSummary('+c.index+','+blockIndex+')')+'"'+((!c.cached&&ccBlockGenerating.has(c.index))?' disabled':'')+'>'+(c.cached?(enabled?'取消替换':'替换'):(ccBlockGenerating.has(c.index)?'生成中…':'✦ 生成摘要'))+'</button>'
+       +'<button class="cc-btn cc-head-toggle'+(enabled?' on':'')+(c.cached?'':' gen')+'" onclick="event.stopPropagation();'+(c.cached?'toggleCcReplace('+c.index+','+blockIndex+','+(isAi?1:0)+')':'regenerateBlockSummary('+c.index+','+blockIndex+')')+'"'+((!c.cached&&AppState.ccBlockGenerating.has(c.index))?' disabled':'')+'>'+(c.cached?(enabled?'取消替换':'替换'):(AppState.ccBlockGenerating.has(c.index)?'生成中…':'✦ 生成摘要'))+'</button>'
        +'</div>'
        +'<div class="cc-meta">第 '+start+'~'+end+' 条 · '+escHtml(timeLabel)+'</div>'
        +'<div class="cc-preview">'+escHtml(c.head||'')+'</div>'
@@ -2856,19 +2945,19 @@ function loadCompactionPreview(){
        +(isAi
          ? '<div class="cc-ai-summary-wrap">'
            +'<div class="cc-sum-toggle-row">'
-           +'<div class="cc-summary-toggle" onclick="toggleCcAiSummary('+c.index+')">'+(ccAiSummaryOpen.has(c.index)?'▾ 收起摘要':'▸ 查看摘要')+'</div>'
-           +'<button class="cc-sum-toggle-btn" onclick="event.stopPropagation();regenerateAiBlockSummary(\''+c.repId+'\','+c.index+')"'+(ccBlockGenerating.has(c.index)?' disabled':'')+'>'+(ccBlockGenerating.has(c.index)?'生成中…':'✦ 重新生成摘要')+'</button>'
+           +'<div class="cc-summary-toggle" onclick="toggleCcAiSummary('+c.index+')">'+(AppState.ccAiSummaryOpen.has(c.index)?'▾ 收起摘要':'▸ 查看摘要')+'</div>'
+           +'<button class="cc-sum-toggle-btn" onclick="event.stopPropagation();regenerateAiBlockSummary(\''+c.repId+'\','+c.index+')"'+(AppState.ccBlockGenerating.has(c.index)?' disabled':'')+'>'+(AppState.ccBlockGenerating.has(c.index)?'生成中…':'✦ 重新生成摘要')+'</button>'
            +'</div>'
-           +'<div id="cc-collapse-ai-'+c.index+'" class="cc-collapse'+(ccAiSummaryOpen.has(c.index)&&(prevOpenCol['cc-collapse-ai-'+c.index]||!ccAnimateOpen.has('cc-collapse-ai-'+c.index))?' open':'')+'"><div class="cc-collapse-inner">'+renderCcAiSummary(c)+'</div></div>'
+           +'<div id="cc-collapse-ai-'+c.index+'" class="cc-collapse'+(AppState.ccAiSummaryOpen.has(c.index)&&(prevOpenCol['cc-collapse-ai-'+c.index]||!AppState.ccAnimateOpen.has('cc-collapse-ai-'+c.index))?' open':'')+'"><div class="cc-collapse-inner">'+renderCcAiSummary(c)+'</div></div>'
            +'</div>'
          : '')
        +(!isAi&&c.cached&&c.summary
          ? '<div class="cc-ai-summary-wrap">'
            +'<div class="cc-sum-toggle-row">'
-           +'<div class="cc-summary-toggle" onclick="toggleCcSummary('+c.index+')">'+(ccSummaryOpen.has(c.index)?'▾ 收起摘要':'▸ 查看摘要')+(c.history&&c.history.length?'（共 '+(c.history.length+1)+' 版）':'')+'</div>'
-           +'<button class="cc-sum-toggle-btn" onclick="event.stopPropagation();regenerateBlockSummary('+c.index+','+blockIndex+')"'+(ccBlockGenerating.has(c.index)?' disabled':'')+'>'+(ccBlockGenerating.has(c.index)?'生成中…':'✦ 重新生成摘要')+'</button>'
+           +'<div class="cc-summary-toggle" onclick="toggleCcSummary('+c.index+')">'+(AppState.ccSummaryOpen.has(c.index)?'▾ 收起摘要':'▸ 查看摘要')+(c.history&&c.history.length?'（共 '+(c.history.length+1)+' 版）':'')+'</div>'
+           +'<button class="cc-sum-toggle-btn" onclick="event.stopPropagation();regenerateBlockSummary('+c.index+','+blockIndex+')"'+(AppState.ccBlockGenerating.has(c.index)?' disabled':'')+'>'+(AppState.ccBlockGenerating.has(c.index)?'生成中…':'✦ 重新生成摘要')+'</button>'
            +'</div>'
-           +'<div id="cc-collapse-sum-'+c.index+'" class="cc-collapse'+(ccSummaryOpen.has(c.index)&&(prevOpenCol['cc-collapse-sum-'+c.index]||!ccAnimateOpen.has('cc-collapse-sum-'+c.index))?' open':'')+'"><div class="cc-collapse-inner">'+renderCcSummaryEditor(c, blockIndex)+renderCcHistory(c)+'</div></div>'
+           +'<div id="cc-collapse-sum-'+c.index+'" class="cc-collapse'+(AppState.ccSummaryOpen.has(c.index)&&(prevOpenCol['cc-collapse-sum-'+c.index]||!AppState.ccAnimateOpen.has('cc-collapse-sum-'+c.index))?' open':'')+'"><div class="cc-collapse-inner">'+renderCcSummaryEditor(c, blockIndex)+renderCcHistory(c)+'</div></div>'
            +'</div>'
          : '')
        +'</div>'
@@ -2876,16 +2965,7 @@ function loadCompactionPreview(){
        +'</div>';
    });
  
-   if(sum){
-     const noBlock=!t.chunkCount;
-     sum.innerHTML='<div class="cc-stats">'
-       +'<span class="cc-mini-main"><span class="l">摘要后约</span><b>'+fmtCcNum(t.estCompressedChars||0)+'</b><span class="unit">字</span></span>'
-       +'<span class="cc-mini-item"><b>'+d.totalCompressible+'</b><i>条</i></span>'
-       +'<span class="cc-mini-item'+(t.chunkCount?'':' zero')+'"><b>'+(t.chunkCount||0)+'</b><i>块</i></span>'
-       +'<span class="cc-mini-item'+(t.cachedCount?'':' zero')+'"><b>'+(t.cachedCount||0)+'</b><i>缓存</i></span>'
-       +'<span class="cc-mini-item"><b>'+fmtCcNum(t.totalChars||0)+'</b><i>字</i></span>'
-       +'</div>';
-   }
+   if(sum){ sum.innerHTML=ccBuildSummaryStatsHtml(d, t); }
     reconcileCcList(el, html);
     ccArmAllGapAutoLoad();
     if(window.scrollTo){
@@ -2895,18 +2975,18 @@ function loadCompactionPreview(){
      const box=document.getElementById('cc-msg-scroll-'+c.index);
      if(box && innerScrolls[c.index]!==undefined) box.scrollTop=innerScrolls[c.index];
    });
-   if(ccAnimateOpen.size){
+   if(AppState.ccAnimateOpen.size){
      requestAnimationFrame(function(){
-       ccAnimateOpen.forEach(function(id){
+       AppState.ccAnimateOpen.forEach(function(id){
          const w=document.getElementById(id);
          if(w) w.classList.add('open');
        });
-       ccAnimateOpen.clear();
+       AppState.ccAnimateOpen.clear();
      });
    }
    const expandAllBtn=document.getElementById('cc-expandall-btn');
    if(expandAllBtn && d.chunks && d.chunks.length){
-     const allOpen=d.chunks.every(function(c){return ccExpanded.has(c.index);});
+     const allOpen=d.chunks.every(function(c){return AppState.ccExpanded.has(c.index);});
      expandAllBtn.textContent=allOpen?'全部收起':'全部展开';
    }
    const rstBtn=document.getElementById('cc-reset-btn');
@@ -2929,10 +3009,16 @@ function ccNodeKey(n){
   if(gk!==null&&gk!=='') return 'g'+gk;
   return null;
 }
+/**
+ * 把渲染结果写回 DOM；与上次 HTML 完全相同则直接短路，
+ * 避免无谓的整块 innerHTML 替换（重绘优化关键路径）。
+ * @param {HTMLElement} el 目标容器
+ * @param {string} html 新渲染的 HTML
+ */
 function reconcileCcList(el, html){
   if(!el) return;
-  if(ccLastRenderedHtml === html) return;
-  ccLastRenderedHtml = html;
+  if(AppState.ccLastRenderedHtml === html) return;
+  AppState.ccLastRenderedHtml = html;
   const ae=document.activeElement;
   if(ae && el.contains(ae) && /^(TEXTAREA|INPUT)$/.test(ae.tagName)) return;
   const tmp=document.createElement('div');
@@ -2967,7 +3053,7 @@ function toggleCcNotice(head){
   if(n) n.classList.toggle('open');
 }
 function updateCcStatusBar(d){
-  d=d||compactionPlan;
+  d=d||AppState.compactionPlan;
   const el=document.getElementById('cc-status-chips');
   if(!el||!d) return;
   const chunks=(d.chunks||[]);
@@ -2981,55 +3067,55 @@ function updateCcStatusBar(d){
     else { pending++; }
   });
   el.innerHTML=
-    '<span class="cc-chip '+(gaps.length?'active':'muted')+'" onclick="toggleCcFilter(\'gap\')"'+(ccFilter==='gap'?' data-filter="gap"':'')+'><i class="cc-dot"></i>未覆盖 <b>'+gaps.length+'</b> 区</span>'
-    +'<span class="cc-chip '+(pending?'done':'muted')+'" onclick="toggleCcFilter(\'pending\')"'+(ccFilter==='pending'?' data-filter="pending"':'')+'><i class="cc-dot"></i>待生成 <b>'+pending+'</b></span>'
-    +'<span class="cc-chip '+(toReplace?'warn':'muted')+'" onclick="toggleCcFilter(\'replace\')"'+(ccFilter==='replace'?' data-filter="replace"':'')+'><i class="cc-dot"></i>待替换 <b>'+toReplace+'</b></span>'
-    +'<span class="cc-chip '+(replaced?'done':'muted')+'" onclick="toggleCcFilter(\'replaced\')"'+(ccFilter==='replaced'?' data-filter="replaced"':'')+'><i class="cc-dot"></i>已替换 <b>'+replaced+'</b></span>';
+    '<span class="cc-chip '+(gaps.length?'active':'muted')+'" onclick="toggleCcFilter(\'gap\')"'+(AppState.ccFilter==='gap'?' data-filter="gap"':'')+'><i class="cc-dot"></i>未覆盖 <b>'+gaps.length+'</b> 区</span>'
+    +'<span class="cc-chip '+(pending?'done':'muted')+'" onclick="toggleCcFilter(\'pending\')"'+(AppState.ccFilter==='pending'?' data-filter="pending"':'')+'><i class="cc-dot"></i>待生成 <b>'+pending+'</b></span>'
+    +'<span class="cc-chip '+(toReplace?'warn':'muted')+'" onclick="toggleCcFilter(\'replace\')"'+(AppState.ccFilter==='replace'?' data-filter="replace"':'')+'><i class="cc-dot"></i>待替换 <b>'+toReplace+'</b></span>'
+    +'<span class="cc-chip '+(replaced?'done':'muted')+'" onclick="toggleCcFilter(\'replaced\')"'+(AppState.ccFilter==='replaced'?' data-filter="replaced"':'')+'><i class="cc-dot"></i>已替换 <b>'+replaced+'</b></span>';
   const genBtn=document.getElementById('cc-gen-all-btn');
-  if(genBtn) genBtn.disabled=gaps.length===0 || ccGapGenerating.size>0;
+  if(genBtn) genBtn.disabled=gaps.length===0 || AppState.ccGapGenerating.size>0;
   const repBtn=document.getElementById('cc-replace-all-btn');
-  if(repBtn) repBtn.disabled=toReplace===0 || ccBlockGenerating.size>0;
+  if(repBtn) repBtn.disabled=toReplace===0 || AppState.ccBlockGenerating.size>0;
   const rpBtn=document.getElementById('cc-reparse-btn');
   if(rpBtn) rpBtn.disabled=replaced===0;
 }
 
  // ===== 多选模式 =====
  function toggleCcMultiSelect(){
-   ccMultiSelectMode = !ccMultiSelectMode;
-   ccSelectedChunks.clear();
+   AppState.ccMultiSelectMode = !AppState.ccMultiSelectMode;
+   AppState.ccSelectedChunks.clear();
    const btn = document.getElementById('cc-multiselect-btn');
    const bar = document.getElementById('cc-multi-bar');
-   if(btn) btn.classList.toggle('primary', ccMultiSelectMode);
-   if(btn) btn.textContent = ccMultiSelectMode ? '取消多选' : '多选';
-   if(bar) bar.classList.toggle('show', ccMultiSelectMode);
+   if(btn) btn.classList.toggle('primary', AppState.ccMultiSelectMode);
+   if(btn) btn.textContent = AppState.ccMultiSelectMode ? '取消多选' : '多选';
+   if(bar) bar.classList.toggle('show', AppState.ccMultiSelectMode);
    renderCompaction();
    updateMultiSelectBar();
  }
 
  function toggleCcChunkSelect(type, key){
    const selKey = type === 'gap' ? 'gap-' + key : key;
-   if(ccSelectedChunks.has(selKey)){
-     ccSelectedChunks.delete(selKey);
+   if(AppState.ccSelectedChunks.has(selKey)){
+     AppState.ccSelectedChunks.delete(selKey);
    }else{
-     ccSelectedChunks.add(selKey);
+     AppState.ccSelectedChunks.add(selKey);
    }
    renderCompaction();
    updateMultiSelectBar();
  }
 
  function toggleSelectAllCc(){
-   const d = compactionPlan;
+   const d = AppState.compactionPlan;
    if(!d) return;
    const chunks = d.chunks || [];
    const gaps = (d.uncovered && d.uncovered.gaps) || [];
    const totalCount = chunks.length + gaps.length;
    // 如果已选数量等于总数，则取消全选
-   if(ccSelectedChunks.size >= totalCount){
-     ccSelectedChunks.clear();
+   if(AppState.ccSelectedChunks.size >= totalCount){
+     AppState.ccSelectedChunks.clear();
    }else{
-     ccSelectedChunks.clear();
-     chunks.forEach(function(c){ ccSelectedChunks.add(c.index); });
-     gaps.forEach(function(g){ ccSelectedChunks.add('gap-' + (g.startIdx||0) + '-' + (g.endIdx||0)); });
+     AppState.ccSelectedChunks.clear();
+     chunks.forEach(function(c){ AppState.ccSelectedChunks.add(c.index); });
+     gaps.forEach(function(g){ AppState.ccSelectedChunks.add('gap-' + (g.startIdx||0) + '-' + (g.endIdx||0)); });
    }
    renderCompaction();
    updateMultiSelectBar();
@@ -3045,14 +3131,14 @@ function updateCcStatusBar(d){
    const exportBtn = document.getElementById('cc-multi-export-btn');
    const removeBtn = document.getElementById('cc-multi-remove-btn');
    if(!bar) return;
-   const d = compactionPlan;
+   const d = AppState.compactionPlan;
    const chunks = d ? (d.chunks || []) : [];
    const totalCount = chunks.length + ((d && d.uncovered && d.uncovered.gaps) ? d.uncovered.gaps.length : 0);
-   if(countEl) countEl.textContent = '已选 ' + ccSelectedChunks.size + ' 项';
-   if(selectAllEl) selectAllEl.checked = ccSelectedChunks.size > 0 && ccSelectedChunks.size >= totalCount;
+   if(countEl) countEl.textContent = '已选 ' + AppState.ccSelectedChunks.size + ' 项';
+   if(selectAllEl) selectAllEl.checked = AppState.ccSelectedChunks.size > 0 && AppState.ccSelectedChunks.size >= totalCount;
    // 统计选中的块中各状态数量
    let canGenerate = 0, canReplace = 0, canReparse = 0, canExport = 0, canRemove = 0;
-   ccSelectedChunks.forEach(function(key){
+   AppState.ccSelectedChunks.forEach(function(key){
      if(String(key).startsWith('gap-')){
        canGenerate++; // 未覆盖区可以生成摘要
        canRemove++;   // 未覆盖区不能移除（它本身就是未覆盖的），但切分出的块可以移除，这里先不算
@@ -3077,10 +3163,10 @@ function updateCcStatusBar(d){
 
  // ===== 状态筛选 =====
  function toggleCcFilter(type){
-   if(ccFilter === type){
-     ccFilter = null; // 再点一次取消筛选
+   if(AppState.ccFilter === type){
+     AppState.ccFilter = null; // 再点一次取消筛选
    }else{
-     ccFilter = type;
+     AppState.ccFilter = type;
    }
    renderCompaction();
    updateCcStatusBar();
@@ -3088,22 +3174,22 @@ function updateCcStatusBar(d){
 
  // 应用筛选到 merged 列表
  function applyCcFilter(list, d){
-   if(!ccFilter) return list;
+   if(!AppState.ccFilter) return list;
    const chunks = d.chunks || [];
    return list.filter(function(it){
-     if(ccFilter === 'gap'){
+     if(AppState.ccFilter === 'gap'){
        return it.type === 'gap';
      }
      if(it.type === 'gap') return false;
      const c = it.chunk;
      const enabled = c.enabled !== false;
-     if(ccFilter === 'pending'){
+     if(AppState.ccFilter === 'pending'){
        return !c.cached; // 待生成
      }
-     if(ccFilter === 'replace'){
+     if(AppState.ccFilter === 'replace'){
        return c.cached && !enabled; // 待替换
      }
-     if(ccFilter === 'replaced'){
+     if(AppState.ccFilter === 'replaced'){
        return c.cached && enabled; // 已替换
      }
      return true;
@@ -3111,9 +3197,13 @@ function updateCcStatusBar(d){
  }
 
  // 批量生成摘要
+/**
+ * 批量生成摘要：对选中的块/未覆盖区逐个调用生成接口，
+ * 期间禁用按钮并展示进度，结束后刷新预览。
+ */
  async function batchGenerateSummaries(){
-   if(!ccSelectedChunks.size) return;
-   const d = compactionPlan;
+   if(!AppState.ccSelectedChunks.size) return;
+   const d = AppState.compactionPlan;
    if(!d) return;
    const chunks = d.chunks || [];
    const gaps = (d.uncovered && d.uncovered.gaps) || [];
@@ -3121,7 +3211,7 @@ function updateCcStatusBar(d){
    const barBtns = document.querySelectorAll('#cc-multi-bar .cc-btn');
    // 收集需要生成的：未生成摘要的块 + 未覆盖区
    const todo = [];
-   ccSelectedChunks.forEach(function(key){
+   AppState.ccSelectedChunks.forEach(function(key){
      if(String(key).startsWith('gap-')){
        const gkey = String(key).replace('gap-', '');
        const parts = gkey.split('-');
@@ -3193,14 +3283,14 @@ function updateCcStatusBar(d){
 
  // 批量替换
  async function batchReplaceBlocks(){
-   if(!ccSelectedChunks.size) return;
-   const d = compactionPlan;
+   if(!AppState.ccSelectedChunks.size) return;
+   const d = AppState.compactionPlan;
    if(!d) return;
    const chunks = d.chunks || [];
    const manualChunks = chunks.filter(function(x){ return !x.aiRep; });
    // 收集待替换的块（cached 且 enabled === false）
    const todo = [];
-   ccSelectedChunks.forEach(function(key){
+   AppState.ccSelectedChunks.forEach(function(key){
      if(String(key).startsWith('gap-')) return; // 未覆盖区不能替换
      const idx = Number(key);
      const c = chunks.find(function(x){ return x.index === idx; });
@@ -3247,13 +3337,13 @@ function updateCcStatusBar(d){
 
  // 批量解析入池
  async function batchReparseToPool(){
-   if(!ccSelectedChunks.size) return;
-   const d = compactionPlan;
+   if(!AppState.ccSelectedChunks.size) return;
+   const d = AppState.compactionPlan;
    if(!d) return;
    const chunks = d.chunks || [];
    // 收集已替换的块
    const selectedIndices = [];
-   ccSelectedChunks.forEach(function(key){
+   AppState.ccSelectedChunks.forEach(function(key){
      if(String(key).startsWith('gap-')) return;
      const idx = Number(key);
      const c = chunks.find(function(x){ return x.index === idx; });
@@ -3282,13 +3372,13 @@ function updateCcStatusBar(d){
 
  // 批量导出
  function batchExportBlocks(){
-   if(!ccSelectedChunks.size) return;
-   const d = compactionPlan;
+   if(!AppState.ccSelectedChunks.size) return;
+   const d = AppState.compactionPlan;
    if(!d) return;
    const chunks = d.chunks || [];
    // 收集选中的块
    const selected = [];
-   ccSelectedChunks.forEach(function(key){
+   AppState.ccSelectedChunks.forEach(function(key){
      if(String(key).startsWith('gap-')) return;
      const idx = Number(key);
      const c = chunks.find(function(x){ return x.index === idx; });
@@ -3298,7 +3388,7 @@ function updateCcStatusBar(d){
    // 检查是否都加载了原文
    let needLoad = [];
    selected.forEach(function(c){
-     const msgs = c.msgs || ccMsgBySig[c.signature] || [];
+     const msgs = c.msgs || AppState.ccMsgBySig[c.signature] || [];
      if(!msgs.length) needLoad.push(c);
    });
    if(needLoad.length){
@@ -3309,7 +3399,7 @@ function updateCcStatusBar(d){
    let allTxt = '';
    selected.sort(function(a, b){ return a.index - b.index; });
    selected.forEach(function(c){
-     const msgs = c.msgs || ccMsgBySig[c.signature] || [];
+     const msgs = c.msgs || AppState.ccMsgBySig[c.signature] || [];
      const baseNum = (typeof c.blockStart === 'number' && c.blockStart >= 0) ? c.blockStart : ((typeof c.firstIdx === 'number' && c.firstIdx >= 0) ? c.firstIdx : null);
      allTxt += '块 #' + c.index + (c.range_label ? (' ' + c.range_label) : '') + '\n';
      allTxt += '========================================\n\n';
@@ -3330,14 +3420,14 @@ function updateCcStatusBar(d){
  }
  // 批量移除
  async function batchRemoveBlocks(){
-   if(!ccSelectedChunks.size) return;
-   const d = compactionPlan;
+   if(!AppState.ccSelectedChunks.size) return;
+   const d = AppState.compactionPlan;
    if(!d) return;
    const chunks = d.chunks || [];
    const manualChunks = chunks.filter(function(x){ return !x.aiRep; });
    // 收集可移除的块
    const todo = [];
-   ccSelectedChunks.forEach(function(key){
+   AppState.ccSelectedChunks.forEach(function(key){
      if(String(key).startsWith('gap-')) return; // 未覆盖区不能移除
      const idx = Number(key);
      const c = chunks.find(function(x){ return x.index === idx; });
@@ -3386,7 +3476,7 @@ function updateCcStatusBar(d){
        break;
      }
    }
-   ccSelectedChunks.clear();
+   AppState.ccSelectedChunks.clear();
    resetCcMsgCache();
    await loadCompactionPreview();
    if(msg) msg.textContent = '已移除 ' + done + '/' + todo.length + ' 块。';
@@ -3397,7 +3487,7 @@ function updateCcStatusBar(d){
 
 
 async function generateAllGapSummaries(){
-  const d=compactionPlan;
+  const d=AppState.compactionPlan;
   if(!d) return;
   const gaps=(d.uncovered&&d.uncovered.gaps)||[];
   if(!gaps.length){ toast('没有未覆盖区，无需生成'); return; }
@@ -3409,7 +3499,7 @@ async function generateAllGapSummaries(){
   let done=0;
   for(let i=0;i<ranges.length;i++){
     const key=ranges[i][0]+'-'+ranges[i][1];
-    ccGapGenerating.add(key);
+    AppState.ccGapGenerating.add(key);
     updateCcStatusBar();
     if(msg) msg.textContent='正在为第 '+ranges[i][0]+'–'+ranges[i][1]+' 条生成摘要（第 '+(i+1)+'/'+ranges.length+' 个）…';
     try{
@@ -3423,7 +3513,7 @@ async function generateAllGapSummaries(){
       toast('生成失败：'+e.message);
       break;
     }finally{
-      ccGapGenerating.delete(key);
+      AppState.ccGapGenerating.delete(key);
     }
   }
   resetCcMsgCache();
@@ -3431,7 +3521,7 @@ async function generateAllGapSummaries(){
   if(msg) msg.textContent='已生成 '+done+'/'+ranges.length+' 个摘要；点块上的「替换」后生效。';
 }
 async function replaceAllPendingBlocks(){
-  const d=compactionPlan;
+  const d=AppState.compactionPlan;
   if(!d) return;
   const ccList=(d.chunks||[]).filter(function(x){return !x.aiRep;});
   const pending=ccList.filter(function(c){ return c.cached && c.enabled===false; });
@@ -3461,7 +3551,7 @@ async function replaceAllPendingBlocks(){
   if(msg) msg.textContent='已替换 '+done+'/'+pending.length+' 块。';
 }
 async function reparseAllFromCompaction(){
-  const d=compactionPlan;
+  const d=AppState.compactionPlan;
   if(!d) return;
   const replaced=(d.chunks||[]).filter(function(c){ return c.enabled!==false; }).length;
   if(!replaced){ toast('还没有已替换的块，请先「替换」后再解析'); return; }
@@ -3494,7 +3584,7 @@ function locateCcFromSearch(el){
   if(cid!==null&&cid!=='') target=list.querySelector('.cc-chunk-swipe[data-cid="'+cid+'"]');
   if(!target && idx!==null&&idx!==''){
     const n=Number(idx);
-    const gaps=((compactionPlan&&compactionPlan.uncovered&&compactionPlan.uncovered.gaps)||[]);
+    const gaps=((AppState.compactionPlan&&AppState.compactionPlan.uncovered&&AppState.compactionPlan.uncovered.gaps)||[]);
     const g=gaps.find(function(x){ return n>=x.startIdx && n<=x.endIdx; });
     if(g){ const k=g.startIdx+'-'+g.endIdx; target=list.querySelector('.cc-uncovered[data-gkey="'+k+'"]'); }
   }
@@ -3515,7 +3605,7 @@ function removeSingleBlock(idx, blockIndex, isAi){
    const msg=document.getElementById('compaction-msg');
    if(msg) msg.textContent='正在移除块 #'+idx+'...';
    if(isAi){
-     const c=(compactionPlan.chunks||[]).find(function(x){return x.index===idx;});
+     const c=(AppState.compactionPlan.chunks||[]).find(function(x){return x.index===idx;});
      if(c && c.repId){ undoContextReplacement(c.repId); return; }
    }
    fetch(ADMIN_API + '/context-compaction/blocks',{
@@ -3532,7 +3622,7 @@ function removeSingleBlock(idx, blockIndex, isAi){
  
  // 切换块的替换开关（手动块和AI块统一）
  function toggleCcReplace(idx, blockIndex, isAi){
-   const c=(compactionPlan.chunks||[]).find(function(x){return x.index===idx;});
+   const c=(AppState.compactionPlan.chunks||[]).find(function(x){return x.index===idx;});
    const next=!c || c.enabled===false;
    const msg=document.getElementById('compaction-msg');
    if(msg) msg.textContent=next?'正在启用块 #'+idx+' 替换...':'正在停用块 #'+idx+' 替换...';
@@ -3579,7 +3669,7 @@ function removeSingleBlock(idx, blockIndex, isAi){
      if(msg) msg.textContent='结束编号要 ≥ 起始编号。';
      return;
    }
-   const d=compactionPlan;
+   const d=AppState.compactionPlan;
    if(d && end>(d.totalCompressible||0)){
      const msg=document.getElementById('compaction-msg');
      if(msg) msg.textContent='结束编号超过消息总数（最大 '+(d.totalCompressible||0)+'）。';
@@ -3624,9 +3714,9 @@ function ccTopicSim(a,b){
   return union? inter/union : 0;
 }
 function ccGapSuggestCuts(key){
-  const msgs=ccGapMsgByKey[key];
+  const msgs=AppState.ccGapMsgByKey[key];
   if(!msgs || msgs.length<2) return [];
-  const cfgGap=(compactionPlan&&compactionPlan.config&&Number(compactionPlan.config.compaction_gap_minutes))||30;
+  const cfgGap=(AppState.compactionPlan&&AppState.compactionPlan.config&&Number(AppState.compactionPlan.config.compaction_gap_minutes))||30;
   const gapMs=cfgGap*60*1000;
   const toks=msgs.map(function(m){ return ccGapTopicTokens(m.content); });
   const out=[];
@@ -3714,11 +3804,11 @@ function ccGapApplyAllCuts(key){
   ccDoCutSegments(segs);
 }
 function ccGapToggleCuts(key){
-  if(ccGapCutsOff.has(key)) ccGapCutsOff.delete(key); else ccGapCutsOff.add(key);
+  if(AppState.ccGapCutsOff.has(key)) AppState.ccGapCutsOff.delete(key); else AppState.ccGapCutsOff.add(key);
   renderCompaction();
 }
 function ccFindGap(gs, ge){
-  const d=compactionPlan; if(!d||!d.uncovered||!d.uncovered.gaps) return null;
+  const d=AppState.compactionPlan; if(!d||!d.uncovered||!d.uncovered.gaps) return null;
   for(let i=0;i<d.uncovered.gaps.length;i++){ const g=d.uncovered.gaps[i]; if((g.startIdx||0)===gs && (g.endIdx||0)===ge) return g; }
   return null;
 }
@@ -3738,9 +3828,9 @@ function ccGapItemHtml(key, m, cuts, idx){
     +(cuts.some(function(c){return c.cut===m.num;})?'<div class="cc-gap-cut-dot" title="点击在第 '+m.num+' 条后切分（会形成两个块）" onclick="ccGapCutAt(\''+key+'\','+m.num+')"><i></i></div>':'');
 }
 function ccGapMoreWrapHtml(key, gs, ge){
-  if(!ccGapHasMore[key]) return '';
+  if(!AppState.ccGapHasMore[key]) return '';
   const g=ccFindGap(gs, ge)||{};
-  const total=(g.count||''); const loaded=ccGapPageOffset[key]||((ccGapMsgByKey[key]||[]).length);
+  const total=(g.count||''); const loaded=AppState.ccGapPageOffset[key]||((AppState.ccGapMsgByKey[key]||[]).length);
   return '<div id="cc-gap-more-wrap-'+key+'" class="cc-gap-more" style="text-align:center;padding:5px 0;font-size:10px;color:var(--text3)">上滑自动加载（已加载 '+loaded+'/'+total+'）</div>';
 }
 function ccArmGapAutoLoad(key, gs, ge){
@@ -3750,7 +3840,7 @@ function ccArmGapAutoLoad(key, gs, ge){
     box._ccAutoLoad=true;
     box.addEventListener('scroll',function(){
       if(box.scrollTop+box.clientHeight>=box.scrollHeight-240){
-        if(ccGapHasMore[key] && ccGapLoadingKey!==key && !ccGapCollapsed.has(key)) loadGapPage(key,gs,ge);
+        if(AppState.ccGapHasMore[key] && AppState.ccGapLoadingKey!==key && !AppState.ccGapCollapsed.has(key)) loadGapPage(key,gs,ge);
       }
     },{passive:true});
   }
@@ -3759,7 +3849,7 @@ function ccArmGapAutoLoad(key, gs, ge){
     more._ccObserved=true;
     const io=new IntersectionObserver(function(entries){
       entries.forEach(function(en){
-        if(en.isIntersecting && ccGapHasMore[key] && ccGapLoadingKey!==key && !ccGapCollapsed.has(key)){
+        if(en.isIntersecting && AppState.ccGapHasMore[key] && AppState.ccGapLoadingKey!==key && !AppState.ccGapCollapsed.has(key)){
           io.disconnect(); more._ccObserved=false;
           loadGapPage(key,gs,ge);
         }
@@ -3770,7 +3860,7 @@ function ccArmGapAutoLoad(key, gs, ge){
 }
 function renderCcGapMessages(g){
   const key=(g.startIdx||0)+'-'+(g.endIdx||0);
-  const msgs=ccGapMsgByKey[key];
+  const msgs=AppState.ccGapMsgByKey[key];
   if(!msgs){
     loadGapPage(key, g.startIdx, g.endIdx);
     return '<div class="cc-gap-scroll"><div style="padding:14px;text-align:center;font-size:12px;color:var(--text3)">消息加载中...</div></div>';
@@ -3784,23 +3874,23 @@ function renderCcGapMessages(g){
   return html;
 }
 function loadGapPage(key, startIdx, endIdx){
-  if(ccGapLoadingKey===key) return;
-  if(ccGapHasMore[key]===false) return;
-  ccGapLoadingKey=key;
+  if(AppState.ccGapLoadingKey===key) return;
+  if(AppState.ccGapHasMore[key]===false) return;
+  AppState.ccGapLoadingKey=key;
   const startVal=(typeof startIdx==='number'?startIdx:parseInt(startIdx,10))||0;
   const endVal=(typeof endIdx==='number'?endIdx:parseInt(endIdx,10))||0;
-  const offset=ccGapPageOffset[key]||0;
+  const offset=AppState.ccGapPageOffset[key]||0;
   const url=ADMIN_API+'/context-compaction/range-preview?start='+startVal+'&end='+endVal+'&limit='+CC_GAP_PAGE+'&offset='+offset;
-  const prevLen=(ccGapMsgByKey[key]||[]).length;
+  const prevLen=(AppState.ccGapMsgByKey[key]||[]).length;
   const moreBtn=document.getElementById('cc-gap-more-'+key);
   if(moreBtn){ moreBtn.textContent='加载中…'; moreBtn.disabled=true; }
   fetch(url).then(function(r){return r.json()}).then(function(d){
-    ccGapLoadingKey=null;
+    AppState.ccGapLoadingKey=null;
     const arr=(d&&d.items)||[];
-    const prev=ccGapMsgByKey[key]||[];
-    ccGapMsgByKey[key]=prev.concat(arr);
-    ccGapPageOffset[key]=offset+arr.length;
-    ccGapHasMore[key]=!!(d&&d.hasMore);
+    const prev=AppState.ccGapMsgByKey[key]||[];
+    AppState.ccGapMsgByKey[key]=prev.concat(arr);
+    AppState.ccGapPageOffset[key]=offset+arr.length;
+    AppState.ccGapHasMore[key]=!!(d&&d.hasMore);
     const liveBox=document.getElementById('cc-gap-scroll-'+key);
     if(liveBox){
       const cuts=ccGapSuggestCuts(key);
@@ -3811,23 +3901,23 @@ function loadGapPage(key, startIdx, endIdx){
     }else{
       renderCompaction();
     }
-  }).catch(function(){ ccGapLoadingKey=null; const wrap=document.getElementById('cc-gap-more-wrap-'+key); if(wrap){ wrap.textContent='加载失败，上滑重试'; } });
+  }).catch(function(){ AppState.ccGapLoadingKey=null; const wrap=document.getElementById('cc-gap-more-wrap-'+key); if(wrap){ wrap.textContent='加载失败，上滑重试'; } });
 }
 function toggleCcGapExpand(key, i){
   const el=document.getElementById('cc-gap-item-'+key+'-'+i);
   if(el) el.classList.toggle('expanded');
 }
 function ccArmAllGapAutoLoad(){
-  const d=compactionPlan; if(!d||!d.uncovered||!d.uncovered.gaps) return;
+  const d=AppState.compactionPlan; if(!d||!d.uncovered||!d.uncovered.gaps) return;
   d.uncovered.gaps.forEach(function(g){
     const key=(g.startIdx||0)+'-'+(g.endIdx||0);
-    if(ccGapHasMore[key]) ccArmGapAutoLoad(key, g.startIdx, g.endIdx);
+    if(AppState.ccGapHasMore[key]) ccArmGapAutoLoad(key, g.startIdx, g.endIdx);
   });
 }
 
  function toggleCcGapCollapse(gs, ge){
    const key=(gs||0)+'-'+(ge||0);
-   if(ccGapCollapsed.has(key)) ccGapCollapsed.delete(key); else ccGapCollapsed.add(key);
+   if(AppState.ccGapCollapsed.has(key)) AppState.ccGapCollapsed.delete(key); else AppState.ccGapCollapsed.add(key);
    renderCompaction();
  }
  
@@ -3835,7 +3925,7 @@ function ccArmAllGapAutoLoad(){
    const v=input.value.trim();
    const m=String(v).match(/^\s*(\d+)\s*[-~至到]\s*(\d+)\s*$/);
    let ok=true;
-   const d=compactionPlan;
+   const d=AppState.compactionPlan;
    const max=(d&&d.totalCompressible)||0;
    if(m){
      const a=parseInt(m[1],10), b=parseInt(m[2],10);
@@ -3846,7 +3936,7 @@ function ccArmAllGapAutoLoad(){
  
  // 自动分块：只分这个未覆盖区，按配置的时间间隔 + 目标/最少/最多条数自然切分
  function autoSplitGap(start, end){
-   const cfg=(compactionPlan&&compactionPlan.config)||{};
+   const cfg=(AppState.compactionPlan&&AppState.compactionPlan.config)||{};
    const cfgGap=Number(cfg.compaction_gap_minutes)||30;
    const chunkSize=Number(cfg.compaction_chunk_size)||100;
    const chunkMin=Number(cfg.compaction_chunk_min)||40;
@@ -3868,9 +3958,9 @@ function ccArmAllGapAutoLoad(){
  
   // 导出块原文 txt：优先用块内已加载的 msgs，空则提示先展开
   function exportBlockTxt(idx){
-    const c=(compactionPlan&&compactionPlan.chunks||[]).find(function(x){return x.index===idx;});
+    const c=(AppState.compactionPlan&&AppState.compactionPlan.chunks||[]).find(function(x){return x.index===idx;});
     if(!c){ toast('块不存在'); return; }
-    const msgs=c.msgs||ccMsgBySig[c.signature]||[];
+    const msgs=c.msgs||AppState.ccMsgBySig[c.signature]||[];
     if(!msgs.length){ toast('该块原文尚未加载，请先展开一次再导出'); return; }
     const baseNum=(typeof c.blockStart==='number'&&c.blockStart>=0)?c.blockStart:((typeof c.firstIdx==='number'&&c.firstIdx>=0)?c.firstIdx:null);
     let txt='块 #'+c.index+(c.range_label?(' '+c.range_label):'')+'\n';
@@ -3893,9 +3983,9 @@ function ccArmAllGapAutoLoad(){
 
  function generateGapSummary(start, end){
    const key=(start||0)+'-'+(end||0);
-   if(ccGapGenerating.has(key)) return;
+   if(AppState.ccGapGenerating.has(key)) return;
    if(!confirm('为第 '+start+'–'+end+' 条生成摘要？将新建一个手动块覆盖该范围，并调模型按压缩提示词生成摘要；生成后需点块上的「替换」才生效。')) return;
-   ccGapGenerating.add(key);
+   AppState.ccGapGenerating.add(key);
    renderCompaction();
    const msg=document.getElementById('compaction-msg');
    if(msg) msg.textContent='正在为第 '+start+'–'+end+' 条生成摘要（约几十秒）…';
@@ -3903,14 +3993,14 @@ function ccArmAllGapAutoLoad(){
      method:'POST',headers:{'Content-Type':'application/json'},
      body:JSON.stringify({action:'gap', start:start, end:end})
    }).then(function(r){return r.json()}).then(function(d){
-     ccGapGenerating.delete(key);
+     AppState.ccGapGenerating.delete(key);
      if(d && d.error){ toast('生成失败：'+d.error); if(msg) msg.textContent='生成失败: '+d.error; renderCompaction(); return; }
      if(d && d.ok===false){ toast('生成失败：'+(d.message||'未知原因')); if(msg) msg.textContent=(d.message||'生成失败'); renderCompaction(); return; }
      if(msg) msg.textContent='已生成摘要（'+d.length+' 字），该块当前为「待替换」，点「替换」后生效。';
      resetCcMsgCache();
      loadCompactionPreview();
    }).catch(function(e){
-     ccGapGenerating.delete(key);
+     AppState.ccGapGenerating.delete(key);
      renderCompaction();
      toast('生成失败：'+e.message);
      if(msg) msg.textContent='生成失败: '+e.message;
@@ -3925,9 +4015,9 @@ function ccArmAllGapAutoLoad(){
     if(w.dataset.open==='1'){ w.innerHTML=''; w.dataset.open='0'; return; }
     w.dataset.open='1';
     const c=ccFindChunk(idx);
-    const cur=((c&&c.summary)||(ccDraft[idx]||''));
+    const cur=((c&&c.summary)||(AppState.ccDraft[idx]||''));
     w.innerHTML='<div class="cc-sum-ta-wrap">'
-      +'<textarea id="cc-edit-sel-'+idx+'" rows="6" oninput="ccDraft['+idx+']=this.value;updateCcCharCount('+idx+')" class="cc-sum-ta" placeholder="填写摘要内容（不调模型）">'+escHtml(cur)+'</textarea>'
+      +'<textarea id="cc-edit-sel-'+idx+'" rows="6" oninput="AppState.ccDraft['+idx+']=this.value;updateCcCharCount('+idx+')" class="cc-sum-ta" placeholder="填写摘要内容（不调模型）">'+escHtml(cur)+'</textarea>'
       +'</div>'
       +'<div class="cc-sum-editor-btns">'
       +'<span class="cc-sum-count" id="cc-edit-count-'+idx+'">'+cur.length+' 字</span>'
@@ -3942,19 +4032,19 @@ function ccArmAllGapAutoLoad(){
    if(blockIndex===undefined || blockIndex===null || blockIndex<0) return;
    if(!confirm('重新生成块 #'+idx+' 的摘要？现有摘要会保留在历史版本里。')) return;
    const msg=document.getElementById('compaction-msg');
-   ccBlockGenerating.add(idx);
+   AppState.ccBlockGenerating.add(idx);
    renderCompaction();
    if(msg) msg.textContent='块 #'+idx+'：正在重新生成摘要（约几十秒）…';
    fetch(ADMIN_API + '/context-compaction/generate',{
      method:'POST',headers:{'Content-Type':'application/json'},
      body:JSON.stringify({action:'block', blockIndex: blockIndex})
    }).then(function(r){return r.json()}).then(function(d){
-     ccBlockGenerating.delete(idx);
+     AppState.ccBlockGenerating.delete(idx);
      if(d && d.error){ toast('生成失败：'+d.error); if(msg) msg.textContent='生成失败: '+d.error; return; }
      if(d && d.ok===false){ toast('生成失败：'+(d.message||'未知原因')); if(msg) msg.textContent=(d.message||'生成失败'); return; }
-     ccDraft[idx]=undefined;
-     ccSummaryOpen.add(idx);
-     ccAnimateOpen.add('cc-collapse-sum-'+idx);
+     AppState.ccDraft[idx]=undefined;
+     AppState.ccSummaryOpen.add(idx);
+     AppState.ccAnimateOpen.add('cc-collapse-sum-'+idx);
      if(msg) msg.textContent='块 #'+idx+' 摘要已重新生成（'+d.length+' 字）。';
      resetCcMsgCache();
    }).catch(function(e){ toast('生成失败：'+e.message); if(msg) msg.textContent='生成失败: '+e.message; }).finally(function(){ loadCompactionPreview(); });
@@ -3964,18 +4054,18 @@ function ccArmAllGapAutoLoad(){
    if(!repId) return;
    if(!confirm('重新生成块 #'+idx+'（AI 记忆）的摘要？现有摘要会保留在历史版本里。')) return;
    const msg=document.getElementById('compaction-msg');
-   ccBlockGenerating.add(idx);
+   AppState.ccBlockGenerating.add(idx);
    renderCompaction();
    if(msg) msg.textContent='块 #'+idx+'：正在重新生成摘要（约几十秒）…';
    fetch(ADMIN_API + '/context-compaction/generate',{
      method:'POST',headers:{'Content-Type':'application/json'},
      body:JSON.stringify({action:'block', repId: repId})
    }).then(function(r){return r.json()}).then(function(d){
-     ccBlockGenerating.delete(idx);
+     AppState.ccBlockGenerating.delete(idx);
      if(d && d.error){ toast('生成失败：'+d.error); if(msg) msg.textContent='生成失败: '+d.error; return; }
      if(d && d.ok===false){ toast('生成失败：'+(d.message||'未知原因')); if(msg) msg.textContent=(d.message||'生成失败'); return; }
-     ccAiSummaryOpen.add(idx);
-     ccAnimateOpen.add('cc-collapse-ai-'+idx);
+     AppState.ccAiSummaryOpen.add(idx);
+     AppState.ccAnimateOpen.add('cc-collapse-ai-'+idx);
      if(msg) msg.textContent='块 #'+idx+' 摘要已重新生成（'+d.length+' 字）。';
      resetCcMsgCache();
    }).catch(function(e){ toast('生成失败：'+e.message); if(msg) msg.textContent='生成失败: '+e.message; }).finally(function(){ loadCompactionPreview(); });
@@ -3983,9 +4073,9 @@ function ccArmAllGapAutoLoad(){
 
 // AI 块：查看摘要
  function toggleCcAiSummary(idx){
-   const wasOpen=ccAiSummaryOpen.has(idx);
+   const wasOpen=AppState.ccAiSummaryOpen.has(idx);
    if(wasOpen){
-     ccAiSummaryOpen.delete(idx);
+     AppState.ccAiSummaryOpen.delete(idx);
      const w=document.getElementById('cc-collapse-ai-'+idx);
      if(w){
        w.classList.remove('open');
@@ -3993,8 +4083,8 @@ function ccArmAllGapAutoLoad(){
        return;
      }
    }else{
-     ccAiSummaryOpen.add(idx);
-     ccAnimateOpen.add('cc-collapse-ai-'+idx);
+     AppState.ccAiSummaryOpen.add(idx);
+     AppState.ccAnimateOpen.add('cc-collapse-ai-'+idx);
    }
    renderCompaction();
  }
@@ -4012,7 +4102,7 @@ function ccArmAllGapAutoLoad(){
  function openCcAiEditModal(idx){
    const c=ccFindChunk(idx);
    if(!c) return;
-   ccAiEditTarget={index:idx, repId:c.repId};
+   AppState.ccAiEditTarget={index:idx, repId:c.repId};
    const s=(typeof c.blockStart==='number'&&c.blockStart>=0)?c.blockStart+1:((c.firstIdx>=0?c.firstIdx:0)+1);
    const e=(typeof c.blockEnd==='number'&&c.blockEnd>=0)?c.blockEnd+1:((c.lastIdx>=0?c.lastIdx:s-1)+1);
    document.getElementById('cc-ai-edit-title').textContent='编辑 AI 记忆 · 块 #'+idx;
@@ -4023,16 +4113,16 @@ function ccArmAllGapAutoLoad(){
    if(ta) setTimeout(function(){ta.focus();},50);
  }
  async function ccSaveAiEdit(){
-   if(!ccAiEditTarget) return;
+   if(!AppState.ccAiEditTarget) return;
    const memory=document.getElementById('cc-ai-edit-content').value.trim();
    if(!memory){toast('记忆内容不能为空');return}
    try{
-     const r=await fetch(ADMIN_API+'/context-replacements/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:ccAiEditTarget.repId,memory:memory}),credentials:'include'});
+     const r=await fetch(ADMIN_API+'/context-replacements/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:AppState.ccAiEditTarget.repId,memory:memory}),credentials:'include'});
      const j=await r.json();
      if(!r.ok){toast(j.error||'保存失败');return}
      toast('AI 记忆已更新，下次请求生效。');
      closeModal('ccAiEditModal');
-     ccAiEditTarget=null;
+     AppState.ccAiEditTarget=null;
      resetCcMsgCache();
      loadCompactionPreview();
    }catch(e){toast('保存失败: '+e.message);}
@@ -4040,7 +4130,7 @@ function ccArmAllGapAutoLoad(){
  
  // 压缩参数配置：把预览里的 config 填进表单
  function renderCompactionConfig(){
-   const d=compactionPlan;
+   const d=AppState.compactionPlan;
    if(!d || !d.config) return;
    const c=d.config;
    const fields={
@@ -4149,7 +4239,7 @@ function ccArmAllGapAutoLoad(){
  
  function updateCompactionBoundary(i, field, raw){
    const v=Math.max(1, Math.floor(Number(raw)||1));
-   const d=compactionPlan;
+   const d=AppState.compactionPlan;
    if(!d) return;
    // 找到这个块对应的真实 blockIndex（非AI块顺序 == blocks数组顺序）
    const ccList=(d.chunks||[]).filter(function(c){return !c.aiRep;});
@@ -4206,7 +4296,7 @@ function ccArmAllGapAutoLoad(){
   }
 
   function updateAiBoundary(index, field, raw){
-    const d=compactionPlan;
+    const d=AppState.compactionPlan;
     if(!d) return;
     const chunk=(d.chunks||[]).find(function(x){ return x.index===index; });
     if(!chunk || !chunk.repId) return;
@@ -4248,7 +4338,7 @@ function ccArmAllGapAutoLoad(){
  function renderCcHistory(c){
    const h=c.history||[];
    if(!h.length) return '';
-   const open=ccHistoryOpen.has(c.index);
+   const open=AppState.ccHistoryOpen.has(c.index);
    let html='<div class="cc-history">'
      +'<div class="cc-history-toggle" onclick="toggleCcHistory('+c.index+')">'+(open?'▾ 收起历史':'▸ 历史版本（'+h.length+' 份，新→旧）')+'</div>';
    if(!open) return html+'</div>';
@@ -4277,7 +4367,7 @@ function ccArmAllGapAutoLoad(){
      body:JSON.stringify({chunkIndex:idx,historyIndex:hi})
    }).then(function(r){return r.json()}).then(function(d){
      if(d && d.error){ if(msg) msg.textContent='恢复失败: '+d.error; return; }
-     ccDraft[idx]=undefined;
+     AppState.ccDraft[idx]=undefined;
      const chunk=ccFindChunk(idx);
      if(chunk && chunk.history && chunk.history[hi]){
        const target=chunk.history[hi];
@@ -4297,7 +4387,7 @@ function ccArmAllGapAutoLoad(){
  }
  
  function toggleCcHistory(idx){
-   if(ccHistoryOpen.has(idx)) ccHistoryOpen.delete(idx); else ccHistoryOpen.add(idx);
+   if(AppState.ccHistoryOpen.has(idx)) AppState.ccHistoryOpen.delete(idx); else AppState.ccHistoryOpen.add(idx);
    renderCompaction();
  }
  
@@ -4327,9 +4417,9 @@ function ccArmAllGapAutoLoad(){
  }
  
  function toggleCcSummary(idx){
-   const wasOpen=ccSummaryOpen.has(idx);
+   const wasOpen=AppState.ccSummaryOpen.has(idx);
    if(wasOpen){
-     ccSummaryOpen.delete(idx);
+     AppState.ccSummaryOpen.delete(idx);
      const w=document.getElementById('cc-collapse-sum-'+idx);
      if(w){
        w.classList.remove('open');
@@ -4337,18 +4427,18 @@ function ccArmAllGapAutoLoad(){
        return;
      }
    }else{
-     ccSummaryOpen.add(idx);
-     ccAnimateOpen.add('cc-collapse-sum-'+idx);
+     AppState.ccSummaryOpen.add(idx);
+     AppState.ccAnimateOpen.add('cc-collapse-sum-'+idx);
    }
    renderCompaction();
  }
  
  function ccSummaryValue(c){
-   return (ccDraft[c.index]!==undefined)?ccDraft[c.index]:c.summary;
+   return (AppState.ccDraft[c.index]!==undefined)?AppState.ccDraft[c.index]:c.summary;
  }
  
  function ccFindChunk(idx){
-   return ((compactionPlan && compactionPlan.chunks)||[]).find(function(x){return x.index===idx;});
+   return ((AppState.compactionPlan && AppState.compactionPlan.chunks)||[]).find(function(x){return x.index===idx;});
  }
  
  function ccRenumberHistory(h){
@@ -4358,14 +4448,14 @@ function ccArmAllGapAutoLoad(){
  function renderCcSummaryEditor(c, blockIndex){
    const cur=ccSummaryValue(c)||'';
    return '<div class="cc-sum-ta-wrap">'
-     +'<textarea id="cc-edit-sel-'+c.index+'" rows="6" oninput="ccDraft['+c.index+']=this.value;updateCcCharCount('+c.index+')" class="cc-sum-ta">'+escHtml(cur)+'</textarea>'
+     +'<textarea id="cc-edit-sel-'+c.index+'" rows="6" oninput="AppState.ccDraft['+c.index+']=this.value;updateCcCharCount('+c.index+')" class="cc-sum-ta">'+escHtml(cur)+'</textarea>'
      +'<button class="cc-sum-zoom" onclick="openCcEditModal('+c.index+')" title="放大编辑">放大</button>'
      +'</div>'
      +'<div class="cc-sum-editor-btns">'
      +'<span class="cc-sum-count" id="cc-edit-count-'+c.index+'">'+cur.length+' 字</span>'
      +'<button class="cc-btn primary" onclick="saveCcSummaryEdit('+c.index+')">保存</button>'
      +'<button class="cc-btn secondary" onclick="revertCcSummaryDraft('+c.index+')">还原</button>'
-     +'<button class="cc-btn secondary" onclick="regenerateBlockSummary('+c.index+','+blockIndex+')"'+(ccBlockGenerating.has(c.index)?' disabled':'')+'>'+(ccBlockGenerating.has(c.index)?'生成中…':'重新生成')+'</button>'
+     +'<button class="cc-btn secondary" onclick="regenerateBlockSummary('+c.index+','+blockIndex+')"'+(AppState.ccBlockGenerating.has(c.index)?' disabled':'')+'>'+(AppState.ccBlockGenerating.has(c.index)?'生成中…':'重新生成')+'</button>'
      +'</div>';
  }
  
@@ -4391,8 +4481,8 @@ function ccArmAllGapAutoLoad(){
      body:JSON.stringify({chunkIndex:idx,summary:text})
    }).then(function(r){return r.json()}).then(function(d){
      if(d && d.error){ if(msg) msg.textContent='保存失败: '+d.error; return; }
-     ccDraft[idx]=undefined;
-     ccSummaryOpen.add(idx);
+     AppState.ccDraft[idx]=undefined;
+     AppState.ccSummaryOpen.add(idx);
      closeModal('ccEditModal');
      ccEditModalIdx=null;
      const chunk=ccFindChunk(idx);
@@ -4420,7 +4510,7 @@ function ccArmAllGapAutoLoad(){
    const inline=document.getElementById('cc-edit-sel-'+idx);
    const ta=document.getElementById('cc-edit-modal-sel');
    if(!ta) return;
-   ta.value=inline ? inline.value : (((compactionPlan.chunks||[]).find(function(x){return x.index===idx;})||{}).summary||'');
+   ta.value=inline ? inline.value : (((AppState.compactionPlan.chunks||[]).find(function(x){return x.index===idx;})||{}).summary||'');
    ccEditModalIdx=idx;
    openModal('ccEditModal');
    setTimeout(function(){ ta.focus(); }, 80);
@@ -4431,7 +4521,7 @@ function ccArmAllGapAutoLoad(){
    if(idx!==null){
      const inline=document.getElementById('cc-edit-sel-'+idx);
      const ta=document.getElementById('cc-edit-modal-sel');
-     if(inline && ta){ inline.value=ta.value; ccDraft[idx]=ta.value; }
+     if(inline && ta){ inline.value=ta.value; AppState.ccDraft[idx]=ta.value; }
    }
    ccEditModalIdx=null;
    closeModal('ccEditModal');
@@ -4444,70 +4534,70 @@ function ccArmAllGapAutoLoad(){
  }
  
  function revertCcSummaryDraft(idx){
-   ccDraft[idx]=undefined;
+   AppState.ccDraft[idx]=undefined;
    renderCompaction();
  }
  
  function stopCcPoll(){
-   if(ccPollTimer){ clearInterval(ccPollTimer); ccPollTimer=null; }
+   if(AppState.ccPollTimer){ clearInterval(AppState.ccPollTimer); AppState.ccPollTimer=null; }
  }
  
  function toggleCcExpand(cidx){
-   if(ccExpanded.has(cidx)) ccExpanded.delete(cidx); else ccExpanded.add(cidx);
+   if(AppState.ccExpanded.has(cidx)) AppState.ccExpanded.delete(cidx); else AppState.ccExpanded.add(cidx);
    renderCompaction();
  }
  
  function toggleCcExpandAll(){
-   const d=compactionPlan;
+   const d=AppState.compactionPlan;
    if(!d || !d.chunks || !d.chunks.length) return;
-   const allOpen=d.chunks.every(function(c){return ccExpanded.has(c.index);});
-   d.chunks.forEach(function(c){ if(allOpen) ccExpanded.delete(c.index); else ccExpanded.add(c.index); });
+   const allOpen=d.chunks.every(function(c){return AppState.ccExpanded.has(c.index);});
+   d.chunks.forEach(function(c){ if(allOpen) AppState.ccExpanded.delete(c.index); else AppState.ccExpanded.add(c.index); });
    if(!allOpen) ensureCcMessages();
    renderCompaction();
  }
  
  function renderCcMessagesLazy(c){
    const sig=c.signature;
-   if(c.msgs) ccMsgBySig[sig]=c.msgs;
-   if(ccMsgsHtmlCache[sig]) return ccMsgsHtmlCache[sig];
-   const msgs=ccMsgBySig[sig];
+   if(c.msgs) AppState.ccMsgBySig[sig]=c.msgs;
+   if(AppState.ccMsgsHtmlCache[sig]) return AppState.ccMsgsHtmlCache[sig];
+   const msgs=AppState.ccMsgBySig[sig];
    if(!msgs){
      ensureCcMessages();
      return '<div style="margin-top:8px;font-size:12px;color:var(--text3)">消息加载中...</div>';
    }
-   ccMsgsHtmlCache[sig]=buildCcMessagesHtml(c, msgs, false); // AI 块/手工块都显示标星
-   return ccMsgsHtmlCache[sig];
+   AppState.ccMsgsHtmlCache[sig]=buildCcMessagesHtml(c, msgs, false); // AI 块/手工块都显示标星
+   return AppState.ccMsgsHtmlCache[sig];
  }
  
  function ensureCcMessages(){
-   if(ccMsgFetchDone || ccMsgFetching) return;
-   ccMsgFetching=true;
+   if(AppState.ccMsgFetchDone || AppState.ccMsgFetching) return;
+   AppState.ccMsgFetching=true;
    fetch(ADMIN_API + '/context-compaction/preview?includeMessages=1&excludeGapMsgs=1').then(function(r){return r.json()}).then(function(d){
-     ccMsgFetching=false;
-     ccMsgFetchDone=true;
-     (d.chunks||[]).forEach(function(c){ if(c.msgs) ccMsgBySig[c.signature]=c.msgs; });
+     AppState.ccMsgFetching=false;
+     AppState.ccMsgFetchDone=true;
+     (d.chunks||[]).forEach(function(c){ if(c.msgs) AppState.ccMsgBySig[c.signature]=c.msgs; });
      (d.uncovered&&d.uncovered.gaps||[]).forEach(function(g){
        const k=(g.startIdx||0)+'-'+(g.endIdx||0);
-       if(g.msgs) ccGapMsgByKey[k]=g.msgs;
+       if(g.msgs) AppState.ccGapMsgByKey[k]=g.msgs;
        const ms=g.msgs||[];
-       ccGapTimeByKey[k]={startTime:g.startTime||(ms.length?ms[0].time:''), endTime:g.endTime||(ms.length?ms[ms.length-1].time:'')};
+       AppState.ccGapTimeByKey[k]={startTime:g.startTime||(ms.length?ms[0].time:''), endTime:g.endTime||(ms.length?ms[ms.length-1].time:'')};
      });
      renderCompaction();
    }).catch(function(){
-     ccMsgFetching=false;
+     AppState.ccMsgFetching=false;
    });
  }
  
  function resetCcMsgCache(){
-   ccMsgBySig={};
-   ccGapMsgByKey={};
-   ccGapTimeByKey={};
-   ccGapPageOffset={};
-   ccGapHasMore={};
-   ccGapLoadingKey=null;
-   ccMsgsHtmlCache={};
-   ccMsgFetching=false;
-   ccMsgFetchDone=false;
+   AppState.ccMsgBySig={};
+   AppState.ccGapMsgByKey={};
+   AppState.ccGapTimeByKey={};
+   AppState.ccGapPageOffset={};
+   AppState.ccGapHasMore={};
+   AppState.ccGapLoadingKey=null;
+   AppState.ccMsgsHtmlCache={};
+   AppState.ccMsgFetching=false;
+   AppState.ccMsgFetchDone=false;
  }
  
  function buildCcMessagesHtml(c, msgs, noMark){
@@ -4534,11 +4624,16 @@ function ccArmAllGapAutoLoad(){
    html+='</div>';
    return html;
  }
+/**
+ * 压缩预览内标星/取消标星：调用 mark 接口成功后更新内存态并整块重绘。
+ * @param {number} cidx 块 index
+ * @param {number} i 消息在块内序号
+ */
  
  function toggleCcMark(cidx, i){
-   const c=(compactionPlan.chunks||[]).find(function(x){return x.index===cidx;});
+   const c=(AppState.compactionPlan.chunks||[]).find(function(x){return x.index===cidx;});
    if(!c) return;
-   const msgs=c.msgs||ccMsgBySig[c.signature];
+   const msgs=c.msgs||AppState.ccMsgBySig[c.signature];
    if(!msgs || !msgs[i]) return;
    const m=msgs[i];
    const next=!m.marked;
@@ -4548,18 +4643,17 @@ function ccArmAllGapAutoLoad(){
    }).then(function(r){return r.json()}).then(function(d){
      if(d && d.error){ alert('标记失败: '+d.error); return; }
      m.marked=next;
-     if(ccMsgsHtmlCache[c.signature]) delete ccMsgsHtmlCache[c.signature];
+     if(AppState.ccMsgsHtmlCache[c.signature]) delete AppState.ccMsgsHtmlCache[c.signature];
      renderCompaction();
    }).catch(function(e){ alert('标记失败: '+e.message); });
  }
  
  // 压缩块左滑显示「移除」
- let ccSwipeState=null;
  // 判断块是否处于任意展开状态（块本体 / 原文 / 摘要，只要有任一展开即禁止左滑）
  function isCcChunkExpanded(w){
    if(!w) return true;
    const cid=Number((w.getAttribute('data-cid')||'').trim());
-   if(!isNaN(cid) && ccExpanded.has(cid)) return true;
+   if(!isNaN(cid) && AppState.ccExpanded.has(cid)) return true;
    if(w.querySelector('.cc-collapse.open')) return true;
    if(w.querySelector('.cc-msg-list')) return true;
    return false;
@@ -4571,20 +4665,20 @@ function ccArmAllGapAutoLoad(){
    if(isCcChunkExpanded(w)){ w.classList.remove('swiped'); return; }
    document.querySelectorAll('.cc-chunk-swipe.swiped').forEach(function(x){ if(x!==w) x.classList.remove('swiped'); });
    const t=e.touches[0];
-   ccSwipeState={x:t.clientX,y:t.clientY,w:w,dx:0};
+   AppState.ccSwipeState={x:t.clientX,y:t.clientY,w:w,dx:0};
  },{passive:true});
  document.addEventListener('touchmove',function(e){
-   if(!ccSwipeState) return;
+   if(!AppState.ccSwipeState) return;
    const t=e.touches[0];
-   ccSwipeState.dx=t.clientX-ccSwipeState.x;
-   const dy=t.clientY-ccSwipeState.y;
+   AppState.ccSwipeState.dx=t.clientX-AppState.ccSwipeState.x;
+   const dy=t.clientY-AppState.ccSwipeState.y;
    // 已展开的块不再响应左滑（防误触），也不拦截纵向滚动
-   if(ccSwipeState.w.classList.contains('swiped') && ccSwipeState.dx<0) return;
-   if(Math.abs(ccSwipeState.dx)>Math.abs(dy)&&Math.abs(ccSwipeState.dx)>10) e.preventDefault();
+   if(AppState.ccSwipeState.w.classList.contains('swiped') && AppState.ccSwipeState.dx<0) return;
+   if(Math.abs(AppState.ccSwipeState.dx)>Math.abs(dy)&&Math.abs(AppState.ccSwipeState.dx)>10) e.preventDefault();
  },{passive:false});
  document.addEventListener('touchend',function(){
-   if(!ccSwipeState) return;
-   const s=ccSwipeState; ccSwipeState=null;
+   if(!AppState.ccSwipeState) return;
+   const s=AppState.ccSwipeState; AppState.ccSwipeState=null;
    const alreadySwiped=s.w.classList.contains('swiped');
    if(alreadySwiped){
      // 已展开：只响应右滑收回，左滑不响应（防误触）
@@ -4619,7 +4713,7 @@ function ccArmAllGapAutoLoad(){
    document.getElementById('tab-'+name).classList.add('active');
    document.querySelector('.tab-item[data-tab="'+name+'"]').classList.add('active');
   if(name==='memory'){switchMemView(memView);loadImportedList();}
-  if(name==='compaction'){ if(!compactionPlan || !ccPreviewLoadedAt || Date.now()-ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(compactionPlan) renderCompactionConfig(); }
+  if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
   if(name==='prompts'){loadWakePrompt();loadCompactionPrompt();loadCoWakePrompt();loadCoVisionPrompt();loadReparsePrompt();}
   if(name==='config'){loadToolsConfig();loadServices();}
   if(name==='system'){startLogsAutoRefresh(); loadReplaceLog();}
@@ -5213,7 +5307,7 @@ async function deletePinned(id){
  }
  
  async function openEditPinned(id){
-   editingPinnedId = id;
+   AppState.editingPinnedId = id;
    try{
      const r=await fetch(ADMIN_API + '/logs/pinned');
      const j=await r.json();
@@ -5226,12 +5320,12 @@ async function deletePinned(id){
  }
  
  async function saveEditPinned(){
-   if(!editingPinnedId){toast('未找到');return}
+   if(!AppState.editingPinnedId){toast('未找到');return}
    const title=document.getElementById('edit-pinned-title').value.trim();
    const content=document.getElementById('edit-pinned-content').value.trim();
    if(!content){toast('内容不能为空');return}
    try{
-     const r=await fetch(ADMIN_API + '/logs/pinned/'+editingPinnedId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,content})});
+     const r=await fetch(ADMIN_API + '/logs/pinned/'+AppState.editingPinnedId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,content})});
      const j=await r.json();
      if(j.success){toast('已更新');closeModal('editPinnedModal');loadPinned();}
      else toast('更新失败: '+(j.error||''));
@@ -5349,8 +5443,6 @@ async function deletePinned(id){
   else if(v==='mempool')initMemPoolView();
  }
    // ============ 记忆池（4 类结构化记忆） ============
-  let memPoolEditId=null;
-  let memPoolSearchTimer=null;
   const MP_CAT_COLORS={关于她:'#2980b9',关于我们:'#8e44ad',锚点:'#c0392b',信号:'#f39c12',对话摘要:'#7f8c8d'};
   function mpCatColor(c){ return MP_CAT_COLORS[c]||'#7f8c8d'; }
 
@@ -5367,9 +5459,13 @@ async function deletePinned(id){
     if(ed){ ed.innerHTML=cats.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join(''); }
   }
   function mempoolSearchInput(v){
-    clearTimeout(memPoolSearchTimer);
-    memPoolSearchTimer=setTimeout(loadMemPool,300);
+    clearTimeout(AppState.memPoolSearchTimer);
+    AppState.memPoolSearchTimer=setTimeout(loadMemPool,300);
   }
+/**
+ * 加载记忆池列表：按搜索词/分类/排序请求接口；保留旧列表避免高度跳动，
+ * 渲染后恢复页面滚动位置。
+ */
   async function loadMemPool(){
     const el=document.getElementById('mempool-list');
     if(!el)return;
@@ -5389,6 +5485,11 @@ async function deletePinned(id){
       if(window.scrollTo){ requestAnimationFrame(function(){ window.scrollTo(0,savedY); }); }
     }catch(e){ el.innerHTML='<div class="empty">加载失败: '+e.message+'</div>'; }
   }
+/**
+ * 渲染记忆池列表与统计；结果缓存到 window.__memPoolData/__memPoolItems，
+ * 供筛选/沉底/置顶等操作复用，避免重复请求。
+ * @param {Object} d 记忆池接口返回数据
+ */
   function renderMemPool(d){
     const stats=d.stats||{}, allItems=d.items||[];
     window.__memPoolData=d;
@@ -5446,7 +5547,7 @@ async function deletePinned(id){
     if(window.__memPoolData){ renderMemPool(window.__memPoolData); } else { loadMemPool(); }
   }
   function openMemPoolAdd(){
-    memPoolEditId=null;
+    AppState.memPoolEditId=null;
     populateMemPoolCatOptions();
     const ed=document.getElementById('mempool-edit-cat');
     if(ed)ed.value='关于她';
@@ -5461,7 +5562,7 @@ async function deletePinned(id){
     const items=window.__memPoolItems||[];
     const it=items.find(function(x){return x.id===id;});
     if(!it){ toast('未找到该记忆'); return; }
-    memPoolEditId=id;
+    AppState.memPoolEditId=id;
     populateMemPoolCatOptions();
     const ed=document.getElementById('mempool-edit-cat');
     if(ed)ed.value=it.category||'关于她';
@@ -5477,13 +5578,13 @@ async function deletePinned(id){
     const category=document.getElementById('mempool-edit-cat').value;
     const importance=parseFloat(document.getElementById('mempool-edit-imp').value);
     if(!content){ toast('记忆内容不能为空'); return; }
-    const url=memPoolEditId ? (ADMIN_API + '/memory-pool/'+memPoolEditId) : (ADMIN_API + '/memory-pool');
+    const url=AppState.memPoolEditId ? (ADMIN_API + '/memory-pool/'+AppState.memPoolEditId) : (ADMIN_API + '/memory-pool');
     try{
-      const r=await apiRequest(memPoolEditId?'PUT':'POST', url, {content:content, category:category, importance:Number.isFinite(importance)?importance:0.6}, {busy:document.getElementById('mp-save-btn')});
+      const r=await apiRequest(AppState.memPoolEditId?'PUT':'POST', url, {content:content, category:category, importance:Number.isFinite(importance)?importance:0.6}, {busy:document.getElementById('mp-save-btn')});
       if(!r.ok) return;
       const d=r.data||{};
       if(d.error){ toast('保存失败: '+d.error); return; }
-      toast(memPoolEditId?'记忆已更新':'记忆已新增');
+      toast(AppState.memPoolEditId?'记忆已更新':'记忆已新增');
       closeModal('mempoolEditModal');
       loadMemPool();
     }catch(e){ toast('网络错误: '+e.message); }
