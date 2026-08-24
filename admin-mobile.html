@@ -125,6 +125,9 @@
  .cloud-res-imp{font-size:10px;color:var(--accent);background:rgba(200,144,152,0.12);padding:2px 8px;border-radius:999px;font-weight:600}
  .cloud-res-time{font-size:10px;color:var(--text3)}
  .cloud-res-content{font-size:13px;color:var(--text);line-height:1.7;word-break:break-all;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+  .cloud-res-content.expanded{display:block;-webkit-line-clamp:unset;-webkit-box-orient:unset;max-height:55vh;overflow-y:auto}
+  .cc-res-toggle{margin-top:6px;border:none;background:rgba(200,144,152,.1);color:#b57f88;font-size:11px;padding:3px 10px;border-radius:999px;cursor:pointer;font-family:inherit}
+  .cc-res-toggle:hover{background:rgba(200,144,152,.18)}
  #pool-results{max-height:72vh;overflow-y:auto;padding:2px 2px 8px;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
  #pool-results::-webkit-scrollbar{width:6px}
  #pool-results::-webkit-scrollbar-thumb{background:rgba(200,144,152,.35);border-radius:3px}
@@ -862,7 +865,6 @@
  </head>
  <body>
  <div class="header" style="display:none"><h1>管理台</h1><p id="headerSub" aria-live="polite">HEARTBEAT · Runtime</p></div>
-<div style="position:fixed;right:8px;bottom:66px;font-size:10px;color:var(--text3);background:rgba(255,255,255,0.85);border:1px solid var(--border);border-radius:8px;padding:2px 8px;z-index:999;pointer-events:none">管理台 v20260825-0320</div>
  
  <!-- Tab 1: 心跳管理 -->
 
@@ -5914,10 +5916,18 @@ async function deletePinned(id){
            '<button class="cc-msg-mark'+(m.marked?' on':'')+'" onclick="togglePoolStar('+i+')" title="'+(m.marked?'取消标星：该消息可被压缩覆盖':'标星：跨窗口注入保留原文，压缩不被覆盖')+'" aria-pressed="'+(m.marked?'true':'false')+'">'+(m.marked?'★':'☆')+'</button>'+
            '</span>'+
            '</div>'+
-           '<div style="font-size:13px;color:var(--text);line-height:1.7;word-break:break-all;white-space:pre-wrap">'+escapeHtml(m.preview)+'</div>'+
+           '<div class="cloud-res-content" id="pool-body-'+i+'">'+escapeHtml(m.preview)+'</div>'+
+           (m.preview.length>180?'<button type="button" class="cc-res-toggle" id="pool-toggle-'+i+'" onclick="togglePoolFull('+i+')">展开全文</button>':'')+
            '</div>';
        }).join('');
    }catch(e){el.innerHTML='<div class="empty">搜索失败: '+e.message+'</div>'}
+ }
+ function togglePoolFull(i){
+   const el=document.getElementById('pool-body-'+i);
+   if(!el) return;
+   const btn=document.getElementById('pool-toggle-'+i);
+   const expanded=el.classList.toggle('expanded');
+   if(btn) btn.textContent=expanded?'收起':'展开全文';
  }
  async function togglePoolStar(i){
    const m=(window.__poolMatches||[])[i];
