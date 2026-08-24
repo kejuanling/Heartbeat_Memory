@@ -2514,12 +2514,20 @@ function buildPushEcho(meta) {
   const tail = meta.tail || "";
   return "（" + (meta.at || "") + " 刚刚给" + user + "发了" + channel + "推送：" + (meta.title || "") + "｜" + (meta.body || "") + "）" + tail;
 }
+// 推送回显缺时间时的兜底：用消息自身的生成时间换算本地时间（UTC+8），避免管理台显示空白
+function fmtLocalAt(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const p = n => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+}
 function pushEchoMeta(msg) {
   if (msg.push_title || msg.push_body) {
     return {
       position: msg.position,
       content: msg.content,
-      at: msg.push_at || "",
+      at: msg.push_at || fmtLocalAt(msg.time) || "",
       user: msg.push_user || (process.env.USER_DISPLAY_NAME || "用户"),
       channel: msg.push_channel || "Bark",
       title: msg.push_title || "",
@@ -2530,7 +2538,7 @@ function pushEchoMeta(msg) {
   }
   const parsed = parsePushEcho(msg.content);
   if (!parsed) return null;
-  return { position: msg.position, content: msg.content, structured: false, at: parsed.at, user: parsed.user, channel: parsed.channel, title: parsed.title, body: parsed.body, tail: parsed.tail };
+  return { position: msg.position, content: msg.content, structured: false, at: parsed.at || fmtLocalAt(msg.time) || "", user: parsed.user, channel: parsed.channel, title: parsed.title, body: parsed.body, tail: parsed.tail };
 }
 function toEpoch(at) {
   const m = String(at || "").match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
