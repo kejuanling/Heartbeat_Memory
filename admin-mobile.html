@@ -4759,14 +4759,14 @@ function ccArmAllGapAutoLoad(){
       html+='<div class="card push-item" data-push-pos="'+it.position+'" style="margin-bottom:10px;padding:12px 14px">'
         +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
         +'<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text2);font-weight:600"><i style="width:8px;height:8px;border-radius:50%;background:'+dotBg+';display:inline-block;flex-shrink:0"></i>'+escapeHtml(it.channel||'bark')+'</span>'
-        +'<span style="font-size:11px;color:var(--text3)">'+escapeHtml(t)+'</span>'
+        +'<span style="font-size:11px;color:var(--text3);flex:1;min-width:0">'+escapeHtml(t)+'</span>'
+        +'<span style="display:flex;gap:6px;flex-wrap:nowrap;flex-shrink:0">'
+        +(isWake?'':'<button class="btn btn-outline" style="width:auto;flex:0 0 auto;padding:2px 8px;font-size:11px;min-height:0" onclick="openPushEdit(\''+it.position+'\')">编辑</button>')
+        +'<button class="btn btn-outline push-del-btn" type="button" style="width:auto;flex:0 0 auto;padding:2px 8px;font-size:11px;min-height:0;color:#c0392b;border-color:#c0392b" onclick="deletePushEvent(\''+it.position+'\')">删除</button>'
+        +'</span>'
         +'</div>'
         +'<div class="push-item-title" style="margin:8px 0 0;font-size:13px;color:var(--text2)"><b>'+escapeHtml(it.title||'')+'</b></div>'
-        +'<div class="push-item-body" style="margin:0 0 8px;font-size:12px;color:var(--text2);white-space:pre-wrap;word-break:break-all">'+escapeHtml(it.body||'')+'</div>'
-        +'<div style="display:flex;gap:8px;flex-wrap:nowrap">'
-        +(isWake?'':'<button class="btn btn-outline" style="flex:1;min-width:0;width:auto;padding:6px 10px" onclick="openPushEdit(\''+it.position+'\')">编辑</button>')
-        +'<button class="btn btn-outline push-del-btn" type="button" style="flex:1;min-width:0;width:auto;padding:6px 10px;color:#c0392b;border-color:#c0392b" onclick="deletePushEvent(\''+it.position+'\')">删除</button>'
-        +'</div>'
+        +'<div class="push-item-body" style="margin:0 0 4px;font-size:12px;color:var(--text2);white-space:pre-wrap;word-break:break-all">'+escapeHtml(it.body||'')+'</div>'
         +'</div>';
     });
     el.innerHTML=html;
