@@ -4758,15 +4758,17 @@ function ccArmAllGapAutoLoad(){
     items.forEach(function(it){
       let t='';
       try{ if(it.at) t=new Date(String(it.at).replace(' ','T')+':00+08:00').toLocaleString('zh-CN',{hour12:false}); }catch(e){}
+      const isWake=it.sent===false;
+      const chanBg=isWake?'#e67e22':'#34495e';
       html+='<div class="card push-item" data-push-pos="'+it.position+'" style="margin-bottom:10px;padding:12px 14px">'
         +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-        +'<span class="mem-tag" style="background:#34495e;color:#fff">'+escapeHtml(it.channel||'bark')+'</span>'
+        +'<span class="mem-tag" style="background:'+chanBg+';color:#fff">'+escapeHtml(it.channel||'bark')+'</span>'
         +'<span style="font-size:11px;color:var(--text3)">'+escapeHtml(t)+'</span>'
         +'</div>'
         +'<div class="push-item-title" style="margin:8px 0 0;font-size:13px;color:var(--text2)"><b>'+escapeHtml(it.title||'')+'</b></div>'
         +'<div class="push-item-body" style="margin:0 0 8px;font-size:12px;color:var(--text2);white-space:pre-wrap;word-break:break-all">'+escapeHtml(it.body||'')+'</div>'
         +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
-        +'<button class="btn btn-outline" onclick="openPushEdit(\''+it.position+'\')">编辑</button>'
+        +(isWake?'':'<button class="btn btn-outline" onclick="openPushEdit(\''+it.position+'\')">编辑</button>')
         +'<button class="btn btn-outline push-del-btn" type="button" style="color:#c0392b;border-color:#c0392b" onclick="deletePushEvent(\''+it.position+'\')">删除</button>'
         +'</div>'
         +'</div>';

@@ -2508,6 +2508,20 @@ function parsePushEcho(content) {
   else { body = rest.trim(); }
   return { at: at, user: user, channel: channel, title: title, body: body, tail: tail };
 }
+// 解析「自动唤醒：本次未发送推送」回显（未真正发送，仅记录唤醒决策；管理台收录展示，可删除）
+function parseWakeEcho(content) {
+  const c = String(content || "").trim();
+  const m = c.match(/^（([^（]*?)自动唤醒：本次未发送推送(.*)$/);
+  if (!m) return null;
+  const at = (m[1] || "").trim();
+  let rest = m[2] || "";
+  let tail = "";
+  const closeIdx = rest.lastIndexOf("）");
+  if (closeIdx >= 0) { tail = rest.slice(closeIdx + 1); rest = rest.slice(0, closeIdx); }
+  let body = rest.replace(/^｜/, "").trim();
+  if (body.indexOf("原因：") === 0) body = body.slice(3).trim();
+  return { at: at, channel: "未发送", title: "自动唤醒", body: body, tail: tail };
+}
 function buildPushEcho(meta) {
   const user = meta.user || (process.env.USER_DISPLAY_NAME || "用户");
   const channel = meta.channel || "Bark";
@@ -2533,12 +2547,14 @@ function pushEchoMeta(msg) {
       title: msg.push_title || "",
       body: msg.push_body || "",
       tail: msg.push_tail || "",
-      structured: true
+      structured: true,
+      sent: true
     };
   }
-  const parsed = parsePushEcho(msg.content);
+  const parsed = parsePushEcho(msg.content) || parseWakeEcho(msg.content);
   if (!parsed) return null;
-  return { position: msg.position, content: msg.content, structured: false, at: parsed.at || fmtLocalAt(msg.time) || "", user: parsed.user, channel: parsed.channel, title: parsed.title, body: parsed.body, tail: parsed.tail };
+  const wake = parsed.channel === "未发送";
+  return { position: msg.position, content: msg.content, structured: false, sent: !wake, at: parsed.at || fmtLocalAt(msg.time) || "", user: parsed.user || (process.env.USER_DISPLAY_NAME || "用户"), channel: parsed.channel || "Bark", title: parsed.title || "", body: parsed.body || "", tail: parsed.tail || "" };
 }
 function toEpoch(at) {
   const m = String(at || "").match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
