@@ -1004,22 +1004,30 @@ function recentDiaryText(days) {
 function starredContextText(limit) {
   let marks = {};
   try { marks = contextCompactor.loadMarks ? contextCompactor.loadMarks() : {}; } catch (e) { marks = {}; }
-  const keySet = new Set(Object.keys(marks || {}));
-  if (!keySet.size) return "";
-  // 标星原文读自 context_replacements 的 items（含 matched 里的原始消息），
-  // 而非时间线 enhanced_messages.json —— 时间线经压缩后大量历史消息已不在其中，
-  // 导致标星 key 找不到原文，跨窗口注入落空。
-  let items = [];
-  try { items = (contextReplacements.loadItems ? contextReplacements.loadItems() : []) || []; } catch (e) { items = []; }
+  const keys = Object.keys(marks || {});
+  if (!keys.length) return "";
   const out = [];
   const seenKeys = new Set();
+  // 第一遍：优先用标星时存的原文 marks[key].content —— 与已标星列表 listMarked 口径一致。
+  // 时间线/替换池查不到的历史标星也能注入，避免“近期新标不在标星内容段”。
+  keys.forEach(function (key) {
+    const entry = marks[key];
+    if (!entry || typeof entry.content !== "string" || !entry.content) return;
+    if (seenKeys.has(key)) return;
+    seenKeys.add(key);
+    const role = (entry.role === "user") ? "她" : "我";
+    out.push(role + "：" + entry.content);
+  });
+  // 第二遍：兜底扫替换记录 matched，补早期没存原文的存量标星（按 key 去重）
+  let items = [];
+  try { items = (contextReplacements.loadItems ? contextReplacements.loadItems() : []) || []; } catch (e) { items = []; }
   for (const it of items) {
     const matched = Array.isArray(it.matched) ? it.matched : [];
     for (const m of matched) {
       if (!m || m.role === "system") continue;
       let k = null;
       try { k = contextReplacements.contentKey ? contextReplacements.contentKey(m) : contextCompactor.contentKey(m); } catch (e) {}
-      if (k && keySet.has(k) && !seenKeys.has(k)) {
+      if (k && marks[k] && !seenKeys.has(k)) {
         seenKeys.add(k);
         const role = m.role === "user" ? "她" : "我";
         const c = typeof m.content === "string" ? m.content : "";
@@ -1085,27 +1093,6 @@ function buildCrossWindowInjection() {
     if (st) parts.push("## 标星内容\n" + st);
   }
   return parts.join("\n\n");
-}
-
-// 跨窗口·近期推送：读取时间线里的推送回显（push_title/push_body），默认注入最近 N 条
-function recentPushText(limit) {
-  let rows = [];
-  try { rows = require("fs-extra").readJsonSync(path.join(__dirname, "enhanced_messages.json")); } catch (e) { rows = []; }
-  if (!Array.isArray(rows)) rows = [];
-  const list = rows.filter(function (r) {
-    return r && !r.deleted && (r.push_title || r.push_body) && r.push_inject !== false;
-  }).sort(function (a, b) {
-    const ta = new Date(a.time || 0).getTime();
-    const tb = new Date(b.time || 0).getTime();
-    if (isFinite(ta) && isFinite(tb) && ta !== tb) return tb - ta; // 最新在前
-    return (Number(b.position) || 0) - (Number(a.position) || 0);
-  });
-  const top = list.slice(0, (Number(limit) || 5));
-  return top.map(function (r) {
-    const title = (r.push_title || "").trim();
-    const body = (r.push_body || "").trim();
-    return "- " + (title ? title + "：" : "") + body;
-  }).join("\n");
 }
 
 
@@ -1339,7 +1326,12 @@ app.post("/v1/chat/completions", async (req, reply) => {
     try {
       const pinnedCtx = isMainChat && memoryEngine.buildPinnedContext ? memoryEngine.buildPinnedContext() : '';
       let crossCtx = "";
-      if (isMainChat) { try { crossCtx = buildCrossWindowInjection(); } catch (cx) { console.warn("[cross-inject] 失败:", cx.message); } }
+      if (isMainChat) {
+        try {
+          const ctxMsgCount = (Array.isArray(kelivoMessages) ? kelivoMessages : []).filter(function (m) { return m && m.role !== "system" && !(m.role === "assistant" && isSpecialEvent(m)) && !m.tool_calls && !m.tool_call_id; }).length;
+          if (ctxMsgCount < 2) { crossCtx = buildCrossWindowInjection(); }
+        } catch (cx) { console.warn("[cross-inject] 失败:", cx.message); }
+      }
       let sysExtra = "";
       if (pinnedCtx) sysExtra += '\n\n## 永久上下文\n' + pinnedCtx;
       if (crossCtx) sysExtra += '\n\n' + crossCtx;
@@ -2928,21 +2920,25 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
   function keyOf(m) {
     return String(m.role || "") + "\u0000" + String(m.content || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   }
-  // 精确匹配：块的“非特殊消息”归一化序列必须原样连续出现在当前窗口，
-  // 不允许中间内容改动（完全一致才显示；跨窗口残留或中间被改动的块不再误显为幽灵块）。
-  function exactMatchStart(recKeys) {
-    if (!recKeys.length) return -1;
-    const len = recKeys.length;
-    if (items.length < len) return -1;
-    outer:
-    for (let i = 0; i <= items.length - len; i++) {
-      for (let j = 0; j < len; j++) {
-        if (keyOf(items[i + j].msg) !== recKeys[j]) continue outer;
-      }
-      return i;
-    }
-    return -1;
+  // 与发送侧 applyReplacements 同口径的归一化键：去 memory/pin/current_time 块 + 压缩空白，
+  // 用于锚点定位。预览按首尾锚点匹配，和实际发送的替换范围一致，避免“发送生效但预览未覆盖”。
+  function nKeyOf(m) {
+    const c = typeof (m && m.content) === "string" ? m.content : JSON.stringify((m && m.content) || "");
+    const stripped = c
+      .replace(/<memory>[\s\S]*?<\/memory>/gi, "")
+      .replace(/<pin>[\s\S]*?<\/pin>/gi, "")
+      .replace(/<current_time>[\s\S]*?<\/current_time>/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    return String((m && m.role) || "") + "\u0000" + stripped;
   }
+  // 压缩索引位置表：非特殊事件消息按归一化键定位（与发送侧 tlKeyToPos 同口径）
+  const itemPosByKey = new Map();
+  items.forEach(function (e, idx) {
+    if (contextReplacements.isSpecialEvent(e.msg)) return;
+    const k = nKeyOf(e.msg);
+    if (!itemPosByKey.has(k)) itemPosByKey.set(k, idx);
+  });
 
   const chunks = [];
   let totalChars = 0;
@@ -2951,14 +2947,37 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
   records.forEach(function (it) {
     const matched = (Array.isArray(it.matched) && it.matched.length > 0) ? it.matched : [];
     if (matched.length === 0) return;
-    const recKeys = matched
-      .filter(function (m) { return m && m.role !== "system" && contextCompactor.isCompressible(m, true); })
-      .map(function (m) { return keyOf(m); });
-    const compStart = exactMatchStart(recKeys);
+    // 锚点定位（与发送侧一致）：取首/末条非特殊压缩消息在时间线中的实际位置作为块边界。
+    // 命中则显示为“已覆盖”，未命中则视为“未覆盖”（此时发送侧同样不会替换）。
+    let aStart = null;
+    for (let i = 0; i < matched.length; i++) {
+      const m = matched[i];
+      if (m && m.role !== "system" && !contextReplacements.isSpecialEvent(m)) { aStart = m; break; }
+    }
+    let aEnd = null;
+    for (let i = matched.length - 1; i >= 0; i--) {
+      const m = matched[i];
+      if (m && m.role !== "system" && !contextReplacements.isSpecialEvent(m)) { aEnd = m; break; }
+    }
+    if (!aStart || !aEnd) return;
+    let compStart = -1;
+    for (let i = 0; i < matched.length; i++) {
+      const m = matched[i];
+      if (!m || m.role === "system" || contextReplacements.isSpecialEvent(m)) continue;
+      const k = itemPosByKey.get(nKeyOf(m));
+      if (k !== undefined) { compStart = k; break; }
+    }
     if (compStart < 0) return;
-    const compEnd = compStart + recKeys.length - 1;
-    const headK = recKeys[0];
-    const tailK = recKeys[recKeys.length - 1];
+    let compEnd = -1;
+    for (let i = matched.length - 1; i >= 0; i--) {
+      const m = matched[i];
+      if (!m || m.role === "system" || contextReplacements.isSpecialEvent(m)) continue;
+      const k = itemPosByKey.get(nKeyOf(m));
+      if (k !== undefined) { compEnd = k; break; }
+    }
+    if (compEnd < compStart) return;
+    const headK = keyOf(aStart);
+    const tailK = keyOf(aEnd);
     let nsHi = -1, nsTi = -1;
     for (let i = 0; i < nonSys.length; i++) if (keyOf(nonSys[i]) === headK) { nsHi = i; break; }
     for (let i = (nsHi >= 0 ? nsHi : 0); i < nonSys.length; i++) if (keyOf(nonSys[i]) === tailK) { nsTi = i; break; }
@@ -2975,7 +2994,7 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
       blockEnd: compEnd,
       firstIdx: nsHi,
       lastIdx: nsTi,
-      count: recKeys.length,
+      count: compEnd - compStart + 1,
       chars: text.length,
       startTime: tl[0] || "",
       endTime: tl[1] || "",
