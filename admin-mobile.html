@@ -1241,10 +1241,9 @@
      </div>
    </div>
    <div class="card" data-collapse-id="cc-marked" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>已标星消息</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>已标星消息</span><span class="card-title-actions"><button type="button" class="icon-btn" onclick="event.stopPropagation();loadMarkedList()" title="刷新已标星" aria-label="刷新已标星"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button><span class="collapse-arrow">▾</span></span></div>
      <div class="card-body">
        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-         <button type="button" class="cc-btn secondary" onclick="loadMarkedList()">刷新</button>
          <span id="cc-marked-info" style="font-size:11px;color:var(--text3)" aria-live="polite"></span>
        </div>
        <div id="cc-marked-list" style="max-height:400px;overflow-y:auto;padding-right:4px"></div>
@@ -1253,10 +1252,9 @@
    </div>
 
    <div class="card" data-collapse-id="cc-replacelog" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>每次请求的替换/压缩记录</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>每次请求的替换/压缩记录</span><span class="card-title-actions"><button type="button" class="icon-btn" onclick="event.stopPropagation();loadReplaceLog()" title="刷新替换记录" aria-label="刷新替换记录"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button><span class="collapse-arrow">▾</span></span></div>
      <div class="card-body">
        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-         <button type="button" class="cc-btn secondary" onclick="loadReplaceLog()">刷新</button>
          <span id="cc-replacelog-info" style="font-size:11px;color:var(--text3)"></span>
        </div>
        <div id="cc-replacelog-list" style="max-height:220px;overflow-y:auto;padding-right:4px"><div class="loading">加载中...</div></div>
@@ -1278,21 +1276,19 @@
      </div>
    </div>
     <div class="card" data-collapse-id="cross-window-inject" data-default="collapsed">
-      <div class="card-title collapsible" onclick="toggleCard(this)"><span>跨窗口注入</span><span class="collapse-arrow">▾</span></div>
+      <div class="card-title collapsible" onclick="toggleCard(this)"><span>跨窗口注入</span><span class="card-title-actions"><button type="button" class="icon-btn" onclick="event.stopPropagation();loadCrossWindowInject()" title="刷新预览" aria-label="刷新预览"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button><span class="collapse-arrow">▾</span></span></div>
       <div class="card-body">
         <div style="font-size:11px;color:var(--text3);margin-bottom:8px">新窗口启动时按「系统提示词 → 永久上下文(pin) → 跨窗口注入」顺序注入：近期日记 / 高重要级记忆 / 标星内容。</div>
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-          <button type="button" class="cc-btn secondary" onclick="loadCrossWindowInject()">刷新预览</button>
           <span id="cross-inject-info" style="font-size:11px;color:var(--text3)"></span>
         </div>
         <div id="cross-inject-view" style="max-height:360px;overflow-y:auto;font-size:12px;color:var(--text2);white-space:pre-wrap;word-break:break-all;padding:10px;background:rgba(0,0,0,0.02);border-radius:8px;font-family:monospace;line-height:1.5"><div class="loading">加载中...</div></div>
       </div>
     </div>
     <div class="card" data-collapse-id="push-log" data-default="collapsed">
-      <div class="card-title collapsible" onclick="toggleCard(this)"><span>推送管理</span><span class="collapse-arrow">▾</span></div>
+      <div class="card-title collapsible" onclick="toggleCard(this)"><span>推送管理</span><span class="card-title-actions"><button type="button" class="icon-btn" onclick="event.stopPropagation();loadPushLog()" title="刷新推送" aria-label="刷新推送"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button><span class="collapse-arrow">▾</span></span></div>
       <div class="card-body">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-          <button type="button" class="cc-btn secondary" onclick="loadPushLog()">刷新</button>
           <span id="push-log-info" style="font-size:11px;color:var(--text3)"></span>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-bottom:8px">按时间倒序展示 AI 发送过的推送；「编辑」修改标题与内容，「删除」会直接从时间线移除该条推送。</div>
@@ -4759,17 +4755,17 @@ function ccArmAllGapAutoLoad(){
       let t='';
       try{ if(it.at) t=new Date(String(it.at).replace(' ','T')+':00+08:00').toLocaleString('zh-CN',{hour12:false}); }catch(e){}
       const isWake=it.sent===false;
-      const chanBg=isWake?'#e67e22':'#34495e';
+      const dotBg=isWake?'#e67e22':'#34495e';
       html+='<div class="card push-item" data-push-pos="'+it.position+'" style="margin-bottom:10px;padding:12px 14px">'
         +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-        +'<span class="mem-tag" style="background:'+chanBg+';color:#fff">'+escapeHtml(it.channel||'bark')+'</span>'
+        +'<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text2);font-weight:600"><i style="width:8px;height:8px;border-radius:50%;background:'+dotBg+';display:inline-block;flex-shrink:0"></i>'+escapeHtml(it.channel||'bark')+'</span>'
         +'<span style="font-size:11px;color:var(--text3)">'+escapeHtml(t)+'</span>'
         +'</div>'
         +'<div class="push-item-title" style="margin:8px 0 0;font-size:13px;color:var(--text2)"><b>'+escapeHtml(it.title||'')+'</b></div>'
         +'<div class="push-item-body" style="margin:0 0 8px;font-size:12px;color:var(--text2);white-space:pre-wrap;word-break:break-all">'+escapeHtml(it.body||'')+'</div>'
-        +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
-        +(isWake?'':'<button class="btn btn-outline" onclick="openPushEdit(\''+it.position+'\')">编辑</button>')
-        +'<button class="btn btn-outline push-del-btn" type="button" style="color:#c0392b;border-color:#c0392b" onclick="deletePushEvent(\''+it.position+'\')">删除</button>'
+        +'<div style="display:flex;gap:8px;flex-wrap:nowrap">'
+        +(isWake?'':'<button class="btn btn-outline" style="flex:1;min-width:0;width:auto;padding:6px 10px" onclick="openPushEdit(\''+it.position+'\')">编辑</button>')
+        +'<button class="btn btn-outline push-del-btn" type="button" style="flex:1;min-width:0;width:auto;padding:6px 10px;color:#c0392b;border-color:#c0392b" onclick="deletePushEvent(\''+it.position+'\')">删除</button>'
         +'</div>'
         +'</div>';
     });
