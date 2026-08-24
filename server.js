@@ -2416,35 +2416,54 @@ app.post("/admin/memory-pool/retrieve", { preHandler: basicAuth }, async (req, r
 app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const b = req.body || {};
+    const fsx = require("fs-extra");
+    const cf = require("path").join(__dirname, "data", "context_replacements.json");
+    let records = [];
+    try { records = await fsx.readJson(cf); } catch (e) { records = []; }
+    const active = Array.isArray(records) ? records.filter(function (it) { return it && !it.removed && it.enabled !== false; }) : [];
+    const blockSummary = function (item) {
+      const summary = String(item.text || item.memory || "").trim();
+      const sig = String(item.id || "").trim();
+      if (!summary) return null;
+      return { summary: summary, block_id: sig || null };
+    };
     let texts = [];
+    let logLabel = "再解析";
     if (b.summary) {
       texts.push({ summary: b.summary, block_id: b.block_id || null });
-    } else if (b.all === true) {
-      const fsx = require("fs-extra");
-      const cf = require("path").join(__dirname, "data", "context_replacements.json");
-      let records = [];
-      try { records = await fsx.readJson(cf); } catch (e) { records = []; }
-      if (Array.isArray(records)) {
-        for (const item of records) {
-          if (!item || item.removed || item.enabled === false) continue;
-          const summary = String(item.text || item.memory || "").trim();
-          const sig = String(item.id || "").trim();
-          if (!summary) continue;
-          texts.push({ summary: summary, block_id: sig || null });
-        }
+      logLabel = "手动再解析";
+    } else if (Array.isArray(b.chunkIds) && b.chunkIds.length) {
+      // 前端批量解析传记录 id（chunkIds），按 id 精确匹配，避免依赖预览索引
+      const idSet = new Set(b.chunkIds.map(String));
+      for (const item of active) {
+        if (!idSet.has(String(item.id))) continue;
+        const t = blockSummary(item);
+        if (t) texts.push(t);
       }
+      logLabel = "批量再解析（" + texts.length + " 条）";
+    } else if (b.all === true) {
+      for (const item of active) {
+        const t = blockSummary(item);
+        if (t) texts.push(t);
+      }
+      logLabel = "全部再解析";
     }
     if (!texts.length) return reply.code(400).send({ error: "无可解析的摘要" });
-    let added = 0, merged = 0, failed = 0;
     const list = texts.slice(0, 200);
+    const logId = addCompactionLog({ action: "reparse", label: logLabel, status: "pending", message: "开始解析 " + list.length + " 段摘要..." }).id;
+    let added = 0, merged = 0, failed = 0;
     for (const t of list) {
       const r = await memoryPool.ingestSummary(t.summary, { source: "compaction", block_id: t.block_id });
       if (r.added) added += r.added;
       if (r.merged) merged += r.merged;
       if (r.failed) failed += r.failed;
     }
+    addCompactionLog({ id: logId, action: "reparse", label: logLabel, status: "success", message: "已解析 " + list.length + " 段 -> 新增 " + added + " / 合并 " + merged + " / 失败 " + failed });
     reply.send({ success: true, processed: list.length, added, merged, failed });
-  } catch (err) { reply.code(500).send({ error: err.message }); }
+  } catch (err) {
+    addCompactionLog({ action: "reparse", label: "再解析", status: "error", message: "再解析失败：" + err.message });
+    reply.code(500).send({ error: err.message });
+  }
 });
 
 app.get("/admin/memory-pool/config", { preHandler: basicAuth }, async (req, reply) => {
@@ -3453,19 +3472,26 @@ app.post("/admin/context-compaction/blocks", { preHandler: basicAuth }, async (r
 
 // 摘要生成：gap = 未覆盖区按范围新建手工记录并生成替换正文（默认不启用，需点「替换」才生效）；
 // block = 已有手工记录重新生成正文
-function autoIngestSummary(summary, blockId) {
+function autoIngestSummary(summary, blockId, label) {
   if (!summary || typeof summary !== "string") return;
+  const logLabel = label || "再解析";
   // 关闭「摘要再解析入库」后，摘要替换/生成不再自动入池（手动「重新解析入库」仍可显式触发）
   if (memoryPool.getConfig().reparse_enabled === false) {
     console.log("[memory-pool] 摘要再解析入库已关闭，跳过自动归入");
+    addCompactionLog({ action: "reparse", label: logLabel, status: "skipped", message: "自动归入已关闭（reparse_enabled=false），跳过" });
     return;
   }
   memoryPool.ingestSummary(summary, { source: "compaction", block_id: blockId || null })
     .then(function (r) {
-      if (r.skipped) return;
+      if (r.skipped) {
+        addCompactionLog({ action: "reparse", label: logLabel, status: "skipped", message: "再解析：摘要已存在，跳过" });
+        return;
+      }
+      addCompactionLog({ action: "reparse", label: logLabel, status: "success", message: "再解析：新增 " + (r.added || 0) + " / 合并 " + (r.merged || 0) + " / 失败 " + (r.failed || 0) });
       console.log("[memory-pool] 自动归入:", JSON.stringify({ added: r.added, merged: r.merged, failed: r.failed }));
     })
     .catch(function (e) {
+      addCompactionLog({ action: "reparse", label: logLabel, status: "error", message: "再解析失败：" + e.message });
       console.error("[memory-pool] 自动归入失败:", e.message);
     });
 }
@@ -3520,7 +3546,7 @@ app.post("/admin/context-compaction/generate", { preHandler: basicAuth }, async 
         return reply.send({ ok: false, message: saved.message });
       }
       addCompactionLog({ id: logId, action: "gap", startIdx: start, endIdx: end, label: "消息" + start + "-" + end + "块", status: "success", message: "生成成功，" + gen.length + " 字" });
-      autoIngestSummary(gen.summary, null);
+      autoIngestSummary(gen.summary, null, "消息" + start + "-" + end + "块");
       return reply.send({
         ok: true,
         action: "gap",
@@ -3588,14 +3614,14 @@ app.post("/admin/context-compaction/generate", { preHandler: basicAuth }, async 
       saved = contextReplacements.updateReplacement(rec.id, gen.summary);
       if (!saved.ok) return reply.send({ ok: false, message: saved.error });
       addCompactionLog({ id: blockLogId, action: "block", blockIndex: body.blockIndex, repId: repId, label: blockLogLabel, status: "success", message: "生成成功，" + gen.length + " 字" });
-      autoIngestSummary(gen.summary, rec.id);
+      autoIngestSummary(gen.summary, rec.id, blockLogLabel);
       return reply.send({ ok: true, action: "block", repId: rec.id, length: gen.length, message: "已重新生成替换正文（" + gen.length + " 字）。" });
     }
     const blockIndex = Number(body.blockIndex);
     saved = contextReplacements.setManualRecordText(blockIndex, gen.summary);
     if (!saved.ok) return reply.send({ ok: false, message: saved.message });
     addCompactionLog({ id: blockLogId, action: "block", blockIndex: blockIndex, repId: repId, label: blockLogLabel, status: "success", message: "生成成功，" + gen.length + " 字" });
-    autoIngestSummary(gen.summary, rec.id);
+    autoIngestSummary(gen.summary, rec.id, blockLogLabel);
     return reply.send({ ok: true, action: "block", blockIndex: blockIndex, length: gen.length, message: "已重新生成替换正文（" + gen.length + " 字）。" });
   } catch (err) {
     console.error("[context-compactor] 摘要生成失败:", err.message);

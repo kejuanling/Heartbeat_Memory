@@ -236,6 +236,8 @@
 .log-item.success .log-item-status{background:#d4f5e0;color:#27ae60}
 .log-item.error .log-item-status{background:#ffd6e0;color:#e74c3c}
 .log-item.pending .log-item-status{background:#fff3d4;color:#f39c12}
+.log-item.skipped{border-left-color:#95a5a6;background:rgba(236,240,241,0.6)}
+.log-item.skipped .log-item-status{background:#eceff1;color:#607d8b}
 .log-item-msg{color:#666;word-break:break-all;line-height:1.45;font-size:11px}
 .log-item-time{font-size:10px;color:#aaa;margin-top:3px}
 .log-panel-empty{text-align:center;color:#c2185b;padding:24px 0;font-size:12px;opacity:.5}
@@ -1862,7 +1864,7 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
      return;
    }
    body.innerHTML = logs.map(function(l){
-     const statusText = l.status === 'success' ? '成功' : (l.status === 'error' ? '失败' : '进行中');
+     const statusText = l.status === 'success' ? '成功' : (l.status === 'error' ? '失败' : (l.status === 'skipped' ? '跳过' : '进行中'));
      return '<div class="log-item ' + (l.status || 'pending') + '">' +
        '<div class="log-item-head">' +
          '<span class="log-item-label">' + (l.label || '未知操作') + '</span>' +
@@ -3356,21 +3358,21 @@ function updateCcStatusBar(d){
    if(!d) return;
    const chunks = d.chunks || [];
    // 收集已替换的块
-   const selectedIndices = [];
+   const selectedIds = [];
    AppState.ccSelectedChunks.forEach(function(key){
      if(String(key).startsWith('gap-')) return;
      const idx = Number(key);
      const c = chunks.find(function(x){ return x.index === idx; });
-     if(c && c.enabled !== false) selectedIndices.push(idx);
+     if(c && c.enabled !== false) selectedIds.push(c.id);
    });
-   if(!selectedIndices.length){ toast('没有已替换的块可解析'); return; }
-   if(!confirm('将选中的 ' + selectedIndices.length + ' 个已替换摘要解析归入记忆池？')) return;
+   if(!selectedIds.length){ toast('没有已替换的块可解析'); return; }
+   if(!confirm('将选中的 ' + selectedIds.length + ' 个已替换摘要解析归入记忆池？')) return;
    const msg = document.getElementById('compaction-msg');
    if(msg) msg.textContent = '正在解析选中的摘要并注入记忆池…';
    try{
      const r = await fetch(ADMIN_API + '/memory-pool/reparse', {
        method: 'POST', headers: {'Content-Type': 'application/json'},
-       body: JSON.stringify({chunkIndices: selectedIndices})
+       body: JSON.stringify({chunkIds: selectedIds})
      });
      const j = await r.json();
      if(j.error) throw new Error(j.error);
