@@ -211,6 +211,8 @@
  #env-list::-webkit-scrollbar-thumb,#diary-list::-webkit-scrollbar-thumb{background:rgba(60,40,40,0.15);border-radius:2px}
  .toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:999;background:rgba(60,60,60,0.92);backdrop-filter:blur(8px);color:#fff;padding:10px 24px;border-radius:10px;font-size:13px;font-family:"Noto Sans SC",sans-serif;opacity:0;transition:opacity .3s;pointer-events:none}
  .toast.show{opacity:1}
+ .global-loading{position:fixed;top:0;left:0;height:3px;width:0;background:linear-gradient(90deg,#ff6b9d,#8e44ad);z-index:1001;transition:width .25s ease;pointer-events:none;border-radius:0 3px 3px 0}
+ .global-loading.show{width:70%}
 
 .log-fab{position:fixed;bottom:80px;right:20px;z-index:999;width:50px;height:50px;border-radius:50%;background:rgba(255,240,245,0.9);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(255,200,220,0.6);box-shadow:0 4px 16px rgba(255,150,180,0.25);cursor:grab;display:flex;align-items:center;justify-content:center;font-size:22px;user-select:none;touch-action:none;transition:box-shadow .2s}
 .log-fab:active{cursor:grabbing;box-shadow:0 2px 8px rgba(255,150,180,0.2)}
@@ -857,7 +859,7 @@
 </style>
  </head>
  <body>
- <div class="header" style="display:none"><h1>管理台</h1><p id="headerSub">HEARTBEAT · Runtime</p></div>
+ <div class="header" style="display:none"><h1>管理台</h1><p id="headerSub" aria-live="polite">HEARTBEAT · Runtime</p></div>
  
  <!-- Tab 1: 心跳管理 -->
 
@@ -1080,11 +1082,11 @@
        <div class="search-bar" style="margin-bottom:6px">
          <input type="text" id="cc-original-search" placeholder="搜索原文…" oninput="scheduleCcOriginalSearch()">
        </div>
-       <div id="cc-original-search-info" style="font-size:11px;color:var(--text3);margin-bottom:4px"></div>
+       <div id="cc-original-search-info" style="font-size:11px;color:var(--text3);margin-bottom:4px" aria-live="polite"></div>
        <div id="cc-original-results"></div>
      </div>
      <div id="compaction-chunks" style="margin-top:4px"></div>
-     <div id="compaction-msg" style="margin-top:12px;font-size:12px;color:var(--accent);min-height:18px;text-align:center"></div>
+     <div id="compaction-msg" style="margin-top:12px;font-size:12px;color:var(--accent);min-height:18px;text-align:center" aria-live="polite"></div>
      <div id="compaction-cfg-tip" style="margin-top:8px;font-size:12px;color:var(--text3);text-align:center"></div>
     <!-- 底部多选操作栏 -->
     <div class="cc-multi-bar" id="cc-multi-bar">
@@ -1241,7 +1243,7 @@
      <div class="card-body">
        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
          <button type="button" class="cc-btn secondary" onclick="loadMarkedList()">刷新</button>
-         <span id="cc-marked-info" style="font-size:11px;color:var(--text3)"></span>
+         <span id="cc-marked-info" style="font-size:11px;color:var(--text3)" aria-live="polite"></span>
        </div>
        <div id="cc-marked-list" style="max-height:400px;overflow-y:auto;padding-right:4px"></div>
        <div style="font-size:11px;color:var(--text3);margin-top:6px">标星的消息会在压缩/替换时以原句保留在上下文中，不被摘要覆盖。点星可取消标记。</div>
@@ -1321,10 +1323,11 @@
 
 
  
- <div class="back-top" id="backTopBtn" onclick="scrollToTop()" title="回到顶部">↑</div>
- <div class="toast" id="toast"></div>
+ <div class="back-top" id="backTopBtn" onclick="scrollToTop()" title="回到顶部" role="button" tabindex="0">↑</div>
+ <div class="toast" id="toast" role="status" aria-live="polite"></div>
+ <div class="global-loading" id="globalLoading" aria-hidden="true"></div>
 
-<div class="log-fab" id="logFab" title="生成日志">
+<div class="log-fab" id="logFab" title="生成日志" role="button" tabindex="0" aria-label="生成日志">
   📋
   <span class="log-fab-badge" id="logFabBadge">0</span>
 </div>
@@ -1332,8 +1335,8 @@
   <div class="log-panel-head">
     <span class="log-panel-title">生成日志</span>
     <div class="log-panel-head-right">
-      <button type="button" class="log-panel-clear-btn" onclick="clearCompactionLogs()">清空</button>
-      <button type="button" class="log-panel-close-btn" onclick="closeLogPanel()">×</button>
+      <button type="button" class="log-panel-clear-btn" onclick="clearCompactionLogs()" aria-label="清空生成日志">清空</button>
+      <button type="button" class="log-panel-close-btn" onclick="closeLogPanel()" aria-label="关闭日志面板">×</button>
     </div>
   </div>
   <div class="log-panel-body" id="logPanelBody">
@@ -1363,7 +1366,7 @@
    <div class="modal"><h3>编辑环境变量</h3><p style="font-size:12px;color:var(--text3);margin:-2px 0 12px">保存后立即热生效，无需重启；若个别改动未按预期生效，可点「重启服务」兜底</p><div id="env-editor-fields"></div>
      <div class="modal-actions">
        <button type="button" class="btn btn-outline" onclick="closeModal('envModal')">取消</button>
-       <button type="button" class="btn btn-primary" onclick="saveEnv()">保存</button>
+       <button type="button" class="btn btn-primary" id="env-save-btn" onclick="saveEnv()">保存</button>
      </div>
    </div>
  </div>
@@ -1375,7 +1378,7 @@
      <div class="form-group"><label>__csrf <span style="color:var(--text3);font-size:11px">可选</span></label><input type="text" id="netease-csrf" placeholder="已设置，留空则不修改"></div>
      <div class="modal-actions">
        <button type="button" class="btn btn-outline" onclick="closeModal('neteaseModal')">取消</button>
-       <button type="button" class="btn btn-primary" onclick="saveNetease()">保存</button>
+       <button type="button" class="btn btn-primary" id="netease-save-btn" onclick="saveNetease()">保存</button>
      </div>
    </div>
  </div>
@@ -1392,7 +1395,7 @@
      <div style="display:flex;gap:10px;margin-top:12px;flex-shrink:0">
        <button type="button" class="btn btn-outline" onclick="addVisionModel()" style="flex:1">新增视觉模型</button>
        <button type="button" class="btn btn-outline" onclick="closeModal('visionModelsModal')" style="flex:1">取消</button>
-       <button type="button" class="btn btn-primary" onclick="saveVisionModels()" style="flex:1;background:var(--accent)">保存</button>
+       <button type="button" class="btn btn-primary" id="vm-save-btn" onclick="saveVisionModels()" style="flex:1;background:var(--accent)">保存</button>
      </div>
    </div>
  </div>
@@ -1406,7 +1409,7 @@
      <div class="form-group"><label>手动查看采样（秒）</label><input type="number" id="co-peek-seconds" min="1" max="10"></div>
      <div class="modal-actions">
        <button type="button" class="btn btn-outline" onclick="closeModal('coViewModal')">取消</button>
-       <button type="button" class="btn btn-primary" onclick="saveCoViewConfig()">保存</button>
+       <button type="button" class="btn btn-primary" id="covew-save-btn" onclick="saveCoViewConfig()">保存</button>
      </div>
    </div>
  </div>
@@ -1420,7 +1423,7 @@
      <div class="switch-row"><div><div class="ci-label">解析结果注入上下文</div><div class="ci-desc">截图画面描述写入上下文时间线</div></div><label class="switch"><input type="checkbox" id="screenshot-inject-switch"><span class="slider"></span></label></div>
      <div class="modal-actions">
        <button type="button" class="btn btn-outline" onclick="closeModal('screenshotModal')">取消</button>
-       <button type="button" class="btn btn-primary" onclick="saveScreenshotConfig()">保存</button>
+       <button type="button" class="btn btn-primary" id="shot-save-btn" onclick="saveScreenshotConfig()">保存</button>
      </div>
    </div>
  </div>
@@ -1471,7 +1474,7 @@
       </div>
       <textarea id="mempool-edit-content" rows="10" placeholder="记忆内容..."></textarea>
       <div class="mp-modal-actions">
-        <button type="button" class="mp-btn primary" onclick="saveMemPoolEdit()">保存</button>
+        <button type="button" class="mp-btn primary" id="mp-save-btn" onclick="saveMemPoolEdit()">保存</button>
         <button type="button" class="mp-btn" onclick="closeModal('mempoolEditModal')">取消</button>
       </div>
     </div>
@@ -1543,21 +1546,43 @@ function getCookie(name) {
 (function () {
   const _fetch = window.fetch;
   function isAdminUrl(u) { return u.indexOf('/admin') === 0 || u.indexOf('/heartbeat/admin') === 0; }
+  let inflight = 0;
+  let loadingTimer = null;
+  function setLoading(on) {
+    const el = document.getElementById('globalLoading');
+    if (el) el.classList.toggle('show', !!on);
+  }
+  function beginLoad() {
+    inflight++;
+    if (loadingTimer) clearTimeout(loadingTimer);
+    loadingTimer = setTimeout(function () { if (inflight > 0) setLoading(true); }, 180);
+  }
+  function endLoad() {
+    inflight--;
+    if (inflight < 0) inflight = 0;
+    if (inflight === 0) {
+      if (loadingTimer) { clearTimeout(loadingTimer); loadingTimer = null; }
+      setLoading(false);
+    }
+  }
   window.fetch = function (input, init) {
     init = init || {};
     const url = typeof input === 'string' ? input : ((input && input.url) || '');
-    if (isAdminUrl(url)) {
+    const admin = isAdminUrl(url);
+    if (admin) {
       const headers = init.headers instanceof Headers ? init.headers : new Headers(init.headers || {});
       const token = getCookie('admin_csrf');
       if (token) headers.set('X-CSRF-Token', token);
       init.headers = headers;
+      beginLoad();
     }
-    return _fetch(input, init).then(function (r) {
+    const p = _fetch(input, init).then(function (r) {
       if (r.status === 401) {
         location.href = ADMIN_API + '/mobile/login';
       }
       return r;
     });
+    return admin ? p.finally(endLoad) : p;
   };
 })();
 
@@ -1640,6 +1665,9 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
  function initLogFab(){
    const fab = document.getElementById('logFab');
    if(!fab) return;
+   fab.addEventListener('keydown',function(e){
+     if(e.key==='Enter'||e.key===' '){ e.preventDefault(); toggleLogPanel(); }
+   });
    try {
      const saved = JSON.parse(localStorage.getItem('logFabPos') || '{}');
      if(saved.x !== undefined) fab.style.left = saved.x + 'px';
@@ -1865,7 +1893,15 @@ function toast(msg){
    setTimeout(()=>el.classList.remove('show'),2200);
  }
  
- function openModal(id){const el=document.getElementById(id);if(el)el.classList.add('show')}
+ function openModal(id){
+   const el=document.getElementById(id);
+   if(!el) return;
+   el.classList.add('show');
+   el.setAttribute('role','dialog');
+   el.setAttribute('aria-modal','true');
+   const first=el.querySelector('input,select,textarea');
+   if(first) setTimeout(function(){ first.focus(); },60);
+ }
  function closeModal(id){const el=document.getElementById(id);if(el)el.classList.remove('show')}
  
  // ============ Heartbeat ============
@@ -1935,7 +1971,7 @@ function toast(msg){
    const body={};
    Object.keys(keyMap).forEach(k=>{const el=document.getElementById('env-'+k);if(el)body[keyMap[k]]=el.value;});
    try{
-     const r=await apiRequest('POST', ADMIN_API + '/save', body);
+     const r=await apiRequest('POST', ADMIN_API + '/save', body, {busy:document.getElementById('env-save-btn')});
      if(!r.ok) return;
      const j=r.data||{};
      if(j.success){toast('已保存，已热生效');closeModal('envModal');fetch(ADMIN_API+'/env').then(r=>r.json()).then(d=>{INITIAL_DATA=d;}).catch(()=>{});}
@@ -1973,8 +2009,9 @@ function toast(msg){
    const csrf=document.getElementById('netease-csrf').value.trim();
    if(!musicU&&!csrf){toast('请至少填写 MUSIC_U');return}
    try{
-     const r=await fetch(ADMIN_API + '/netease/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({music_u:musicU,csrf})});
-     const j=await r.json();
+     const r=await apiRequest('POST', ADMIN_API + '/netease/save', {music_u:musicU,csrf}, {busy:document.getElementById('netease-save-btn')});
+     if(!r.ok) return;
+     const j=r.data||{};
      if(j.success){
        toast(j.account&&j.account.nickname?('已保存，当前账号: '+j.account.nickname):'已保存');
        closeModal('neteaseModal');
@@ -2077,8 +2114,9 @@ function toast(msg){
    collectVisionModels();
    const clean=visionModels.map(m=>({id:m.id,name:m.name,api_url:m.api_url,api_key:m.api_key,model:m.model}));
    try{
-     const r=await fetch(ADMIN_API + '/vision-models',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({models:clean})});
-     const j=await r.json();
+     const r=await apiRequest('POST', ADMIN_API + '/vision-models', {models:clean}, {busy:document.getElementById('vm-save-btn')});
+     if(!r.ok) return;
+     const j=r.data||{};
      if(j.success){
        toast('视觉模型已保存');
        closeModal('visionModelsModal');
@@ -2140,8 +2178,9 @@ function toast(msg){
    const peek=parseFloat(document.getElementById('co-peek-seconds').value);
    if(Number.isFinite(peek)&&peek>=1&&peek<=10)updates.co_peek_seconds=peek;
    try{
-     const r=await fetch(ADMIN_API + '/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(updates)});
-     const j=await r.json();
+     const r=await apiRequest('POST', ADMIN_API + '/config', updates, {busy:document.getElementById('covew-save-btn')});
+     if(!r.ok) return;
+     const j=r.data||{};
      if(j.success){toast('共影环境已保存');closeModal('coViewModal');renderCoView();}
      else toast('保存失败: '+(j.error||''));
    }catch(e){toast('网络错误: '+e.message)}
@@ -2194,8 +2233,9 @@ function toast(msg){
      if(wantInject&&!has)types.push('screenshot');
      if(!wantInject&&has)types.splice(types.indexOf('screenshot'),1);
      updates.event_inject_types=types;
-     const r=await fetch(ADMIN_API + '/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(updates)});
-     const j=await r.json();
+     const r=await apiRequest('POST', ADMIN_API + '/config', updates, {busy:document.getElementById('shot-save-btn')});
+     if(!r.ok) return;
+     const j=r.data||{};
      if(j.success){toast('截图上传已保存');closeModal('screenshotModal');renderScreenshotStatus();}
      else toast('保存失败: '+(j.error||''));
    }catch(e){toast('网络错误: '+e.message)}
@@ -2560,7 +2600,7 @@ let ccGapCutsOff = new Set();
          '<span class="mem-tag">'+escapeHtml(x.role||'')+'</span>' +
          '<span class="mem-time">'+escapeHtml(x.time||'')+'</span>' +
          chunkTag +
-         '<button class="cc-msg-mark'+(x.marked?' on':'')+'" data-key="'+x.key+'" style="margin-left:auto" onclick="toggleCcOrigMark(this)" title="标星：压缩后以原句保留，不被摘要覆盖">'+(x.marked?'★':'☆')+'</button>' +
+         '<button class="cc-msg-mark'+(x.marked?' on':'')+'" data-key="'+x.key+'" style="margin-left:auto" onclick="toggleCcOrigMark(this)" title="标星：压缩后以原句保留，不被摘要覆盖" aria-pressed="'+(x.marked?'true':'false')+'" aria-label="标星此消息">'+(x.marked?'★':'☆')+'</button>' +
          '</div>' +
          '<div class="cc-orig-content">'+escapeHtml(x.content)+'</div>' +
          '</div>';
@@ -2582,6 +2622,7 @@ let ccGapCutsOff = new Set();
      if(d && d.error){ alert('标记失败: '+d.error); return; }
      btn.classList.toggle('on', next);
      btn.textContent = next ? '★' : '☆';
+     btn.setAttribute('aria-pressed', next ? 'true' : 'false');
    }).catch(function(e){ alert('标记失败: '+e.message); });
  }
 
@@ -2609,7 +2650,7 @@ let ccGapCutsOff = new Set();
          +'<span style="font-size:11px;color:var(--text3)">第 '+x.index+' 条</span>'
          +'<span style="font-size:11px;'+roleCls+'">'+escHtml2(x.role||'')+'</span>'
          +chunkTag
-         +'<button style="margin-left:auto;flex-shrink:0" class="cc-msg-mark on" data-key="'+x.key+'" onclick="unmarkMsg(this)" title="取消标星：将后此消息可被摘要覆盖">★</button>'
+         +'<button style="margin-left:auto;flex-shrink:0" class="cc-msg-mark on" data-key="'+x.key+'" onclick="unmarkMsg(this)" title="取消标星：将后此消息可被摘要覆盖" aria-pressed="true" aria-label="取消标星">★</button>'
          +'</div>'
          +'<div style="font-size:11px;color:var(--text3);margin-top:2px">'+tH+'</div>'
          +'<div style="font-size:12px;margin-top:2px;word-break:break-all">'+escHtml2(x.content)+'</div>'
@@ -4484,7 +4525,7 @@ function ccArmAllGapAutoLoad(){
        +'</span>'
        +'<span class="cc-msg-right">'
        +(m.time?'<span class="cc-msg-time">'+escHtml(m.time)+'</span>':'')
-       +(noMark?'':'<button class="cc-msg-mark'+(marked?' on':'')+'" onclick="toggleCcMark('+c.index+','+i+')" title="标星：压缩后以原句保留，不被摘要覆盖">'+(marked?'★':'☆')+'</button>')
+       +(noMark?'':'<button class="cc-msg-mark'+(marked?' on':'')+'" onclick="toggleCcMark('+c.index+','+i+')" title="标星：压缩后以原句保留，不被摘要覆盖" aria-pressed="'+(marked?'true':'false')+'" aria-label="标星此消息">'+(marked?'★':'☆')+'</button>')
        +'</span>'
        +'</div>'
        +'<div class="cc-msg-body">'+escHtml(m.content)+'</div>'
@@ -4564,6 +4605,13 @@ function ccArmAllGapAutoLoad(){
  function scrollToTop(){
    window.scrollTo({top:0,behavior:'smooth'});
  }
+ (function(){
+   const b=document.getElementById('backTopBtn');
+   if(!b)return;
+   b.addEventListener('keydown',function(e){
+     if(e.key==='Enter'||e.key===' '){ e.preventDefault(); scrollToTop(); }
+   });
+ })();
  function switchTab(name){
    try{localStorage.setItem('adminTab',name)}catch(e){}
    document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
@@ -4850,6 +4898,7 @@ let lastPendingCount = null;
    const nowCollapsed=card.classList.contains('collapsed');
    card.classList.toggle('collapsed',!nowCollapsed);
    if(id){try{localStorage.setItem('card-collapse-'+id,nowCollapsed?'open':'collapsed')}catch(e){}}
+   if(header && header.setAttribute) header.setAttribute('aria-expanded', nowCollapsed ? 'true' : 'false');
  }
  
  function initCollapsibleCards(){
@@ -4860,6 +4909,15 @@ let lastPendingCount = null;
      try{state=localStorage.getItem('card-collapse-'+id)}catch(e){}
      const collapsed=state? (state==='collapsed') : (def!=='open');
      card.classList.toggle('collapsed',collapsed);
+     const header=card.querySelector('.card-title');
+     if(header){
+       header.setAttribute('role','button');
+       header.setAttribute('tabindex','0');
+       header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+       header.addEventListener('keydown',function(e){
+         if(e.key==='Enter'||e.key===' '){ e.preventDefault(); toggleCard(header); }
+       });
+     }
    });
  }
  
@@ -5421,8 +5479,9 @@ async function deletePinned(id){
     if(!content){ toast('记忆内容不能为空'); return; }
     const url=memPoolEditId ? (ADMIN_API + '/memory-pool/'+memPoolEditId) : (ADMIN_API + '/memory-pool');
     try{
-      const r=await fetch(url,{method:memPoolEditId?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:content, category:category, importance:Number.isFinite(importance)?importance:0.6})});
-      const d=await r.json();
+      const r=await apiRequest(memPoolEditId?'PUT':'POST', url, {content:content, category:category, importance:Number.isFinite(importance)?importance:0.6}, {busy:document.getElementById('mp-save-btn')});
+      if(!r.ok) return;
+      const d=r.data||{};
       if(d.error){ toast('保存失败: '+d.error); return; }
       toast(memPoolEditId?'记忆已更新':'记忆已新增');
       closeModal('mempoolEditModal');
