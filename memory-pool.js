@@ -412,6 +412,7 @@ async function reparseSummaryViaLLM(text, cfg) {
   const warm = cfg && cfg.warm !== undefined ? !!cfg.warm : CONFIG.reparse_warm !== false;
   const maxChars = Math.max(5, Number(CONFIG.reparse_max_chars) || 30);
   const maxItems = Math.max(1, Number(CONFIG.reparse_max_items) || 8);
+  const hasCustom = !!(String(CONFIG.reparse_system_prompt || "").trim() || String(CONFIG.reparse_user_prompt || "").trim());
   if (CONFIG.reparse_enabled === false) {
     const fb = parseCategoryBlocks(text);
     return { ok: true, fallback: true, disabled: true, memories: fb };
@@ -455,11 +456,11 @@ async function reparseSummaryViaLLM(text, cfg) {
       const cat = CATEGORIES.includes(it.category) ? it.category : "关于她";
       let content2 = String(it.content || it.memory || "").trim();
       content2 = content2.replace(/^(关于她|关于我们|锚点|信号|对话摘要)\s*[：:]\s*/, "");
-      if (content2.length > maxChars) content2 = content2.slice(0, maxChars);
+      if (!hasCustom && content2.length > maxChars) content2 = content2.slice(0, maxChars);
       if (content2) out.push({ category: cat, content: content2, importance: Math.max(0, Math.min(1, Number(it.importance) || 0.5)) });
     }
     out.sort((a, b) => (Number(b.importance) || 0) - (Number(a.importance) || 0));
-    if (out.length > maxItems) out.length = maxItems;
+    if (!hasCustom && out.length > maxItems) out.length = maxItems;
     return { ok: true, memories: out };
   } catch (e) {
     return { ok: false, error: e.message, fallback: true, memories: parseCategoryBlocks(text) };
