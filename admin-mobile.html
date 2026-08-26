@@ -940,6 +940,8 @@
      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆与唤醒参数</span><span class="collapse-arrow">▾</span></div>
      <div class="card-body">
                <div class="cc-cfg-grid">
+          <div class="cc-cfg-group-title">唤醒</div>
+          <label class="cc-cfg-field">唤醒历史最大条数(0=不裁剪)<input type="number" id="mw-wake-history-max" min="0" step="10"></label>
           <div class="cc-cfg-group-title">记忆池</div>
           <label class="cc-cfg-field">去重阈值<input type="number" id="mw-dedup" min="0" max="1" step="0.05"></label>
           <label class="cc-cfg-field">衰减半衰期(天)<input type="number" id="mw-decay-days" min="1" step="1"></label>
@@ -948,6 +950,7 @@
           <label class="cc-cfg-field cc-cfg-check">再解析·温暖风格<span class="cc-sw"><input type="checkbox" id="mw-reparse-warm"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
           <label class="cc-cfg-field">再解析·每条字数上限<input type="number" id="mw-reparse-maxchars" min="5" step="1"></label>
           <label class="cc-cfg-field">再解析·每段最多条数<input type="number" id="mw-reparse-maxitems" min="1" step="1"></label>
+          <label class="cc-cfg-field">合并解析·总字数上限<input type="number" id="mw-reparse-mergemaxchars" min="0" step="100"></label>
           <div class="cc-cfg-group-title">跨窗口注入</div>
           <label class="cc-cfg-field cc-cfg-check">总开关<span class="cc-sw"><input type="checkbox" id="mw-cross-enabled"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
           <label class="cc-cfg-field cc-cfg-check">固定注入(整场会话一直带)<span class="cc-sw"><input type="checkbox" id="mw-cross-always"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
@@ -1672,6 +1675,7 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
   ccMultiSelectMode: false,        // 是否处于多选模式
   ccSelectedChunks: new Set(),     // 多选选中的 chunk index / gap key
   ccFilter: null,                  // 筛选: null/gap/pending/replace/replaced
+   ccReparseMergeMaxChars: 8000,       // 合并解析总字数上限（可调）
   ccSwipeState: null,              // 压缩块左滑状态
   memPoolEditId: null,             // 记忆池编辑中的记忆 id（null=新增）
   memPoolSearchTimer: null,        // 记忆池搜索防抖定时器
@@ -2354,6 +2358,7 @@ function toast(msg){
     try{
       const r=await fetch(ADMIN_API + '/config');
       const c=await r.json();
+      document.getElementById('mw-wake-history-max').value=c.wake_history_max_messages!=null?c.wake_history_max_messages:80;
     }catch(e){ if(msg)msg.textContent='读取记忆参数失败: '+e.message; }
     try{
       const r=await fetch(ADMIN_API + '/memory-pool/config');
@@ -2366,6 +2371,7 @@ function toast(msg){
        document.getElementById('mw-reparse-warm').checked=c.reparse_warm!==false;
         document.getElementById('mw-reparse-maxchars').value=c.reparse_max_chars!=null?c.reparse_max_chars:30;
         document.getElementById('mw-reparse-maxitems').value=c.reparse_max_items!=null?c.reparse_max_items:8;
+        document.getElementById('mw-reparse-mergemaxchars').value=c.reparse_merge_max_chars!=null?c.reparse_merge_max_chars:8000;
       document.getElementById('mw-cross-enabled').checked=c.cross_inject_enabled!==false;
       document.getElementById('mw-cross-diary').checked=c.cross_inject_diary!==false;
       document.getElementById('mw-cross-memory').checked=c.cross_inject_memory!==false;
@@ -2383,6 +2389,7 @@ function toast(msg){
     const msg=document.getElementById('memory-wake-config-msg');
     if(msg)msg.textContent='保存中...';
     const up={};
+    up.wake_history_max_messages=Number(document.getElementById('mw-wake-history-max').value)||0;
     let saved=true;
     try{
       const r=await fetch(ADMIN_API+'/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(up)});
@@ -2398,6 +2405,7 @@ function toast(msg){
      up2.reparse_warm=document.getElementById('mw-reparse-warm').checked;
       up2.reparse_max_chars=Number(document.getElementById('mw-reparse-maxchars').value)||30;
       up2.reparse_max_items=Number(document.getElementById('mw-reparse-maxitems').value)||8;
+      up2.reparse_merge_max_chars=Number(document.getElementById('mw-reparse-mergemaxchars').value)||8000;
     up2.cross_inject_enabled=document.getElementById('mw-cross-enabled').checked;
     up2.cross_inject_diary=document.getElementById('mw-cross-diary').checked;
     up2.cross_inject_memory=document.getElementById('mw-cross-memory').checked;
@@ -2786,27 +2794,9 @@ function loadCompactionPreview(){
  * @returns {string}
  */
 function ccBuildEmptyNoticeHtml(d, ccGaps, ccMin){
-  let html='';
-  if(ccGaps>0){
-    html+='<div class="cc-notice" data-cid="cc-empty">'
-      +'<div class="cc-notice-head" onclick="toggleCcNotice(this)">'
-      +'<span class="cc-notice-icon">⚠</span>'
-      +'<span class="cc-notice-txt">未触发自动压缩 · 点击查看说明</span>'
-      +'<span class="cc-notice-arrow">▾</span>'
-      +'</div>'
-      +'<div class="cc-notice-body">当前共 '+(d.totalCompressible||0)+' 条消息，未达自动压缩阈值（'+(ccMin||0)+' 条），故未自动分块。仍可手动压缩：在下方未覆盖区点「生成摘要」逐区压缩，或点「自动分块」按时间/条数切块；也可到下方参数配置里把该阈值调小或改为 0。</div>'
-      +'</div>';
-  }else if(ccMin>0){
-    html+='<div class="cc-notice" data-cid="cc-empty">'
-      +'<div class="cc-notice-head" onclick="toggleCcNotice(this)">'
-      +'<span class="cc-notice-icon">⚠</span>'
-      +'<span class="cc-notice-txt">当前消息未达压缩阈值（'+(d.config.compaction_min_messages||0)+' 条）· 点击查看说明</span>'
-      +'<span class="cc-notice-arrow">▾</span>'
-      +'</div>'
-      +'<div class="cc-notice-body">当前消息数未达到压缩阈值（'+(d.config.compaction_min_messages||0)+' 条），暂不压缩。可到下方参数配置里把该值调小或改为 0。</div>'
-      +'</div>';
-  }
-  return html;
+  // 自动压缩相关提示已下线（不再提醒未达阈值/未触发自动压缩），
+  // 保留函数与调用点不变，仅不再渲染任何内容，避免影响手动压缩流程。
+  return '';
 }
 
 /**
@@ -3091,6 +3081,7 @@ function updateCcStatusBar(d){
  function toggleCcMultiSelect(){
    AppState.ccMultiSelectMode = !AppState.ccMultiSelectMode;
    AppState.ccSelectedChunks.clear();
+   if(AppState.ccMultiSelectMode){ loadCcReparseMaxChars(); }
    const btn = document.getElementById('cc-multiselect-btn');
    const bar = document.getElementById('cc-multi-bar');
    if(btn) btn.classList.toggle('primary', AppState.ccMultiSelectMode);
@@ -3105,11 +3096,36 @@ function updateCcStatusBar(d){
    if(AppState.ccSelectedChunks.has(selKey)){
      AppState.ccSelectedChunks.delete(selKey);
    }else{
+     if(type === 'chunk'){
+       const d = AppState.compactionPlan;
+       const chunks = d ? (d.chunks || []) : [];
+       const c = chunks.find(function(x){ return x.index === key; });
+       let cur = 0;
+       AppState.ccSelectedChunks.forEach(function(k){
+         if(String(k).startsWith('gap-')) return;
+         const idx = Number(k);
+         const cc = chunks.find(function(x){ return x.index === idx; });
+         if(cc) cur += (Number(cc.chars) || 0);
+       });
+       const limit = Number(AppState.ccReparseMergeMaxChars || 8000);
+       if(c && (cur + (Number(c.chars) || 0)) > limit){
+         toast('选中块总字数已达上限（'+fmtCcNum(limit)+' 字），不能再选了');
+         return;
+       }
+     }
      AppState.ccSelectedChunks.add(selKey);
    }
    renderCompaction();
    updateMultiSelectBar();
  }
+
+  async function loadCcReparseMaxChars(){
+    try{
+      const r=await fetch(ADMIN_API + '/memory-pool/config');
+      const c=await r.json();
+      AppState.ccReparseMergeMaxChars = (c && c.reparse_merge_max_chars!=null) ? Number(c.reparse_merge_max_chars) : 8000;
+    }catch(e){ /* 读取失败用默认值 */ }
+  }
 
  function toggleSelectAllCc(){
    const d = AppState.compactionPlan;
@@ -3370,13 +3386,16 @@ function updateCcStatusBar(d){
      if(c && c.enabled !== false) selectedIds.push(c.id);
    });
    if(!selectedIds.length){ toast('没有已替换的块可解析'); return; }
-   if(!confirm('将选中的 ' + selectedIds.length + ' 个已替换摘要解析归入记忆池？')) return;
+   const isMerge = selectedIds.length > 1;
+   if(!confirm(isMerge
+     ? '将选中的 ' + selectedIds.length + ' 个块拼接为一次 LLM 提炼，归入记忆池？'
+     : '将选中的 1 个块解析归入记忆池？')) return;
    const msg = document.getElementById('compaction-msg');
-   if(msg) msg.textContent = '正在解析选中的摘要并注入记忆池…';
+   if(msg) msg.textContent = isMerge ? '正在合并解析选中的摘要并注入记忆池…' : '正在解析选中的摘要并注入记忆池…';
    try{
      const r = await fetch(ADMIN_API + '/memory-pool/reparse', {
        method: 'POST', headers: {'Content-Type': 'application/json'},
-       body: JSON.stringify({chunkIds: selectedIds})
+       body: JSON.stringify({chunkIds: selectedIds, merge: isMerge})
      });
      const j = await r.json();
      if(j.error) throw new Error(j.error);

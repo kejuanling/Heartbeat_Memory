@@ -979,18 +979,14 @@ app.get("/v1/models", async (req, reply) => {
 // ========================
 // 跨窗口自动注入：日记 + 高重要级记忆 + 标星内容
 // ========================
-function recentDiaryText(days) {
+function recentDiaryText(count) {
   const diaryDir = path.join(__dirname, "diary");
   let files = [];
   try { files = fs.readdirSync(diaryDir).filter(function (f) { return /^\d{4}-\d{2}-\d{2}\.md$/.test(f); }); } catch (e) { return ""; }
   if (!files.length) return "";
-  const cutoff = Date.now() - (Number(days) || 3) * 24 * 60 * 60 * 1000;
   files.sort().reverse();
-  const picked = files.slice(0, 14).filter(function (f) {
-    const m = f.match(/^(\d{4}-\d{2}-\d{2})\.md$/);
-    if (!m) return false;
-    return new Date(m[1] + "T00:00:00").getTime() >= cutoff;
-  });
+  // 直接取最新的 count 份文件，不再按时间过滤
+  const picked = files.slice(0, Math.max(1, Number(count) || 3));
   const out = [];
   for (const f of picked) {
     try {
@@ -1051,10 +1047,8 @@ function buildCrossWindowInjection() {
   const cfg = memoryPool.getConfig();
   if (cfg.cross_inject_enabled === false) return "";
   const parts = [];
-  if (cfg.cross_inject_diary !== false) {
-    const dt = recentDiaryText(Number(cfg.cross_inject_diary_days) || 3);
-    if (dt) parts.push("## 近期日记\n" + dt);
-  }
+  
+  // 1. 高重要级记忆（优先注入）
   if (cfg.cross_inject_memory !== false) {
     const perCat = Math.max(1, Number(cfg.cross_inject_memory_per_category) || 2);
     const summaryDays = Math.max(1, Number(cfg.cross_inject_summary_days) || 7);
@@ -1097,10 +1091,19 @@ function buildCrossWindowInjection() {
       parts.push("## 重要置顶\n" + pinnedMems.map(function (m) { return "【" + m.category + "】" + m.content; }).join("\n"));
     }
   }
+  
+  // 2. 近期日记
+  if (cfg.cross_inject_diary !== false) {
+    const dt = recentDiaryText(Number(cfg.cross_inject_diary_count) || 3);
+    if (dt) parts.push("## 近期日记\n" + dt);
+  }
+  
+  // 3. 标星内容
   if (cfg.cross_inject_starred !== false) {
     const st = starredContextText(Number(cfg.cross_inject_starred_topk) || 10);
     if (st) parts.push("## 标星内容\n" + st);
   }
+  
   return parts.join("\n\n");
 }
 
@@ -2251,6 +2254,20 @@ app.get("/internal/memory-pool/retrieve", async (req, reply) => {
   }
 });
 
+// 记忆池新增记忆：MCP 工具 memory_add 用（x-internal-key 鉴权）
+app.post("/internal/memory-pool/add", async (req, reply) => {
+  try {
+    const b = req.body || {};
+    const content = String(b.content || "").trim();
+    if (!content) return reply.code(400).send({ error: "content 必填" });
+    const r = memoryPool.add({ content, category: b.category, importance: b.importance, source: "mcp" });
+    reply.send({ success: true, dup: r.dup, entry: r.entry });
+  } catch (err) {
+    console.error("[POST /internal/memory-pool/add] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
 // 永久注入上下文（pin）：MCP 工具 pin_add / pin_update / pin_delete 用
 app.get("/internal/pin", async (req, reply) => {
   try {
@@ -2471,15 +2488,30 @@ app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, re
     }
     if (!texts.length) return reply.code(400).send({ error: "无可解析的摘要" });
     const list = texts.slice(0, 200);
-    const logId = addCompactionLog({ action: "reparse", label: logLabel, status: "pending", message: "开始解析 " + list.length + " 段摘要..." }).id;
+    const isMerge = b.merge === true && list.length > 1;
+    const logLabelUse = isMerge ? ("合并再解析（" + list.length + " 块）") : logLabel;
+    const logId = addCompactionLog({ action: "reparse", label: logLabelUse, status: "pending", message: "开始解析 " + list.length + " 段摘要..." }).id;
     let added = 0, merged = 0, failed = 0;
-    for (const t of list) {
-      const r = await memoryPool.ingestSummary(t.summary, { source: "compaction", block_id: t.block_id });
+    if (isMerge) {
+      // 多个块拼接为一次 LLM 提炼：每块带编号前缀，让模型跨块全局合并去重
+      const merged = list.map(function (t, i) { return "【块 " + (i + 1) + "】\n" + t.summary; }).join("\n\n");
+      const r = await memoryPool.ingestSummary(merged, {
+        source: "compaction",
+        blockIds: list.map(function (t) { return t.block_id; }).filter(Boolean),
+        forceLlm: true
+      });
       if (r.added) added += r.added;
       if (r.merged) merged += r.merged;
       if (r.failed) failed += r.failed;
+    } else {
+      for (const t of list) {
+        const r = await memoryPool.ingestSummary(t.summary, { source: "compaction", block_id: t.block_id, forceLlm: true });
+        if (r.added) added += r.added;
+        if (r.merged) merged += r.merged;
+        if (r.failed) failed += r.failed;
+      }
     }
-    addCompactionLog({ id: logId, action: "reparse", label: logLabel, status: "success", message: "已解析 " + list.length + " 段 -> 新增 " + added + " / 合并 " + merged + " / 失败 " + failed });
+    addCompactionLog({ id: logId, action: "reparse", label: logLabelUse, status: "success", message: "已解析 " + list.length + " 段 -> 新增 " + added + " / 合并 " + merged + " / 失败 " + failed });
     reply.send({ success: true, processed: list.length, added, merged, failed });
   } catch (err) {
     addCompactionLog({ action: "reparse", label: "再解析", status: "error", message: "再解析失败：" + err.message });
@@ -4788,7 +4820,7 @@ const RUN_CONFIG_WHITELIST = new Set([
   "memory_relevance_threshold", "memory_item_cooldown_minutes",
   "context_injection_types",
   "wake_top_k", "wake_total_limit", "wake_random_count", "wake_relevance_threshold",
-  "memory_retrieval_wake_enabled"
+  "memory_retrieval_wake_enabled", "wake_history_max_messages"
 ]);
 
 // key -> expected type, applied to /admin/config and /admin/vision-models whitelist write
@@ -4811,7 +4843,8 @@ const RUN_CONFIG_TYPES = {
   wake_total_limit: "number",
   wake_random_count: "number",
   wake_relevance_threshold: "number",
-  memory_retrieval_wake_enabled: "boolean"
+  memory_retrieval_wake_enabled: "boolean",
+  wake_history_max_messages: "number"
 };
 
 app.get("/admin/config", { preHandler: basicAuth }, async (req, reply) => {

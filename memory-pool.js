@@ -45,7 +45,7 @@ const CONFIG = {
   cross_inject_diary: true,
   cross_inject_memory: true,
   cross_inject_starred: true,
-  cross_inject_diary_days: 3,
+  cross_inject_diary_count: 3,
   cross_inject_memory_per_category: 2,
   cross_inject_summary_days: 7,
   cross_inject_starred_topk: 10,
@@ -57,7 +57,8 @@ const CONFIG = {
   reparse_system_prompt: "",
   reparse_user_prompt: "",
   reparse_max_chars: 30,
-  reparse_max_items: 8
+  reparse_max_items: 8,
+  reparse_merge_max_chars: 8000
 };
 
 // 进程内已解析过的摘要哈希，短时间不重复调用 LLM
@@ -413,7 +414,7 @@ async function reparseSummaryViaLLM(text, cfg) {
   const maxChars = Math.max(5, Number(CONFIG.reparse_max_chars) || 30);
   const maxItems = Math.max(1, Number(CONFIG.reparse_max_items) || 8);
   const hasCustom = !!(String(CONFIG.reparse_system_prompt || "").trim() || String(CONFIG.reparse_user_prompt || "").trim());
-  if (CONFIG.reparse_enabled === false) {
+  if (CONFIG.reparse_enabled === false && !(cfg && cfg.forceLlm === true)) {
     const fb = parseCategoryBlocks(text);
     return { ok: true, fallback: true, disabled: true, memories: fb };
   }
@@ -472,23 +473,31 @@ async function ingestSummary(summaryText, opts) {
   opts = opts || {};
   const source = opts.source || "compaction";
   const blockId = opts.block_id || null;
+  // 合并发：批量沉底的块 id 数组（多个块一次 LLM 提炼；新条目不挂单一 block_id）
+  const mergeBlockIds = Array.isArray(opts.blockIds) ? opts.blockIds.map(String).filter(Boolean) : [];
   const hash = crypto.createHash("sha1").update(String(summaryText || "")).digest("hex");
   if (!opts.force && ingestedHashes.has(hash)) {
     return { ok: true, skipped: true, added: 0, merged: 0, failed: 0 };
   }
   ingestedHashes.add(hash);
-  const parsed = await reparseSummaryViaLLM(summaryText, opts.llm);
-  // 同一来源块的新版摘要入库时，先把旧版该块的记忆沉底，避免“同块换摘要留两条”
-  supersedeBlock(blockId);
+  const parsed = await reparseSummaryViaLLM(summaryText, { ...(opts.llm || {}), forceLlm: opts.forceLlm === true });
+  // 换版时先沉底旧记忆：合并发批量沉底选中块；单块按 block_id 沉底
+  if (mergeBlockIds.length) {
+    for (const bid of mergeBlockIds) supersedeBlock(bid);
+  } else if (blockId) {
+    supersedeBlock(blockId);
+  }
   const parsedMemories = Array.isArray(parsed.memories) ? parsed.memories : [];
   let added = 0, merged = 0, failed = 0;
   for (const m of parsedMemories) {
+    // 合并发的条目不挂单一 block_id（它可能同时吸收了多个块）；单块仍精确挂 block_id
+    const attachBlock = mergeBlockIds.length ? null : blockId;
     const r = add({
       content: m.content,
       category: m.category,
       importance: m.importance,
       source,
-      block_id: blockId
+      block_id: attachBlock
     });
     if (r.dup) merged++; else added++;
   }
