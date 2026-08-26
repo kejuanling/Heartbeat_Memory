@@ -3435,6 +3435,22 @@ app.post("/admin/context-compaction/mark", { preHandler: basicAuth }, async (req
   }
 });
 
+// 更新已标星消息正文（管理台"已标星消息"编辑）：只更新 content，保留角色与标星时间
+app.post("/admin/context-compaction/marked/update", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  const key = String(body.key || "").trim();
+  const content = String(body.content || "").trim();
+  if (!key) return reply.code(400).send({ error: "key 无效" });
+  if (!content) return reply.code(400).send({ error: "正文内容不能为空" });
+  try {
+    const r = contextCompactor.updateMark(key, { content: content });
+    if (!r.ok) return reply.code(400).send({ error: r.error || "更新失败" });
+    reply.send({ ok: true, content: r.content });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
 // 压缩上下文提示词（生成摘要时使用，恢复管理台编辑）
 app.get("/admin/logs/compaction-prompt", { preHandler: basicAuth }, async (req, reply) => {
   try {

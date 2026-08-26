@@ -1211,6 +1211,19 @@ function setMark(key, marked, opt) {
   return { ok: true, marked: !!marked };
 }
 
+
+
+// 更新已标星消息的正文内容（保留角色与标星时间）。用于管理台"已标星消息"编辑。
+function updateMark(key, opt) {
+  const marks = loadMarks();
+  if (!marks[key]) return { ok: false, error: "该标星消息不存在，可能已被取消" };
+  const content = String((opt && opt.content) || "").trim();
+  if (!content) return { ok: false, error: "正文内容不能为空" };
+  marks[key].content = content;
+  saveMarks(marks);
+  return { ok: true, content: content };
+}
+
 // 从时间线原文件（enhanced_messages.json）按内容指纹反查原文。
 // 时间线是对话原始记录，比替换池 matched 更完整；仅在标星未带原文时兜底调用。
 function findContentByKey(key) {
@@ -1891,6 +1904,7 @@ module.exports = {
   contentKey,
   loadMarks,
   setMark,
+  updateMark,
   getCompactionPromptForDisplay,
   saveCompactionPromptConfig,
   resetCompactionPromptConfig

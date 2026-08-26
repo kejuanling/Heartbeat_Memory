@@ -1545,6 +1545,21 @@
     </div>
   </div>
 
+ <div class="modal-overlay" id="markEditModal">
+   <div class="modal modal-edit-mem" style="max-width:min(94vw,680px)">
+     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-shrink:0">
+       <h3 id="mark-modal-title" style="margin:0;font-size:16px">编辑标星消息</h3>
+       <button type="button" onclick="closeModal('markEditModal')" style="background:rgba(0,0,0,0.04);border:none;font-size:16px;color:var(--text2);cursor:pointer;padding:6px 10px;border-radius:8px;line-height:1">&times;</button>
+     </div>
+     <div id="mark-modal-info" style="font-size:12px;color:var(--text3);margin-bottom:10px"></div>
+     <textarea id="mark-edit-content" rows="10" placeholder="正文内容（保存后会同步影响跨窗口注入给AI的内容）..." style="width:100%;box-sizing:border-box;padding:12px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,0.85);font-size:13px;line-height:1.5;color:var(--text2);resize:vertical;font-family:inherit"></textarea>
+     <div style="display:flex;gap:10px;margin-top:12px">
+       <button type="button" class="btn btn-primary" id="mark-save-btn" onclick="saveMarkEdit()" style="flex:1;background:var(--accent)">保存</button>
+       <button type="button" class="btn btn-outline" onclick="closeModal('markEditModal')" style="flex:1">取消</button>
+     </div>
+   </div>
+ </div>
+
 <!-- 信封：信全文弹窗 -->
  
  <div class="modal-overlay" id="diaryEditModal">
@@ -2770,6 +2785,7 @@ function toast(msg){
      const r=await fetch(ADMIN_API + '/context-compaction/marked-list');
      const j=await r.json();
      const list=j.results||[];
+     window.__markedList=list;
      el.innerHTML='';
      if(info) info.textContent='共 ' + list.length + ' 条已标星消息';
      if(!list.length){ el.innerHTML='<div class="empty">暂无标星消息（在上方原文搜索里点星可以标记）</div>'; return; }
@@ -2784,6 +2800,7 @@ function toast(msg){
          +'<span style="font-size:11px;color:var(--text3)">第 '+x.index+' 条</span>'
          +'<span style="font-size:11px;'+roleCls+'">'+escHtml2(x.role||'')+'</span>'
          +chunkTag
+         +'<button type="button" onclick="openMarkEdit(this)" data-key="'+x.key+'" title="编辑正文" aria-label="编辑正文" style="flex-shrink:0;padding:2px 8px;border:1px solid var(--border);border-radius:6px;background:rgba(0,0,0,0.02);color:var(--text2);font-size:11px;cursor:pointer">编辑</button>'
          +'<button style="margin-left:auto;flex-shrink:0" class="cc-msg-mark on" data-key="'+x.key+'" onclick="unmarkMsg(this)" title="取消标星：将后此消息可被摘要覆盖" aria-pressed="true" aria-label="取消标星">★</button>'
          +'</div>'
          +'<div style="font-size:11px;color:var(--text3);margin-top:2px">'+tH+'</div>'
@@ -2807,6 +2824,42 @@ function toast(msg){
      loadMarkedList();
    }).catch(function(e){ alert('取消失败: '+e.message); btn.disabled=false; });
  }
+
+
+  // 编辑标星消息正文（管理台"已标星消息"）
+  function openMarkEdit(btn){
+    if(!btn) return;
+    const key=btn.getAttribute('data-key');
+    const list=window.__markedList||[];
+    const it=list.find(function(x){ return String(x.key)===String(key); });
+    if(!it){ toast('未找到该标星消息'); return; }
+    window.__markEditKey=key;
+    const mt=document.getElementById('mark-modal-title'); if(mt) mt.textContent='编辑标星消息';
+    const info=document.getElementById('mark-modal-info');
+    if(info){
+      let t=''; try{ t=it.markedAt?new Date(it.markedAt).toLocaleString('zh-CN',{hour12:false}):(it.time||''); }catch(err){}
+      info.textContent='第 '+it.index+' 条 · '+(it.role||'')+(t?(' · '+t):'');
+    }
+    const ce=document.getElementById('mark-edit-content'); if(ce) ce.value=it.content||'';
+    openModal('markEditModal');
+  }
+  async function saveMarkEdit(){
+    const key=window.__markEditKey;
+    if(!key){ toast('记录不存在'); return; }
+    const el=document.getElementById('mark-edit-content');
+    const content=(el?el.value:'').trim();
+    if(!content){ toast('正文内容不能为空'); return; }
+    const btn=document.getElementById('mark-save-btn');
+    try{
+      const r=await apiRequest('POST', ADMIN_API+'/context-compaction/marked/update', {key:key, content:content}, {busy:btn});
+      if(!r.ok) return;
+      const d=r.data||{};
+      if(d.error){ toast('保存失败: '+d.error); return; }
+      toast('已保存');
+      closeModal('markEditModal');
+      loadMarkedList();
+    }catch(e){ toast('网络错误: '+e.message); }
+  }
 
  let ccPreviewInflight=false;
 let ccPreviewDirty=false;
