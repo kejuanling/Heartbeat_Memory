@@ -1713,8 +1713,14 @@ function listMarked() {
     });
   });
 
-  // 按消息在对话中的位置（编号）升序，编号从小到大连续
-  results.sort(function (a, b) { return a.index - b.index; });
+  // 按标记时间倒序：最新标记在最前面；无标记时间的存量条目排最后，保证稳定
+  results.sort(function (a, b) {
+    const ta = a.markedAt ? (Number(new Date(a.markedAt)) || -Infinity) : -Infinity;
+    const tb = b.markedAt ? (Number(new Date(b.markedAt)) || -Infinity) : -Infinity;
+    return tb - ta;
+  });
+  // 排序后重新分配连续编号（1-based），保证前端「第 X 条」序号连续
+  results.forEach(function (r, i) { r.index = i + 1; });
   return { ok: true, total: results.length, results: results };
 }
 
