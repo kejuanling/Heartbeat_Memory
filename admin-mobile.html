@@ -743,6 +743,17 @@
  .mp-btn.danger{color:#c0392b;border-color:rgba(192,57,43,0.22)}
  .mp-btn.danger:hover{background:rgba(192,57,43,0.06);border-color:rgba(192,57,43,0.36);color:#a93226;box-shadow:none;transform:none}
  .mp-btn:disabled{opacity:.5;pointer-events:none}
+ .cl-diff{display:flex;flex-direction:column;gap:4px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin-bottom:8px;position:relative}
+ .cl-tag{font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;align-self:flex-start}
+ .cl-diff.add .cl-tag{background:rgba(46,204,113,0.14);color:#27ae60}
+ .cl-diff.sink .cl-tag{background:rgba(127,140,141,0.16);color:#7f8c8d}
+ .cl-diff.recat .cl-tag{background:rgba(41,128,185,0.14);color:#2980b9}
+ .cl-diff.rescore .cl-tag{background:rgba(243,156,18,0.16);color:#e67e22}
+ .cl-diff.edit .cl-tag{background:rgba(142,68,173,0.14);color:#8e44ad}
+ .cl-cat{font-size:11px;color:var(--text2)}
+ .cl-body{font-size:13px;color:var(--text);line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
+ .cl-old{font-size:11px;color:var(--text3);background:rgba(60,40,40,0.04);border-radius:8px;padding:6px 8px;margin-top:2px}
+ #mempool-clean-body{max-height:58vh;overflow:auto;padding-right:4px}
  .mp-stats{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
  .mp-stat{display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:999px;background:rgba(200,144,152,0.08);border:1px solid rgba(200,144,152,0.14);font-size:11px;color:var(--text2)}
  .mp-stat b{color:var(--accent);font-weight:700;font-size:12px}
@@ -1066,6 +1077,7 @@
           <button type="button" class="mp-btn primary" onclick="openMemPoolAdd()">＋ 新增记忆</button>
           <button type="button" class="mp-btn" onclick="tidyMemPool()">整理记忆池</button>
         </div>
+        <div id="mempool-clean-msg" style="width:100%;font-size:11px;color:var(--text3);min-height:16px;margin-top:2px"></div>
       </div>
       <div id="mempool-stats" class="mp-stats"><span class="mp-stat">统计中...</span></div>
       <div class="mp-controls">
@@ -1167,6 +1179,21 @@
       </div>
     </div>
 
+    <div class="card" data-collapse-id="clean-prompt-config" data-default="collapsed">
+      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆池·整理清洗提示词</span><span class="collapse-arrow">▾</span></div>
+      <div class="card-body">
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">下面展示「整理记忆池」用的清洗提示词（系统 + 用户）。可直接修改、保存后覆盖内置；点「恢复内置默认」会清空自定义、回到内置版。</div>
+        <div class="cc-cfg-msg" id="clean-prompt-msg" style="margin-bottom:8px"></div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">System 提示词</div>
+        <textarea id="clean-sys-prompt" rows="4" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;margin-bottom:10px"></textarea>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">User 提示词（不含记忆文本，运行时自动追加）</div>
+        <textarea id="clean-user-prompt" rows="10" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;margin-bottom:10px"></textarea>
+        <div style="display:flex;gap:10px">
+          <button type="button" class="cc-btn primary" onclick="saveCleanPrompt()">保存提示词</button>
+          <button type="button" class="cc-btn secondary" onclick="resetCleanPrompt()">恢复内置默认</button>
+        </div>
+      </div>
+    </div>
 <div class="card" data-collapse-id="co-wake-prompt" data-default="collapsed">
      <div class="card-title collapsible" onclick="toggleCard(this)"><span>观影唤醒提示词</span><span class="collapse-arrow">▾</span></div>
      <div class="card-body">
@@ -1489,7 +1516,21 @@
       </div>
     </div>
   </div>
-  <div class="modal-overlay" id="pushEditModal">
+    <div class="modal-overlay" id="mempoolCleanModal">
+    <div class="modal" style="max-width:min(94vw,720px)">
+      <div class="mp-modal-head">
+        <h3>整理记忆池 · 预览</h3>
+        <button type="button" class="mp-modal-x" onclick="closeModal('mempoolCleanModal')">&times;</button>
+      </div>
+      <div id="mempool-clean-stat" style="font-size:12px;color:var(--text2);margin-bottom:10px"></div>
+      <div id="mempool-clean-body" style="padding-right:4px"></div>
+      <div class="mp-modal-actions">
+        <button type="button" class="mp-btn" onclick="closeModal('mempoolCleanModal')">取消</button>
+        <button type="button" class="mp-btn primary" id="mempool-clean-apply" onclick="applyClean()">确认落地</button>
+      </div>
+    </div>
+  </div>
+<div class="modal-overlay" id="pushEditModal">
     <div class="modal modal-edit-mem" style="max-width:min(94vw,680px)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-shrink:0">
         <h3 id="push-modal-title" style="margin:0;font-size:16px">编辑推送</h3>
@@ -2358,6 +2399,42 @@ function toast(msg){
     }catch(e){ toast('网络错误: '+e.message); }
   }
 
+  async function loadCleanPrompt(){
+    const msg=document.getElementById('clean-prompt-msg');
+    try{
+      const r=await fetch(ADMIN_API + '/memory-pool/clean/prompt');
+      const c=await r.json();
+      const s=document.getElementById('clean-sys-prompt'); if(s) s.value=c.clean_system_prompt||c.default_clean_system_prompt||'';
+      const u=document.getElementById('clean-user-prompt'); if(u) u.value=c.clean_user_prompt||c.default_clean_user_prompt||'';
+      if(msg) msg.textContent='已载入内置默认清洗提示词；可修改保存覆盖，或点「恢复内置默认」。';
+    }catch(e){ if(msg) msg.textContent='读取清洗提示词失败: '+e.message; }
+  }
+  async function saveCleanPrompt(){
+    const msg=document.getElementById('clean-prompt-msg');
+    const s=document.getElementById('clean-sys-prompt').value;
+    const u=document.getElementById('clean-user-prompt').value;
+    try{
+      const r=await fetch(ADMIN_API+'/memory-pool/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clean_system_prompt:s.trim(),clean_user_prompt:u.trim()})});
+      const d=await r.json();
+      if(d.error){ if(msg) msg.textContent='保存失败: '+d.error; return; }
+      if(msg) msg.textContent='已保存，下次整理记忆池生效。';
+      toast('清洗提示词已保存');
+    }catch(e){ if(msg) msg.textContent='保存失败: '+e.message; }
+  }
+  async function resetCleanPrompt(){
+    const s=document.getElementById('clean-sys-prompt');
+    const u=document.getElementById('clean-user-prompt');
+    const _c=await (await fetch(ADMIN_API + '/memory-pool/clean/prompt')).json() || {};
+    if(s) s.value=_c.default_clean_system_prompt||'';
+    if(u) u.value=_c.default_clean_user_prompt||'';
+    try{
+      const r=await fetch(ADMIN_API+'/memory-pool/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clean_system_prompt:'',clean_user_prompt:''})});
+      const d=await r.json();
+      if(d.error){ toast('恢复失败: '+d.error); return; }
+      toast('已恢复内置默认清洗提示词');
+      const m=document.getElementById('clean-prompt-msg'); if(m) m.textContent='已恢复内置默认';
+    }catch(e){ toast('网络错误: '+e.message); }
+  }
   async function loadMemoryWakeConfig(){
     const msg=document.getElementById('memory-wake-config-msg');
     try{
@@ -4758,7 +4835,7 @@ function ccArmAllGapAutoLoad(){
    document.querySelector('.tab-item[data-tab="'+name+'"]').classList.add('active');
   if(name==='memory'){switchMemView(AppState.memView);loadImportedList();}
   if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
-  if(name==='prompts'){loadWakePrompt();loadCompactionPrompt();loadCoWakePrompt();loadCoVisionPrompt();loadReparsePrompt();}
+  if(name==='prompts'){loadWakePrompt();loadCompactionPrompt();loadCoWakePrompt();loadCoVisionPrompt();loadReparsePrompt();loadCleanPrompt();}
   if(name==='config'){loadToolsConfig();loadServices();}
   if(name==='system'){startLogsAutoRefresh(); loadReplaceLog();}
   if(name!=='system'){stopLogsAutoRefresh();}
@@ -5659,8 +5736,63 @@ async function deletePinned(id){
       toast('已删除'); loadMemPool();
     }catch(e){ toast('操作失败: '+e.message); }
   }
-  function tidyMemPool(){
-    toast('「整理记忆池」功能规划中，清洗方案详见《记忆池整理功能策划书》。');
+  async function tidyMemPool(){
+    if(!confirm('将把记忆池中所有未清洗过的记忆发给 LLM 做一次全量清洗：合并重复/同义、纠正分类、重估重要级、把过时/无关/与已有重复的沉底（不删除，可恢复）。已清洗过的记忆作为参考一起比对，避免重复&下次不再重洗。\n会先预览，你确认后才落地。继续？')) return;
+    const msg=document.getElementById('mempool-clean-msg');
+    if(msg) msg.textContent='正在生成清洗预览…';
+    try{
+      const r=await fetch(ADMIN_API+'/memory-pool/clean',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({preview:true})});
+      const d=await r.json();
+      if(d.error){ if(msg) msg.textContent='清洗失败: '+d.error; toast('清洗失败: '+d.error); return; }
+      if(msg) msg.textContent='';
+      renderCleanPreview(d);
+    }catch(e){ if(msg) msg.textContent='清洗失败: '+e.message; toast('清洗失败: '+e.message); }
+  }
+  function renderCleanPreview(d){
+    window.__cleanPreview=d;
+    const body=document.getElementById('mempool-clean-body');
+    if(!body) return;
+    const st=document.getElementById('mempool-clean-stat');
+    if(st) st.textContent='活跃 '+d.found+' 条 · 待清洗 '+(d.to_clean||0)+' 条，建议：合并 '+(d.merged||0)+' / 沉底 '+(d.sunk||0)+' / 重分类 '+(d.recategorized||0)+' / 重打分 '+(d.rescored||0)+' / 新增 '+(d.added||0);
+    const changes=d.changes||[];
+    if(!changes.length){ body.innerHTML='<div class="mp-empty">未识别到需要整理的记忆，可直接关闭。</div>'; }
+    else{
+      let html='';
+      changes.forEach(function(c){
+        if(c.type==='add'){
+          html+='<div class="cl-diff add"><span class="cl-tag">新增</span><div class="cl-body">'+escapeHtml(c.content)+'</div></div>';
+        }else{
+          let cat=c.from.category;
+          if(c.to && c.to.category && c.to.category!==c.from.category) cat+=' → '+c.to.category;
+          let imp=c.from.importance;
+          if(c.to && c.to.importance!=null && c.to.importance!==c.from.importance) imp+=' → '+c.to.importance;
+          const tag=c.type==='sink'?'沉底':(c.type==='recat'?'改分类':(c.type==='rescore'?'重打分':'修改'));
+          html+='<div class="cl-diff '+c.type+'"><span class="cl-tag">'+tag+'</span>'
+            +'<div class="cl-cat">'+escapeHtml(cat)+' · 重要 '+escapeHtml(imp)+'</div>'
+            +'<div class="cl-body">'+escapeHtml(c.type==='sink'?c.from.content:c.to.content)+'</div>'
+            +(c.type!=='sink'?'<div class="cl-old">原：'+escapeHtml(c.from.content)+'</div>':'')
+            +'</div>';
+        }
+      });
+      body.innerHTML=html;
+    }
+    openModal('mempoolCleanModal');
+  }
+  async function applyClean(){
+    const d=window.__cleanPreview;
+    if(!d) return;
+    const btn=document.getElementById('mempool-clean-apply');
+    if(btn){ btn.disabled=true; btn.textContent='落地中…'; }
+    try{
+      const r=await fetch(ADMIN_API+'/memory-pool/clean',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({preview:false})});
+      const res=await r.json();
+      if(res.error){ toast('落地失败: '+res.error); if(btn){btn.disabled=false;btn.textContent='确认落地';} return; }
+      const msg=document.getElementById('mempool-clean-msg');
+      if(msg) msg.textContent='已落地：待清洗 '+(res.to_clean||0)+' 条 → 合并 '+(res.merged||0)+' / 沉底 '+(res.sunk||0)+' / 重分类 '+(res.recategorized||0)+' / 重打分 '+(res.rescored||0)+' / 新增 '+(res.added||0);
+      toast('整理完成');
+      closeModal('mempoolCleanModal');
+      loadMemPool();
+    }catch(e){ toast('网络错误: '+e.message); if(btn){btn.disabled=false;btn.textContent='确认落地';} }
   }
 
 // ============ 信封：写给下一个窗口自己的信 ============

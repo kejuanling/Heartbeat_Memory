@@ -2531,6 +2531,35 @@ app.post("/admin/memory-pool/config", { preHandler: basicAuth }, async (req, rep
   try { reply.send(memoryPool.setConfig(req.body || {})); } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
+app.get("/admin/memory-pool/clean/prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const cfg = memoryPool.getConfig();
+    const def = memoryPool.buildCleanPrompt();
+    reply.send({ ...cfg, default_clean_system_prompt: def.system, default_clean_user_prompt: def.user });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+app.post("/admin/memory-pool/clean", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const b = req.body || {};
+    const preview = b.preview !== false;
+    const label = preview ? "整理记忆池·预览" : "整理记忆池·落地";
+    const st = memoryPool.stats();
+    addCompactionLog({ action: "memory-clean", label: label, status: "pending", message: "开始整理（活跃 " + st.active + " 条）…" });
+    const r = await memoryPool.cleanPool({ preview: preview, force: b.force === true });
+    if (r.error) {
+      addCompactionLog({ action: "memory-clean", label: label, status: "error", message: "整理失败：" + r.error });
+      return reply.send(r);
+    }
+    const statMsg = "待清洗 " + (r.to_clean || 0) + " 条 → 合并 " + (r.merged || 0) + " / 沉底 " + (r.sunk || 0) + " / 重分类 " + (r.recategorized || 0) + " / 重打分 " + (r.rescored || 0) + " / 新增 " + (r.added || 0);
+    addCompactionLog({ action: "memory-clean", label: label, status: "success", message: "记忆已整理完成 " + statMsg });
+    reply.send(r);
+  } catch (err) {
+    addCompactionLog({ action: "memory-clean", label: "整理记忆池", status: "error", message: "整理失败：" + err.message });
+    reply.code(500).send({ error: err.message });
+  }
+});
+
 // ========================
 // 推送管理（时间线里的推送回显）
 // ========================

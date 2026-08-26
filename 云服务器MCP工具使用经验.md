@@ -168,3 +168,12 @@
 - 内存治理：gateway ~450-700MB + 无头浏览器 ~170MB → OOM 杀进程（曾一晚上重启 300+ 次）。用 `free -h`、`dmesg | grep -i oom`、`pm2 list` 重启次数监控。
 - 工具集（mcp-tools）：`tools_manifest.json` 由服务启动时自动重新生成，**不能手改**；运行时描述以 `tools_config.json` 的 `descriptions`/`schemas` 覆盖为准（配置覆盖优先，源码只作恢复默认底稿）；改完 watch 循环 2 秒热加载重写 manifest；`tools_server.py` 只作源码默认。
 - 导入对话：`imported-conversations.js` 解析（按 `---` 分段，首行 `YYYY年M月D日 HH:mm:ss · 说话人`，涵→user、谢意行→assistant）；入库后逐条恢复原始 timestamp；导入内容不能整个记录共用同一个去重 key。
+
+
+### 3.12 网关（gateway）重启与“整理记忆池”清洗调优
+- **gateway 重启坑**：pm2 里 `gateway` 常显示 `stopped`/`pid=0`（状态与真实进程 desync），但实际在跑 `node /opt/dylan-heartbeat/server.js`（父进程是 PM2 God Daemon，pid 通常 67493）。改完 server.js/memory-pool.js 要生效，用 **准确 PID `kill -TERM <pid>`**，pm2 会自动拉新进程；别依赖 `pgrep -f "^node ...server.js$"`（精确匹配常抓不到，导致 kill 空转），也别相信 `ss -ltn | grep :3000`（有时测不到但 curl 有响应）。重启后用 `curl -u han:xxxx -s -o /dev/null -w "%{http_code}" .../clean/prompt` 看 401/200 判断是否加载了新路由。
+- **改代码后必须重启**：`admin-mobile.html` 改动刷新浏览器即可生效，但 `memory-pool.js`/`server.js` 改动要重启 gateway。
+- **清洗性能**：`deepseek-v4-flash-vision-exp` 单条清洗约 2.7s，整池 270 条一次喂会超时。`clean_max_items`（默认 50）控制单次批大小，`cleanPool` 按重要级降序取前 N，低频“体检”分几次跑。若 MCP `tools/call` 超时，先把 `clean_max_items` 临时调小（如 8）做只读 preview 验证管道。
+- **对齐 note**：`/proc/<pid>/environ` 读不到 dotenv 注入的凭据，admin 凭据在 `/opt/dylan-heartbeat/.env` 的 `ADMIN_USER`/`ADMIN_PASSWORD`（勿打印明文）。
+- 压缩编号体系要同源：未覆盖区预览编号（`rangePreview`）与填编号/改范围（`compressibleItems`）必须用同一套可压缩列表，`rangePreview` 应复用 `contextReplacements.compressibleItems()`，否则 compactor 对软删除消息"保留占位"会让编号漂移约 8 条。
+- 生成摘要发原文必须同源：`generateSummaryForRange` 一定要用 `contextReplacements.compressibleItems()` 构建 items，别用 compactor 自己的 `isCompressible`（后者对软删除 `deleted===true` 返回 true、且不排除「记忆碎片」，列表会多几条，导致同一编号指到不同消息、切片首尾与块编号错位）。`buildPlan`/`generateBlockSummary` 用 `loadBlocks()`（context_compaction_blocks.json 那套）与 `compressibleItems` 是两套编号，别混。

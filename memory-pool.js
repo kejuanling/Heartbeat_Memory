@@ -58,7 +58,16 @@ const CONFIG = {
   reparse_user_prompt: "",
   reparse_max_chars: 30,
   reparse_max_items: 8,
-  reparse_merge_max_chars: 8000
+  reparse_merge_max_chars: 8000,
+  // 整理记忆池（全局清洗 LLM）：预览/落地、提示词、数量上限、温度
+  clean_enabled: true,
+  clean_system_prompt: "",
+  clean_user_prompt: "",
+  clean_max_items: 50,
+  clean_temperature: 0.2,
+  clean_ref_topk: 10,
+  clean_ref_threshold: 0.4,
+  clean_ref_dup_threshold: 0.85
 };
 
 // 进程内已解析过的摘要哈希，短时间不重复调用 LLM
@@ -392,6 +401,27 @@ function parseCategoryBlocks(text) {
   return [];
 }
 
+// 稳健地从 LLM 返回字符串中取出记忆数组（兼容：纯数组 JSON / 对象包数组 {memories:[...]} / 带 ```json 围栏 / 文本里嵌 [] / JSON.parse 失败用正则抓）
+function parseLlmArray(cleaned) {
+  const tryParse = function (t) { try { return JSON.parse(t); } catch (e) { return null; } };
+  let parsed = tryParse(cleaned);
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && typeof parsed === "object") {
+    const keys = ["memories", "data", "items", "list", "results", "memory", "entries"];
+    for (const k of keys) if (Array.isArray(parsed[k])) return parsed[k];
+    for (const k of Object.keys(parsed)) if (Array.isArray(parsed[k])) return parsed[k];
+  }
+  const mm = String(cleaned || "").match(/\[[\s\S]*\]/);
+  if (mm) {
+    parsed = tryParse(mm[0]);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === "object") {
+      for (const k of Object.keys(parsed)) if (Array.isArray(parsed[k])) return parsed[k];
+    }
+  }
+  return null;
+}
+
 function buildReparsePrompt(warm) {
   const maxChars = Math.max(5, Number(CONFIG.reparse_max_chars) || 30);
   const maxItems = Math.max(1, Number(CONFIG.reparse_max_items) || 8);
@@ -446,11 +476,7 @@ async function reparseSummaryViaLLM(text, cfg) {
     const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
     if (!content) return { ok: false, error: "LLM 空响应" };
     const cleaned = String(content).replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
-    let arr = null;
-    try { arr = JSON.parse(cleaned); } catch (e) {
-      const mm = cleaned.match(/\[[\s\S]*\]/);
-      if (mm) { try { arr = JSON.parse(mm[0]); } catch (e2) {} }
-    }
+    const arr = parseLlmArray(cleaned);
     if (!Array.isArray(arr)) return { ok: false, error: "LLM 输出非数组" };
     const out = [];
     for (const it of arr) {
@@ -502,6 +528,247 @@ async function ingestSummary(summaryText, opts) {
     if (r.dup) merged++; else added++;
   }
   return { ok: true, added, merged, failed, fallback: !!parsed.fallback, error: parsed.error || null };
+}
+
+// ---------------- 整理记忆池（全局清洗 + 打标记 + 参考去重） ----------------
+// 全量清洗：只洗「未清洗过」的记忆（cleaned_at 为空）。已清洗过的记忆作为
+// 「参考上下文」参与去重/合并判断：用关键词+语义相似度把与本次内容相近的旧记忆
+// 挑出来一起喂给 LLM，从而下次全量不会重复清洗旧部分，又能挡掉与旧记忆重复的新增。
+function buildCleanPrompt() {
+  const catEnum = "(关于她|关于我们|锚点|信号|对话摘要)";
+  const catNote = "分类含义：关于她=她是谁/她经历过的（稳定特征+过往经历）；关于我们=我们怎么相处（触发场景→我怎么做/不怎么做→她反应→下次想怎么调）；锚点=一字不改的原话；信号=她状态变化的可观察言行；对话摘要=聊过什么话题索引。";
+  const system = "你是这段关系的记忆整理者，处理要果断、不手软。目标是把记忆池整理得干净、凝练、贴近真实，宁可少而准不要多而杂。对不重要的记忆，把重要级打低到 0.2~0.4；对过时、无效、含糊不清、没用的记忆，直接沉底，别舍不得；对内容相近、同义、重复的记忆，直接合并成一条，不用等完全一样；与【已清洗参考】重复的待清洗记忆，直接沉底。保留真实相处质感，禁止编造、禁止脑补、禁止写成冰冷档案。只输出 JSON。";
+  const user = "以下是记忆池中所有待清洗记忆（每条含：编号、原分类、内容、重要级、是否置顶）。请整理成一份新的记忆清单，规则如下（要果断，不要手软）：\n"
+    + "1. 合并：内容相近、同义、重复的记忆直接合并为一条，不用等完全一样；宁可合并，不要留多个相似条。\n"
+    + "2. 去重：完全相同的只保留一条。\n"
+    + "3. 重新分类：按【关于她｜关于我们｜锚点｜信号｜对话摘要】纠正分类。\n"
+    + "4. " + catNote + "\n"
+    + "5. 重要级：重新评估 importance（0~1），不重要的打低到 0.2~0.4，越重要越接近 1。\n"
+    + "6. 沉底：对不重要、不明确、过时、无效、没用，或与【已清洗参考】重复的记忆，直接标记 sunk=true（不是删除，只是不再参与浮现），别舍不得。\n"
+    + "7. 置顶的尽量保留置顶状态，除非内容已完全失效。\n"
+    + "8. 只输出对【待清洗记忆】的整理结果；【已清洗参考】仅作去重/合并判断，不要重复输出它们。\n"
+    + "9. 宁可少而准确，不要多而杂；合并后总条数尽量少，但不要丢失重要事实。\n"
+    + "直接输出 JSON 数组，每项格式：\n"
+    + "{\"id\":\"保持原 id 或 new\",\"content\":\"...\",\"category\":\"" + catEnum + "\",\"importance\":0~1,\"sunk\":false,\"pin\":false}\n"
+    + "不要输出任何解释文字。";
+  return { system: system, user: user };
+}
+
+async function cleanPoolViaLLM(system, user) {
+  const apiUrl = process.env.TARGET_API_URL || "";
+  const apiKey = process.env.TARGET_API_KEY || "";
+  const model = process.env.MODEL_NAME || "";
+  if (!apiUrl || !apiKey || !model) return { ok: false, error: "LLM 未配置（TARGET_API_URL / TARGET_API_KEY / MODEL_NAME）" };
+  try {
+    const resp = await fetch(apiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
+      body: JSON.stringify({
+        model: model,
+        messages: [{ role: "system", content: system }, { role: "user", content: user }],
+        temperature: Number(CONFIG.clean_temperature) || 0.2,
+        response_format: { type: "json_object" }
+      })
+    });
+    if (!resp.ok) return { ok: false, error: "LLM HTTP " + resp.status };
+    const data = await resp.json();
+    const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+    if (!content) return { ok: false, error: "LLM 空响应" };
+    const cleaned = String(content).replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
+    const arr = parseLlmArray(cleaned);
+    if (!Array.isArray(arr)) return { ok: false, error: "LLM 输出非数组" };
+    const out = [];
+    for (const it of arr) {
+      if (!it || typeof it !== "object") continue;
+      const content2 = String(it.content || "").trim();
+      if (!content2) continue;
+      out.push({
+        id: it.id ? String(it.id) : null,
+        content: content2,
+        category: CATEGORIES.includes(it.category) ? it.category : "关于她",
+        importance: Math.max(0, Math.min(1, Number(it.importance) || 0.5)),
+        sunk: it.sunk === true,
+        pin: it.pin === true
+      });
+    }
+    return { ok: true, memories: out };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function backupPoolFile() {
+  try {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const dest = path.join(DATA_DIR, "_fix_backup_" + stamp + ".json");
+    await fs.copy(POOL_FILE, dest);
+    return dest;
+  } catch (e) {
+    return null;
+  }
+}
+
+// 选出与 chunk 最相似的一批「已清洗记忆」，作为 LLM 去重参考上下文
+function selectReferenceContext(chunk, refPool, topk, th) {
+  const ctx = [];
+  for (const ref of refPool) {
+    let bestSim = 0;
+    for (const ci of chunk) {
+      const sim = contentSimilarity(ref.content, ci.content);
+      if (sim > bestSim) bestSim = sim;
+    }
+    if (bestSim >= th) ctx.push({ ref: ref, sim: bestSim });
+  }
+  ctx.sort(function (a, b) { return b.sim - a.sim; });
+  return ctx.slice(0, topk);
+}
+
+async function cleanPool(opts) {
+  opts = opts || {};
+  const preview = opts.preview !== false;
+  const rows = load();
+  const active = rows.filter(function (r) { return r.active !== false; });
+  const found = active.length;
+  if (!found) return { ok: true, preview: preview, found: 0, to_clean: 0, added: 0, merged: 0, recategorized: 0, rescored: 0, sunk: 0, changes: [] };
+  if (CONFIG.clean_enabled === false) return { ok: false, error: "整理记忆池已关闭（clean_enabled=false）" };
+
+  const maxItems = Math.max(1, Number(CONFIG.clean_max_items) || 50);
+  const refTopk = Math.max(1, Number(CONFIG.clean_ref_topk) || 10);
+  const refTh = Number(CONFIG.clean_ref_threshold) || 0.4;
+  const dupTh = Number(CONFIG.clean_ref_dup_threshold) || 0.85;
+  const MATCH_TH = 0.5;
+  const MERGE_SINK_TH = 0.6;  // 与保留条目相近度>=此值，视为被合并，沉底
+
+  // 待清洗 = 还没打标记（cleaned_at 为空）；已清洗 = 已有 cleaned_at
+  // force=true 时忽略标记、强制重洗全部活跃记忆
+  const toClean = active.filter(function (r) { return opts.force === true || !r.cleaned_at; });
+  const toCleanCount = toClean.length;
+  if (!toCleanCount) return { ok: true, preview: preview, found: found, to_clean: 0, added: 0, merged: 0, recategorized: 0, rescored: 0, sunk: 0, changes: [], message: "没有新的待清洗记忆" };
+
+  const sortedToClean = toClean.slice().sort(function (a, b) { return (Number(b.importance) || 0) - (Number(a.importance) || 0); });
+  const priorRef = active.filter(function (r) { return !!r.cleaned_at; }).slice();
+  const contextPool = priorRef.slice();
+
+  const def = buildCleanPrompt();
+  const system = String(CONFIG.clean_system_prompt || "").trim() || def.system;
+  const userBase = (String(CONFIG.clean_user_prompt || "").trim() || def.user);
+
+  const changes = [];
+  let added = 0, merged = 0, recategorized = 0, rescored = 0, sunkCount = 0;
+  let llmError = null;
+
+  // 按批分块（LLM 容量限制），每块处理一部分待清洗记忆
+  for (let i = 0; i < sortedToClean.length; i += maxItems) {
+    const chunk = sortedToClean.slice(i, i + maxItems);
+    const refContext = selectReferenceContext(chunk, contextPool, refTopk, refTh);
+
+    const snapshot = chunk.map(function (r, j) {
+      return (j + 1) + ". [id=" + r.id + "]（分类=" + r.category + "，重要级=" + (Number(r.importance) || 0.5) + "，置顶=" + (r.pinned ? "是" : "否") + "）内容：" + r.content;
+    }).join("\n");
+    const refText = refContext.map(function (c, j) {
+      return "[" + c.ref.id + "]（分类=" + c.ref.category + "，重要级=" + (Number(c.ref.importance) || 0.5) + "）内容：" + c.ref.content;
+    }).join("\n");
+    let user = userBase + "\n\n【待清洗记忆】\n" + snapshot;
+    if (refText) user += "\n\n【已清洗参考（仅作去重/合并判断，勿作为本次输出重新创建）】\n" + refText;
+
+    const llm = await cleanPoolViaLLM(system, user);
+    if (!llm.ok) { llmError = llm.error; break; }
+    const items = llm.memories || [];
+    const byId = new Map();
+    for (const r of chunk) byId.set(r.id, r);
+    const matchedIds = new Set();
+
+    for (const it of items) {
+      let target = null;
+      if (it.id && byId.has(it.id)) target = byId.get(it.id);
+      else {
+        let best = null, bestSim = 0;
+        for (const r of chunk) {
+          const sim = contentSimilarity(r.content, it.content);
+          if (sim > bestSim) { bestSim = sim; best = r; }
+        }
+        if (best && bestSim >= MATCH_TH) target = best;
+      }
+      if (!target) { changes.push({ id: null, type: "add", content: it.content, category: it.category, importance: it.importance, sink: false }); added++; continue; }
+      matchedIds.add(target.id);
+      const isAnchor = target.category === "锚点";
+      const newCat = CATEGORIES.includes(it.category) ? it.category : target.category;
+      const newImp = Math.max(0, Math.min(1, Number(it.importance) || (Number(target.importance) || 0)));
+      const newContent = isAnchor ? target.content : String(it.content || target.content).trim();
+      const sinkIt = it.sunk === true;
+      const diffs = [];
+      if (newContent !== target.content) diffs.push("content");
+      if (newCat !== target.category) diffs.push("category");
+      if (Math.abs(newImp - (Number(target.importance) || 0)) > 0.01) diffs.push("importance");
+      if (sinkIt) diffs.push("sink");
+      if (!diffs.length) continue;
+      if (diffs.indexOf("content") !== -1) merged++;
+      if (diffs.indexOf("category") !== -1) recategorized++;
+      if (diffs.indexOf("importance") !== -1) rescored++;
+      if (sinkIt) sunkCount++;
+      let type = "edit";
+      if (diffs.length === 1) {
+        if (diffs[0] === "category") type = "recat";
+        else if (diffs[0] === "importance") type = "rescore";
+        else if (diffs[0] === "sink") type = "sink";
+      }
+      changes.push({ id: target.id, type: type, from: { content: target.content, category: target.category, importance: Number(target.importance) || 0.5 }, to: { content: newContent, category: newCat, importance: newImp }, sink: sinkIt });
+    }
+
+    // 被 LLM 漏掉的待清洗条目：分成两种情况对待（激进）
+    // a) 与「已清洗参考」高度相似(重复) → 沉底
+    // b) 与「本次 LLM 保留的某条」高度相近 → 说明它已被合并进那条，也沉底，让合并不干净的情况也清掉
+    for (const r of chunk) {
+      if (matchedIds.has(r.id)) continue;
+      let bestPriorSim = 0;
+      for (const ref of priorRef) {
+        const sim = contentSimilarity(ref.content, r.content);
+        if (sim > bestPriorSim) bestPriorSim = sim;
+      }
+      let bestAliveSim = 0;
+      for (const rid of matchedIds) {
+        const alive = byId.get(rid);
+        if (!alive) continue;
+        const sim = contentSimilarity(alive.content, r.content);
+        if (sim > bestAliveSim) bestAliveSim = sim;
+      }
+      if (bestPriorSim >= dupTh || bestAliveSim >= MERGE_SINK_TH) {
+        changes.push({ id: r.id, type: "sink", from: { content: r.content, category: r.category, importance: Number(r.importance) || 0.5 }, to: null, sink: true });
+        sunkCount++;
+      }
+    }
+
+    // 本块处理过的条目加入上下文池，供后续块去重参考
+    for (const r of chunk) contextPool.push(r);
+  }
+
+  const summarized = { added: added, merged: merged, recategorized: recategorized, rescored: rescored, sunk: sunkCount };
+  if (preview) {
+    return { ok: true, preview: true, found: found, to_clean: toCleanCount, ...summarized, changes: changes, error: llmError };
+  }
+  if (llmError) return { ok: false, error: llmError };
+
+  const backup = await backupPoolFile();
+  const toCleanIds = new Set();
+  for (const r of sortedToClean) toCleanIds.add(r.id);
+  let appliedAdd = 0;
+  for (const ch of changes) {
+    if (ch.type === "add") {
+      const rr = add({ content: ch.content, category: ch.category, importance: ch.importance, source: "clean" });
+      if (!rr.dup) appliedAdd++;
+    } else if (ch.type === "sink") {
+      sink(ch.id);
+    } else {
+      update(ch.id, { content: ch.to.content, category: ch.to.category, importance: ch.to.importance, active: ch.sink ? false : undefined });
+    }
+  }
+  // 打标记：本次全量处理过的待清洗记忆，下次不再重复清洗
+  for (const r of rows) {
+    if (toCleanIds.has(r.id)) { r.cleaned_at = nowIso(); r.updated_at = nowIso(); }
+  }
+  dirty = true;
+  flush();
+  return { ok: true, preview: false, found: found, to_clean: toCleanCount, added: appliedAdd, merged: merged, recategorized: recategorized, rescored: rescored, sunk: sunkCount, backup: backup, changes: changes };
 }
 
 // 记忆池词云关键词：从池内 active 记忆内容提取高频重点词（复用 memory-engine 分词/停用词）
@@ -556,6 +823,7 @@ module.exports = {
   list, stats, get, add, update, remove, sink, revive,
   retrieve, ingestSummary, parseCategoryBlocks, reparseSummaryViaLLM, buildReparsePrompt,
   contentSimilarity, tokensOf, decayFactor, scoreOf,
+  buildCleanPrompt, cleanPool,
   setConfig, getConfig, poolKeywords,
   get file() { return POOL_FILE; }
 };
