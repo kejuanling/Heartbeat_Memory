@@ -1727,12 +1727,8 @@ function preview(opts) {
 // 编号范围预览（1-based）：返回范围内每条消息（编号/角色/时间/内容/标记），供未覆盖区滚动窗使用
 function rangePreview(start, end, opts) {
   const cfg = loadConfig();
-  const timeline = loadTimeline();
-  const dialog = (Array.isArray(timeline) ? timeline : []).filter(function (m) { return m && m.role !== "system"; });
-  const items = [];
-  dialog.forEach(function (m, idx) {
-    if (isCompressible(m, cfg.compaction_compress_events !== false)) items.push({ msg: m, idx: idx });
-  });
+  // 统一使用替换模块的可压缩索引（编号与 add_range/update_range 一致），避免未覆盖区编号漂移
+  const items = contextReplacements.compressibleItems();
   // 预览展示完整压缩区间：keepRecent/minMessages 属于实际替换语义，不在此截断
   const compactCount = items.length;
   let s = Math.max(1, Math.floor(Number(start) || 1));
