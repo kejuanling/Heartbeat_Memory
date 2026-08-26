@@ -177,3 +177,10 @@
 - **对齐 note**：`/proc/<pid>/environ` 读不到 dotenv 注入的凭据，admin 凭据在 `/opt/dylan-heartbeat/.env` 的 `ADMIN_USER`/`ADMIN_PASSWORD`（勿打印明文）。
 - 压缩编号体系要同源：未覆盖区预览编号（`rangePreview`）与填编号/改范围（`compressibleItems`）必须用同一套可压缩列表，`rangePreview` 应复用 `contextReplacements.compressibleItems()`，否则 compactor 对软删除消息"保留占位"会让编号漂移约 8 条。
 - 生成摘要发原文必须同源：`generateSummaryForRange` 一定要用 `contextReplacements.compressibleItems()` 构建 items，别用 compactor 自己的 `isCompressible`（后者对软删除 `deleted===true` 返回 true、且不排除「记忆碎片」，列表会多几条，导致同一编号指到不同消息、切片首尾与块编号错位）。`buildPlan`/`generateBlockSummary` 用 `loadBlocks()`（context_compaction_blocks.json 那套）与 `compressibleItems` 是两套编号，别混。
+
+### 3.13 已标星消息编辑 与 进程重启确认
+- 已标星消息存 `data/context_compaction_marks.json`；`listMarked()` 只列 content 非空的条目，`total` 可能 < 文件内 mark 总数（content 为空的存量会被过滤/走 matched 兜底）。
+- 标星消息正文会被 `starredContextText()`（server.js）读到用于**跨窗口注入**（拼成 `她：/我：`+content）。所以编辑标星消息 = 改 `marks[key].content`，改完会同步影响跨窗口注入给 AI 的内容。
+- 编辑链路：`context-compactor.updateMark(key,{content})`（只改 content，保留 markedAt/role）→ `server.js POST /admin/context-compaction/marked/update` → 前端 `openMarkEdit/saveMarkEdit`。⚠️ 不要复用 `/admin/context-compaction/mark` 做编辑（它会重置 markedAt，把消息当作重新标星）。
+- kill 独立的 node server.js 进程后，PM2 God Daemon 会按 `autorestart:true` 自动拉起新进程（加载新代码），但 `pm2 list` 可能显示 `errored`/`pid=0`——这是**状态 desync**，别误判服务挂了。判断是否加载新代码：进程 `lstart`（`ps -o lstart`）是否晚于代码文件 mtime。
+- 用管理接口测"写入类"会真改数据（标星/编辑），先备份 `data/context_compaction_marks.json`，测完复原并逐字比对，残留测试标记 grep 排查。
