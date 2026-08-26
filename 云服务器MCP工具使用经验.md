@@ -38,6 +38,7 @@
 - 关键文件：`server.js`（网关+管理台 API）、`wake_up.js`（唤醒）、`admin-mobile.html`（管理台）、`memory-engine.js`、`memory-pool.js`、`context-compactor.js`、`context-replacements.js`、`tag-parser.js`、`time_utils.js`。
 - 数据：`data/`（config.json / state.json / context_replacements.json / memory_pool.json / push_log.json / *_prompt.json 等）+ `enhanced_messages.json`（时间线）、`diary/`。
 - 其他 MCP 端口：yun-mcp-v2(9010)、netease-music(3303)、spicy-monopoly(8773)、decision-trail(8787)、ocr-api(8790)、mcp-tools(8771)、zzf-mcp(8890)、phone-api(8080/8084)、email_server(5000)。
+- decision-trail(8787)：决策痕迹 MCP，源码在 `workspace/decision-trail/`（有独立 git 仓库，remote=github xie.git，main 无 upstream，源码此前未被跟踪；数据文件由程序 autoPush 只推 data/decisions.json）。**决策同步到记忆池功能已停用**（网关 server.js 无对应 internal 接口，一直 404，无实际作用；mirrorDecisions/removeDecisions/backfillToGateway 已改为空操作并清理死代码）。
 - 管理台：`http://<公网IP>:9001/heartbeat/admin/mobile`（账号密码见 `/opt/dylan-heartbeat/.env` 的 `ADMIN_USER` / `ADMIN_PASSWORD`）。
 - 常用命令：`nginx -t && systemctl reload nginx`；`pm2 logs gateway --nostream`；`systemctl status <svc>`；`find / -name <文件>` 定位。**注意 gateway 的重启姿势见「当前运维状态」**。
 
@@ -82,6 +83,7 @@
 - **快照里的 content 已是 JSON.stringify 后的字符串**（如 `/admin/logs/context` 响应），直接喂给「数组拆分函数」会误判为没图片（count=0）。要先 `JSON.parse` 还原成数组再验证，或改在捕获点之前验证。
 - **`lastLLMMessages` 是内存态**，重启后为空，接口返回空数组属正常。验证逻辑用真实快照离线测即可，**不要为了验证去触发真实上游对话**（会打扰线上聊天）。
 - 多模态响应体积：单条 content 内嵌 base64 图片可达 2MB，前端当纯文本渲染会卡死。后端用 `splitMultimodalContent()` 拆成「纯文字 + 图片元数据」，base64 不落存储/不进响应；前端对图片只显示「[图片 N 张]」，超长纯文本（>30000 字符）折叠「展开全文」。
+- **朝不存在的接口发请求 = 白费 + 一直 404**：decision-trail 曾向 `/internal/decisions/sync`、`/internal/decisions/remove` 同步决策到记忆池，但网关 server.js 从没实现这两个接口，于是每次决策操作都触发 404 告警、功能为空。排查：先 `search_text` 在 server.js 里确认真实存在该路由/接口，再判断是否真的在服务。此类「假同步」应直接关掉，而非反复重试。
 
 ### 3.4 多进程 / 并发 / 沙盒
 - gateway 与 wake-up 共享数据文件是竞态：多进程共享文件必须「单写者」或加锁；wake-up 只读，写入统一走网关内部接口。
