@@ -63,7 +63,7 @@ const CONFIG = {
   clean_enabled: true,
   clean_system_prompt: "",
   clean_user_prompt: "",
-  clean_max_items: 50,
+  clean_max_items: 500,
   clean_temperature: 0.2,
   clean_ref_topk: 10,
   clean_ref_threshold: 0.4,
@@ -632,7 +632,7 @@ async function cleanPool(opts) {
   if (!found) return { ok: true, preview: preview, found: 0, to_clean: 0, added: 0, merged: 0, recategorized: 0, rescored: 0, sunk: 0, changes: [] };
   if (CONFIG.clean_enabled === false) return { ok: false, error: "整理记忆池已关闭（clean_enabled=false）" };
 
-  const maxItems = Math.max(1, Number(CONFIG.clean_max_items) || 50);
+  const maxItems = Math.max(1, Number(CONFIG.clean_max_items) || 500);
   const refTopk = Math.max(1, Number(CONFIG.clean_ref_topk) || 10);
   const refTh = Number(CONFIG.clean_ref_threshold) || 0.4;
   const dupTh = Number(CONFIG.clean_ref_dup_threshold) || 0.85;
