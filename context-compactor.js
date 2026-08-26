@@ -1129,15 +1129,13 @@ async function generateBlockSummary(blockIndex) {
 // 按压缩索引范围直接生成摘要文字（统一替换用：不写块、不写缓存，只返回文字）
 async function generateSummaryForRange(start, end) {
   const cfg = loadConfig();
-  const timeline = loadTimeline();
-  const items = [];
-  (Array.isArray(timeline) ? timeline : []).forEach(function (m, idx) {
-    if (m && m.role !== "system" && isCompressible(m, cfg.compaction_compress_events !== false)) items.push({ msg: m, idx: idx });
-  });
+  // 编号与前端/块存储同源：复用 contextReplacements.compressibleItems()。
+  // 否则 compactor 对软删除消息"保留占位"会让编号漂移约 8 条，导致切片错位。
+  const items = contextReplacements.compressibleItems();
   const minMessages = Number(cfg.compaction_min_messages) || 0;
-  const keepRecent = Math.max(0, Number(cfg.compaction_keep_recent_messages) || 0);
-  const compactCount = items.length >= minMessages ? Math.max(0, items.length - keepRecent) : 0;
-  if (compactCount <= 0) return { ok: false, message: "当前没有可压缩内容" };
+  // 与前端 rangePreview 一致：展示完整可压缩区间，不做 keepRecent/minMessages 截断
+  const compactCount = items.length;
+  if (items.length < minMessages) return { ok: false, message: "当前没有可压缩内容" };
   const s = Math.max(0, Math.floor(Number(start) || 0));
   let e = Math.floor(Number(end));
   if (!Number.isInteger(e) || e < s) e = s;
