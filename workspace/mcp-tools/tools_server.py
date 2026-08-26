@@ -674,17 +674,75 @@ def tool_memory_search(args):
 
 
 TOOLS["memory_search"] = {
-    "description": "检索长期记忆池（八大类记忆库：事实/经验/方法/锚点/经历/信号/回应/对话摘要）。返回相关记忆条目（含内容、分类、重要度、来源）。可用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池。区别于 context_search（检索原始对话原文）。",
+    "description": "检索长期记忆池（五大类记忆库：关于她/关于我们/锚点/信号/对话摘要）。返回相关记忆条目（含内容、分类、重要度、来源）。可用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池。区别于 context_search（检索原始对话原文）。",
     "inputSchema": {
         "type": "object",
         "properties": {
             "q": {"type": "string", "description": "检索关键词或想问的问题（多个词用空格分隔，命中的词越多越靠前）"},
-            "category": {"type": "string", "description": "按分类过滤，可选：事实/经验/方法/锚点/经历/信号/回应/对话摘要"},
+            "category": {"type": "string", "description": "按分类过滤，可选：关于她/关于我们/锚点/信号/对话摘要"},
             "limit": {"type": "integer", "description": "返回条数，默认5，最大50"}
         },
         "required": ["q"]
     },
     "handler": tool_memory_search
+}
+
+
+def tool_memory_add(args):
+    content = (args.get("content") or "").strip()
+    if not content:
+        return {"error": "content 必填：要写入记忆池的记忆正文"}
+    category = (args.get("category") or "").strip()
+    importance = args.get("importance")
+    data = {"content": content}
+    if category:
+        data["category"] = category
+    if importance is not None:
+        try:
+            data["importance"] = max(0.0, min(1.0, float(importance)))
+        except (TypeError, ValueError):
+            return {"error": "importance 必须是 0~1 的数字"}
+    url = f"{BASE_URL}:3000/internal/memory-pool/add"
+    req = urllib.request.Request(url,
+        data=json.dumps(data).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-internal-key": INTERNAL_KEY},
+        method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            out = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            out = json.loads(e.read().decode("utf-8"))
+        except Exception:
+            out = {"error": f"HTTP {e.code}"}
+    except Exception as e:
+        return {"error": str(e)}
+    if out.get("success"):
+        entry = out.get("entry") or {}
+        return {
+            "success": True,
+            "dup": bool(out.get("dup")),
+            "id": entry.get("id"),
+            "category": entry.get("category") or "",
+            "content": entry.get("content") or "",
+            "important": entry.get("importance"),
+            "message": "已写入记忆池" + ("（与已有记忆合并/去重）" if out.get("dup") else "（新增）")
+        }
+    return {"error": out.get("error", "写入失败")}
+
+
+TOOLS["memory_add"] = {
+    "description": "新增一条长期记忆到记忆池。适用于：对话里发现关于她的稳定特征、相处规律、重要原话，或她在对话里明确说“记住”之类的话时，把这条信息写入记忆池。支持分类（关于她/关于我们/锚点/信号/对话摘要）与重要级（0~1）。会自动与已有记忆做相似去重合并。区别于 pin（永久注入）与 context_replace（压缩替换）。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "content": {"type": "string", "description": "记忆正文（要长期记住的信息，写清结论/原话，避免模糊）"},
+            "category": {"type": "string", "description": "分类，可选：关于她/关于我们/锚点/信号/对话摘要（默认关于她）"},
+            "importance": {"type": "number", "description": "重要级 0~1，默认 0.5"}
+        },
+        "required": ["content"]
+    },
+    "handler": tool_memory_add
 }
 
 

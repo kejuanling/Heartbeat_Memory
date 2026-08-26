@@ -1,6 +1,6 @@
 {
   "server": "小世界MCP工具集",
-  "generated_at": "2026-08-25 00:01:29",
+  "generated_at": "2026-08-26 18:19:57",
   "tools": [
     {
       "name": "context_replace",
@@ -159,8 +159,54 @@
       "enabled": true
     },
     {
+      "name": "memory_add",
+      "description": "新增一条长期记忆到记忆池。适用于：对话里发现关于她的稳定特征、相处规律、重要原话，或她在对话里明确说“记住”之类的话时，把这条信息写入记忆池。支持分类（关于她/关于我们/锚点/信号/对话摘要）与重要级（0~1）。会自动与已有记忆做相似去重合并。区别于 pin（永久注入）与 context_replace（压缩替换）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "记忆正文（要长期记住的信息，写清结论/原话，避免模糊）"
+          },
+          "category": {
+            "type": "string",
+            "description": "分类，可选：关于她/关于我们/锚点/信号/对话摘要（默认关于她）"
+          },
+          "importance": {
+            "type": "number",
+            "description": "重要级 0~1，默认 0.5"
+          }
+        },
+        "required": [
+          "content"
+        ]
+      },
+      "defaultDescription": "新增一条长期记忆到记忆池。适用于：对话里发现关于她的稳定特征、相处规律、重要原话，或她在对话里明确说“记住”之类的话时，把这条信息写入记忆池。支持分类（关于她/关于我们/锚点/信号/对话摘要）与重要级（0~1）。会自动与已有记忆做相似去重合并。区别于 pin（永久注入）与 context_replace（压缩替换）。",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "记忆正文（要长期记住的信息，写清结论/原话，避免模糊）"
+          },
+          "category": {
+            "type": "string",
+            "description": "分类，可选：关于她/关于我们/锚点/信号/对话摘要（默认关于她）"
+          },
+          "importance": {
+            "type": "number",
+            "description": "重要级 0~1，默认 0.5"
+          }
+        },
+        "required": [
+          "content"
+        ]
+      },
+      "enabled": true
+    },
+    {
       "name": "memory_search",
-      "description": "检索长期记忆池（八大类记忆库：事实/经验/方法/锚点/经历/信号/回应/对话摘要）。返回相关记忆条目（含内容、分类、重要度、来源）。可用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池。区别于 context_search（检索原始对话原文）。",
+      "description": "检索长期记忆池（五大类记忆库：关于她/关于我们/锚点/信号/对话摘要）。返回相关记忆条目（含内容、分类、重要度、来源）。可用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池。区别于 context_search（检索原始对话原文）。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -170,7 +216,7 @@
           },
           "category": {
             "type": "string",
-            "description": "按分类过滤，可选：事实/经验/方法/锚点/经历/信号/回应/对话摘要"
+            "description": "按分类过滤，可选：关于她/关于我们/锚点/信号/对话摘要"
           },
           "limit": {
             "type": "integer",
@@ -181,7 +227,7 @@
           "q"
         ]
       },
-      "defaultDescription": "检索长期记忆池（八大类记忆库：事实/经验/方法/锚点/经历/信号/回应/对话摘要）。返回相关记忆条目（含内容、分类、重要度、来源）。可用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池。区别于 context_search（检索原始对话原文）。",
+      "defaultDescription": "检索长期记忆池（五大类记忆库：关于她/关于我们/锚点/信号/对话摘要）。返回相关记忆条目（含内容、分类、重要度、来源）。可用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池。区别于 context_search（检索原始对话原文）。",
       "defaultInputSchema": {
         "type": "object",
         "properties": {
@@ -191,7 +237,7 @@
           },
           "category": {
             "type": "string",
-            "description": "按分类过滤，可选：事实/经验/方法/锚点/经历/信号/回应/对话摘要"
+            "description": "按分类过滤，可选：关于她/关于我们/锚点/信号/对话摘要"
           },
           "limit": {
             "type": "integer",
