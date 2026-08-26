@@ -1,9 +1,21 @@
 # 任务前速览（云服务器 MCP 工具 + AI 易错经验 + 系统速览）
 
 > 本文件是唯一需要每次任务前快速扫过的经验总览，供 AI 任务前浏览。
-> 已合并并去重：云服务器MCP工具使用经验 / AI易错经验汇总 / 系统架构关键要点 / 历史踩坑沉淀。
+> 已合并并去重：云服务器MCP工具使用经验 / AI易错经验汇总 / 系统架构关键要点 / 历史踩坑沉淀（含原「踩坑经验.md」已并入本文档）。
 > 不再保留「按日期追加日志」式记录，只留框架介绍 + 踩坑干货，按主题整理。
 > 历史完整版备份在 `/opt/dylan-heartbeat/backups/`。
+
+---
+
+## 📚 知识文档索引（快速导航）
+
+本机与云服务器相关的参考文档都集中在 `/opt/dylan-heartbeat/`，扫这一份 + 按需翻下面几份：
+
+- `云服务器MCP工具使用经验.md`（**本文件**）— 每次任务前扫它：系统框架 + 踩坑干货。
+- `SERVER_DIRECTORY_MAP.md` — 云服务器目录与服务地图：端口 / 服务 / 路径 / Nginx 路由 / 运维速查。
+- `心跳唤醒管理台-功能全解析.md` — 管理台所有页面、接口、逻辑的完整功能解析，改管理台功能时对照。
+- `记忆池整理功能策划书.md` — 记忆池整理功能策划。
+- （归档）`踩坑经验.md` — 已合并进本文件「AI 易错经验」各主题，原文件保留作历史备份。
 
 ---
 
@@ -25,7 +37,7 @@
 - 技术栈：Node.js 20 + Fastify 5 + @xenova/transformers（当前 embedding_enabled=false，走关键词检索）+ PM2 + Nginx。
 - 关键文件：`server.js`（网关+管理台 API）、`wake_up.js`（唤醒）、`admin-mobile.html`（管理台）、`memory-engine.js`、`memory-pool.js`、`context-compactor.js`、`context-replacements.js`、`tag-parser.js`、`time_utils.js`。
 - 数据：`data/`（config.json / state.json / context_replacements.json / memory_pool.json / push_log.json / *_prompt.json 等）+ `enhanced_messages.json`（时间线）、`diary/`。
-- 其他 MCP 端口：yun-mcp-v2(9010)、netease-music(3303)、spicy-monopoly(8773)、decision-trail(8787)、ocr-api(8790)、mcp-tools(8771)、zzf-mcp(8890)、phone-api(8080/8084)。
+- 其他 MCP 端口：yun-mcp-v2(9010)、netease-music(3303)、spicy-monopoly(8773)、decision-trail(8787)、ocr-api(8790)、mcp-tools(8771)、zzf-mcp(8890)、phone-api(8080/8084)、email_server(5000)。
 - 管理台：`http://<公网IP>:9001/heartbeat/admin/mobile`（账号密码见 `/opt/dylan-heartbeat/.env` 的 `ADMIN_USER` / `ADMIN_PASSWORD`）。
 - 常用命令：`nginx -t && systemctl reload nginx`；`pm2 logs gateway --nostream`；`systemctl status <svc>`；`find / -name <文件>` 定位。**注意 gateway 的重启姿势见「当前运维状态」**。
 
@@ -50,7 +62,7 @@
 ## 三、AI 易错经验（按主题）
 
 ### 3.1 端口与「谁真正在服务」的识别
-- **查端口别用 `ss | grep ':3000'`**：3000 在 `/etc/services` 里映射为服务名 `hbci`，`ss` 显示 `*:hbci` 而非 `*:3000`，grep 会误判"空闲"。要 `ss -antp | grep -iE '3000|hbci'` 或 `lsof -i :3000`。
+- **查端口别用 `ss | grep ':3000'`**：3000 在 `/etc/services` 里映射为服务名 `hbci`，`ss` 显示 `*:hbci` 而非 `*:3000`，grep 会误判"空闲"。要 `ss -antp | grep -iE '3000|hbci'` 或 `lsof -i :3000`。**注意 `ss -tlnp` 在某些环境直接不显示端口/为空，此时以 `lsof -i -P -n | grep LISTEN` 为准。**
 - **判断"谁真正在服务"用 `lsof -i :PORT`**，别只看 `pm2 list`：pm2 可能显示 `errored`/`stopped`，但端口其实被一个运行中的 `node server.js`（孤儿/脱节进程）占着，pm2 反复 restart 永远 `EADDRINUSE`。此时要重启的是那个占端口的进程，而不是 `pm2 restart gateway`。
 - **判断"运行中的进程是否加载了新代码"**：进程启动时间 > 代码文件 mtime 即代表已加载新代码（日志看 gateway out log）。
 - 项目实际路径与目录地图可能不符：先 `find / -name 文件名`，别只信 SERVER_DIRECTORY_MAP.md。
@@ -67,6 +79,9 @@
 - 排查链路：请求到达（网关日志）→ 是否写盘（mtime/内容）→ 运行服务是否读同一份文件（systemd WorkingDirectory、路径一致）。
 - 「diff 式保存 + 全量覆盖」是典型数据丢失：前端以为发了「全部要改的」，后端以为是「全部最终状态」。
 - 用管理接口做「写入类」测试会真改数据。测试覆盖/合并型 API 必须像真实前端传完整状态（如 `PUT /admin/tools` 传 `disabled: []` 会把用户停用工具全部启用）；要么先快照、要么只测校验失败分支；改完与备份逐字比对。
+- **快照里的 content 已是 JSON.stringify 后的字符串**（如 `/admin/logs/context` 响应），直接喂给「数组拆分函数」会误判为没图片（count=0）。要先 `JSON.parse` 还原成数组再验证，或改在捕获点之前验证。
+- **`lastLLMMessages` 是内存态**，重启后为空，接口返回空数组属正常。验证逻辑用真实快照离线测即可，**不要为了验证去触发真实上游对话**（会打扰线上聊天）。
+- 多模态响应体积：单条 content 内嵌 base64 图片可达 2MB，前端当纯文本渲染会卡死。后端用 `splitMultimodalContent()` 拆成「纯文字 + 图片元数据」，base64 不落存储/不进响应；前端对图片只显示「[图片 N 张]」，超长纯文本（>30000 字符）折叠「展开全文」。
 
 ### 3.4 多进程 / 并发 / 沙盒
 - gateway 与 wake-up 共享数据文件是竞态：多进程共享文件必须「单写者」或加锁；wake-up 只读，写入统一走网关内部接口。
@@ -127,11 +142,14 @@
 - CSRF 双提交：登录与既有会话下发可读 `admin_csrf` cookie；Fastify 全局 `preHandler` 在 `/admin*` 写操作+有效会话时校验 `X-CSRF-Token` 与 cookie 一致；Basic 认证与 `/internal/*` 跳过。`reply.header('Set-Cookie',[a,b])` 支持同时下发两个 cookie。
 - XSS 内联 onclick 陷阱：把用户文本放进 `onclick="fn('...')"` 时，`escapeHtml` 把 `'` 转成 `&#39;` 会被 HTML 先行解码回 `'`，从而可注入。需用专门函数 `escJsStr`（先转 `&`，再转 `"`,`<`,`>`,`\`,`'`）。
 - Python 正则坑：`re.findall(pattern, content)` 不加 `re.M` 时 `^` 只匹配字符串开头，跨行锚点全部 count=0 静默失败；`sed -i` 在 MCP heredoc 里改 Python 正则字符串容易双重转义，直接重写脚本文件更稳。
+- **JS 作用域坑**：把工具函数插到 `app.post("/v1/chat/completions")` 处理器内部后，顶层函数访问不到，运行时报 ReferenceError。`node --check` 查不出作用域问题，改完必须确认函数在顶层，否则移到顶层。
+- **面板/卡片跨页签移动**：除搬 HTML 外，还要同步 `switchTab` 里的按页签加载逻辑（如 `loadToolsConfig`/`loadServices` 从 system 分支移到 config 分支、`loadPinned` 从 prompts 分支移除），否则切到该页签列表空白。用元素唯一标记（id/data-collapse-id）做区间判断，别用 indexOf 匹配中文标题（会误命中注释/弹窗标题）。
 - 大函数拆分走"自下而上按行号替换"：先改最下面的行区间（行号不变），再依次向上，最后在最上方做插入；每步用首尾行文本做断言防偏移。
 - 状态收敛方案：37 个压缩/记忆业务变量收进 `const AppState = {...}`，删掉散落的 `let` 声明，全文件用正则 `\b名称\b` → `AppState.名称` 替换。顺序：先删声明 → 再替换标识符 → 最后插入 AppState 对象（键名不能被二次替换）。替换后跑"裸引用检查"：`(?<![A-Za-z0-9_$.])名称\b` 只允许命中对象键与注释。
 - 单文件纯函数单测法：test 脚本里读 admin-mobile.html，正则提取 <script> 块，再按函数名 + 平衡大括号提取函数源码，vm.runInContext 求值后断言。给"单文件部署"的前端纯逻辑补 node --test。
 - `node --test`（不带路径）会递归扫整个仓库目录树，可能被无关文件干扰（本仓库会因 .local/bin/python3.11 缺失报错）；跑单测用显式路径 `node --test test/xxx.test.js` 最稳。
 - re.sub 替换串陷阱：`\'` 不是 Python 替换串转义，会原样写成反斜杠+引号，产生非法 JS（如 `memView: \'cloud\',`）。字符串字面量改用双引号（`memView: "cloud",`）规避；任何替换后必须 node --check 兜底。
+- **缩进/锚点必须用整行**：`<span class="collapse-arrow">▾</span>` 这类在页面上重复出现，精确替换必须用整行做锚点，否则 count!=1 或改错位置。
 - 验证组合拳：node --check 只查语法；线上用 curl 登录后 grep 标记 + 检查 git diff --stat 只含目标文件。
 
 ### 3.11 凭据与安全
