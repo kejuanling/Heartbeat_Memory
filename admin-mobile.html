@@ -1028,8 +1028,9 @@
 
 <!-- Tab 3: 记忆 -->
 <div class="tab-content" id="tab-memory" style="position:relative">
-   <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
-     <button type="button" class="btn btn-outline" onclick="openImportModal()" style="padding:6px 12px">导入对话</button>
+   <div style="margin:12px 0 16px;padding:0 2px">
+     <h2 style="font-family:'Noto Serif SC',serif;font-size:27px;font-weight:700;color:var(--tab-active);letter-spacing:4px;margin:0;line-height:1.35">记忆</h2>
+     <div style="width:38px;height:4px;border-radius:2px;background:var(--accent);margin-top:10px;box-shadow:0 2px 8px rgba(200,144,152,.30)"></div>
    </div>
    <div id="mem-view-toggle" class="mem-tabs">
      <button type="button" class="mem-tab active" id="mem-view-cloud" onclick="switchMemView('cloud')">词云</button>
@@ -1042,7 +1043,12 @@
    </div>
    <div id="mem-pool-wrap" style="display:none">
      <div class="card" style="margin-bottom:12px">
-       <div class="card-title">检索池 · 导入的对话</div>
+       <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+         <span>检索池 · 导入的对话</span>
+         <span class="card-title-actions">
+           <button type="button" class="btn btn-outline" onclick="openImportModal()" style="padding:4px 10px;font-size:11px">导入对话</button>
+         </span>
+       </div>
        <div id="pool-stats" style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text2);margin-bottom:10px"><span>统计中...</span></div>
        <div class="search-bar">
          <input type="text" id="pool-search" placeholder="搜索导入的对话（空格分隔多词，与 AI 检索工具同一数据源）..." oninput="poolSearchInput(this.value)">
@@ -1056,10 +1062,9 @@
    </div>
    <div id="mem-mempool-wrap" style="display:none">
       <div class="mp-head">
-        <div class="mp-title"><b>记忆池</b><span>4 类 · 重要级 · 自动衰减 · 相似去重</span></div>
         <div class="mp-actions">
           <button type="button" class="mp-btn primary" onclick="openMemPoolAdd()">＋ 新增记忆</button>
-          <button type="button" class="mp-btn" onclick="reparseAllMemPool()">重新解析入库</button>
+          <button type="button" class="mp-btn" onclick="tidyMemPool()">整理记忆池</button>
         </div>
       </div>
       <div id="mempool-stats" class="mp-stats"><span class="mp-stat">统计中...</span></div>
@@ -2334,7 +2339,7 @@ function toast(msg){
       const r=await fetch(ADMIN_API+'/memory-pool/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reparse_system_prompt:s.trim(),reparse_user_prompt:u.trim()})});
       const d=await r.json();
       if(d.error){ if(msg) msg.textContent='保存失败: '+d.error; return; }
-      if(msg) msg.textContent='已保存，下次“重新解析入库”生效。';
+      if(msg) msg.textContent='已保存，下次解析入库/再解析生效。';
       toast('解析提示词已保存');
     }catch(e){ if(msg) msg.textContent='保存失败: '+e.message; }
   }
@@ -5547,7 +5552,7 @@ async function deletePinned(id){
     const el=document.getElementById('mempool-list');
     if(!el)return;
     el.className='mp-list';
-    if(!items.length){ el.innerHTML='<div class="mp-empty">暂无记忆，点右上角「＋ 新增记忆」或「重新解析入库」</div>'; return; }
+    if(!items.length){ el.innerHTML='<div class="mp-empty">暂无记忆，点右上角「＋ 新增记忆」或「整理记忆池」</div>'; return; }
     let html='';
     items.forEach(function(it){
       const sunk=it.active===false, pinned=it.pinned;
@@ -5654,18 +5659,8 @@ async function deletePinned(id){
       toast('已删除'); loadMemPool();
     }catch(e){ toast('操作失败: '+e.message); }
   }
-  async function reparseAllMemPool(){
-    if(!confirm('重新解析全部压缩摘要并归入记忆池（会调用API去重）？'))return;
-    const btn=document.querySelector('[onclick="reparseAllMemPool()"]');
-    if(btn){ btn.disabled=true; btn.textContent='解析中...'; }
-    try{
-      const r=await fetch(ADMIN_API+'/memory-pool/reparse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({all:true})});
-      const d=await r.json();
-      if(d.error){ toast('解析失败: '+d.error); return; }
-      toast('已解析 '+d.processed+' 段 -> 新增 '+d.added+' / 合并 '+d.merged+' / 失败 '+d.failed);
-      loadMemPool();
-    }catch(e){ toast('网络错误: '+e.message); }
-    finally{ if(btn){ btn.disabled=false; btn.textContent='重新解析入库'; } }
+  function tidyMemPool(){
+    toast('「整理记忆池」功能规划中，清洗方案详见《记忆池整理功能策划书》。');
   }
 
 // ============ 信封：写给下一个窗口自己的信 ============
