@@ -19,14 +19,12 @@
 
 ---
 
-## 〇、当前运维状态（2026-08-26 核实，重要，先看这条）
+## 〇、当前运维状态（2026-08-27 更新，重要，先看这条）
 
-- 实际提供网关 3000 服务的**不是 pm2 里的 gateway**，而是一个独立启动的 `node /opt/dylan-heartbeat/server.js` 进程（当前 PID 1018357，21:04 启动），它**直接占用端口 3000**。
-- **pm2 `gateway`（id 0）处于 stopped**（多次 restart 计数，因 3000 被上述独立进程占用导致 EADDRINUSE），并非正常启动态。
-- 两者指向**同一份** `server.js` 代码，但运行方式不同：独立进程 ≠ pm2 托管进程。
-- ⚠️ 因此**不能直接 `pm2 restart gateway`，也不要默认执行「重启服务」的 `pm2 restart wake-up gateway --update-env`**——重启 gateway 会因 3000 已被独立进程占用而 EADDRINUSE。服务相关改动一般由独立进程加载/已生效。
-- 若想统一交回 pm2 管理：先 `kill` 占用 3000 的独立 `server.js` 进程，再 `pm2 restart gateway`；否则保持「独立进程跑服务、pm2 gateway 静默」现状。
-- pm2 `wake-up`（id 1）正常在线，不在本次端口冲突范围。
+- ✅ **2026-08-27 已修复 PM2 双守护进程错乱**：现在只有**一个** PM2 God Daemon（systemd `pm2-root.service`），`gateway` 与 `wake-up` 均 online，3000 由 PM2 `gateway` 提供。
+- 曾因**同时跑两个 PM2 God Daemon + 独立 node server.js 占 3000**（一个 7/17 起、一个 8/26 systemd 拉起），导致 `pm2 list` 里 gateway 显示 `errored / pid 0`（状态 desync），实际 3000 由旧守护进程的 server.js 在服务。已收敛为**单守护进程**并 `pm2 save` 固化（`/root/.pm2/dump.pm2` 已生成，开机 resurrect 可自启）。
+- 现在**可以**正常 `pm2 restart wake-up gateway`、`pm2 logs gateway`。
+- ⚠️ **判据**：若再看到 `pm2 list` 里 gateway「errored/pid 0 但 3000 却在跑」，先查**是否又出现两个 God Daemon**（`ps -eo cmd | grep "God Daemon"`）。根因是**双守护进程抢 `/root/.pm2`**，**别急着 `pm2 restart`**（越 restart 越崩循环）。正确做法：保留 systemd 那个 daemon，杀掉旧的，再 `pm2 delete gateway` + `pm2 start ecosystem.config.js --only gateway` + `pm2 save`。
 
 ---
 

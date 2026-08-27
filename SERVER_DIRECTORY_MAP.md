@@ -20,9 +20,9 @@ pm2 logs gateway --lines 80 --nostream   # 网关 stdout
 crontab -l                              # 查看定时任务（当前仅 bark 推送调度 1 条）
 ```
 
-**注意**：当前 PM2 二进制位于 `/opt/node/bin/pm2`（旧路径不在默认 PATH 需加 `export PATH=/opt/node/bin:$PATH`）；如果 `pm2` 命令直接用不了，请用绝对路径 `/opt/node/bin/pm2`。
+**注意**：PM2 二进制在 `/opt/node/bin/pm2`（已在 PATH，`pm2` 可直接用）；如不可用再用绝对路径 `/opt/node/bin/pm2` 或 `export PATH=/opt/node/bin:$PATH`。
 
-**重启 Dylan**：⚠️ 目前 3000 由**独立进程** `node /opt/dylan-heartbeat/server.js` 提供，pm2 `gateway` 处于 stopped。因此**不要默认执行 `pm2 restart wake-up gateway --update-env`**——会因 3000 被独立进程占用而 EADDRINUSE。详见下方「D. 独立进程」3000 行的说明。
+**重启 Dylan**：✅ 2026-08-27 已修复为**单一 PM2 守护进程**，gateway 与 wake-up 均由 systemd PM2 管理且 online，3000 由 PM2 `gateway` 提供。可正常 `pm2 restart wake-up gateway`。
 
 **管理台**：`http://<公网IP>:9001/heartbeat/admin/mobile`（或 HTTPS :9002 同路径）
 - 登录账号见 `/opt/dylan-heartbeat/.env` 的 `ADMIN_USER` / `ADMIN_PASSWORD`
@@ -64,13 +64,13 @@ crontab -l                              # 查看定时任务（当前仅 bark �
 | gateway | 3000 | server.js | /opt/dylan-heartbeat | Dylan 网关：/v1 LLM 代理 + 时间线 + 记忆/摘要引擎 + 管理台 API + 共影/截图 internal 接口 | /root/.pm2/logs/gateway-*.log |
 | wake-up | - | wake_up.js | /opt/dylan-heartbeat | 唤醒系统：沉默检测 + 天气 + 记忆检索 + Bark/ntfy 推送 | /root/.pm2/logs/wake-up-*.log |
 
-> ⚠️ **gateway 当前为 stopped**（端口 3000 被独立进程 `node /opt/dylan-heartbeat/server.js` 占用，见 D 组）。wake-up 正常 online。PM2 的 gateway 与独立进程跑的是**同一份** server.js，但只有独立进程在真正服务 3000。
+> ✅ **2026-08-27 已修复**：gateway 与 wake-up 均由单一 PM2 守护进程（systemd `pm2-root.service`）管理，均 online。3000 由 PM2 `gateway` 提供。此前「双 PM2 God Daemon + 独立进程占 3000」的错乱已收敛为单守护进程。
 
 ### D. 独立进程（重启会丢，多数带 bash 自愈包装脚本或 nohup）
 
 | 端口 | 进程 | 目录 | 说明 |
 |---|---|---|---|
-| 3000 | `node /opt/dylan-heartbeat/server.js` | /opt/dylan-heartbeat | ⚠️ **网关主进程**：当前由独立 node 提供（非 pm2 gateway）。若想交回 pm2，先 `kill` 此进程再 `pm2 restart gateway`；否则改动已由它加载/生效 |
+| 3000 | `node /opt/dylan-heartbeat/server.js`(PM2 gateway) | /opt/dylan-heartbeat | ✅ **网关主进程**：由 PM2 `gateway` 管理（2026-08-27 起），已交回 pm2，非独立进程 |
 | 5000 | python3 email_server.py | /opt/dylan-heartbeat/workspace | 邮件通知服务（email_server.py），独立运行 |
 | 8773 | node mcp-server.js | /opt/dylan-heartbeat/spicy-monopoly | 涩涩大富翁 MCP，Bearer Token 鉴权（nohup 拉起）。**已监听（2026-08-27 修复路径后）** |
 | 8787 | node server.mjs | /root/workspace/decision-trail | 决策痕迹 MCP（bash 包装脚本守护）。**当前未监听** |
@@ -86,7 +86,7 @@ crontab -l                              # 查看定时任务（当前仅 bark �
 | 端口 | 服务 | 管理方式 |
 |---|---|---|
 | 22 | sshd | systemd: sshd |
-| 3000 | dylan-heartbeat server.js（网关主进程） | ⚠️ 独立 node（非 pm2 gateway） |
+| 3000 | dylan-heartbeat server.js（网关主进程） | ✅ PM2 gateway（systemd，online） |
 | 3303 | netease-music-mcp | systemd: netease-music |
 | 5000 | email_server.py | 独立 python |
 | 8080 | phone-report-api（gunicorn） | systemd: phone-api |
@@ -211,7 +211,7 @@ crontab -l                              # 查看定时任务（当前仅 bark �
 ### /opt
 | 目录 | 用途 |
 |---|---|
-| dylan-heartbeat | Dylan 网关 + 唤醒系统（PM2 gateway/wake-up + 独立 gateway 进程），全部数据在此 |
+| dylan-heartbeat | Dylan 网关 + 唤醒系统（PM2 gateway/wake-up，单守护进程 systemd 管理），全部数据在此 |
 | dylan-heartbeat/workspace | ⭐ 小世界实际目录（/root/workspace 软链指向这）：mcp-tools/decision-trail/ocr-api/daily-涵/diary/monthly/system/co-view.html/unified_server.py/email_server.py |
 | dylan-heartbeat/yun-mcp-v2 | yun-mcp-v2 MCP（systemd 9010） |
 | netease-music-mcp | 网易云音乐 MCP（systemd 3303） |
@@ -231,15 +231,15 @@ crontab -l                              # 查看定时任务（当前仅 bark �
 
 ## ⚠️ 已知配置注意点（运维时留意）
 
-1. **PM2 路径**：旧版 /opt/node/bin/pm2 不在默认 PATH；若 `pm2` 不可用，用绝对路径 `/opt/node/bin/pm2` 或 `export PATH=/opt/node/bin:$PATH`。
-2. **3000 双跑冲突**：当前 3000 由独立 `node /opt/dylan-heartbeat/server.js` 提供，pm2 `gateway` 是 stopped。二者是同一份 server.js，但只有独立进程在服务。**勿直接 `pm2 restart gateway`**（会 EADDRINUSE）；要交回 pm2 先 `kill` 独立进程。
+1. **PM2 路径**：pm2 在 `/opt/node/bin/pm2`，已在 PATH；不可用时用绝对路径或其 `export PATH`。
+2. **3000**：✅ 已修复（2026-08-27）。3000 由 PM2 `gateway` 提供，单守护进程，gateway/wake-up 均 online。可正常 `pm2 restart wake-up gateway`。此前双跑冲突（双 God Daemon + 独立进程占 3000）已收敛。
 3. **mcp-ssh 已停**：systemd 单元 disabled / inactive，9000 未监听；如恢复需重新 enable 手动脚本。
 4. **共影 & 截图接口**：/co-api/ 与 /screenshot-api/ 均落到 3000；screenshot 的 key 由 nginx 从 conf.d/screenshot-key.conf 注入（快捷指令无需处理 key）；共影播放页需 HTTPS（9002）下截图功能才可用（getDisplayMedia 要求安全上下文）。
 5. **OCR 端口已修正**：nginx /ocr-api/ 现在直连 8790（真实 OCR 服务），不再是 8771。
 6. **phone-api 双端口**：8080 为 systemd gunicorn（phone-report-api，内存态）；8084 为 /opt/http_api.py 独立 FastAPI（sqlite，重启会丢）。
 7. **9002 HTTPS**：共影 ssl 证书 /etc/nginx/ssl/co-view.*；该 server 块不含 /screenshot-api/ 代理。
 8. **dylan-heartbeat 数据文件集中在 /opt/dylan-heartbeat/**：含 data/ 子目录；/root/ 下同名 JSON 为旧副本，不再使用。备份目录 data/_fix_backup_*、_unify_backup_* 为历史修复备份，可清理。
-9. **RESTART_COMMAND**：原为 `pm2 restart wake-up gateway --update-env`。⚠️ 因当前 gateway 由独立进程服务，执行前先核实是否真的需要重启 gateway（见第 2 点）。
+9. **RESTART_COMMAND**：`pm2 restart wake-up gateway --update-env` 可正常执行（gateway 现由 PM2 管理，2026-08-27 修复）。
 10. **管理台配置生效方式**：配置区（config.json）与环境变量区（.env）均热生效；仅时区/端口等非管理台项以重启为准。
 11. **安全**：gateway 3000 的 /v1 公网访问由 `ALLOW_PUBLIC_API` + `GATEWAY_API_KEY` 控制；8773 spicy-monopoly 需 Bearer Token；8771/8777 内部接口需 `INTERNAL_API_KEY`；8890 仅绑定 127.0.0.1。
 12. **docker/containerd 已安装但无运行容器**；需要时再启。
