@@ -229,3 +229,13 @@
 - **验证链路**：起 `PORT=3100` 临时实例测新接口，用 `RAILWAY_ENVIRONMENT=1` 注入环境变量（`ALLOW_PUBLIC_API=true GATEWAY_API_KEY=test`）避免读 .env 真 key。`/v1/history` 只读不写盘，临时实例不污染生产。但**别用临时实例测真实对话**（会共用生产 data/，测完必须手动清理时间线的测试条目）。
 - **测试污染清理**：端到端验证时会在 `enhanced_messages.json` 留下测试 user/assistant 消息，必须按 content 关键词（如"系统测试""刚刚收到系统消息"）精准删除，恢复原条数（811）。**别在 user 消息里放会触发 AI 回复的测试文本**，否则会产生配对 assistant 要连带删。
 - `isRealMessageForTimeline` 过滤后：811 条里剩 626（313 user + 313 assistant），去掉了 1 system + 特殊事件 + tool_calls。前端拿到的就是这 626 条可对话历史。
+
+### 3.18 自建聊天前端 chat.html 增强（AI设置面板 / token / 思考链 / current_time / QQ分组气泡，2026-08-27）
+- **前端 token 显示**：网关转发上游是 `{...body, messages: sanitizedMessages}` 原样透传，所以前端请求体加 `stream_options:{include_usage:true}` 即可拿 usage（prompt_tokens/completion_tokens）。**纯前端改动，不用改网关**。上游是 DeepSeek（api.deepseek.com），官方支持 include_usage。若模型不返回 usage，前端已留「按字数估算」兜底。
+- **思考链回传**：`reasoning_content` 网关流式已透传给前端（前端原本只显示、没存）。要「多轮回传模型」需在前端 `buildMessages` 给 assistant 消息带 `reasoning_content`，**并**在 server.js `sanitizedMessages` 里保留该字段（否则后端会丢弃）。后端改动很小：在 clean 对象里加 `if(msg.role==="assistant"&&msg.reasoning_content!==undefined) clean.reasoning_content=...`。
+- **`<current_time>` 标签注入**：网关用 `extractCurrentTimeTagLabel` 解析 `<current_time>周几 26-08-27 19:50:00</current_time>`（**两位年** + 时:分，见 server.js 668 行正则 `(\d{2})[-/]...`）。前端发送消息时要给 user content 注入这个标签，网关才能做时间/唤醒/特殊事件定位。**显示时要用 `stripCurrentTime` 剥掉标签**，否则气泡里裸显示乱码。已用 node 离线验证生成格式能被网关正则解析。
+- **系统提示词只发一次**：前端 `buildMessages` 只在数组第 0 位 push 一条 system（若用户填了），不会重复发第二遍。跟 Kelivo 一致。
+- **QQ 式分组气泡**：连续同角色消息（时间差 <10 分钟）用 `grp/grp-mid/grp-last` 类做紧密排列、仅最后一条带小尾巴；`grp .meta{display:none}` 隐藏中间条时间。判断用 `groupCls(i)` 看前后条角色+时间。
+- **时间显示**：原来 `makeMsgEl` 的 meta 用的是 `timeStr()`（当前时刻）——这是 bug。应改用**消息自带时间**（`m.time` 或 content 里 `<current_time>` 剥出来的），历史从 `/v1/history` 拉回来的条目自带 `time` 字段。
+- **坑：暂无 `edit_file` MCP 工具**，改 server.js 这种大文件用 `python3` 读替换写入（`io.open` + `text.replace`），别指望 edit 工具。
+- **改后端重启**：沿用 3.17 的安全方式 `kill -TERM <3000 真实 PID>` 让 PM2 自动拉起，别 `pm2 restart gateway`。重启前先记录 `/v1/history` 条数，重启后比对确认没丢历史。

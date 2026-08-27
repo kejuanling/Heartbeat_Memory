@@ -1659,6 +1659,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
       if (msg.name !== undefined) clean.name = msg.name;
       if (msg.tool_calls !== undefined) clean.tool_calls = msg.tool_calls;
       if (msg.tool_call_id !== undefined) clean.tool_call_id = msg.tool_call_id;
+      // 多轮对话时可回传思考链（前端若开"回传思考链"会带 reasoning_content），透传给上游而非丢弃
+      if (msg.role === "assistant" && msg.reasoning_content !== undefined) clean.reasoning_content = msg.reasoning_content;
       return clean;
     });
 
