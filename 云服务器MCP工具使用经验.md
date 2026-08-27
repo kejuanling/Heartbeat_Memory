@@ -219,3 +219,13 @@
 - **regen/edit 都要 `slice` 出一个新数组再赋给 `msgs`**，别原地改动全局数组之外还要记得 `saveMsgs()+renderAll()`。
 - ⚠️ 长按会触发 iOS 系统文本选择菜单，`msg .bubble` 上加了 `user-select:none;-webkit-touch-callout:none` 屏蔽；复制功能自行用 `navigator.clipboard.writeText` 兜底 `execCommand`。
 - ⚠️ `send()` 里调了 `updateSelBar()`，但该函数定义在后面——JS 函数声明提升所以没事，但要确保函数是 `function` 声明而非箭头函数赋给变量。
+
+### 3.17 聊天记录接入网关真源：/v1/history + 前端首次拉取（2026-08-27）
+- **背景坑**：网关时间线 `enhanced_messages.json` 不是网关"自己保管"，而是**以"客户端每次发来的完整历史"为准重建并覆盖**（`/v1/chat/completions` 里 `buildTimeline(kelivoMessages)` + `saveTimeline`）。Kelivo 不丢历史是因为它本地存全套、每回全量发。自建前端若 localStorage 为空，一发消息就会用"新消息"覆盖掉 811 条历史。**数据丢失风险！**
+- **解法**：给网关加只读接口 `GET /v1/history`（在 `/v1/` 前缀下，走 `GATEWAY_API_KEY` 鉴权，`onRequest` hook 已拦），返回 `loadTimeline()` 过滤 `isRealMessageForTimeline` 后、剥离内部 position 字段、保留 role/content/time 的数组。前端**首次打开先拉 `/v1/history` 填满 `msgs` 并 `renderAll`**，之后发消息全量带回 → 网关重建时历史保留+追加，不覆盖。
+- **前端保险**：`send()` 里若 `msgs` 为空，先 `loadMsgs()` 再 `fetchHistory()`，实在拉不到才发，**杜绝"空历史覆盖网关"**。
+- **前端数据注意**：历史里 user 消息 content 带 `<current_time>…</current_time>` 和 `[图片]` 占位符，前端 `escapeHtml` 渲染会当文本显示（与 Kelivo 行为一致）。content 全是字符串（图片已转 `[图片]` 占位），不会出现数组，渲染安全。
+- **⚠️ 重启 3000 进程（关键，勿莽撞）**：3000 被 PID `node server.js` 占用，PPID=PM2 God Daemon(67493)，`autorestart:true`。**pm2 list 里 `gateway(id 0)` 显示 `errored/pid 0` 是 desync 假死**（实际进程在跑）。正确重启方式：**`kill -TERM <占用3000的PID>`，PM2 God Daemon 按 autorestart 自动拉起新进程加载新代码**。**禁止 `pm2 restart gateway`**（会因 3000 被占 EADDRINUSE）。加载成功标志：新进程启动时间晚于 server.js mtime，且 `/v1/history` 能返回数据。
+- **验证链路**：起 `PORT=3100` 临时实例测新接口，用 `RAILWAY_ENVIRONMENT=1` 注入环境变量（`ALLOW_PUBLIC_API=true GATEWAY_API_KEY=test`）避免读 .env 真 key。`/v1/history` 只读不写盘，临时实例不污染生产。但**别用临时实例测真实对话**（会共用生产 data/，测完必须手动清理时间线的测试条目）。
+- **测试污染清理**：端到端验证时会在 `enhanced_messages.json` 留下测试 user/assistant 消息，必须按 content 关键词（如"系统测试""刚刚收到系统消息"）精准删除，恢复原条数（811）。**别在 user 消息里放会触发 AI 回复的测试文本**，否则会产生配对 assistant 要连带删。
+- `isRealMessageForTimeline` 过滤后：811 条里剩 626（313 user + 313 assistant），去掉了 1 system + 特殊事件 + tool_calls。前端拿到的就是这 626 条可对话历史。
