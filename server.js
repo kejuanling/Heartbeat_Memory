@@ -322,16 +322,199 @@ function parseWakeTagAndSchedule(text) {
   return cleaned;
 }
 
+// ========================
+// 消息扣住（免打扰）时段：与 <wake> 闹钟完全独立。
+// AI 在对话里写 <quiet>数值</quiet>（分钟）或 <quiet>22:30</quiet>（到点结束）开启。
+// 扣住期间新用户消息被网关拦截（不转发、不回复）；到点一次性打包给 AI 做总结回复。
+// 与 wake_schedule.json 无关，功能完全独立。
+// ========================
+const QUIET_SCHEDULE_PATH = path.join(__dirname, "data", "quiet_schedule.json");
+const HELD_MESSAGES_PATH = path.join(__dirname, "data", "held_messages.json");
+let quietReleaseTimer = null;
+
+function readQuietScheduleRaw() {
+  try {
+    if (!fs.existsSync(QUIET_SCHEDULE_PATH)) return null;
+    return JSON.parse(fs.readFileSync(QUIET_SCHEDULE_PATH, "utf-8"));
+  } catch (err) {
+    console.warn("[quiet] 读取扣住时段失败:", err.message);
+    return null;
+  }
+}
+function readQuietSchedule() {
+  const d = readQuietScheduleRaw();
+  if (!d || !d.end_at) return null;
+  const t = new Date(d.end_at);
+  return isNaN(t.getTime()) ? null : t;
+}
+function saveQuietSchedule(endAtIso) {
+  fs.ensureDirSync(path.dirname(QUIET_SCHEDULE_PATH));
+  const tmp = QUIET_SCHEDULE_PATH + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify({ end_at: endAtIso, updated_at: new Date().toISOString() }, null, 2), "utf-8");
+  fs.renameSync(tmp, QUIET_SCHEDULE_PATH);
+}
+function clearQuietSchedule() {
+  if (quietReleaseTimer) { clearTimeout(quietReleaseTimer); quietReleaseTimer = null; }
+  try {
+    if (fs.existsSync(QUIET_SCHEDULE_PATH)) fs.unlinkSync(QUIET_SCHEDULE_PATH);
+  } catch (err) { console.warn("[quiet] 清理扣住时段失败:", err.message); }
+}
+// 当前是否处于扣住时段（现在早于结束时间）
+function isQuietActive() {
+  const end = readQuietSchedule();
+  return !!end && end.getTime() > Date.now();
+}
+function readHeldMessages() {
+  try {
+    if (!fs.existsSync(HELD_MESSAGES_PATH)) return [];
+    return JSON.parse(fs.readFileSync(HELD_MESSAGES_PATH, "utf-8")) || [];
+  } catch (err) { return []; }
+}
+function writeHeldMessages(arr) {
+  fs.ensureDirSync(path.dirname(HELD_MESSAGES_PATH));
+  const tmp = HELD_MESSAGES_PATH + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(arr || [], null, 2), "utf-8");
+  fs.renameSync(tmp, HELD_MESSAGES_PATH);
+}
+
+// 解析 <quiet> 标签并写入调度（标签随后被剥离，不显示给用户）
+function parseQuietTagAndSchedule(text) {
+  const cleaned = String(text || "").replace(/<quiet>[\s\S]*?<\/quiet>/gi, "").trim();
+  const m = String(text || "").match(/<quiet>([\s\S]*?)<\/quiet>/i);
+  if (!m) return cleaned;
+  const target = parseWakeTarget(m[1], TIME_ZONE);
+  if (!target) { console.log("[quiet] <quiet> 内容无效（忽略）:", m[1]); return cleaned; }
+  const endAt = target.at || new Date(Date.now() + target.minutes * 60 * 1000);
+  if (endAt.getTime() <= Date.now()) { console.log("[quiet] <quiet> 时间已过（忽略）:", m[1]); return cleaned; }
+  try {
+    saveQuietSchedule(endAt.toISOString());
+    console.log(`[quiet] 设置消息扣住时段到：${formatDateTimeInTimeZone(endAt, TIME_ZONE)}（${endAt.toISOString()}）`);
+    armQuietRelease();
+  } catch (err) { console.warn("[quiet] 保存扣住时段失败:", err.message); }
+  return cleaned;
+}
+
+// 挂释放定时器：到点把扣住的消息打包给 AI 做总结回复
+function armQuietRelease() {
+  if (quietReleaseTimer) { clearTimeout(quietReleaseTimer); quietReleaseTimer = null; }
+  const end = readQuietSchedule();
+  if (!end) return;
+  const delayMs = end.getTime() - Date.now();
+  if (delayMs <= 0) {
+    try { releaseHeldMessages(); } catch (err) { console.error("[quiet] 释放失败:", err.message); }
+    clearQuietSchedule();
+    return;
+  }
+  quietReleaseTimer = setTimeout(async () => {
+    try { await releaseHeldMessages(); } catch (err) { console.error("[quiet] 释放失败:", err.message); }
+    clearQuietSchedule();
+  }, delayMs);
+  console.log(`[quiet] 已挂扣住释放定时器：${formatDateTimeInTimeZone(end, TIME_ZONE)}（${Math.round(delayMs / 60000)} 分钟后）`);
+}
+
+function quietMsgSignature(m) {
+  return (m.role || "") + "\u0000" + normalizeContentToText(m.content);
+}
+// 扣住期间收集新来的用户消息（按内容去重，避免重复扣住同一条历史）
+// 收集请求末尾尚未被回答的用户消息（直到遇到 assistant 回复为止）
+function collectTrailingUnansweredUserMessages(msgs) {
+  if (!Array.isArray(msgs)) return [];
+  const out = [];
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if (!m || !isRealMessageForTimeline(m)) continue;
+    if (m.role === "assistant") break;
+    if (m.role === "user") out.unshift(m);
+  }
+  return out;
+}
+
+function holdNewUserMessages(kelivoMessages) {
+  const held = readHeldMessages();
+  const heldSigs = new Set(held.map(m => quietMsgSignature(m)));
+  let added = 0;
+  for (const m of kelivoMessages) {
+    if (!isRealMessageForTimeline(m) || m.role !== "user") continue;
+    const sig = quietMsgSignature(m);
+    if (heldSigs.has(sig)) continue;
+    held.push({
+      role: "user",
+      content: normalizeContentToText(m.content),
+      held_at: new Date().toISOString()
+    });
+    heldSigs.add(sig);
+    added++;
+  }
+  if (added > 0) writeHeldMessages(held);
+  return added;
+}
+
+// 扣住到点：把扣住的消息一次性打包给 AI，只生成一条总结回复；写入时间线 + 推 Bark
+async function releaseHeldMessages() {
+  const held = readHeldMessages();
+  if (!held.length) { console.log("[quiet] 释放：无扣住消息"); return; }
+  console.log(`[quiet] 释放：共扣住 ${held.length} 条消息，打包给 AI 做总结`);
+  const targetApiUrl = readEnvValue("TARGET_API_URL");
+  const targetApiKey = readEnvValue("TARGET_API_KEY");
+  const modelName = readEnvValue("MODEL_NAME");
+  if (!targetApiUrl || !targetApiKey || !modelName) { console.warn("[quiet] 缺少上游配置，无法生成总结"); return; }
+  const timeline = loadTimeline();
+  const sp = timeline.find(m => m.role === "system");
+  const cleanSP = sp ? String(normalizeContentToText(sp.content)).split("## search_web 工具使用说明")[0].trim() : "";
+  const historyMsgs = timeline
+    .filter(m => m.role !== "system" && !isSpecialEvent(m) && m.role !== "tool" && !m.tool_calls && !m.tool_call_id)
+    .slice(-50)
+    .map(m => ({ role: m.role, content: normalizeContentToText(m.content) }));
+  const heldText = held.map((m, i) => `${i + 1}. ${normalizeContentToText(m.content)}`).join("\n");
+  const quietPrompt = `（系统提示：以下内容仅你可见）有 ${held.length} 条消息在免打扰时段被系统拦截扣住，现在一并交给你。请把它们当作对方在此期间的留言，做一条自然、简洁的总结回复。不需要逐条复述，若有需要回应的点可以点到，语气自然贴切。\n\n被扣住的消息：\n${heldText}`;
+  const messages = [
+    { role: "system", content: cleanSP },
+    ...historyMsgs,
+    { role: "system", content: quietPrompt }
+  ];
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(targetApiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${targetApiKey}` },
+      body: JSON.stringify({ model: modelName, messages, temperature: 0.8, top_p: 0.95, stream: false }),
+      signal: controller.signal
+    });
+  } finally { clearTimeout(timer); }
+  const responseText = await response.text();
+  let data;
+  try { data = JSON.parse(responseText); } catch (err) { throw new Error("模型返回非 JSON: " + responseText.slice(0, 200)); }
+  if (!response.ok) throw new Error("模型请求失败 HTTP " + response.status + ": " + responseText.slice(0, 200));
+  const aiText = String(normalizeContentToText(data?.choices?.[0]?.message?.content) || "").trim();
+  if (aiText) {
+    const clean = stripInternalTags(aiText) || aiText;
+    appendSpecialEvent(clean, { event_type: "quiet_summary" });
+    const pushResult = await sendPushNotification({ title: "扣住消息已处理", body: clean.slice(0, 300) });
+    console.log(`[quiet] 总结回复已写入时间线${pushResult.ok ? "并推送" : "（推送失败：" + pushResult.reason + "）"}`);
+  }
+  writeHeldMessages([]);
+}
+
+// 扣住期间返回给客户端的响应：内容为空，让客户端不显示 AI 回复（此时消息只是被扣住）
+function buildQuietHeldReply(reply) {
+  return reply.code(200).send({
+    choices: [{ index: 0, message: { role: "assistant", content: "" }, finish_reason: "stop" }],
+    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+  });
+}
+
 function createContentTagFilter() {
   let buf = "";
   let inTag = false;
-  let tagType = ""; // "memory" | "pin" | "wake"
+  let tagType = ""; // "memory" | "pin" | "wake" | "quiet"
 
   // 判断 tail（从某个 "<" 开始的小写文本）是否可能是 memory/pin/wake 开标签
   function isPotentialOpen(tail) {
-    if (/^<(memory|pin|wake)(\s[^>]*)?>/.test(tail)) return true; // 完整开标签（可带属性）
-    if (/^<(memory|pin|wake)\s[^>]*$/.test(tail)) return true;     // 属性写法进行中
-    if (/^<(memory|pin|wake)$/.test(tail)) return true;            // 恰好 <memory / <pin / <wake
+    if (/^<(memory|pin|wake|quiet)(\s[^>]*)?>/.test(tail)) return true; // 完整开标签（可带属性）
+    if (/^<(memory|pin|wake|quiet)\s[^>]*$/.test(tail)) return true;     // 属性写法进行中
+    if (/^<(memory|pin|wake|quiet)$/.test(tail)) return true;            // 恰好 <memory / <pin / <wake / <quiet
     if (/^<m(?:e(?:m(?:o(?:r)?)?)?)?$/.test(tail)) return true; // <m <me <mem <memo <memor
     if (/^<p(?:i)?$/.test(tail)) return true;                  // <p <pi
     if (/^<w(?:a(?:k)?)?$/.test(tail)) return true;            // <w <wa <wak
@@ -343,7 +526,7 @@ function createContentTagFilter() {
   function findOpenIndex(str) {
     const lower = str.toLowerCase();
     const candidates = [];
-    const re = /<(?=[mpw])/g;
+    const re = /<(?=[mpwq])/g;
     let m;
     while ((m = re.exec(lower)) !== null) {
       candidates.push(m.index);
@@ -364,7 +547,7 @@ function createContentTagFilter() {
       buf += delta;
       for (;;) {
         if (inTag) {
-          const closeRe = tagType === "memory" ? /<\/memory>/i : tagType === "pin" ? /<\/pin>/i : /<\/wake>/i;
+          const closeRe = tagType === "memory" ? /<\/memory>/i : tagType === "pin" ? /<\/pin>/i : tagType === "quiet" ? /<\/quiet>/i : /<\/wake>/i;
           const m = closeRe.exec(buf);
           if (m) {
             buf = buf.slice(m.index + m[0].length);
@@ -380,10 +563,10 @@ function createContentTagFilter() {
         if (open !== -1) {
           if (open > 0) emit(buf.slice(0, open));
           buf = buf.slice(open);
-          if (/^<(memory|pin|wake)(\s[^>]*)?>/.test(buf.toLowerCase())) {
+          if (/^<(memory|pin|wake|quiet)(\s[^>]*)?>/.test(buf.toLowerCase())) {
             inTag = true;
             const lowerBuf = buf.toLowerCase();
-            tagType = lowerBuf.startsWith("<pin") ? "pin" : lowerBuf.startsWith("<wake") ? "wake" : "memory";
+            tagType = lowerBuf.startsWith("<pin") ? "pin" : lowerBuf.startsWith("<wake") ? "wake" : lowerBuf.startsWith("<quiet") ? "quiet" : "memory";
           }
           return;
         }
@@ -1147,6 +1330,24 @@ app.post("/v1/chat/completions", async (req, reply) => {
       return false;
     });
 
+    // ========================
+    // 消息扣住（免打扰）：扣住时段内新用户消息待处理，不转发给模型
+    // ========================
+    if (isMainChat && isQuietActive()) {
+      const trailing = collectTrailingUnansweredUserMessages(kelivoMessages);
+      if (trailing.length > 0) {
+        const newest = normalizeContentToText(trailing[trailing.length - 1].content) || "";
+        const urgent = /紧急|急事|加急|急用|很急|马上回/.test(newest);
+        if (urgent) {
+          console.log("[quiet] 检测到紧急关键词，本次放行");
+        } else {
+          const addedHeld = holdNewUserMessages(trailing);
+          console.log(`[quiet] 扣住 ${addedHeld} 条新用户消息，本次不转发给模型`);
+          return buildQuietHeldReply(reply);
+        }
+      }
+    }
+
     // 用时间线里的原始回复替换客户端清洗过的版本，保留 <memory>/<pin> 标签：
     // 模型能看到自己写过什么，管理台上下文窗口也能审查。
     // 匹配方式：时间线回复去掉内部标签后与客户端内容比对。
@@ -1477,6 +1678,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
         if (aiContent) {
           // 解析 <wake> 闹钟标签并写入调度（标签随后被剥离，不显示给用户）
           parseWakeTagAndSchedule(aiContent);
+          parseQuietTagAndSchedule(aiContent);
           // 提取并存储记忆，同时拿到清洗后的文本
           const cleanText = await tagParser.extractAndStore(aiContent);
           // 用清洗后的文本替换 JSON 中的 content
@@ -1594,6 +1796,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
       if (aiFullContent) {
         // 解析 <wake> 闹钟标签并写入调度（标签随后被剥离，不显示给用户）
         parseWakeTagAndSchedule(aiFullContent);
+        parseQuietTagAndSchedule(aiFullContent);
         // 提取并存储记忆，并拿到清洗后的文本
         const cleanFull = await tagParser.extractAndStore(aiFullContent).catch(err => {
           console.warn("[memory] 流式标签解析失败:", err.message);
@@ -5157,6 +5360,8 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err, address) => {
     process.exit(1);
   }
   console.log(`✅ Gateway 运行在 ${address}`);
+  // 启动重挂「消息扣住」释放定时器（若曾有未到点的扣住时段）
+  try { armQuietRelease(); } catch (e) { console.warn("[quiet] 启动重挂释放定时器失败:", e.message); }
   setTimeout(async () => {
     try {
       const headers = { "Content-Type": "application/json" };
