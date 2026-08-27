@@ -239,3 +239,9 @@
 - **时间显示**：原来 `makeMsgEl` 的 meta 用的是 `timeStr()`（当前时刻）——这是 bug。应改用**消息自带时间**（`m.time` 或 content 里 `<current_time>` 剥出来的），历史从 `/v1/history` 拉回来的条目自带 `time` 字段。
 - **坑：暂无 `edit_file` MCP 工具**，改 server.js 这种大文件用 `python3` 读替换写入（`io.open` + `text.replace`），别指望 edit 工具。
 - **改后端重启**：沿用 3.17 的安全方式 `kill -TERM <3000 真实 PID>` 让 PM2 自动拉起，别 `pm2 restart gateway`。重启前先记录 `/v1/history` 条数，重启后比对确认没丢历史。
+
+### 3.19 历史图片裁剪 keep_recent_image_turns 语义 & 改 server.js 前必读（2026-08-27）
+- 该配置控制网关发视觉模型时保留多少历史图。语义已改：以「带图的 user 消息」为单位，只保留最后 x 条带图消息里的图；**当前正在发送的最后一条消息(数组末尾)的图始终保留**；x=0 不留历史图。配置键名 keep_recent_image_turns 不变，只改 server.js 的 trimHistoricalImages + admin-mobile.html 文案。
+- 改 server.js 前务必先读文首「〇、当前运维状态」：3000 由独立/PM2 God Daemon(67493) 托管的 node server.js 进程服务，pm2 list 里 gateway 显示 errored/pid=0 是**状态 desync(假死)**。
+- **别用 `pm2 restart gateway`**（因 3000 被占会 EADDRINUSE，↺ 重启数飙升、崩循环）。正确姿势：`kill -TERM <占用3000的真实PID>`，PM2 按 autorestart 自动拉起新进程。
+- 判断是否已加载新代码：`ps -o lstart -p <pid>` 是否晚于 `stat -c %y server.js`。本次最终由 1040463(20:26 启动) 提供 3000 服务，已加载新代码。
