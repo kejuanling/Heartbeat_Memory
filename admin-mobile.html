@@ -564,8 +564,7 @@
 .cc-gap-body::after{content:'';position:absolute;right:0;bottom:0;width:56px;height:1.2em;background:linear-gradient(90deg,transparent,rgba(255,255,255,.92));pointer-events:none}
 .cc-gap-item.expanded .cc-gap-body{display:block;-webkit-line-clamp:unset;overflow:visible}
 .cc-gap-item.expanded .cc-gap-body::after{content:none}
-.cc-orig-item{cursor:pointer;transition:background .15s}
-.cc-orig-item:hover{background:rgba(200,144,152,.06)}
+.cc-orig-item{transition:background .15s}
 
 /* 多选模式 */
 .cc-chunk{position:relative}
@@ -2738,14 +2737,13 @@ function toast(msg){
          chunkTag = '<span class="mem-tag" style="background:'+(chunk.source==='manual'?'#8e44ad':'#2980b9')+';color:#fff">块 #'+chunk.chunkIndex+'</span>'
            + (chunk.summary ? '<span class="cc-orig-sum" title="'+escapeHtml(chunk.summary)+'">'+escapeHtml(chunk.summary)+'</span>' : '');
        }
-       const _locAttrs = chunk ? (' data-chunk="'+chunk.chunkIndex+'"') : (' data-idx="'+x.index+'"');
-      return '<div class="cc-orig-item" onclick="locateCcFromSearch(this)"'+_locAttrs+'>' +
+      return '<div class="cc-orig-item">' +
          '<div class="cc-orig-meta">' +
          '<span class="mem-tag">第 '+x.index+' 条</span>' +
          '<span class="mem-tag">'+escapeHtml(x.role||'')+'</span>' +
          '<span class="mem-time">'+escapeHtml(x.time||'')+'</span>' +
          chunkTag +
-         '<button class="cc-msg-mark'+(x.marked?' on':'')+'" data-key="'+x.key+'" style="margin-left:auto" onclick="toggleCcOrigMark(this)" title="标星：压缩后以原句保留，不被摘要覆盖" aria-pressed="'+(x.marked?'true':'false')+'" aria-label="标星此消息">'+(x.marked?'★':'☆')+'</button>' +
+         '<button class="cc-msg-mark'+(x.marked?' on':'')+'" data-key="'+x.key+'" style="margin-left:auto" onclick="event.stopPropagation();toggleCcOrigMark(this)" title="标星：压缩后以原句保留，不被摘要覆盖" aria-pressed="'+(x.marked?'true':'false')+'" aria-label="标星此消息">'+(x.marked?'★':'☆')+'</button>' +
          '</div>' +
          '<div class="cc-orig-content">'+escapeHtml(x.content)+'</div>' +
          '</div>';
