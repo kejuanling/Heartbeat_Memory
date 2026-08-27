@@ -88,6 +88,14 @@ function backupFile(file) {
     if (!fs.existsSync(file)) return;
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
     fs.copyFileSync(file, file + ".bak-" + ts);
+    // 轮转：同一基础文件的 .bak-* 仅保留最近 2 份，避免每次保存全量备份导致 data/ 无限膨胀
+    try {
+      const dir = path.dirname(file);
+      const prefix = path.basename(file) + ".bak-";
+      const keep = 2;
+      const matches = fs.readdirSync(dir).filter(function (n) { return n.startsWith(prefix); }).sort().reverse();
+      matches.slice(keep).forEach(function (n) { try { fs.unlinkSync(path.join(dir, n)); } catch (e) {} });
+    } catch (e) {}
   } catch (err) {
     console.warn("[context-replacements] 备份失败:", err.message);
   }
