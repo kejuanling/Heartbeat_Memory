@@ -161,17 +161,32 @@ function systemNotePrefix() {
 }
 
 
-// 历史图片裁剪：发送给上游前只保留最近 keepTurns 轮（以 user 消息为轮边界）里的图片，
-// 更早轮次消息中的图片统一替换为 [图片] 文本占位符，避免视觉模型反复重编码历史图片。
+// 历史图片裁剪：以「带图的 user 消息」为单位，发送给上游前只保留最后 keepTurns 条带图消息里的图片，
+// 更早消息中的图片统一替换为 [图片] 文本占位符，避免视觉模型反复重编码历史图片。
+// 当前正在发送的最后一条消息（数组末尾）里的图片始终保留，不计入历史窗口；keepTurns<=0 表示不保留任何历史图片。
 function trimHistoricalImages(messages, keepTurns) {
-  if (!Array.isArray(messages) || keepTurns <= 0) return messages;
-  const userIdxs = [];
-  for (let i = 0; i < messages.length; i++) {
+  if (!Array.isArray(messages) || messages.length === 0) return messages;
+  const lastIdx = messages.length - 1;
+  const hasImage = function (msg) {
+    if (!msg || !Array.isArray(msg.content)) return false;
+    return msg.content.some(p => p && isImageContentPart(p));
+  };
+  // 历史带图 user 消息索引（不含当前正在发送的最后一条）
+  const imgUserIdxs = [];
+  for (let i = 0; i < lastIdx; i++) {
     const msg = messages[i];
-    if (msg && msg.role === "user") userIdxs.push(i);
+    if (msg && msg.role === "user" && hasImage(msg)) imgUserIdxs.push(i);
   }
-  if (userIdxs.length <= keepTurns) return messages;
-  const keepStartIdx = userIdxs[userIdxs.length - keepTurns];
+  const x = Number(keepTurns);
+  // 保留窗口起点：最后 x 条历史带图消息的第一条；x<=0 则连历史带图消息都不保留（只保留当前消息的图）
+  let keepStartIdx;
+  if (!Number.isFinite(x) || x <= 0) {
+    keepStartIdx = lastIdx;
+  } else if (imgUserIdxs.length <= x) {
+    return messages; // 历史带图消息都在保留窗口内，无需裁剪
+  } else {
+    keepStartIdx = imgUserIdxs[imgUserIdxs.length - x];
+  }
   let dropped = 0;
   const touchedMsgs = [];
   for (let i = 0; i < keepStartIdx; i++) {
@@ -191,7 +206,7 @@ function trimHistoricalImages(messages, keepTurns) {
     }
   }
   if (dropped > 0) {
-    console.log(`[trim-images] 历史图片裁剪：总轮 ${userIdxs.length}，保留最近 ${keepTurns} 轮，替换早于窗口的图片 ${dropped} 张（涉及 ${touchedMsgs.length} 条历史消息）`);
+    console.log(`[trim-images] 历史图片裁剪：历史带图消息 ${imgUserIdxs.length} 条，保留最近 ${x > 0 ? x : 0} 条，替换早于窗口的图片 ${dropped} 张（涉及 ${touchedMsgs.length} 条历史消息）`);
   }
   return messages;
 }
@@ -1544,7 +1559,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
       llmMessages.splice(idx, 1);
     }
 
-    // (trim 逻辑移至 lastLLMMessages 捕获处，避免误删当前用户请求)
+    // (trim 逻辑在下方最近窗口处执行，当前用户请求的图片始终保留)
 
     const targetApiUrl = readEnvValue("TARGET_API_URL");
     const targetApiKey = readEnvValue("TARGET_API_KEY");
@@ -1612,11 +1627,12 @@ app.post("/v1/chat/completions", async (req, reply) => {
     }
 
     // ========================
-    // 历史图片裁剪：只保留最近 8 轮对话里的图片，更早的图片替换为 [图片] 占位符。
+    // 历史图片裁剪：只保留最后 N 条「带图历史消息」里的图片（N=keep_recent_image_turns），
+    // 更早消息里的图片替换为 [图片] 占位符；当前正在发送的那条消息的图片始终保留。
     // 图片无法命中 prompt 缓存，反复重编码历史图片是慢响应主因；文本历史不受影响。
     // ========================
     const cfgKeepImgTurns = Number(memoryEngine.getConfig().keep_recent_image_turns);
-    // 0 表示不裁剪历史图片；配置缺省时回退环境变量，再回退默认 8
+    // 0 表示不保留历史图片（仅当前发送那张图传入）；配置缺省时回退环境变量，再回退默认 8
     const keepImageTurns = Number.isFinite(cfgKeepImgTurns) && cfgKeepImgTurns >= 0
       ? cfgKeepImgTurns
       : (Number(process.env.KEEP_RECENT_IMAGE_TURNS) || 8);
