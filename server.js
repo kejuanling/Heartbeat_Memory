@@ -1160,7 +1160,7 @@ app.get("/v1/models", async (req, reply) => {
 // Chat Completions
 // ========================
 // ========================
-// 跨窗口自动注入：日记 + 高重要级记忆 + 记忆碎片
+// 跨窗口自动注入：日记 + 高重要级记忆 + 标星内容（注入标题显示为「记忆碎片」，本质仍标星）
 // ========================
 function recentDiaryText(count) {
   const diaryDir = path.join(__dirname, "diary");
@@ -1188,7 +1188,7 @@ function starredContextText(limit) {
   const items = [];
   const seenKeys = new Set();
   // 第一遍：优先用标星时存的原文 marks[key].content —— 与已标星列表 listMarked 口径一致。
-  // 时间线/替换池查不到的历史标星也能注入，避免“近期新标不在记忆碎片段”。
+  // 时间线/替换池查不到的历史标星也能注入，避免“近期新标不在标星内容段”。
   keys.forEach(function (key) {
     const entry = marks[key];
     if (!entry || typeof entry.content !== "string" || !entry.content) return;
@@ -1281,7 +1281,9 @@ function buildCrossWindowInjection() {
     if (dt) parts.push("## 近期日记\n" + dt);
   }
   
-  // 3. 记忆碎片
+  // 3. 标星内容（注入标题显示为「记忆碎片」，本质仍是标星功能）
+  //    数据来源 starredContextText()（标星正文），开关 cross_inject_starred，均未变；
+  //    仅把该段落的显示标题从「标星内容」改为「记忆碎片」。别当成新功能。
   if (cfg.cross_inject_starred !== false) {
     const st = starredContextText(Number(cfg.cross_inject_starred_topk) || 10);
     if (st) parts.push("## 记忆碎片\n" + st);
