@@ -1029,6 +1029,66 @@ function contentKey(msg) {
   return crypto.createHash("sha256").update((msg && msg.role ? msg.role : "") + "\u0000" + text).digest("hex").slice(0, 32);
 }
 
+function saveMarks(marks) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    const tmp = MARKS_FILE + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify({ version: 1, marks: marks }, null, 2), "utf-8");
+    fs.renameSync(tmp, MARKS_FILE);
+  } catch (err) {
+    console.error("[context-replacements] 标记保存失败:", err.message);
+  }
+}
+
+function findContentByKey(key) {
+  try {
+    const timeline = loadTimeline();
+    for (const m of timeline) {
+      if (!m || m.role === "system") continue;
+      if (m.deleted === true) continue;
+      try {
+        if (contentKey(m) === key) {
+          const c = contentToText(m);
+          if (c) return { content: c, role: m.role || "" };
+        }
+      } catch (e) { /* 单条失败忽略 */ }
+    }
+  } catch (err) { /* 反查失败不阻断标星 */ }
+  return null;
+}
+
+function setMark(key, marked, opt) {
+  const marks = loadMarks();
+  if (marked) {
+    const entry = { markedAt: new Date().toISOString() };
+    if (opt && opt.content) entry.content = opt.content;
+    if (opt && opt.role) entry.role = opt.role;
+    if (!entry.content) {
+      const orig = findContentByKey(key);
+      if (orig && orig.content) { entry.content = orig.content; entry.role = entry.role || orig.role; }
+    }
+    if (!entry.content) {
+      console.warn("[context-replacements] 标星失败：无法回溯到原文 key=" + key);
+      return { ok: false, error: "无法回溯到这条消息的原文，标星失败（请刷新后重试）" };
+    }
+    marks[key] = entry;
+  } else {
+    delete marks[key];
+  }
+  saveMarks(marks);
+  return { ok: true, marked: !!marked };
+}
+
+function updateMark(key, opt) {
+  const marks = loadMarks();
+  if (!marks[key]) return { ok: false, error: "该标星消息不存在，可能已被取消" };
+  const content = String((opt && opt.content) || "").trim();
+  if (!content) return { ok: false, error: "正文内容不能为空" };
+  marks[key].content = content;
+  saveMarks(marks);
+  return { ok: true, content: content };
+}
+
 // 未发生替换时统一留痕：让每次请求都有记录，便于了解哪些请求没触发上下文替换
 function logNoReplace(count, source) {
   try {
@@ -1796,6 +1856,11 @@ module.exports = {
   searchRelatedSegments,
   searchCompactionOriginal,
   listMarked,
+  loadMarks,
+  setMark,
+  updateMark,
+  findContentByKey,
+  contentKey,
   // 特殊事件结构化识别与注入窗口过滤（供 context-compactor / server 复用同一口径）
   messageTime,
   currentWindowStartMs,

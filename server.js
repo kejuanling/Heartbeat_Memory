@@ -1321,7 +1321,7 @@ function recentDiaryText(count) {
 
 function starredContextText(limit) {
   let marks = {};
-  try { marks = contextCompactor.loadMarks ? contextCompactor.loadMarks() : {}; } catch (e) { marks = {}; }
+  try { marks = contextReplacements.loadMarks ? contextReplacements.loadMarks() : {}; } catch (e) { marks = {}; }
   const keys = Object.keys(marks || {});
   if (!keys.length) return "";
   const items = [];
@@ -1344,7 +1344,7 @@ function starredContextText(limit) {
     for (const m of matched) {
       if (!m || m.role === "system") continue;
       let k = null;
-      try { k = contextReplacements.contentKey ? contextReplacements.contentKey(m) : contextCompactor.contentKey(m); } catch (e) {}
+      try { k = contextReplacements.contentKey ? contextReplacements.contentKey(m) : contextReplacements.contentKey(m); } catch (e) {}
       if (k && marks[k] && !seenKeys.has(k)) {
         seenKeys.add(k);
         const role = m.role === "user" ? "她" : "我";
@@ -3615,11 +3615,11 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
       original_preview: matched.slice(0, 2).map(m => ({ role: m.role, content: String(m.content || "").slice(0, 150) })),
       history: (Array.isArray(it.history) ? it.history : []).map(function (h, i) { return { index: i, summary: h.summary, generatedAt: h.generatedAt, mode: h.mode || (manual ? "edited" : "ai"), manual: h.manual === true || manual }; }).slice(0, 8),
       msgs: includeMessages ? matched.map(function (m, i) {
-        const _key = contextCompactor.contentKey(m);
+        const _key = contextReplacements.contentKey(m);
         // 手工块：编号=存储起点+块内序号（matched 与压缩切片一一对应），避免锚点撞键漂移；
         // 存储编号失效（换窗口）时退回内容锚点编号
         const _num = (hasStoredIdx && storedValid) ? (storedStart + i) : (itemPosByKey.has(nKeyOf(m)) ? itemPosByKey.get(nKeyOf(m)) : null);
-        return { role: m.role, content: typeof m.content === "string" ? m.content : "", key: _key, marked: !!contextCompactor.loadMarks()[_key], num: _num };
+        return { role: m.role, content: typeof m.content === "string" ? m.content : "", key: _key, marked: !!contextReplacements.loadMarks()[_key], num: _num };
       }) : undefined,
       pos: compStart
     });
@@ -3764,10 +3764,10 @@ app.get("/admin/context-compaction/block-messages", { preHandler: basicAuth }, a
     const matched = Array.isArray(rec.matched) ? rec.matched : [];
     const total = matched.length;
     const slice = (offset < total) ? matched.slice(offset, offset + limit) : [];
-    const marks = contextCompactor.loadMarks();
+    const marks = contextReplacements.loadMarks();
     const posByKey = compressiblePosMap();
     const items = slice.map(function (m) {
-      const _key = contextCompactor.contentKey(m);
+      const _key = contextReplacements.contentKey(m);
       const _k = nKeyOfMsg(m);
       return { role: m.role || "", time: (m && m.time) || "", content: typeof m.content === "string" ? m.content : "", key: _key, marked: !!marks[_key], num: posByKey.has(_k) ? posByKey.get(_k) : null };
     });
@@ -3854,7 +3854,7 @@ app.post("/admin/context-compaction/mark", { preHandler: basicAuth }, async (req
         for (const m of matched) {
           if (!m) continue;
           let k = null;
-          try { k = contextCompactor.contentKey(m); } catch (e) {}
+          try { k = contextReplacements.contentKey(m); } catch (e) {}
           if (k === key) {
             content = typeof m.content === "string" ? m.content : (Array.isArray(m.content) ? m.content.map(function(p){return p&&(p.text||p.content)||"";}).join("") : "");
             role = m.role || "";
@@ -3865,7 +3865,7 @@ app.post("/admin/context-compaction/mark", { preHandler: basicAuth }, async (req
       }
       } catch (e) { /* 查找失败不阻断标星 */ }
     }
-    const markRes = contextCompactor.setMark(key, body.marked === true, { content: content, role: role });
+    const markRes = contextReplacements.setMark(key, body.marked === true, { content: content, role: role });
     if (!markRes || markRes.ok === false) {
       return reply.code(400).send({ error: (markRes && markRes.error) || "标星失败" });
     }
@@ -3883,7 +3883,7 @@ app.post("/admin/context-compaction/marked/update", { preHandler: basicAuth }, a
   if (!key) return reply.code(400).send({ error: "key 无效" });
   if (!content) return reply.code(400).send({ error: "正文内容不能为空" });
   try {
-    const r = contextCompactor.updateMark(key, { content: content });
+    const r = contextReplacements.updateMark(key, { content: content });
     if (!r.ok) return reply.code(400).send({ error: r.error || "更新失败" });
     reply.send({ ok: true, content: r.content });
   } catch (err) {
@@ -4301,7 +4301,7 @@ app.get("/admin/imported-conversations/search", { preHandler: basicAuth }, async
           preview: x.content,
           content: x.content,
           key: mkey,
-          marked: !!(contextCompactor.loadMarks())[mkey]
+          marked: !!(contextReplacements.loadMarks())[mkey]
         };
       })
     });
