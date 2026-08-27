@@ -40,6 +40,7 @@ const CONFIG = {
   dedup_anchor_threshold: DEFAULT_DEDUP_ANCHOR_THRESHOLD,
   decay_days: DEFAULT_DECAY_DAYS,
   retrieval_top_k: 5,
+  retrieval_max_content_chars: 4000,
   // 跨窗口注入（日记 / 高重要级记忆 / 记忆碎片）
   cross_inject_enabled: true,
   cross_inject_diary: true,
@@ -373,8 +374,15 @@ function retrieve(query, opts) {
     p.r.updated_at = nowIso();
     dirty = true;
   }
-  if (picked.length) flush();
-  return picked.map(p => ({ ...p.r, _score: Math.round(p.score * 1000) / 1000 }));
+  // Reads no longer write to disk immediately: batch via the 5s flushTimer to avoid write amplification.
+  const maxChars = Math.max(0, Number(CONFIG.retrieval_max_content_chars) || 0);
+  return picked.map(p => {
+    const rec = { ...p.r, _score: Math.round(p.score * 1000) / 1000 };
+    if (maxChars > 0 && typeof rec.content === "string" && rec.content.length > maxChars) {
+      rec.content = rec.content.slice(0, maxChars) + " ...[truncated]";
+    }
+    return rec;
+  });
 }
 
 // ---------------- 压缩摘要 → 记忆池 ----------------
