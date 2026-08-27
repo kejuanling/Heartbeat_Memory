@@ -40,7 +40,7 @@ const CONFIG = {
   dedup_anchor_threshold: DEFAULT_DEDUP_ANCHOR_THRESHOLD,
   decay_days: DEFAULT_DECAY_DAYS,
   retrieval_top_k: 5,
-  // 跨窗口注入（日记 / 高重要级记忆 / 标星内容）
+  // 跨窗口注入（日记 / 高重要级记忆 / 记忆碎片）
   cross_inject_enabled: true,
   cross_inject_diary: true,
   cross_inject_memory: true,
