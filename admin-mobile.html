@@ -871,6 +871,27 @@
 .cc-gap-scroll{max-height:44vh;margin-top:6px}
 .cc-gap-more{letter-spacing:.3px}
 
+
+/* ============ 聊天 tab：iframe 嵌入 ============ */
+.tab-content#tab-chat.active{display:block;padding:0}
+#tab-chat .chat-embed-wrap{
+  position:fixed;left:0;right:0;top:0;bottom:0;z-index:5;
+  /* 从顶部 header 下沿到 tab-bar 上沿，避开底部导航 */
+  padding-top:52px; /* 为 header 留出空间 */
+  background:#fdf6ed;
+}
+#tab-chat .chat-embed-wrap::before{
+  content:'';display:block;height:52px;background:#fdf6ed;
+}
+.chat-iframe{
+  width:100%;height:calc(100dvh - 52px - 72px);display:block;border:0;background:#fdf6ed;
+  margin:0;
+}
+@media(min-width:600px){
+  #tab-chat .chat-embed-wrap{padding-top:64px}
+  #tab-chat .chat-embed-wrap::before{height:64px}
+  .chat-iframe{height:calc(100dvh - 64px - 88px)}
+}
 </style>
  </head>
  <body>
@@ -904,6 +925,12 @@
 
    <div class="card"><div class="card-title">日记阅览</div><div id="diary-list"></div></div>
    <button type="button" class="btn btn-primary" onclick="restartService()" style="margin-top:4px;background:#c89098">重启服务</button>
+
+<!-- Tab: 聊天 -->
+<div class="tab-content" id="tab-chat">
+  <div class="chat-embed-wrap">
+    <iframe id="chatFrame" class="chat-iframe" title="聊天" frameborder="0" allow="camera; microphone; fullscreen"></iframe>
+  </div>
 </div>
 
 <!-- Tab 2: 配置 -->
@@ -1340,6 +1367,9 @@
   <button type="button" class="tab-item active" data-tab="status" onclick="switchTab('status')">
     <span class="tab-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span><span class="tab-label">状态</span>
   </button>
+  <button type="button" class="tab-item" data-tab="chat" onclick="switchTab('chat')">
+    <span class="tab-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span><span class="tab-label">聊天</span>
+  </button>
   <button type="button" class="tab-item" data-tab="config" onclick="switchTab('config')">
     <span class="tab-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span><span class="tab-label">配置</span>
   </button>
@@ -1761,7 +1791,7 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    // 恢复上次停留的导航 tab（刷新后不再回到心跳页）
    try{
      const savedTab = localStorage.getItem('adminTab');
-     if(savedTab && ['status','config','memory','compaction','prompts','system'].indexOf(savedTab)>=0 && savedTab!=='status'){
+     if(savedTab && ['status','chat','config','memory','compaction','prompts','system'].indexOf(savedTab)>=0 && savedTab!=='status'){
        switchTab(savedTab);
      }
    }catch(e){}
@@ -4891,6 +4921,10 @@ function ccArmAllGapAutoLoad(){
   if(name==='config'){loadToolsConfig();loadServices();}
   if(name==='system'){startLogsAutoRefresh(); loadReplaceLog();}
   if(name!=='system'){stopLogsAutoRefresh();}
+  if(name==='chat'){
+    const f=document.getElementById('chatFrame');
+    if(f && !f.src){ f.src='/chat'; }
+  }
   }
  
  async function loadPushLog(){

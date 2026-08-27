@@ -250,3 +250,10 @@
 - **验证**：`grep -n spicy-monopoly server.js` 确认只改这一行；`node --check server.js` 语法通过。
 - **让改动生效**：面板的 MANAGED_SERVICES 是网关（3000）启动时读进内存的，**改完 server.js 必须重启 3000 才生效**。重启姿势见 3.12/3.17：**`kill -TERM <占用3000的真实PID>`**，PM2 God Daemon(67493) 按 autorestart 自动拉起新进程；**别 `pm2 restart gateway`**（EADDRINUSE）。判断已加载新代码：进程 `lstart` 晚于 server.js mtime。
 - **踩坑提示**：大富翁 MCP 自身也可以用 `node mcp-server.js --http` 手动起（监听 8773），但面板用的是环境变量方式（`SPICY_MONOPOLY_MCP_TRANSPORT=streamable-http`），二者都能跑，路径别搞混。当初"点了面板重启就起来了"是错觉——真正拉起的是手动进程，面板那条 cmd 一直是坏的。
+
+### 3.21 上下文压缩：压缩页「编号」≠ 发送侧定位口径（2026-08-28）
+- **核心机制**：管理台「上下文压缩」页 show 的"第 X~Y 条"编号，是 `compressibleItems()`（过滤 system/特殊事件/tool/空消息后的可压缩列表）的**展示位置**，仅 `buildUnifiedReplacementPreview` 用。
+- **发送侧完全不用这个编号**：`context-replacements.js` 的 `applyReplacements()` 靠**内容锚点**（`normalizedCompareKey` 归一化去掉 `<memory>/<pin>/<current_time>`+压缩空白）在「本次请求客户端带的消息」里找块首末条定位。客户端没发的旧片段，服务端改编号也找不回，整块被静默跳过 → 原文泄出、时间线乱。
+- **排查法**：`GET /admin/logs/context`（basicAuth，.env 的 ADMIN_USER/ADMIN_PASSWORD，`-u user:pass`）抓「实际发给 LLM 的完整上下文」；`data/context_replace_log.json` 看每次请求 `applied` 的 startIdx/endIdx/replaced 数。
+- **关键**：同一条记录，`recordCompRange`（预览）与 `applyReplacements`（发送）**口径不一致**是正常的，不是 bug。差异在**客户端消息内容是否完整**：自建前端发完整历史=正常；Kelivo 只发它自己维护/截断后的消息则锚点对不上。排查先分清是"客户端没发"还是"服务端替换错"，别默认是服务端 bug。
+- **注意**：两套逻辑都在 `context-replacements.js`，但 `isCompressible` / `normalizedCompareKey` 等内部函数**未导出**，node -e 直接 require 会报 not a function；复刻逻辑自己写归一化键即可。

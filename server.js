@@ -4,6 +4,21 @@ const Fastify = require("fastify");
 const fs = require("fs-extra");
 const path = require("path");
 const crypto = require("crypto");
+
+// === MCP 工具循环接入（隔离式，ENABLE_MCP=true 才生效）===
+const mcp = require("./mcp-tool-loop");
+const { createClients: mcpCreateClients } = require("./mcp-client");
+const MCP_SERVERS_CONFIG = path.join(__dirname, "mcp-servers.json");
+const MCP_ENABLED = () => readEnvValue("ENABLE_MCP") === "true";
+let _mcpClientsCache = null;
+function getMcpClients() {
+  if (!_mcpClientsCache) {
+    try { _mcpClientsCache = mcpCreateClients(MCP_SERVERS_CONFIG); }
+    catch (e) { console.warn("[mcp] 加载配置失败:", e.message); _mcpClientsCache = []; }
+  }
+  return _mcpClientsCache;
+}
+// === end MCP ===
 const {
   getDatePartsInTimeZone,
   formatDateTimeInTimeZone,
@@ -39,6 +54,14 @@ const IS_RAILWAY_RUNTIME = Boolean(
   process.env.RAILWAY_SERVICE_ID
 );
 const TIMELINE_FILE = "enhanced_messages.json";
+// 多会话：按 sessionId 计算对应的时间线文件。
+// 空/缺省 sessionId 走默认主会话（enhanced_messages.json），100% 兼容旧行为。
+function timelineFileFor(sessionId) {
+  if (!sessionId || sessionId === "default") return TIMELINE_FILE;
+  // 只允许安全的会话ID字符，防止路径穿越
+  const safe = String(sessionId).replace(/[^A-Za-z0-9_-]/g, "");
+  return "enhanced_messages_" + safe + ".json";
+}
 // 对话侧闹钟与唤醒侧共用同一份调度文件：gateway 写入，wake-up 轮询感知后挂定时器
 const WAKE_SCHEDULE_PATH = path.join(__dirname, "data", "wake_schedule.json");
 // 批注 2026-07-17：管理页保存 .env 后要让 PM2 刷新进程环境；保留原进程名，
@@ -604,15 +627,16 @@ function createContentTagFilter() {
 // ========================
 // 读取 timeline
 // ========================
-function loadTimeline() {
-  if (!fs.existsSync(TIMELINE_FILE)) return [];
+function loadTimeline(sessionId) {
+  const file = timelineFileFor(sessionId);
+  if (!fs.existsSync(file)) return [];
   try {
-    return fs.readJsonSync(TIMELINE_FILE);
+    return fs.readJsonSync(file);
   } catch (err) {
     // 文件损坏时先备份再按空时间线处理，避免被下一次保存静默覆盖
     try {
-      const bak = TIMELINE_FILE + ".corrupt-" + new Date().toISOString().replace(/[:.]/g, "-");
-      fs.copySync(TIMELINE_FILE, bak);
+      const bak = file + ".corrupt-" + new Date().toISOString().replace(/[:.]/g, "-");
+      fs.copySync(file, bak);
       console.error("[timeline] 时间线文件损坏，已备份到 " + bak + "，本次按空时间线处理:", err.message);
     } catch (bakErr) {}
     return [];
@@ -638,14 +662,15 @@ function atomicWriteFileSync(file, content) {
 // ========================
 // 保存 timeline（保留 SP）
 // ========================
-function saveTimeline(messages) {
+function saveTimeline(messages, sessionId) {
+  const file = timelineFileFor(sessionId);
   const sp = messages.find(m => m.role === "system");
   const nonSP = messages.filter(m => m.role !== "system");
   // 兜底：任何写入路径都补齐缺失的 time（system 除外），避免历史消息/特殊事件缺时间
   backfillMissingTimes(nonSP);
   // 不再截断：完全保留客户端发送的全部消息（仅将 SP 放在首位）
   const final = sp ? [sp, ...nonSP] : nonSP;
-  atomicWriteJsonSync(TIMELINE_FILE, final);
+  atomicWriteJsonSync(file, final);
 }
 
 // ========================
@@ -789,8 +814,8 @@ function backfillMissingTimes(messages) {
 // ========================
 // 构建 Timeline
 // ========================
-function buildTimeline(kelivoMessages) {
-  const oldTimeline = loadTimeline();
+function buildTimeline(kelivoMessages, sessionId) {
+  const oldTimeline = loadTimeline(sessionId);
   // position → 旧时间线消息，用于找回已保存的 time，避免历史消息每次都回落为服务器时间
   // 按 role+content 匹配旧时间线找回已保存的 time（position 在客户端增删后会错位，内容匹配更鲁棒）
   const oldByContent = new Map();
@@ -1171,10 +1196,90 @@ app.get("/v1/models", async (req, reply) => {
   });
 });
 
+// 多会话列表：扫描本目录下所有 enhanced_messages*.json，返回会话摘要
+// 供前端侧边栏展示有哪些会话。默认主会话以 "default" 标识。
+app.get("/v1/sessions", async (req, reply) => {
+  try {
+    const fsx = require("fs-extra");
+    const pathm = require("path");
+    const dir = __dirname;
+    const files = fsx.readdirSync(dir).filter(f => /^enhanced_messages[_-][A-Za-z0-9_-]+\.json$/.test(f));
+    const sessions = [];
+    // 默认主会话
+    try {
+      const main = loadTimeline(); // 无参 = 主会话
+      const realMain = main.filter(isRealMessageForTimeline);
+      sessions.push({
+        id: "default",
+        name: "主会话",
+        total: main.length,
+        real: realMain.length,
+        last_time: (main[main.length - 1] && main[main.length - 1].time) || null,
+        is_default: true
+      });
+    } catch (e) {}
+    // 各分会话
+    for (const f of files) {
+      const sid = f.replace(/^enhanced_messages_/, "").replace(/\.json$/, "");
+      if (!sid || sid === "default") continue;
+      try {
+        const arr = loadTimeline(sid);
+        const real = arr.filter(isRealMessageForTimeline);
+        sessions.push({
+          id: sid,
+          name: sid,
+          total: arr.length,
+          real: real.length,
+          last_time: (arr[arr.length - 1] && arr[arr.length - 1].time) || null,
+          is_default: false
+        });
+      } catch (e) {}
+    }
+    reply.send({ ok: true, sessions });
+  } catch (err) {
+    console.error("[GET /v1/sessions] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 删除会话：删除与会话ID对应的独立时间线文件。主会话(default)不允许删除。
+app.delete("/v1/sessions/:id", async (req, reply) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    if (!id || id === "default") {
+      return reply.code(400).send({ error: "主会话不能删除" });
+    }
+    // 只允许安全字符，防止路径穿越
+    const safe = id.replace(/[^A-Za-z0-9_-]/g, "");
+    if (safe !== id) {
+      return reply.code(400).send({ error: "非法会话ID" });
+    }
+    const file = timelineFileFor(safe);
+    const fsx = require("fs-extra");
+    if (!fsx.existsSync(file)) {
+      // 可能从未落盘（本地新建未实聊），也视为删除成功
+      return reply.send({ ok: true, deleted: false, note: "no-file" });
+    }
+    // 删除前先备份到 backups/，避免误删无法找回
+    const bakDir = path.join(__dirname, "backups");
+    if (fsx.existsSync(bakDir)) {
+      const bak = path.join(bakDir, file + ".deleted-" + new Date().toISOString().replace(/[:.]/g, "-"));
+      fsx.copySync(file, bak);
+    }
+    fsx.removeSync(file);
+    // 清理对应本地会话名（前端侧也在做，这里后端冗余一份）
+    reply.send({ ok: true, deleted: true });
+  } catch (err) {
+    console.error("[DELETE /v1/sessions/:id] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
 // 只读返回完整时间线（供自建聊天前端首次拉取历史；剥离内部 position 字段，保留 role/content/time）
 app.get("/v1/history", async (req, reply) => {
   try {
-    const timeline = loadTimeline();
+    const sessionId = String(req.query.session_id || req.headers["x-session-id"] || "").trim();
+    const timeline = loadTimeline(sessionId);
     const items = timeline
       .filter(isRealMessageForTimeline)
       .map(m => {
@@ -1183,7 +1288,7 @@ app.get("/v1/history", async (req, reply) => {
         if (m.time) clean.time = m.time;
         return clean;
       });
-    reply.send({ ok: true, total: items.length, items });
+    reply.send({ ok: true, total: items.length, items, session_id: sessionId || "default" });
   } catch (err) {
     console.error("[GET /v1/history] error:", err.message);
     reply.code(500).send({ error: err.message });
@@ -1328,6 +1433,82 @@ function buildCrossWindowInjection() {
 
 
 
+// === MCP_TOOL_LOOP_BEGIN ===
+// MCP 工具循环入口：如果启用，则用 mcp-tool-loop 处理；返回 true 表示已处理并写完响应。
+// messages 为已处理好的 sanitizedMessages（含记忆/时间线/替换/裁剪）
+async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMessages) {
+  if (!MCP_ENABLED()) return false;
+  const clients = getMcpClients();
+  if (!clients || clients.length === 0) return false;
+  const targetApiUrl = readEnvValue("TARGET_API_URL");
+  const targetApiKey = readEnvValue("TARGET_API_KEY");
+  if (!targetApiUrl || !targetApiKey) return false;
+
+  const model = body.model || readEnvValue("MODEL_NAME");
+  const r = await mcp.runWithTools({
+    upstreamUrl: targetApiUrl,
+    upstreamKey: targetApiKey,
+    model,
+    messages: messages || body.messages || [],
+    serverClients: clients
+  });
+
+  // 修复：MCP 分支此前拦截了主流程的"AI 回复写回时间线"，导致刷新后回复丢失。
+  // 这里把最终回复也写回当前会话的时间线。
+  if (r && r.text) {
+    try {
+      const baseMsgs = Array.isArray(kelivoMessages) && kelivoMessages.length
+        ? kelivoMessages
+        : (messages || body.messages || []);
+      const newMsgs = baseMsgs.slice();
+      newMsgs.push({ role: "assistant", content: r.text });
+      const rebuilt = buildTimeline(newMsgs, sessionId);
+      saveTimeline(rebuilt, sessionId);
+      console.log("[mcp] AI 回复已写回时间线 (session=" + (sessionId || "default") + ", chars=" + r.text.length + ")");
+    } catch (wr) {
+      console.warn("[mcp] 写回时间线失败:", wr.message);
+    }
+  }
+
+  // 把最终文本转成 OpenAI 兼容 SSE 流（工具轮次已结束，这里流式回传最终结果）
+  if (body.stream === true) {
+    const stream = mcp.buildSSE(r.text, { model, usage: r.usage, reasoning: r.reasoning, toolHistory: r.toolHistory });
+    reply.raw.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive"
+    });
+    const reader = stream.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        reply.raw.write(value);
+      }
+      reply.raw.end();
+    } catch (e) {
+      try { reply.raw.end(); } catch {}
+    }
+    return true;
+  }
+
+  // 非流式：返回 OpenAI JSON
+  reply.send({
+    id: "chatcmpl-mcp",
+    object: "chat.completion",
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [{
+      index: 0,
+      message: { role: "assistant", content: r.text },
+      finish_reason: "stop"
+    }],
+    usage: r.usage
+  });
+  return true;
+}
+// === MCP_TOOL_LOOP_END ===
+
 app.post("/v1/chat/completions", async (req, reply) => {
   try {
     const body = req.body;
@@ -1342,15 +1523,21 @@ app.post("/v1/chat/completions", async (req, reply) => {
 
     const kelivoMessages = body.messages || [];
 
-    const oldTimeline = loadTimeline();
+    // 多会话：识别当前请求来自哪个会话
+    const sessionId = String(body.session_id || req.headers["x-session-id"] || "").trim();
+    // 客户端来源标记：只有真正的客户端聊天请求（带这个标记）才允许写时间线，
+    // 避免旁路/探活/测试/内部调用随时覆盖历史（本次事故根因）
+    const isClientChat = (req.headers["x-client"] || "").trim() === "dylan-chat";
 
-    const finalTimeline = buildTimeline(kelivoMessages);
-    // 防误伤：请求未携带任何真实消息（空 body/探活请求）时不覆盖已有时间线，
-    // 避免一次异常请求把完整历史冲成空壳（时间线以客户端完整历史为源）
-    if (kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0) {
-      saveTimeline(finalTimeline);
+    const oldTimeline = loadTimeline(sessionId);
+
+    const finalTimeline = buildTimeline(kelivoMessages, sessionId);
+    // 防误伤：仅当"这是客户端聊天请求"且"携带真实消息"时才写时间线，
+    // 否则一律跳过，防止一次异常请求把完整历史冲成空壳
+    if (isClientChat && (kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0)) {
+      saveTimeline(finalTimeline, sessionId);
     } else {
-      console.log("[timeline] 请求未包含真实消息，跳过时间线保存");
+      console.log("[timeline] 跳过时间线保存 (isClientChat=" + isClientChat + ", 真实消息=" + kelivoMessages.some(isRealMessageForTimeline) + ")");
     }
 
     // Kelivo 发图时 content 常是数组。默认原样透传给视觉模型；
@@ -1681,6 +1868,17 @@ app.post("/v1/chat/completions", async (req, reply) => {
     });
 
 
+    // === MCP_TOOL_LOOP_BEGIN ===
+    // MCP 工具循环：启用时若为主聊天，走 MCP 分支（工具轮次非流式，最终流式回传）
+    // 这里传入已处理好的 sanitizedMessages，完整保留记忆/时间线/替换/裁剪上下文
+    if (MCP_ENABLED()) {
+      try {
+        if (await handleMcpRequest(body, reply, req, sanitizedMessages, sessionId, kelivoMessages)) return;
+      } catch (mcpErr) {
+        console.warn("[mcp] 工具循环失败，回退原逻辑:", mcpErr.message);
+      }
+    }
+    // === MCP_TOOL_LOOP_END ===
     // 上游请求超时保护，避免上游挂起导致 /v1 请求永久阻塞
     const upstreamController = new AbortController();
     const upstreamTimer = setTimeout(() => upstreamController.abort(), UPSTREAM_TIMEOUT_MS);
@@ -1727,8 +1925,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
           }
           // 把 AI 回复追加到 kelivoMessages，然后重建时间线
           kelivoMessages.push({ role: "assistant", content: cleanText });
-          const rebuilt = buildTimeline(kelivoMessages);
-          saveTimeline(rebuilt);
+          const rebuilt = buildTimeline(kelivoMessages, sessionId);
+          saveTimeline(rebuilt, sessionId);
         }
       } catch (parseErr) {
         console.warn("[memory] 非流式响应 JSON 解析失败:", parseErr.message);
@@ -1843,8 +2041,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
         });
         // 把清洗后的 AI 回复追加到 kelivoMessages，然后重建时间线
         kelivoMessages.push({ role: "assistant", content: cleanFull });
-        const rebuiltStream = buildTimeline(kelivoMessages);
-        saveTimeline(rebuiltStream);
+        const rebuiltStream = buildTimeline(kelivoMessages, sessionId);
+        saveTimeline(rebuiltStream, sessionId);
       }
     } catch (streamErr) {
       console.warn("[memory] 流式响应解析失败:", streamErr.message);
@@ -2736,8 +2934,8 @@ app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, re
     let added = 0, merged = 0, failed = 0;
     if (isMerge) {
       // 多个块拼接为一次 LLM 提炼：每块带编号前缀，让模型跨块全局合并去重
-      const merged = list.map(function (t, i) { return "【块 " + (i + 1) + "】\n" + t.summary; }).join("\n\n");
-      const r = await memoryPool.ingestSummary(merged, {
+      const mergedText = list.map(function (t, i) { return "【块 " + (i + 1) + "】\n" + t.summary; }).join("\n\n");
+      const r = await memoryPool.ingestSummary(mergedText, {
         source: "compaction",
         blockIds: list.map(function (t) { return t.block_id; }).filter(Boolean),
         forceLlm: true

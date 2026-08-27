@@ -373,6 +373,25 @@ footer{
 .rw .rw-a{font-size:10px;color:var(--ink3);margin-left:auto;transition:transform .2s}
 .rw.open .rw-a{transform:rotate(180deg)}
 
+/* 工具胶囊（API 工具调用痕迹） */
+.tool-trace{
+  margin-bottom:8px;border-left:3px solid rgba(92,134,166,.35);
+  padding:6px 10px;border-radius:0 8px 8px 0;
+  background:rgba(92,134,166,.07);font-size:12.5px;color:var(--ink2);
+  line-height:1.6;cursor:pointer;user-select:none;-webkit-user-select:none;
+}
+.tool-trace .tt-h{font-size:11px;color:#5a86a6;letter-spacing:.5px;display:flex;align-items:center;gap:6px}
+.tool-trace .tt-icon{font-size:12px}
+.tool-trace .tt-name{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:#4a7a9c;font-weight:600}
+.tool-trace .tt-a{font-size:10px;color:var(--ink3);margin-left:auto;transition:transform .2s}
+.tool-trace.open .tt-a{transform:rotate(180deg)}
+.tool-trace .tt-body{display:none;margin-top:6px;font-size:12px}
+.tool-trace.open .tt-body{display:block}
+.tool-trace .tt-arg{color:var(--ink2);margin-bottom:5px;white-space:pre-wrap;word-break:break-all}
+.tool-trace .tt-res{white-space:pre-wrap;word-break:break-all;color:var(--ink);background:rgba(255,255,255,.45);border-radius:6px;padding:6px 8px;margin:0;max-height:180px;overflow:auto;font-size:11.5px}
+.tool-trace .tt-err{display:inline-block;margin-top:5px;font-size:11px;color:#a5554a;background:rgba(200,90,80,.10);padding:1px 8px;border-radius:999px}
+.tool-trace .tt-ok{display:inline-block;margin-top:5px;font-size:11px;color:#4a8a5c;background:rgba(60,140,90,.10);padding:1px 8px;border-radius:999px}
+
 /* 空态 */
 #empty{
   flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
@@ -397,6 +416,49 @@ footer{
   transition:all .25s;white-space:nowrap;
 }
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ============ 会话侧边栏 ============ */
+.drawer{position:fixed;inset:0;z-index:100;pointer-events:none}
+.drawer-backdrop{position:absolute;inset:0;background:rgba(74,52,38,.35);opacity:0;transition:opacity .25s;pointer-events:none}
+.drawer.open .drawer-backdrop{opacity:1;pointer-events:auto}
+.drawer-panel{
+  position:absolute;top:0;left:0;bottom:0;width:82%;max-width:300px;
+  background:linear-gradient(170deg,#fffdf9,#faf0e4);
+  box-shadow:8px 0 30px rgba(120,80,60,.18);
+  transform:translateX(-100%);transition:transform .28s cubic-bezier(.3,.8,.3,1);
+  display:flex;flex-direction:column;pointer-events:auto;
+}
+.drawer.open .drawer-panel{transform:translateX(0)}
+.drawer-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:calc(env(safe-area-inset-top) + 16px) 18px 12px;
+  font-family:"Noto Serif SC",serif;font-size:17px;font-weight:600;color:var(--accent-deep);
+  border-bottom:1px solid rgba(200,144,152,.15);
+}
+.drawer-close{border:none;background:none;font-size:18px;color:var(--ink2);cursor:pointer;width:32px;height:32px;border-radius:50%}
+.drawer-actions{display:flex;gap:8px;padding:12px 14px;border-bottom:1px solid rgba(200,144,152,.1)}
+.drawer-btn{
+  flex:1;border:none;border-radius:10px;padding:9px 0;font-size:13px;cursor:pointer;
+  background:linear-gradient(135deg,var(--bubble-user1),var(--bubble-user2));color:#fff;
+  font-weight:600;transition:all .2s;
+}
+.drawer-btn.ghost{background:rgba(200,144,152,.14);color:var(--accent-deep)}
+.drawer-btn:active{transform:scale(.97);opacity:.85}
+.session-list{flex:1;overflow-y:auto;padding:6px 10px}
+.session-list::-webkit-scrollbar{width:0}
+.session-item{
+  display:flex;flex-direction:column;gap:3px;padding:11px 12px;margin:4px 0;border-radius:12px;
+  cursor:pointer;transition:background .15s;border:1px solid transparent;
+}
+.session-item:hover{background:rgba(255,255,255,.65)}
+.session-item.active{background:var(--accent-soft);border-color:rgba(200,144,152,.3)}
+.session-item .s-name{font-size:14px;font-weight:600;color:var(--ink);display:flex;align-items:center;gap:6px}
+.session-item .s-name .s-badge{font-size:10px;color:#fff;background:var(--accent);border-radius:8px;padding:1px 7px;flex-shrink:0}
+.session-item .s-name .s-del{margin-left:auto;border:none;background:none;color:var(--ink3);font-size:15px;cursor:pointer;padding:2px 6px}
+.session-item .s-name .s-del:hover{color:#d88383}
+.session-item .s-meta{font-size:11px;color:var(--ink3)}
+.session-item .s-ops{display:flex;gap:6px;margin-top:3px}
+.session-item .s-op{border:1px solid rgba(200,144,152,.3);background:none;border-radius:8px;padding:3px 8px;font-size:11px;color:var(--accent-deep);cursor:pointer}
 </style>
 </head>
 <body>
@@ -407,8 +469,27 @@ footer{
     <div class="hd-name" id="hdName">谢意行</div>
     <div class="hd-sub" id="hdSub">一直在 · 陪你说话</div>
   </div>
+  <button class="hd-btn" id="sessionBtn" title="会话">📂</button>
   <button class="hd-btn" id="menuBtn" title="设置">⚙</button>
 </header>
+
+<!-- 会话侧边栏抽屉 -->
+<div id="sessionDrawer" class="drawer">
+  <div class="drawer-backdrop" id="sessionBackdrop"></div>
+  <div class="drawer-panel">
+    <div class="drawer-head">
+      <span>会话</span>
+      <button class="drawer-close" id="sessionClose">✕</button>
+    </div>
+    <div class="drawer-actions">
+      <button class="drawer-btn" id="newSessionBtn">＋ 新建</button>
+      <button class="drawer-btn ghost" id="exportSessionBtn">导出</button>
+      <button class="drawer-btn ghost" id="importSessionBtn">导入</button>
+    </div>
+    <div id="sessionList" class="session-list"></div>
+  </div>
+</div>
+<input type="file" id="importFile" accept=".json,application/json" style="display:none">
 
 <div id="selBar">
   <span class="st" id="selCount">已选 0 条</span>
@@ -546,6 +627,9 @@ let cfg=loadCfg();
 let sending=false, aborter=null;
 let msgs=[];
 let selectMode=false, selectSet=new Set(), actIdx=-1;
+// 多会话：当前会话ID（default=主会话），本地缓存会话名单
+let currentSession="default";
+let sessionList=[];
 
 function loadCfg(){
   try{
@@ -599,14 +683,14 @@ let imgData=[];
 
 /* ================= 存储 ================= */
 function loadMsgs(){
-  try{return JSON.parse(localStorage.getItem(LS_MSGS)||"[]");}catch(e){return [];}
+  try{return JSON.parse(localStorage.getItem(LS_MSGS+"_"+currentSession)||"[]");}catch(e){return [];}
 }
-function saveMsgs(){localStorage.setItem(LS_MSGS,JSON.stringify(msgs));}
+function saveMsgs(){localStorage.setItem(LS_MSGS+"_"+currentSession,JSON.stringify(msgs));}
 
 /* 从网关拉取完整历史（首次打开 / 刷新时用），失败回退本地 */
 async function fetchHistory(){
   try{
-    const r=await fetch(HISTORY_API,{headers:{"Authorization":"Bearer "+api_key}});
+    const r=await fetch(HISTORY_API+"?session_id="+encodeURIComponent(currentSession),{headers:{"Authorization":"Bearer "+api_key}});
     if(!r.ok)return null;
     const j=await r.json();
     if(!j||!Array.isArray(j.items))return null;
@@ -711,18 +795,33 @@ function msgImages(m){
 }
 
 /* ================= 渲染 ================= */
-function renderAiContent(bubble, content, reasoning){
+function renderToolCapsule(t){
+  const name=(t&&t.name)||"tool";
+  const args=t&&t.args?JSON.stringify(t.args):"{}";
+  let res="",badge="";
+  if(t&&t.error){badge='<span class="tt-err">⚠ 失败</span>';res=(t.result||t.error||"");}
+  else{badge='<span class="tt-ok">✓ 已执行</span>';res=(t&&t.result)||"";}
+  const argHtml=args&&args!=="{}"?('<div class="tt-arg">参数：'+escapeHtml(args)+'</div>'):'';
+  return '<div class="tool-trace"><span class="tt-h"><span class="tt-icon">🔧</span>调用工具 <span class="tt-name">'+escapeHtml(name)+'</span> '+badge+'<span class="tt-a">▾</span></span><div class="tt-body">'+argHtml+'<pre class="tt-res">'+escapeHtml(res)+(res? "":"（无返回）")+'</pre></div></div>';
+}
+function renderToolCapsules(tools){
+  if(!tools||!tools.length)return "";
+  return tools.map(renderToolCapsule).join("");
+}
+function renderAiContent(bubble, content, reasoning, tools){
   let html="";
   if(reasoning && cfg.show_thinking){
     const rc=cfg.thinking_md?renderMd(reasoning):escapeHtml(reasoning);
     html+='<div class="rw"><span class="rw-h">💭 思考过程 <span class="rw-a">▾</span></span><div class="rw-c">'+rc+'</div></div>';
   }
+  html+=renderToolCapsules(tools);
   html+=(content||"")?(cfg.ai_md?renderMd(content):escapeHtml(content)):"";
   bubble.innerHTML=html;
   const rw=bubble.querySelector(".rw");
   if(rw) rw.addEventListener("click",()=>rw.classList.toggle("open"));
+  bubble.querySelectorAll(".tool-trace").forEach(tt=>tt.addEventListener("click",()=>tt.classList.toggle("open")));
 }
-function renderAI(bubble, content, reasoning){renderAiContent(bubble,content,reasoning);}
+function renderAI(bubble, content, reasoning, tools){renderAiContent(bubble,content,reasoning,tools||[]);}
 // 把 [图片]/[文件] 占位转成 chip
 function chips(html){
   return html.replace(/\[图片\]/g,'<span class="chip">🖼 图片</span>')
@@ -744,7 +843,7 @@ function makeMsgEl(m,idx,grpCls){
   const bubble=document.createElement("div");bubble.className="bubble";
   if(m.role==="ai"){
     const txt=stripCurrentTime(msgText(m)).clean;
-    renderAiContent(bubble,txt,m.reasoning||"");
+    renderAiContent(bubble,txt,m.reasoning||"",m.tools||[]);
   }else{
     const st=stripCurrentTime(msgText(m));
     bubble.innerHTML=chips(cfg.user_md?renderMd(st.clean):escapeHtml(st.clean));
@@ -831,12 +930,13 @@ async function request(finalMsgs){
   if(sending)return;
   sending=true;setSendState(true);aborter=new AbortController();
   const box=appendTypingBox();
-  let full="",reasoning="",usage=null;
+  let full="",reasoning="",usage=null,tools=[];
   try{
     const payload={
       model:"deepseek-v4-flash-vision-exp",
       stream:true,
       messages:buildMessages(finalMsgs),
+      session_id:currentSession,
       stream_options:{include_usage:true}
     };
     if(cfg.temperature!=null&&cfg.temperature!=="")payload.temperature=Number(cfg.temperature);
@@ -844,7 +944,7 @@ async function request(finalMsgs){
     if(cfg.max_tokens!=null&&cfg.max_tokens!=="")payload.max_tokens=Number(cfg.max_tokens);
     const resp=await fetch(API,{
       method:"POST",
-      headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key},
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-Client":"dylan-chat"},
       body:JSON.stringify(payload),
       signal:aborter.signal
     });
@@ -865,17 +965,17 @@ async function request(finalMsgs){
           const json=JSON.parse(data);
           if(json.usage){usage=json.usage;}
           const delta=json.choices&&json.choices[0]&&json.choices[0].delta;
-          if(delta){if(delta.content)full+=delta.content;if(delta.reasoning_content)reasoning+=delta.reasoning_content;}
-          const b=lastAIBubble();if(b){renderAI(b.querySelector(".bubble"),full,reasoning);scrollBottom();}
+          if(delta){if(delta.content)full+=delta.content;if(delta.reasoning_content)reasoning+=delta.reasoning_content;if(delta.tool_trace){tools=delta.tool_trace;}}
+          const b=lastAIBubble();if(b){renderAI(b.querySelector(".bubble"),full,reasoning,tools);scrollBottom();}
         }catch(e){}
       }
     }
     // 入库
-    finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,time:new Date().toISOString(),tokens:usage});
+    finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});
     msgs=finalMsgs;saveMsgs();renderAll();
   }catch(err){
     if(err.name==="AbortError"){
-      if(full){finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,time:new Date().toISOString(),tokens:usage});}
+      if(full){finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});}
       msgs=finalMsgs;saveMsgs();renderAll();
       if(full)showToast("已停止生成");
     }else{
@@ -1133,10 +1233,174 @@ pickRender.addEventListener("click",e=>{
   saveCfg();renderPicks();renderAll();
 });
 
+
+/* ================= 多会话管理 ================= */
+const SESSIONS_API="/v1/sessions";
+function genSessionId(){return "s_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,8);}
+
+// 打开/关闭侧边栏
+function openDrawer(){document.getElementById("sessionDrawer").classList.add("open");loadSessions();}
+function closeDrawer(){document.getElementById("sessionDrawer").classList.remove("open");}
+document.getElementById("sessionBtn").onclick=openDrawer;
+document.getElementById("sessionClose").onclick=closeDrawer;
+document.getElementById("sessionBackdrop").onclick=closeDrawer;
+
+// 从后端拉会话列表
+async function loadSessions(){
+  try{
+    const r=await fetch(SESSIONS_API,{headers:{"Authorization":"Bearer "+api_key}});
+    const j=await r.json();
+    if(j&&Array.isArray(j.sessions)){sessionList=j.sessions;renderSessionList();}
+  }catch(e){console.warn("loadSessions fail:",e.message);}
+}
+function renderSessionList(){
+  const el=document.getElementById("sessionList");
+  if(!el)return;
+  el.innerHTML="";
+  const list=[...sessionList];
+  // 确保当前会话在列表里(前端新建但后端还没记录时)
+  if(currentSession!=="default"&&!list.find(s=>s.id===currentSession)){
+    list.push({id:currentSession,name:currentSession,total:0,real:0,last_time:null,is_default:false});
+  }
+  list.sort((a,b)=>((b.last_time||"")>(a.last_time||"")?1:((b.last_time||"")<(a.last_time||"")?-1:0)));
+  list.forEach(s=>{
+    const item=document.createElement("div");
+    item.className="session-item"+(s.id===currentSession?" active":"");
+    const name=s.name||(s.id==="default"?"主会话":s.id);
+    const meta=(s.real!=null?(""+s.real+" 条"):"")+(s.last_time?(" · "+fmtTime(new Date(s.last_time))):"");
+    item.innerHTML='<div class="s-name">'+(s.id==="default"?'<span class="s-badge">主</span>':'')+escapeHtml(name)+'<button class="s-del" data-id="'+escapeHtml(s.id)+'" title="删除">🗑</button></div>'+
+      '<div class="s-meta">'+escapeHtml(meta)+'</div>'+
+      '<div class="s-ops"><button class="s-op" data-op="export" data-id="'+escapeHtml(s.id)+'">导出</button><button class="s-op" data-op="rename" data-id="'+escapeHtml(s.id)+'">改名</button></div>';
+    item.querySelector(".s-name > .s-del").addEventListener("click",e=>{e.stopPropagation();deleteSession(s.id);});
+    item.querySelectorAll(".s-op").forEach(btn=>btn.addEventListener("click",e=>{
+      e.stopPropagation();
+      const op=btn.dataset.op,id=btn.dataset.id;
+      if(op==="export")exportSession(id);
+      if(op==="rename")renameSession(id);
+    }));
+    item.addEventListener("click",()=>switchSession(s.id));
+    el.appendChild(item);
+  });
+}
+
+// 切换会话
+async function switchSession(id){
+  if(id===currentSession){closeDrawer();return;}
+  // 保存旧会话到本地
+  saveMsgs();
+  currentSession=id;
+  localStorage.setItem("han_current_session",id);
+  msgs=[];
+  const history=await fetchHistory();
+  if(history&&history.length){msgs=history;saveMsgs();}
+  else{msgs=loadMsgs();}
+  renderAll();scrollBottom();
+  closeDrawer();
+  renderSessionList();
+}
+
+// 新建会话
+function newSession(){
+  const sid=genSessionId();
+  localStorage.setItem("han_current_session",sid);
+  // 清空当前显示
+  currentSession=sid;
+  msgs=[];saveMsgs();
+  renderAll();
+  closeDrawer();
+  // 把新会话加入本地列表
+  sessionList=sessionList.filter(s=>s.id!=="default");
+  sessionList.push({id:sid,name:sid,total:0,real:0,last_time:null,is_default:false});
+  renderSessionList();
+}
+
+// 删除会话：调用后端 DELETE /v1/sessions/:id 真正删除独立时间线文件
+async function deleteSession(id){
+  if(id==="default"){showToast("主会话不能删除");return;}
+  if(!confirm("确定删除这个会话？删除后无法恢复。"))return;
+  try{
+    const r=await fetch("/v1/sessions/"+encodeURIComponent(id),{method:"DELETE",headers:{"Authorization":"Bearer "+api_key}});
+    const j=await r.json().catch(()=>({}));
+    // 本地清掉该会话缓存
+    localStorage.removeItem(LS_MSGS+"_"+id);
+    const nameMap=JSON.parse(localStorage.getItem("han_session_names")||"{}");
+    delete nameMap[id];localStorage.setItem("han_session_names",JSON.stringify(nameMap));
+    if(currentSession===id){
+      // 若删除的是当前会话，回退到主会话
+      currentSession="default";
+      localStorage.setItem("han_current_session","default");
+      msgs=[];const h=await fetchHistory();
+      if(h&&h.length){msgs=h;saveMsgs();}else{msgs=loadMsgs();}
+      renderAll();
+    }
+    showToast(j.error?("删除失败:"+j.error):"已删除");
+  }catch(e){showToast("删除失败:"+(e.message||""));}
+  loadSessions();
+}
+
+// 重命名会话(存到本地映射)
+function renameSession(id){
+  const cur=sessionList.find(s=>s.id===id);
+  const old=cur&&cur.name?(cur.name==="主会话"?"主会话":cur.name):id;
+  const nn=prompt("给这个会话起个名字",old);
+  if(!nn||nn.trim()==="")return;
+  const map=JSON.parse(localStorage.getItem("han_session_names")||"{}");
+  map[id]=nn.trim();
+  localStorage.setItem("han_session_names",JSON.stringify(map));
+  loadSessions();
+}
+
+// 导出会话
+async function exportSession(id){
+  try{
+    const r=await fetch(HISTORY_API+"?session_id="+encodeURIComponent(id),{headers:{"Authorization":"Bearer "+api_key}});
+    const j=await r.json();
+    const items=(j&&j.items)||[];
+    const nameMap=JSON.parse(localStorage.getItem("han_session_names")||"{}");
+    const nm=(id==="default"?"主会话":(nameMap[id]||id));
+    const blob=new Blob([JSON.stringify({session_id:id,name:nm,exported_at:new Date().toISOString(),messages:items},null,2)],{type:"application/json"});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);a.download=nm+".json";a.click();
+    URL.revokeObjectURL(a.href);
+  }catch(e){showToast("导出失败");}
+}
+
+// 导入会话
+async function importSession(file){
+  try{
+    const text=await file.text();
+    const j=JSON.parse(text);
+    const items=Array.isArray(j)?j:(Array.isArray(j.messages)?j.messages:null);
+    if(!items)throw new Error("格式错误");
+    const newId=genSessionId();
+    // 写入本地
+    currentSession=newId;
+    msgs=items;saveMsgs();
+    renderAll();
+    closeDrawer();
+    // 记录名字
+    const nameMap=JSON.parse(localStorage.getItem("han_session_names")||"{}");
+    nameMap[newId]=(j.name||("导入 "+new Date().toLocaleDateString()));
+    localStorage.setItem("han_session_names",JSON.stringify(nameMap));
+    sessionList=sessionList.filter(s=>s.id!=="default");
+    sessionList.push({id:newId,name:nameMap[newId],total:items.length,real:items.length,last_time:(items[items.length-1]&&items[items.length-1].time)||null,is_default:false});
+    renderSessionList();
+    showToast("已导入");
+  }catch(e){showToast("导入失败:"+e.message);}
+}
+
+document.getElementById("newSessionBtn").onclick=newSession;
+document.getElementById("exportSessionBtn").onclick=()=>exportSession(currentSession);
+document.getElementById("importSessionBtn").onclick=()=>document.getElementById("importFile").click();
+document.getElementById("importFile").addEventListener("change",e=>{const f=e.target.files[0];if(f)importSession(f);e.target.value="";});
+
 /* ================= 初始化 ================= */
 applyHeader();
 async function init(){
   if(!api_key){openSetup();renderAll();return;}
+  // 恢复上次会话
+  currentSession=localStorage.getItem("han_current_session")||"default";
+  await loadSessions();
   const history=await fetchHistory();
   if(history&&history.length){
     msgs=history;saveMsgs();
