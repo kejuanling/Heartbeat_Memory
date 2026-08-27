@@ -153,6 +153,8 @@
 - re.sub 替换串陷阱：`\'` 不是 Python 替换串转义，会原样写成反斜杠+引号，产生非法 JS（如 `memView: \'cloud\',`）。字符串字面量改用双引号（`memView: "cloud",`）规避；任何替换后必须 node --check 兜底。
 - **缩进/锚点必须用整行**：`<span class="collapse-arrow">▾</span>` 这类在页面上重复出现，精确替换必须用整行做锚点，否则 count!=1 或改错位置。
 - 验证组合拳：node --check 只查语法；线上用 curl 登录后 grep 标记 + 检查 git diff --stat 只含目标文件。
+- 改 onclick/定位行为后用户说“还是跳/没变”先别动代码：admin-mobile.html 服务端每请求都从磁盘读、不用重启，用户端看到旧的十有八九是浏览器缓存。先让用户 Ctrl+Shift+R（Mac Cmd+Shift+R）强刷再测，确认后再改。本次“原文搜索点结果自动跳转”就是：先只堵标星、用户反馈仍跳（缓存+未强刷），最后直接整块去掉 onclick 定位才符合预期。
+
 
 ### 3.11 凭据与安全
 - 凭据读取：dotenv 运行时注入不会出现在 `/proc/<pid>/environ`；应从 `/opt/dylan-heartbeat/.env` 的 `ADMIN_USER`/`ADMIN_PASSWORD` 读取（勿打印明文）。
