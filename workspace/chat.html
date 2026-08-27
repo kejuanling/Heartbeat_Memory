@@ -109,8 +109,12 @@ header{
   font-size:15px;line-height:1.72;word-break:break-word;
   box-shadow:0 3px 14px rgba(181,131,122,.10);
   max-width:100%;
+  white-space:pre-wrap;overflow-wrap:anywhere;
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;position:relative;
 }
+.msg .bubble p{margin:0 0 8px;white-space:pre-wrap}
+.msg .bubble p:last-child{margin-bottom:0}
+.msg .bubble br{content:"";line-height:1.72}
 .msg.user .bubble{
   background:linear-gradient(135deg,var(--bubble-user1),var(--bubble-user2));
   color:#fff;border-bottom-right-radius:6px;
@@ -592,6 +596,7 @@ async function fetchHistory(){
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 function inlineMd(s){
   s=escapeHtml(s);
+  s=s.replace(/\n/g,"<br>");
   s=s.replace(/`([^`]+)`/g,(m,c)=>"<code>"+c+"</code>");
   s=s.replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>");
   s=s.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g,"$1<em>$2</em>");
