@@ -341,6 +341,11 @@ footer{
   background:#fbf6f0;border:1px solid rgba(200,144,152,.12);border-radius:var(--radius-sm);
   padding:11px 12px;overflow-x:auto;margin:8px 0;font-size:13px;
 }
+.bubble pre.code-wrap{white-space:pre-wrap;word-break:break-all;overflow-x:visible}
+.bubble pre:not(.code-wrap){white-space:pre;overflow-x:auto}
+.bubble .code-fold{margin:8px 0}
+.bubble .code-fold summary{display:block;cursor:pointer;padding:7px 12px;background:#fbf6f0;border:1px solid rgba(200,144,152,.12);border-bottom:none;border-radius:var(--radius-sm) var(--radius-sm) 0 0;font-size:12px;color:var(--ink2);user-select:none;-webkit-user-select:none}
+.bubble .code-fold summary+pre{margin:0;border-radius:0 0 var(--radius-sm) var(--radius-sm)}
 .bubble code{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
 .bubble :not(pre)>code{background:rgba(200,144,152,.1);padding:1.5px 5px;border-radius:5px;font-size:13.5px;color:#a86064}
 .bubble pre code{background:none;padding:0;font-size:12.5px;color:#7a5a52}
@@ -487,6 +492,17 @@ footer{
       </div>
     </div>
 
+    <div class="field">
+      <label>渲染设置</label>
+      <div class="pick" id="pickRender">
+        <button data-k="ai_md" class="on">助手消息 MD</button>
+        <button data-k="user_md" class="on">用户消息 MD</button>
+        <button data-k="thinking_md">思维链 MD</button>
+        <button data-k="fold_code">折叠代码块</button>
+        <button data-k="code_wrap" class="on">代码块换行</button>
+      </div>
+    </div>
+
     <button class="btn" id="saveBtn">进入聊天</button>
     <button class="btn-ghost" id="cancelBtn">取消</button>
 
@@ -517,7 +533,12 @@ const DEFAULT_CFG={
   max_tokens:null,
   show_thinking:true,
   send_thinking:false,
-  show_token:true
+  show_token:true,
+  ai_md:true,        // 助手消息 markdown 渲染
+  user_md:true,      // 用户消息 markdown 渲染
+  thinking_md:false, // 思维链 markdown 渲染
+  fold_code:false,   // 自动折叠代码块
+  code_wrap:true     // 移动端代码块自动换行
 };
 let api_key=localStorage.getItem(LS_KEY)||"";
 let system_prompt=localStorage.getItem(LS_PROMPT)||"";
@@ -573,6 +594,7 @@ const hdSub=document.getElementById("hdSub");
 const hdAvatar=document.getElementById("hdAvatar");
 const pickThinking=document.getElementById("pickThinking");
 const pickToken=document.getElementById("pickToken");
+const pickRender=document.getElementById("pickRender");
 let imgData=[];
 
 /* ================= 存储 ================= */
@@ -610,7 +632,16 @@ function renderMd(text){
   for(let b of blocks){
     b=b.trim(); if(!b)continue;
     let m=b.match(/^```(.*)\n([\s\S]*?)```$/);
-    if(m){html+="<pre><code>"+escapeHtml(m[2].replace(/\n$/,""))+"</code></pre>";continue;}
+    if(m){
+      const code=escapeHtml(m[2].replace(/\n$/,""));
+      const wrap=cfg.code_wrap?' class="code-wrap"':'';
+      if(cfg.fold_code){
+        html+='<details class="code-fold"><summary>代码块</summary><pre'+wrap+'><code>'+code+'</code></pre></details>';
+      }else{
+        html+='<pre'+wrap+'><code>'+code+'</code></pre>';
+      }
+      continue;
+    }
     m=b.match(/^(#{1,4})\s+(.+)$/);
     if(m){const l=m[1].length;html+="<h"+l+">"+inlineMd(m[2])+"</h"+l+">";continue;}
     if(/^>/.test(b)){const lines=b.split("\n").map(x=>x.replace(/^>\s?/,"")).join("<br>");html+="<blockquote>"+inlineMd(lines)+"</blockquote>";continue;}
@@ -680,14 +711,18 @@ function msgImages(m){
 }
 
 /* ================= 渲染 ================= */
-function renderAI(bubble, content, reasoning){
+function renderAiContent(bubble, content, reasoning){
   let html="";
-  if(reasoning && cfg.show_thinking){html+='<div class="rw"><span class="rw-h">💭 思考过程 <span class="rw-a">▾</span></span><div class="rw-c">'+escapeHtml(reasoning)+'</div></div>';}
-  html+=(content||"")?renderMd(content):"";
+  if(reasoning && cfg.show_thinking){
+    const rc=cfg.thinking_md?renderMd(reasoning):escapeHtml(reasoning);
+    html+='<div class="rw"><span class="rw-h">💭 思考过程 <span class="rw-a">▾</span></span><div class="rw-c">'+rc+'</div></div>';
+  }
+  html+=(content||"")?(cfg.ai_md?renderMd(content):escapeHtml(content)):"";
   bubble.innerHTML=html;
   const rw=bubble.querySelector(".rw");
   if(rw) rw.addEventListener("click",()=>rw.classList.toggle("open"));
 }
+function renderAI(bubble, content, reasoning){renderAiContent(bubble,content,reasoning);}
 // 把 [图片]/[文件] 占位转成 chip
 function chips(html){
   return html.replace(/\[图片\]/g,'<span class="chip">🖼 图片</span>')
@@ -709,10 +744,10 @@ function makeMsgEl(m,idx,grpCls){
   const bubble=document.createElement("div");bubble.className="bubble";
   if(m.role==="ai"){
     const txt=stripCurrentTime(msgText(m)).clean;
-    bubble.innerHTML=renderMd(txt);
+    renderAiContent(bubble,txt,m.reasoning||"");
   }else{
     const st=stripCurrentTime(msgText(m));
-    bubble.innerHTML=chips(escapeHtml(st.clean));
+    bubble.innerHTML=chips(cfg.user_md?renderMd(st.clean):escapeHtml(st.clean));
     // 真实图片
     msgImages(m).forEach(im=>{const img=document.createElement("img");img.src=im;bubble.appendChild(img);});
   }
@@ -1036,6 +1071,9 @@ function renderPicks(){
   pickToken.querySelectorAll("button").forEach(b=>{
     b.classList.toggle("on",b.dataset.k==="token"?cfg.show_token:false);
   });
+  if(pickRender)pickRender.querySelectorAll("button").forEach(b=>{
+    b.classList.toggle("on",!!cfg[b.dataset.k]);
+  });
 }
 function applyHeader(){
   hdName.textContent=cfg.ai_name||"谢意行";
@@ -1088,6 +1126,11 @@ pickToken.addEventListener("click",e=>{
   const b=e.target.closest("button");if(!b)return;
   if(b.dataset.k==="token"){cfg.show_token=!cfg.show_token;}
   saveCfg();renderPicks();
+});
+pickRender.addEventListener("click",e=>{
+  const b=e.target.closest("button");if(!b)return;
+  if(b.dataset.k in cfg){cfg[b.dataset.k]=!cfg[b.dataset.k];}
+  saveCfg();renderPicks();renderAll();
 });
 
 /* ================= 初始化 ================= */
