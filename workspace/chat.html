@@ -486,6 +486,18 @@ function loadMsgs(){
 }
 function saveMsgs(){localStorage.setItem(LS_MSGS,JSON.stringify(msgs));}
 
+/* 从网关拉取完整历史（首次打开 / 刷新时用），失败回退本地 */
+const HISTORY_API="/v1/history";
+async function fetchHistory(){
+  try{
+    const r=await fetch(HISTORY_API,{headers:{"Authorization":"Bearer "+api_key}});
+    if(!r.ok)return null;
+    const j=await r.json();
+    if(!j||!Array.isArray(j.items))return null;
+    return j.items;
+  }catch(e){return null;}
+}
+
 /* ================= markdown ================= */
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 function inlineMd(s){
@@ -654,14 +666,20 @@ async function request(finalMsgs){
     sending=false;setSendState(false);aborter=null;
   }
 }
-function send(){
+async function send(){
   const text=inputEl.value.trim();
   if(sending)return;
   if(!text&&!imgData.length)return;
   if(!api_key){openSetup();return;}
+  // 确保 msgs 是完整历史：空时优先从网关拉，避免"空历史覆盖网关"
+  if(!msgs.length){
+    msgs=loadMsgs();
+    if(!msgs.length){
+      const history=await fetchHistory();
+      if(history&&history.length){msgs=history;saveMsgs();renderAll();}
+    }
+  }
   const userContent=imgData.length?[{type:"text",text:text||"看看这张图"},...imgData.map(d=>({type:"image_url",image_url:{url:d}}))]:text;
-  // 更新消息数组
-  msgs=loadMsgs();
   msgs.push({role:"user",content:userContent});
   inputEl.value="";inputEl.style.height="auto";imgData=[];renderPreviews();
   updateSelBar();
@@ -840,9 +858,17 @@ setupMask.addEventListener("click",e=>{if(e.target===setupMask)setupMask.classLi
 document.getElementById("noticeHead").onclick=function(){this.closest(".cc-notice").classList.toggle("open");};
 
 /* ================= 初始化 ================= */
-function init(){
-  msgs=loadMsgs();
+async function init(){
   if(!api_key){openSetup();renderAll();return;}
+  // 有 key：先从网关拉完整历史，失败再回退本地
+  const history=await fetchHistory();
+  if(history&&history.length){
+    msgs=history;saveMsgs();
+    renderAll();
+    return;
+  }
+  // 网关拉不到（网络/首次）：回退本地历史
+  msgs=loadMsgs();
   if(msgs.length)renderAll();
 }
 init();

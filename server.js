@@ -1156,6 +1156,25 @@ app.get("/v1/models", async (req, reply) => {
   });
 });
 
+// 只读返回完整时间线（供自建聊天前端首次拉取历史；剥离内部 position 字段，保留 role/content/time）
+app.get("/v1/history", async (req, reply) => {
+  try {
+    const timeline = loadTimeline();
+    const items = timeline
+      .filter(isRealMessageForTimeline)
+      .map(m => {
+        const clean = { role: m.role };
+        if (m.content !== undefined) clean.content = m.content;
+        if (m.time) clean.time = m.time;
+        return clean;
+      });
+    reply.send({ ok: true, total: items.length, items });
+  } catch (err) {
+    console.error("[GET /v1/history] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
 // ========================
 // Chat Completions
 // ========================
