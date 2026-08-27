@@ -2824,73 +2824,7 @@ app.get("/admin/memories/keywords", { preHandler: basicAuth }, async (req, reply
 // ========================
 // 记忆池（8 分类结构化记忆）管理
 // ========================
-app.get("/admin/memory-pool", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const opts = {
-      category: req.query.category || "",
-      q: req.query.q || "",
-      active: req.query.active === "" ? undefined : (req.query.active === "true" ? true : req.query.active === "false" ? false : undefined),
-      pinned: req.query.pinned === "" ? undefined : (req.query.pinned === "true" ? true : req.query.pinned === "false" ? false : undefined),
-      sort: req.query.sort || "score"
-    };
-    reply.send({ items: memoryPool.list(opts), stats: memoryPool.stats(), categories: memoryPool.CATEGORIES, config: memoryPool.getConfig() });
-  } catch (err) { reply.code(500).send({ error: err.message }); }
-});
-
-app.get("/admin/memory-pool/stats", { preHandler: basicAuth }, async (req, reply) => {
-  try { reply.send(memoryPool.stats()); } catch (err) { reply.code(500).send({ error: err.message }); }
-});
-
-app.post("/admin/memory-pool", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const b = req.body || {};
-    if (!String(b.content || "").trim()) return reply.code(400).send({ error: "content 必填" });
-    const r = memoryPool.add({ content: b.content, category: b.category, importance: b.importance, source: "manual" });
-    reply.send({ success: true, dup: r.dup, entry: r.entry });
-  } catch (err) { reply.code(500).send({ error: err.message }); }
-});
-
-app.put("/admin/memory-pool/:id", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const r = memoryPool.update(req.params.id, req.body || {});
-    if (!r) return reply.code(404).send({ error: "记忆不存在" });
-    reply.send({ success: true, entry: r });
-  } catch (err) { reply.code(500).send({ error: err.message }); }
-});
-
-app.delete("/admin/memory-pool/:id", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const ok = memoryPool.remove(req.params.id);
-    if (!ok) return reply.code(404).send({ error: "记忆不存在" });
-    reply.send({ success: true });
-  } catch (err) { reply.code(500).send({ error: err.message }); }
-});
-
-app.post("/admin/memory-pool/sink", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const r = memoryPool.sink(String((req.body || {}).id || ""));
-    if (!r) return reply.code(404).send({ error: "记忆不存在" });
-    reply.send({ success: true, entry: r });
-  } catch (err) { reply.code(500).send({ error: err.message }); }
-});
-
-app.post("/admin/memory-pool/revive", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const r = memoryPool.revive(String((req.body || {}).id || ""));
-    if (!r) return reply.code(404).send({ error: "记忆不存在" });
-    reply.send({ success: true, entry: r });
-  } catch (err) { reply.code(500).send({ error: err.message }); }
-});
-
-app.post("/admin/memory-pool/retrieve", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const q = String((req.body || {}).query || "").trim();
-    const topK = Number((req.body || {}).topK) || 5;
-    const items = memoryPool.retrieve(q, { topK });
-    reply.send({ success: true, items, config: memoryPool.getConfig() });
-  } catch (err) { reply.code(500).send({ error: err.message }); }
-});
-
+require("./routes/memory-pool")(app, { basicAuth });
 app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const b = req.body || {};
