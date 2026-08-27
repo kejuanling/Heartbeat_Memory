@@ -4284,6 +4284,9 @@ app.get("/admin/mobile", { preHandler: mobileAuth }, async (req, reply) => {
 app.get("/admin/mobile.css", async (req, reply) => {
   reply.type("text/css").header("Cache-Control", "no-store, no-cache, must-revalidate").send(require("fs").readFileSync(path.join(__dirname, "admin-mobile.css"), "utf-8"));
 });
+app.get("/admin/mobile.js", async (req, reply) => {
+  reply.type("application/javascript").header("Cache-Control", "no-store, no-cache, must-revalidate").send(require("fs").readFileSync(path.join(__dirname, "admin-mobile.js"), "utf-8"));
+});
 
 // ========================
 // 日志与上下文查看 API
