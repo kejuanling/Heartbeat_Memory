@@ -873,24 +873,12 @@
 
 
 /* ============ 聊天 tab：iframe 嵌入 ============ */
-.tab-content#tab-chat.active{display:block;padding:0}
-#tab-chat .chat-embed-wrap{
-  position:fixed;left:0;right:0;top:0;bottom:0;z-index:5;
-  /* 从顶部 header 下沿到 tab-bar 上沿，避开底部导航 */
-  padding-top:52px; /* 为 header 留出空间 */
-  background:#fdf6ed;
-}
-#tab-chat .chat-embed-wrap::before{
-  content:'';display:block;height:52px;background:#fdf6ed;
-}
-.chat-iframe{
-  width:100%;height:calc(100dvh - 52px - 72px);display:block;border:0;background:#fdf6ed;
-  margin:0;
-}
+.tab-content#tab-chat.active{display:block;padding:0;margin:0}
+.chat-embed-wrap{width:100%;height:calc(100dvh - 68px - var(--safe-bottom));background:#fdf6ed;overflow:hidden}
+.chat-iframe{display:block;width:100%;height:100%;border:0;background:#fdf6ed;margin:0}
+#chatLoadError{display:none;color:#b07a6a;text-align:center;padding:40px 20px;font-size:14px;line-height:1.7}
 @media(min-width:600px){
-  #tab-chat .chat-embed-wrap{padding-top:64px}
-  #tab-chat .chat-embed-wrap::before{height:64px}
-  .chat-iframe{height:calc(100dvh - 64px - 88px)}
+  .chat-embed-wrap{height:calc(100dvh - 84px - var(--safe-bottom))}
 }
 </style>
  </head>
@@ -926,9 +914,11 @@
    <div class="card"><div class="card-title">日记阅览</div><div id="diary-list"></div></div>
    <button type="button" class="btn btn-primary" onclick="restartService()" style="margin-top:4px;background:#c89098">重启服务</button>
 
+</div>
 <!-- Tab: 聊天 -->
 <div class="tab-content" id="tab-chat">
   <div class="chat-embed-wrap">
+    <div id="chatLoadError">聊天界面加载中…<br>若长时间空白，请检查 /chat 是否能直接访问。</div>
     <iframe id="chatFrame" class="chat-iframe" title="聊天" frameborder="0" allow="camera; microphone; fullscreen"></iframe>
   </div>
 </div>
@@ -3448,8 +3438,8 @@ function updateCcStatusBar(d){
          url = ADMIN_API + '/context-compaction/generate';
          body = JSON.stringify({action: 'gap', start: item.start, end: item.end});
        }else if(item.type === 'ai'){
-         url = ADMIN_API + '/context-replacements/generate';
-         body = JSON.stringify({id: item.repId});
+         url = ADMIN_API + '/context-compaction/generate';
+         body = JSON.stringify({repId: item.repId});
        }else{
          url = ADMIN_API + '/context-compaction/generate';
          body = JSON.stringify({action: 'block', blockIndex: item.blockIndex});
@@ -4909,6 +4899,25 @@ function ccArmAllGapAutoLoad(){
      if(e.key==='Enter'||e.key===' '){ e.preventDefault(); scrollToTop(); }
    });
  })();
+ function resizeChatFrame(){
+   const f=document.getElementById('chatFrame');
+   const wrap=document.querySelector('#tab-chat .chat-embed-wrap');
+   if(!f)return;
+   // 用 JS 拿真实可用高度：窗口高度 - 底部 tab-bar
+   const win=window.innerHeight || document.documentElement.clientHeight;
+   const tabbar=document.querySelector('.tab-bar');
+   let tabH=0;
+   if(tabbar){ tabH=tabbar.offsetHeight || 68; }
+   // 顶部 header 在移动端是 display:none，offsetHeight 为 0，不影响
+   const h=Math.max(200, win - tabH);
+   // 优先设置外层容器高度，iframe 用 CSS 100% 继承，避免二者不一致
+   if(wrap){ wrap.style.height=h+'px'; }
+   f.style.height='100%';
+ }
+ // iframe 每次 onload 后也重算高度（内容变化/横竖屏）
+ window.addEventListener('orientationchange',()=>{ if(document.getElementById('tab-chat')&&document.getElementById('tab-chat').classList.contains('active')) setTimeout(resizeChatFrame,120); });
+ window.addEventListener('resize',()=>{ if(document.getElementById('tab-chat')&&document.getElementById('tab-chat').classList.contains('active')) setTimeout(resizeChatFrame,120); });
+
  function switchTab(name){
    try{localStorage.setItem('adminTab',name)}catch(e){}
    document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
@@ -4923,7 +4932,10 @@ function ccArmAllGapAutoLoad(){
   if(name!=='system'){stopLogsAutoRefresh();}
   if(name==='chat'){
     const f=document.getElementById('chatFrame');
-    if(f && !f.src){ f.src='/chat'; }
+    if(f){
+      if(!f.getAttribute('data-loaded')){ f.setAttribute('data-loaded','1'); f.setAttribute('src','/chat?t='+Date.now()); }
+      setTimeout(resizeChatFrame, 60);
+    }
   }
   }
  
