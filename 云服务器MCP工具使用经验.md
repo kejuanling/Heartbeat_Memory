@@ -245,3 +245,10 @@
 - 改 server.js 前务必先读文首「〇、当前运维状态」：3000 由独立/PM2 God Daemon(67493) 托管的 node server.js 进程服务，pm2 list 里 gateway 显示 errored/pid=0 是**状态 desync(假死)**。
 - **别用 `pm2 restart gateway`**（因 3000 被占会 EADDRINUSE，↺ 重启数飙升、崩循环）。正确姿势：`kill -TERM <占用3000的真实PID>`，PM2 按 autorestart 自动拉起新进程。
 - 判断是否已加载新代码：`ps -o lstart -p <pid>` 是否晚于 `stat -c %y server.js`。本次最终由 1040463(20:26 启动) 提供 3000 服务，已加载新代码。
+
+### 3.20 涩涩大富翁 MCP 面板启动路径错误 & 修复（2026-08-27）
+- **坑**：管理台「服务管理」里 spicy-monopoly（8773）的启动命令 `cmd` 写死了 `cd /root/spicy-monopoly`，但 `/root/spicy-monopoly` **已不存在**（也不是软链），代码实际在 `/opt/dylan-heartbeat/spicy-monopoly`。所以从面板点「启动/重启」会因 `cd` 失败而**永远起不来**，一直显示 stopped。
+- **修复**：改 `server.js` 的 `MANAGED_SERVICES` 里该条 cmd，路径 `/root/spicy-monopoly` → `/opt/dylan-heartbeat/spicy-monopoly`。其余字段不动（`SPICY_MONOPOLY_MCP_BEARER_TOKEN=han-xie-2026` 等要保留，8773 需 Bearer Token 鉴权）。
+- **验证**：`grep -n spicy-monopoly server.js` 确认只改这一行；`node --check server.js` 语法通过。
+- **让改动生效**：面板的 MANAGED_SERVICES 是网关（3000）启动时读进内存的，**改完 server.js 必须重启 3000 才生效**。重启姿势见 3.12/3.17：**`kill -TERM <占用3000的真实PID>`**，PM2 God Daemon(67493) 按 autorestart 自动拉起新进程；**别 `pm2 restart gateway`**（EADDRINUSE）。判断已加载新代码：进程 `lstart` 晚于 server.js mtime。
+- **踩坑提示**：大富翁 MCP 自身也可以用 `node mcp-server.js --http` 手动起（监听 8773），但面板用的是环境变量方式（`SPICY_MONOPOLY_MCP_TRANSPORT=streamable-http`），二者都能跑，路径别搞混。当初"点了面板重启就起来了"是错觉——真正拉起的是手动进程，面板那条 cmd 一直是坏的。

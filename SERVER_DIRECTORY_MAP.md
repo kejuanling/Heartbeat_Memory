@@ -72,12 +72,12 @@ crontab -l                              # 查看定时任务（当前仅 bark �
 |---|---|---|---|
 | 3000 | `node /opt/dylan-heartbeat/server.js` | /opt/dylan-heartbeat | ⚠️ **网关主进程**：当前由独立 node 提供（非 pm2 gateway）。若想交回 pm2，先 `kill` 此进程再 `pm2 restart gateway`；否则改动已由它加载/生效 |
 | 5000 | python3 email_server.py | /opt/dylan-heartbeat/workspace | 邮件通知服务（email_server.py），独立运行 |
-| 8773 | node mcp-server.js | /root/spicy-monopoly | 涩涩大富翁 MCP，Bearer Token 鉴权（nohup 拉起）。**当前未监听** |
+| 8773 | node mcp-server.js | /opt/dylan-heartbeat/spicy-monopoly | 涩涩大富翁 MCP，Bearer Token 鉴权（nohup 拉起）。**已监听（2026-08-27 修复路径后）** |
 | 8787 | node server.mjs | /root/workspace/decision-trail | 决策痕迹 MCP（bash 包装脚本守护）。**当前未监听** |
 | 8790 | python3 app.py | /root/workspace/ocr-api | 真正的 OCR API（独立 nohup；nginx /ocr-api/ → 8790） |
 | 8084 | python3.11 /opt/http_api.py | /opt | 电话数据 FastAPI（独立，非 systemd，sqlite 在 /opt/phone_data） |
 
-> ⚠️ **8773 / 8787 当前未监听**。若需使用，按原启动命令手动拉起（spicy-monopoly: `node mcp-server.js`；decision-trail: `node server.mjs`）。8707 端口现由 `python3 /opt/http_api.py` 提供。9010/3303 已改为 systemd（见 A 组）。
+> ⚠️ **8773 已监听（2026-08-27 起，路径已从 /root 修正到 /opt/dylan-heartbeat）**；**8787 当前未监听**，若需使用按原启动命令手动拉起（decision-trail: `node server.mjs`）。8707 端口现由 `python3 /opt/http_api.py` 提供。9010/3303 已改为 systemd（见 A 组）。
 
 ---
 
@@ -99,7 +99,7 @@ crontab -l                              # 查看定时任务（当前仅 bark �
 | 9002 | nginx HTTPS ssl（共影 + 对外 HTTPS 入口） | systemd: nginx |
 | 9010 | yun-mcp-v2 | systemd: yun-mcp-v2 |
 
-**未监听（文档曾记录但现未运行）**：8773（spicy-monopoly）、8787（decision-trail）、9000（mcp-ssh）、8000/8765（Ombre-Brain）、8001（bark HTTP）、8097（reading-nook）、8764（问卷）、8768/8769/8770（daily-涵 三服务）、8772（browser-env）、8088（静态）。
+**未监听（文档曾记录但现未运行）**：8787（decision-trail）、9000（mcp-ssh）、8000/8765（Ombre-Brain）、8001（bark HTTP）、8097（reading-nook）、8764（问卷）、8768/8769/8770（daily-涵 三服务）、8772（browser-env）、8088（静态）。
 
 ---
 
@@ -200,7 +200,7 @@ crontab -l                              # 查看定时任务（当前仅 bark �
 | yun-mcp-v2 | 旧独立（现 systemd 9010，实际在 /opt/dylan-heartbeat/yun-mcp-v2） |
 | zzf-mcp | ZuiQingFeng 远程玩具 MCP（systemd，8890） |
 | bark_tasks | Bark 推送调度（cron 每分钟） |
-| spicy-monopoly | 涩涩大富翁 MCP（8773，当前未监听） |
+| spicy-monopoly | 涩涩大富翁 MCP（8773）。**注意：/root/spicy-monopoly 已不存在，实际代码在 /opt/dylan-heartbeat/spicy-monopoly，勿再按 /root 路径拉起** |
 | phone-report-api | 电话数据 API 源码（systemd 8080） |
 | browser-env | Playwright 浏览器 MCP（已停用） |
 | static-pages | 静态小页面（diary/sea/finger/drawer 等） |
