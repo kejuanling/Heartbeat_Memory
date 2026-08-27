@@ -186,3 +186,36 @@
 - 编辑链路：`context-compactor.updateMark(key,{content})`（只改 content，保留 markedAt/role）→ `server.js POST /admin/context-compaction/marked/update` → 前端 `openMarkEdit/saveMarkEdit`。⚠️ 不要复用 `/admin/context-compaction/mark` 做编辑（它会重置 markedAt，把消息当作重新标星）。
 - kill 独立的 node server.js 进程后，PM2 God Daemon 会按 `autorestart:true` 自动拉起新进程（加载新代码），但 `pm2 list` 可能显示 `errored`/`pid=0`——这是**状态 desync**，别误判服务挂了。判断是否加载新代码：进程 `lstart`（`ps -o lstart`）是否晚于代码文件 mtime。
 - 用管理接口测"写入类"会真改数据（标星/编辑），先备份 `data/context_compaction_marks.json`，测完复原并逐字比对，残留测试标记 grep 排查。
+
+### 3.14 消息扣住（<quiet>）功能 & 测试隔离
+- **功能**：`<quiet>90</quiet>`（分钟）或 `<quiet>22:30</quiet>`（到点结束，支持时:分）设置"消息扣住"时段；扣住期间新用户消息进 `data/held_messages.json`，`/v1/chat/completions` 拦截返回空 content、不转发模型；期间发「紧急」放行；到点 `releaseHeldMessages` 把扣住消息打包给 AI 做一条总结，写入时间线（event_type=quiet_summary）+ 推 Bark。与 `<wake>` 闹钟完全独立、互不影响。说明写在 `data/pinned.json` 新增「消息扣住」pin，让 AI 自己会写这个标签。
+- **改动点**：`server.js`（<quiet> 解析、quiet_schedule 调度、/v1 拦截、紧急放行、到点释放、启动重挂 armQuietRelease）、`tag-parser.js` stripTags 补剥 `<quiet>`、流式过滤器 createContentTagFilter 补 quiet、`time_utils.js parseWakeTarget` 加 HH:mm、`pinned.json` 加 pin。
+- **功能注入的位置**：`parseQuietTagAndSchedule` 要加在**两处**——非流式（`parseWakeTagAndSchedule(aiContent)` 旁）和流式（`parseWakeTagAndSchedule(aiFullContent)` 旁），否则流式响应回退时标签会漏进上下文。
+- **拦截插入点**要放 `isMainChat` 判定**之后**（`kelivoMessages` 含 system 才是主聊天），否则标题总结等旁路请求会被误拦截。只拦 `isMainChat && isQuietActive()`。
+- **测试隔离重大坑**：起 `PORT=3100` 临时实例测试时，会**共用生产 `data/` 目录和 `enhanced_messages.json`**，测试写入的 quiet_schedule/held_messages/timeline 测试痕迹会污染生产数据（data 已被 .gitignore，git 无法还原）。强制用 mock 上游（`RAILWAY_ENVIRONMENT=1` 让 `readEnvValue` 读 process.env 而非 .env）真实模型才不会被打。测完必须**手动清理**：`rm data/quiet_schedule.json data/held_messages.json`，并把 `enhanced_messages.json` 中 position>=1 的测试条目按内容（如 MOCK_REPLY/QUIET_TAG/设个安静）筛查后删掉。
+- `readEnvValue` 非 railway 下**优先读 `.env` 文件**（不是 process.env），所以临时实例靠 `PORT=3100 TARGET_*` 注入环境变量**不生效**，必须加 `RAILWAY_ENVIRONMENT=1` 才会取 process.env。`.env` 里的真 key 临时实例也会被注入（dotenv），所以测试会真的发 Bark 推送/调上游，务必用 mock。
+- **生产重启**：3000 服务是"独立 node server.js 进程（父进程 PM2 God Daemon 67493）"，pm2 `gateway` 显示 errored/pid=0 是 desync。改完 `kill -TERM <准确3600进程PID>`，PM2 自动拉起新进程；用 `ps -o lstart` 晚于 server.js mtime 判断已加载新代码。别 `pm2 restart gateway`（会因 3000 被占用 EADDRINUSE）。
+
+
+### 3.15 自建「涵」聊天前端 chat.html（2026-08-27）
+- **成果**：`/root/workspace/chat.html`（软链到 `/opt/dylan-heartbeat/workspace/chat.html`，nginx root 就在这，前端直接访 `https://域名/chat`）。单文件原生 HTML+JS，未上构建链，风格沿用 admin 的 `.cc-notice` 奶粉色体系（`--accent:#c89098`、`rgba(200,144,152,.25)` 描边、`rgba(200,144,152,.05)` 背景）。
+- **nginx 改动**（只动 `/etc/nginx/nginx.conf`，**没碰 server.js、没重启生产网关**）：9002(HTTPS) server 块内、`location /mcp` 之后新增两条 —— `location = /chat { alias /root/workspace/chat.html; }` 和 `location /v1 { proxy_pass http://127.0.0.1:3000; proxy_buffering off; proxy_read_timeout 300s; }`。
+  - ⚠️ `/v1` 反代**必须 `proxy_buffering off`**，否则 SSE 流式会被 nginx 缓冲、前端收不到逐字分片。
+  - `/v1` 此前 nginx **没有反代**；加上后所有 `/v1/*` 走 HTTPS 转发到网关。因为网关 `ALLOW_PUBLIC_API=true` 且 `/v1` 本来就要 `GATEWAY_API_KEY`，加反代只是让网页能同源访问，不新增暴露面。
+- **鉴权方案**：key **不硬编码**在源码。首次打开弹引导输入 `GATEWAY_API_KEY`（可选 system prompt），存 `localStorage`，之后每次请求带 `Authorization: Bearer`。这样拿到页面但没 key 也调不动 `/v1`。
+- **⚠️ DeepSeek thinking 模型坑（必记）**：`deepseek-v4-flash-vision-exp` 是 thinking 模型，流式会**先输出 `delta.reasoning_content`（思考）再输出 `delta.content`（正文）**。前端解析必须**同时接住两个字段**，否则思考期间用户看到空白、正文一直不出现。本次已把 reasoning 渲染成可折叠"思考过程"区（`.rw`），content 作正文。判断模型是否 thinking：看流式 chunk 里有没有 `reasoning_content`。
+- **访问路径**：`https://你的域名/chat`。前端把 `messages`（含 system 人设）POST 给 `/v1/chat/completions`，记忆/唤醒/推送/跨窗口注入全链路由网关保留（已用真实 key 验证）。
+- **自检命令**：`nginx -t` 用 `/usr/sbin/nginx`（不在 PATH）；`curl -sk https://127.0.0.1:9002/chat` 应 200；`curl .../v1/models` 带 key 应返回模型列表。前端 JS 校验：`python3 -c` 抽 `<script>` 段写临时 `.js` 再 `node --check`。
+- 参考 `workspace/index.html`（小世界页）配色：`#fdf6ed/#f5e6d3/#f0ddd0` 渐变、`#b07a6a` 暖棕红、`#c89098` 玫粉。
+
+### 3.16 聊天前端 chat.html 提效操作（长按菜单）补充
+- 自建 `chat.html` 在 3.15 基础上加了全套提效：长按消息弹操作菜单 → 复制 / 编辑(仅user) / 重新生成(仅ai) / 删除 / 多选批量删除。**入口是长按/右键(`contextmenu`)，纯前端本地交互，不用改后端、不用动网关。**
+- **交互统一走事件委托**：长按 `touchstart` 定时 500ms + `contextmenu` 都绑在 `#chat` 上，用 `closest('.msg')` 取 `dataset.idx`。`touchmove/touchend/touchcancel` 要 `clearTimeout` 防误触。
+- **数据驱动渲染（关键）**：把消息存 `data/messages`(localStorage) 数组 `msgs`，每次增删改后 **`renderAll()` 全量重建 DOM**，用 `makeMsgEl(m,idx)` 按数组索引重建并挂 `dataset.idx`。**不要**用增量 append 做删除/编辑，否则索引错乱。只有流式打字那一下用 `appendTypingBox()` + 更新最后一个 AI 气泡，其余都重建。
+- **多选模式**：`selectMode=true` 时 `makeMsgEl` 据 `selectMode`+`selectSet` 挂 `selectable/selected` 类（**不是**靠手动 `classList.add`，否则 `renderAll()` 重建会丢状态）。点消息用 `toggleSelect(idx)`，`selAll`/`selDel` 统一走 `renderAll()`。
+- **重新生成 regen**：找到该 AI 前面最近的 user 下标 `ui`，`msgs.slice(0, ui+1)` 截断（含该 user），再 `request(base)` 重发。⚠️ 这是"重发这一问"，不是"替换单条"，会丢弃该 user 之后的所有对话。
+- **编辑 edit**：取 `msgText(m)` 回填输入框、`msgs.slice(0, idx)` 截断（**去掉该 user**，因为它要被新内容替代），图片放回 `imgData`。
+- **删除 del**：`msgs.splice(idx,1)` 后重建。批量删除按下标 **倒序** `sort((a,b)=>b-a)` splice，否则索引错位。
+- **regen/edit 都要 `slice` 出一个新数组再赋给 `msgs`**，别原地改动全局数组之外还要记得 `saveMsgs()+renderAll()`。
+- ⚠️ 长按会触发 iOS 系统文本选择菜单，`msg .bubble` 上加了 `user-select:none;-webkit-touch-callout:none` 屏蔽；复制功能自行用 `navigator.clipboard.writeText` 兜底 `execCommand`。
+- ⚠️ `send()` 里调了 `updateSelBar()`，但该函数定义在后面——JS 函数声明提升所以没事，但要确保函数是 `function` 声明而非箭头函数赋给变量。
