@@ -1075,6 +1075,7 @@
         <div class="mp-actions">
           <button type="button" class="mp-btn primary" onclick="openMemPoolAdd()">＋ 新增记忆</button>
           <button type="button" class="mp-btn" onclick="tidyMemPool()">整理记忆池</button>
+          <button type="button" class="mp-btn" onclick="exportMemPool()">导出</button>
         </div>
         <div id="mempool-clean-msg" style="width:100%;font-size:11px;color:var(--text3);min-height:16px;margin-top:2px"></div>
       </div>
@@ -5713,6 +5714,35 @@ async function deletePinned(id){
         +'</div>';
     });
     el.innerHTML=html;
+  }
+  async function exportMemPool(){
+    const msg=document.getElementById('mempool-clean-msg');
+    if(msg) msg.textContent='正在导出全部活跃记忆…';
+    try{
+      const r=await fetch(ADMIN_API + '/memory-pool');
+      const d=await r.json();
+      const all=d.items||[];
+      const items=all.filter(function(x){return x.active!==false;});
+      if(!items.length){ toast('没有可导出的活跃记忆'); if(msg) msg.textContent=''; return; }
+      let txt='记忆池导出 · 全部活跃记忆\n';
+      txt+='导出时间: '+new Date().toLocaleString('zh-CN')+'\n';
+      txt+='共 '+items.length+' 条\n';
+      txt+='========================================\n\n';
+      items.forEach(function(it, idx){
+        const cat=it.category||'其他';
+        const imp=Math.round((Number(it.importance)||0)*100);
+        txt+='【'+(idx+1)+'】['+cat+'] 重要 '+imp+'%\n';
+        txt+=(it.content||'')+'\n\n';
+      });
+      const blob=new Blob([txt], {type:'text/plain;charset=utf-8'});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url;
+      a.download='记忆池_活跃_'+items.length+'条_'+new Date().toISOString().slice(0,10)+'.txt';
+      document.body.appendChild(a); a.click();
+      setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 60);
+      if(msg) msg.textContent='已导出 '+items.length+' 条活跃记忆';
+    }catch(e){ toast('导出失败: '+e.message); if(msg) msg.textContent='导出失败: '+e.message; }
   }
   function toggleMemPoolSunk(){
     window.__memShowSunk=!window.__memShowSunk;
