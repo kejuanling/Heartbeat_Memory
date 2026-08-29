@@ -1454,47 +1454,12 @@ function buildCrossWindowInjection() {
   if (cfg.cross_inject_enabled === false) return "";
   const parts = [];
   
-  // 1. 高重要级记忆（优先注入）
+  // 1. 相关记忆（只固定「置顶」记忆：手动置顶 + 多次检索自动置顶，不限制条数）
+  //    不再按分类抽高重要级、不再带最近「对话摘要」——话题相关记忆交给 surface_memory 按需召回。
   if (cfg.cross_inject_memory !== false) {
-    const perCat = Math.max(1, Number(cfg.cross_inject_memory_per_category) || 2);
-    const summaryDays = Math.max(1, Number(cfg.cross_inject_summary_days) || 7);
-    const summaryCutoff = Date.now() - summaryDays * 24 * 60 * 60 * 1000;
-    const all = memoryPool.list({ active: true });
-    let mems = [];
-    const seen = new Set();
-    // 静态分类覆盖：每个非「对话摘要」分类抽 importance 最高的前 perCat 条
-    (memoryPool.CATEGORIES || []).forEach(function (c) {
-      if (c === "对话摘要") return;
-      all
-        .filter(function (m) { return m.category === c; })
-        .sort(function (a, b) { return (Number(b.importance) || 0) - (Number(a.importance) || 0); })
-        .slice(0, perCat)
-        .forEach(function (m) { if (!seen.has(m.id)) { seen.add(m.id); mems.push(m); } });
-    });
-    // 「对话摘要」按最近日期取，只取最近 summaryDays 天内的（无日期兜底保留）
-    all
-      .filter(function (m) { return m.category === "对话摘要"; })
-      .filter(function (m) {
-        const t = new Date(m.updated_at || m.created_at || "");
-        if (isNaN(t.getTime())) return true; // 无日期：保留兜底
-        return t.getTime() >= summaryCutoff;
-      })
-      .sort(function (a, b) {
-        const ta = String(a.updated_at || a.created_at || "");
-        const tb = String(b.updated_at || b.created_at || "");
-        return ta < tb ? 1 : (ta > tb ? -1 : 0);
-      })
-      .slice(0, 20) // 安全上限，防止最近几天摘要过多刷屏
-      .forEach(function (m) { if (!seen.has(m.id)) { seen.add(m.id); mems.push(m); } });
-    if (mems.length) {
-      parts.push("## 相关记忆\n" + mems.map(function (m) { return "【" + m.category + "】" + m.content; }).join("\n"));
-    }
-    // 重要置顶：手动置顶（pin）的记忆单独成段，永远带上，不占「每类几条」配额
-    const pinnedMems = memoryPool.list({ active: true, pinned: true }).filter(function (m) {
-      return !seen.has(m.id);
-    }).slice(0, 8);
+    const pinnedMems = memoryPool.list({ active: true, pinned: true });
     if (pinnedMems.length) {
-      parts.push("## 重要置顶\n" + pinnedMems.map(function (m) { return "【" + m.category + "】" + m.content; }).join("\n"));
+      parts.push("## 相关记忆\n" + pinnedMems.map(function (m) { return "【" + m.category + "】" + m.content; }).join("\n"));
     }
   }
   
@@ -1517,11 +1482,14 @@ function buildCrossWindowInjection() {
 
 // ========================
 // 跨窗口记忆快照（每会话固定）
-// 批注 2026-08-30：相关记忆 + 重要置顶 + 标星(记忆碎片) 不再每次实时重建，
+// 批注 2026-08-30：相关记忆(置顶) + 标星(记忆碎片) + 近期日记 不再每次实时重建，
 // 而是"开新会话时抓一次快照并固定不变"。快照按 sessionId 存到 data/cross_snapshot_<sid>.json。
 // 日记不在此处（日记按时间线特殊事件插入，见 appendSpecialEvent/特殊事件注入）。
+// 2026-08-29 批注：相关记忆改为「只固定置顶记忆(手动+多次检索自动置顶)」，去掉按分类抽高重要级，
+// 话题相关交给 surface_memory 按需召回。加了 version 以让旧快照(旧格式)在下次请求时自动重建。
 // ========================
 const CROSS_SNAPSHOT_DIR = path.join(__dirname, "data");
+const CROSS_SNAPSHOT_VERSION = 2;
 function crossSnapshotFile(sessionId) {
   const safe = String(sessionId || "default").replace(/[^A-Za-z0-9_-]/g, "") || "default";
   return path.join(CROSS_SNAPSHOT_DIR, "cross_snapshot_" + safe + ".json");
@@ -1530,52 +1498,21 @@ function buildCrossMemorySnapshot(sessionId) {
   const cfg = memoryPool.getConfig();
   if (cfg.cross_inject_enabled === false) return "";
   const file = crossSnapshotFile(sessionId);
-  // 已有快照：直接复用（固定不变）
+  // 已有快照：直接复用（固定不变），但版本不符（旧格式）则重建。
   try {
     if (fs.existsSync(file)) {
       const snap = fs.readJsonSync(file);
-      if (snap && typeof snap.text === "string" && snap.text) return snap.text;
+      if (snap && snap.version === CROSS_SNAPSHOT_VERSION && typeof snap.text === "string" && snap.text) return snap.text;
     }
   } catch (e) { console.warn("[cross-snapshot] 读取快照失败:", e.message); }
   // 未创建：本次抓一次并落盘
   const parts = [];
   if (cfg.cross_inject_memory !== false) {
-    const perCat = Math.max(1, Number(cfg.cross_inject_memory_per_category) || 2);
-    const summaryDays = Math.max(1, Number(cfg.cross_inject_summary_days) || 7);
-    const summaryCutoff = Date.now() - summaryDays * 24 * 60 * 60 * 1000;
-    const all = memoryPool.list({ active: true });
-    let mems = [];
-    const seen = new Set();
-    (memoryPool.CATEGORIES || []).forEach(function (c) {
-      if (c === "对话摘要") return;
-      all
-        .filter(function (m) { return m.category === c; })
-        .sort(function (a, b) { return (Number(b.importance) || 0) - (Number(a.importance) || 0); })
-        .slice(0, perCat)
-        .forEach(function (m) { if (!seen.has(m.id)) { seen.add(m.id); mems.push(m); } });
-    });
-    all
-      .filter(function (m) { return m.category === "对话摘要"; })
-      .filter(function (m) {
-        const t = new Date(m.updated_at || m.created_at || "");
-        if (isNaN(t.getTime())) return true;
-        return t.getTime() >= summaryCutoff;
-      })
-      .sort(function (a, b) {
-        const ta = String(a.updated_at || a.created_at || "");
-        const tb = String(b.updated_at || b.created_at || "");
-        return ta < tb ? 1 : (ta > tb ? -1 : 0);
-      })
-      .slice(0, 20)
-      .forEach(function (m) { if (!seen.has(m.id)) { seen.add(m.id); mems.push(m); } });
-    if (mems.length) {
-      parts.push("## 相关记忆\n" + mems.map(function (m) { return "【" + m.category + "】" + m.content; }).join("\n"));
-    }
-    const pinnedMems = memoryPool.list({ active: true, pinned: true }).filter(function (m) {
-      return !seen.has(m.id);
-    }).slice(0, 8);
+    // 相关记忆：只固定「置顶」记忆（手动置顶 + 多次检索自动置顶），不限制条数。
+    // 不再按分类抽高重要级、不再带最近「对话摘要」——话题相关交给 surface_memory 按需召回。
+    const pinnedMems = memoryPool.list({ active: true, pinned: true });
     if (pinnedMems.length) {
-      parts.push("## 重要置顶\n" + pinnedMems.map(function (m) { return "【" + m.category + "】" + m.content; }).join("\n"));
+      parts.push("## 相关记忆\n" + pinnedMems.map(function (m) { return "【" + m.category + "】" + m.content; }).join("\n"));
     }
   }
   if (cfg.cross_inject_starred !== false) {
@@ -1592,7 +1529,7 @@ function buildCrossMemorySnapshot(sessionId) {
   if (text) {
     try {
       fs.ensureDirSync(CROSS_SNAPSHOT_DIR);
-      fs.writeJsonSync(file, { session: sessionId || "default", captured_at: new Date().toISOString(), text });
+      fs.writeJsonSync(file, { session: sessionId || "default", captured_at: new Date().toISOString(), version: CROSS_SNAPSHOT_VERSION, text });
     } catch (e) { console.warn("[cross-snapshot] 写入快照失败:", e.message); }
   }
   return text;
@@ -1947,11 +1884,10 @@ app.post("/v1/chat/completions", async (req, reply) => {
       let crossCtx = "";
       if (isMainChat) {
         try {
-          const ctxMsgCount = (Array.isArray(kelivoMessages) ? kelivoMessages : []).filter(function (m) { return m && m.role !== "system" && !(m.role === "assistant" && isSpecialEvent(m)) && !m.tool_calls && !m.tool_call_id; }).length;
-          const crossCfg = memoryPool.getConfig();
-          const crossAlways = crossCfg.cross_inject_always === true;
-          const crossMaxMsgs = Math.max(1, Number(crossCfg.cross_inject_max_msgs) || 2);
-          if (crossAlways || ctxMsgCount < crossMaxMsgs) { crossCtx = buildCrossMemorySnapshot(sessionId); }
+          // 跨窗口触发条件：新建会话 id 时抓一次快照并固定。
+          // buildCrossMemorySnapshot(sessionId) 会复用已存在的快照（同 sessionId 不再重建），
+          // 因此这里不再按消息条数触发，话题相关记忆交给 surface_memory 按需召回。
+          crossCtx = buildCrossMemorySnapshot(sessionId);
         } catch (cx) { console.warn("[cross-inject] 失败:", cx.message); }
       }
       let sysExtra = "";

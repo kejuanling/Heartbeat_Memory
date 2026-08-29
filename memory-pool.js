@@ -40,7 +40,9 @@ const CONFIG = {
   dedup_anchor_threshold: DEFAULT_DEDUP_ANCHOR_THRESHOLD,
   decay_days: DEFAULT_DECAY_DAYS,
   retrieval_top_k: 5,
-  // 跨窗口注入（日记 / 高重要级记忆 / 记忆碎片）
+  // 多次检索自动置顶：检索次数达到该阈值即固定为置顶（相关记忆块稳定带上它）
+  auto_pin_retrieval_count: 3,
+  // 跨窗口注入（日记 / 置顶记忆 / 记忆碎片）
   cross_inject_enabled: true,
   cross_inject_diary: true,
   cross_inject_memory: true,
@@ -367,10 +369,15 @@ function retrieve(query, opts) {
   });
   scored.sort((a, b) => b.score - a.score || b.sim - a.sim);
   const picked = scored.slice(0, topK);
+  const autoPinTh = Math.max(2, Number(CONFIG.auto_pin_retrieval_count) || 3);
   for (const p of picked) {
     p.r.retrieval_count = Number(p.r.retrieval_count || 0) + 1;
     p.r.last_retrieved_at = nowIso();
     p.r.updated_at = nowIso();
+    // 多次检索自动置顶：达到阈值即固定为置顶，让「相关记忆」跨窗口块能稳定带上它
+    if (p.r.pinned !== true && p.r.retrieval_count >= autoPinTh) {
+      p.r.pinned = true;
+    }
     dirty = true;
   }
   // Reads no longer write to disk immediately: batch via the 5s flushTimer to avoid write amplification.
@@ -499,7 +506,18 @@ async function ingestSummary(summaryText, opts) {
   opts = opts || {};
   const source = opts.source || "compaction";
   const blockId = opts.block_id || null;
-  // 合并发：批量沉底的块 id 数组（多个块一次 LLM 提炼；新条目不挂单一 block_id）
+  // 直接分类/重要级：memory 标签里写了 {category,importance} 时，跳过 LLM 再解析，直接入库。
+  const directCategory = opts.directCategory ? String(opts.directCategory).trim() : "";
+  if (directCategory && directCategory !== "" && CATEGORIES.includes(directCategory)) {
+    const importance = (opts.directImportance != null && isFinite(opts.directImportance)) ? Number(opts.directImportance) : null;
+    const r = add({
+      content: String(summaryText || "").trim(),
+      category: directCategory,
+      importance: importance != null ? importance : 0.5,
+      source
+    });
+    return { ok: true, added: r.dup ? 0 : 1, merged: r.dup ? 1 : 0, failed: 0, fallback: false };
+  }
   const mergeBlockIds = Array.isArray(opts.blockIds) ? opts.blockIds.map(String).filter(Boolean) : [];
   const hash = crypto.createHash("sha1").update(String(summaryText || "")).digest("hex");
   if (!opts.force && ingestedHashes.has(hash)) {
