@@ -795,7 +795,6 @@ function classifySpecialEvent(msg) {
 }
 
 function isRealMessageForTimeline(msg) {
-  if (msg.deleted) return false;
   if (msg.role === "system") return false;
   if (msg.tool_calls) return false;
   if (isSpecialEvent(msg)) return false;
