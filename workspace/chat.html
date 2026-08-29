@@ -80,6 +80,19 @@ header{
 .hd-mid{flex:1;min-width:0}
 .hd-name{font-size:16px;font-weight:600;letter-spacing:1px;color:var(--accent-deep);font-family:"Noto Serif SC",serif}
 .hd-sub{font-size:11px;color:var(--ink3);letter-spacing:1.5px;margin-top:2px}
+/* 顶部栏按聊天布局(模板)差异化 —— 仅调整名称位置/头像与名称，保留左侧会话按钮与右侧菜单按钮 */
+.hd-mid{display:flex;flex-direction:column}
+/* QQ：名称左对齐（默认） */
+/* 微信：名称居中 */
+header.hd-wx .hd-mid{align-items:center;text-align:center}
+header.hd-wx .hd-name{text-align:center}
+/* 短信：名称居中（联系人名片式，保留左侧会话头像与右侧菜单） */
+header.hd-sms .hd-mid{align-items:center;text-align:center;flex:1}
+header.hd-sms .hd-name{text-align:center}
+header.hd-sms .hd-sub{display:none}
+/* qq/custom：名称左对齐 */
+header.hd-qq .hd-mid{align-items:flex-start}
+header.hd-custom .hd-mid{align-items:flex-start}
 .hd-btn{
   width:38px;height:38px;border:none;border-radius:50%;flex-shrink:0;
   background:rgba(255,255,255,.55);color:var(--ink2);
@@ -126,10 +139,12 @@ header{
 }
 .msg.ev-diary .bubble{background:rgba(255,255,255,.25);border:1px dashed rgba(200,144,152,.25);color:var(--ink3)}
 .msg{
-  max-width:82%;display:flex;flex-direction:column;gap:4px;
+  max-width:92%;display:flex;flex-direction:column;gap:4px;
   animation:msgIn .3s ease;
   position:relative;
 }
+/* 多气泡消息：外层容器不再整体进场，交给内部各 .bubble.pop 按顺序逐个弹出 */
+.msg:has(.bubble.pop){animation:none}
 @keyframes msgIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 .msg.user{align-self:flex-end;align-items:flex-end}
 .msg.ai{align-self:flex-start;align-items:flex-start}
@@ -231,6 +246,7 @@ header{
 /* 分割气泡依次弹出 */
 @keyframes popIn{from{opacity:0;transform:scale(.92) translateY(4px)}to{opacity:1;transform:none}}
 .msg .bubble.pop{animation:popIn .28s ease both}
+.msg.ai.stream-in .bubble{animation:msgIn .35s ease both}
 .msg .bubble img{
   max-width:100%;border-radius:var(--radius-sm);
   margin-top:6px;display:block;
@@ -628,6 +644,14 @@ footer{
 .typing i{width:5px;height:5px;border-radius:50%;background:var(--accent);animation:tp 1.2s infinite;display:inline-block}
 .typing i:nth-child(2){animation-delay:.2s}
 .typing i:nth-child(3){animation-delay:.4s}
+/* 顶部输入状态 */
+.hd-name-row{display:flex;align-items:center;gap:8px}
+.hd-typing{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;background:rgba(200,144,152,.12);border-radius:10px;font-size:11px;color:var(--accent-deep)}
+.hd-typing-dots{display:inline-flex;gap:2px;align-items:center}
+.hd-typing-dots i{width:4px;height:4px;border-radius:50%;background:var(--accent-deep);animation:tp 1.2s infinite;display:inline-block}
+.hd-typing-dots i:nth-child(2){animation-delay:.2s}
+.hd-typing-dots i:nth-child(3){animation-delay:.4s}
+.hd-typing-text{font-weight:500}
 @keyframes tp{0%,60%,100%{opacity:.3;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
 
 /* toast */
@@ -961,7 +985,13 @@ footer{
 <header>
   <div class="avatar" id="hdAvatar" title="会话列表" style="cursor:pointer">谢</div>
   <div class="hd-mid">
-    <div class="hd-name" id="hdName">谢意行</div>
+    <div class="hd-name-row">
+      <div class="hd-name" id="hdName">谢意行</div>
+    </div>
+    <div class="hd-typing" id="hdTyping" style="display:none">
+      <span class="hd-typing-text">正在输入</span>
+      <span class="hd-typing-dots"><i></i><i></i><i></i></span>
+    </div>
     <div class="hd-sub" id="hdSub">一直在 · 陪你说话</div>
   </div>
   <button class="hd-btn" id="navBtn" title="菜单"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
@@ -1253,6 +1283,11 @@ footer{
                 <button data-k="show_name" class="on">名称</button>
                 <button data-k="show_time">消息时间</button>
               </div>
+              <div class="set-sec-label">发送方式</div>
+              <div class="pick" id="pickMode">
+                <button data-m="stream" class="on">流式</button>
+                <button data-m="nonstream">非流式</button>
+              </div>
               <div class="set-sec-label">聊天布局</div>
               <div class="pick" id="pickBstyle">
                 <button data-bs="qq" class="on">QQ</button>
@@ -1404,7 +1439,8 @@ const DEFAULT_CFG={
   show_avatar:true,        // 显示头像
   show_name:true,          // 显示名称
   show_time:true,
-  bubble_delim:"---" // AI 回复拆多气泡的分隔符（写入 system prompt 让模型用）
+  bubble_delim:"---", // AI 回复拆多气泡的分隔符（写入 system prompt 让模型用）
+  send_mode:"stream"   // 发送模式：stream=流式(默认,边回边出,显思考/工具) | nonstream=非流式(整段回完,不显思考/工具)
 };
 let api_key=localStorage.getItem(LS_KEY)||"";
 let system_prompt=localStorage.getItem(LS_PROMPT)||"";
@@ -1524,6 +1560,7 @@ const pickThinking=document.getElementById("pickThinking");
 const pickOthers=document.getElementById("pickOthers");
 const pickBstyle=document.getElementById("pickBstyle");
 const pickRender=document.getElementById("pickRender");
+const pickMode=document.getElementById("pickMode");
 /* 头像上传 */
 const avatarFile=document.getElementById("avatarFile");
 let avatarTarget="";
@@ -1910,7 +1947,7 @@ function makeMsgEl(m,idx,grpCls){
     if(parts.length<=1){parts=[full];}
     parts.forEach(function(p,pi){
       const host=buildUnit();
-      const b=document.createElement("div");b.className="bubble"+(parts.length>1?" pop":"");if(parts.length>1)b.style.animationDelay=(pi*0.12)+"s";
+      const b=document.createElement("div");b.className="bubble"+(parts.length>1?" pop":"");if(parts.length>1)b.style.animationDelay=(pi*0.18)+"s";
       renderAiContent(host,b,p,(pi===0?m.reasoning:""),(pi===0?(m.tools||[]):[]));
       host.appendChild(b);
     });
@@ -1950,12 +1987,19 @@ function renderAll(keepPos){
 function removeEmpty(){if(emptyEl&&chatEl.contains(emptyEl))emptyEl.remove();}
 function appendTypingBox(){
   removeEmpty();
-  const d=document.createElement("div");d.className="msg ai";d.dataset.idx="-1";
-  d.innerHTML='<div class="bubble"><span class="typing"><i></i><i></i><i></i></span></div>';
-  chatEl.appendChild(d);scrollBottom();
-  return d;
+  showHeaderTyping(true);
+  // 不再显示气泡内三个点，只在顶部显示输入状态
+  return null;
+}
+function showHeaderTyping(show){
+  // 短信模板不显示"正在输入"
+  if((cfg.bubble_style||"qq")==="sms"){ show=false; }
+  const el=document.getElementById("hdTyping");
+  if(!el) return;
+  el.style.display = show ? "inline-flex" : "none";
 }
 function removeTyping(){
+  showHeaderTyping(false);
   const ms=chatEl.querySelectorAll(".msg.ai");
   const last=ms[ms.length-1];
   if(last&&last.querySelector(".typing"))last.remove();
@@ -1966,8 +2010,8 @@ function lastAIBubble(){
 }
 function showError(msg){
   removeTyping();
-  const d=document.createElement("div");d.className="msg ai";
-  d.innerHTML='<div class="bubble" style="color:#c97070">连接时遇到一点问题：'+escapeHtml(msg)+'</div>';
+  const d=document.createElement("div");d.className="msg ev-silent";
+  d.innerHTML='<div class="ev-silent" style="color:#c97070;background:rgba(201,112,112,.10);border:1px dashed rgba(201,112,112,.25)">连接时遇到一点问题：'+escapeHtml(msg)+'</div>';
   chatEl.appendChild(d);scrollBottom();
 }
 
@@ -1988,12 +2032,13 @@ function buildMessages(list){
 async function request(finalMsgs){
   if(sending)return;
   sending=true;setSendState(true);aborter=new AbortController();
-  const box=appendTypingBox();
+  appendTypingBox();
   let full="",reasoning="",usage=null,tools=[];
+  const isStream=(cfg.send_mode||"stream")==="stream" || cfg.send_mode===undefined;
   try{
     const payload={
       model:"deepseek-v4-flash-vision-exp",
-      stream:true,
+      stream:isStream,
       messages:buildMessages(finalMsgs),
       session_id:currentSession,
       stream_options:{include_usage:true}
@@ -2009,8 +2054,18 @@ async function request(finalMsgs){
       signal:aborter.signal
     });
     if(!resp.ok){const t=await resp.text().catch(()=>"");throw new Error("HTTP "+resp.status+" : "+(t.slice(0,200)||resp.statusText));}
+    if(!isStream){
+      // 非流式：直接读整段 JSON 回复，一次性显示（不显示思考链/工具痕迹）
+      const j=await resp.json().catch(()=>null);
+      if(!j||!j.choices||!j.choices[0])throw new Error("上游返回格式异常");
+      const msg=j.choices[0].message||{};
+      full=typeof msg.content==="string"?msg.content:"";
+      if((j.usage)){usage=j.usage;}
+      if(j.choices[0].finish_reason==="length"){/* 截断提示 */ }
+    } else {
     const reader=resp.body.getReader();
     const dec=new TextDecoder();let buf="";
+    let streamBubble=null;  // 流式气泡元素，第一个 content 来的时候才创建
     while(true){
       const {done,value}=await reader.read();
       if(done)break;
@@ -2025,10 +2080,21 @@ async function request(finalMsgs){
           const json=JSON.parse(data);
           if(json.usage){usage=json.usage;}
           const delta=json.choices&&json.choices[0]&&json.choices[0].delta;
+          const hasContent = delta && delta.content;
+          const hasReasoning = delta && delta.reasoning_content;
           if(delta){if(delta.content)full+=delta.content;if(delta.reasoning_content)reasoning+=delta.reasoning_content;if(delta.tool_trace){tools=delta.tool_trace;}}
-          const b=lastAIBubble();if(b){renderAI(b,b.querySelector(".bubble"),full,reasoning,tools);if(autoScroll)scrollBottom();}
+          // 第一个有内容的 chunk 到达时才创建气泡（去掉三个点的加载状态）
+          if((hasContent || hasReasoning) && !streamBubble){
+            removeEmpty();
+            const d=document.createElement("div");d.className="msg ai stream-in";d.dataset.idx="-1";
+            d.innerHTML='<div class="bubble"></div>';
+            chatEl.appendChild(d);
+            streamBubble = d;
+          }
+          if(streamBubble){renderAI(streamBubble,streamBubble.querySelector(".bubble"),full,reasoning,tools);if(autoScroll)scrollBottom();}
         }catch(e){}
       }
+    }
     }
     // 入库
     finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});
@@ -2043,6 +2109,7 @@ async function request(finalMsgs){
     }
   }finally{
     sending=false;setSendState(false);aborter=null;
+    showHeaderTyping(false);
     // 通话页文字发送后：AI 回复完成，朗读最后一条 AI 消息
     if(_callAfterAI){
       _callAfterAI=false;
@@ -2383,6 +2450,9 @@ function renderPicks(){
   if(pickBstyle)pickBstyle.querySelectorAll("button").forEach(b=>{
     b.classList.toggle("on",b.dataset.bs===(cfg.bubble_style||"qq"));
   });
+  if(pickMode)pickMode.querySelectorAll("button").forEach(b=>{
+    b.classList.toggle("on",b.dataset.m===(cfg.send_mode||"stream"));
+  });
 }
 function sessionDisplayName(){
   var sid=currentSession||"default";
@@ -2394,14 +2464,23 @@ function sessionDisplayName(){
   return sid==="default" ? "主会话" : sid;
 }
 function applyHeader(){
-  // 顶部只显示会话名称（隐藏 AI 名称/头像/副标题）
-  if(hdAvatar) hdAvatar.style.display='none';
-  if(hdSub) hdSub.style.display='none';
+  // 顶部显示会话名称；按聊天布局(模板)控制名称位置与头像/副标题是否显示
+  const layout=(cfg.bubble_style||"qq");
   hdName.textContent=sessionDisplayName();
   document.title=sessionDisplayName();
   if(hdName){ hdName.style.cursor='pointer'; hdName.title='会话列表'; }
   const mt=document.querySelector('meta[name="apple-mobile-web-app-title"]');
   if(mt)mt.setAttribute("content",sessionDisplayName());
+  // 给 header 加 layout 类，CSS 按模板控制样式（名称位置/头像/副标题）
+  const hd=document.querySelector("header");
+  if(hd){
+    ["qq","wx","sms","custom"].forEach(function(c){hd.classList.remove("hd-"+c);});
+    hd.classList.add("hd-"+layout);
+  }
+  // 副标题：QQ/微信/短信都默认隐藏（保持简洁；只保留名称主视觉）
+  if(hdSub) hdSub.style.display='none';
+  // 头像：默认为轻头像（左上），供短信/QQ 等看需求
+  if(hdAvatar) hdAvatar.style.display='';
 }
 if(hdName) hdName.addEventListener('click', openDrawer);
 function populateSettings(){
@@ -2592,6 +2671,7 @@ function applyLayout(style){
   populateSettings();
   renderThemeValues();
   renderPicks();
+  applyHeader();   // 切换模板时同步更新顶部栏名称位置/头像
 }
 [bubbleOpacity,bubbleBlur,bubbleRadius,userBubbleColor,aiBubbleColor,bgColorInput,bgImageInput,userFontColorInput,aiFontColorInput,fontSizeInput,fontFamilyInput].forEach(function(el){
   el.addEventListener("input",function(){renderThemeValues();applyThemePreview();});
@@ -2661,6 +2741,10 @@ pickRender.addEventListener("click",e=>{
 if(pickBstyle)pickBstyle.addEventListener("click",e=>{
   const b=e.target.closest("button");if(!b)return;
   if(b.dataset.bs){ applyLayout(b.dataset.bs); renderAll(); }
+});
+if(pickMode)pickMode.addEventListener("click",e=>{
+  const b=e.target.closest("button");if(!b)return;
+  if(b.dataset.m){ cfg.send_mode=b.dataset.m; saveCfg(); renderPicks(); }
 });
 
 
