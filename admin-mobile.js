@@ -45,7 +45,18 @@ function getCookie(name) {
   }
   window.fetch = function (input, init) {
     init = init || {};
-    const url = typeof input === 'string' ? input : ((input && input.url) || '');
+    let url = typeof input === 'string' ? input : ((input && input.url) || '');
+    // 压缩/替换接口自动带上当前会话（聊天与管理台同源，可读 localStorage.han_current_session）
+    if (url.indexOf('/context-compaction') >= 0 || url.indexOf('/context-replacements') >= 0) {
+      try {
+        const sid = localStorage.getItem('han_current_session') || 'default';
+        if (url.indexOf('session_id=') < 0) {
+          const sep = url.indexOf('?') >= 0 ? '&' : '?';
+          url = url + sep + 'session_id=' + encodeURIComponent(sid);
+          if (typeof input === 'string') input = url;
+        }
+      } catch (e) {}
+    }
     const admin = isAdminUrl(url);
     if (admin) {
       const headers = init.headers instanceof Headers ? init.headers : new Headers(init.headers || {});
@@ -160,8 +171,9 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    initCollapsibleCards();
    // 恢复上次停留的导航 tab（刷新后不再回到心跳页）
    try{
-     const savedTab = localStorage.getItem('adminTab');
-     if(savedTab && ['status','chat','config','memory','compaction','prompts','system'].indexOf(savedTab)>=0 && savedTab!=='status'){
+     let savedTab = localStorage.getItem('adminTab');
+     try{ const qp=new URLSearchParams(location.search); const t=qp.get('tab'); if(t) savedTab=t; }catch(e){}
+     if(savedTab && ['status','config','memory','compaction','prompts','system'].indexOf(savedTab)>=0 && savedTab!=='status'){
        switchTab(savedTab);
      }
    }catch(e){}
@@ -3310,13 +3322,6 @@ function ccArmAllGapAutoLoad(){
   if(name==='config'){loadToolsConfig();loadServices();}
   if(name==='system'){startLogsAutoRefresh(); loadReplaceLog();}
   if(name!=='system'){stopLogsAutoRefresh();}
-  if(name==='chat'){
-    const f=document.getElementById('chatFrame');
-    if(f){
-      if(!f.getAttribute('data-loaded')){ f.setAttribute('data-loaded','1'); f.setAttribute('src','/chat?t='+Date.now()); }
-      setTimeout(resizeChatFrame, 60);
-    }
-  }
   }
  
  async function loadPushLog(){
@@ -3343,9 +3348,11 @@ function ccArmAllGapAutoLoad(){
       try{ if(it.at) t=new Date(String(it.at).replace(' ','T')+':00+08:00').toLocaleString('zh-CN',{hour12:false}); }catch(e){}
       const isWake=it.sent===false;
       const dotBg=isWake?'#e67e22':'#34495e';
-      html+='<div class="card push-item" data-push-pos="'+it.position+'" style="margin-bottom:10px;padding:12px 14px">'
+      const sessLabel = it.session_id && it.session_id !== 'default' ? escapeHtml(it.session_id) : '主会话';
+      html+='<div class="card push-item" data-push-pos="'+it.position+'" data-push-session="'+escapeHtml(it.session_id||'default')+'" style="margin-bottom:10px;padding:12px 14px">'
         +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
         +'<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text2);font-weight:600"><i style="width:8px;height:8px;border-radius:50%;background:'+dotBg+';display:inline-block;flex-shrink:0"></i>'+escapeHtml(it.channel||'bark')+'</span>'
+        +'<span style="display:inline-block;padding:1px 6px;font-size:10px;background:var(--bg2);color:var(--text3);border-radius:4px;flex-shrink:0">'+sessLabel+'</span>'
         +'<span style="font-size:11px;color:var(--text3);flex:1;min-width:0">'+escapeHtml(t)+'</span>'
         +'<span style="display:flex;gap:6px;flex-wrap:nowrap;flex-shrink:0">'
         +(isWake?'':'<button class="btn btn-outline" style="width:auto;flex:0 0 auto;padding:2px 8px;font-size:11px;min-height:0" onclick="openPushEdit(\''+it.position+'\')">编辑</button>')
@@ -3363,7 +3370,7 @@ function ccArmAllGapAutoLoad(){
     const it=findPushItem(pos);
     if(!it){ toast('未找到该记录'); return; }
     if(!confirm('确定删除这条推送？会直接从时间线移除，不可恢复。')) return;
-    fetch(ADMIN_API+'/push-events/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({position:Number(pos),content:it.content})})
+    fetch(ADMIN_API+'/push-events/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({position:Number(pos),content:it.content,session_id:it.session_id||'default'})})
       .then(function(r){return r.json();})
       .then(function(d){
         if(d.error){ toast('删除失败: '+d.error); return; }
@@ -3394,7 +3401,7 @@ function ccArmAllGapAutoLoad(){
     const body=document.getElementById('push-edit-body').value.trim();
     if(!body){ toast('内容不能为空'); return; }
     try{
-      const r=await fetch(ADMIN_API+'/push-events/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({position:Number(pos),content:it.content,title:title,body:body})});
+      const r=await fetch(ADMIN_API+'/push-events/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({position:Number(pos),content:it.content,title:title,body:body,session_id:it.session_id||'default'})});
       const d=await r.json();
       if(d.error){ toast('保存失败: '+d.error); return; }
       const card=document.querySelector('.push-item[data-push-pos="'+String(pos)+'"]');

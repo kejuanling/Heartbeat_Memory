@@ -10,38 +10,83 @@ function timelinePathFor(baseDir, sessionId) {
   if (!sessionId || sessionId === 'default') {
     return path.join(baseDir, TIMELINE_FILE);
   }
-  // 只允许安全的会话ID字符，防止路径穿越
   const safe = String(sessionId).replace(/[^A-Za-z0-9_-]/g, '');
   if (!safe) return path.join(baseDir, TIMELINE_FILE);
   return path.join(baseDir, `enhanced_messages_${safe}.json`);
 }
 
-function readTimeline(baseDir, sessionId) {
-  const p = timelinePathFor(baseDir, sessionId);
-  if (!fsx.existsSync(p)) return null;
-  const data = fsx.readJsonSync(p);
-  return Array.isArray(data) ? data : null;
+// 扫描所有会话时间线文件，返回 [{ sessionId, path }]
+function listAllTimelines(baseDir) {
+  const files = fsx.readdirSync(baseDir);
+  const result = [];
+  // 主会话
+  if (fsx.existsSync(path.join(baseDir, TIMELINE_FILE))) {
+    result.push({ sessionId: 'default', path: path.join(baseDir, TIMELINE_FILE) });
+  }
+  // 分会话
+  for (const f of files) {
+    const m = f.match(/^enhanced_messages_([A-Za-z0-9_-]+)\.json$/);
+    if (m) {
+      result.push({ sessionId: m[1], path: path.join(baseDir, f) });
+    }
+  }
+  return result;
+}
+
+function extractPushItems(timeline, sessionId) {
+  if (!Array.isArray(timeline)) return [];
+  return timeline
+    .filter(function (x) { return !x.deleted; })
+    .map(pushEchoMeta)
+    .filter(Boolean)
+    .map(function (item) {
+      return Object.assign({}, item, { session_id: sessionId });
+    });
 }
 
 module.exports = function registerPushEventsRoutes(app, { basicAuth, baseDir }) {
 
-  // 列出推送记录（支持按会话筛选）
+  // 列出推送记录
+  // - 传 session_id：只返回该会话的推送
+  // - 不传 session_id：返回所有会话的推送（管理台用）
   app.get('/admin/push-events', { preHandler: basicAuth }, async (req, reply) => {
     try {
-      const sessionId = String(req.query?.session_id || '').trim() || 'default';
-      const timeline = readTimeline(baseDir, sessionId);
-      if (!timeline) return reply.send({ items: [], session_id: sessionId });
-      const items = timeline.filter(function (x) { return !x.deleted; }).map(pushEchoMeta).filter(Boolean);
+      const rawSession = String(req.query?.session_id || '').trim();
+      const sessionId = rawSession || 'default';
+      const wantAll = rawSession === '' && (req.query?.all === '1' || req.query?.all === 'true');
+
+      let items = [];
+      if (wantAll || rawSession === '') {
+        // 汇总所有会话
+        const timelines = listAllTimelines(baseDir);
+        for (const tl of timelines) {
+          try {
+            if (!fsx.existsSync(tl.path)) continue;
+            const data = fsx.readJsonSync(tl.path);
+            items = items.concat(extractPushItems(data, tl.sessionId));
+          } catch (e) {
+            console.warn('[push-events] 读取会话时间线失败:', tl.sessionId, e.message);
+          }
+        }
+      } else {
+        // 单会话
+        const p = timelinePathFor(baseDir, sessionId);
+        if (fsx.existsSync(p)) {
+          const data = fsx.readJsonSync(p);
+          items = extractPushItems(data, sessionId);
+        }
+      }
+
       items.sort(function (a, b) {
         const ta = toEpoch(a.at), tb = toEpoch(b.at);
         if (ta != null && tb != null) return tb - ta;
         return (b.position || 0) - (a.position || 0);
       });
-      reply.send({ items: items, session_id: sessionId });
+      reply.send({ items: items, session_id: rawSession || 'all' });
     } catch (err) { reply.code(500).send({ error: err.message }); }
   });
 
-  // 编辑推送内容
+  // 编辑推送内容（必须带 session_id）
   app.post('/admin/push-events/update', { preHandler: basicAuth }, async (req, reply) => {
     try {
       const b = req.body || {};
@@ -65,11 +110,11 @@ module.exports = function registerPushEventsRoutes(app, { basicAuth, baseDir }) 
       msg.push_tail = meta.tail || '';
       msg.updated_at = new Date().toISOString();
       writeTimelineAtomic(timeline, tlPath);
-      reply.send({ success: true, entry: pushEchoMeta(msg), session_id: sessionId });
+      reply.send({ success: true, entry: Object.assign({}, pushEchoMeta(msg), { session_id: sessionId }), session_id: sessionId });
     } catch (err) { reply.code(500).send({ error: err.message }); }
   });
 
-  // 删除推送（软删除）
+  // 删除推送（软删除，必须带 session_id）
   app.post('/admin/push-events/delete', { preHandler: basicAuth }, async (req, reply) => {
     try {
       const b = req.body || {};
@@ -83,8 +128,6 @@ module.exports = function registerPushEventsRoutes(app, { basicAuth, baseDir }) 
       const idx = timeline.findIndex(function (x) { return x.role === 'assistant' && x.position === position && x.content === content; });
       if (idx < 0) return reply.code(404).send({ error: '记录不存在' });
       const msg = timeline[idx];
-      // 软删除：不移动数组元素（编号范围不变，避免破坏压缩/替换块），保留原内容供时间排序，
-      // 仅打 deleted 标记；模型请求注入、压缩摘要文本、面板都会过滤掉它。
       msg.deleted = true;
       msg.deleted_at = new Date().toISOString();
       writeTimelineAtomic(timeline, tlPath);
