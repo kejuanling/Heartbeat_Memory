@@ -65,10 +65,11 @@ function toEpoch(at) {
   const d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
   return isNaN(d.getTime()) ? null : d.getTime();
 }
-function writeTimelineAtomic(list) {
+function writeTimelineAtomic(list, filePath) {
   const fsx = require('fs-extra');
-  const tmp = path.join(__dirname, '..', 'enhanced_messages.json.tmp');
+  const targetPath = filePath || path.join(__dirname, '..', 'enhanced_messages.json');
+  const tmp = targetPath + '.tmp';
   fsx.writeJsonSync(tmp, list, { spaces: 2 });
-  fsx.renameSync(tmp, path.join(__dirname, '..', 'enhanced_messages.json'));
+  fsx.renameSync(tmp, targetPath);
 }
 module.exports = { parsePushEcho, parseWakeEcho, buildPushEcho, fmtLocalAt, pushEchoMeta, toEpoch, writeTimelineAtomic };
