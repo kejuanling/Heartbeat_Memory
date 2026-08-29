@@ -3348,7 +3348,7 @@ function ccArmAllGapAutoLoad(){
       try{ if(it.at) t=new Date(String(it.at).replace(' ','T')+':00+08:00').toLocaleString('zh-CN',{hour12:false}); }catch(e){}
       const isWake=it.sent===false;
       const dotBg=isWake?'#e67e22':'#34495e';
-      const sessLabel = it.session_id && it.session_id !== 'default' ? escapeHtml(it.session_id) : '主会话';
+      const sessLabel = escapeHtml(it.session_id || 'default');
       html+='<div class="card push-item" data-push-pos="'+it.position+'" data-push-session="'+escapeHtml(it.session_id||'default')+'" style="margin-bottom:10px;padding:12px 14px">'
         +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
         +'<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text2);font-weight:600"><i style="width:8px;height:8px;border-radius:50%;background:'+dotBg+';display:inline-block;flex-shrink:0"></i>'+escapeHtml(it.channel||'bark')+'</span>'
