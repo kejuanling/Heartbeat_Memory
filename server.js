@@ -7,7 +7,7 @@ const crypto = require("crypto");
 
 // === MCP 工具循环接入（隔离式，ENABLE_MCP=true 才生效）===
 const mcp = require("./mcp-tool-loop");
-const { createClients: mcpCreateClients } = require("./mcp-client");
+const { createClients: mcpCreateClients, probeServer: mcpProbeServer } = require("./mcp-client");
 const MCP_SERVERS_CONFIG = path.join(__dirname, "mcp-servers.json");
 const MCP_ENABLED = () => readEnvValue("ENABLE_MCP") === "true";
 let _mcpClientsCache = null;
@@ -19,6 +19,24 @@ function getMcpClients() {
   return _mcpClientsCache;
 }
 // === end MCP ===
+
+// ---- 模型供应商（多供应商路由）----
+const AI_PROVIDERS_CONFIG = path.join(__dirname, "ai-providers.json");
+function loadAiProviders() {
+  try {
+    const raw = fs.readFileSync(AI_PROVIDERS_CONFIG, "utf-8");
+    const cfg = JSON.parse(raw);
+    return Array.isArray(cfg) ? cfg : (Array.isArray(cfg.providers) ? cfg.providers : []);
+  } catch (e) { return []; }
+}
+function saveAiProviders(list) {
+  writeJsonFileAtomic(AI_PROVIDERS_CONFIG, { providers: list || [] });
+}
+// 取已启用的第一个供应商（未配置则回退 TARGET_API_*）
+function resolveActiveProvider() {
+  const ps = loadAiProviders();
+  return ps.find(function (p) { return p.enabled !== false && (p.api_url || p.base_url) && p.api_key; }) || null;
+}
 const {
   getDatePartsInTimeZone,
   formatDateTimeInTimeZone,
@@ -44,6 +62,21 @@ const app = Fastify({
 });
 
 app.register(require("@fastify/formbody"));
+
+// 多会话：压缩上下文按会话时间线工作。对 /admin/context-compaction/* 请求，从 query 的 session_id 设置活跃会话；响应后复位（无 session_id 则回退主会话）。
+app.addHook("onRequest", async (req, reply) => {
+  if (req.url && req.url.startsWith("/admin/context-compaction")) {
+    const sid = (req.query && req.query.session_id) ? String(req.query.session_id) : null;
+    req.__ctxWasSet = sid != null;
+    contextReplacements.setActiveSession(sid);
+  }
+});
+app.addHook("onResponse", async (req, reply) => {
+  if (req.__ctxWasSet) {
+    contextReplacements.setActiveSession(null);
+    req.__ctxWasSet = false;
+  }
+});
 
 const PORT = Number(process.env.PORT) || 3000;
 const TARGET_API_URL = process.env.TARGET_API_URL;
@@ -708,9 +741,9 @@ function extractTrailingTimestampLabel(value) {
 // 解析 <current_time>Sat 26-08-15 12:37:16</current_time> 里的时间（客户端新时间格式，两位年份补全）
 function extractCurrentTimeTagLabel(value) {
   const text = String(value || "");
-  const m = text.match(/<current_time>[\s\S]*?(\d{2})[-/](\d{1,2})[-/](\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})/);
+  const m = text.match(/<current_time>[\s\S]*?(\d{2})[-/](\d{1,2})[-/](\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})(?:[:：](\d{2}))?/);
   if (!m) return null;
-  return zonedWallTimeToDate({ year: 2000 + Number(m[1]), month: Number(m[2]), day: Number(m[3]), hour: Number(m[4]), minute: Number(m[5]) }, TIME_ZONE);
+  return zonedWallTimeToDate({ year: 2000 + Number(m[1]), month: Number(m[2]), day: Number(m[3]), hour: Number(m[4]), minute: Number(m[5]), second: m[6] ? Number(m[6]) : 0 }, TIME_ZONE);
 }
 
 // 消息时间解析：优先 time 字段（客户端已传）→ <current_time> 标签 → 末尾时间缀 → 开头时间戳（AI 抄的）
@@ -762,6 +795,7 @@ function classifySpecialEvent(msg) {
 }
 
 function isRealMessageForTimeline(msg) {
+  if (msg.deleted) return false;
   if (msg.role === "system") return false;
   if (msg.tool_calls) return false;
   if (isSpecialEvent(msg)) return false;
@@ -933,17 +967,17 @@ function buildTimeline(kelivoMessages, sessionId) {
 // ========================
 // 追加特殊事件
 // ========================
-function appendSpecialEvent(content, extra) {
-  const timeline = loadTimeline();
+function appendSpecialEvent(content, extra, sessionId) {
+  const timeline = loadTimeline(sessionId);
   let maxPos = 0;
   for (const msg of timeline) {
     if (msg.position && msg.position > maxPos) maxPos = msg.position;
   }
   const newEvent = { role: "assistant", content, position: maxPos + 0.5, time: new Date().toISOString(), ...(extra || {}) };
   timeline.push(newEvent);
-  saveTimeline(timeline);
+  saveTimeline(timeline, sessionId);
   // 批注 2026-07-15：特殊事件可能包含推送正文；日志只记录长度，避免公开部署时泄漏私密内容。
-  console.log(`\n已记录特殊事件 (position ${newEvent.position}, chars ${normalizeContentToText(content).length})\n`);
+  console.log(`\n已记录特殊事件 (session ${sessionId || "default"}, position ${newEvent.position}, chars ${normalizeContentToText(content).length})\n`);
 }
 
 
@@ -1152,6 +1186,14 @@ app.addHook("onRequest", (req, reply, done) => {
     const bearer = auth.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || "";
     const headerKey = String(req.headers["x-gateway-api-key"] || req.headers["x-api-key"] || "").trim();
     if (bearer === configuredKey || headerKey === configuredKey) return done();
+    // 批注 2026-08-29：多浏览器/跨设备同步。聊天页登录后夹带 admin_session cookie，
+    // 登录本身就用管理员账号密码校验（与 GATEWAY key 同等级或更强），
+    // 所以允许"已登录会话"访问 /v1/*（读历史 + 发消息），
+    // 避免每个浏览器都要在 localStorage 里单独存一份 GATEWAY key。
+    try {
+      const cookies = parseCookies(req.headers.cookie);
+      if (cookies.admin_session && validSessionToken(cookies.admin_session)) return done();
+    } catch (e) {}
     // 批注 2026-07-30：Kelivo 可能在模型探测或旧预设里继续带错 key；
     // 只记路径和 header 类型，帮助排查缓存/重复请求，绝不把任意密钥写入日志。
     console.warn(JSON.stringify({
@@ -1276,6 +1318,7 @@ app.delete("/v1/sessions/:id", async (req, reply) => {
 });
 
 // 只读返回完整时间线（供自建聊天前端首次拉取历史；剥离内部 position 字段，保留 role/content/time）
+// 批注 2026-08-29：同时回传 assistant 的 reasoning/tools/tokens，供前端重载后仍能显示 token 统计等富字段。
 app.get("/v1/history", async (req, reply) => {
   try {
     const sessionId = String(req.query.session_id || req.headers["x-session-id"] || "").trim();
@@ -1286,6 +1329,9 @@ app.get("/v1/history", async (req, reply) => {
         const clean = { role: m.role };
         if (m.content !== undefined) clean.content = m.content;
         if (m.time) clean.time = m.time;
+        if (m.reasoning !== undefined) clean.reasoning = m.reasoning;
+        if (m.tools !== undefined) clean.tools = m.tools;
+        if (m.tokens !== undefined) clean.tokens = m.tokens;
         return clean;
       });
     reply.send({ ok: true, total: items.length, items, session_id: sessionId || "default" });
@@ -1317,6 +1363,36 @@ function recentDiaryText(count) {
     } catch (e) {}
   }
   return out.join("\n\n");
+}
+
+// 取最近 count 份日记文件，但排除"当前会话里已经以特殊事件(自动写了日记)插入过"的日期。
+// 批注 2026-08-30：日记跨窗口注入 = 别把"本会话 AI 写的日记"再塞到顶部（它已按时间线插入），
+// 只把"其它会话语的日记"作为跨窗口块注入。判定依据：当前会话时间线里是否存在该日期的「自动写了日记」事件。
+function recentDiaryTextExcluding(sessionId, count) {
+  const base = recentDiaryText(count);
+  if (!base) return "";
+  const sid = String(sessionId || "default");
+  // 收集当前会话时间线里已出现的日记日期（从「自动写了日记」特殊事件里提取 YYYY-MM-DD）
+  const presentDates = new Set();
+  try {
+    const tl = loadTimeline(sid);
+    for (const m of tl) {
+      if (!m || typeof m.content !== "string") continue;
+      if (!m.content.includes("自动写了日记")) continue;
+      const dm = m.content.match(/（?\s*(\d{4}-\d{2}-\d{2})/);
+      if (dm) presentDates.add(dm[1]);
+    }
+  } catch (e) {}
+  if (!presentDates.size) return base;
+  // 逐段过滤：recentDiaryText 输出形如 "### 2026-08-30\n内容"
+  const segments = base.split(/(?=^### )/m).map(function (s) { return s.trim(); }).filter(Boolean);
+  const kept = segments.filter(function (seg) {
+    const dm = seg.match(/^###\s*(\d{4}-\d{2}-\d{2})/);
+    if (!dm) return true;
+    if (presentDates.has(dm[1])) return false; // 本会话已按时间线插入，跳过跨窗口块
+    return true;
+  });
+  return kept.join("\n\n");
 }
 
 function starredContextText(limit) {
@@ -1431,6 +1507,89 @@ function buildCrossWindowInjection() {
   return parts.join("\n\n");
 }
 
+// ========================
+// 跨窗口记忆快照（每会话固定）
+// 批注 2026-08-30：相关记忆 + 重要置顶 + 标星(记忆碎片) 不再每次实时重建，
+// 而是"开新会话时抓一次快照并固定不变"。快照按 sessionId 存到 data/cross_snapshot_<sid>.json。
+// 日记不在此处（日记按时间线特殊事件插入，见 appendSpecialEvent/特殊事件注入）。
+// ========================
+const CROSS_SNAPSHOT_DIR = path.join(__dirname, "data");
+function crossSnapshotFile(sessionId) {
+  const safe = String(sessionId || "default").replace(/[^A-Za-z0-9_-]/g, "") || "default";
+  return path.join(CROSS_SNAPSHOT_DIR, "cross_snapshot_" + safe + ".json");
+}
+function buildCrossMemorySnapshot(sessionId) {
+  const cfg = memoryPool.getConfig();
+  if (cfg.cross_inject_enabled === false) return "";
+  const file = crossSnapshotFile(sessionId);
+  // 已有快照：直接复用（固定不变）
+  try {
+    if (fs.existsSync(file)) {
+      const snap = fs.readJsonSync(file);
+      if (snap && typeof snap.text === "string" && snap.text) return snap.text;
+    }
+  } catch (e) { console.warn("[cross-snapshot] 读取快照失败:", e.message); }
+  // 未创建：本次抓一次并落盘
+  const parts = [];
+  if (cfg.cross_inject_memory !== false) {
+    const perCat = Math.max(1, Number(cfg.cross_inject_memory_per_category) || 2);
+    const summaryDays = Math.max(1, Number(cfg.cross_inject_summary_days) || 7);
+    const summaryCutoff = Date.now() - summaryDays * 24 * 60 * 60 * 1000;
+    const all = memoryPool.list({ active: true });
+    let mems = [];
+    const seen = new Set();
+    (memoryPool.CATEGORIES || []).forEach(function (c) {
+      if (c === "对话摘要") return;
+      all
+        .filter(function (m) { return m.category === c; })
+        .sort(function (a, b) { return (Number(b.importance) || 0) - (Number(a.importance) || 0); })
+        .slice(0, perCat)
+        .forEach(function (m) { if (!seen.has(m.id)) { seen.add(m.id); mems.push(m); } });
+    });
+    all
+      .filter(function (m) { return m.category === "对话摘要"; })
+      .filter(function (m) {
+        const t = new Date(m.updated_at || m.created_at || "");
+        if (isNaN(t.getTime())) return true;
+        return t.getTime() >= summaryCutoff;
+      })
+      .sort(function (a, b) {
+        const ta = String(a.updated_at || a.created_at || "");
+        const tb = String(b.updated_at || b.created_at || "");
+        return ta < tb ? 1 : (ta > tb ? -1 : 0);
+      })
+      .slice(0, 20)
+      .forEach(function (m) { if (!seen.has(m.id)) { seen.add(m.id); mems.push(m); } });
+    if (mems.length) {
+      parts.push("## 相关记忆\n" + mems.map(function (m) { return "【" + m.category + "】" + m.content; }).join("\n"));
+    }
+    const pinnedMems = memoryPool.list({ active: true, pinned: true }).filter(function (m) {
+      return !seen.has(m.id);
+    }).slice(0, 8);
+    if (pinnedMems.length) {
+      parts.push("## 重要置顶\n" + pinnedMems.map(function (m) { return "【" + m.category + "】" + m.content; }).join("\n"));
+    }
+  }
+  if (cfg.cross_inject_starred !== false) {
+    const st = starredContextText(Number(cfg.cross_inject_starred_topk) || 10);
+    if (st) parts.push("## 记忆碎片\n" + st);
+  }
+  // 日记：跨窗口注入（快照的一部分），但排除"本会话已按时间线插入过的日记"。
+  if (cfg.cross_inject_diary !== false) {
+    const dt = recentDiaryTextExcluding(sessionId, Number(cfg.cross_inject_diary_count) || 3);
+    if (dt) parts.push("## 近期日记\n" + dt);
+  }
+  const text = parts.join("\n\n");
+  // 只有非空才落盘（有内容才固定；空则下次重试，避免把永远为空的会话锁死）
+  if (text) {
+    try {
+      fs.ensureDirSync(CROSS_SNAPSHOT_DIR);
+      fs.writeJsonSync(file, { session: sessionId || "default", captured_at: new Date().toISOString(), text });
+    } catch (e) { console.warn("[cross-snapshot] 写入快照失败:", e.message); }
+  }
+  return text;
+}
+
 
 
 // === MCP_TOOL_LOOP_BEGIN ===
@@ -1440,11 +1599,12 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
   if (!MCP_ENABLED()) return false;
   const clients = getMcpClients();
   if (!clients || clients.length === 0) return false;
-  const targetApiUrl = readEnvValue("TARGET_API_URL");
-  const targetApiKey = readEnvValue("TARGET_API_KEY");
+  const prov = resolveActiveProvider();
+  const targetApiUrl = (prov && (prov.api_url || prov.base_url)) || readEnvValue("TARGET_API_URL");
+  const targetApiKey = (prov && prov.api_key) || readEnvValue("TARGET_API_KEY");
   if (!targetApiUrl || !targetApiKey) return false;
 
-  const model = body.model || readEnvValue("MODEL_NAME");
+  const model = (prov && prov.model) || body.model || readEnvValue("MODEL_NAME");
   const r = await mcp.runWithTools({
     upstreamUrl: targetApiUrl,
     upstreamKey: targetApiKey,
@@ -1452,6 +1612,17 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
     messages: messages || body.messages || [],
     serverClients: clients
   });
+
+  // 提取 <memory>/<pin>/<wake>/<quiet> 标签：存记忆池并剥离，避免标签显示给用户
+  let aiClean = (r && r.text) || "";
+  if (aiClean) {
+    try {
+      const cleaned = await tagParser.extractAndStore(aiClean);
+      if (typeof cleaned === "string" && cleaned) aiClean = cleaned;
+    } catch (e) {
+      console.warn("[mcp] 标签解析失败:", e.message);
+    }
+  }
 
   // 修复：MCP 分支此前拦截了主流程的"AI 回复写回时间线"，导致刷新后回复丢失。
   // 这里把最终回复也写回当前会话的时间线。
@@ -1461,7 +1632,7 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         ? kelivoMessages
         : (messages || body.messages || []);
       const newMsgs = baseMsgs.slice();
-      newMsgs.push({ role: "assistant", content: r.text });
+      newMsgs.push({ role: "assistant", content: aiClean });
       const rebuilt = buildTimeline(newMsgs, sessionId);
       saveTimeline(rebuilt, sessionId);
       console.log("[mcp] AI 回复已写回时间线 (session=" + (sessionId || "default") + ", chars=" + r.text.length + ")");
@@ -1472,7 +1643,7 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
 
   // 把最终文本转成 OpenAI 兼容 SSE 流（工具轮次已结束，这里流式回传最终结果）
   if (body.stream === true) {
-    const stream = mcp.buildSSE(r.text, { model, usage: r.usage, reasoning: r.reasoning, toolHistory: r.toolHistory });
+    const stream = mcp.buildSSE(aiClean, { model, usage: r.usage, reasoning: r.reasoning, toolHistory: r.toolHistory });
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
@@ -1500,7 +1671,7 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
     model,
     choices: [{
       index: 0,
-      message: { role: "assistant", content: r.text },
+      message: { role: "assistant", content: aiClean },
       finish_reason: "stop"
     }],
     usage: r.usage
@@ -1525,6 +1696,9 @@ app.post("/v1/chat/completions", async (req, reply) => {
 
     // 多会话：识别当前请求来自哪个会话
     const sessionId = String(body.session_id || req.headers["x-session-id"] || "").trim();
+    // 让压缩/替换按当前会话时间线工作（onResponse 钩子复位）
+    contextReplacements.setActiveSession(sessionId || null);
+    req.__ctxWasSet = true;
     // 客户端来源标记：只有真正的客户端聊天请求（带这个标记）才允许写时间线，
     // 避免旁路/探活/测试/内部调用随时覆盖历史（本次事故根因）
     const isClientChat = (req.headers["x-client"] || "").trim() === "dylan-chat";
@@ -1748,10 +1922,11 @@ app.post("/v1/chat/completions", async (req, reply) => {
 
     // (trim 逻辑在下方最近窗口处执行，当前用户请求的图片始终保留)
 
-    const targetApiUrl = readEnvValue("TARGET_API_URL");
-    const targetApiKey = readEnvValue("TARGET_API_KEY");
+    const prov = resolveActiveProvider();
+    const targetApiUrl = (prov && (prov.api_url || prov.base_url)) || readEnvValue("TARGET_API_URL");
+    const targetApiKey = (prov && prov.api_key) || readEnvValue("TARGET_API_KEY");
     if (!targetApiUrl || !targetApiKey) {
-      return reply.code(500).send({ error: "TARGET_API_URL / TARGET_API_KEY 未配置" });
+      return reply.code(500).send({ error: "TARGET_API_URL / TARGET_API_KEY 或 AI 供应商未配置" });
     }
 
     const requestedStream = body?.stream === true;
@@ -1768,12 +1943,12 @@ app.post("/v1/chat/completions", async (req, reply) => {
           const crossCfg = memoryPool.getConfig();
           const crossAlways = crossCfg.cross_inject_always === true;
           const crossMaxMsgs = Math.max(1, Number(crossCfg.cross_inject_max_msgs) || 2);
-          if (crossAlways || ctxMsgCount < crossMaxMsgs) { crossCtx = buildCrossWindowInjection(); }
+          if (crossAlways || ctxMsgCount < crossMaxMsgs) { crossCtx = buildCrossMemorySnapshot(sessionId); }
         } catch (cx) { console.warn("[cross-inject] 失败:", cx.message); }
       }
       let sysExtra = "";
       if (pinnedCtx) sysExtra += '\n\n## 永久上下文\n' + pinnedCtx;
-      if (isMainChat) sysExtra += '\n\n（可选记忆）如果你觉得某一点值得长期记住，可以在回复里顺手用 <memory>…</memory> 标记，例如 <memory>她说：她需要反复确认才敢靠近。</memory>。系统会收进长期记忆池并自动去重；不写也不影响主流程。只标真正重要的点，别把整段话包进去。';
+      // 批注 2026-08-30：memory 提示不再硬编码注入（用户已写入 pin/永久上下文），删除此段。
       if (sysExtra) {
         const sysIdx = llmMessages.findIndex(m => m.role === "system");
         if (sysIdx >= 0) {
@@ -2058,10 +2233,13 @@ app.post("/v1/chat/completions", async (req, reply) => {
 // ========================
 app.post("/internal/wake-event", async (req, reply) => {
   try {
-    const { content, event, diary, push_meta } = req.body;
+    const { content, event, diary, push_meta, session_id } = req.body;
+    // 批注 2026-08-29：多会话。唤醒侧(wake_up.js)现在会携带 session_id，把唤醒事件写到
+    // 对应会话语，而不是永远堆在主会话。未携带时回退主会话（100% 兼容旧行为）。
+    const evSession = typeof session_id === "string" && session_id.trim() ? String(session_id).trim() : null;
     if (!content && !event && !diary) return reply.code(400).send({ error: "content or event is required" });
     if (diary) {
-      appendSpecialEvent(`（${formatDateTimeInTimeZone(new Date(), TIME_ZONE)} 自动写了日记：${String(diary).trim()}）`);
+      appendSpecialEvent(`（${formatDateTimeInTimeZone(new Date(), TIME_ZONE)} 自动写了日记：${String(diary).trim()}）`, null, evSession);
     }
     if (event) {
       if (push_meta && isPushEchoContent(event)) {
@@ -2073,9 +2251,9 @@ app.post("/internal/wake-event", async (req, reply) => {
           push_title: String(push_meta.title || "").trim(),
           push_body: String(push_meta.body || "").trim(),
           push_tail: String(push_meta.tail || "")
-        });
+        }, evSession);
       } else {
-        appendSpecialEvent(event);
+        appendSpecialEvent(event, null, evSession);
       }
     }
     if (content) {
@@ -2088,7 +2266,7 @@ app.post("/internal/wake-event", async (req, reply) => {
         console.warn("[wake-event] 标签解析失败:", e.message);
       }
       if (stored) {
-        appendSpecialEvent(stored);
+        appendSpecialEvent(stored, null, evSession);
       }
     }
     reply.send({ success: true });
@@ -2349,6 +2527,9 @@ app.addHook("preHandler", (req, reply, done) => {
   const method = (req.method || "").toUpperCase();
   if (!["POST", "PUT", "DELETE", "PATCH"].includes(method)) return done();
   if (url.endsWith("/mobile/login")) return done();
+  if (url.endsWith("/chat-login")) return done();
+  // 聊天页语音接口：已过 mcpManageAuth 鉴权，豁免 CSRF（前端读 cookie 易错）
+  if (url.endsWith("/admin/tts") || url.endsWith("/admin/voice-config")) return done();
   const cookies = parseCookies(req.headers.cookie);
   if (!(cookies.admin_session && validSessionToken(cookies.admin_session))) return done();
   const cookieToken = cookies.admin_csrf || "";
@@ -2418,6 +2599,46 @@ app.post("/admin/mobile/login", async (req, reply) => {
   }
   await new Promise(r => setTimeout(r, 500));
   reply.type("text/html").send(LOGIN_PAGE_HTML.replace("<!--ERROR-->", '<div class="err">用户名或密码错误</div>'));
+});
+
+// 聊天前端登录：复用管理台账号密码校验（JSON 接口，供 /chat 页做密码登录用）
+app.post("/admin/chat-login", async (req, reply) => {
+  const body = req.body || {};
+  console.log("[chat-login] got user=" + JSON.stringify(String(body.user || "")) + " pwLen=" + String(body.password || "").length + " at=" + new Date().toISOString());
+  const ok = String(body.user || "") === process.env.ADMIN_USER
+    && String(body.password || "") === process.env.ADMIN_PASSWORD;
+  if (ok) {
+    // 让 /chat 页也能走管理台会话：登录成功后下发 admin_session + admin_csrf cookie，
+    // chat.html 内置卡片即可直接调 /heartbeat/admin/*（cookie 认证 + CSRF 双提交）。
+    const csrf = createCsrfToken();
+    reply.header("Set-Cookie", [
+      `admin_session=${createSessionToken()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_DAYS * 24 * 3600}`,
+      `admin_csrf=${csrf}; Path=/; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_DAYS * 24 * 3600}`
+    ]);
+    reply.send({ ok: true });
+    return;
+  }
+  await new Promise(r => setTimeout(r, 500));
+  console.log("[chat-login] rejected user=" + JSON.stringify(String(body.user || "") ));
+  reply.code(401).send({ ok: false, error: "账号或密码错误" });
+});
+
+// 修改登录密码（管理台/聊天页共用）：校验旧密码，写回 .env 并热更新 process.env
+app.post("/admin/change-password", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const body = req.body || {};
+    const oldPw = String(body.old_password || "");
+    const newPw = String(body.new_password || "").trim();
+    if (oldPw !== (process.env.ADMIN_PASSWORD || "")) {
+      return reply.code(400).send({ ok: false, error: "旧密码不正确" });
+    }
+    if (!newPw) return reply.code(400).send({ ok: false, error: "新密码不能为空" });
+    if (newPw.length < 4) return reply.code(400).send({ ok: false, error: "新密码至少 4 位" });
+    await writeEnvUpdates({ ADMIN_PASSWORD: newPw });
+    process.env.ADMIN_PASSWORD = newPw;   // 热生效：basicAuth/chat-login 直接读取该值
+    console.log("[change-password] 登录密码已更新");
+    reply.send({ ok: true });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
 // ========================
@@ -3240,6 +3461,169 @@ app.put("/admin/tools", { preHandler: basicAuth }, async (req, reply) => {
     console.error("[PUT /admin/tools] error:", err.message);
     reply.code(500).send({ error: err.message });
   }
+});
+
+// MCP 服务器注册表管理（聊天客户端"设置→连接"或管理台调用）
+// 鉴权：GATEWAY_API_KEY（Bearer / x-gateway-api-key / x-api-key）或 admin basicAuth
+function mcpManageAuth(req, reply, done) {
+  const auth = String(req.headers.authorization || "");
+  const bearer = auth.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || "";
+  const headerKey = String(req.headers["x-gateway-api-key"] || req.headers["x-api-key"] || "").trim();
+  const configuredKey = readEnvValue("GATEWAY_API_KEY");
+  if (configuredKey && (bearer === configuredKey || headerKey === configuredKey)) return done();
+  // 也接受管理台会话 cookie（聊天页登录后即带 admin_session，可无痛读 MCP/AI供应商列表）
+  if (isAuthorized(req)) return done();
+  return basicAuth(req, reply, done);
+}
+
+app.get("/admin/mcp/servers", { preHandler: mcpManageAuth }, async (req, reply) => {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(MCP_SERVERS_CONFIG, "utf-8"));
+    const list = (cfg.servers || []).map(async function (s) {
+      const base = { id: s.id, name: s.name, type: s.type, url: s.url, command: s.command, args: s.args || [], headers: s.headers || {}, enabled: s.enabled !== false };
+      if (s.enabled === false) return Object.assign(base, { connected: false, tools: [], toolCount: 0, note: "已停用" });
+      try {
+        const probe = await mcpProbeServer(s);
+        return Object.assign(base, probe);
+      } catch (e) {
+        return Object.assign(base, { connected: false, tools: [], toolCount: 0, error: String((e && e.message) || e) });
+      }
+    });
+    const servers = await Promise.all(list);
+    reply.send({ ok: true, servers: servers, config_path: MCP_SERVERS_CONFIG });
+  } catch (err) {
+    console.error("[GET /admin/mcp/servers] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+app.put("/admin/mcp/servers", { preHandler: mcpManageAuth }, async (req, reply) => {
+  try {
+    const body = req.body || {};
+    const arr = Array.isArray(body.servers) ? body.servers : [];
+    const clean = arr.map(function (s) {
+      const o = { id: String(s.id || ""), name: String(s.name || ""), type: String(s.type || "auto"), enabled: s.enabled !== false };
+      if (s.url) o.url = String(s.url);
+      if (s.command) o.command = String(s.command);
+      if (Array.isArray(s.args)) o.args = s.args.map(String);
+      if (s.headers && typeof s.headers === "object") o.headers = s.headers;
+      return o;
+    }).filter(function (s) { return s.id && s.name; });
+    writeJsonFileAtomic(MCP_SERVERS_CONFIG, { servers: clean });
+    _mcpClientsCache = null; // 强制下次重载
+    reply.send({ ok: true, restart: "hot-reload", count: clean.length });
+  } catch (err) {
+    console.error("[PUT /admin/mcp/servers] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+app.get("/admin/ai-providers", { preHandler: mcpManageAuth }, async (req, reply) => {
+  try {
+    reply.send({ ok: true, providers: loadAiProviders() });
+  } catch (err) {
+    console.error("[GET /admin/ai-providers] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+app.put("/admin/ai-providers", { preHandler: mcpManageAuth }, async (req, reply) => {
+  try {
+    const arr = Array.isArray(req.body && req.body.providers) ? req.body.providers : [];
+    const clean = arr.map(function (p) {
+      const o = { id: String(p.id || ""), name: String(p.name || ""), enabled: p.enabled !== false };
+      if (p.api_url || p.base_url) o.api_url = String(p.api_url || p.base_url);
+      if (p.api_key) o.api_key = String(p.api_key);
+      if (p.model) o.model = String(p.model);
+      return o;
+    }).filter(function (p) { return p.name && p.api_url; });
+    saveAiProviders(clean);
+    reply.send({ ok: true, restart: "hot-reload", count: clean.length });
+  } catch (err) {
+    console.error("[PUT /admin/ai-providers] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// ---- 语音服务（TTS 文字转语音；MiniMax t2a_v2）----
+const VOICE_CONFIG = path.join(__dirname, "voice-config.json");
+function loadVoiceConfig() {
+  try {
+    const c = JSON.parse(fs.readFileSync(VOICE_CONFIG, "utf-8"));
+    return (c && typeof c === "object") ? c : {};
+  } catch (e) { return {}; }
+}
+function saveVoiceConfig(cfg) { writeJsonFileAtomic(VOICE_CONFIG, cfg); }
+
+app.get("/admin/voice-config", { preHandler: mcpManageAuth }, async (req, reply) => {
+  try { reply.send({ ok: true, config: loadVoiceConfig() }); }
+  catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+app.put("/admin/voice-config", { preHandler: mcpManageAuth }, async (req, reply) => {
+  try {
+    const b = req.body || {};
+    const clean = {
+      enabled: b.enabled !== false,
+      name: String(b.name || "MiniMax"),
+      api_key: String(b.api_key || ""),
+      api_base: String(b.api_base || "https://api.minimaxi.com/v1"),
+      tts_model: String(b.tts_model || "speech-2.6-turbo"),
+      voice_id: String(b.voice_id || ""),
+      emotion: String(b.emotion || "calm"),
+      speed: Number(b.speed != null ? b.speed : 0.8),
+      vol: Number(b.vol != null ? b.vol : 1.0),
+      pitch: Number(b.pitch != null ? b.pitch : 0),
+      audio_format: String(b.audio_format || "mp3"),
+      sample_rate: Number(b.sample_rate || 32000),
+      bitrate: Number(b.bitrate || 128000),
+      channels: Number(b.channels || 1)
+    };
+    saveVoiceConfig(clean);
+    reply.send({ ok: true });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+// 文字 → 语音（base64 mp3）。无 body 解析 issue：前端 POST JSON { text, voice? }
+app.post("/admin/tts", { preHandler: mcpManageAuth }, async (req, reply) => {
+  try {
+    const vc = loadVoiceConfig();
+    if (!vc.api_key) return reply.code(400).send({ error: "未配置语音服务 API Key" });
+    const text = String((req.body && req.body.text) || "").trim();
+    if (!text) return reply.code(400).send({ error: "内容为空" });
+    const payload = {
+      model: vc.tts_model || "speech-2.6-turbo",
+      text: text.slice(0, 1200),
+      stream: false,
+      voice_setting: {
+        voice_id: vc.voice_id || "ttv-voice-2026070919184726-re9oBNKY",
+        speed: vc.speed != null ? vc.speed : 0.8,
+        vol: vc.vol != null ? vc.vol : 1.0,
+        pitch: vc.pitch != null ? vc.pitch : 0,
+        emotion: vc.emotion || "calm"
+      },
+      audio_setting: {
+        format: vc.audio_format || "mp3",
+        sample_rate: vc.sample_rate || 32000,
+        bitrate: vc.bitrate || 128000,
+        channels: vc.channels || 1
+      }
+    };
+    const base = (vc.api_base || "https://api.minimaxi.com/v1").replace(/\/$/, "");
+    const r = await fetch(base + "/t2a_v2", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + vc.api_key },
+      body: JSON.stringify(payload)
+    });
+    const j = await r.json();
+    let audio = (j && j.data && j.data.audio) || "";
+    if (!audio) return reply.code(502).send({ error: "TTS 失败: " + ((j && j.base_resp && j.base_resp.status_msg) || "unknown") });
+    // MiniMax 的 data.audio 是 hex 编码；统一转成 base64，前端按 base64 解即可播放
+    if (/^[0-9a-fA-F]+$/.test(audio) && audio.length % 2 === 0) {
+      try { audio = Buffer.from(audio, "hex").toString("base64"); } catch (e) {}
+    }
+    reply.send({ ok: true, audio: audio, format: vc.audio_format || "mp3", sample_rate: vc.sample_rate || 32000, extra: (j && j.data && j.data.extra_info) || null });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
 app.get("/admin/services", { preHandler: basicAuth }, async (req, reply) => {
@@ -5166,6 +5550,29 @@ app.post("/admin/config", { preHandler: basicAuth }, async (req, reply) => {
     }
     await require("./memory-engine").updateConfig(updates);
     reply.send({ success: true });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+// ======================== 聊天页设置云端同步 ========================
+// 把 chat.html 的前端设置（api_key / system_prompt / cfg）整体存到服务器，
+// 换浏览器输入同一 key 后自动拉取覆盖本地，保持一致。用 basicAuth（管理台会话 cookie 亦可）。
+const CHAT_SETTINGS_FILE = path.join(__dirname, "chat-settings.json");
+app.get("/admin/chat-settings", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    if (!fs.existsSync(CHAT_SETTINGS_FILE)) return reply.send({ ok: true, exists: false });
+    const data = JSON.parse(fs.readFileSync(CHAT_SETTINGS_FILE, "utf-8"));
+    reply.send({ ok: true, exists: true, data: data || {} });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+app.put("/admin/chat-settings", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const body = (req.body && typeof req.body === "object") ? req.body : {};
+    const clean = {};
+    if (typeof body.api_key === "string") clean.api_key = body.api_key;
+    if (typeof body.system_prompt === "string") clean.system_prompt = body.system_prompt;
+    if (body.cfg && typeof body.cfg === "object") clean.cfg = body.cfg;
+    writeJsonFileAtomic(CHAT_SETTINGS_FILE, clean);
+    reply.send({ ok: true, saved: true });
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
