@@ -12,6 +12,7 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { AsyncLocalStorage } = require("async_hooks");
 
 const DATA_DIR = path.join(__dirname, "data");
 const REPLACEMENTS_FILE = path.join(DATA_DIR, "context_replacements.json");
@@ -447,7 +448,20 @@ function listReplacements() {
 // ========================
 // 时间线
 // ========================
-function loadTimeline() {
+// 多会话：按 sessionId 读对应时间线文件；缺省走主会话（enhanced_messages.json）。
+// 另支持"活跃会话"上下文：server.js 在请求入口 setActiveSession/清空，让所有内部 loadTimeline() 自动用对会话。
+// 多会话并发安全：改用 AsyncLocalStorage 把"活跃会话"绑定到该请求自己的异步上下文，
+// 而不是进程级单例 —— 不同会话的请求跨 await 交错时，各自读到自己的会话，避免跨会话串扰。
+const _activeSessionAls = new AsyncLocalStorage();
+function setActiveSession(sid) { _activeSessionAls.enterWith(sid || null); }
+function getActiveSession() { return _activeSessionAls.getStore() || null; }
+function activeSessionOr(sessionId) { return (sessionId !== undefined && sessionId !== null) ? sessionId : getActiveSession(); }
+function loadTimeline(sessionId) {
+  const sid = activeSessionOr(sessionId);
+  if (sid && sid !== "default") {
+    const safe = String(sid).replace(/[^A-Za-z0-9_-]/g, "");
+    return readJson(path.join(__dirname, "enhanced_messages_" + safe + ".json"), []);
+  }
   return readJson(TIMELINE_FILE, []);
 }
 
@@ -540,6 +554,7 @@ function addReplacement(options) {
     id: "ctxrep_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8),
     created_at: nowIso(),
     source: "ai",
+    session: activeSessionOr() || "default",   // 多会话：记录归属当前会话，只在该会话内套用
     text: text,
     memory: text,
     range: (options && options.range) || {},
@@ -607,6 +622,7 @@ function buildManualRecord(start, end, enabled) {
       id: "ctxrep_manual_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8),
       created_at: nowIso(),
       source: "manual",
+      session: activeSessionOr() || "default",   // 多会话：记录归属当前会话，只在该会话内套用
       text: "",
       memory: "",
       range: { start_index: start, end_index: ee },
@@ -1103,6 +1119,7 @@ function logNoReplace(count, source) {
     appendReplaceLog({
       time: nowIso(),
       source: source || "对话",
+      session: activeSessionOr(),
       before: count,
       after: count,
       replaced: 0,
@@ -1114,7 +1131,12 @@ function logNoReplace(count, source) {
 }
 
 function applyReplacements(messages, source) {
+  // 多会话隔离：只套用"属于当前会话"的替换记录。
+  // 兼容旧数据：没有 session 字段的记录是历史遗留（所有会话通用，维持旧行为）；
+  // 新记录在创建时都会打上 session，只在该会话内套用，避免跨会话串扰。
+  const curSession = activeSessionOr() || "default";
   let items = loadItems().filter(it => !it.removed && it.enabled !== false && recordText(it));
+  items = items.filter(it => !it.session || it.session === curSession);
   if (items.length === 0) { logNoReplace(messages.length, source); return messages; }
 
   const out = Array.isArray(messages) ? messages.slice() : [];
@@ -1353,6 +1375,7 @@ function applyReplacements(messages, source) {
     appendReplaceLog({
       time: nowIso(),
       source: source || "对话",
+      session: activeSessionOr(),
       before: out.length,
       after: result.length,
       replaced: replacements.length,
@@ -1860,6 +1883,8 @@ module.exports = {
   compressibleItems,
   removeAllManualRecords,
   loadTimeline,
+  setActiveSession,
+  getActiveSession,
   extractPoolKeywords,
   searchRelatedSegments,
   searchCompactionOriginal,
