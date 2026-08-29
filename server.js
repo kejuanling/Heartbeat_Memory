@@ -676,17 +676,26 @@ function loadTimeline(sessionId) {
   }
 }
 
-// 原子写入：先写临时文件再 rename，避免进程被杀/崩溃时把 JSON 写坏
+// 原子写入：先写临时文件再 rename，避免进程被杀/崩溃时把 JSON 写坏。
+// 临时文件名加 pid+时间戳后缀，避免同名 .tmp 交叉；失败/中断时尽力清理残留。
 function atomicWriteJsonSync(file, data) {
-  const tmp = file + ".tmp";
-  fs.writeJsonSync(tmp, data, { spaces: 2 });
-  fs.renameSync(tmp, file);
+  const tmp = file + "." + process.pid + "." + Date.now() + ".tmp";
+  try {
+    fs.writeJsonSync(tmp, data, { spaces: 2 });
+    fs.renameSync(tmp, file);
+  } finally {
+    try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (e) {}
+  }
 }
 
 function atomicWriteFileSync(file, content) {
-  const tmp = file + ".tmp";
-  fs.writeFileSync(tmp, content);
-  fs.renameSync(tmp, file);
+  const tmp = file + "." + process.pid + "." + Date.now() + ".tmp";
+  try {
+    fs.writeFileSync(tmp, content);
+    fs.renameSync(tmp, file);
+  } finally {
+    try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (e) {}
+  }
 }
 
 
