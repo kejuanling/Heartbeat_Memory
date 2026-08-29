@@ -3569,6 +3569,29 @@ const LS_LOGIN="han_logged_in";
 function isLoggedIn(){ try{return localStorage.getItem(LS_LOGIN)==="1";}catch(e){return false;} }
 function showLogin(){ if(loginMask)loginMask.classList.remove("hidden"); setTimeout(function(){ if(loginUser)loginUser.focus(); },60); }
 function hideLogin(){ if(loginMask)loginMask.classList.add("hidden"); }
+
+function forceLogout(msg){
+  try{ localStorage.removeItem(LS_LOGIN); }catch(e){}
+  if(loginMask) loginMask.classList.remove("hidden");
+  if(msg && loginMsg) loginMsg.textContent=msg;
+  setTimeout(function(){ if(loginUser) loginUser.focus(); },60);
+}
+// 会话失效/未登录处理：任意接口返回 401（登录端点除外）时，清除本地登录标记并重新弹登录，
+// 避免“假登录→所有接口401→菜单/消息加载失败”。
+(function(){
+  const __fetch=window.fetch.bind(window);
+  window.fetch=function(){
+    const args=Array.prototype.slice.call(arguments);
+    const u=(typeof args[0]==="string")?args[0]:((args[0]&&args[0].url)||"");
+    return __fetch.apply(window,args).then(function(r){
+      if(r && r.status===401 && u.indexOf("/chat-login")===-1){
+        const show=!!(loginMask && !loginMask.classList.contains("hidden"));
+        if(!show) forceLogout("登录已过期，请重新登录");
+      }
+      return r;
+    });
+  };
+})();
 async function doLogin(){
   const u=(loginUser.value||"").trim();
   const p=(loginPass.value||"").trim();
@@ -4130,6 +4153,7 @@ function renderMemWake(body){
       +'<div class="adm-row"><span class="adm-k">每条字数上限</span><input type="number" step="1" min="5" id="adm-mw-rmax" value="'+num(m.reparse_max_chars,30)+'"></div>'
       +'<div class="adm-row"><span class="adm-k">每段最多条数</span><input type="number" step="1" min="1" id="adm-mw-rmaxitems" value="'+num(m.reparse_max_items,8)+'"></div>'
       +'<div class="set-sec-title">跨窗口注入</div>'
++'<div class="adm-row"><span class="adm-k">检索自动置顶(次)</span><input type="number" step="1" min="2" id="adm-mw-autopin" value="'+num(m.auto_pin_retrieval_count,3)+'"></div>'
       +'<div class="adm-row"><span class="adm-k">总开关</span><label class="adm-sw"><input type="checkbox" id="adm-mw-cross" '+(m.cross_inject_enabled!==false?'checked':'')+'><i></i></label></div>'
       +'<div class="adm-row"><span class="adm-k">固定注入</span><label class="adm-sw"><input type="checkbox" id="adm-mw-always" '+(m.cross_inject_always===true?'checked':'')+'><i></i></label></div>'
       +'<div class="adm-row"><span class="adm-k">消息少于 N 条</span><input type="number" step="1" min="1" id="adm-mw-maxmsgs" value="'+num(m.cross_inject_max_msgs,2)+'"></div>'
@@ -4155,7 +4179,7 @@ function saveMemWake(body){
     cross_inject_diary_days:Number(document.getElementById('adm-mw-days').value)||3,
     cross_inject_memory_per_category:Number(document.getElementById('adm-mw-mempercat').value)||2,
     cross_inject_summary_days:Number(document.getElementById('adm-mw-sumdays').value)||7,
-    cross_inject_starred_topk:Number(document.getElementById('adm-mw-startopk').value)||10
+    cross_inject_starred_topk:Number(document.getElementById('adm-mw-startopk').value)||10,auto_pin_retrieval_count:Number(document.getElementById('adm-mw-autopin').value)||3
   };
   Promise.all([admPost(BASE+'/config',up), admPost(BASE+'/memory-pool/config',up2)]).then(function(res){
     var bad=res.some(function(j){ return j&&j.error; });
