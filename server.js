@@ -2266,15 +2266,23 @@ app.post("/internal/wake-event", async (req, reply) => {
     }
     if (content) {
       // 先解析记忆标签，存储清洗后的文本，避免 <memory> 原始标签进入上下文/事件
-      let stored = stripDiaryBlocks(String(content).trim());
-      try {
-        const cleaned = await tagParser.extractAndStore(content);
-        if (cleaned) stored = stripDiaryBlocks(cleaned);
-      } catch (e) {
-        console.warn("[wake-event] 标签解析失败:", e.message);
-      }
-      if (stored) {
-        appendSpecialEvent(stored, null, evSession);
+      const trimmedContent = String(content).trim();
+      // [NO_ACTION] 是"未发送推送"的静默标记：AI 决定不主动联系用户。
+      // 不应把带 [NO_ACTION] 前缀的原文写入时间线（否则前端会把它当成普通 AI 消息显示成气泡），
+      // 只保留上方 event 分支那条正常摘要（"XX 自动唤醒：本次未发送推送..."）。
+      if (/^\[NO_ACTION\]/.test(trimmedContent)) {
+        console.log("[wake-event] 跳过 [NO_ACTION] 原文，不写入时间线");
+      } else {
+        let stored = stripDiaryBlocks(trimmedContent);
+        try {
+          const cleaned = await tagParser.extractAndStore(content);
+          if (cleaned) stored = stripDiaryBlocks(cleaned);
+        } catch (e) {
+          console.warn("[wake-event] 标签解析失败:", e.message);
+        }
+        if (stored) {
+          appendSpecialEvent(stored, null, evSession);
+        }
       }
     }
     reply.send({ success: true });
