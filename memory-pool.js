@@ -10,6 +10,7 @@ const fs = require("fs-extra");
 const fsp = require("fs").promises;
 const path = require("path");
 const crypto = require("crypto");
+const { nowIso } = require("./time_utils");
 
 const DATA_DIR = process.env.MEMORY_DATA_DIR || path.join(__dirname, "data");
 const POOL_FILE = path.join(DATA_DIR, "memory_pool.json");
@@ -41,18 +42,14 @@ const CONFIG = {
   decay_days: DEFAULT_DECAY_DAYS,
   retrieval_top_k: 5,
   // 多次检索自动置顶：检索次数达到该阈值即固定为置顶（相关记忆块稳定带上它）
-  auto_pin_retrieval_count: 3,
+  auto_pin_retrieval_count: 5,
   // 跨窗口注入（日记 / 置顶记忆 / 记忆碎片）
   cross_inject_enabled: true,
   cross_inject_diary: true,
   cross_inject_memory: true,
   cross_inject_starred: true,
   cross_inject_diary_count: 3,
-  cross_inject_memory_per_category: 2,
-  cross_inject_summary_days: 7,
   cross_inject_starred_topk: 10,
-  cross_inject_max_msgs: 2,
-  cross_inject_always: false,
   // 压缩摘要再解析入库（LLM）：总开关 + 温暖风格
   reparse_enabled: true,
   reparse_warm: false,
@@ -78,7 +75,7 @@ const ingestedHashes = new Set();
 const STOP_CHARS = new Set("的了我是你他它她这在在有也就说都还被把让跟和与或但而而且还再不没这那们个种些去来到上下前后时次天点会能要想觉得自己什么怎么这样那样现在然后因为所以但是如果感觉时候东西应该可以已经知道看到听到想到".split(""));
 
 // ---------------- 工具 ----------------
-function nowIso() { return new Date().toISOString(); }
+// nowIso 已统一到 time_utils 模块
 
 function newId() { return "mp_" + crypto.randomBytes(6).toString("hex"); }
 
@@ -369,7 +366,7 @@ function retrieve(query, opts) {
   });
   scored.sort((a, b) => b.score - a.score || b.sim - a.sim);
   const picked = scored.slice(0, topK);
-  const autoPinTh = Math.max(2, Number(CONFIG.auto_pin_retrieval_count) || 3);
+  const autoPinTh = Math.max(2, Number(CONFIG.auto_pin_retrieval_count) || 5);
   for (const p of picked) {
     p.r.retrieval_count = Number(p.r.retrieval_count || 0) + 1;
     p.r.last_retrieved_at = nowIso();
@@ -381,7 +378,20 @@ function retrieve(query, opts) {
     dirty = true;
   }
   // Reads no longer write to disk immediately: batch via the 5s flushTimer to avoid write amplification.
-  return picked.map(p => ({ ...p.r, _score: Math.round(p.score * 1000) / 1000 }));
+  // 返回精简字段：只要展示/编辑需要的 id/content/category/importance/pinned + 时间戳，
+  // 去掉 _score、last_retrieved_at、retrieval_count、cleaned_at、source 等内部噪音字段。
+  return picked.map(p => {
+    const r = p.r;
+    return {
+      id: r.id,
+      content: r.content,
+      category: r.category,
+      importance: r.importance,
+      pinned: r.pinned === true,
+      created_at: r.created_at,
+      updated_at: r.updated_at
+    };
+  });
 }
 
 // ---------------- 压缩摘要 → 记忆池 ----------------
