@@ -963,9 +963,25 @@ function buildTimeline(kelivoMessages, sessionId) {
   const latestSP = newSystemMessages.length > 0 ? newSystemMessages[newSystemMessages.length - 1] : null;
   const oldSP = oldTimeline.find(msg => msg.role === "system");
 
-  const newRealMessages = kelivoMessages
-    .filter(isRealMessageForTimeline)
-    .map(normalizeMessageForTimeline)
+  // 存储层历史图片保留（与请求层 keep_recent_image_turns 一致）：窗口内保留真实 image_url；窗口外的更早带图消息压成 [图片] 占位，避免 JSON 无限膨胀。
+  const realForTimeline = kelivoMessages.filter(isRealMessageForTimeline);
+  const hasAnyImagePart = function (msg) { return Array.isArray(msg && msg.content) && msg.content.some(p => p && isImageContentPart(p)); };
+  let keepImgTurns = Number((typeof memoryEngine.getConfig === 'function' && memoryEngine.getConfig()).keep_recent_image_turns);
+  if (!Number.isFinite(keepImgTurns) || keepImgTurns < 0) keepImgTurns = Number(process.env.KEEP_RECENT_IMAGE_TURNS) || 8;
+  const imgMsgIdx = [];
+  realForTimeline.forEach(function (m, i) { if (hasAnyImagePart(m)) imgMsgIdx.push(i); });
+  let keepFromIdx = 0;
+  if (Number.isFinite(keepImgTurns) && keepImgTurns > 0 && imgMsgIdx.length > keepImgTurns) keepFromIdx = imgMsgIdx[imgMsgIdx.length - keepImgTurns];
+  const keepImgSet = new Set();
+  for (let i = keepFromIdx; i < realForTimeline.length; i++) { if (hasAnyImagePart(realForTimeline[i])) keepImgSet.add(i); }
+  const newRealMessages = realForTimeline
+    .map(function (m, i) {
+      if (hasAnyImagePart(m)) {
+        if (keepImgSet.has(i)) return { ...m, content: m.content };       // 窗口内：保留真实 image_url
+        return { ...m, content: normalizeContentToText(m.content) };      // 窗口外：压成 [图片] 占位
+      }
+      return normalizeMessageForTimeline(m);
+    })
     .map(m => ({ ...m, _t: resolveMessageTime(m) }));
 
   const oldSpecialEvents = oldTimeline.filter(isSpecialEvent).sort((a, b) => {
