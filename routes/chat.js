@@ -1,0 +1,896 @@
+'use strict';
+// 从 server.js 拆出的 /v1/* 路由(models/sessions/history/events/timeline-sync + chat/completions)。
+// 依赖注入：server.js 里用到的函数经 deps 传入；baseDir = 项目根目录。
+// 鉴权沿用 server.js 的全局 addHook，不需要在此重复。
+const path = require('path');
+const fsp = require('fs-extra');
+const mcp = require('../mcp-tool-loop');
+const memoryPool = require('../memory-pool');
+const memoryEngine = require('../memory-engine');
+const tagParser = require('../tag-parser');
+const contextReplacements = require('../context-replacements');
+
+// ---- 跨会话语义检索（TF-IDF + 字符 bigram，与前端旧逻辑同口径）----
+function charBigrams(text) {
+  if (!text) return [];
+  const t = String(text).toLowerCase().replace(/[^\w\u4e00-\u9fa5]/g, ' ');
+  const chars = [];
+  for (let i = 0; i < t.length; i++) if (t[i] !== ' ') chars.push(t[i]);
+  if (chars.length < 2) return chars;
+  const r = [];
+  for (let i = 0; i < chars.length - 1; i++) r.push(chars[i] + chars[i + 1]);
+  return r;
+}
+function buildSemIndex(items) {
+  const vocab = {};
+  const docFreq = [];
+  const docs = [];
+  for (let i = 0; i < items.length; i++) {
+    const tokens = charBigrams(items[i].text);
+    docs.push(tokens);
+    const seen = {};
+    for (let j = 0; j < tokens.length; j++) {
+      const tok = tokens[j];
+      if (seen[tok]) continue;
+      seen[tok] = true;
+      if (vocab[tok] === undefined) { vocab[tok] = docFreq.length; docFreq.push(1); }
+      else docFreq[vocab[tok]]++;
+    }
+  }
+  const n = docs.length;
+  const rows = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const tokens = docs[i];
+    if (!tokens.length) { rows[i] = { idx: [], val: [] }; continue; }
+    const tf = {};
+    for (let j = 0; j < tokens.length; j++) { const t = tokens[j]; tf[t] = (tf[t] || 0) + 1; }
+    const total = tokens.length;
+    const idx = [], val = []; let nsq = 0;
+    for (const t in tf) {
+      const k = vocab[t]; if (k === undefined) continue;
+      const tfv = tf[t] / total;
+      const idfv = Math.log((n + 1) / (docFreq[k] + 1)) + 1;
+      const v = tfv * idfv;
+      idx.push(k); val.push(v); nsq += v * v;
+    }
+    const nm = Math.sqrt(nsq);
+    if (nm > 0) for (let k = 0; k < val.length; k++) val[k] /= nm;
+    rows[i] = { idx, val };
+  }
+  return { vocab, rows, items };
+}
+function semanticSearch(index, query, threshold) {
+  if (!threshold) threshold = 0.05;
+  const qTokens = charBigrams(query);
+  if (!qTokens.length) return [];
+  const qTf = {};
+  for (let i = 0; i < qTokens.length; i++) { const t = qTokens[i]; qTf[t] = (qTf[t] || 0) + 1; }
+  const qTotal = qTokens.length;
+  const qIdx = [], qVal = []; let qNsq = 0;
+  for (const t in qTf) {
+    if (index.vocab[t] === undefined) continue;
+    const k = index.vocab[t];
+    const v = qTf[t] / qTotal;
+    qIdx.push(k); qVal.push(v); qNsq += v * v;
+  }
+  if (!qIdx.length) return [];
+  const qNm = Math.sqrt(qNsq);
+  for (let k = 0; k < qVal.length; k++) qVal[k] /= qNm;
+  const results = [];
+  for (let i = 0; i < index.rows.length; i++) {
+    const row = index.rows[i];
+    if (!row.idx.length) continue;
+    let dot = 0;
+    for (let qi = 0; qi < qIdx.length; qi++) {
+      const qk = qIdx[qi];
+      for (let di = 0; di < row.idx.length; di++) {
+        if (row.idx[di] === qk) { dot += row.val[di] * qVal[qi]; break; }
+      }
+    }
+    if (dot >= threshold) results.push({ i, score: dot });
+  }
+  results.sort((a, b) => b.score - a.score);
+  return results;
+}
+
+module.exports = function registerChatRoutes(app, deps) {
+  const {
+    baseDir,
+    configuredModelName,
+    loadTimeline,
+    isRealMessageForTimeline,
+    timelineFileFor,
+    normalizeMessageForTimeline,
+    buildTimeline,
+    saveTimeline,
+    sseSubscribe,
+    sseUnsubscribe,
+    sseNotify,
+    SSE_HEARTBEAT_MS,
+    recentReplies,
+    isRecentReplyCacheable,
+    IDEMPOTENCY_TTL_MS,
+    setRecentReply,
+    buildCrossMemorySnapshot,
+    prepareMessageForLLM,
+    isQuietActive,
+    collectTrailingUnansweredUserMessages,
+    holdNewUserMessages,
+    buildQuietHeldReply,
+    normalizeContentToText,
+    isSpecialEvent,
+    stripInternalTags,
+    extractTimestampWithMemory,
+    stripPosition,
+    extractCoRecordEventTime,
+    classifySpecialEvent,
+    resolveActiveProvider,
+    readEnvValue,
+    UPSTREAM_TIMEOUT_MS,
+    handleMcpRequest,
+    splitMultimodalContent,
+    trimHistoricalImages,
+    extractAssistantThinking,
+    parseWakeTagAndSchedule,
+    parseQuietTagAndSchedule,
+    createContentTagFilter,
+    MCP_ENABLED,
+    summarizeMessagesForLog,
+    setLastLLMCapture
+  } = deps;
+
+  app.get('/v1/models', async (req, reply) => {
+    reply.send({
+      object: 'list',
+      data: [{ id: configuredModelName(), object: 'model', created: 0, owned_by: 'gateway' }]
+    });
+  });
+
+  // 多会话列表：扫描本目录下所有 enhanced_messages*.json，返回会话摘要
+  app.get('/v1/sessions', async (req, reply) => {
+    try {
+      const files = fsp.readdirSync(baseDir).filter(f => /^enhanced_messages[_-][A-Za-z0-9_-]+\.json$/.test(f));
+      const sessions = [];
+      for (const f of files) {
+        const sid = f.replace(/^enhanced_messages_/, '').replace(/\.json$/, '');
+        if (!sid || sid === 'default') continue;
+        try {
+          const arr = loadTimeline(sid);
+          const real = arr.filter(isRealMessageForTimeline);
+          sessions.push({
+            id: sid,
+            name: sid,
+            total: arr.length,
+            real: real.length,
+            last_time: (arr[arr.length - 1] && arr[arr.length - 1].time) || null,
+            is_default: false
+          });
+        } catch (e) {}
+      }
+      reply.send({ ok: true, sessions });
+    } catch (err) {
+      console.error('[GET /v1/sessions] error:', err.message);
+      reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // 删除会话：删除与会话ID对应的独立时间线文件。主会话(default)不允许删除。
+  app.delete('/v1/sessions/:id', async (req, reply) => {
+    try {
+      const id = String(req.params.id || '').trim();
+      if (!id || id === 'default') return reply.code(400).send({ error: '主会话不能删除' });
+      const safe = id.replace(/[^A-Za-z0-9_-]/g, '');
+      if (safe !== id) return reply.code(400).send({ error: '非法会话ID' });
+      const file = timelineFileFor(safe);
+      if (!fsp.existsSync(file)) return reply.send({ ok: true, deleted: false, note: 'no-file' });
+      const bakDir = path.join(baseDir, 'backups');
+      if (fsp.existsSync(bakDir)) {
+        const bak = path.join(bakDir, file + '.deleted-' + new Date().toISOString().replace(/[:.]/g, '-'));
+        fsp.copySync(file, bak);
+      }
+      fsp.removeSync(file);
+      reply.send({ ok: true, deleted: true });
+    } catch (err) {
+      console.error('[DELETE /v1/sessions/:id] error:', err.message);
+      reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // 只读返回完整时间线（供自建聊天前端首次拉取历史；剥离内部 position 字段，保留 role/content/time）
+  app.get('/v1/history', async (req, reply) => {
+    try {
+      const sessionId = String(req.query.session_id || req.headers['x-session-id'] || '').trim();
+      const timeline = loadTimeline(sessionId);
+      const items = timeline
+        .filter(isRealMessageForTimeline)
+        .map(m => {
+          const clean = { role: m.role };
+          if (m.content !== undefined) clean.content = m.content;
+          if (m.time) clean.time = m.time;
+          if (m.reasoning !== undefined) clean.reasoning = m.reasoning;
+          if (m.tools !== undefined) clean.tools = m.tools;
+          if (m.tokens !== undefined) clean.tokens = m.tokens;
+          return clean;
+        });
+      reply.send({ ok: true, total: items.length, items, session_id: sessionId || 'default' });
+    } catch (err) {
+      console.error('[GET /v1/history] error:', err.message);
+      reply.code(500).send({ error: err.message });
+    }
+  });
+  // 跨会话全量搜索：扫描所有会话时间线，支持关键词/语义两种模式（语义=TF-IDF+bigram）。
+  app.get('/v1/search', async (req, reply) => {
+    try {
+      const q = String(req.query.q || '').trim();
+      const mode = String(req.query.mode || 'keyword').trim() === 'semantic' ? 'semantic' : 'keyword';
+      const limit = Math.min(Number(req.query.limit) || 200, 500);
+      if (!q) return reply.send({ ok: true, mode, total: 0, results: [] });
+      const files = fsp.readdirSync(baseDir).filter(f => /^enhanced_messages[_-][A-Za-z0-9_-]+\.json$/.test(f));
+      const ql = q.toLowerCase();
+      const items = [];
+      for (const f of files) {
+        const sid = f.replace(/^enhanced_messages_/, '').replace(/\.json$/, '');
+        if (!sid || sid === 'default') continue;
+        let arr = [];
+        try { arr = loadTimeline(sid); } catch (e) { continue; }
+        arr.filter(isRealMessageForTimeline).forEach((m, i) => {
+          const text = normalizeContentToText(m.content) || '';
+          if (!text) return;
+          items.push({ sid, sidx: i, name: sid, text });
+        });
+      }
+      let results = [];
+      if (mode === 'keyword') {
+        items.forEach(it => { if (it.text.toLowerCase().includes(ql)) results.push({ sid: it.sid, sidx: it.sidx, name: it.name, text: it.text, score: 1 }); });
+        results = results.slice(0, limit);
+      } else {
+        const idx = buildSemIndex(items);
+        const hits = semanticSearch(idx, q, 0.06);
+        results = hits.slice(0, limit).map(h => { const it = idx.items[h.i]; return { sid: it.sid, sidx: it.sidx, name: it.name, text: it.text, score: h.score }; });
+      }
+      reply.send({ ok: true, mode, total: results.length, results });
+    } catch (err) {
+      console.error('[GET /v1/search] error:', err.message);
+      reply.code(500).send({ error: err.message });
+    }
+  });
+
+
+  // 实时事件流（SSE）：聊天页用 EventSource 订阅本会话，收到 history_update 后拉一次历史。
+  app.get('/v1/events', async (req, reply) => {
+    const sessionId = String(req.query.session_id || req.headers['x-session-id'] || '').trim() || 'default';
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no'
+    });
+    reply.raw.write('retry: 3000\n\n');
+    reply.raw.write('data: ' + JSON.stringify({ type: 'hello', session_id: sessionId, at: Date.now() }) + '\n\n');
+
+    sseSubscribe(sessionId, reply);
+    const heartbeat = setInterval(() => {
+      try { reply.raw.write(': ping\n\n'); } catch (e) { clearInterval(heartbeat); }
+    }, SSE_HEARTBEAT_MS);
+    req.raw.on('close', () => {
+      clearInterval(heartbeat);
+      sseUnsubscribe(sessionId, reply);
+    });
+  });
+
+  // 本地编辑/删除同步：聊天页「编辑 / 删除消息」目前只改本机 localStorage，
+  // 真正写回服务端时间线要靠下一次发消息的全量重建。这里补一个轻量端点。
+  app.post('/v1/timeline/sync', async (req, reply) => {
+    try {
+      const body = req.body || {};
+      const isClientChat = (req.headers['x-client'] || '').trim() === 'dylan-chat';
+      if (!isClientChat) return reply.code(403).send({ error: 'forbidden' });
+      const sessionId = String(body.session_id || req.headers['x-session-id'] || '').trim();
+      const messages = Array.isArray(body.messages) ? body.messages : [];
+      const realMsgs = messages.filter(isRealMessageForTimeline).map(normalizeMessageForTimeline);
+      const rebuilt = buildTimeline(realMsgs, sessionId);
+      saveTimeline(rebuilt, sessionId);
+      sseNotify(sessionId);
+      console.log(`[timeline-sync] 编辑/删除同步成功 (session=${sessionId || 'default'}, 条数=${rebuilt.length})`);
+      reply.send({ ok: true, total: rebuilt.length, session_id: sessionId || 'default' });
+    } catch (err) {
+      console.error('[timeline-sync] error:', err.message);
+      reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // ========================
+  // /v1/chat/completions（从 server.js 拆出）
+  // ========================
+app.post("/v1/chat/completions", async (req, reply) => {
+  try {
+    const body = req.body;
+    // 批注 2026-07-15：公开部署时日志不能默认写入完整上下文；
+    // 这里只保留请求摘要，避免 system prompt、记忆和聊天正文进入 pm2 日志。
+    console.log(JSON.stringify({
+      event: "kelivo_request",
+      model: body?.model || "",
+      stream: body?.stream === true,
+      messages: summarizeMessagesForLog(body?.messages || [])
+    }));
+
+    const kelivoMessages = body.messages || [];
+
+    // 多会话：识别当前请求来自哪个会话
+    const sessionId = String(body.session_id || req.headers["x-session-id"] || "").trim();
+    // 让压缩/替换按当前会话时间线工作（onResponse 钩子复位）
+    contextReplacements.setActiveSession(sessionId || null);
+    req.__ctxWasSet = true;
+    // 客户端来源标记：只有真正的客户端聊天请求（带这个标记）才允许写时间线，
+    // 避免旁路/探活/测试/内部调用随时覆盖历史（本次事故根因）
+    const isClientChat = (req.headers["x-client"] || "").trim() === "dylan-chat";
+
+    // ========================
+    // 幂等回放：同一 client_msg_id 的重复请求（如浏览器断连重发）直接回放上次已生成的回复，
+    // 不再次调用上游、不重复写时间线。
+    // ========================
+    const clientMsgId = isClientChat ? String(body.client_msg_id || "").trim() : "";
+    if (clientMsgId) {
+      const cached = recentReplies.get(clientMsgId);
+      if (cached && isRecentReplyCacheable(cached) && (Date.now() - cached.ts) < IDEMPOTENCY_TTL_MS) {
+        console.log("[idempotency] 命中同 client_msg_id 的已生成回复，直接回放");
+        if (body.stream === true) {
+          const stream = mcp.buildSSE(cached.text, { model: body.model || cached.model || "", usage: cached.usage, reasoning: cached.reasoning, toolHistory: cached.tools });
+          reply.raw.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive"
+          });
+          const reader = stream.getReader();
+          try {
+            while (true) { const { done, value } = await reader.read(); if (done) break; reply.raw.write(value); }
+            reply.raw.end();
+          } catch (e) { try { reply.raw.end(); } catch {} }
+          return;
+        }
+        reply.send({
+          id: "chatcmpl-idem",
+          object: "chat.completion",
+          created: Math.floor(Date.now() / 1000),
+          model: cached.model || body.model || "",
+          choices: [{ index: 0, message: { role: "assistant", content: cached.text }, finish_reason: "stop" }],
+          usage: cached.usage || null
+        });
+        return;
+      }
+    }
+
+    const oldTimeline = loadTimeline(sessionId);
+
+    const finalTimeline = buildTimeline(kelivoMessages, sessionId);
+    // 防误伤：仅当"这是客户端聊天请求"且"携带真实消息"时才写时间线，
+    // 否则一律跳过，防止一次异常请求把完整历史冲成空壳
+    if (isClientChat && (kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0)) {
+      saveTimeline(finalTimeline, sessionId);
+      // 用户消息落时间线后，通知该会话所有打开的聊天页（别台设备实时看到这条新消息）。
+      sseNotify(sessionId);
+    } else {
+      console.log("[timeline] 跳过时间线保存 (isClientChat=" + isClientChat + ", 真实消息=" + kelivoMessages.some(isRealMessageForTimeline) + ")");
+    }
+
+    // Kelivo 发图时 content 常是数组。默认原样透传给视觉模型；
+    // 如上游不支持图片，可设置 MULTIMODAL_MODE=text 退回文本占位。
+    let llmMessages = kelivoMessages
+      .map(prepareMessageForLLM)
+      .filter(Boolean);
+    // 主聊天（客户端携带 system 身份提示）才做记忆/跨窗口/特殊事件注入；标题总结等旁路请求保持精简
+    const isMainChat = kelivoMessages.some(function (m) {
+      if (!m) return false;
+      if (m.role === "system") return true;
+      if (m.role === "user" && typeof m.content === "string" && m.content.trim().indexOf("<system>") === 0) return true;
+      return false;
+    });
+
+    // ========================
+    // 消息扣住（免打扰）：扣住时段内新用户消息待处理，不转发给模型
+    // ========================
+    if (isMainChat && isQuietActive()) {
+      const trailing = collectTrailingUnansweredUserMessages(kelivoMessages);
+      if (trailing.length > 0) {
+        const newest = normalizeContentToText(trailing[trailing.length - 1].content) || "";
+        const urgent = /紧急|急事|加急|急用|很急|马上回/.test(newest);
+        if (urgent) {
+          console.log("[quiet] 检测到紧急关键词，本次放行");
+        } else {
+          const addedHeld = holdNewUserMessages(trailing);
+          console.log(`[quiet] 扣住 ${addedHeld} 条新用户消息，本次不转发给模型`);
+          return buildQuietHeldReply(reply);
+        }
+      }
+    }
+
+    // 用时间线里的原始回复替换客户端清洗过的版本，保留 <memory>/<pin> 标签：
+    // 模型能看到自己写过什么，管理台上下文窗口也能审查。
+    // 匹配方式：时间线回复去掉内部标签后与客户端内容比对。
+    {
+      const rawByClean = new Map();
+      for (const m of finalTimeline) {
+        if (m.role !== "assistant" || isSpecialEvent(m) || typeof m.content !== "string") continue;
+        const clean = stripInternalTags(m.content).trim();
+        if (clean && !rawByClean.has(clean)) rawByClean.set(clean, m);
+      }
+      llmMessages = llmMessages.map(m => {
+        if (m.role !== "assistant" || typeof m.content !== "string") return m;
+        const raw = rawByClean.get(String(m.content).trim());
+        return raw && raw.content !== m.content ? { ...m, content: raw.content } : m;
+      });
+    }
+
+
+    // 特殊事件按时间定位插入：客户端消息不带 time 字段，
+    // 先用 finalTimeline 里已解析/恢复的时间建立 内容->时间 映射，保证事件能落到对应时间位置
+    const timeByKey = new Map();
+    for (const m of finalTimeline) {
+      if (isSpecialEvent(m)) continue;
+      const key = m.role + "\u0000" + normalizeContentToText(m.content);
+      const t = extractTimestampWithMemory(m);
+      if (t && !timeByKey.has(key)) timeByKey.set(key, t);
+    }
+    const oldEvents = stripPosition(finalTimeline.filter(m => !m.deleted && isSpecialEvent(m)));
+    // 当前窗口起点：最新一次重建时间线里第一条真实 user 消息时间，用于界定本次会话的特殊事件范围
+    let windowStartMs = null;
+    for (const m of finalTimeline) {
+      if (windowStartMs !== null) break;
+      if (!m || m.role !== "user") continue;
+      if (isSpecialEvent(m)) continue;
+      const mt = extractTimestampWithMemory(m);
+      if (mt) windowStartMs = mt.getTime();
+    }
+    // 特殊事件注入：只取当前窗口（第一条真实 user 消息之后）内的事件；窗口内不限制条数（推送同样不限制）
+    const pushEnabled = memoryPool.getConfig().cross_inject_push !== false;
+    let injectableEvents = oldEvents.slice();
+    if (windowStartMs !== null) {
+      injectableEvents = injectableEvents.filter(ev => {
+        const t = extractTimestampWithMemory(ev) || extractCoRecordEventTime(ev);
+        const tms = t ? t.getTime() : NaN;
+        return !isFinite(tms) || tms >= windowStartMs;
+      });
+    }
+    // 推送开关关闭时剔除推送类特殊事件；条数不再限制（配合压缩摘要统一压缩）
+    if (!pushEnabled) {
+      injectableEvents = injectableEvents.filter(ev => {
+        const cats = classifySpecialEvent(ev) || [];
+        return cats.indexOf('push') < 0;
+      });
+    }
+
+    // 特殊事件注入分类多选：只注入勾选类型；配置里没有该 key 时默认全部注入
+    const injectTypesCfg = memoryEngine.getConfig().event_inject_types;
+    if (Array.isArray(injectTypesCfg)) {
+      const enabledTypes = new Set(injectTypesCfg);
+      const before = injectableEvents.length;
+      injectableEvents = injectableEvents.filter(ev => {
+        const cats = classifySpecialEvent(ev);
+        if (!cats.length) return true; // 无法分类的兜底保留
+        return cats.some(k => enabledTypes.has(k));
+      });
+      if (injectableEvents.length !== before) {
+        console.log(`[event-inject] 分类过滤: ${before} -> ${injectableEvents.length} 条`);
+      }
+    }
+
+
+    // 共影记录注入开关：关闭后整段观影记录不再注入主对话（记录仍完整保存在共影里）
+    const coEventInjectEnabled = memoryEngine.getConfig().co_event_inject_enabled !== false;
+    if (!coEventInjectEnabled) {
+      const before = injectableEvents.length;
+      injectableEvents = injectableEvents.filter(ev => !(typeof ev.content === "string" && ev.content.includes("共影）")));
+      if (injectableEvents.length !== before) {
+        console.log("[co-event] 共影记录注入已关闭，跳过观影记录");
+      }
+    }
+
+    if (!isMainChat) injectableEvents = [];
+    console.log("本次注入的特殊事件数量:", injectableEvents.length);
+
+    for (const event of injectableEvents) {
+      const eventTime = extractTimestampWithMemory(event) || extractCoRecordEventTime(event);
+      if (!eventTime) { llmMessages.push(event); continue; }
+      let inserted = false;
+      for (let i = 0; i < llmMessages.length; i++) {
+        const m = llmMessages[i];
+        if (m.role === "system") continue; // 系统提示保持首位，历史事件不能插到 system 之前
+        let msgTime = timeByKey.get(m.role + "\u0000" + normalizeContentToText(m.content));
+        if (!msgTime) msgTime = extractTimestampWithMemory(m);
+        if (msgTime && msgTime >= eventTime) {
+          llmMessages.splice(i, 0, event);
+          inserted = true;
+          break;
+        }
+      }
+      if (!inserted) llmMessages.push(event);
+    }
+
+
+
+    console.log(JSON.stringify({
+      event: "llm_forward_summary",
+      messages: summarizeMessagesForLog(llmMessages)
+    }));
+
+    // ---- 自动修复不完整的 tool 调用（双向清理） ----
+    // 第一遍：标记需要移除的索引
+    const removeSet = new Set();
+
+    // 检查 assistant tool_calls 是否完整
+    for (let i = 0; i < llmMessages.length; i++) {
+      const msg = llmMessages[i];
+      if (msg.role !== "assistant" || !msg.tool_calls) continue;
+      const expectedIds = msg.tool_calls.map(tc => tc.id);
+      const followingTools = [];
+      for (let j = i + 1; j < llmMessages.length; j++) {
+        const nxt = llmMessages[j];
+        if (nxt.role === "tool") {
+          followingTools.push(nxt);
+        } else {
+          break;
+        }
+      }
+      const foundIds = followingTools.map(t => t.tool_call_id);
+      const complete = expectedIds.every(id => foundIds.includes(id));
+      if (!complete) {
+        // 标记这条 assistant 为移除，同时标记它后面的所有 tool 消息也移除
+        removeSet.add(i);
+        for (let j = i + 1; j < llmMessages.length; j++) {
+          if (llmMessages[j].role === "tool") {
+            removeSet.add(j);
+          } else {
+            break;
+          }
+        }
+        console.log(`⚠️ 自动修复：移除不完整的 tool_calls (索引 ${i})`);
+      }
+    }
+
+    // 检查孤立 tool 消息（前面没有对应的 tool_calls）
+    for (let i = 0; i < llmMessages.length; i++) {
+      if (llmMessages[i].role !== "tool") continue;
+      // 向前查找最近的 assistant
+      let hasMatchingToolCalls = false;
+      for (let j = i - 1; j >= 0; j--) {
+        const prev = llmMessages[j];
+        if (prev.role === "assistant" && prev.tool_calls) {
+          // 检查这个 tool_call_id 是否在 assistant 的 tool_calls 中
+          const ids = prev.tool_calls.map(tc => tc.id);
+          if (ids.includes(llmMessages[i].tool_call_id)) {
+            hasMatchingToolCalls = true;
+          }
+          break;
+        } else if (prev.role === "tool") {
+          continue; // 继续向前找
+        } else {
+          break; // 遇到 user 或其他消息，停止
+        }
+      }
+      if (!hasMatchingToolCalls) {
+        removeSet.add(i);
+        console.log(`⚠️ 自动修复：移除孤立的 tool 消息 (索引 ${i})`);
+      }
+    }
+
+    // 按索引从大到小删除，避免索引错乱
+    const sortedRemove = Array.from(removeSet).sort((a, b) => b - a);
+    for (const idx of sortedRemove) {
+      llmMessages.splice(idx, 1);
+    }
+
+    // (trim 逻辑在下方最近窗口处执行，当前用户请求的图片始终保留)
+
+    const prov = resolveActiveProvider();
+    const targetApiUrl = (prov && (prov.api_url || prov.base_url)) || readEnvValue("TARGET_API_URL");
+    const targetApiKey = (prov && prov.api_key) || readEnvValue("TARGET_API_KEY");
+    if (!targetApiUrl || !targetApiKey) {
+      return reply.code(500).send({ error: "TARGET_API_URL / TARGET_API_KEY 或 AI 供应商未配置" });
+    }
+
+    const requestedStream = body?.stream === true;
+
+    // ========================
+    // 永久注入上下文：pinned context 注入 system prompt
+    // ========================
+    try {
+      const pinnedCtx = isMainChat && memoryEngine.buildPinnedContext ? memoryEngine.buildPinnedContext() : '';
+      let crossCtx = "";
+      if (isMainChat) {
+        try {
+          // 跨窗口触发条件：新建会话 id 时抓一次快照并固定。
+          // buildCrossMemorySnapshot(sessionId) 会复用已存在的快照（同 sessionId 不再重建），
+          // 因此这里不再按消息条数触发，话题相关记忆交给 surface_memory 按需召回。
+          crossCtx = buildCrossMemorySnapshot(sessionId);
+        } catch (cx) { console.warn("[cross-inject] 失败:", cx.message); }
+      }
+      let sysExtra = "";
+      if (pinnedCtx) sysExtra += '\n\n## 永久上下文\n' + pinnedCtx;
+      // 批注 2026-08-30：memory 提示不再硬编码注入（用户已写入 pin/永久上下文），删除此段。
+      if (sysExtra) {
+        const sysIdx = llmMessages.findIndex(m => m.role === "system");
+        if (sysIdx >= 0) {
+          llmMessages[sysIdx].content = llmMessages[sysIdx].content + sysExtra;
+        } else {
+          llmMessages.unshift({ role: "system", content: sysExtra.trim() });
+        }
+        if (pinnedCtx) console.log('[pinned] 注入永久上下文');
+      }
+      // 跨窗口注入：不进系统提示，作为上下文消息拼在 system 之后（与当前时间线特殊事件同属上下文层）
+      if (isMainChat && crossCtx) {
+        const sysIdx = llmMessages.findIndex(m => m.role === "system");
+        const bg = { role: "assistant", content: crossCtx };
+        if (sysIdx >= 0) {
+          llmMessages.splice(sysIdx + 1, 0, bg);
+        } else {
+          llmMessages.unshift(bg);
+        }
+        console.log('[cross-inject] 注入跨窗口记忆（上下文）');
+      }
+    } catch (pinErr) {
+      console.warn('[pinned] 注入失败:', pinErr.message);
+    }
+
+    // ========================
+    // 对话时记忆浮现 / 时间注入：已随记忆池与摘要体系一起移除
+    // ========================
+
+    // 上下文记忆替换：把已记录范围里的原文替换成 AI 自己写的记忆（源文件不动，只影响本次发送）
+    try {
+      const beforeCount = llmMessages.length;
+      llmMessages = contextReplacements.applyReplacements(llmMessages);
+      if (llmMessages.length !== beforeCount) {
+        console.log("[context-replacements] 发送前替换生效: 消息 " + beforeCount + " -> " + llmMessages.length);
+      }
+    } catch (repErr) {
+      console.warn("[context-replacements] 替换失败（按原样转发）:", repErr.message);
+    }
+
+    // ========================
+    // 历史图片裁剪：只保留最后 N 条「带图历史消息」里的图片（N=keep_recent_image_turns），
+    // 更早消息里的图片替换为 [图片] 占位符；当前正在发送的那条消息的图片始终保留。
+    // 图片无法命中 prompt 缓存，反复重编码历史图片是慢响应主因；文本历史不受影响。
+    // ========================
+    const cfgKeepImgTurns = Number(memoryEngine.getConfig().keep_recent_image_turns);
+    // 0 表示不保留历史图片（仅当前发送那张图传入）；配置缺省时回退环境变量，再回退默认 8
+    const keepImageTurns = Number.isFinite(cfgKeepImgTurns) && cfgKeepImgTurns >= 0
+      ? cfgKeepImgTurns
+      : (Number(process.env.KEEP_RECENT_IMAGE_TURNS) || 8);
+    try {
+      trimHistoricalImages(llmMessages, keepImageTurns);
+    } catch (imgErr) {
+      console.warn("[trim-images] 历史图片裁剪失败（按原样转发）:", imgErr.message);
+    }
+
+    // 上下文压缩已统一进「上下文替换」：早期对话块摘要与 AI 记忆现在都是同一种替换记录，
+    // 由 contextReplacements.applyReplacements 统一生效，旧压缩器发送路径已停用。
+
+
+    // 请求模型
+    // Capture the actual messages sent to LLM for inspection
+    if (isMainChat) {
+      setLastLLMCapture(llmMessages.map(m => {
+        const cap = splitMultimodalContent(m.content);
+        return {
+          role: m.role,
+          content: cap.content,
+          images: cap.images && cap.images.length ? cap.images : undefined,
+          attachments: cap.attachments || undefined,
+          tool_calls: m.tool_calls || undefined,
+          tool_call_id: m.tool_call_id || undefined
+        };
+      }), new Date().toISOString());
+    }
+
+
+
+
+    // 管理台展示：保留完整消息序列（含动态注入），方便核对注入位置
+
+    // 转发前只保留 OpenAI 兼容字段，剥离 Kelivo 自定义字段（position 等）
+    const sanitizedMessages = llmMessages.map(msg => {
+      const clean = { role: msg.role };
+      if (msg.content !== undefined) clean.content = msg.content;
+      if (msg.name !== undefined) clean.name = msg.name;
+      if (msg.tool_calls !== undefined) clean.tool_calls = msg.tool_calls;
+      if (msg.tool_call_id !== undefined) clean.tool_call_id = msg.tool_call_id;
+      // 多轮对话时可回传思考链（前端若开"回传思考链"会带 reasoning_content），透传给上游而非丢弃
+      if (msg.role === "assistant" && msg.reasoning_content !== undefined) clean.reasoning_content = msg.reasoning_content;
+      return clean;
+    });
+
+
+    // === MCP_TOOL_LOOP_BEGIN ===
+    // MCP 工具循环：启用时若为主聊天，走 MCP 分支（工具轮次非流式，最终流式回传）
+    // 这里传入已处理好的 sanitizedMessages，完整保留记忆/时间线/替换/裁剪上下文
+    if (MCP_ENABLED()) {
+      try {
+        if (await handleMcpRequest(body, reply, req, sanitizedMessages, sessionId, kelivoMessages)) return;
+      } catch (mcpErr) {
+        console.warn("[mcp] 工具循环失败，回退原逻辑:", mcpErr.message);
+      }
+    }
+    // === MCP_TOOL_LOOP_END ===
+    // 上游请求超时保护，避免上游挂起导致 /v1 请求永久阻塞
+    const upstreamController = new AbortController();
+    const upstreamTimer = setTimeout(() => upstreamController.abort(), UPSTREAM_TIMEOUT_MS);
+    let response;
+    try {
+      response = await fetch(targetApiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${targetApiKey}`
+        },
+        body: JSON.stringify({ ...body, messages: sanitizedMessages }),
+        signal: upstreamController.signal
+      });
+    } catch (upstreamErr) {
+      clearTimeout(upstreamTimer);
+      throw upstreamErr;
+    }
+
+    const upstreamContentType = response.headers.get("content-type") || "";
+    const shouldStreamResponse = requestedStream || upstreamContentType.includes("text/event-stream");
+
+    // 批注 2026-07-11：Kelivo 关闭 stream 时需要收到普通 JSON；只在请求或上游确认为 SSE 时才按流式直通。
+    if (!shouldStreamResponse) {
+      const responseText = await response.text();
+      let finalResponseText = responseText;
+
+      // 解析 AI 回复，提取 <memory> 标签存入记忆池，并清洗返回给用户的内容
+      try {
+        const parsed = JSON.parse(responseText);
+        const aiMessage = parsed.choices?.[0]?.message || {};
+        const aiContent = aiMessage.content || "";
+        const aiThinking = extractAssistantThinking(aiMessage);
+        if (aiContent) {
+          // 解析 <wake> 闹钟标签并写入调度（标签随后被剥离，不显示给用户）
+          parseWakeTagAndSchedule(aiContent);
+          parseQuietTagAndSchedule(aiContent);
+          // 提取并存储记忆，同时拿到清洗后的文本
+          const cleanText = await tagParser.extractAndStore(aiContent);
+          // 用清洗后的文本替换 JSON 中的 content
+          if (cleanText !== aiContent) {
+            parsed.choices[0].message.content = cleanText;
+            finalResponseText = JSON.stringify(parsed);
+          }
+          // 把 AI 回复追加到 kelivoMessages，然后重建时间线
+          kelivoMessages.push({ role: "assistant", content: cleanText });
+          const rebuilt = buildTimeline(kelivoMessages, sessionId);
+          saveTimeline(rebuilt, sessionId);
+        }
+      } catch (parseErr) {
+        console.warn("[memory] 非流式响应 JSON 解析失败:", parseErr.message);
+      }
+
+      clearTimeout(upstreamTimer);
+      return reply
+        .code(response.status)
+        .header("Content-Type", upstreamContentType || "application/json")
+        .send(finalResponseText);
+    }
+
+    if (!response.body) {
+      return reply.code(response.status).send({ error: "上游 API 没有返回可读取的响应体" });
+    }
+
+    reply.raw.writeHead(response.status, {
+      "Content-Type": upstreamContentType || "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive"
+    });
+
+    const reader = response.body.getReader();
+    const streamChunks = [];
+    try {
+    // Streaming tag filter: 上游会把 <memory>/<pin> 拆成 <、memory、> 等多个事件，
+    // 字节层匹配不到完整标签，必须在 content 文本层过滤后再重组 SSE 事件。
+    const contentFilter = createContentTagFilter();
+    const emitRawLine = (line) => reply.raw.write(line + "\n");
+    let sseBuffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      streamChunks.push(value);
+
+      sseBuffer += Buffer.from(value).toString("utf-8");
+      let nl;
+      while ((nl = sseBuffer.indexOf("\n")) !== -1) {
+        const rawLine = sseBuffer.slice(0, nl);
+        sseBuffer = sseBuffer.slice(nl + 1);
+        const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+        if (!line.startsWith("data:")) {
+          emitRawLine(line);
+          continue;
+        }
+        const payload = line.slice(5).replace(/^\s+/, "");
+        if (!payload || payload === "[DONE]") {
+          emitRawLine(line);
+          continue;
+        }
+        let evt;
+        try {
+          evt = JSON.parse(payload);
+        } catch {
+          emitRawLine(line);
+          continue;
+        }
+        const delta = evt && evt.choices && evt.choices[0] && evt.choices[0].delta;
+        // 空字符串 content 常伴随 finish_reason/usage（如末尾事件），必须原样透传
+        if (delta && typeof delta.content === "string" && delta.content.length > 0) {
+          contentFilter.push(delta.content, (filtered) => {
+            delta.content = filtered;
+            reply.raw.write("data: " + JSON.stringify(evt) + "\n\n");
+          });
+        } else {
+          emitRawLine(line);
+        }
+      }
+    }
+    // 收尾：丢弃未闭合标签/残留前缀，转发剩余行，结束响应
+    contentFilter.flush();
+    if (sseBuffer) emitRawLine(sseBuffer.replace(/\n+$/, ""));
+    reply.raw.end();
+    } catch (streamErr) {
+      // 上游中断/超时时确保响应结束，避免连接悬挂
+      try { reply.raw.end(); } catch {}
+      throw streamErr;
+    } finally {
+      clearTimeout(upstreamTimer);
+    }
+
+    // 流结束后解析 AI 回复
+    try {
+      const fullText = Buffer.concat(streamChunks).toString("utf-8");
+      // 从 SSE 中提取完整的 AI 回复文本
+      let aiFullContent = "";
+      let aiThinking = "";
+      let aiUsage = null;
+      const lines = fullText.split("\n");
+      for (const line of lines) {
+        if (line.startsWith("data: ") && line !== "data: [DONE]") {
+          try {
+            const evt = JSON.parse(line.slice(6));
+            const delta = evt.choices?.[0]?.delta?.content;
+            if (delta) aiFullContent += delta;
+            const deltaThink = evt.choices?.[0]?.delta?.reasoning_content || evt.choices?.[0]?.delta?.reasoning;
+            if (deltaThink) aiThinking += (typeof deltaThink === "string" ? deltaThink : (deltaThink.text || ""));
+            const finishContent = evt.choices?.[0]?.message?.content;
+            if (finishContent) aiFullContent = finishContent;
+            if (evt.usage) { aiUsage = evt.usage; console.log("[usage] " + JSON.stringify(evt.usage)); }
+          } catch {}
+        }
+      }
+      if (aiFullContent) {
+        // 解析 <wake> 闹钟标签并写入调度（标签随后被剥离，不显示给用户）
+        parseWakeTagAndSchedule(aiFullContent);
+        parseQuietTagAndSchedule(aiFullContent);
+        // 提取并存储记忆，并拿到清洗后的文本
+        const cleanFull = await tagParser.extractAndStore(aiFullContent).catch(err => {
+          console.warn("[memory] 流式标签解析失败:", err.message);
+          return aiFullContent;
+        });
+        // 富字段一并落时间线：reasoning/tokens，跨设备刷新不再丢
+        kelivoMessages.push({ role: "assistant", content: cleanFull, reasoning: aiThinking || "", tokens: aiUsage || null });
+        const rebuiltStream = buildTimeline(kelivoMessages, sessionId);
+        saveTimeline(rebuiltStream, sessionId);
+        sseNotify(sessionId);
+        // 缓存本次已生成的回复，供同 client_msg_id 的重复请求直接回放。
+        if (cleanFull && body && body.client_msg_id) {
+          setRecentReply(String(body.client_msg_id).trim(), {
+            text: cleanFull, model: body.model || "", reasoning: aiThinking || "", tools: [], usage: aiUsage || null, ts: Date.now()
+          });
+        }
+      }
+    } catch (streamErr) {
+      console.warn("[memory] 流式响应解析失败:", streamErr.message);
+    }
+  } catch (err) {
+    console.error(err);
+    reply.code(500).send({ error: err.message });
+  }
+});
+};

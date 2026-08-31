@@ -4668,39 +4668,28 @@ function _semanticSearch(index, query, threshold){
   return results;
 }
 var _sessionSearchMode = "semantic"; // semantic | keyword
+let _searchTimer=null;
 function searchSessions(q){
   const resultsEl=document.getElementById("sessionSearchResults");
   const listEl=document.getElementById("sessionList");
   if(!resultsEl||!listEl)return;
   const ql=(q||"").trim().toLowerCase();
   if(!ql){ resultsEl.style.display="none"; listEl.style.display=""; return; }
+  if(_searchTimer) clearTimeout(_searchTimer);
+  _searchTimer=setTimeout(function(){ doSearchSessions(ql); }, 180);
+}
+async function doSearchSessions(ql){
+  const resultsEl=document.getElementById("sessionSearchResults");
+  const listEl=document.getElementById("sessionList");
   const nm=JSON.parse(localStorage.getItem("han_session_names")||"{}");
-  const data=allSessionLocalMsgs();
-  const mode = _sessionSearchMode;
-  let results = [];
-  if(mode === "keyword"){
-    Object.keys(data).forEach(function(sid){
-      data[sid].forEach(function(m,i){
-        const t=msgText(m);
-        if(t&&t.toLowerCase().includes(ql)){ results.push({sid:sid,sidx:i,name:(nm[sid]||(sid==="default"?"主会话":sid)),text:t, score:1}); }
-      });
-    });
-  } else {
-    // 语义模式：构建索引并搜索
-    const items = [];
-    Object.keys(data).forEach(function(sid){
-      data[sid].forEach(function(m,i){
-        const t=msgText(m);
-        if(t) items.push({sid:sid, sidx:i, name:(nm[sid]||(sid==="default"?"主会话":sid)), text:t});
-      });
-    });
-    const idx = _buildSemIndex(items);
-    const hits = _semanticSearch(idx, ql, 0.06);
-    results = hits.slice(0,200).map(function(h){
-      const it = idx.items[h.i];
-      return {sid:it.sid, sidx:it.sidx, name:it.name, text:it.text, score:h.score};
-    });
-  }
+  const mode=_sessionSearchMode;
+  let results=[];
+  try{
+    const r=await fetch("/v1/search?q="+encodeURIComponent(ql)+"&mode="+encodeURIComponent(mode)+"&limit=200",{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
+    const j=await r.json();
+    results=(j&&j.results)||[];
+  }catch(e){ results=[]; }
+  results.forEach(function(x){ if(nm[x.sid]) x.name=nm[x.sid]; });
   const shown=results.slice(0,200);
   resultsEl.innerHTML= shown.length? shown.map(function(r){
     const scoreLabel = mode==="semantic" && r.score ? '<span class="sr-score">'+(r.score*100).toFixed(0)+'%</span>' : '';
@@ -4717,6 +4706,7 @@ function searchSessions(q){
     });
   });
 }
+
 async function switchSessionAndLocate(sid,idx){
   saveMsgs();
   currentSession=sid;
