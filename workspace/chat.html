@@ -724,7 +724,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .rw .rw-a{font-size:10px;color:var(--ink3);margin-left:auto;transition:transform .2s}
 .rw.open .rw-a{transform:rotate(180deg)}
 /* 思考过程 / 工具痕迹：气泡外的独立容器（单独成行，不塞进气泡） */
-.rw-wrap{width:100%;max-width:100%;margin-bottom:6px;display:flex;flex-direction:column;gap:6px}
+.rw-wrap{width:100%;max-width:84%!important;max-width:min(84%,640px);margin-bottom:6px;display:flex;flex-direction:column;gap:6px}
 .rw-wrap .rw,.rw-wrap .tool-trace{margin-bottom:0}
 .msg.user .mhead{flex-direction:row-reverse}
 .msg.user .mhead .mnm{padding-left:0;padding-right:2px}
