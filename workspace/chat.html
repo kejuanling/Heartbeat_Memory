@@ -114,9 +114,9 @@ header.hd-custom .hd-mid{align-items:flex-start}
 #chat::-webkit-scrollbar{width:0}
 .day-divider{
   align-self:center;
-  font-size:10.5px;color:var(--ink3);letter-spacing:2px;
-  padding:4px 14px;border-radius:20px;
-  background:rgba(255,255,255,.32);margin:6px 0;
+  font-size:11px;color:var(--ink3);letter-spacing:1px;
+  margin:6px 0;padding:0;background:none;border:none;
+  opacity:.8;
 }
 /* 特殊事件（推送/未推送等）在时间线里的呈现 */
 .msg.ev-push,.msg.ev-silent,.msg.ev-diary{max-width:92%;align-self:stretch;width:auto}
@@ -152,7 +152,7 @@ header.hd-custom .hd-mid{align-items:flex-start}
 .msg.ai{align-self:flex-start;align-items:flex-start}
 .msg .meta{align-self:center;text-align:center;font-size:10.5px;color:var(--ink3);padding:2px 12px;letter-spacing:1px;margin:3px 0;min-height:0}
 .msg.user .meta{display:none}
-.msg.ai .meta{order:-1;margin:6px 0 8px}
+.msg.ai .meta{display:none} /* 时间统一走居中时间线(renderAll), 不再贴气泡 */
 .mhead{display:flex;align-items:center;gap:7px;padding:0 3px;margin-bottom:5px;max-width:100%}
 .mhead .mav{width:26px;height:26px;border-radius:50%;background:var(--accent-grad);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-family:"Noto Serif SC",serif;box-shadow:0 1px 4px rgba(176,122,106,.2)}
 .mhead .mav img{width:100%;height:100%;object-fit:cover;border-radius:50%}
