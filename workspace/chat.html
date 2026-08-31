@@ -107,7 +107,7 @@ header.hd-custom .hd-mid{align-items:flex-start}
 #chat{
   position:relative;z-index:1;
   flex:1;overflow-y:auto;
-  padding:8px 10px calc(env(safe-area-inset-bottom) + 8px);
+  padding:8px 5px calc(env(safe-area-inset-bottom) + 8px);
   display:flex;flex-direction:column;gap:14px;
   -webkit-overflow-scrolling:touch;
 }
@@ -631,7 +631,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 /* 主题：两列排布更省空间、不散 */
 .theme-field{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:5px 0}
 .theme-field label{flex-shrink:0;margin:0;min-width:104px}
-.theme-row{flex:1}
+.theme-row{flex:1;min-width:0}
 .theme-row input[type="range"]{max-width:180px}
 .theme-row .v{min-width:52px}
 /* 保存主题：独立堆叠（非两列），第一行=输入+保存，下方=已存主题横向胶囊 */
@@ -1585,7 +1585,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
             <div class="set-sec-label">字体</div>
             <div class="theme-field">
               <label>字体</label>
-              <div class="theme-row"><select id="fontFamilyInput" style="max-width:180px;padding:9px 11px;border:1px solid rgba(200,144,152,.25);border-radius:var(--radius-sm);background:#fff;color:var(--ink);font-size:13px">
+              <div class="theme-row"><select id="fontFamilyInput" style="width:100%;max-width:180px;min-width:0;padding:9px 11px;border:1px solid rgba(200,144,152,.25);border-radius:var(--radius-sm);background:#fff;color:var(--ink);font-size:13px">
                 <option value="">默认（系统）</option>
                 <option value="PingFang SC">苹方 PingFang SC</option>
                 <option value="Noto Serif SC">思源宋体 Noto Serif SC</option>
