@@ -139,22 +139,27 @@ TOOLS["moments_list"] = {
 def tool_moments_search(args):
     q = args.get("q", "").strip()
     if not q:
-        return {"error": "请输入搜索关键词"}
-    limit = args.get("limit", 50)
+        return {"error": "请输入搜索关键词或描述"}
+    limit = args.get("limit", 20)
+    mode = args.get("mode", "semantic")  # semantic=语义搜索（默认） | keyword=关键词匹配
     import urllib.parse
     q_enc = urllib.parse.quote(q)
-    data = api_get(f"{BASE_URL}:8777/todo/api/moments/search?q={q_enc}&limit={limit}")
+    if mode == "keyword":
+        data = api_get(f"{BASE_URL}:8777/todo/api/moments/search?q={q_enc}&limit={limit}")
+    else:
+        data = api_get(f"{BASE_URL}:8777/todo/api/moments/semantic-search?q={q_enc}&limit={limit}")
     if "_error" in data:
         return {"error": data["_error"]}
     moments = [_moment_brief(m) for m in data] if isinstance(data, list) else []
-    return {"moments": moments, "count": len(moments), "keyword": q}
+    return {"moments": moments, "count": len(moments), "query": q, "mode": mode}
 TOOLS["moments_search"] = {
-    "description": "搜索心动时刻记录，按关键词匹配标题/内容/感受/定义备注（涵记录、谢意行可查阅）。limit<=0 取全部匹配",
+    "description": "语义检索心动时刻记录，根据查询内容的语义相关度排序返回（涵记录、谢意行可查阅）。支持模糊匹配、意思相近的描述也能搜到。默认语义模式，也可切换关键词精确匹配。",
     "inputSchema": {
         "type": "object",
         "properties": {
-            "q": {"type": "string", "description": "搜索关键词"},
-            "limit": {"type": "integer", "description": "返回条数，默认50；<=0取全部匹配"}
+            "q": {"type": "string", "description": "搜索词或描述（语义模式下可以是描述性语句，如她最浪漫的时刻、让她感动的事）"},
+            "limit": {"type": "integer", "description": "返回条数，默认20"},
+            "mode": {"type": "string", "description": "搜索模式：semantic=语义检索（默认，推荐） | keyword=关键词精确匹配"}
         },
         "required": ["q"]
     },
@@ -392,6 +397,27 @@ TOOLS["period_get"] = {
         }
     },
     "handler": tool_period_get
+}
+
+def tool_period_set(args):
+    on = args.get("on", True)
+    if isinstance(on, str):
+        on = on.lower() in ("true", "1", "yes", "开始", "on", "是")
+    date = str(args.get("date", "") or "").strip() or datetime.date.today().isoformat()
+    data = api_post(f"{BASE_URL}:8777/monthly/api/period/toggle", {"on": on, "date": date})
+    if "_error" in data and "period" not in data:
+        return {"error": data.get("_error", "未知错误"), "date": date, "on": on}
+    return {"ok": True, "date": date, "on": on, "message": "经期已" + ("开始" if on else "结束") + "记录"}
+TOOLS["period_set"] = {
+    "description": "设置经期状态：把某天标记为经期开始或结束（写入月历经期记录，前端月历会同步显示）。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "on": {"type": "boolean", "description": "true=标记经期开始；false=标记经期结束。默认 true"},
+            "date": {"type": "string", "description": "日期 YYYY-MM-DD，默认今天"}
+        }
+    },
+    "handler": tool_period_set
 }
 
 # ── 12. 今日总结（AI写）──

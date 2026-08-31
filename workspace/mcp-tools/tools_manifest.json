@@ -1,6 +1,6 @@
 {
   "server": "小世界MCP工具集",
-  "generated_at": "2026-08-26 18:19:57",
+  "generated_at": "2026-08-31 13:52:04",
   "tools": [
     {
       "name": "context_replace",
@@ -454,28 +454,36 @@
         "properties": {
           "q": {
             "type": "string",
-            "description": "搜索关键词"
+            "description": "搜索词或描述（语义模式下可以是描述性语句，如她最浪漫的时刻、让她感动的事）"
           },
           "limit": {
             "type": "integer",
-            "description": "返回条数，默认50；<=0取全部匹配"
+            "description": "返回条数，默认20"
+          },
+          "mode": {
+            "type": "string",
+            "description": "搜索模式：semantic=语义检索（默认，推荐） | keyword=关键词精确匹配"
           }
         },
         "required": [
           "q"
         ]
       },
-      "defaultDescription": "搜索心动时刻记录，按关键词匹配标题/内容/感受/定义备注（涵记录、谢意行可查阅）。limit<=0 取全部匹配",
+      "defaultDescription": "语义检索心动时刻记录，根据查询内容的语义相关度排序返回（涵记录、谢意行可查阅）。支持模糊匹配、意思相近的描述也能搜到。默认语义模式，也可切换关键词精确匹配。",
       "defaultInputSchema": {
         "type": "object",
         "properties": {
           "q": {
             "type": "string",
-            "description": "搜索关键词"
+            "description": "搜索词或描述（语义模式下可以是描述性语句，如她最浪漫的时刻、让她感动的事）"
           },
           "limit": {
             "type": "integer",
-            "description": "返回条数，默认50；<=0取全部匹配"
+            "description": "返回条数，默认20"
+          },
+          "mode": {
+            "type": "string",
+            "description": "搜索模式：semantic=语义检索（默认，推荐） | keyword=关键词精确匹配"
           }
         },
         "required": [
@@ -500,6 +508,38 @@
       "defaultInputSchema": {
         "type": "object",
         "properties": {
+          "date": {
+            "type": "string",
+            "description": "日期 YYYY-MM-DD，默认今天"
+          }
+        }
+      },
+      "enabled": true
+    },
+    {
+      "name": "period_set",
+      "description": "设置经期：把某天标记为经期开始或结束。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "on": {
+            "type": "boolean",
+            "description": "true=标记经期开始；false=标记经期结束。默认 true"
+          },
+          "date": {
+            "type": "string",
+            "description": "日期 YYYY-MM-DD，默认今天"
+          }
+        }
+      },
+      "defaultDescription": "设置经期状态：把某天标记为经期开始或结束（写入月历经期记录，前端月历会同步显示）。",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "on": {
+            "type": "boolean",
+            "description": "true=标记经期开始；false=标记经期结束。默认 true"
+          },
           "date": {
             "type": "string",
             "description": "日期 YYYY-MM-DD，默认今天"
@@ -568,7 +608,7 @@
           "content"
         ]
       },
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "pin_delete",
@@ -600,7 +640,7 @@
           }
         }
       },
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "pin_update",
@@ -648,7 +688,7 @@
           }
         }
       },
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "todo_add",

@@ -5,7 +5,8 @@
 合并模块: 涵的日记, 五子棋, 谢的笔记, 月历, 待办/心动/记忆桶
 数据文件保留在原目录
 """
-import os, json, datetime, csv, io, sys, re, urllib.request
+import os, json, datetime, csv, io, sys, re, urllib.request, math
+import numpy as np
 from flask import Flask, Blueprint, request, jsonify
 
 app = Flask(__name__)
@@ -785,6 +786,135 @@ def todo_search_moments():
             if "is_defining" not in m: m["is_defining"] = False
             results.append(m)
     return jsonify(sorted(results, key=lambda x: x["ts"], reverse=True)[:50])
+
+
+# ── 心动时刻语义搜索：TF-IDF + 字符 bigram + 余弦相似度 ──
+_tfidf_cache = {"version": None, "vocab": None, "tfidf_matrix": None, "ids": None}
+
+def _char_bigrams(text):
+    """中文用字符 bigram 切分，适合短文本模糊匹配"""
+    text = text.lower()
+    text = re.sub(r'[^\w\u4e00-\u9fa5]', ' ', text)
+    chars = [c for c in text if not c.isspace()]
+    if len(chars) < 2:
+        return chars
+    return [''.join(chars[i:i+2]) for i in range(len(chars)-1)]
+
+def _build_moment_search_text(m):
+    """把心动时刻的所有文本字段合并成检索文本"""
+    parts = []
+    for key in ['title', 'text', 'feelings', 'defining_note', 'category', 'stage', 'thinking']:
+        v = m.get(key, '')
+        if v:
+            parts.append(str(v))
+    return ' '.join(parts)
+
+def _build_tfidf_cache(moments):
+    """构建 TF-IDF 矩阵并缓存，数据变化时自动重建"""
+    global _tfidf_cache
+    ids = [m.get('id', i) for i, m in enumerate(moments)]
+    # 用数量+前10个id做版本快速校验
+    version = f"{len(ids)}_{'_'.join(str(x) for x in ids[:10])}"
+    if _tfidf_cache["version"] == version and _tfidf_cache["tfidf_matrix"] is not None:
+        return
+    docs = []
+    for m in moments:
+        text = _build_moment_search_text(m)
+        docs.append(_char_bigrams(text))
+    vocab = {}
+    doc_freq = []
+    for tokens in docs:
+        unique = set(tokens)
+        for t in unique:
+            if t not in vocab:
+                vocab[t] = len(vocab)
+                doc_freq.append(0)
+            doc_freq[vocab[t]] += 1
+    n_docs = len(docs)
+    vocab_size = len(vocab)
+    tfidf_matrix = np.zeros((n_docs, vocab_size), dtype=np.float32)
+    for i, tokens in enumerate(docs):
+        if not tokens:
+            continue
+        tf = {}
+        for t in tokens:
+            tf[t] = tf.get(t, 0) + 1
+        total = len(tokens)
+        for t, count in tf.items():
+            j = vocab[t]
+            tf_val = count / total
+            idf_val = math.log((n_docs + 1) / (doc_freq[j] + 1)) + 1
+            tfidf_matrix[i, j] = tf_val * idf_val
+        norm = np.linalg.norm(tfidf_matrix[i])
+        if norm > 0:
+            tfidf_matrix[i] /= norm
+    _tfidf_cache = {
+        "version": version,
+        "vocab": vocab,
+        "tfidf_matrix": tfidf_matrix,
+        "ids": ids
+    }
+
+@todo_bp.route('/todo/api/moments/semantic-search')
+def todo_semantic_search_moments():
+    q = request.args.get('q', '').strip()
+    if not q:
+        return jsonify([])
+    try:
+        limit = int(request.args.get('limit', 20))
+    except:
+        limit = 20
+    threshold_str = request.args.get('threshold', '')
+    try:
+        threshold = float(threshold_str) if threshold_str else 0.08
+    except:
+        threshold = 0.08
+    d = todo_load()
+    moments = d.get('moments', [])
+    if not moments:
+        return jsonify([])
+    _build_tfidf_cache(moments)
+    vocab = _tfidf_cache["vocab"]
+    tfidf_matrix = _tfidf_cache["tfidf_matrix"]
+    q_tokens = _char_bigrams(q)
+    if not q_tokens:
+        return jsonify([])
+    q_vec = np.zeros(len(vocab), dtype=np.float32)
+    q_tf = {}
+    for t in q_tokens:
+        q_tf[t] = q_tf.get(t, 0) + 1
+    total = len(q_tokens)
+    for t, count in q_tf.items():
+        if t in vocab:
+            j = vocab[t]
+            q_vec[j] = count / total
+    q_norm = np.linalg.norm(q_vec)
+    if q_norm == 0:
+        return jsonify([])
+    q_vec /= q_norm
+    scores = tfidf_matrix.dot(q_vec)
+    top_indices = np.argsort(scores)[::-1]
+    results = []
+    seen = set()
+    for idx in top_indices:
+        score = float(scores[idx])
+        if score < threshold:
+            break
+        m = moments[idx].copy()
+        # 去重（同关键词搜索一致）
+        key = _norm_moment_text(m.get("text"))
+        if key in seen: continue
+        seen.add(key)
+        m['_score'] = round(score, 4)
+        for k in ["title","text_han","text_xie","thinking","feelings","category","defining_note","stage"]:
+            if k not in m: m[k] = ""
+        if "timeline_order" not in m: m["timeline_order"] = m["id"]
+        if "is_defining" not in m: m["is_defining"] = False
+        results.append(m)
+        if len(results) >= limit:
+            break
+    return jsonify(results)
+
 
 # --- 记忆桶 API ---
 def todo_find_mem_file(mid):
