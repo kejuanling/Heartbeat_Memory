@@ -1483,15 +1483,26 @@ function starredContextText(limit) {
     }
   }
   const n = Number(limit) || 10;
+  // 先按标星时间倒序（最新的在前），取前 n 条，再按时间正序排列展示
   items.sort(function (a, b) {
     const ta = a.markedAt || "";
     const tb = b.markedAt || "";
     if (ta === tb) return 0;
     if (!ta) return 1;      // 无时间放最后
     if (!tb) return -1;
-    return ta < tb ? -1 : 1;  // 升序：时间早的在前（按时间线顺序铺开）
+    return ta > tb ? -1 : 1;  // 降序：时间晚的在前（先取最新的）
   });
-  return items.slice(0, n).map(function (x) { return x.text; }).join("\n\n");
+  const latest = items.slice(0, n);
+  // 再按时间正序排，保证阅读顺序是早→晚
+  latest.sort(function (a, b) {
+    const ta = a.markedAt || "";
+    const tb = b.markedAt || "";
+    if (ta === tb) return 0;
+    if (!ta) return 1;
+    if (!tb) return -1;
+    return ta < tb ? -1 : 1;
+  });
+  return latest.map(function (x) { return x.text; }).join("\n\n");
 }
 
 // ========================
