@@ -136,6 +136,51 @@ TOOLS["moments_list"] = {
     "handler": tool_moments_list
 }
 
+def tool_starred_list(args):
+    "查看最近标星的消息（记忆碎片）列表，按标星时间倒序（最新在前）返回。"
+    try:
+        limit = int(args.get("limit") or 50)
+    except Exception:
+        limit = 50
+    if limit <= 0:
+        limit = 50
+    if limit > 200:
+        limit = 200
+    path = args.get("file") or "/opt/dylan-heartbeat/data/context_compaction_marks.json"
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        return {"error": "读取标星文件失败: " + str(e)}
+    marks = data.get("marks", {}) if isinstance(data, dict) else {}
+    items = []
+    for key, entry in marks.items():
+        if not entry or not entry.get("content"):
+            continue
+        role = entry.get("role") or ""
+        name = "涵" if role == "user" else "谢"
+        items.append({
+            "key": key,
+            "role": role,
+            "markedAt": entry.get("markedAt", ""),
+            "text": "【" + name + "】 " + entry.get("content")
+        })
+    items.sort(key=lambda x: x.get("markedAt") or "", reverse=True)
+    items = items[:limit]
+    return {"starred": items, "count": len(items)}
+
+TOOLS["starred_list"] = {
+    "description": "查看最近标星的消息（也称记忆碎片），按标星时间倒序（最新在前）返回。当你想了解最近刚被保存为记忆碎片的对话片段、或查阅这段关系里沉淀有哪些重要内容时使用。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "limit": {"type": "integer", "description": "返回条数，默认50，最多200"},
+            "file": {"type": "string", "description": "标星文件路径，一般不用传"}
+        }
+    },
+    "handler": tool_starred_list
+}
+
 def tool_moments_search(args):
     q = args.get("q", "").strip()
     if not q:
