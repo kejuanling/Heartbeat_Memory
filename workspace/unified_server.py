@@ -5,7 +5,7 @@
 合并模块: 涵的日记, 五子棋, 谢的笔记, 月历, 待办/心动/记忆桶
 数据文件保留在原目录
 """
-import os, json, datetime, csv, io, sys, re, urllib.request, math
+import os, json, datetime, csv, io, sys, re, urllib.request, math, hashlib
 import numpy as np
 from flask import Flask, Blueprint, request, jsonify
 
@@ -915,6 +915,92 @@ def todo_semantic_search_moments():
             break
     return jsonify(results)
 
+
+
+# ── 心动时刻标星（加入上下文标星内容，压缩时保留原文） ──
+MARKS_FILE = '/opt/dylan-heartbeat/data/context_compaction_marks.json'
+
+def _load_marks():
+    try:
+        with open(MARKS_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data.get('marks', {})
+    except:
+        return {}
+
+def _save_marks(marks):
+    tmp = MARKS_FILE + '.tmp'
+    os.makedirs(os.path.dirname(MARKS_FILE), exist_ok=True)
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump({'version': 1, 'marks': marks}, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, MARKS_FILE)
+
+def _content_key(role, content):
+    """和 context-replacements.js 的 contentKey 一致：sha256(role+\0+content) 前32位"""
+    text = content or ''
+    raw = (role or '') + '\x00' + text
+    return hashlib.sha256(raw.encode('utf-8')).hexdigest()[:32]
+
+@todo_bp.route('/todo/api/moments/mark', methods=['POST'])
+def todo_mark_moment():
+    data = request.get_json(silent=True) or {}
+    mid = data.get('id')
+    marked = data.get('marked', True)
+    if not mid:
+        return jsonify({'ok': False, 'error': 'id 必填'})
+    d = todo_load()
+    moments = d.get('moments', [])
+    moment = None
+    for m in moments:
+        if m.get('id') == mid:
+            moment = m
+            break
+    if not moment:
+        return jsonify({'ok': False, 'error': '未找到该心动时刻'})
+    # 构造标星内容：标题 + 正文 + 感受
+    parts = []
+    title = moment.get('title', '')
+    if title:
+        parts.append('【心动时刻】' + title)
+    text = moment.get('text', '')
+    if text:
+        parts.append(text)
+    feelings = moment.get('feelings', '')
+    if feelings:
+        parts.append('感受：' + feelings)
+    note = moment.get('defining_note', '')
+    if note and moment.get('is_defining'):
+        parts.append('定义备注：' + note)
+    content = '\n'.join(parts)
+    role = 'user'  # 标星内容按 user 角色存，跟上下文里的用户消息一致
+    key = _content_key(role, content)
+    marks = _load_marks()
+    if marked:
+        marks[key] = {
+            'markedAt': datetime.datetime.now().isoformat(),
+            'content': content,
+            'role': role,
+            'source': 'heart-moment',
+            'momentId': mid,
+            'momentTitle': title
+        }
+        msg = '已标星，将在上下文压缩时保留原文'
+    else:
+        if key in marks:
+            del marks[key]
+        msg = '已取消标星'
+    _save_marks(marks)
+    return jsonify({'ok': True, 'marked': marked, 'key': key, 'message': msg, 'total_marked': len(marks)})
+
+@todo_bp.route('/todo/api/moments/marked-check')
+def todo_check_marked_moments():
+    """批量检查哪些心动已被标星，返回 moment_id 列表"""
+    marks = _load_marks()
+    marked_ids = []
+    for key, entry in marks.items():
+        if entry.get('source') == 'heart-moment' and entry.get('momentId'):
+            marked_ids.append(entry['momentId'])
+    return jsonify({'marked_ids': marked_ids, 'total': len(marked_ids)})
 
 # --- 记忆桶 API ---
 def todo_find_mem_file(mid):

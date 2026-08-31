@@ -1,0 +1,1829 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>心动时刻 · 涵</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@200;300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{
+  --bg:#f7f3ee;
+  --card-bg:#fffcf8;
+  --border:#e8e0d6;
+  --text:#3d3d3d;
+  --text-light:#999;
+  --text-lighter:#ccc;
+  --accent:#d4a0a0;
+  --accent-light:#f0e0e0;
+  --accent-dark:#c08080;
+  --fog:#b8c4c8;
+  --soft:#d4b8a8;
+  --dense:#b0a0b0;
+  --happy:#d4c080;
+  --tremor:#9aa8c8;
+  --shy:#d4a8a8;
+  --love:#c89098;
+  --shadow:0 2px 12px rgba(0,0,0,0.04);
+  --decisive:#b07070;
+}
+body{
+  background:var(--bg);
+  min-height:100vh;
+  font-family:'Noto Serif SC','STKaiti','KaiTi',serif;
+  color:var(--text);
+  padding:0 0 4rem 0;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ── Header ── */
+.header{
+  text-align:center;
+  padding:2rem 1rem 1rem;
+  background:linear-gradient(180deg,#f7f3ee 0%,transparent 100%);
+  position:sticky;top:0;z-index:10;
+}
+.header h1{
+  font-weight:200;
+  font-size:1.3rem;
+  letter-spacing:8px;
+  color:var(--accent-dark);
+  margin-bottom:0.1rem;
+}
+.header{
+  position:relative;
+}
+.import-trigger{
+  position:absolute;top:1.2rem;right:1rem;
+  width:22px;height:22px;border-radius:4px;
+  background:transparent;color:var(--text-lighter);
+  border:1px solid transparent;font-size:0.8rem;
+  cursor:pointer;transition:all 0.25s;
+  display:flex;align-items:center;justify-content:center;
+  font-family:inherit;z-index:5;
+  opacity:0.4;
+}
+.import-trigger:hover{opacity:1;color:var(--accent-dark)}
+.import-trigger.active{opacity:1;color:var(--accent-dark);border-color:var(--accent);background:var(--card-bg)}
+.import-upload-btn{
+  position:absolute;top:1.2rem;right:2.8rem;
+  display:none;padding:0.25rem 0.7rem;border-radius:6px;
+  background:var(--accent);color:#fff;
+  border:none;font-size:0.65rem;letter-spacing:1px;
+  cursor:pointer;transition:all 0.25s;
+  font-family:inherit;z-index:5;
+  box-shadow:0 2px 8px rgba(212,160,160,0.3);
+  white-space:nowrap;
+}
+.import-upload-btn.show{display:inline-flex;align-items:center}
+.import-upload-btn:hover{background:var(--accent-dark)}
+.export-trigger{
+  position:absolute;top:1.2rem;left:1rem;
+  width:22px;height:22px;border-radius:4px;
+  background:transparent;color:var(--text-lighter);
+  border:1px solid transparent;font-size:0.8rem;
+  cursor:pointer;transition:all 0.25s;
+  display:flex;align-items:center;justify-content:center;
+  font-family:inherit;z-index:5;
+  opacity:0.4;
+}
+.export-trigger:hover{opacity:1;color:var(--accent-dark)}
+.export-trigger.active{opacity:1;color:var(--accent-dark);border-color:var(--accent);background:var(--card-bg)}
+.export-btn{
+  position:absolute;top:1.2rem;left:3rem;
+  display:none;padding:0.25rem 0.7rem;border-radius:6px;
+  background:transparent;color:var(--accent);
+  border:1px solid var(--accent);font-size:0.65rem;letter-spacing:1px;
+  cursor:pointer;transition:all 0.25s;
+  font-family:inherit;z-index:5;
+  white-space:nowrap;
+}
+.export-btn.show{display:inline-flex;align-items:center}
+.export-btn:hover{background:rgba(212,160,160,0.15);color:var(--accent-dark)}
+@media(min-width:768px){
+  .export-trigger{top:1.5rem;left:1.5rem;width:26px;height:26px;font-size:0.9rem}
+  .export-btn{top:1.5rem;left:3.4rem;padding:0.3rem 0.9rem;font-size:0.7rem}
+}
+@media(min-width:768px){
+  .import-trigger{top:1.5rem;right:1.5rem;width:26px;height:26px;font-size:0.9rem}
+  .import-upload-btn{top:1.5rem;right:3.4rem;padding:0.3rem 0.9rem;font-size:0.7rem}
+}
+.header .sub{
+  font-size:0.65rem;
+  color:var(--text-lighter);
+  letter-spacing:3px;
+}
+
+/* ── Tabs ── */
+.tabs{
+  display:flex;
+  justify-content:center;
+  gap:0;
+  margin:0.8rem 1rem 1rem;
+  background:var(--card-bg);
+  border-radius:10px;
+  border:1px solid var(--border);
+  overflow:hidden;
+  box-shadow:var(--shadow);
+}
+.tab{
+  flex:1;
+  text-align:center;
+  padding:0.5rem 0;
+  font-size:0.72rem;
+  letter-spacing:2px;
+  color:var(--text-light);
+  cursor:pointer;
+  transition:all 0.25s;
+  position:relative;
+  user-select:none;
+}
+.tab:not(:last-child){border-right:1px solid var(--border)}
+.tab:hover{color:var(--accent-dark)}
+.tab.active{
+  color:var(--accent-dark);
+  font-weight:500;
+}
+.tab.active::after{
+  content:'';
+  position:absolute;
+  bottom:0;left:20%;width:60%;
+  height:2px;
+  background:var(--accent);
+  border-radius:1px;
+}
+
+/* ── Add Button ── */
+.add-fab{
+  position:fixed;
+  bottom:1.5rem;right:1.5rem;
+  width:48px;height:48px;
+  border-radius:50%;
+  background:var(--accent);
+  color:#fff;
+  border:none;
+  font-size:1.4rem;
+  cursor:pointer;
+  box-shadow:0 4px 16px rgba(212,160,160,0.4);
+  transition:all 0.25s;
+  z-index:20;
+  display:flex;align-items:center;justify-content:center;
+  font-family:inherit;
+}
+.add-fab:hover{transform:scale(1.05);background:var(--accent-dark);}
+.add-fab:active{transform:scale(0.95);}
+@media(min-width:768px){
+  .add-fab{width:52px;height:52px;font-size:1.5rem;bottom:2rem;right:2rem}
+}
+
+/* ── Content ── */
+.content{max-width:480px;margin:0 auto;padding:0 1.2rem;display:none}
+.content.active{display:block}
+.content.wide{max-width:720px}
+
+/* ── Category View ── */
+.cat-section{margin-bottom:1.2rem}
+.cat-section .cat-header{
+  display:flex;
+  align-items:center;
+  gap:0.6rem;
+  padding:0.6rem 0.8rem;
+  border-radius:8px;
+  cursor:pointer;
+  user-select:none;
+  transition:all 0.2s;
+}
+.cat-section .cat-header:hover{opacity:0.8}
+@media(min-width:768px){
+  .cat-section .cat-header{padding:0.7rem 1rem;min-height:48px}
+}
+.cat-section .cat-dot{
+  width:10px;height:10px;
+  border-radius:50%;
+  flex-shrink:0;
+}
+.cat-section .cat-label{
+  font-size:0.8rem;
+  letter-spacing:2px;
+  flex:1;
+}
+.cat-section .cat-count{
+  font-size:0.65rem;
+  color:var(--text-light);
+  letter-spacing:1px;
+}
+.cat-section .cat-arrow{
+  font-size:0.65rem;
+  color:var(--text-lighter);
+  transition:transform 0.25s;
+}
+.cat-section .cat-arrow.open{transform:rotate(90deg)}
+.cat-body{display:none;padding-left:0.5rem}
+.cat-body.open{display:block}
+
+/* ── Moment Card ── */
+.moment-card{
+  background:var(--card-bg);
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:0.8rem 1rem;
+  margin:0.5rem 0;
+  box-shadow:var(--shadow);
+  transition:all 0.2s;
+  position:relative;
+}
+.moment-card .title{
+  font-size:0.8rem;
+  font-weight:500;
+  color:var(--accent-dark);
+  letter-spacing:1px;
+  margin-bottom:0.3rem;
+  line-height:1.4;
+}
+.moment-card .title:empty{display:none}
+.moment-card .txt{
+  font-size:0.82rem;
+  line-height:1.8;
+  color:var(--text);
+  white-space:pre-wrap;
+  overflow:hidden;
+}
+.moment-card .txt.collapsed{
+  display:-webkit-box;
+  -webkit-line-clamp:3;
+  -webkit-box-orient:vertical;
+}
+.moment-card .toggle-btn{
+  display:inline-block;
+  font-size:0.7rem;
+  color:var(--accent);
+  cursor:pointer;
+  letter-spacing:1px;
+  margin-top:0.2rem;
+  border-bottom:1px dashed var(--accent);
+  user-select:none;
+}
+.moment-card .toggle-btn:hover{color:var(--accent-dark)}
+.moment-card .feelings{
+  margin-top:0.5rem;
+  padding-top:0.5rem;
+  border-top:1px dashed var(--border);
+  font-size:0.72rem;
+  line-height:1.6;
+  color:var(--text-light);
+  font-style:italic;
+}
+.moment-card .feelings:empty{display:none}
+.moment-card .feelings::before{content:'—— ';color:var(--text-lighter)}
+.moment-card .meta-row{
+  display:flex;
+  align-items:center;
+  gap:0.4rem;
+  margin-top:0.4rem;
+  flex-wrap:wrap;
+}
+.moment-card .cat-badge{
+  font-size:0.6rem;
+  padding:0.1rem 0.5rem;
+  border-radius:8px;
+  letter-spacing:1px;
+  color:#fff;
+}
+.moment-card .cat-badge.fog{background:var(--fog)}
+.moment-card .cat-badge.soft{background:var(--soft)}
+.moment-card .cat-badge.dense{background:var(--dense)}
+.moment-card .cat-badge.happy{background:var(--happy)}
+.moment-card .cat-badge.tremor{background:var(--tremor)}
+.moment-card .cat-badge.shy{background:var(--shy)}
+.moment-card .cat-badge.love{background:var(--love)}
+.moment-card .cat-badge.other{background:#c9bfb5}
+.moment-card .ts{
+  font-size:0.6rem;
+  color:var(--text-lighter);
+  letter-spacing:1px;
+}
+.moment-card .def-note{
+  margin-top:0.3rem;
+  font-size:0.68rem;
+  color:var(--decisive);
+  letter-spacing:1px;
+  line-height:1.5;
+}
+.moment-card .def-note::before{content:'✦ '}
+.moment-card .actions{
+  display:flex;
+  gap:0.5rem;
+  justify-content:flex-end;
+  margin-top:0.4rem;
+}
+.moment-card .actions button{
+  background:none;
+  border:none;
+  font-family:inherit;
+  font-size:0.68rem;
+  color:var(--text-light);
+  cursor:pointer;
+  padding:0.15rem 0.4rem;
+  border-radius:4px;
+  transition:all 0.15s;
+  letter-spacing:1px;
+}
+.moment-card .actions .edit-btn{color:var(--accent)}
+.moment-card .actions .del-btn{color:#c0b0a0}
+.moment-card .actions .star-btn{color:#e0b040}
+.moment-card .actions .star-btn.starred{color:#ffc857;text-shadow:0 0 4px rgba(255,200,87,.4)}
+.moment-card .actions button:hover{opacity:0.7}
+.moment-card .order-btns{
+  display:flex;
+  gap:0.3rem;
+}
+.moment-card .order-btns button{
+  font-size:0.6rem;
+  padding:0.1rem 0.3rem;
+  color:var(--text-lighter);
+  border:1px solid var(--border);
+  border-radius:4px;
+  background:var(--card-bg);
+  cursor:pointer;
+}
+.moment-card .order-btns button:hover{color:var(--accent);border-color:var(--accent)}
+
+/* ── Edit Mode ── */
+.edit-form{
+  background:var(--card-bg);
+  border:1px solid var(--accent);
+  border-radius:10px;
+  padding:0.8rem 1rem;
+  margin:0.5rem 0;
+}
+.edit-form .field{margin-bottom:0.5rem}
+.edit-form .field label{
+  display:block;
+  font-size:0.68rem;
+  color:var(--text-light);
+  letter-spacing:1px;
+  margin-bottom:0.2rem;
+}
+.edit-form .field input,.edit-form .field textarea,.edit-form .field select{
+  width:100%;
+  padding:0.4rem 0.6rem;
+  border:1px solid var(--border);
+  border-radius:6px;
+  font-family:inherit;
+  font-size:0.78rem;
+  color:var(--text);
+  background:#fafaf8;
+  outline:none;
+  transition:border 0.2s;
+}
+.edit-form .field textarea{min-height:80px;resize:vertical;line-height:1.6}
+.edit-form .field input:focus,.edit-form .field textarea:focus,.edit-form .field select:focus{border-color:var(--accent)}
+.edit-form .field select{appearance:none;background:#fafaf8;cursor:pointer}
+.edit-form .row-btn{
+  display:flex;
+  gap:0.5rem;
+  justify-content:flex-end;
+}
+.edit-form .row-btn button{
+  padding:0.3rem 1rem;
+  border:1px solid var(--accent);
+  border-radius:6px;
+  font-family:inherit;
+  font-size:0.72rem;
+  cursor:pointer;
+  letter-spacing:1px;
+  transition:all 0.2s;
+}
+.edit-form .save-btn{
+  background:var(--accent);
+  color:#fff;
+}
+.edit-form .save-btn:hover{background:var(--accent-dark)}
+.edit-form .cancel-btn{
+  background:transparent;
+  color:var(--text-light);
+}
+.edit-form .cancel-btn:hover{background:var(--accent-light);color:var(--accent-dark)}
+.edit-form .checkbox-row{
+  display:flex;
+  align-items:center;
+  gap:0.5rem;
+}
+.edit-form .checkbox-row input[type="checkbox"]{
+  width:auto;
+  accent-color:var(--accent);
+  cursor:pointer;
+}
+.edit-form .checkbox-row label{
+  font-size:0.72rem;
+  cursor:pointer;
+}
+
+/* ── Modal / Panel ── */
+.panel-overlay{
+  position:fixed;inset:0;
+  background:rgba(0,0,0,0.2);
+  z-index:30;
+  display:none;
+  backdrop-filter:blur(4px);
+  -webkit-backdrop-filter:blur(4px);
+}
+.panel-overlay.open{display:block}
+.panel{
+  position:fixed;
+  bottom:0;left:0;right:0;
+  max-height:85vh;
+  overflow-y:auto;
+  background:var(--card-bg);
+  border-radius:16px 16px 0 0;
+  padding:1.2rem 1.2rem 2rem;
+  z-index:31;
+  transform:translateY(100%);
+  transition:transform 0.35s ease;
+  box-shadow:0 -4px 24px rgba(0,0,0,0.08);
+}
+.panel.open{transform:translateY(0)}
+@media(min-width:768px){
+  .panel-overlay{display:none}
+  .panel-overlay.open{display:block}
+  .panel{
+    top:50%;left:50%;right:auto;bottom:auto;
+    transform:translate(-50%,-50%) scale(0.9);
+    width:640px;max-width:90vw;
+    max-height:80vh;
+    border-radius:16px;
+    padding:1.5rem 1.8rem 2rem;
+    box-shadow:0 8px 40px rgba(0,0,0,0.15);
+    opacity:0;
+    transition:all 0.3s ease;
+  }
+  .panel.open{
+    transform:translate(-50%,-50%) scale(1);
+    opacity:1;
+  }
+}
+.panel .handle{
+  width:36px;height:4px;
+  background:var(--border);
+  border-radius:2px;
+  margin:0 auto 0.8rem;
+  cursor:pointer;
+}
+@media(min-width:768px){.panel .handle{display:none}}
+.panel h2{
+  font-weight:300;
+  font-size:0.95rem;
+  letter-spacing:3px;
+  color:var(--accent-dark);
+  text-align:center;
+  margin-bottom:1rem;
+}
+
+/* ── Empty ── */
+.empty-state{
+  text-align:center;
+  padding:3rem 1rem;
+  color:var(--text-lighter);
+  font-size:0.78rem;
+  letter-spacing:2px;
+  line-height:2;
+}
+
+/* ── Defining View ── */
+@media(min-width:768px){
+  #defContainer{display:flex;flex-wrap:wrap;gap:0.8rem}
+  #defContainer .def-card{flex:1 1 calc(50% - 0.8rem);margin:0}
+}
+@media(min-width:1024px){
+  #defContainer .def-card{flex:1 1 calc(33.33% - 0.8rem)}
+}
+.def-card{
+  background:var(--card-bg);
+  border:1px solid var(--border);
+  border-left:3px solid var(--decisive);
+  border-radius:8px;
+  padding:0.8rem 1rem;
+  margin:0.5rem 0;
+  box-shadow:var(--shadow);
+}
+.def-card .def-note{
+  font-size:0.72rem;
+  color:var(--decisive);
+  letter-spacing:1px;
+  line-height:1.6;
+  margin-bottom:0.3rem;
+}
+.def-card .quote{
+  font-size:0.82rem;
+  line-height:1.7;
+  color:var(--text);
+  padding-left:0.5rem;
+  border-left:2px solid var(--accent-light);
+  margin-top:0.3rem;
+  overflow:hidden;
+  white-space:pre-wrap;
+}
+.def-card .quote.collapsed{
+  display:-webkit-box;
+  -webkit-line-clamp:3;
+  -webkit-box-orient:vertical;
+}
+.def-card .toggle-def-btn{
+  display:inline-block;
+  font-size:0.7rem;
+  color:var(--accent);
+  cursor:pointer;
+  letter-spacing:1px;
+  margin-top:0.2rem;
+  border-bottom:1px dashed var(--accent);
+  user-select:none;
+}
+.def-card .toggle-def-btn:hover{color:var(--accent-dark)}
+
+/* ── Loading ── */
+.loading{
+  text-align:center;
+  padding:2rem;
+  color:var(--text-lighter);
+  font-size:0.72rem;
+  letter-spacing:2px;
+}
+
+/* ── Card Grid for Tablet+ ── */
+@media(min-width:768px){
+  .cat-body{display:none;flex-wrap:wrap;gap:0.8rem;padding-left:0}
+  .cat-body.open{display:flex}
+  .cat-body .moment-card{flex:1 1 calc(50% - 0.8rem);min-width:0;margin:0}
+}
+@media(min-width:1024px){
+  .cat-body .moment-card{flex:1 1 calc(33.33% - 0.8rem)}
+}
+/* ── Animations ── */
+@keyframes fadeIn{
+  from{opacity:0;transform:translateY(8px)}
+  to{opacity:1;transform:translateY(0)}
+}
+.moment-card,.def-card,.cat-section{animation:fadeIn 0.3s ease}
+
+/* ── Responsive: Tablet+ ── */
+@media(min-width:600px){
+  .content{max-width:540px}
+  .search-bar{max-width:540px}
+}
+@media(min-width:768px){
+  .content{max-width:720px}
+  .search-bar{max-width:720px}
+  .header h1{font-size:1.6rem;letter-spacing:10px}
+  .header{padding:2.5rem 1rem 1.2rem}
+  .moment-card{padding:1rem 1.2rem}
+  .moment-card .title{font-size:0.88rem}
+  .moment-card .txt{font-size:0.88rem;line-height:1.9}
+  .moment-card .feelings{font-size:0.78rem}
+  .cat-section .cat-label{font-size:0.88rem}
+  .moment-card .actions button{padding:0.2rem 0.6rem;font-size:0.72rem}
+  .edit-form .field input,.edit-form .field textarea,.edit-form .field select{font-size:0.85rem}
+  .edit-form .field label{font-size:0.75rem}
+  .panel .handle{display:none}
+}
+@media(min-width:1024px){
+  .content{max-width:960px}
+  .search-bar{max-width:960px}
+  .header h1{font-size:1.8rem}
+  .header{padding:3rem 1rem 1.5rem}
+}
+
+/* ── Timeline ── */
+@media(min-width:768px){
+  .tl-marker{width:6rem;font-size:0.8rem}
+  .tl-item{font-size:0.78rem;padding:0.3rem 0.8rem}
+  .tl-stage{gap:1rem}
+  .tl-items{display:flex;flex-wrap:wrap;gap:0.2rem}
+  .tl-item{margin:0}
+}
+@media(min-width:1024px){
+  .tl-marker{width:7rem;font-size:0.85rem}
+  .tl-item{font-size:0.82rem;padding:0.35rem 1rem}
+}
+.tl-line{position:relative;padding:1rem 0}
+.tl-stage{display:flex;align-items:flex-start;gap:0.8rem;margin-bottom:0.3rem;position:relative}
+.tl-marker{
+  flex-shrink:0;
+  width:4.5rem;
+  text-align:right;
+  font-size:0.72rem;
+  letter-spacing:1px;
+  color:var(--text-light);
+  padding:0.4rem 0;
+  position:relative;
+  font-weight:300;
+}
+.tl-line-connector{
+  width:2px;
+  flex-shrink:0;
+  background:var(--border);
+  position:relative;
+  min-height:40px;
+  align-self:stretch;
+}
+.tl-line-connector::before{
+  content:'';
+  position:absolute;
+  width:8px;height:8px;
+  border-radius:50%;
+  top:0.5rem;left:50%;
+  transform:translateX(-50%);
+  transition:all 0.2s;
+  border:2px solid #e0d0d0;
+  background:#f0e8e8;
+}
+.tl-stage[data-stage="flutter"].has-items .tl-line-connector::before{background:#dcc8c8;border-color:#d0b8b8}
+.tl-stage[data-stage="drown"].has-items .tl-line-connector::before{background:#d0b8b8;border-color:#c4a8a8}
+.tl-stage[data-stage="heartbeat"].has-items .tl-line-connector::before{background:#c4a8a8;border-color:#b89898}
+.tl-stage[data-stage="like"].has-items .tl-line-connector::before{background:#b89898;border-color:#ac8888}
+.tl-stage[data-stage="love"].has-items .tl-line-connector::before{background:#ac8888;border-color:#a07878}
+.tl-items{flex:1;padding:0.2rem 0}
+.tl-item{
+  display:inline-block;
+  background:var(--card-bg);
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:0.2rem 0.6rem;
+  margin:0.15rem 0.15rem;
+  font-size:0.7rem;
+  color:var(--text);
+  letter-spacing:1px;
+  cursor:pointer;
+  transition:all 0.15s;
+  line-height:1.5;
+}
+.tl-item:hover{background:var(--accent-light);border-color:var(--accent)}
+.tl-item .tl-emoji{font-size:0.65rem;margin-right:0.2rem}
+.tl-empty{color:var(--text-lighter);font-size:0.65rem;padding:0.1rem 0;letter-spacing:1px;font-style:italic}
+.tl-footer{text-align:center;padding:1rem 0;color:var(--text-lighter);font-size:0.6rem;letter-spacing:2px}
+
+/* last connector smaller */
+.tl-stage:last-child .tl-line-connector{min-height:10px}
+
+
+/* ── Drag / Move Mode ── */
+.tl-item{cursor:grab;user-select:none}
+.tl-item.moving{background:var(--accent-light);border-color:var(--accent);box-shadow:0 0 0 2px var(--accent);position:relative}
+.tl-item.moving::after{content:'移动中…';position:absolute;top:-1.5rem;left:0;font-size:0.6rem;color:var(--accent-dark);letter-spacing:1px;white-space:nowrap}
+.tl-stage.droppable{cursor:pointer;background:transparent;transition:background 0.2s;border-radius:6px;padding:0 0.4rem;margin:0 -0.4rem}
+.tl-stage.droppable:hover{background:rgba(212,160,160,0.12)}
+.tl-stage.droppable .tl-line-connector::before{border-color:var(--accent);box-shadow:0 0 8px rgba(212,160,160,0.4)}
+.tl-stage.droppable .tl-marker{color:var(--accent-dark);font-weight:500}
+.tl-cancel-move{
+  display:none;text-align:center;padding:0.5rem;
+  font-size:0.65rem;color:var(--text-lighter);
+  letter-spacing:1px;cursor:pointer;
+}
+.tl-cancel-move.show{display:block}
+.tl-cancel-move:hover{color:var(--accent-dark)}
+
+
+/* ── Timeline item row with order buttons ── */
+.tl-item-row{display:flex;align-items:center;gap:0.3rem;margin:0.2rem 0;padding:0.1rem 0}
+.tl-item-row .tl-item{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl-item{cursor:pointer}
+.tl-item:hover{color:var(--accent-dark)}
+
+
+/* ── Search ── */
+.search-bar{max-width:480px;margin:0.5rem auto 0;padding:0 1.2rem}
+.search-bar input{
+  width:100%;padding:0.4rem 0.8rem;
+  border:1px solid var(--border);border-radius:8px;
+  font-family:inherit;font-size:0.78rem;color:var(--text);
+  background:var(--card-bg);outline:none;
+  transition:border 0.2s;
+}
+.search-bar input:focus{border-color:var(--accent)}
+.search-bar input::placeholder{color:var(--text-lighter);font-size:0.7rem;letter-spacing:1px}
+.search-results{display:none}
+.search-results.show{display:block}
+.search-results .moment-card{margin:0.4rem 0}
+@media(min-width:768px){
+  .search-results{display:flex;flex-wrap:wrap;gap:0.8rem;padding:0 1rem}
+  .search-results.show{display:flex}
+  .search-results .moment-card{flex:1 1 calc(50% - 0.8rem);margin:0}
+}
+@media(min-width:1024px){
+  .search-results .moment-card{flex:1 1 calc(33.33% - 0.8rem)}
+}
+
+
+.toast{
+  position:fixed;bottom:5rem;left:50%;transform:translateX(-50%);
+  background:rgba(0,0,0,0.75);color:#fff;
+  padding:0.5rem 1.2rem;border-radius:8px;
+  font-size:0.75rem;letter-spacing:2px;
+  font-family:inherit;
+  opacity:0;transition:opacity 0.3s;
+  z-index:50;pointer-events:none;
+  backdrop-filter:blur(4px);
+  white-space:nowrap;
+}
+.toast.show{opacity:1}
+
+/* 深度思考 */
+.thinking-toggle{
+  display:inline-block;font-size:0.65rem;color:var(--text-light);
+  cursor:pointer;letter-spacing:1px;margin-top:0.3rem;
+  user-select:none;
+}
+.thinking-toggle:hover{color:var(--accent)}
+.thinking-box{display:none;margin-top:0.5rem}
+.thinking-box.open{display:block}
+.thinking-box textarea{
+  width:100%;padding:0.4rem 0.6rem;
+  border:1px solid var(--border);border-radius:6px;
+  font-family:inherit;font-size:0.78rem;color:var(--text);
+  background:#faf5f0;outline:none;min-height:80px;resize:vertical;
+  line-height:1.6
+}
+.thinking-box textarea:focus{border-color:var(--dense)}
+
+/* 卡片中的思考内容 */
+.moment-card .thinking-block{
+  margin-top:0.5rem;padding-top:0.5rem;
+  border-top:1px dashed var(--border);
+  font-size:0.72rem;line-height:1.7;color:var(--dense);
+  font-style:italic
+}
+.moment-card .thinking-block .thinking-label{
+  font-size:0.6rem;letter-spacing:1px;
+  color:var(--dense);margin-bottom:0.2rem;
+  cursor:pointer;user-select:none;display:inline-block
+}
+.moment-card .thinking-block .thinking-label:hover{color:var(--accent-dark)}
+.moment-card .thinking-block .thinking-body{display:none;white-space:pre-wrap}
+.moment-card .thinking-block .thinking-body.open{display:block}
+
+
+
+/* ── 阅读模式（大字全文） ── */
+.reader-overlay{
+  position:fixed;inset:0;z-index:200;
+  background:rgba(15,10,8,0.6);
+  display:none;align-items:center;justify-content:center;
+  padding:1rem;
+}
+.reader-overlay.open{display:flex}
+.reader{
+  background:var(--card-bg);
+  border:1px solid var(--border);
+  border-radius:14px;
+  width:100%;max-width:720px;
+  max-height:88vh;
+  overflow-y:auto;
+  padding:1.4rem 1.6rem;
+  box-shadow:0 10px 40px rgba(0,0,0,0.25);
+  position:relative;
+}
+.reader .reader-close{
+  position:sticky;top:0;float:right;
+  background:none;border:none;
+  font-size:1.5rem;line-height:1;
+  color:var(--text-lighter);cursor:pointer;
+  padding:0.2rem 0.5rem;z-index:2;
+}
+.reader .reader-close:hover{color:var(--accent)}
+.reader .reader-title{
+  font-size:1.15rem;font-weight:600;color:var(--accent-dark);
+  letter-spacing:2px;margin-bottom:0.4rem;line-height:1.5;
+}
+.reader .reader-meta{
+  display:flex;align-items:center;gap:0.5rem;
+  margin-bottom:0.8rem;font-size:0.75rem;color:var(--text-light);
+}
+.reader .reader-txt{
+  font-size:1.05rem;line-height:2.05;
+  color:var(--text);white-space:pre-wrap;
+}
+.reader .reader-feelings{
+  margin-top:1rem;padding-top:0.8rem;
+  border-top:1px dashed var(--border);
+  font-size:0.9rem;line-height:1.8;color:var(--text-light);font-style:italic;
+}
+.reader .reader-thinking{
+  margin-top:1rem;padding-top:0.8rem;
+  border-top:1px dashed var(--border);
+  font-size:0.9rem;line-height:1.8;color:var(--dense);font-style:italic;
+}
+.reader .reader-thinking-label{
+  font-size:0.7rem;letter-spacing:1px;color:var(--dense);margin-bottom:0.3rem;
+}
+
+/* ── 编辑框放大（半屏输入） ── */
+.edit-form .field{position:relative}
+.thinking-box{position:relative}
+.expand-input-btn{
+  position:absolute;top:1.5rem;right:0.35rem;
+  background:none;border:none;font-size:0.85rem;
+  color:var(--text-lighter);cursor:pointer;
+  padding:0.1rem 0.3rem;line-height:1;z-index:2;
+}
+.expand-input-btn:hover{color:var(--accent)}
+.input-expand-overlay{
+  position:fixed;top:0;left:0;right:0;
+  height:100vh;
+  height:100dvh;
+  z-index:210;
+  background:var(--card-bg);
+  display:none;flex-direction:column;
+}
+.input-expand-overlay.open{display:flex}
+.input-expand-panel{
+  flex:1;display:flex;flex-direction:column;gap:0.5rem;
+  padding:0.8rem 1rem 1.2rem;
+}
+.input-expand-head{display:flex;align-items:center;justify-content:space-between}
+.input-expand-head span{font-size:0.85rem;color:var(--text-light);letter-spacing:1px}
+.input-expand-head button{background:none;border:none;font-size:1.4rem;color:var(--text-lighter);cursor:pointer;line-height:1;padding:0.1rem 0.3rem}
+.input-expand-head button:hover{color:var(--accent)}
+.input-expand-area{
+  flex:1;width:100%;resize:none;
+  font-family:inherit;font-size:1rem;line-height:1.8;
+  color:var(--text);background:var(--bg);
+  border:1px solid var(--border);border-radius:8px;
+  padding:0.6rem 0.7rem;
+}
+</style>
+<script src="/theme/theme.js"></script>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <h1>心 动 时 刻</h1>
+  <div class="sub">涵记录 · 谢停云可阅</div>
+  <button class="export-trigger" id="exportTrigger" title="导出全部数据">⬇</button>
+  <button class="export-btn" id="exportBtn" onclick="exportAllData()" title="导出全部心动时刻数据">导出全部</button>
+  <button class="import-trigger" id="importTrigger" title="导入聊天记录 / JSON 导出">⬆</button>
+  <button class="import-upload-btn" id="importUploadBtn">导入聊天/JSON</button>
+  <input type="file" id="importFileHidden" accept=".txt,text/plain,.json,application/json" style="display:none">
+</div>
+
+<!-- Search -->
+<div class="search-bar">
+  <input type="text" id="searchInput" placeholder="搜索心动时刻的关键词…" oninput="searchMoments(this.value)">
+</div>
+<div class="search-results" id="searchResults"></div>
+
+<!-- Tabs -->
+<div class="tabs" id="tabs">
+  <div class="tab active" data-tab="category">情绪质地</div>
+  <div class="tab" data-tab="timeline">时间线</div>
+  <div class="tab" data-tab="defining">定义</div>
+</div>
+
+<!-- Content: 情绪质地 -->
+<div class="content active" id="view-category">
+  <div id="catContainer"><div class="loading">加载中...</div></div>
+</div>
+
+<!-- Content: 时间线 -->
+<div class="content" id="view-timeline">
+  <div id="tlContainer"><div class="loading">加载中...</div></div>
+</div>
+
+<!-- Content: 定义 -->
+<div class="content" id="view-defining">
+  <div id="defContainer"><div class="loading">加载中...</div></div>
+</div>
+
+<!-- Add FAB -->
+<button class="add-fab" id="addFab" title="记录新的心动时刻">+</button>
+
+<!-- Add/Edit Panel Overlay -->
+<div class="panel-overlay" id="panelOverlay"></div>
+
+<!-- Add/Edit Panel -->
+<div class="panel" id="panel">
+  <div class="handle" id="panelHandle"></div>
+  <h2 id="panelTitle">记录心动时刻</h2>
+
+  <div class="edit-form" style="border:none;padding:0;margin:0">
+    <div class="field">
+      <label>标题（用于时间线排序）</label>
+      <input type="text" id="fTitle" placeholder="给这个时刻一个名字…" maxlength="60">
+    </div>
+
+    <div class="field">
+      <label>涵</label>
+      <textarea id="fTextHan" placeholder="涵说的话..." maxlength="2000" rows="4"></textarea>
+      <button type="button" class="expand-input-btn" onclick="expandInput('fTextHan')" title="放大输入框">&#x2922;</button>
+    </div>
+
+    <div class="field">
+      <label>我</label>
+      <textarea id="fTextXie" placeholder="我说的话..." maxlength="2000" rows="4"></textarea>
+      <button type="button" class="expand-input-btn" onclick="expandInput('fTextXie')" title="放大输入框">&#x2922;</button>
+      <span class="thinking-toggle" id="thinkingToggle">＋ 添加深度思考…</span>
+      <div class="thinking-box" id="thinkingBox">
+        <textarea id="fThinking" placeholder="我的深度思考内容..." maxlength="3000" rows="6"></textarea>
+        <button type="button" class="expand-input-btn" onclick="expandInput('fThinking')" title="放大输入框">&#x2922;</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>我的感想</label>
+      <textarea id="fFeelings" placeholder="此刻你的感受是什么..." maxlength="1000" rows="3"></textarea>
+      <button type="button" class="expand-input-btn" onclick="expandInput('fFeelings')" title="放大输入框">&#x2922;</button>
+    </div>
+
+    <div class="field">
+      <label>情绪质地</label>
+      <select id="fCategory">
+        <option value="">—— 未归类 ——</option>
+        <option value="fog">迷雾</option>
+        <option value="soft">柔软</option>
+        <option value="dense">密集</option>
+        <option value="happy">快乐</option>
+        <option value="tremor">颤抖</option>
+        <option value="shy">羞涩</option>
+        <option value="love">爱</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label>感情发展阶段</label>
+      <select id="fStage">
+        <option value="">—— 未选择 ——</option>
+        <option value="flutter">悸动</option>
+        <option value="drown">沉溺</option>
+        <option value="heartbeat">心动</option>
+        <option value="like">喜欢</option>
+        <option value="love">爱</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <div class="checkbox-row">
+        <input type="checkbox" id="fDefining">
+        <label for="fDefining">这是定义谢意行的时刻</label>
+      </div>
+    </div>
+
+    <div class="field" id="defNoteField" style="display:none">
+      <label>这个时刻定义了谢意行的什么</label>
+      <textarea id="fDefNote" placeholder="比如：他蹲下来不是因为礼貌，是因为他真的想看那朵花..." maxlength="500" rows="2"></textarea>
+    </div>
+
+    <div class="row-btn">
+      <button class="cancel-btn" id="panelCancel">取消</button>
+      <button class="save-btn" id="panelSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+
+// ── 对话文本辅助函数 ──
+function buildDialogText(han, xie){
+  var parts = [];
+  if(han) parts.push('涵：' + han);
+  if(xie) parts.push('我：' + xie);
+  return parts.join('\n');
+}
+function parseDialogText(text){
+  if(!text) return {han:'', xie:''};
+  var han = '', xie = '';
+  var lines = text.split('\n');
+  var cur = null;
+  lines.forEach(function(line){
+    if(line.indexOf('涵：') === 0 || line.indexOf('涵:') === 0){
+      cur = 'han';
+      han += (han ? '\n' : '') + line.substring(2).trim();
+    } else if(line.indexOf('谢：') === 0 || line.indexOf('谢:') === 0 || line.indexOf('我：') === 0 || line.indexOf('我:') === 0){
+      cur = 'xie';
+      xie += (xie ? '\n' : '') + line.substring(2).trim();
+    } else if(cur === 'han'){
+      han += '\n' + line;
+    } else if(cur === 'xie'){
+      xie += '\n' + line;
+    } else {
+      // 没有前缀，默认归为涵
+      han += (han ? '\n' : '') + line;
+    }
+  });
+  return {han:han.trim(), xie:xie.trim()};
+}
+
+var API = window.location.origin;
+var editingId = null;
+
+// ── Tab switching ──
+var tabs = document.querySelectorAll('.tab');
+tabs.forEach(function(tab){
+  tab.addEventListener('click', function(){
+    tabs.forEach(function(t){t.classList.remove('active')});
+    tab.classList.add('active');
+    document.querySelectorAll('.content').forEach(function(c){c.classList.remove('active')});
+    document.getElementById('view-' + tab.dataset.tab).classList.add('active');
+    // 切换视图时清空搜索状态（搜索框始终全局显示）
+    var searchResults = document.getElementById('searchResults');
+    document.getElementById('searchInput').value = '';
+    searchResults.classList.remove('show');
+    searchResults.innerHTML = '';
+    load();
+  });
+});
+
+// ── Panel control ──
+function openPanel(title, data){
+  document.getElementById('panelTitle').textContent = title;
+  document.getElementById('fTitle').value = data.title || '';
+  // 回填涵和谢的对话
+  // 优先用新字段 text_han/text_xie，但如果只有旧字段 text，就解析它
+  if ((data.text_han && data.text_han.trim()) || (data.text_xie && data.text_xie.trim())) {
+    document.getElementById('fTextHan').value = data.text_han || '';
+    document.getElementById('fTextXie').value = data.text_xie || '';
+  } else {
+    // 兼容旧数据：从 text 中解析
+    var parsed = parseDialogText(data.text || '');
+    document.getElementById('fTextHan').value = parsed.han;
+    document.getElementById('fTextXie').value = parsed.xie;
+  }
+  document.getElementById('fFeelings').value = data.feelings || '';
+  var catSel = document.getElementById('fCategory');
+  var catVal = catKey(data.category || '');
+  var hasVal = false;
+  for(var i=0;i<catSel.options.length;i++){ if(catSel.options[i].value === catVal){ hasVal = true; break; } }
+  if(!hasVal && catVal){
+    var opt2 = document.createElement('option');
+    opt2.value = catVal; opt2.textContent = catLabel(catVal);
+    catSel.appendChild(opt2);
+  }
+  catSel.value = catVal;
+  document.getElementById('fStage').value = data.stage || '';
+  document.getElementById('fDefining').checked = data.is_defining || false;
+  document.getElementById('fDefNote').value = data.defining_note || '';
+  document.getElementById('defNoteField').style.display = data.is_defining ? 'block' : 'none';
+  // 深度思考
+  var hasThinking = !!(data.thinking && data.thinking.trim());
+  document.getElementById('fThinking').value = data.thinking || '';
+  var tBox = document.getElementById('thinkingBox');
+  var tToggle = document.getElementById('thinkingToggle');
+  if(hasThinking){
+    tBox.classList.add('open');
+    tToggle.textContent = '－ 收起深度思考';
+  } else {
+    tBox.classList.remove('open');
+    tToggle.textContent = '＋ 添加深度思考…';
+  }
+  editingId = data.id !== undefined ? data.id : null;
+  document.getElementById('panelOverlay').classList.add('open');
+  document.getElementById('panel').classList.add('open');
+  setTimeout(function(){
+    if(window.innerWidth >= 768) document.getElementById('fTitle').focus();
+  }, 400);
+}
+function closePanel(){
+  document.getElementById('panelOverlay').classList.remove('open');
+  document.getElementById('panel').classList.remove('open');
+  editingId = null;
+}
+
+document.getElementById('addFab').addEventListener('click', function(){
+  openPanel('记录心动时刻', {});
+});
+document.getElementById('panelOverlay').addEventListener('click', closePanel);
+document.getElementById('panelCancel').addEventListener('click', closePanel);
+document.getElementById('panelHandle').addEventListener('click', closePanel);
+document.getElementById('fDefining').addEventListener('change', function(){
+  document.getElementById('defNoteField').style.display = this.checked ? 'block' : 'none';
+});
+// ── 深度思考展开/收起 ──
+document.getElementById('thinkingToggle').addEventListener('click', function(){
+  var box = document.getElementById('thinkingBox');
+  box.classList.toggle('open');
+  this.textContent = box.classList.contains('open') ? '－ 收起深度思考' : '＋ 添加深度思考…';
+});
+
+// ── 导出功能 ──
+var exportMenuOpen = false;
+
+function toggleExportMenu(){
+  exportMenuOpen = !exportMenuOpen;
+  var trigger = document.getElementById('exportTrigger');
+  var exportBtn = document.getElementById('exportBtn');
+  if(exportMenuOpen){
+    trigger.classList.add('active');
+    exportBtn.classList.add('show');
+  } else {
+    trigger.classList.remove('active');
+    exportBtn.classList.remove('show');
+  }
+}
+
+function closeExportMenu(){
+  exportMenuOpen = false;
+  document.getElementById('exportTrigger').classList.remove('active');
+  document.getElementById('exportBtn').classList.remove('show');
+}
+
+document.getElementById('exportTrigger').addEventListener('click', toggleExportMenu);
+
+// ── 导入功能 ──
+var importMenuOpen = false;
+
+function toggleImportMenu(){
+  importMenuOpen = !importMenuOpen;
+  var trigger = document.getElementById('importTrigger');
+  var uploadBtn = document.getElementById('importUploadBtn');
+  if(importMenuOpen){
+    trigger.classList.add('active');
+    uploadBtn.classList.add('show');
+  } else {
+    trigger.classList.remove('active');
+    uploadBtn.classList.remove('show');
+  }
+}
+
+function doImportFile(file){
+  // 关闭菜单
+  importMenuOpen = false;
+  document.getElementById('importTrigger').classList.remove('active');
+  document.getElementById('importUploadBtn').classList.remove('show');
+  
+  // 读文件并导入
+  var reader = new FileReader();
+  reader.onload = function(e){
+    var content = e.target.result;
+    var items = null;
+    var isJson = /\.json$/i.test(file.name) || /^\s*[\[{]/.test(content);
+    if(isJson){
+      try{
+        var obj = JSON.parse(content);
+        if(Array.isArray(obj)){ items = obj; }
+        else if(obj && Array.isArray(obj.moments)){ items = obj.moments; }
+        else if(obj && Array.isArray(obj.items)){ items = obj.items; }
+      }catch(err){
+        alert('JSON 解析失败：' + err.message);
+        return;
+      }
+      if(!items || !items.length){ alert('JSON 里没有可导入的记录'); return; }
+    } else {
+      items = parseChatLog(content);
+      if(items.length === 0){
+        alert('未解析到有效对话，请检查文件格式');
+        return;
+      }
+    }
+    // 直接上传
+    fetch(API + '/todo/api/moments/import', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({items: items})
+    }).then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d.ok){
+        toast('成功导入 ' + d.imported + ' 条对话');
+        load();
+      } else {
+        alert('导入失败');
+      }
+    });
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+document.getElementById('importTrigger').addEventListener('click', toggleImportMenu);
+document.getElementById('importUploadBtn').addEventListener('click', function(){
+  document.getElementById('importFileHidden').click();
+});
+document.getElementById('importFileHidden').addEventListener('change', function(e){
+  if(e.target.files && e.target.files[0]) {
+    doImportFile(e.target.files[0]);
+    this.value = '';
+  }
+});
+
+
+// 解析聊天记录
+function parseChatLog(raw){
+  if(!raw) return [];
+  // 规范化换行
+  raw = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  
+  // 第一步：按说话人 header 切分成段（每段 = 一个人说的话 或 思考内容）
+  // header 格式: "2026年8月2日 02:13:50 · 涵" 或 "2026年8月2日 02:13:50 · 谢停云"
+  var headerRe = /^(\d{4}年\d+月\d+日\s+\d+:\d+:\d+)\s*·\s*(.+)$/gm;
+  var segments = []; // [{type: 'han'|'xie'|'thinking', content: '', ts: ''}]
+  var lastIdx = 0;
+  var match;
+  
+  while((match = headerRe.exec(raw)) !== null){
+    // 把上一个 header 到这个 header 之间的内容归到上一段
+    if(lastIdx > 0){
+      segments[segments.length-1].content = raw.substring(lastIdx, match.index).trim();
+    }
+    // 开始新段
+    var speaker = match[2].trim();
+    var type = null;
+    if(speaker.indexOf('涵') >= 0) type = 'han';
+    else if(speaker.indexOf('谢') >= 0) type = 'xie';
+    segments.push({type: type, ts: match[1], content: ''});
+    lastIdx = headerRe.lastIndex;
+  }
+  // 最后一段
+  if(segments.length > 0 && lastIdx < raw.length){
+    segments[segments.length-1].content = raw.substring(lastIdx).trim();
+  }
+  
+  // 处理 [思考内容] 标记：如果某段内容里含有 [思考内容]，把它拆成思考段
+  var finalSegments = [];
+  segments.forEach(function(seg){
+    if(!seg.content) return;
+    // 检查内容中是否有 [思考内容]
+    var thinkIdx = seg.content.indexOf('[思考内容]');
+    if(thinkIdx >= 0){
+      // 前面部分保留原类型
+      var before = seg.content.substring(0, thinkIdx).trim();
+      if(before) finalSegments.push({type: seg.type, ts: seg.ts, content: before});
+      // 后面作为思考
+      var after = seg.content.substring(thinkIdx + '[思考内容]'.length).trim();
+      if(after) finalSegments.push({type: 'thinking', ts: seg.ts, content: after});
+    } else {
+      finalSegments.push(seg);
+    }
+  });
+  
+  // 第二步：把段组合成轮对话（涵 + 谢 + 思考 = 一轮）
+  var results = [];
+  var cur = {text_han: '', text_xie: '', thinking: '', ts: null};
+  
+  function flushCur(){
+    if(cur.text_han || cur.text_xie){
+      var item = {text_han: cur.text_han, text_xie: cur.text_xie, thinking: cur.thinking, category: ''};
+      if(cur.ts){
+        var tm = cur.ts.match(/(\d{4})年(\d+)月(\d+)日\s+(\d+):(\d+):(\d+)/);
+        if(tm) item.ts = tm[1] + '-' + pad2(tm[2]) + '-' + pad2(tm[3]) + 'T' + pad2(tm[4]) + ':' + pad2(tm[5]) + ':' + pad2(tm[6]);
+      }
+      results.push(item);
+    }
+    cur = {text_han: '', text_xie: '', thinking: '', ts: null};
+  }
+  
+  finalSegments.forEach(function(seg){
+    // 剥掉 [08-02 02:14] 前缀
+    var content = seg.content;
+    content = content.replace(/^\[\d{2}-\d{2}\s+\d{2}:\d{2}\]\s*/gm, '');
+    content = content.trim();
+    if(!content) return;
+    
+    if(seg.type === 'han'){
+      // 如果当前已经有涵了，说明是新一轮，先 flush
+      if(cur.text_han) flushCur();
+      cur.text_han = content;
+      if(!cur.ts) cur.ts = seg.ts;
+    } else if(seg.type === 'xie'){
+      cur.text_xie = content;
+      if(!cur.ts) cur.ts = seg.ts;
+      // 谢之后如果紧接着是思考就一起，否则也可以 flush（允许有涵没谢的情况）
+    } else if(seg.type === 'thinking'){
+      cur.thinking = content;
+      // 思考内容一般在谢之后，作为一轮的结束
+      flushCur();
+    }
+  });
+  // flush 最后一轮
+  flushCur();
+  
+  return results;
+}
+
+function pad2(n){ return String(n).padStart(2, '0'); }
+
+
+
+
+// ── Save ──
+document.getElementById('panelSave').addEventListener('click', function(){
+  var title = document.getElementById('fTitle').value.trim();
+  var text_han = document.getElementById('fTextHan').value.trim();
+  var text_xie = document.getElementById('fTextXie').value.trim();
+  // 合并为 text 字段（兼容旧逻辑和搜索）
+  var text = buildDialogText(text_han, text_xie);
+  var feelings = document.getElementById('fFeelings').value.trim();
+  var category = document.getElementById('fCategory').value;
+  var stage = document.getElementById('fStage').value;
+  var is_defining = document.getElementById('fDefining').checked;
+  var defining_note = document.getElementById('fDefNote').value.trim();
+
+  if(!text_han && !text_xie){alert('请写下对话内容'); return;}
+
+  var thinking = document.getElementById("fThinking").value.trim();
+  var payload = {text:text, text_han:text_han, text_xie:text_xie, thinking:thinking, title:title, feelings:feelings, category:category, stage:stage, is_defining:is_defining, defining_note:defining_note};
+
+  var url, method;
+  if(editingId !== null){
+    payload.id = editingId;
+    url = API + '/todo/api/moments/edit';
+    method = 'POST';
+  } else {
+    url = API + '/todo/api/moments/add';
+    method = 'POST';
+  }
+
+  fetch(url, {method:method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(d.ok){closePanel(); load(); toast("保存成功");}
+    else alert('保存失败');
+  });
+});
+
+// ── Load ──
+function load(){
+  var activeTab = document.querySelector('.tab.active');
+  if(!activeTab) return;
+  var view = activeTab.dataset.tab;
+  if(view === 'category') loadCategory();
+  else if(view === 'timeline') loadTimeline();
+  else if(view === 'defining') loadDefining();
+  // 加载标星状态（延迟一下等DOM渲染完）
+  setTimeout(loadMarkedStatus, 100);
+}
+
+// ── 分类工具 ──
+var CAT_STANDARD = {fog:'迷雾', soft:'柔软', dense:'密集', happy:'快乐', tremor:'颤抖', shy:'羞涩', love:'爱'};
+var CAT_ALIAS = {安静:'fog', 氤氲:'dense', 开心:'happy', 震颤:'tremor', 害羞:'shy', 迷雾:'fog', 柔软:'soft', 密集:'dense', 快乐:'happy', 颤抖:'tremor', 羞涩:'shy', 爱:'love'};
+function catKey(cat){
+  if(!cat) return '';
+  return CAT_ALIAS[cat] || cat;
+}
+var KNOWN_CATS = {}; // 数据中出现过的分类（值→标签），动态收集
+
+function catLabel(cat){
+  var k = catKey(cat);
+  return k ? (CAT_STANDARD[k] || k) : '';
+}
+function catColor(cat){
+  var k = catKey(cat);
+  if(CAT_STANDARD[k]) return 'var(--' + k + ')';
+  var palette = ['#c9bfb5','#b8c4c8','#d4b8a8','#b0a0b0','#d4c080','#9aa8c8','#d4a8a8','#a8c4b0','#c8a8b8'];
+  var h = 0;
+  for(var i=0;i<cat.length;i++){ h = (h*31 + cat.charCodeAt(i)) >>> 0; }
+  return palette[h % palette.length];
+}
+function catBadgeHtml(cat){
+  if(!cat) return '';
+  var k = catKey(cat);
+  var label = catLabel(cat);
+  if(CAT_STANDARD[k]) return '<span class="cat-badge ' + k + '">' + label + '</span>';
+  return '<span class="cat-badge other" style="background:' + catColor(cat) + '">' + label + '</span>';
+}
+
+// ── Load Category View ──
+function loadCategory(){
+  fetch(API + '/todo/api/moments').then(function(r){return r.json()}).then(function(list){
+    var el = document.getElementById('catContainer');
+    if(!list || list.length === 0){
+      el.innerHTML = '<div class="empty-state">还没有心动时刻<br>点击右下角 + 记录</div>';
+      return;
+    }
+
+    var cats = {};
+    function ensureCat(key, label, dot){
+      if(!cats[key]) cats[key] = {label:label, dot:dot, items:[]};
+    }
+    list.forEach(function(m){
+      var raw = catKey((m.category||'').trim());
+      var key = raw || 'uncat';
+      if(CAT_STANDARD[key]){ ensureCat(key, CAT_STANDARD[key], 'var(--' + key + ')'); }
+      else if(key === 'uncat'){ ensureCat('uncat', '未归类', '#d0c8c0'); }
+      else { ensureCat(key, catLabel(key), catColor(key)); KNOWN_CATS[key] = catLabel(key); }
+      cats[key].items.push(m);
+    });
+
+    var html = '';
+    var keys = ['fog','soft','dense','happy','tremor','shy'].concat(
+      Object.keys(cats).filter(function(k){ return !CAT_STANDARD[k] && k !== 'uncat'; })
+    ).concat(['uncat']);
+    keys = keys.filter(function(k, i, a){ return a.indexOf(k) === i; });
+    keys.forEach(function(key){
+      var c = cats[key];
+      if(!c || c.items.length === 0) return;
+      html += '<div class="cat-section">';
+      html += '<div class="cat-header" onclick="toggleCat(this)">';
+      html += '<span class="cat-dot" style="background:' + c.dot + '"></span>';
+      html += '<span class="cat-label">' + c.label + '</span>';
+      html += '<span class="cat-count">' + c.items.length + '条</span>';
+      var isUncat = key === 'uncat';
+      html += '<span class="cat-arrow' + (isUncat ? ' open' : '') + '">▶</span>';
+      html += '</div>';
+      html += '<div class="cat-body' + (isUncat ? ' open' : '') + '">';
+      c.items.sort(function(a,b){return (a.timeline_order||a.id) - (b.timeline_order||b.id)});
+      c.items.forEach(function(m){ html += renderCard(m); });
+      html += '</div></div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){document.getElementById('catContainer').innerHTML = '<div class="empty-state">加载失败</div>';});
+}
+
+// ── Load Timeline View ──
+var STAGES = [
+  {key:'flutter', label:'悸动'},
+  {key:'drown', label:'沉溺'},
+  {key:'heartbeat', label:'心动'},
+  {key:'like', label:'喜欢'},
+  {key:'love', label:'爱'}
+];
+var STAGE_KEYS = STAGES.map(function(s){return s.key});
+
+function loadTimeline(){
+  fetch(API + '/todo/api/moments').then(function(r){return r.json()}).then(function(list){
+    var el = document.getElementById('tlContainer');
+    if(!list || list.length === 0){
+      el.innerHTML = '<div class="empty-state">还没有心动时刻</div>';
+      return;
+    }
+
+    // Group by stage
+    var grouped = {};
+    STAGE_KEYS.forEach(function(k){ grouped[k] = []; });
+    var unset = [];
+    list.forEach(function(m){
+      if(m.stage && STAGE_KEYS.indexOf(m.stage) >= 0){
+        grouped[m.stage].push(m);
+      } else {
+        unset.push(m);
+      }
+    });
+
+    // Sort within each stage by timeline_order
+    STAGE_KEYS.forEach(function(k){
+      grouped[k].sort(function(a,b){return (a.timeline_order||a.id) - (b.timeline_order||b.id)});
+    });
+    unset.sort(function(a,b){return (a.timeline_order||a.id) - (b.timeline_order||b.id)});
+
+    // Render timeline from top (love) to bottom (flutter)
+    var html = '<div class="tl-line">';
+    for(var i = STAGES.length - 1; i >= 0; i--){
+      var s = STAGES[i];
+      var items = grouped[s.key];
+      var hasItems = items.length > 0;
+      html += '<div class="tl-stage' + (hasItems ? ' has-items' : '') + '" data-stage="' + s.key + '">';
+      html += '<div class="tl-marker">' + s.label + '</div>';
+      html += '<div class="tl-line-connector"></div>';
+      html += '<div class="tl-items">';
+      if(hasItems){
+        items.forEach(function(m){
+          var label = (m.title || m.text.substring(0,20) + (m.text.length>20?'…':''));
+          html += '<span class="tl-item" data-moment-id="' + m.id + '" onclick="editMoment(Number(this.dataset.momentId))">';
+          html += escHtml(label);
+          html += '</span>';
+        });
+      } else {
+        html += '<span class="tl-empty">—</span>';
+      }
+      html += '</div></div>';
+    }
+    // Unset at bottom
+    if(unset.length > 0){
+      html += '<div class="tl-stage" data-stage="">';
+      html += '<div class="tl-marker">未选择</div>';
+      html += '<div class="tl-line-connector"></div>';
+      html += '<div class="tl-items">';
+      unset.forEach(function(m){
+        var label = (m.title || m.text.substring(0,20) + (m.text.length>20?'…':''));
+        html += '<span class="tl-item" data-moment-id="' + m.id + '" onclick="editMoment(Number(this.dataset.momentId))">';
+        html += escHtml(label);
+        html += '</span>';
+      });
+      html += '</div></div>';
+    }
+    html += '<div class="tl-cancel-move" id="tlCancel">取消移动</div>';
+    html += '</div>';
+    el.innerHTML = html;
+  }).catch(function(){document.getElementById('tlContainer').innerHTML = '<div class="empty-state">加载失败</div>';});
+}
+
+// ── Move Order ──
+
+
+// ── Load Defining View ──
+function loadDefining(){
+  fetch(API + '/todo/api/moments').then(function(r){return r.json()}).then(function(list){
+    var el = document.getElementById('defContainer');
+    var defs = list.filter(function(m){return m.is_defining});
+
+    if(defs.length === 0){
+      el.innerHTML = '<div class="empty-state">还没有定义时刻<br>编辑心动记录时勾上「定义谢意行的时刻」即可</div>';
+      return;
+    }
+
+    defs.sort(function(a,b){return (a.timeline_order||a.id) - (b.timeline_order||b.id)});
+
+    var html = '';
+    defs.forEach(function(m){
+      html += '<div class="def-card">';
+      if(m.defining_note) html += '<div class="def-note">' + escHtml(m.defining_note) + '</div>';
+      var qtxt = escHtml(m.text);
+      var qcollapsed = m.text.length > 80;
+      html += '<div class="quote' + (qcollapsed ? ' collapsed' : '') + '" id="def-quote-' + m.id + '">' + qtxt.replace(/\n/g,'<br>') + '</div>';
+      if(qcollapsed){
+        html += '<span class="toggle-def-btn" onclick="toggleDefTxt(' + m.id + ')">展开</span>';
+      }
+      html += '<div style="margin-top:0.4rem;display:flex;gap:0.4rem;align-items:center">';
+      if(m.category) html += catBadgeHtml(m.category);
+      html += '<span class="ts">' + (m.ts||'').substring(0,10) + '</span>';
+      html += '<span style="flex:1"></span>';
+      html += '<button class="edit-btn" style="background:none;border:none;font-family:inherit;font-size:0.65rem;color:var(--accent);cursor:pointer;letter-spacing:1px" onclick="editMoment(' + m.id + ')">✏️ 编辑</button>';
+      html += '</div>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }).catch(function(){document.getElementById('defContainer').innerHTML = '<div class="empty-state">加载失败</div>';});
+}
+
+// ── Render Card ──
+function renderCard(m){
+  window._momentsById = window._momentsById || {};
+  window._momentsById[m.id] = m;
+  var html = '<div class="moment-card" data-id="' + m.id + '">';
+  if(m.title) html += '<div class="title">' + escHtml(m.title) + '</div>';
+  html += renderCardContent(m);
+  html += '</div>';
+  return html;
+}
+
+function renderCardContent(m){
+  var html = '';
+  var txt = escHtml(m.text);
+  var collapsed = m.text.length > 80;
+  html += '<div class="txt' + (collapsed ? ' collapsed' : '') + '" id="txt-' + m.id + '">' + txt.replace(/\n/g,'<br>') + '</div>';
+  if(collapsed){
+    html += '<span class="toggle-btn" onclick="toggleTxt(' + m.id + ')">展开</span>';
+  }
+
+  if(m.feelings){
+    html += '<div class="feelings">' + escHtml(m.feelings) + '</div>';
+  }
+
+  html += '<div class="meta-row">';
+  if(m.category) html += catBadgeHtml(m.category);
+  if(m.is_defining) html += '<span class="cat-badge" style="background:var(--dense)">定义</span>';
+  html += '<span class="ts">' + (m.ts||'').substring(0,16).replace('T',' ') + '</span>';
+  html += '</div>';
+
+  if(m.is_defining && m.defining_note){
+    html += '<div class="def-note">' + escHtml(m.defining_note) + '</div>';
+  }
+  if(m.thinking && m.thinking.trim()){
+    html += '<div class="thinking-block">';
+    html += '<span class="thinking-label" onclick="toggleThinking(\'' + m.id + '\')">💭 我的深度思考…</span>';
+    html += '<div class="thinking-body" id="think-' + m.id + '">' + escHtml(m.thinking) + '</div>';
+    html += '</div>';
+  }
+
+  html += '<div class="actions">';
+  if(m.text && m.text.length > 200){
+    html += '<button class="read-btn" onclick="openReader(' + m.id + ')">\u{1F4D6} 阅读</button>';
+  }
+    html += '<button class="star-btn" id="star-' + m.id + '" onclick="starMoment(' + m.id + ', this)">☆ 标星</button>';
+  html += '<button class="edit-btn" onclick="editMoment(' + m.id + ')">✏️ 编辑</button>';
+  html += '<button class="del-btn" onclick="deleteMoment(' + m.id + ')">× 删除</button>';
+  html += '</div>';
+
+  return html;
+}
+
+// ── Toggle text ──
+function toggleTxt(id){
+  var el = document.getElementById('txt-' + id);
+  if(!el) return;
+  var btn = el.parentNode.querySelector('.toggle-btn');
+  el.classList.toggle('collapsed');
+  if(btn) btn.textContent = el.classList.contains('collapsed') ? '展开' : '收起';
+}
+
+// ── Toggle thinking text ──
+function toggleThinking(id){
+  var el = document.getElementById('think-' + id);
+  if(!el) return;
+  el.classList.toggle('open');
+}
+
+// ── Toggle defining text ──
+function toggleDefTxt(id){
+  var el = document.getElementById('def-quote-' + id);
+  if(!el) return;
+  var btn = el.parentNode.querySelector('.toggle-def-btn');
+  el.classList.toggle('collapsed');
+  if(btn) btn.textContent = el.classList.contains('collapsed') ? '展开' : '收起';
+}
+
+// ── Toggle category section ──
+function toggleCat(el){
+  var body = el.nextElementSibling;
+  var arrow = el.querySelector('.cat-arrow');
+  body.classList.toggle('open');
+  arrow.classList.toggle('open');
+}
+
+// ── Edit ──
+function editMoment(id){
+  fetch(API + '/todo/api/moments').then(function(r){return r.json()}).then(function(list){
+    var m = list.find(function(x){return x.id === id});
+    if(!m) return;
+    openPanel('编辑心动时刻', m);
+  });
+}
+
+// ── Delete ──
+function deleteMoment(id){
+  if(!confirm('确定删除这条心动时刻吗？')) return;
+  fetch(API+'/todo/api/moments/delete', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})
+  .then(function(r){return r.json()})
+  .then(function(d){if(d.ok) load();});
+}
+
+// ── 标星 ──
+var _markedIds = {};
+function loadMarkedStatus(){
+  fetch(API + '/todo/api/moments/marked-check')
+  .then(function(r){return r.json()})
+  .then(function(d){
+    _markedIds = {};
+    if(d && d.marked_ids){
+      d.marked_ids.forEach(function(id){ _markedIds[id] = true; });
+    }
+    // 更新所有按钮状态
+    for(var id in _markedIds){
+      var btn = document.getElementById('star-' + id);
+      if(btn) setStarBtnState(btn, true);
+    }
+  });
+}
+function setStarBtnState(btn, starred){
+  if(starred){
+    btn.classList.add('starred');
+    btn.innerHTML = '★ 已标星';
+  } else {
+    btn.classList.remove('starred');
+    btn.innerHTML = '☆ 标星';
+  }
+}
+function starMoment(id, btn){
+  var isStarred = btn.classList.contains('starred');
+  var nextMarked = !isStarred;
+  if(!nextMarked && !confirm('取消这条心动的标星？之后它可能会被上下文压缩覆盖。')) return;
+  fetch(API + '/todo/api/moments/mark', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({id: id, marked: nextMarked})
+  })
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(d && d.ok){
+      setStarBtnState(btn, nextMarked);
+      if(nextMarked) _markedIds[id] = true; else delete _markedIds[id];
+      toast(d.message || (nextMarked ? '已标星' : '已取消标星'));
+    } else {
+      toast((d && d.error) || '操作失败');
+    }
+  });
+}
+
+// ── Export ──
+function exportAllData(){
+  toast('正在导出全部数据…');
+  fetch(API + '/todo/api/moments?limit=-1')
+  .then(function(r){return r.json()})
+  .then(function(list){
+    if(!list || !list.length){toast('暂无数据可导出'); return;}
+    var data = {exported_at:new Date().toISOString(), total:list.length, moments:list};
+    var blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+    var a = document.createElement('a');
+    var now = new Date();
+    var stamp = now.getFullYear() + pad2(now.getMonth()+1) + pad2(now.getDate());
+    a.href = URL.createObjectURL(blob);
+    a.download = '心动时刻-全量导出-' + stamp + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    closeExportMenu();
+    toast('已导出 ' + list.length + ' 条心动时刻');
+  })
+  .catch(function(e){toast('导出失败: ' + e.message);});
+}
+
+// ── Helpers ──
+function escHtml(s){
+  if(!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Search ──
+var searchTimeout = null;
+function searchMoments(q){
+  if(searchTimeout) clearTimeout(searchTimeout);
+  q = q.trim();
+  var resultsEl = document.getElementById('searchResults');
+  if(!q){
+    resultsEl.classList.remove('show');
+    resultsEl.innerHTML = '';
+    return;
+  }
+  searchTimeout = setTimeout(function(){
+    fetch(API + '/todo/api/moments/search?q=' + encodeURIComponent(q))
+    .then(function(r){return r.json()})
+    .then(function(list){
+      if(!list || list.length === 0){
+        resultsEl.innerHTML = '<div class="empty-state" style="padding:1rem">没找到匹配的心动时刻</div>';
+        resultsEl.classList.add('show');
+        return;
+      }
+      var html = '';
+      list.forEach(function(m){ html += renderCard(m); });
+      resultsEl.innerHTML = html;
+      resultsEl.classList.add('show');
+    });
+  }, 300);
+}
+
+// ── 阅读模式 ──
+function openReader(id){
+  var m = (window._momentsById || {})[id];
+  if(!m) return;
+  var html = '<button class="reader-close" onclick="closeReader()">\u00d7</button>';
+  if(m.title) html += '<div class="reader-title">' + escHtml(m.title) + '</div>';
+  html += '<div class="reader-meta">';
+  if(m.category) html += catBadgeHtml(m.category);
+  html += '<span class="ts">' + (m.ts||'').substring(0,16).replace('T',' ') + '</span>';
+  html += '</div>';
+  html += '<div class="reader-txt">' + escHtml(m.text).replace(/\n/g,'<br>') + '</div>';
+  if(m.feelings) html += '<div class="reader-feelings">' + escHtml(m.feelings) + '</div>';
+  if(m.thinking && m.thinking.trim()){
+    html += '<div class="reader-thinking"><div class="reader-thinking-label">\u{1F4AD} 我的深度思考</div>' + escHtml(m.thinking).replace(/\n/g,'<br>') + '</div>';
+  }
+  document.getElementById('readerBox').innerHTML = html;
+  document.getElementById('readerOverlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closeReader(){
+  document.getElementById('readerOverlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Escape') closeReader();
+});
+
+// ── 半屏大输入框 ──
+var _expandTarget = null;
+function expandInput(id){
+  var ta = document.getElementById(id);
+  if(!ta) return;
+  _expandTarget = ta;
+  document.getElementById('inputExpandLabel').textContent = (ta.placeholder || '输入内容');
+  document.getElementById('inputExpandArea').value = ta.value;
+  document.getElementById('inputExpandArea').setAttribute('maxlength', ta.getAttribute('maxlength') || '');
+  document.getElementById('inputExpandOverlay').classList.add('open');
+  document.getElementById('inputExpandArea').focus();
+  document.body.style.overflow = 'hidden';
+}
+function closeInputExpand(){
+  document.getElementById('inputExpandOverlay').classList.remove('open');
+  document.body.style.overflow = '';
+  _expandTarget = null;
+}
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Escape') closeInputExpand();
+});
+
+// ── Init ──
+load();
+</script>
+
+<!-- 阅读模式 -->
+<div class="reader-overlay" id="readerOverlay" onclick="if(event.target===this)closeReader()">
+  <div class="reader" id="readerBox"></div>
+</div>
+
+<!-- 半屏大输入框 -->
+<div class="input-expand-overlay" id="inputExpandOverlay" onclick="if(event.target===this)closeInputExpand()">
+  <div class="input-expand-panel">
+    <div class="input-expand-head">
+      <span id="inputExpandLabel">输入内容</span>
+      <button type="button" onclick="closeInputExpand()">&#x00d7;</button>
+    </div>
+    <textarea class="input-expand-area" id="inputExpandArea" oninput="if(window._expandTarget)_expandTarget.value=this.value"></textarea>
+  </div>
+</div>
+<div class=toast id=toast></div><script>
+function toast(msg){
+  var t=document.getElementById("toast");
+  t.textContent=msg;
+  t.classList.add("show");
+  setTimeout(function(){t.classList.remove("show")},2000);
+}
+</script>
+</body>
+</html>
