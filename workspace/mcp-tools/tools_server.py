@@ -633,12 +633,15 @@ def tool_context_search(args):
     q = (args.get("q") or "").strip()
     if not q:
         return {"error": "q 必填：检索关键词或想问的问题"}
-    limit = args.get("limit") or 5
+    limit = args.get("limit") or 8
     try:
         limit = max(1, min(50, int(limit)))
     except (TypeError, ValueError):
-        limit = 10
-    url = f"{BASE_URL}:3000/internal/context-search?q=" + urllib.parse.quote(q) + "&limit=" + str(limit)
+        limit = 8
+    mode = args.get("mode", "semantic")  # semantic | keyword
+    scope = args.get("scope", "all")  # all | current
+    all_sessions = "1" if scope == "all" else "0"
+    url = f"{BASE_URL}:3000/internal/context-search?q=" + urllib.parse.quote(q) + "&limit=" + str(limit) + "&mode=" + mode + "&all_sessions=" + all_sessions
     req = urllib.request.Request(url, headers={"x-internal-key": INTERNAL_KEY})
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -651,17 +654,19 @@ def tool_context_search(args):
     except Exception as e:
         return {"error": str(e)}
     if data.get("ok"):
-        return {"query": q, "total": data.get("total", 0), "matches": data.get("matches", [])}
+        return {"query": q, "total": data.get("total", 0), "matches": data.get("matches", []), "mode": data.get("mode"), "scope": "all" if scope == "all" else "current"}
     return {"error": data.get("error", "检索失败")}
 
 
 TOOLS["context_search"] = {
-    "description": "检索原始上下文和导入的对话（含所有未被替换的历史）。返回相关消息段落及时间、角色；同一段连续命中已合并为一条；关键词按空格分词，部分命中也会返回，命中越多越靠前。注意：最近5分钟内的内容不会返回，10分钟内已检索过的内容不会重复出现；导入的内容仅可回忆，不能用于替换。可用于：回忆旧对话细节、确认要替换的范围（拿到时间后调用 context_replace）。",
+    "description": "语义检索所有会话的原始上下文和导入对话（含已被压缩区域的原文）。默认跨所有会话、语义模式，用描述性语句也能搜到相关内容；返回相关消息段落及时间、角色、所属会话，相邻命中自动合并。可用于：回忆旧对话细节、找某段聊过的内容、确认要替换的范围。注意：仅当前会话模式下最近5分钟内容不返回。",
     "inputSchema": {
         "type": "object",
         "properties": {
-            "q": {"type": "string", "description": "检索关键词（多个词用空格分隔，部分命中也会返回，命中的词越多越靠前）"},
-            "limit": {"type": "integer", "description": "返回条数，默认5，最大50"}
+            "q": {"type": "string", "description": "检索词或描述（语义模式下可以是描述性语句，如她上次说难过的时候、我们聊过蓝鲸的话题）"},
+            "limit": {"type": "integer", "description": "返回条数，默认8，最大50"},
+            "mode": {"type": "string", "description": "检索模式：semantic=语义检索（默认，推荐，意思相近也能搜到） | keyword=关键词精确匹配"},
+            "scope": {"type": "string", "description": "搜索范围：all=跨所有会话（默认，最全） | current=仅当前会话"}
         },
         "required": ["q"]
     },

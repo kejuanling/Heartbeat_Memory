@@ -1040,6 +1040,9 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .session-search{display:flex;align-items:center;gap:6px;margin:0 14px 8px;padding:8px 10px;border:1px solid rgba(200,144,152,.25);border-radius:10px;background:rgba(255,255,255,.7)}
 .session-search input{flex:1;min-width:0;border:none;outline:none;background:transparent;font-size:13px;color:var(--ink);font-family:inherit}
 .session-search .si{color:var(--ink3);font-size:14px;flex-shrink:0}
+.session-search .mode-toggle{font-size:11px;color:var(--ink3);cursor:pointer;padding:2px 6px;border-radius:6px;background:rgba(200,144,152,.1);flex-shrink:0;user-select:none}
+.session-search .mode-toggle:hover{background:rgba(200,144,152,.2);color:var(--ink)}
+.sr-score{font-size:10px;color:var(--ink3);margin-left:auto;padding:1px 5px;background:rgba(200,144,152,.1);border-radius:4px}
 .session-results{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:4px 10px}
 .session-results .adm-empty{padding:14px 6px}
 .sr-item{display:flex;flex-direction:column;gap:2px;padding:10px 10px;margin:4px 0;border-radius:10px;cursor:pointer;border:1px solid transparent}
@@ -1215,7 +1218,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
       <button class="drawer-btn ghost" id="exportSessionBtn">导出</button>
       <button class="drawer-btn ghost" id="importSessionBtn">导入</button>
     </div>
-    <div class="session-search"><span class="si"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg></span><input id="sessionSearch" placeholder="搜索会话内容…" autocomplete="off"></div>
+    <div class="session-search"><span class="si"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg></span><input id="sessionSearch" placeholder="搜索会话内容…" autocomplete="off"><span class="mode-toggle" id="sessionSearchMode" title="点击切换搜索模式">语义</span></div>
     <div id="sessionSearchResults" class="session-results" style="display:none"></div>
     <div id="sessionList" class="session-list"></div>
     <div class="session-logout">
@@ -2450,7 +2453,7 @@ function makeMsgEl(m,idx,grpCls){
   // AI 多气泡：按分隔符拆，每个气泡独立带头像+名称
   if(isAI){
     const full=stripCurrentTime(stripInnerTags(msgText(m))).clean;
-    const delim=cfg.bubble_delim||"---";
+    const delim=cfg.bubble_delim;
     const esc=delim.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
     const splitRe=new RegExp("\\n\\s*"+esc+"\\s*\\n");   // 仅当分隔符独立成行（前后是换行）才分气泡
     let parts=full.split(splitRe).map(p=>p.trim()).filter(p=>p);
@@ -4488,6 +4491,93 @@ function highlightKeyword(t,q){
   if(i<0)return escapeHtml(t);
   return escapeHtml(t.slice(0,i))+'<mark>'+escapeHtml(t.slice(i,i+q.length))+'</mark>'+escapeHtml(t.slice(i+q.length));
 }
+/* 语义检索：TF-IDF + 字符 bigram */
+var _semCache = null;
+function _charBigrams(text){
+  if(!text) return [];
+  var t = String(text).toLowerCase().replace(/[^\w一-龥]/g," ");
+  var chars = [];
+  for(var i=0;i<t.length;i++){ if(t[i]!==" ") chars.push(t[i]); }
+  if(chars.length<2) return chars;
+  var r=[]; for(var i=0;i<chars.length-1;i++) r.push(chars[i]+chars[i+1]);
+  return r;
+}
+function _buildSemIndex(items){
+  // items: [{text, sid, sidx, name}]
+  var vocab = {}; // term -> idx
+  var docFreq = [];
+  var docs = [];
+  for(var i=0;i<items.length;i++){
+    var tokens = _charBigrams(items[i].text);
+    docs.push(tokens);
+    var seen = {};
+    for(var j=0;j<tokens.length;j++){
+      var tok = tokens[j];
+      if(seen[tok]) continue;
+      seen[tok] = true;
+      if(vocab[tok]===undefined){ vocab[tok]=docFreq.length; docFreq.push(1); }
+      else docFreq[vocab[tok]]++;
+    }
+  }
+  var n = docs.length, vs = docFreq.length;
+  var rows = new Array(n);
+  for(var i=0;i<n;i++){
+    var tokens = docs[i];
+    if(!tokens.length){ rows[i]={idx:[],val:[]}; continue; }
+    var tf = {};
+    for(var j=0;j<tokens.length;j++){ var t=tokens[j]; tf[t]=(tf[t]||0)+1; }
+    var total = tokens.length;
+    var idx=[], val=[], nsq=0;
+    for(var t in tf){
+      var k = vocab[t]; if(k===undefined) continue;
+      var tfv = tf[t]/total;
+      var idfv = Math.log((n+1)/(docFreq[k]+1))+1;
+      var v = tfv*idfv;
+      idx.push(k); val.push(v); nsq += v*v;
+    }
+    var nm = Math.sqrt(nsq);
+    if(nm>0) for(var k=0;k<val.length;k++) val[k]/=nm;
+    rows[i] = {idx:idx, val:val};
+  }
+  return {vocab:vocab, rows:rows, items:items};
+}
+function _semanticSearch(index, query, threshold){
+  if(!threshold) threshold = 0.05;
+  var qTokens = _charBigrams(query);
+  if(!qTokens.length) return [];
+  var qTf = {};
+  for(var i=0;i<qTokens.length;i++){ var t=qTokens[i]; qTf[t]=(qTf[t]||0)+1; }
+  var qTotal = qTokens.length;
+  var qIdx=[], qVal=[], qNsq=0;
+  for(var t in qTf){
+    if(index.vocab[t]===undefined) continue;
+    var k = index.vocab[t];
+    var v = qTf[t]/qTotal;
+    qIdx.push(k); qVal.push(v); qNsq += v*v;
+  }
+  if(!qIdx.length) return [];
+  var qNm = Math.sqrt(qNsq);
+  for(var k=0;k<qVal.length;k++) qVal[k]/=qNm;
+  // 计算每条的相似度
+  var results = [];
+  for(var i=0;i<index.rows.length;i++){
+    var row = index.rows[i];
+    if(!row.idx.length) continue;
+    var dot = 0;
+    // 双指针：先排序查询向量
+    // 简单做法：遍历查询项，在 row.idx 里找
+    for(var qi=0;qi<qIdx.length;qi++){
+      var qk = qIdx[qi];
+      for(var di=0;di<row.idx.length;di++){
+        if(row.idx[di]===qk){ dot += row.val[di]*qVal[qi]; break; }
+      }
+    }
+    if(dot >= threshold) results.push({i:i, score:dot});
+  }
+  results.sort(function(a,b){ return b.score-a.score; });
+  return results;
+}
+var _sessionSearchMode = "semantic"; // semantic | keyword
 function searchSessions(q){
   const resultsEl=document.getElementById("sessionSearchResults");
   const listEl=document.getElementById("sessionList");
@@ -4496,16 +4586,35 @@ function searchSessions(q){
   if(!ql){ resultsEl.style.display="none"; listEl.style.display=""; return; }
   const nm=JSON.parse(localStorage.getItem("han_session_names")||"{}");
   const data=allSessionLocalMsgs();
-  const results=[];
-  Object.keys(data).forEach(function(sid){
-    data[sid].forEach(function(m,i){
-      const t=msgText(m);
-      if(t&&t.toLowerCase().includes(ql)){ results.push({sid:sid,sidx:i,name:(nm[sid]||(sid==="default"?"主会话":sid)),text:t}); }
+  const mode = _sessionSearchMode;
+  let results = [];
+  if(mode === "keyword"){
+    Object.keys(data).forEach(function(sid){
+      data[sid].forEach(function(m,i){
+        const t=msgText(m);
+        if(t&&t.toLowerCase().includes(ql)){ results.push({sid:sid,sidx:i,name:(nm[sid]||(sid==="default"?"主会话":sid)),text:t, score:1}); }
+      });
     });
-  });
+  } else {
+    // 语义模式：构建索引并搜索
+    const items = [];
+    Object.keys(data).forEach(function(sid){
+      data[sid].forEach(function(m,i){
+        const t=msgText(m);
+        if(t) items.push({sid:sid, sidx:i, name:(nm[sid]||(sid==="default"?"主会话":sid)), text:t});
+      });
+    });
+    const idx = _buildSemIndex(items);
+    const hits = _semanticSearch(idx, ql, 0.06);
+    results = hits.slice(0,200).map(function(h){
+      const it = idx.items[h.i];
+      return {sid:it.sid, sidx:it.sidx, name:it.name, text:it.text, score:h.score};
+    });
+  }
   const shown=results.slice(0,200);
   resultsEl.innerHTML= shown.length? shown.map(function(r){
-    return '<div class="sr-item" data-sid="'+encodeURIComponent(r.sid)+'" data-sidx="'+r.sidx+'"><div class="sr-h"><b>'+escapeHtml(r.name)+'</b><span class="adm-badge">第 '+(r.sidx+1)+' 条</span></div><div class="sr-q">'+highlightKeyword(r.text,ql)+'</div></div>';
+    const scoreLabel = mode==="semantic" && r.score ? '<span class="sr-score">'+(r.score*100).toFixed(0)+'%</span>' : '';
+    return '<div class="sr-item" data-sid="'+encodeURIComponent(r.sid)+'" data-sidx="'+r.sidx+'"><div class="sr-h"><b>'+escapeHtml(r.name)+'</b><span class="adm-badge">第 '+(r.sidx+1)+' 条</span>'+scoreLabel+'</div><div class="sr-q">'+highlightKeyword(r.text,ql)+'</div></div>';
   }).join('') : '<div class="adm-empty">没有会话内容命中「'+escapeHtml(ql)+'」</div>';
   resultsEl.style.display="block";
   listEl.style.display="none";
@@ -4536,6 +4645,13 @@ async function switchSessionAndLocate(sid,idx){
 (function(){
   const se=document.getElementById("sessionSearch");
   if(se)se.addEventListener("input",function(){ searchSessions(se.value); });
+  const sm=document.getElementById("sessionSearchMode");
+  if(sm)sm.addEventListener("click",function(){
+    _sessionSearchMode = _sessionSearchMode==="semantic"?"keyword":"semantic";
+    sm.textContent = _sessionSearchMode==="semantic"?"语义":"关键词";
+    const se2=document.getElementById("sessionSearch");
+    if(se2&&se2.value) searchSessions(se2.value);
+  });
 })();
 
 // 切换会话

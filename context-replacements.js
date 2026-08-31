@@ -13,6 +13,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { AsyncLocalStorage } = require("async_hooks");
+const { nowIso } = require("./time_utils");
 
 const DATA_DIR = path.join(__dirname, "data");
 const REPLACEMENTS_FILE = path.join(DATA_DIR, "context_replacements.json");
@@ -60,15 +61,26 @@ function getReplaceLog(cap) {
 // ========================
 // mtime 感知文件缓存：文件未变化（mtime+size 相同）时复用内存结果，避免对同一份大盘内容反复读盘
 const _readJsonCache = new Map();
+const READ_JSON_CACHE_MAX = 50; // 上限，防止长期运行缓存无限膨胀
 function readJson(file, fallback) {
   try {
     if (!fs.existsSync(file)) return fallback;
     const st = fs.statSync(file);
     const ck = st.mtimeMs + ':' + st.size;
     const hit = _readJsonCache.get(file);
-    if (hit && hit.ck === ck) return hit.data;
+    if (hit && hit.ck === ck) {
+      // 命中即刷新热度（删除后重插，把该条移到 Map 尾部当作最近使用），用于后续 LRU 淘汰
+      _readJsonCache.delete(file);
+      _readJsonCache.set(file, hit);
+      return hit.data;
+    }
     const data = JSON.parse(fs.readFileSync(file, "utf-8"));
     _readJsonCache.set(file, { ck: ck, data: data });
+    // 超出上限：删掉 Map 头部（最久未使用）的一项
+    if (_readJsonCache.size > READ_JSON_CACHE_MAX) {
+      const oldest = _readJsonCache.keys().next().value;
+      if (oldest !== undefined) _readJsonCache.delete(oldest);
+    }
     return data;
   } catch (err) {
     console.warn("[context-replacements] 读取失败:", file, err.message);
@@ -78,7 +90,7 @@ function readJson(file, fallback) {
 
 function writeJsonAtomic(file, data) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = file + ".tmp";
+  const tmp = file + ".tmp-" + process.pid + "-" + Date.now();
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
   fs.renameSync(tmp, file);
   _readJsonCache.delete(file);
@@ -102,9 +114,7 @@ function backupFile(file) {
   }
 }
 
-function nowIso() {
-  return new Date().toISOString();
-}
+// nowIso 已统一到 time_utils 模块（原先本模块与 memory-pool 各有一份相同实现）
 
 // 判断消息是否为「替换」生成的占位消息（压缩/唤醒等环节需保护，避免被吞掉）
 function isReplacementMemoryMessage(msg) {
@@ -1155,6 +1165,24 @@ function applyReplacements(messages, source) {
     srcAnchorIdx.push(i);
     srcAnchorKeys.push(normalizedCompareKey(m));
   });
+  // 性能：预构建「内容锚点键 -> 出现的索引列表」，把 indexOf/lastIndexOf 的 O(n) 扫降为 O(log n) 查表。
+  // srcAnchorKeys 允许重复键，列表按索引升序；查表语义与 Array.indexOf/lastIndexOf 完全一致。
+  const srcKeyToIdx = new Map();
+  srcAnchorKeys.forEach(function (k, i) {
+    if (!srcKeyToIdx.has(k)) srcKeyToIdx.set(k, []);
+    srcKeyToIdx.get(k).push(i);
+  });
+  const anchorFirst = function (key, from) {
+    const arr = srcKeyToIdx.get(key);
+    if (!arr || arr.length === 0) return -1;
+    let lo = 0, hi = arr.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid] < from) lo = mid + 1; else hi = mid; }
+    return lo < arr.length ? arr[lo] : -1;
+  };
+  const anchorLast = function (key) {
+    const arr = srcKeyToIdx.get(key);
+    return (arr && arr.length) ? arr[arr.length - 1] : -1;
+  };
   if (srcAnchorIdx.length === 0) { logNoReplace(messages.length, source); return messages; }
 
   // 时间线纯对话序列（内容锚点失败时做位置近似兜底）
@@ -1230,9 +1258,9 @@ function applyReplacements(messages, source) {
     const startKey = normalizedCompareKey(aStart);
     const endKey = normalizedCompareKey(aEnd);
 
-    let si = srcAnchorKeys.indexOf(startKey, searchStart);
+    let si = anchorFirst(startKey, searchStart);
     // 兜底：相邻块在时间线里被重复内容错位、把“搜索起点”推到本块起点之后时，仍从序列开头重新找起点，避免该块被静默跳过
-    if (si === -1) si = srcAnchorKeys.indexOf(startKey);
+    if (si === -1) si = anchorFirst(startKey, 0);
     if (si === -1) {
       let firstNonSpecialTlIdx = -1;
       for (const m of matched) {
@@ -1245,8 +1273,8 @@ function applyReplacements(messages, source) {
       else return;
     }
 
-    let ei = srcAnchorKeys.indexOf(endKey, si + 1);
-    if (ei === -1) ei = srcAnchorKeys.lastIndexOf(endKey);
+    let ei = anchorFirst(endKey, si + 1);
+    if (ei === -1) ei = anchorLast(endKey);
     if (ei === -1 || ei < si) {
       let found = -1;
       let tried = 0;
@@ -1254,12 +1282,31 @@ function applyReplacements(messages, source) {
         if (isSpecialEvent(matched[k])) continue;
         tried++;
         const alt = normalizedCompareKey(matched[k]);
-        let ae = srcAnchorKeys.indexOf(alt, si + 1);
-        if (ae === -1) ae = srcAnchorKeys.lastIndexOf(alt);
+        let ae = anchorFirst(alt, si + 1);
+        if (ae === -1) ae = anchorLast(alt);
         if (ae >= si) { found = ae; break; }
       }
       if (found === -1) return;
       ei = found;
+    }
+
+    // 块内多锚点校验（"钥匙"）：除首尾外，再从 matched 块内均匀取若干条非特殊事件消息，
+    // 要求它们都能在当前请求 srcAnchorKeys 中找到、且位置落在 [si,ei] 内，才算命中。
+    // 避免仅靠首尾（可能是"哥哥"等短通用消息）跨会话误命中整段替换。
+    const INNER_ANCHOR_COUNT = 10;
+    const _innerCandidates = [];
+    for (const m of matched) {
+      if (isSpecialEvent(m)) continue;
+      _innerCandidates.push(m);
+    }
+    if (_innerCandidates.length > 2) {
+      const _mid = _innerCandidates.slice(1, _innerCandidates.length - 1);
+      const _take = Math.min(INNER_ANCHOR_COUNT, _mid.length);
+      for (let _s = 0; _s < _take; _s++) {
+        const _idx = Math.floor(_s * _mid.length / _take);
+        const _ai = anchorFirst(normalizedCompareKey(_mid[_idx]), si);
+        if (_ai === -1 || _ai > ei) return; // 块内锚点缺失/越界 -> 不命中，跳过该块
+      }
     }
 
     const srcStart = srcAnchorIdx[si];
@@ -1411,6 +1458,201 @@ function loadSearchableMessages() {
   return { timeline: timeline, imported: imported };
 }
 
+
+// ── 跨会话加载 ──
+function loadAllSessionTimelines() {
+  const fs = require("fs");
+  const path = require("path");
+  const dir = __dirname;
+  const files = fs.readdirSync(dir).filter(function(f) {
+    return f.startsWith("enhanced_messages_") && f.endsWith(".json") && f !== "enhanced_messages___diag__.json";
+  });
+  const all = [];
+  for (const f of files) {
+    const sid = f.slice("enhanced_messages_".length, -".json".length);
+    try {
+      const data = readJson(path.join(dir, f), []);
+      const nonSys = (Array.isArray(data) ? data : []).filter(function(m) {
+        return m && m.role !== "system";
+      });
+      // 给每条打上 session 标记
+      for (let i = 0; i < nonSys.length; i++) {
+        nonSys[i]._session = sid;
+        nonSys[i]._sidx = i;
+      }
+      all.push.apply(all, nonSys);
+    } catch(e) { /* skip */ }
+  }
+  return all;
+}
+
+// ── 语义搜索：TF-IDF + 字符 bigram + 余弦相似度 ──
+const SEMANTIC_CACHE = { version: null, vocab: null, tfidfRows: null, ids: null, messages: null };
+
+function _charBigrams(text) {
+  if (!text) return [];
+  var t = String(text).toLowerCase();
+  t = t.replace(/[^\w一-龥]/g, " ");
+  var chars = [];
+  for (var i = 0; i < t.length; i++) {
+    if (t[i] !== " ") chars.push(t[i]);
+  }
+  if (chars.length < 2) return chars;
+  var result = [];
+  for (var i = 0; i < chars.length - 1; i++) {
+    result.push(chars[i] + chars[i+1]);
+  }
+  return result;
+}
+
+function _msgSearchText(m) {
+  var parts = [];
+  if (m.content) parts.push(String(m.content));
+  return parts.join(" ");
+}
+
+function _buildSemanticCache(messages) {
+  // 版本标记：用消息数量 + 第一条+最后一条的时间/内容指纹
+  var version = messages.length;
+  if (messages.length > 0) {
+    version += "_" + (messages[0].time || "") + "_" + (messages[messages.length-1].time || "");
+  }
+  if (SEMANTIC_CACHE.version === version && SEMANTIC_CACHE.tfidfRows !== null) {
+    return SEMANTIC_CACHE;
+  }
+  var vocab = {};      // term -> index
+  var docFreq = [];    // index -> count of docs containing term
+  var docs = [];       // array of token arrays
+  
+  for (var i = 0; i < messages.length; i++) {
+    var tokens = _charBigrams(_msgSearchText(messages[i]));
+    docs.push(tokens);
+    var seen = {};
+    for (var j = 0; j < tokens.length; j++) {
+      var tok = tokens[j];
+      if (seen[tok]) continue;
+      seen[tok] = true;
+      if (vocab[tok] === undefined) {
+        vocab[tok] = docFreq.length;
+        docFreq.push(1);
+      } else {
+        docFreq[vocab[tok]]++;
+      }
+    }
+  }
+  
+  var nDocs = docs.length;
+  var vocabSize = docFreq.length;
+  // 用数组的数组存储稀疏矩阵（每条消息只存非零项）
+  var tfidfRows = new Array(nDocs);
+  
+  for (var i = 0; i < nDocs; i++) {
+    var tokens = docs[i];
+    if (tokens.length === 0) { tfidfRows[i] = { indices: [], values: [] }; continue; }
+    var tf = {};
+    for (var j = 0; j < tokens.length; j++) {
+      var t = tokens[j];
+      tf[t] = (tf[t] || 0) + 1;
+    }
+    var total = tokens.length;
+    var indices = [];
+    var values = [];
+    var normSq = 0;
+    for (var t in tf) {
+      var idx = vocab[t];
+      var tfVal = tf[t] / total;
+      var idfVal = Math.log((nDocs + 1) / (docFreq[idx] + 1)) + 1;
+      var tfidf = tfVal * idfVal;
+      indices.push(idx);
+      values.push(tfidf);
+      normSq += tfidf * tfidf;
+    }
+    // 归一化
+    var norm = Math.sqrt(normSq);
+    if (norm > 0) {
+      for (var k = 0; k < values.length; k++) values[k] /= norm;
+    }
+    tfidfRows[i] = { indices: indices, values: values };
+  }
+  
+  SEMANTIC_CACHE.version = version;
+  SEMANTIC_CACHE.vocab = vocab;
+  SEMANTIC_CACHE.tfidfRows = tfidfRows;
+  SEMANTIC_CACHE.messages = messages;
+  return SEMANTIC_CACHE;
+}
+
+function semanticSearchMessages(messages, query, limit, threshold) {
+  if (!threshold) threshold = 0.05;
+  if (!limit) limit = 20;
+  var cache = _buildSemanticCache(messages);
+  var vocab = cache.vocab;
+  var tfidfRows = cache.tfidfRows;
+  
+  var qTokens = _charBigrams(query);
+  if (qTokens.length === 0) return [];
+  
+  // 构建查询向量
+  var qTf = {};
+  for (var i = 0; i < qTokens.length; i++) {
+    var t = qTokens[i];
+    qTf[t] = (qTf[t] || 0) + 1;
+  }
+  var qTotal = qTokens.length;
+  var qIndices = [];
+  var qValues = [];
+  var qNormSq = 0;
+  for (var t in qTf) {
+    if (vocab[t] === undefined) continue;
+    var idx = vocab[t];
+    var val = qTf[t] / qTotal;
+    qIndices.push(idx);
+    qValues.push(val);
+    qNormSq += val * val;
+  }
+  if (qIndices.length === 0) return [];
+  var qNorm = Math.sqrt(qNormSq);
+  for (var k = 0; k < qValues.length; k++) qValues[k] /= qNorm;
+  
+  // 计算余弦相似度（只遍历查询向量中非零维度的文档，加速）
+  // 先建倒排：term -> list of doc indices
+  // 由于 vocab 很大，我们用另一种方式：遍历所有文档算点积
+  // 6000+ 条不多，直接遍历即可
+  var scores = new Float32Array(messages.length);
+  for (var i = 0; i < messages.length; i++) {
+    var row = tfidfRows[i];
+    if (!row || row.indices.length === 0) continue;
+    // 计算点积：用双指针？文档向量和查询向量都按索引排序的话可以
+    // 查询向量的 indices 不一定有序，先排序
+    var dot = 0;
+    // 简单做法：对于小查询，遍历查询项在文档里找
+    for (var qi = 0; qi < qIndices.length; qi++) {
+      var qIdx = qIndices[qi];
+      // 在 row.indices 中查找 qIdx
+      // 因为 row.indices 是按 vocab 插入顺序的，不一定有序
+      // 用 Set 加速？每条消息存一个 termSet？
+      // 先线性搜，消息不多应该没问题
+      for (var di = 0; di < row.indices.length; di++) {
+        if (row.indices[di] === qIdx) {
+          dot += row.values[di] * qValues[qi];
+          break;
+        }
+      }
+    }
+    scores[i] = dot;
+  }
+  
+  // 取 top N
+  var results = [];
+  for (var i = 0; i < messages.length; i++) {
+    if (scores[i] >= threshold) {
+      results.push({ idx: i, score: scores[i] });
+    }
+  }
+  results.sort(function(a, b) { return b.score - a.score; });
+  return results.slice(0, limit);
+}
+
 function searchTimeline(query, limit) {
   const q = String(query || "").trim();
   if (!q) return { ok: false, error: "查询不能为空" };
@@ -1543,6 +1785,193 @@ function searchTimeline(query, limit) {
   }
 
   return { ok: true, total: scored.length, matches: matches.slice(0, maxReturn) };
+}
+
+// ── 增强版上下文搜索：支持跨会话 + 语义检索 ──
+function searchContextEnhanced(query, options) {
+  const q = String(query || "").trim();
+  if (!q) return { ok: false, error: "查询不能为空" };
+  const opts = options || {};
+  const mode = opts.mode === "keyword" ? "keyword" : "semantic";
+  const allSessions = !!opts.allSessions;
+  const maxReturn = Math.max(1, Math.min(100, Math.floor(Number(opts.limit) || 10)));
+  const threshold = opts.threshold !== undefined ? Number(opts.threshold) : (mode === "semantic" ? 0.08 : 0);
+  
+  var allMsgs = [];
+  if (allSessions) {
+    allMsgs = loadAllSessionTimelines().map(function(m, i) {
+      return {
+        content: m.content || "",
+        role: m.role,
+        time: m.time || null,
+        source: "timeline",
+        session: m._session,
+        sidx: m._sidx,
+        _gidx: i
+      };
+    });
+    try {
+      const mod = require("./imported-conversations");
+      const imp = mod.getMessages ? mod.getMessages() : [];
+      const baseIdx = allMsgs.length;
+      for (let i = 0; i < imp.length; i++) {
+        allMsgs.push({
+          content: imp[i].content || "",
+          role: imp[i].role,
+          time: imp[i].time || null,
+          source: "imported",
+          record_id: imp[i].record_id,
+          msg_id: imp[i].msg_id,
+          _gidx: baseIdx + i
+        });
+      }
+    } catch(e) { }
+  } else {
+    const src = loadSearchableMessages();
+    for (let i = 0; i < src.timeline.length; i++) {
+      allMsgs.push({
+        content: src.timeline[i].content || "",
+        role: src.timeline[i].role,
+        time: src.timeline[i].time || null,
+        source: "timeline",
+        session: "current",
+        sidx: i,
+        _gidx: i
+      });
+    }
+    const baseIdx = allMsgs.length;
+    for (let i = 0; i < src.imported.length; i++) {
+      allMsgs.push({
+        content: src.imported[i].content || "",
+        role: src.imported[i].role,
+        time: src.imported[i].time || null,
+        source: "imported",
+        record_id: src.imported[i].record_id,
+        msg_id: src.imported[i].msg_id,
+        _gidx: baseIdx + i
+      });
+    }
+  }
+  
+  const now = Date.now();
+  const recentCutoff = now - CONTEXT_SEARCH_RECENT_EXCLUDE_MINUTES * 60000;
+  var scored = [];
+  
+  if (mode === "semantic") {
+    const results = semanticSearchMessages(allMsgs, q, Math.min(maxReturn * 10, 200), threshold);
+    for (let r = 0; r < results.length; r++) {
+      const m = allMsgs[results[r].idx];
+      if (!allSessions && m.source === "timeline" && m.time) {
+        const t = new Date(m.time).getTime();
+        if (!isNaN(t) && t > recentCutoff) continue;
+      }
+      if (!m.content) continue;
+      scored.push({
+        pos: m._gidx,
+        source: m.source,
+        session: m.session,
+        sidx: m.sidx,
+        record_id: m.record_id,
+        msg_id: m.msg_id,
+        role: m.role,
+        time: m.time,
+        score: Math.round(results[r].score * 10000) / 100,
+        coverage: 1,
+        hits: 1,
+        hit_terms: [],
+        content: m.content
+      });
+    }
+  } else {
+    const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return { ok: false, error: "查询不能为空" };
+    for (let i = 0; i < allMsgs.length; i++) {
+      const m = allMsgs[i];
+      if (!m.content) continue;
+      if (!allSessions && m.source === "timeline" && m.time) {
+        const t = new Date(m.time).getTime();
+        if (!isNaN(t) && t > recentCutoff) continue;
+      }
+      const low = m.content.toLowerCase();
+      const hitTerms = [];
+      let totalHits = 0;
+      for (let ti = 0; ti < terms.length; ti++) {
+        const t = terms[ti];
+        let c = 0;
+        let pos = 0;
+        while ((pos = low.indexOf(t, pos)) !== -1) { c++; totalHits++; pos += t.length; }
+        if (c > 0) hitTerms.push(t);
+      }
+      if (hitTerms.length === 0) continue;
+      const coverage = hitTerms.length;
+      const density = (totalHits / m.content.length) * 100;
+      scored.push({
+        pos: m._gidx, source: m.source, session: m.session, sidx: m.sidx,
+        record_id: m.record_id, msg_id: m.msg_id, role: m.role, time: m.time,
+        score: Math.round((coverage * 100 + Math.min(density * 20, 40) + Math.min(totalHits, 10)) * 10) / 10,
+        coverage: coverage, density: Math.round(density * 10) / 10,
+        hits: totalHits, hit_terms: hitTerms, content: m.content
+      });
+    }
+    if (scored.length > CONTEXT_SEARCH_FILTER_MIN_HITS) {
+      const filtered = scored.filter(function(x) { return (x.density||0) >= CONTEXT_SEARCH_DENSITY_FLOOR; });
+      if (filtered.length >= CONTEXT_SEARCH_MIN_KEEP) scored = filtered;
+      else scored = scored.slice(0, CONTEXT_SEARCH_MIN_KEEP);
+    }
+    scored.sort(function(a, b) { return b.coverage - a.coverage || b.density - a.density || b.hits - a.hits || a.pos - b.pos; });
+  }
+  
+  const groups = [];
+  const used = new Array(scored.length).fill(false);
+  for (let i = 0; i < scored.length; i++) {
+    if (used[i]) continue;
+    const group = [scored[i]];
+    used[i] = true;
+    for (let j = i + 1; j < scored.length; j++) {
+      if (used[j]) continue;
+      if (scored[j].session !== scored[i].session) continue;
+      if (scored[j].source !== scored[i].source) continue;
+      const gap = Math.abs(scored[j].sidx - group[group.length-1].sidx);
+      if (gap <= CONTEXT_SEARCH_MERGE_GAP) { group.push(scored[j]); used[j] = true; }
+    }
+    groups.push(group);
+  }
+  
+  const matches = groups.slice(0, maxReturn).map(function(g) {
+    const rep = g[0];
+    const content = rep.content;
+    let snippet = content;
+    if (content.length > 500) {
+      if (mode === "keyword" && rep.hit_terms && rep.hit_terms.length > 0) {
+        const low = content.toLowerCase();
+        let firstHit = -1;
+        for (let ti = 0; ti < rep.hit_terms.length; ti++) {
+          const pos = low.indexOf(rep.hit_terms[ti]);
+          if (pos >= 0 && (firstHit < 0 || pos < firstHit)) firstHit = pos;
+        }
+        const sliceStart = Math.max(0, Math.min(firstHit - 100, content.length - 500));
+        snippet = (sliceStart > 0 ? "…" : "") + content.slice(sliceStart, sliceStart + 500) + (content.length > sliceStart + 500 ? "…" : "");
+      } else {
+        snippet = content.slice(0, 500) + (content.length > 500 ? "…" : "");
+      }
+    }
+    const out = {
+      role: rep.role, time: rep.time, score: rep.score,
+      hit_terms: rep.hit_terms || [], hits: g.reduce(function(s, x) { return s + (x.hits||0); }, 0),
+      count: g.length, content: snippet, source: rep.source
+    };
+    if (rep.source === "timeline") {
+      out.session = rep.session;
+      out.start_index = rep.sidx;
+      out.end_index = g[g.length-1].sidx;
+    } else if (rep.source === "imported") {
+      out.record_id = rep.record_id;
+      out.msg_id = rep.msg_id;
+    }
+    return out;
+  });
+  
+  return { ok: true, total: scored.length, matches: matches, mode: mode, all_sessions: allSessions };
 }
 
 // ========================
@@ -1866,6 +2295,8 @@ module.exports = {
   applyReplacements,
   getReplaceLog,
   searchTimeline,
+  searchContextEnhanced,
+  loadAllSessionTimelines,
   resolveRange,
   loadItems,
   recordText,
