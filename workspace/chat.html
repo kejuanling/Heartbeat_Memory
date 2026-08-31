@@ -306,10 +306,13 @@ header.hd-custom .hd-mid{align-items:flex-start}
 .vmsg-content.expand{-webkit-line-clamp:unset;overflow:visible;white-space:pre-wrap}
 .msg.user .vmsg-content{color:rgba(255,255,255,.85)}
 @keyframes vmsgWave{0%,100%{transform:scaleY(.4)}50%{transform:scaleY(1)}}
-/* 聊天图片缩略图：1:1 正方形、较小，位于气泡内容上方 */
-.msg .bubble img{
+/* 聊天图片缩略图：不放进气泡，作为独立小方块卡片置于气泡上方 */
+.bubble-imgs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 4px}
+.msg.user .bubble-imgs{justify-content:flex-end}
+.msg.ai .bubble-imgs{justify-content:flex-start}
+.bubble-imgs img{
   width:64px;height:64px;object-fit:cover;
-  border-radius:10px;margin:0 0 6px;display:block;cursor:zoom-in;
+  border-radius:10px;display:block;cursor:zoom-in;
   box-shadow:0 1px 4px rgba(0,0,0,.18);
 }
 /* 图片放大弹窗：固定遮罩 + 白色容器盒子，点遮罩或右上角 x 关闭 */
@@ -2326,9 +2329,14 @@ function renderAiContent(msgEl, bubble, content, reasoning, tools){
   }else{
     bubble.innerHTML=(content||"")?(cfg.ai_md?renderMd(content):escapeHtml(content)):"";
   }
-  // AI 消息若带图片（image_url），追加缩略图
+  // AI 消息若带图片（image_url），作为独立于气泡的缩略图卡片置于气泡上方
   if(Array.isArray(content)){
-    content.forEach(function(x){ if(x&&x.type==="image_url"&&x.image_url&&x.image_url.url){ const img=document.createElement("img"); img.src=x.image_url.url; img.alt=""; img.onerror=function(){this.style.display="none";}; bubble.insertBefore(img,bubble.firstChild); } });
+    const _imgs=content.filter(function(x){ return x&&x.type==="image_url"&&x.image_url&&x.image_url.url; });
+    if(_imgs.length){
+      const wrap=document.createElement("div");wrap.className="bubble-imgs";
+      _imgs.forEach(function(x){ const img=document.createElement("img"); img.src=x.image_url.url; img.alt=""; img.onerror=function(){this.style.display="none";}; wrap.appendChild(img); });
+      msgEl.insertBefore(wrap, bubble);
+    }
   }
   // 思考过程 / 工具痕迹：作为气泡外单独的块（不放进气泡），置于气泡上方独立一行
   const showThink=!!reasoning && cfg.show_thinking;
@@ -2498,7 +2506,12 @@ function makeMsgEl(m,idx,grpCls){
     const st=stripCurrentTime(stripInnerTags(msgText(m)));
     const bubble=document.createElement("div");bubble.className="bubble";
     bubble.innerHTML=chips(cfg.user_md?renderMd(st.clean):escapeHtml(st.clean));
-    msgImages(m).forEach(im=>{const img=document.createElement("img");img.src=im;img.alt="";img.onerror=function(){this.style.display="none";};bubble.insertBefore(img,bubble.firstChild);});
+    const _um=msgImages(m);
+    if(_um.length){
+      const wrap=document.createElement("div");wrap.className="bubble-imgs";
+      _um.forEach(im=>{const img=document.createElement("img");img.src=im;img.alt="";img.onerror=function(){this.style.display="none";};wrap.appendChild(img);});
+      host.appendChild(wrap);
+    }
     host.appendChild(bubble);
   }
   // 多选勾选 + 时间
@@ -6035,7 +6048,7 @@ window.__openCcForSession = function(id){
 <script>
 (function(){
   document.addEventListener("click", function(e){
-    var img = e.target && e.target.closest ? e.target.closest(".msg .bubble img") : null;
+    var img = e.target && e.target.closest ? e.target.closest(".msg .bubble img, .msg .bubble-imgs img") : null;
     if(!img || !img.src || img.src === location.href) return;
     var lb = document.getElementById("imgLightbox");
     if(!lb){ lb=document.createElement("div"); lb.id="imgLightbox";
