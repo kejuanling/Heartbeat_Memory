@@ -306,10 +306,34 @@ header.hd-custom .hd-mid{align-items:flex-start}
 .vmsg-content.expand{-webkit-line-clamp:unset;overflow:visible;white-space:pre-wrap}
 .msg.user .vmsg-content{color:rgba(255,255,255,.85)}
 @keyframes vmsgWave{0%,100%{transform:scaleY(.4)}50%{transform:scaleY(1)}}
+/* 聊天图片缩略图：1:1 正方形、较小，位于气泡内容上方 */
 .msg .bubble img{
-  max-width:100%;border-radius:var(--radius-sm);
-  margin-top:6px;display:block;
+  width:64px;height:64px;object-fit:cover;
+  border-radius:10px;margin:0 0 6px;display:block;cursor:zoom-in;
+  box-shadow:0 1px 4px rgba(0,0,0,.18);
 }
+/* 图片放大弹窗：固定遮罩 + 白色容器盒子，点遮罩或右上角 x 关闭 */
+#imgLightbox{
+  position:fixed;inset:0;background:rgba(20,14,14,.62);z-index:99999;
+  display:none;align-items:center;justify-content:center;padding:26px;box-sizing:border-box;
+  cursor:zoom-out;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);
+}
+#imgLightbox .lb-box{
+  background:#fff;border-radius:14px;padding:8px;
+  display:flex;align-items:center;justify-content:center;
+  max-width:min(92vw,1200px);max-height:88vh;overflow:hidden;
+  box-shadow:0 24px 80px rgba(0,0,0,.45);
+}
+#imgLightbox .lb-box img{
+  display:block;max-width:88vw;max-height:83vh;width:auto;height:auto;
+  border-radius:8px;object-fit:contain;background:#fff;
+}
+#imgLightbox .lb-close{
+  position:fixed;top:16px;right:16px;width:38px;height:38px;border-radius:50%;
+  background:rgba(0,0,0,.5);color:#fff;border:none;font-size:22px;line-height:1;cursor:pointer;z-index:2;
+  display:flex;align-items:center;justify-content:center;
+}
+#imgLightbox .lb-close:hover{background:rgba(0,0,0,.72)}
 /* 图片/文件占位 chip */
 .chip{
   display:inline-flex;align-items:center;gap:4px;
@@ -2304,7 +2328,7 @@ function renderAiContent(msgEl, bubble, content, reasoning, tools){
   }
   // AI 消息若带图片（image_url），追加缩略图
   if(Array.isArray(content)){
-    content.forEach(function(x){ if(x&&x.type==="image_url"&&x.image_url&&x.image_url.url){ const img=document.createElement("img"); img.src=x.image_url.url; img.alt=""; img.onerror=function(){this.style.display="none";}; bubble.appendChild(img); } });
+    content.forEach(function(x){ if(x&&x.type==="image_url"&&x.image_url&&x.image_url.url){ const img=document.createElement("img"); img.src=x.image_url.url; img.alt=""; img.onerror=function(){this.style.display="none";}; bubble.insertBefore(img,bubble.firstChild); } });
   }
   // 思考过程 / 工具痕迹：作为气泡外单独的块（不放进气泡），置于气泡上方独立一行
   const showThink=!!reasoning && cfg.show_thinking;
@@ -2474,7 +2498,7 @@ function makeMsgEl(m,idx,grpCls){
     const st=stripCurrentTime(stripInnerTags(msgText(m)));
     const bubble=document.createElement("div");bubble.className="bubble";
     bubble.innerHTML=chips(cfg.user_md?renderMd(st.clean):escapeHtml(st.clean));
-    msgImages(m).forEach(im=>{const img=document.createElement("img");img.src=im;img.alt="";img.onerror=function(){this.style.display="none";};bubble.appendChild(img);});
+    msgImages(m).forEach(im=>{const img=document.createElement("img");img.src=im;img.alt="";img.onerror=function(){this.style.display="none";};bubble.insertBefore(img,bubble.firstChild);});
     host.appendChild(bubble);
   }
   // 多选勾选 + 时间
@@ -6006,6 +6030,28 @@ window.__openCcForSession = function(id){
   CC_SESSION = id || 'default';
   renderCompaction(document.getElementById('ccBody'));
 };
+})();
+</script>
+<script>
+(function(){
+  document.addEventListener("click", function(e){
+    var img = e.target && e.target.closest ? e.target.closest(".msg .bubble img") : null;
+    if(!img || !img.src || img.src === location.href) return;
+    var lb = document.getElementById("imgLightbox");
+    if(!lb){ lb=document.createElement("div"); lb.id="imgLightbox";
+      lb.innerHTML='<div class="lb-box"></div><button class="lb-close" title="关闭">&times;</button>';
+      var hideLb=function(){ lb.style.display="none"; };
+      lb.addEventListener("click", function(ev){
+        if(ev.target===lb || (ev.target && ev.target.classList && ev.target.classList.contains("lb-close"))) hideLb();
+      });
+      document.addEventListener("keydown", function(k){ if(k.key==="Escape" && lb.style.display==="flex") hideLb(); });
+      document.body.appendChild(lb);
+    }
+    var box=lb.querySelector(".lb-box");
+    box.innerHTML="";
+    var im=document.createElement("img"); im.src=img.src; im.alt="";
+    box.appendChild(im); lb.style.display="flex";
+  });
 })();
 </script>
 </body>
