@@ -254,6 +254,33 @@ module.exports = function registerChatRoutes(app, deps) {
       reply.code(500).send({ error: err.message });
     }
   });
+  // 已保存主题跨设备同步（存 data/saved-themes.json）
+  const SAVED_THEMES_FILE = path.join(baseDir, 'data', 'saved-themes.json');
+  app.get('/v1/themes', async (req, reply) => {
+    try {
+      let themes = [];
+      try { if (fsp.existsSync(SAVED_THEMES_FILE)) themes = JSON.parse(fsp.readFileSync(SAVED_THEMES_FILE, 'utf-8')) || []; } catch (e) {}
+      if (!Array.isArray(themes)) themes = [];
+      reply.send({ ok: true, themes });
+    } catch (err) {
+      console.error('[GET /v1/themes] error:', err.message);
+      reply.code(500).send({ error: err.message });
+    }
+  });
+  app.put('/v1/themes', async (req, reply) => {
+    try {
+      const body = (req.body && typeof req.body === 'object') ? req.body : {};
+      const themes = Array.isArray(body.themes) ? body.themes : [];
+      const clean = themes.filter(t => t && typeof t === 'object').slice(0, 50);
+      fsp.ensureDirSync(path.join(baseDir, 'data'));
+      fsp.writeFileSync(SAVED_THEMES_FILE, JSON.stringify(clean, null, 2), 'utf-8');
+      reply.send({ ok: true, saved: true, count: clean.length });
+    } catch (err) {
+      console.error('[PUT /v1/themes] error:', err.message);
+      reply.code(500).send({ error: err.message });
+    }
+  });
+
 
 
   // 实时事件流（SSE）：聊天页用 EventSource 订阅本会话，收到 history_update 后拉一次历史。

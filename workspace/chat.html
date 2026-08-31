@@ -3271,14 +3271,26 @@ function themeInputs(){
   return { bg_image:(bgImageInput&&bgImageInput.value)||"", bg_color:(bgColorInput&&bgColorInput.value)||"", user_bubble:(userBubbleColor&&userBubbleColor.value)||"#d9a3a8", ai_bubble:(aiBubbleColor&&aiBubbleColor.value)||"#fffdf9", bubble_opacity:Number(bubbleOpacity&&bubbleOpacity.value||100)/100, bubble_blur:Number(bubbleBlur&&bubbleBlur.value||0), bubble_radius:Number(bubbleRadius&&bubbleRadius.value||18), user_font_color:(userFontColorInput&&userFontColorInput.value)||"#ffffff", ai_font_color:(aiFontColorInput&&aiFontColorInput.value)||"#5a4a3a", font_size:Number(fontSizeInput&&fontSizeInput.value||15), font_family:(fontFamilyInput&&fontFamilyInput.value)||"" };
 }
 function loadSavedThemes(){ try{ const a=JSON.parse(localStorage.getItem(LS_THEMES)||"[]"); return Array.isArray(a)?a:[]; }catch(e){ return []; } }
+function syncThemesToServer(){
+  const arr=loadSavedThemes();
+  fetch("/v1/themes",{method:"PUT",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key},credentials:"include",body:JSON.stringify({themes:arr})}).catch(function(){});
+}
+async function loadThemesFromServer(){
+  try{
+    const r=await fetch("/v1/themes",{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
+    const j=await r.json();
+    const arr=(j&&j.themes)||[];
+    if(Array.isArray(arr)&&arr.length){ localStorage.setItem(LS_THEMES,JSON.stringify(arr)); renderSavedThemes(); }
+  }catch(e){}
+}
 function saveCustomTheme(){
   const name=(document.getElementById("themeNameInput")&&document.getElementById("themeNameInput").value||"").trim();
   const th=themeInputs(); th.name=name||("主题 "+(loadSavedThemes().length+1));
   let arr=loadSavedThemes().filter(function(t){ return t.name!==th.name; });
-  arr.push(th); if(arr.length>3) arr=arr.slice(-3);
+  arr.push(th); if(arr.length>20) arr=arr.slice(-20);
   try{ localStorage.setItem(LS_THEMES, JSON.stringify(arr)); }catch(e){}
   if(document.getElementById("themeNameInput"))document.getElementById("themeNameInput").value="";
-  renderSavedThemes(); showToast("主题已保存");
+  syncThemesToServer(); renderSavedThemes(); showToast("主题已保存");
 }
 function applyCustomTheme(t){
   if(!t) return;
@@ -3317,11 +3329,11 @@ function renderSavedThemes(){
       const arr=loadSavedThemes(); if(!arr.length) return;
       arr.splice(+btn.closest(".saved-theme").dataset.i,1);
       try{ localStorage.setItem(LS_THEMES, JSON.stringify(arr)); }catch(e){}
-      renderSavedThemes(); showToast("已删除主题");
+      syncThemesToServer(); renderSavedThemes(); showToast("已删除主题");
     });
   });
 }
-(function(){ const b=document.getElementById("saveThemeBtn"); if(b) b.addEventListener("click",saveCustomTheme); renderSavedThemes(); })();
+(function(){ const b=document.getElementById("saveThemeBtn"); if(b) b.addEventListener("click",saveCustomTheme); renderSavedThemes(); loadThemesFromServer(); })();
 function shade(hex,p){
   try{let c=hex.replace("#","");if(c.length===3)c=c.split("").map(x=>x+x).join("");let n=parseInt(c,16);let r=Math.max(0,Math.min(255,(n>>16)+p)),g=Math.max(0,Math.min(255,((n>>8)&255)+p)),b=Math.max(0,Math.min(255,(n&255)+p));return "#"+(r.toString(16).padStart(2,"0"))+(g.toString(16).padStart(2,"0"))+(b.toString(16).padStart(2,"0"));}catch(e){return hex;}
 }
