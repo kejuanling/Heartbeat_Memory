@@ -139,7 +139,7 @@ header.hd-custom .hd-mid{align-items:flex-start}
 }
 .msg.ev-diary .bubble{background:rgba(255,255,255,.25);border:1px dashed rgba(200,144,152,.25);color:var(--ink3)}
 .msg{
-  width:100%;padding:0 4%;display:flex;flex-direction:column;gap:4px;
+  width:100%;padding:0 2%;display:flex;flex-direction:column;gap:4px;
   animation:msgIn .3s ease;
   position:relative;
 }
@@ -209,6 +209,9 @@ header.hd-custom .hd-mid{align-items:flex-start}
 #chat[data-layout] .mrow .mcol{display:flex;flex-direction:column;gap:3px;flex:1;min-width:0;max-width:100%;align-items:flex-start}
 /* 气泡自然取内容宽（短消息不竖排，长消息自动换行） */
 #chat[data-layout] .mrow .mcol .bubble{max-width:100%}
+/* 气泡最大宽度(参考微信~72%): 短消息自然宽, 长消息不超容器 75% */
+#chat[data-layout="qq"] .mrow .mcol .bubble,
+#chat[data-layout="wx"] .mrow .mcol .bubble{max-width:75%}
 #chat[data-layout] .msg.user .mrow .mcol{align-items:flex-end}
 #chat[data-layout] .mcol .mnm{font-size:10.5px;color:var(--ink2);margin:0 3px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #chat[data-layout] .msg.user .mcol .mnm{color:rgba(255,255,255,.75)}
@@ -1144,7 +1147,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .call-overlay.ended .call-mist-ball{animation:none;opacity:.5}
 .call-overlay.ended .call-caption{opacity:.4}
 /* 通话记录气泡（微信式：电话图标+时长；发起方一侧） */
-.msg.call-record{width:100%;padding:0 4%}
+.msg.call-record{width:100%;padding:0 2%}
 .msg.call-record .call-record-bubble{display:inline-flex;align-items:center;gap:8px;max-width:100%;padding:9px 14px;border-radius:14px;background:rgba(255,255,255,.72);border:1px solid rgba(255,182,193,.35);box-shadow:0 3px 12px rgba(181,131,122,.12);cursor:pointer;color:var(--accent-deep);font-size:13px;letter-spacing:.3px;transition:all .2s}
 .msg.user.call-record .call-record-bubble{background:var(--bubble-user1);border:none;color:#fff}
 .call-record-bubble:active{transform:scale(.97)}
@@ -2491,11 +2494,22 @@ function renderAll(keepPos){
   chatEl.innerHTML="";
   if(!msgs.length){chatEl.appendChild(emptyEl);if(keepPos!==true)scrollBottom();return;}
   let lastDay="";
+  let lastShownTs=null; // 最近一次显示时间线的时间戳, 用于按间隔判断
   msgs.forEach((m,i)=>{
-    if(m._callB) return; // 通话对话：折叠成"通话记录"气泡，不在聊天流逐条显示
-    const day=dayDivider(msgTime(m));
+    if(m._callB) return;
+    const mt=msgTime(m); const tmt=mt?mt.getTime():0;
+    const day=dayDivider(mt);
+    // QQ/微信式时间线: 首条 / 跨天 / 与上次时间线>=5分钟 时, 插入居中时间线(复用 .day-divider 样式)
+    if(mt){
+      const showTLine = (lastShownTs===null) || (day&&day!==lastDay) || (tmt-lastShownTs>=5*60*1000);
+      if(showTLine){
+        const dv=document.createElement("div");dv.className="day-divider";
+        dv.textContent=(day&&day!==lastDay)?day:fmtTime(mt);
+        chatEl.appendChild(dv); lastShownTs=tmt;
+      }
+    }
+    if(day&&day!==lastDay)lastDay=day;
     const gcls=groupCls(i);
-    if(day&&day!==lastDay){const dv=document.createElement("div");dv.className="day-divider";dv.textContent=day;chatEl.appendChild(dv);lastDay=day;}
     const mel=makeMsgEl(m,i,gcls); if(mel) chatEl.appendChild(mel);
   });
   if(keepPos!==true)scrollBottom();
