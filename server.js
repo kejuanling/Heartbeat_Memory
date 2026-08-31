@@ -1445,6 +1445,13 @@ function recentDiaryTextExcluding(sessionId, count) {
   return kept.join("\n\n");
 }
 
+// ── 记忆碎片（标星内容）注入 ────────
+// 用途:开新会话/跨窗口时，把标星消息(记忆碎片)注入为上下文消息(不进系统提示)。
+// 排序&数量:按标星时间正序取前 N 条(读取 memory_pool_config.json 的
+//   cross_inject_starred_topk,默认50)。时间早的在前,铺开最近一段连贯历史。
+// 互补:本函数=窗口注入取较早连贯片段; MCP 工具 moments_list=随时拉取最新记忆碎片。
+// 批注 2026-08-31:由"取最新N条再重排"改回"正序取前N"，最新内容交给 moments_list 工具。
+
 function starredContextText(limit) {
   // 标星注入的角色标签：AI 用【谢】、用户用【涵】(取 AI_DISPLAY_NAME / USER_DISPLAY_NAME,默认 谢/涵)
   const AI_DISPLAY_NAME = String(readEnvValue("AI_DISPLAY_NAME") || "谢");

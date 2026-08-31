@@ -118,6 +118,15 @@ def _moment_brief(m):
     }
 
 
+# ── 心动时刻 moments_list(2026-08-31 重定义为“记忆碎片/标星池”) ──
+# 背景:旧 moments_* 工具查询 unified_server 的旧心动时刻数据,本日起整体弃用并关闭注册。
+#      将“标星消息(记忆碎片)”作为新的心动时刻来源,moments_list 改为直接读取
+#      data/context_compaction_marks.json,按保存时间倒序(最新在前)返回。
+# 设计:工具名沿用“心动时刻”,让 AI 无缝沿用旧习惯;底层数据实为标星记忆池。
+# 互补:server.js 的窗口注入取较早连贯片段,本工具随时拉取最新记忆碎片。
+# 注意:下方 tool_moments_search/count/delete/edit 旧函数体仍保留,但已不注册
+#      (不暴露给 AI),仅在需要回滚/参考时使用。
+
 def tool_moments_list(args):
     "查看心动时刻：最近被保存的珍贵对话片段（即标星内容/记忆碎片），按保存时间倒序（最新在前）返回。"
     try:
@@ -162,6 +171,8 @@ TOOLS["moments_list"] = {
     "handler": tool_moments_list
 }
 
+
+# ↓↓↓ 旧心动时刻工具:2026-08-31 已关闭注册,函数体保留供参考/回滚,勿再注册 ↓↓↓
 
 def tool_moments_search(args):
     q = args.get("q", "").strip()
