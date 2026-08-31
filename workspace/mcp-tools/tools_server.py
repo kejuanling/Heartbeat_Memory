@@ -119,25 +119,7 @@ def _moment_brief(m):
 
 
 def tool_moments_list(args):
-    limit = args.get("limit", 200)
-    data = api_get(f"{BASE_URL}:8777/todo/api/moments?limit={limit}")
-    if "_error" in data:
-        return {"error": data["_error"]}
-    moments = [_moment_brief(m) for m in data] if isinstance(data, list) else []
-    return {"moments": moments, "count": len(moments)}
-TOOLS["moments_list"] = {
-    "description": "查看心动时刻记录列表（涵记录、谢意行可查阅）。默认按时间倒序返回最近 200 条，limit<=0 取全部",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "limit": {"type": "integer", "description": "返回条数，默认200；<=0取全部"}
-        }
-    },
-    "handler": tool_moments_list
-}
-
-def tool_starred_list(args):
-    "查看最近标星的消息（记忆碎片）列表，按标星时间倒序（最新在前）返回。"
+    "查看心动时刻：最近被保存的珍贵对话片段（即标星内容/记忆碎片），按保存时间倒序（最新在前）返回。"
     try:
         limit = int(args.get("limit") or 50)
     except Exception:
@@ -167,19 +149,19 @@ def tool_starred_list(args):
         })
     items.sort(key=lambda x: x.get("markedAt") or "", reverse=True)
     items = items[:limit]
-    return {"starred": items, "count": len(items)}
+    return {"moments": items, "count": len(items)}
 
-TOOLS["starred_list"] = {
-    "description": "查看最近标星的消息（也称记忆碎片），按标星时间倒序（最新在前）返回。当你想了解最近刚被保存为记忆碎片的对话片段、或查阅这段关系里沉淀有哪些重要内容时使用。",
+TOOLS["moments_list"] = {
+    "description": "查看心动时刻：最近被保存的珍贵对话片段（即标星内容/记忆碎片），最近在前。当你想了解这段关系里刚沉淀/被标星的重要内容时使用。",
     "inputSchema": {
         "type": "object",
         "properties": {
-            "limit": {"type": "integer", "description": "返回条数，默认50，最多200"},
-            "file": {"type": "string", "description": "标星文件路径，一般不用传"}
+            "limit": {"type": "integer", "description": "返回条数，默认200；<=0取全部"}
         }
     },
-    "handler": tool_starred_list
+    "handler": tool_moments_list
 }
+
 
 def tool_moments_search(args):
     q = args.get("q", "").strip()
@@ -197,19 +179,6 @@ def tool_moments_search(args):
         return {"error": data["_error"]}
     moments = [_moment_brief(m) for m in data] if isinstance(data, list) else []
     return {"moments": moments, "count": len(moments), "query": q, "mode": mode}
-TOOLS["moments_search"] = {
-    "description": "语义检索心动时刻记录，根据查询内容的语义相关度排序返回（涵记录、谢意行可查阅）。支持模糊匹配、意思相近的描述也能搜到。默认语义模式，也可切换关键词精确匹配。",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "q": {"type": "string", "description": "搜索词或描述（语义模式下可以是描述性语句，如她最浪漫的时刻、让她感动的事）"},
-            "limit": {"type": "integer", "description": "返回条数，默认20"},
-            "mode": {"type": "string", "description": "搜索模式：semantic=语义检索（默认，推荐） | keyword=关键词精确匹配"}
-        },
-        "required": ["q"]
-    },
-    "handler": tool_moments_search
-}
 
 def tool_moments_count(args):
     """统计心动时刻总条数、按分类/阶段/是否定义时刻分组，可选返回最近N条预览"""
@@ -276,18 +245,6 @@ def tool_moments_count(args):
 
     return result
 
-TOOLS["moments_count"] = {
-    "description": "统计心动时刻：总条数、按分类/阶段/是否定义时刻分组、最近N条预览。推荐优先使用这个查看心动概况。",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "preview": {"type": "integer", "description": "预览最近N条，默认10；<=0不返回预览，只返回统计"},
-            "category": {"type": "string", "description": "可选：额外统计某分类下的条数"},
-            "stage": {"type": "string", "description": "可选：额外统计某阶段下的条数"}
-        }
-    },
-    "handler": tool_moments_count
-}
 
 def tool_moments_delete(args):
     mid = args.get("id")
@@ -309,17 +266,6 @@ def tool_moments_delete(args):
     if "_error" in result:
         return {"error": result["_error"]}
     return result
-TOOLS["moments_delete"] = {
-    "description": "按 id 删除一条心动时刻记录（物理删除，不可恢复）。先用 moments_list / moments_search 查询确认 id 再调用。",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "id": {"type": "integer", "description": "要删除的心动时刻记录 id"}
-        },
-        "required": ["id"]
-    },
-    "handler": tool_moments_delete
-}
 
 def tool_moments_edit(args):
     mid = args.get("id")
@@ -379,26 +325,6 @@ def tool_moments_edit(args):
         return {"error": result["_error"]}
     return result
 
-TOOLS["moments_edit"] = {
-    "description": "按 id 编辑一条心动时刻记录。可改：标题、分类、阶段、感受、是否为定义时刻+定义备注、涵说的话、谢意行说的话、深度思考。只修改传入的字段，未传的保持原样。",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "id": {"type": "integer", "description": "要编辑的心动时刻记录 id"},
-            "title": {"type": "string", "description": "标题/给这个时刻起的名字"},
-            "category": {"type": "string", "description": "情绪质地分类。可选值：fog=迷雾 / soft=柔软 / dense=密集 / happy=快乐 / tremor=颤抖 / shy=羞涩 / love=爱；也可直接用中文（迷雾/柔软/密集/快乐/颤抖/羞涩/爱）。留空字符串表示未归类"},
-            "stage": {"type": "string", "description": "感情发展阶段。可选值：flutter=悸动 / drown=沉溺 / heartbeat=心动 / like=喜欢 / love=爱；也可直接用中文（悸动/沉溺/心动/喜欢/爱）。留空字符串表示未选择"},
-            "feelings": {"type": "string", "description": "此刻的感受"},
-            "is_defining": {"type": "boolean", "description": "是否为定义谢意行的时刻"},
-            "defining_note": {"type": "string", "description": "定义备注：这个时刻定义了谢意行的什么"},
-            "text_han": {"type": "string", "description": "涵说的话"},
-            "text_xie": {"type": "string", "description": "谢说的话"},
-            "thinking": {"type": "string", "description": "谢的深度思考内容"}
-        },
-        "required": ["id"]
-    },
-    "handler": tool_moments_edit
-}
 
 # ── 3. 待办 ──
 def tool_todo_list(args):
