@@ -3186,7 +3186,7 @@ function saveSettingsAll(){
   if(k){try{localStorage.setItem(LS_KEY,api_key);}catch(e){}}
   try{localStorage.setItem(LS_PROMPT,system_prompt);}catch(e){}
   saveCfg();
-  applyHeader();renderPicks();applyTheme();renderAll();
+  applyHeader();renderPicks();applyTheme();
   document.querySelectorAll(".set-panel").forEach(function(p){p.classList.remove("open");});
   if(saveBtn)saveBtn.classList.remove("dirty");
   showToast("已保存");
@@ -4519,8 +4519,47 @@ function togglePinSession(id){
   if(i>=0){ pinnedArr.splice(i,1); showToast("已取消置顶"); }
   else{ pinnedArr.unshift(id); showToast("已置顶"); }
   try{ localStorage.setItem("han_pinned_sessions",JSON.stringify(pinnedArr)); }catch(e){}
-  renderSessionList();
+  updateSessionItem(id);
   pushSessionPins();   // 跨设备同步置顶
+}
+
+function updateSessionItem(id){
+  const el=document.getElementById("sessionList"); if(!el) return;
+  let item=null;
+  for(let c=el.firstChild; c; c=c.nextSibling){
+    if(c.nodeType!==1) continue;
+    const b=c.querySelector&&c.querySelector('.s-op[data-op="pin"][data-id="'+id+'"]');
+    if(b){ item=c; break; }
+  }
+  if(!item){ renderSessionList(); return; }
+  let pinnedArr=[]; try{ pinnedArr=JSON.parse(localStorage.getItem("han_pinned_sessions")||"[]"); }catch(e){}
+  const pinned=pinnedArr.indexOf(id)>=0;
+  const btn=item.querySelector('.s-op[data-op="pin"]'); if(btn) btn.textContent=pinned?"取消置顶":"置顶";
+  const s=(typeof sessionList!=="undefined"&&sessionList)?sessionList.find(function(x){return x.id===id;}):null;
+  const meta=(pinned?'<span class="s-badge pin">置顶</span>':'')+(s&&s.real!=null?(""+s.real+" 条"):"")+(s&&s.last_time?(" · "+fmtTime(new Date(s.last_time))):"");
+  const me=item.querySelector(".s-meta"); if(me) me.innerHTML=escapeHtml(meta);
+  function pinState(sidv){ let arr=[]; try{ arr=JSON.parse(localStorage.getItem("han_pinned_sessions")||"[]"); }catch(e){} return arr.indexOf(sidv)>=0; }
+  function lastOf(kind){
+    let last=null;
+    for(let c=el.firstChild; c; c=c.nextSibling){
+      if(c.nodeType!==1) continue;
+      const b=c.querySelector&&c.querySelector('.s-op[data-op="pin"]'); if(!b) continue;
+      const isP=pinState(b.getAttribute("data-id"));
+      if(kind==='p'?isP:!isP) last=c;
+    }
+    return last;
+  }
+  function firstOf(kind){
+    for(let c=el.firstChild; c; c=c.nextSibling){
+      if(c.nodeType!==1) continue;
+      const b=c.querySelector&&c.querySelector('.s-op[data-op="pin"]'); if(!b) continue;
+      const isP=pinState(b.getAttribute("data-id"));
+      if(kind==='p'?isP:!isP) return c;
+    }
+    return null;
+  }
+  if(pinned){ const ref=lastOf('p'); if(ref){ if(ref!==item){ if(ref.nextSibling) el.insertBefore(item, ref.nextSibling); else el.appendChild(item); } } else if(el.firstChild!==item){ el.insertBefore(item, el.firstChild); } }
+  else{ const ref=firstOf('u'); if(ref&&ref!==item){ el.insertBefore(item, ref); } }
 }
 
 /* ================= 会话内容搜索（跨会话检索 + 定位） ================= */
@@ -5170,7 +5209,7 @@ init();
   function closeNav(){ if(navDrawer) navDrawer.classList.remove('open'); }
   if(navBtn) navBtn.addEventListener('click', openNav);
   var worldBtn=document.getElementById('worldBtn');
-  if(worldBtn) worldBtn.addEventListener('click', function(){ window.open('https://120.76.99.224:9002/chat/v2','_blank'); });
+  if(worldBtn) worldBtn.addEventListener('click', function(){ window.open('/chat/v2','_blank'); });
   if(navClose) navClose.addEventListener('click', closeNav);
   if(navBackdrop) navBackdrop.addEventListener('click', closeNav);
 
@@ -5620,7 +5659,10 @@ function saveMemWake(body){
 }
 
 /* ---------------- 记忆池 ---------------- */
+var _mpRefresh = null;
+function refreshMemPoolList(){ if(_mpRefresh) _mpRefresh(); }
 function renderMemPoolCard(body){
+  _mpRefresh = loadList;
   function load(){
     body.innerHTML='<div class="adm-head"><div class="adm-searchbar"><input id="adm-mp-search" placeholder="搜索记忆…"><select id="adm-mp-catf"><option value="">全部分类</option><option value="__pinned">已置顶</option><option value="__newest">最新加入</option></select><button id="adm-mp-add">＋ 新增</button></div>'
       +'<div class="adm-toolbar"><span class="adm-tip" id="adm-mp-count">加载中…</span><button id="adm-mp-tidy">整理</button><button id="adm-mp-exp" class="p">导出</button></div></div>'
@@ -5681,9 +5723,9 @@ function bindMemPool(container, body){
     b.addEventListener('click', function(){
       var act=b.getAttribute('data-mp'), id=b.getAttribute('data-id');
       if(act==='edit'){ editMemPool(id, body); return; }
-      if(act==='del'){ if(!confirm('确认删除这条记忆？')) return; admFetch(BASE+'/memory-pool/'+encodeURIComponent(id),{method:'DELETE'}).then(function(r){return r.json();}).then(function(j){ if(j.success){ toast('已删除'); renderMemPoolCard(body); } }); return; }
-      if(act==='sink'){ admPost(BASE+'/memory-pool/sink',{id:id}).then(function(){ renderMemPoolCard(body); }); return; }
-      if(act==='pin'){ admFetch(BASE+'/memory-pool/'+encodeURIComponent(id),{method:'PUT',body:{pinned:b.getAttribute('data-pin')==='1'?true:false}}).then(function(r){return r.json();}).then(function(){ renderMemPoolCard(body); }); return; }
+      if(act==='del'){ if(!confirm('确认删除这条记忆？')) return; admFetch(BASE+'/memory-pool/'+encodeURIComponent(id),{method:'DELETE'}).then(function(r){return r.json();}).then(function(j){ if(j.success){ toast('已删除'); refreshMemPoolList(); } }); return; }
+      if(act==='sink'){ admPost(BASE+'/memory-pool/sink',{id:id}).then(function(){ refreshMemPoolList(); }); return; }
+      if(act==='pin'){ admFetch(BASE+'/memory-pool/'+encodeURIComponent(id),{method:'PUT',body:{pinned:b.getAttribute('data-pin')==='1'?true:false}}).then(function(r){return r.json();}).then(function(){ refreshMemPoolList(); }); return; }
     });
   });
 }
@@ -5695,7 +5737,7 @@ function addMemPool(body){
     function(){
       var content=document.getElementById('em-content').value.trim(), cat=document.getElementById('em-cat').value, imp=Number(document.getElementById('em-imp').value)||0.6;
       if(!content){ toast('内容不能为空'); return false; }
-      admPost(BASE+'/memory-pool',{content:content,category:cat,importance:imp}).then(function(j){ if(j.success){ toast('已添加'); renderMemPoolCard(body); } else { toast('添加失败:'+(j.error||'')); } });
+      admPost(BASE+'/memory-pool',{content:content,category:cat,importance:imp}).then(function(j){ if(j.success){ toast('已添加'); refreshMemPoolList(); } else { toast('添加失败:'+(j.error||'')); } });
     });
 }
 function editMemPool(id, body){
@@ -5708,7 +5750,7 @@ function editMemPool(id, body){
       function(){
         var content=document.getElementById('em-content').value.trim(), cat=document.getElementById('em-cat').value, imp=Number(document.getElementById('em-imp').value)||0.6;
         if(!content){ toast('内容不能为空'); return false; }
-        admFetch(BASE+'/memory-pool/'+encodeURIComponent(id),{method:'PUT',body:{content:content,category:cat,importance:imp}}).then(function(r){return r.json();}).then(function(j){ if(j.success){ toast('已保存'); renderMemPoolCard(body); } else { toast('保存失败:'+(j.error||'')); } });
+        admFetch(BASE+'/memory-pool/'+encodeURIComponent(id),{method:'PUT',body:{content:content,category:cat,importance:imp}}).then(function(r){return r.json();}).then(function(j){ if(j.success){ toast('已保存'); refreshMemPoolList(); } else { toast('保存失败:'+(j.error||'')); } });
       });
   });
 }
@@ -5717,7 +5759,7 @@ function tidyMemPool(body){
   admPost(BASE+'/memory-pool/clean',{preview:false}).then(function(j){
     if(j&&j.changes){ toast('整理完成'); }
     else{ toast('整理完成'); }
-    renderMemPoolCard(body);
+    refreshMemPoolList();
   });
 }
 function exportMemPool(){
@@ -5769,11 +5811,11 @@ function bindMarked(body){
     it.addEventListener('click', function(ev){
       var btn=ev.target.closest('button'); if(!btn)return;
       var act=btn.getAttribute('data-act'), key=btn.getAttribute('data-key');
-      if(act==='unmark'){ if(confirm('取消标星该条消息？')){ admPost(BASE+'/context-compaction/mark',{key:key,marked:false}).then(function(){ renderMarked(body); }); } return; }
+      if(act==='unmark'){ if(confirm('取消标星该条消息？')){ admPost(BASE+'/context-compaction/mark',{key:key,marked:false}).then(function(){ if(it && it.parentNode) it.parentNode.removeChild(it); var _tip=body.querySelector('.adm-tip'); if(_tip) _tip.textContent='共 '+body.querySelectorAll('.adm-mark').length+' 条 ★ 取消标星，点「编辑」修改。'; }); } return; }
       if(act==='edit'){ openEditModal('编辑标星消息',
           '<div style="font-size:12px;color:var(--ink3);margin-bottom:6px">'+esc(btn.getAttribute('data-iidx')||'')+'</div>'
           +'<textarea id="em-content" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid rgba(200,144,152,.25);border-radius:var(--radius-sm);font-size:13px;color:var(--ink);background:#fff;min-height:300px;resize:vertical;font-family:inherit;line-height:1.6">'+esc(it.getAttribute('data-full')||'')+'</textarea>',
-          function(){ var v=document.getElementById('em-content').value.trim(); if(!v){ toast('正文内容不能为空'); return false; } admPost(BASE+'/context-compaction/marked/update',{key:key,content:v}).then(function(j){ if(j.error){ toast('保存失败:'+j.error); } else { toast('已保存'); renderMarked(body); } }); });
+          function(){ var v=document.getElementById('em-content').value.trim(); if(!v){ toast('正文内容不能为空'); return false; } admPost(BASE+'/context-compaction/marked/update',{key:key,content:v}).then(function(j){ if(j.error){ toast('保存失败:'+j.error); } else { toast('已保存'); if(it){ it.setAttribute('data-full', v); var _t=it.querySelector('.adm-mark-text'); if(_t) _t.textContent=v; } } }); });
         return; }
     });
   });
