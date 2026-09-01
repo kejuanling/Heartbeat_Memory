@@ -378,6 +378,36 @@ async function fetchWeatherContext() {
   }
 }
 
+// 读 han 手机最近一次上报的状态快照（电池/当前App/位置），注入唤醒上下文
+// 数据在 phone-report-api(8080)，经 /state/latest 读取；user_id 固定为 han
+const PHONE_STATE_URL = "http://127.0.0.1:8080/state/latest?user_id=han";
+const PHONE_STATE_TOKEN = "rsh"; // 与 phone-api systemd unit 的 AUTH_TOKEN 一致
+
+async function fetchPhoneStateContext() {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const response = await fetch(PHONE_STATE_URL, {
+      signal: controller.signal,
+      headers: { "Authorization": "Bearer " + PHONE_STATE_TOKEN },
+    });
+    clearTimeout(timeout);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    const st = data && data.state;
+    if (!st) return ""; // 没有上报过，不注入
+    const lines = ["## 手机状态（han 本人手机，最近一次上报）"];
+    if (st.battery != null && st.battery !== "") lines.push(`- 电量：${st.battery}%（数值为百分数，范围 0-100）`);
+    if (st.current_app) lines.push(`- 正在用：${st.current_app}`);
+    if (st.location) lines.push(`- 位置：${st.location}`);
+    if (st.captured_at) lines.push(`- 上报时间：${st.captured_at}`);
+    return lines.join("\n");
+  } catch (err) {
+    console.log("手机状态注入失败，跳过本次:", err.message);
+    return "";
+  }
+}
+
 function loadTimelineMessages() {
   if (!fs.existsSync(TIMELINE_PATH)) {
     console.log("未找到 enhanced_messages.json");
@@ -622,16 +652,45 @@ function stripPosition(messages) {
   return messages.map(({ position, time, ...rest }) => rest);
 }
 
-function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
+// 跨窗口注入：与对话侧(routes/chat.js)同口径，读取磁盘上的跨窗口记忆快照
+// data/cross_snapshot_<sid>.json（相关记忆 + 记忆碎片 + 近期日记）。
+// 若唤醒活跃会话无快照则回退 default，再没有则返回空字符串（不注入该层）。
+function readCrossSnapshot(sessionId) {
+  try {
+    const safe = String(sessionId || "default").replace(/[^A-Za-z0-9_-]/g, "") || "default";
+    const candidates = [
+      path.join(__dirname, "data", "cross_snapshot_" + safe + ".json"),
+      path.join(__dirname, "data", "cross_snapshot_default.json")
+    ];
+    for (const file of candidates) {
+      if (fs.existsSync(file)) {
+        const snap = JSON.parse(fs.readFileSync(file, "utf-8"));
+        if (snap && typeof snap.text === "string" && snap.text.trim()) {
+          return snap.text.trim();
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[wake-up] 读取跨窗口记忆快照失败:", e.message);
+  }
+  return "";
+}
+
+function buildWakePrompt(currentTime, diffMinutes, weatherContext = "", phoneContext = "") {
   // 优先读取独立的提示词文件（推荐方式）
   const promptFile = path.join(__dirname, "wake_prompt.txt");
   if (fs.existsSync(promptFile)) {
     const template = fs.readFileSync(promptFile, "utf-8");
-    return template
-      .replace(/\$\{currentTime\}/g, currentTime)
-      .replace(/\$\{diffMinutes\}/g, diffMinutes)
+    let out = template;
+    // 天气：兼容模板里的 `${weatherContext}` / `${weather}` / 旧中文占位符 `${天气信息（可选）}`
+    out = out
       .replace(/\$\{weatherContext\}/g, weatherContext)
-      .replace(/\$\{weather\}/g, weatherContext);
+      .replace(/\$\{weather\}/g, weatherContext)
+      .replace(/\$\{天气信息（可选）\}/g, weatherContext);
+    // 手机状态
+    out = out.replace(/\$\{phoneContext\}/g, phoneContext)
+             .replace(/\$\{手机状态（可选）\}/g, phoneContext);
+    return out;
   }
 
   // 如果文件不存在，尝试从环境变量读取（兼容旧配置）
@@ -641,7 +700,8 @@ function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
       .replace(/\$\{currentTime\}/g, currentTime)
       .replace(/\$\{diffMinutes\}/g, diffMinutes)
       .replace(/\$\{weatherContext\}/g, weatherContext)
-      .replace(/\$\{weather\}/g, weatherContext);
+      .replace(/\$\{weather\}/g, weatherContext)
+      .replace(/\$\{phoneContext\}/g, phoneContext);
   }
 
   // 默认理智版本（开源通用），可自行修改提示词
@@ -655,6 +715,7 @@ function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
 - 当前时间：${currentTime}
 - 距离用户最后一条消息：${diffMinutes} 分钟
 ${weatherContext ? `\n${weatherContext}\n` : ""}
+${phoneContext ? `\n${phoneContext}\n` : ""}
 
 ## 输出格式
 - 如果想联系用户，直接写你想说的话。系统会自动打包成手机推送发送。可以是一句话，也可以第一行作为标题、第二行作为正文。
@@ -731,6 +792,7 @@ async function runWakeUpInner() {
   }
 
   const weatherContext = await fetchWeatherContext();
+  const phoneContext = await fetchPhoneStateContext();
 
   // 永久注入上下文
   let pinnedContext = "";
@@ -744,7 +806,7 @@ async function runWakeUpInner() {
     console.warn("[pinned] 唤醒时注入失败:", pinErr.message);
   }
 
-  const wakePrompt = buildWakePrompt(getChinaTimeString(), diffMinutes, weatherContext);
+  const wakePrompt = buildWakePrompt(getChinaTimeString(), diffMinutes, weatherContext, phoneContext);
   let cleanMessages = stripPosition(messages);
 
   // 上下文记忆替换：唤醒时看到的也是 AI 写好的记忆而不是原文（源文件不动）
@@ -811,11 +873,17 @@ async function runWakeUpInner() {
   // system = 唤醒提示词 + 人设(cleanSP) + 永久上下文(pinned)
   const systemContent = [wakePrompt, cleanSP, pinnedContext].filter(Boolean).join("\n\n");
 
+  // 跨窗口记忆快照（与对话侧三层结构一致：system -> assistant(跨窗口记忆) -> user 任务）
+  const crossSnapshotText = readCrossSnapshot(wakeSessionId);
+
   const wakeMessages = [
     {
       role: "system",
       content: systemContent
     },
+    ...(crossSnapshotText
+      ? [{ role: "assistant", content: "## 跨窗口记忆\n" + crossSnapshotText }]
+      : []),
     {
       // 批注 2026-07-15：Claude/部分 New API 适配器会把 system 抽成独立字段；
       // 唤醒请求如果全是 system，上游 messages 会变空，因此最近记录必须作为 user 任务输入发送。
@@ -835,6 +903,9 @@ ${historyText}`
 
   // 批注 2026-07-15：wake-up prompt 会包含最近聊天记录；
   // 默认日志只写摘要，避免公开部署时把完整上下文刷进 pm2 日志。
+  if (crossSnapshotText) console.log("[wake-up] 已注入跨窗口记忆（" + crossSnapshotText.length + " 字符）");
+  else console.log("[wake-up] 无跨窗口记忆快照可注入（回退为空）");
+
   console.log("\n===== WAKE MESSAGES SUMMARY =====\n");
   console.log(JSON.stringify(summarizeWakeMessages(wakeMessages)));
 
@@ -863,11 +934,17 @@ ${historyText}`
       }),
       signal: wakeController.signal
     });
+  } catch (e) {
+    clearTimeout(wakeTimer);
+    throw e;
+  }
+
+  let responseText;
+  try {
+    responseText = await response.text();
   } finally {
     clearTimeout(wakeTimer);
   }
-
-  const responseText = await response.text();
   let data;
   try {
     data = JSON.parse(responseText);
