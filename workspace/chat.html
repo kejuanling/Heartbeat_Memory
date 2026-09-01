@@ -2116,6 +2116,7 @@ let jumpSeen=false, jumpHideTimer=null, lastScrollTop=0;
 // 避免稍微滑动屏幕就闪现按钮。
 const JUMP_SHOW_DIST=Math.max(120, Math.round((window.innerHeight||640)*0.25)); // 距底部超过此值才显示
 const JUMP_DELTA_MIN=30;   // 连续两次滚动的位移需超过此值才更新方向/显示，抑制抖动
+function scheduleMicro(fn){ if(typeof Promise!=="undefined"){ Promise.resolve().then(fn); } else { setTimeout(fn,0); } }
 function updateJumpBtn(dir,hideShort){
   if(!jumpBtn)return;
   const fromBottom=chatEl.scrollHeight-chatEl.scrollTop-chatEl.clientHeight;
@@ -2129,8 +2130,26 @@ function updateJumpBtn(dir,hideShort){
   jumpHideTimer=setTimeout(function(){ jumpBtn.style.display="none"; },1600);
 }
 if(jumpBtn)jumpBtn.addEventListener("click",function(){
-  if(jumpBtn.dataset.go==="top"){ chatEl.scrollTop=0; }
-  else{ chatEl.scrollTop=chatEl.scrollHeight; }
+  // 窗口化后滚动跳转需回到"数据层"：
+  // - 回到底部：解除定位、锚定尾部窗口后, 真正滚到最新消息
+  // - 回到顶部：把窗口补到最早(_from=0), 让头部消息真正渲染进 DOM 后再滚到起点
+  if(jumpBtn.dataset.go==="top"){
+    // 回到顶部：必须用 _lockFrom=true 把窗口起点锁定到 0(最早), 否则 renderAll 会把它重置回尾部窗口
+    _winSession=currentSession;
+    _lockFrom=true;
+    _from=0; _to=null;
+    renderAll(true);
+    // DOM 顶部即是第一条消息; _from=0 时无顶部哨兵占位
+    requestAnimationFrame(function(){ chatEl.scrollTop=0; jumpSeen=false; });
+    // 展示后解除定位锁, 保留窗口起点(_from=0), 后续向上/向下补载逻辑可正常接管
+    scheduleMicro(function(){ _from=0; _lockFrom=false; });
+  }
+  else{
+    // 回到底部：解除定位, 锚定尾部窗口
+    _lockFrom=false; _winSession=currentSession;
+    renderAll(false);   // 窗口重置到尾部并 scrollBottom
+    jumpSeen=false;
+  }
 });
 chatEl.addEventListener("scroll",function(){
   autoScroll=nearBottom();
