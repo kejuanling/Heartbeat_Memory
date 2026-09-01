@@ -1199,6 +1199,14 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .call-float:active{transform:scale(.94)}
 .call-float .cf-ico{display:flex}
 .call-float .cf-timer{font-variant-numeric:tabular-nums}
+
+/* 窗口化补载哨兵 */
+.win-sentinel{
+  height:2px;margin:6px 0;border-radius:2px;
+  background:linear-gradient(90deg,transparent,rgba(200,144,152,.28),transparent);
+  color:transparent;font-size:0;user-select:none;
+}
+.win-sentinel.btm{margin-top:10px;margin-bottom:2px;}
 </style>
 </head>
 
@@ -2529,29 +2537,127 @@ function groupCls(i){
   // 一律不分组：QQ/微信/短信/自定义 每条消息独立（各自带头像/尾巴/圆角），更贴近真实聊天 APP
   return "";
 }
-function renderAll(keepPos){
-  chatEl.innerHTML="";
-  if(!msgs.length){chatEl.appendChild(emptyEl);if(keepPos!==true)scrollBottom();return;}
-  let lastDay="";
-  let lastShownTs=null; // 最近一次显示时间线的时间戳, 用于按间隔判断
-  msgs.forEach((m,i)=>{
-    if(m._callB) return;
+/* ================= 窗口化渲染（大会话性能） ================= */
+// 滑动窗口渲染：只渲染 [_from,_to) 这段。默认锚定尾部(_to=null片尾=len)，向上滚动补载更早消息。
+// 搜索定位时 _lockFrom=true 并锁 _to，形成固定滑窗，可向上/向下补载。
+let _WIN=100;            // 单次窗口/补载条数
+let _from=0;             // 窗口起点（msgs 索引）
+let _to=null;            // 窗口终点(含? 否)。null=渲染到 msgs.length
+let _lockFrom=false;     // 是否锁定窗口范围（搜索定位模式）
+let _winSession=null;    // 记录渲染窗口所属会话，会话切换时自动复位定位锁
+let _sentTop=null;       // 顶部哨兵：进入视口触发"加载更早"
+let _sentBtm=null;       // 底部哨兵：进入视口触发"加载更新"(仅定位模式用)
+let _io=null;            // IntersectionObserver
+function _ensureIO(){
+  if(_io) return _io;
+  if(typeof IntersectionObserver==="undefined") return null;
+  _io=new IntersectionObserver(function(entries){
+    entries.forEach(function(en){
+      if(_winActive&&en.isIntersecting){
+        if(en.target===_sentTop) loadMoreOlder();
+        else if(en.target===_sentBtm) loadMoreNewer();
+      }
+    });
+  },{root:chatEl, rootMargin:"160px 0px 160px 0px"});
+  return _io;
+}
+function _buildBatch(fromIdx,toIdx,insertBeforeEl){
+  const frag=document.createDocumentFragment();
+  let lastShownTs=null,lastDay="";
+  for(let i=fromIdx;i<toIdx;i++){
+    const m=msgs[i];
+    if(!m) continue;
+    if(m._callB||typeof m.content==="string"&&m.content.indexOf("【工具调用记录】")===0) continue;
     const mt=msgTime(m); const tmt=mt?mt.getTime():0;
     const day=dayDivider(mt);
-    // QQ/微信式时间线: 首条 / 跨天 / 与上次时间线>=5分钟 时, 插入居中时间线(复用 .day-divider 样式)
     if(mt){
-      const showTLine = (lastShownTs===null) || (day&&day!==lastDay) || (tmt-lastShownTs>=5*60*1000);
+      const showTLine=(lastShownTs===null)||(day&&day!==lastDay)||(tmt-lastShownTs>=5*60*1000);
       if(showTLine){
         const dv=document.createElement("div");dv.className="day-divider";
         dv.textContent=(day&&day!==lastDay)?day:fmtTime(mt);
-        chatEl.appendChild(dv); lastShownTs=tmt;
+        frag.appendChild(dv); lastShownTs=tmt;
       }
     }
-    if(day&&day!==lastDay)lastDay=day;
-    const gcls=groupCls(i);
-    const mel=makeMsgEl(m,i,gcls); if(mel) chatEl.appendChild(mel);
-  });
-  if(keepPos!==true)scrollBottom();
+    if(day&&day!==lastDay) lastDay=day;
+    const mel=makeMsgEl(m,i,""); if(mel) frag.appendChild(mel);
+  }
+  return frag;
+}
+function _replaceWindow(keepPos){
+  chatEl.innerHTML="";
+  const to = (_to===null)?msgs.length:Math.min(msgs.length,_to);
+  const from = Math.max(0, Math.min(_from, to));
+  const frag=_buildBatch(from,to,null);
+  chatEl.appendChild(frag);
+  _from=from;
+  // 重建顶部哨兵（若还有更早消息）
+  if(_sentTop){ try{_io&&_io.unobserve(_sentTop);}catch(e){} _sentTop=null; }
+  if(from>0){
+    _sentTop=document.createElement("div"); _sentTop.className="win-sentinel";
+    _sentTop.textContent="↑ 加载更早消息";
+    chatEl.insertBefore(_sentTop, chatEl.firstChild);
+    try{ const io=_ensureIO(); if(io) io.observe(_sentTop); }catch(e){}
+  }
+  // 底部哨兵（仅非尾部窗口，即定位模式且 to<len 时）
+  if(_sentBtm){ try{_io&&_io.unobserve(_sentBtm);}catch(e){} _sentBtm=null; }
+  if(_to!==null && to<msgs.length){
+    _sentBtm=document.createElement("div"); _sentBtm.className="win-sentinel btm";
+    _sentBtm.textContent="↓ 加载更新消息";
+    chatEl.appendChild(_sentBtm);
+    try{ const io=_ensureIO(); if(io) io.observe(_sentBtm); }catch(e){}
+  }
+  if(keepPos!==true) scrollBottom();
+}
+// 向上补载更早
+function loadMoreOlder(){
+  if(!_winActive||!_from) return;
+  const nstart=Math.max(0,_from-_WIN);
+  // 记录插入前顶部锚点位置，插入后补偿 scrollTop，避免视口跳动
+  const oldH=chatEl.scrollHeight;
+  const frag=_buildBatch(nstart,_from,null);
+  const anchor=_sentTop||chatEl.firstChild;
+  chatEl.insertBefore(frag, anchor);
+  _from=nstart;
+  // 重挂顶部哨兵
+  if(_sentTop){ try{_io&&_io.unobserve(_sentTop);}catch(e){} _sentTop=null; }
+  if(_from>0){
+    _sentTop=document.createElement("div"); _sentTop.className="win-sentinel";
+    _sentTop.textContent="↑ 向上滚动查看更多更早消息";
+    chatEl.insertBefore(_sentTop, chatEl.firstChild);
+    try{ const io=_ensureIO(); if(io) io.observe(_sentTop); }catch(e){}
+  }
+  // 补偿：内容变高了，把滚动往回调，保持用户当前仍停在同一批消息
+  const dh=chatEl.scrollHeight-oldH;
+  if(dh>0){ chatEl.scrollTop+=dh; }
+}
+// 向下补载更新（仅定位模式）
+function loadMoreNewer(){
+  if(!_winActive||_to===null) return;
+  const cur=Math.min(msgs.length,_to);
+  if(cur>=msgs.length) return;
+  const nto=Math.min(msgs.length, cur+_WIN);
+  const frag=_buildBatch(cur,nto,null);
+  const anchor=_sentBtm||null;
+  if(anchor) chatEl.insertBefore(frag, anchor); else chatEl.appendChild(frag);
+  _to=nto;
+  if(_sentBtm){ try{_io&&_io.unobserve(_sentBtm);}catch(e){} _sentBtm=null; }
+  if(_to<msgs.length){
+    _sentBtm=document.createElement("div"); _sentBtm.className="win-sentinel btm";
+    _sentBtm.textContent="↓ 加载更新消息";
+    chatEl.appendChild(_sentBtm);
+    try{ const io=_ensureIO(); if(io) io.observe(_sentBtm); }catch(e){}
+  }
+}
+let _winActive=true;
+function renderAll(keepPos){
+  // 会话切换自动复位窗口（避免上一个会话的定位窗口被沿用）
+  if(_winSession!==currentSession){ _winSession=currentSession; _lockFrom=false; _from=0; _to=null; }
+  chatEl.innerHTML="";
+  removeEmpty();
+  if(!msgs.length){chatEl.appendChild(emptyEl);if(keepPos!==true)scrollBottom();return;}
+  if(!_lockFrom){ _from=Math.max(0,msgs.length-_WIN); _to=null; }
+  _winActive=true;
+  _replaceWindow(keepPos);
 }
 function removeEmpty(){if(emptyEl&&chatEl.contains(emptyEl))emptyEl.remove();}
 function appendTypingBox(){
@@ -4764,13 +4870,18 @@ async function switchSessionAndLocate(sid,idx){
   applyHeader();
   msgs=loadMsgs();
   if(!(msgs&&msgs.length)){ const h=await fetchHistory(); if(h&&h.length){ msgs=h; saveMsgs(); } }
-  renderAll(false);
+  // 定位模式：以目标消息为中心开固定滑窗 [_from,_to)，保证该条必然被渲染
+  _lockFrom=true;
+  _from=Math.max(0, idx-Math.floor(_WIN/2));
+  _to=Math.min(msgs.length, idx+Math.floor(_WIN/2));
+  renderAll(true);
   closeDrawer();
   renderSessionList();
-  setTimeout(function(){
+  requestAnimationFrame(function(){ renderAll(true);
     const el=chatEl.querySelector('.msg[data-idx="'+idx+'"]');
     if(el){ el.scrollIntoView({behavior:"smooth",block:"center"}); el.classList.add("flash"); setTimeout(function(){el.classList.remove("flash");},1600); }
-  },200);
+    else{ _lockFrom=false; renderAll(false); }
+  });
 }
 (function(){
   const se=document.getElementById("sessionSearch");
