@@ -2134,15 +2134,15 @@ if(jumpBtn)jumpBtn.addEventListener("click",function(){
   // - 回到底部：解除定位、锚定尾部窗口后, 真正滚到最新消息
   // - 回到顶部：把窗口补到最早(_from=0), 让头部消息真正渲染进 DOM 后再滚到起点
   if(jumpBtn.dataset.go==="top"){
-    // 回到顶部：必须用 _lockFrom=true 把窗口起点锁定到 0(最早), 否则 renderAll 会把它重置回尾部窗口
+    // 回到顶部：只渲染头部窗口 [_from,_to)=[0,min(len,_WIN)]，避免一次性全量渲染 3000 条阻塞主线程
+    // 头部窗口不含尾部，_replaceWindow 会自动挂底部哨兵，向下滚动时逐批补载剩余历史；语义即回到对话第一屏
     _winSession=currentSession;
     _lockFrom=true;
-    _from=0; _to=null;
+    _from=0;
+    _to=Math.min(msgs.length||0, _WIN);
     renderAll(true);
-    // DOM 顶部即是第一条消息; _from=0 时无顶部哨兵占位
+    // DOM 顶部即第一条消息; 窗口又是头部, 无顶部哨兵占位
     requestAnimationFrame(function(){ chatEl.scrollTop=0; jumpSeen=false; });
-    // 展示后解除定位锁, 保留窗口起点(_from=0), 后续向上/向下补载逻辑可正常接管
-    scheduleMicro(function(){ _from=0; _lockFrom=false; });
   }
   else{
     // 回到底部：解除定位, 锚定尾部窗口
@@ -3430,19 +3430,42 @@ function applyThemePreview(){
 /* ===== 保存主题（最多 3 个，点回可切换） ===== */
 const LS_THEMES="han_saved_themes";
 function themeInputs(){
-  return { bg_image:(bgImageInput&&bgImageInput.value)||"", bg_color:(bgColorInput&&bgColorInput.value)||"", user_bubble:(userBubbleColor&&userBubbleColor.value)||"#d9a3a8", ai_bubble:(aiBubbleColor&&aiBubbleColor.value)||"#fffdf9", bubble_opacity:Number(bubbleOpacity&&bubbleOpacity.value||100)/100, bubble_blur:Number(bubbleBlur&&bubbleBlur.value||0), bubble_radius:Number(bubbleRadius&&bubbleRadius.value||18), user_font_color:(userFontColorInput&&userFontColorInput.value)||"#ffffff", ai_font_color:(aiFontColorInput&&aiFontColorInput.value)||"#5a4a3a", font_size:Number(fontSizeInput&&fontSizeInput.value||15), font_family:(fontFamilyInput&&fontFamilyInput.value)||"" };
+  const or=function(v,d){ return (v!==null&&v!==undefined&&v!=="")?v:d; };
+  return {
+    bg_image: or(bgImageInput&&bgImageInput.value, cfg.bg_image||""),
+    bg_color: or(bgColorInput&&bgColorInput.value, cfg.bg_color||""),
+    user_bubble: or(userBubbleColor&&userBubbleColor.value, cfg.user_bubble||"#d9a3a8"),
+    ai_bubble: or(aiBubbleColor&&aiBubbleColor.value, cfg.ai_bubble||"#fffdf9"),
+    bubble_opacity: (bubbleOpacity&&bubbleOpacity.value!=="")?Number(bubbleOpacity.value)/100 : (cfg.bubble_opacity!=null?cfg.bubble_opacity:1),
+    bubble_blur: (bubbleBlur&&bubbleBlur.value!=="")?Number(bubbleBlur.value) : (cfg.bubble_blur!=null?cfg.bubble_blur:0),
+    bubble_radius: (bubbleRadius&&bubbleRadius.value!=="")?Number(bubbleRadius.value) : (cfg.bubble_radius!=null?cfg.bubble_radius:18),
+    user_font_color: or(userFontColorInput&&userFontColorInput.value, cfg.user_font_color||"#ffffff"),
+    ai_font_color: or(aiFontColorInput&&aiFontColorInput.value, cfg.ai_font_color||"#5a4a3a"),
+    font_size: (fontSizeInput&&fontSizeInput.value!=="")?Number(fontSizeInput.value) : (cfg.font_size!=null?cfg.font_size:15),
+    font_family: or(fontFamilyInput&&fontFamilyInput.value, cfg.font_family||""),
+    user_avatar: or(userAvatarInput&&userAvatarInput.value, cfg.user_avatar||""),
+    ai_avatar: or(aiAvatarInput&&aiAvatarInput.value, cfg.ai_avatar||""),
+    bubble_style: (chatEl&&chatEl.getAttribute("data-layout"))||cfg.bubble_style||"qq"
+  };
 }
 function loadSavedThemes(){ try{ const a=JSON.parse(localStorage.getItem(LS_THEMES)||"[]"); return Array.isArray(a)?a:[]; }catch(e){ return []; } }
-function syncThemesToServer(){
+function syncThemesToServer(replace){
   const arr=loadSavedThemes();
-  fetch("/v1/themes",{method:"PUT",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key},credentials:"include",body:JSON.stringify({themes:arr})}).catch(function(){});
+  fetch("/v1/themes",{method:"PUT",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key},credentials:"include",body:JSON.stringify({themes:arr,replace:!!replace})}).catch(function(){});
 }
 async function loadThemesFromServer(){
   try{
     const r=await fetch("/v1/themes",{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
     const j=await r.json();
-    const arr=(j&&j.themes)||[];
-    if(Array.isArray(arr)&&arr.length){ localStorage.setItem(LS_THEMES,JSON.stringify(arr)); renderSavedThemes(); }
+    const arr=Array.isArray(j&&j.themes)?j.themes:[];
+    if(!arr.length){ return; } // 服务器为空：绝不覆盖本地（防刷新丢主题）
+    const local=loadSavedThemes();
+    const merged=local.slice(0);
+    const names={}; local.forEach(function(t){ if(t&&t.name)names[t.name]=1; });
+    let added=false;
+    arr.forEach(function(t){ if(t&&t.name&&!names[t.name]){ merged.push(t); names[t.name]=1; added=true; } });
+    if(added){ try{ localStorage.setItem(LS_THEMES,JSON.stringify(merged)); }catch(e){} }
+    renderSavedThemes();
   }catch(e){}
 }
 function saveCustomTheme(){
@@ -3461,13 +3484,18 @@ function applyCustomTheme(t){
   cfg.bubble_opacity=t.bubble_opacity!=null?t.bubble_opacity:1; cfg.bubble_blur=t.bubble_blur!=null?t.bubble_blur:0; cfg.bubble_radius=t.bubble_radius!=null?t.bubble_radius:18;
   cfg.user_font_color=t.user_font_color||"#ffffff"; cfg.ai_font_color=t.ai_font_color||"#5a4a3a";
   cfg.font_size=t.font_size!=null?t.font_size:15; cfg.font_family=t.font_family||"";
+  if(t.user_avatar!==undefined)cfg.user_avatar=t.user_avatar||"";
+  if(t.ai_avatar!==undefined)cfg.ai_avatar=t.ai_avatar||"";
+  if(t.bubble_style)cfg.bubble_style=t.bubble_style;
   if(bgImageInput)bgImageInput.value=cfg.bg_image||""; if(bgColorInput)bgColorInput.value=cfg.bg_color||"#f4f1ee";
   if(userBubbleColor)userBubbleColor.value=cfg.user_bubble; if(aiBubbleColor)aiBubbleColor.value=cfg.ai_bubble;
   if(bubbleOpacity)bubbleOpacity.value=Math.round((cfg.bubble_opacity!=null?cfg.bubble_opacity:1)*100); if(bubbleBlur)bubbleBlur.value=cfg.bubble_blur; if(bubbleRadius)bubbleRadius.value=cfg.bubble_radius;
   if(userFontColorInput)userFontColorInput.value=cfg.user_font_color; if(aiFontColorInput)aiFontColorInput.value=cfg.ai_font_color;
   if(fontSizeInput)fontSizeInput.value=cfg.font_size; if(fontFamilyInput)fontFamilyInput.value=cfg.font_family;
-  renderThemeValues(); applyTheme(); saveCfg();
-  showToast("已切换到「"+t.name+"」");
+  if(userAvatarInput)userAvatarInput.value=cfg.user_avatar||""; if(aiAvatarInput)aiAvatarInput.value=cfg.ai_avatar||"";
+  if(chatEl)chatEl.setAttribute("data-layout",cfg.bubble_style||"qq");
+  renderPicks(); renderThemeValues(); applyTheme(); applyHeader(); saveCfg();
+  showToast("已切换到「"+(t.name||"主题")+"」");
 }
 function themeSwatch(t){
   const c=(t&&(t.user_bubble||t.bg_color))||"";
@@ -3491,7 +3519,7 @@ function renderSavedThemes(){
       const arr=loadSavedThemes(); if(!arr.length) return;
       arr.splice(+btn.closest(".saved-theme").dataset.i,1);
       try{ localStorage.setItem(LS_THEMES, JSON.stringify(arr)); }catch(e){}
-      syncThemesToServer(); renderSavedThemes(); showToast("已删除主题");
+      syncThemesToServer(true); renderSavedThemes(); showToast("已删除主题");
     });
   });
 }

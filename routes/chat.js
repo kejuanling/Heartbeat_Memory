@@ -272,6 +272,14 @@ module.exports = function registerChatRoutes(app, deps) {
       const body = (req.body && typeof req.body === 'object') ? req.body : {};
       const themes = Array.isArray(body.themes) ? body.themes : [];
       const clean = themes.filter(t => t && typeof t === 'object').slice(0, 50);
+      let existing = [];
+      try { if (fsp.existsSync(SAVED_THEMES_FILE)) existing = JSON.parse(fsp.readFileSync(SAVED_THEMES_FILE, 'utf-8')) || []; } catch (e) {}
+      if (!Array.isArray(existing)) existing = [];
+      // 防止空覆盖：服务器已有主题却收到空数组时保留原数据，除非显式 replace
+      if (clean.length === 0 && existing.length > 0 && !body.replace) {
+        reply.send({ ok: true, saved: false, skipped: 'empty', count: existing.length });
+        return;
+      }
       fsp.ensureDirSync(path.join(baseDir, 'data'));
       fsp.writeFileSync(SAVED_THEMES_FILE, JSON.stringify(clean, null, 2), 'utf-8');
       reply.send({ ok: true, saved: true, count: clean.length });
