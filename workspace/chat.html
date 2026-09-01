@@ -1499,7 +1499,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
               <div style="margin-top:10px"><label>max_tokens<span class="tag">可选</span></label><input type="number" min="1" id="maxTokInput" placeholder="留空不限制"></div>
             </div>
             <button type="button" class="mcp-btn primary" id="aiSaveBtn" style="margin-top:12px" onclick="saveSettingsAll()">保存 AI 设置</button>
-            </div></div><div class="set-panel" data-acc="sendcfg"><div class="set-acc-h" data-acc="sendcfg">对话发送配置<span class="ar">▾</span></div><div class="set-sec"><div class="field">
+            </div></div><div class="set-panel" data-acc="memwake"><div class="set-acc-h" data-acc="memwake">记忆与唤醒参数<span class="ar">▾</span></div><div class="set-sec"><div class="set-sec-label">唤醒</div><div class="field"><label>唤醒历史最大条数</label><input type="number" id="mwWake" value="80"></div><div class="set-sec-label">记忆池</div><div class="field"><label>去重阈值</label><input type="number" step="0.05" min="0" max="1" id="mwDedup" value="0.78"></div><div class="field"><label>衰减半衰期（天）</label><input type="number" step="1" min="1" id="mwDecay" value="30"></div><div class="set-sec-label">再解析（压缩摘要 → 记忆池）</div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">摘要再解析入库</label><label class="adm-sw"><input type="checkbox" id="mwReparse" checked><i></i></label></div><div class="field"><label>每条字数上限</label><input type="number" step="1" min="5" id="mwRmax" value="30"></div><div class="field"><label>每段最多条数</label><input type="number" step="1" min="1" id="mwRmaxitems" value="8"></div><div class="set-sec-label">跨窗口注入</div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">总开关</label><label class="adm-sw"><input type="checkbox" id="mwCross" checked><i></i></label></div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">固定注入</label><label class="adm-sw"><input type="checkbox" id="mwAlways"><i></i></label></div><div class="field"><label>消息少于 N 条</label><input type="number" step="1" min="1" id="mwMaxmsgs" value="2"></div><div class="field"><label>日记天数</label><input type="number" step="1" min="0" id="mwDays" value="3"></div><div class="field"><label>每类注入条数</label><input type="number" step="1" min="1" id="mwMempercat" value="2"></div><div class="field"><label>摘要最近天数</label><input type="number" step="1" min="1" id="mwSumdays" value="7"></div><div class="field"><label>标星条数</label><input type="number" step="1" min="1" id="mwStartopk" value="10"></div><div class="mcp-msg" id="mwMsg"></div><button type="button" class="mcp-btn primary" id="mwSaveBtn">保存参数</button></div></div><div class="set-panel" data-acc="sendcfg"><div class="set-acc-h" data-acc="sendcfg">对话发送配置<span class="ar">▾</span></div><div class="set-sec"><div class="field">
               <label>保留最近 N 条带图消息的历史图片（0=不保留，当前发送的图始终保留）</label>
               <input type="number" id="imgKeepTurns" min="0" step="1" value="8">
             </div>
@@ -4314,7 +4314,7 @@ function initSettingsDrawer(){
     {key:"mcp",     name:"MCP 管理",  accs:["mcp"],  icon:'<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4L15 12l-3-3z"/>'},
     {key:"prov",    name:"AI 供应商", accs:["prov"], icon:'<path d="M12 2l3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/>'},
     {key:"voice",   name:"语音服务",  accs:["voice"],icon:'<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>'},
-    {key:"ai",      name:"AI 设置",   accs:["ai"],   icon:'<path d="M12 2a7 7 0 0 1 7 7c0 2-1 3-1 5 0 2 1 2 1 4H5c0-2 1-2 1-4 0-2-1-3-1-5a7 7 0 0 1 7-7z"/>'},
+    {key:"ai",      name:"AI 设置",   accs:["ai","memwake"],   icon:'<path d="M12 2a7 7 0 0 1 7 7c0 2-1 3-1 5 0 2 1 2 1 4H5c0-2 1-2 1-4 0-2-1-3-1-5a7 7 0 0 1 7-7z"/>'},
     {key:"theme",   name:"主题设置",  accs:["theme"],icon:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/>'}
   ];
   body.innerHTML="";
@@ -4361,6 +4361,7 @@ function settingsShowPage(key){
   if(key==="mcp"){ if(typeof loadMcpServers==="function") loadMcpServers(); }
   if(key==="prov"){ if(typeof loadProviders==="function") loadProviders(); }
   if(key==="general"){ if(typeof loadSendCfgSettings==="function") loadSendCfgSettings(); }
+  if(key==="ai"){ if(typeof loadMemWakeSettings==="function") loadMemWakeSettings(); }
   // 保存按钮只在「通用」页显示（它是通用页的保存按钮）
   var ssb=document.getElementById("settingsSaveBtn"); if(ssb) ssb.style.display=(key==="general")?"":"none";
 }
@@ -5319,7 +5320,6 @@ function admPost(url, body){ return admFetch(url,{method:'POST',body:body}).then
 var CARDS = [
   { group:'sys', id:'env',        n:'环境变量',   d:'运行 · 模型 · 推送 · 天气', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="9" cy="18" r="2"/></svg>' },
   { group:'sys', id:'netease',    n:'网易云环境', d:'登录会话 · 账号状态', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>' },
-  { group:'sys', id:'memwake',    n:'记忆与唤醒参数', d:'去重 · 衰减 · 跨窗口注入', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>' },
 
   { group:'mem', id:'diary',      n:'日记阅览',   d:'编辑日记 · 同步上下文', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>' },
   { group:'mem', id:'mempool',    n:'记忆池',     d:'新增 · 整理 · 检索', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 1 5 5v9a5 5 0 0 1-10 0V7a5 5 0 0 1 5-5z"/><path d="M12 12v6"/></svg>' },
@@ -5429,7 +5429,6 @@ function renderCard(id, body){
       case 'env': return renderEnv(body);
       case 'netease': return renderNetease(body);
       case 'sendcfg': return renderSendCfg(body);
-      case 'memwake': return renderMemWake(body);
       case 'mempool': return renderMemPoolCard(body);
       case 'compaction': return renderCompaction(body);
       case 'wakelog': return renderWakeLog(body);
@@ -5608,58 +5607,7 @@ function renderSendCfg(body){
   }).catch(function(e){ body.innerHTML='<div class="adm-empty">加载失败: '+esc(e.message)+'</div>'; });
 }
 
-/* ---------------- 记忆与唤醒参数 ---------------- */
-function renderMemWake(body){
-  body.innerHTML='<div class="adm-load">加载中…</div>';
-  Promise.all([admGet(BASE+'/config'), admGet(BASE+'/memory-pool/config')]).then(function(res){
-    var c=res[0], m=res[1];
-    function num(v,d){ return v!=null?v:d; }
-    body.innerHTML='<div class="adm-item">'
-      +'<div class="set-sec-title">唤醒</div>'
-      +'<div class="adm-row"><span class="adm-k">唤醒历史最大条数</span><input type="number" id="adm-mw-wake" value="'+num(c.wake_history_max_messages,80)+'" style="flex:1;min-width:0;padding:7px 9px;border:1px solid rgba(200,144,152,.25);border-radius:8px;font-size:12px"></div>'
-      +'<div class="set-sec-title">记忆池</div>'
-      +'<div class="adm-row"><span class="adm-k">去重阈值</span><input type="number" step="0.05" min="0" max="1" id="adm-mw-dedup" value="'+num(m.dedup_threshold,0.78)+'"></div>'
-      +'<div class="adm-row"><span class="adm-k">衰减半衰期(天)</span><input type="number" step="1" min="1" id="adm-mw-decay" value="'+num(m.decay_days,30)+'"></div>'
-      +'<div class="set-sec-title">再解析（压缩摘要 → 记忆池）</div>'
-      +'<div class="adm-row"><span class="adm-k">摘要再解析入库</span><label class="adm-sw"><input type="checkbox" id="adm-mw-reparse" '+(m.reparse_enabled!==false?'checked':'')+'><i></i></label></div>'
-      +'<div class="adm-row"><span class="adm-k">每条字数上限</span><input type="number" step="1" min="5" id="adm-mw-rmax" value="'+num(m.reparse_max_chars,30)+'"></div>'
-      +'<div class="adm-row"><span class="adm-k">每段最多条数</span><input type="number" step="1" min="1" id="adm-mw-rmaxitems" value="'+num(m.reparse_max_items,8)+'"></div>'
-      +'<div class="set-sec-title">跨窗口注入</div>'
-      +'<div class="adm-row"><span class="adm-k">总开关</span><label class="adm-sw"><input type="checkbox" id="adm-mw-cross" '+(m.cross_inject_enabled!==false?'checked':'')+'><i></i></label></div>'
-      +'<div class="adm-row"><span class="adm-k">固定注入</span><label class="adm-sw"><input type="checkbox" id="adm-mw-always" '+(m.cross_inject_always===true?'checked':'')+'><i></i></label></div>'
-      +'<div class="adm-row"><span class="adm-k">消息少于 N 条</span><input type="number" step="1" min="1" id="adm-mw-maxmsgs" value="'+num(m.cross_inject_max_msgs,2)+'"></div>'
-      +'<div class="adm-row"><span class="adm-k">日记天数</span><input type="number" step="1" min="0" id="adm-mw-days" value="'+num(m.cross_inject_diary_days,3)+'"></div>'
-      +'<div class="adm-row"><span class="adm-k">每类注入条数</span><input type="number" step="1" min="1" id="adm-mw-mempercat" value="'+num(m.cross_inject_memory_per_category,2)+'"></div>'
-      +'<div class="adm-row"><span class="adm-k">摘要最近天数</span><input type="number" step="1" min="1" id="adm-mw-sumdays" value="'+num(m.cross_inject_summary_days,7)+'"></div>'
-      +'<div class="adm-row"><span class="adm-k">标星条数</span><input type="number" step="1" min="1" id="adm-mw-startopk" value="'+num(m.cross_inject_starred_topk,10)+'"></div>'
-      +'<div class="adm-tr"><button class="p" id="adm-mw-save">保存参数</button></div><div class="adm-msg" id="adm-mw-msg"></div></div>';
-    document.getElementById('adm-mw-save').addEventListener('click', function(){ saveMemWake(body); });
-  }).catch(function(e){ body.innerHTML='<div class="adm-empty">加载失败: '+esc(e.message)+'</div>'; });
-}
-function saveMemWake(body){
-  var up={wake_history_max_messages:Number(document.getElementById('adm-mw-wake').value)||0};
-  var up2={
-    dedup_threshold:Number(document.getElementById('adm-mw-dedup').value)||0.78,
-    decay_days:Number(document.getElementById('adm-mw-decay').value)||30,
-    reparse_enabled:document.getElementById('adm-mw-reparse').checked,
-    reparse_max_chars:Number(document.getElementById('adm-mw-rmax').value)||30,
-    reparse_max_items:Number(document.getElementById('adm-mw-rmaxitems').value)||8,
-    cross_inject_enabled:document.getElementById('adm-mw-cross').checked,
-    cross_inject_always:document.getElementById('adm-mw-always').checked,
-    cross_inject_max_msgs:Number(document.getElementById('adm-mw-maxmsgs').value)||2,
-    cross_inject_diary_days:Number(document.getElementById('adm-mw-days').value)||3,
-    cross_inject_memory_per_category:Number(document.getElementById('adm-mw-mempercat').value)||2,
-    cross_inject_summary_days:Number(document.getElementById('adm-mw-sumdays').value)||7,
-    cross_inject_starred_topk:Number(document.getElementById('adm-mw-startopk').value)||10
-  };
-  Promise.all([admPost(BASE+'/config',up), admPost(BASE+'/memory-pool/config',up2)]).then(function(res){
-    var bad=res.some(function(j){ return j&&j.error; });
-    if(bad){ document.getElementById('adm-mw-msg').textContent='部分参数保存失败'; return; }
-    toast('记忆与唤醒参数已保存');
-    document.getElementById('adm-mw-msg').textContent='已保存，下次请求/重启生效（跨窗口注入即时生效）。';
-  });
-}
-
+/* ---------------- 记忆与唤醒参数（设置页 · 由原菜单卡片迁移） ---------------- */function loadMemWakeSettings(){  Promise.all([admGet(BASE+'/config'), admGet(BASE+'/memory-pool/config')]).then(function(res){    var c=res[0], m=res[1];    function num(v,d){ return v!=null?v:d; }    function setVal(id,v){ var el=document.getElementById(id); if(el) el.value=v; }    function setChk(id,b){ var el=document.getElementById(id); if(el) el.checked=!!b; }    setVal('mwWake',num(c.wake_history_max_messages,80));    setVal('mwDedup',num(m.dedup_threshold,0.78));    setVal('mwDecay',num(m.decay_days,30));    setChk('mwReparse',m.reparse_enabled!==false);    setVal('mwRmax',num(m.reparse_max_chars,30));    setVal('mwRmaxitems',num(m.reparse_max_items,8));    setChk('mwCross',m.cross_inject_enabled!==false);    setChk('mwAlways',m.cross_inject_always===true);    setVal('mwMaxmsgs',num(m.cross_inject_max_msgs,2));    setVal('mwDays',num(m.cross_inject_diary_days,3));    setVal('mwMempercat',num(m.cross_inject_memory_per_category,2));    setVal('mwSumdays',num(m.cross_inject_summary_days,7));    setVal('mwStartopk',num(m.cross_inject_starred_topk,10));  }).catch(function(e){ var m=document.getElementById('mwMsg'); if(m) m.textContent='加载失败: '+(e&&e.message||e); });}function saveMemWakeSettings(){  var up={wake_history_max_messages:Number(document.getElementById('mwWake').value)||0};  var up2={    dedup_threshold:Number(document.getElementById('mwDedup').value)||0.78,    decay_days:Number(document.getElementById('mwDecay').value)||30,    reparse_enabled:document.getElementById('mwReparse').checked,    reparse_max_chars:Number(document.getElementById('mwRmax').value)||30,    reparse_max_items:Number(document.getElementById('mwRmaxitems').value)||8,    cross_inject_enabled:document.getElementById('mwCross').checked,    cross_inject_always:document.getElementById('mwAlways').checked,    cross_inject_max_msgs:Number(document.getElementById('mwMaxmsgs').value)||2,    cross_inject_diary_days:Number(document.getElementById('mwDays').value)||3,    cross_inject_memory_per_category:Number(document.getElementById('mwMempercat').value)||2,    cross_inject_summary_days:Number(document.getElementById('mwSumdays').value)||7,    cross_inject_starred_topk:Number(document.getElementById('mwStartopk').value)||10  };  Promise.all([admPost(BASE+'/config',up), admPost(BASE+'/memory-pool/config',up2)]).then(function(res){    var bad=res.some(function(j){ return j&&j.error; });    var m=document.getElementById('mwMsg');    if(m){ m.textContent=bad?'部分参数保存失败':'已保存，下次请求/重启生效（跨窗口注入即时生效）。'; }    showToast(bad?'部分参数保存失败':'记忆与唤醒参数已保存');  }).catch(function(e){ var m=document.getElementById('mwMsg'); if(m) m.textContent='保存失败: '+(e&&e.message||e); });}if(document.getElementById('mwSaveBtn')){  document.getElementById('mwSaveBtn').addEventListener('click', saveMemWakeSettings);}
 /* ---------------- 记忆池 ---------------- */
 var _mpRefresh = null;
 function refreshMemPoolList(){ if(_mpRefresh) _mpRefresh(); }
