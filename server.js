@@ -2411,7 +2411,7 @@ app.get("/internal/context-search", async (req, reply) => {
     const allSessions = req.query.all_sessions === "1" || req.query.all_sessions === "true";
     const limit = Number(req.query.limit) || undefined;
     const threshold = req.query.threshold !== undefined ? Number(req.query.threshold) : undefined;
-    reply.send(contextReplacements.searchContextEnhanced(req.query.q, { mode, allSessions, limit, threshold }));
+    reply.send(await contextReplacements.searchContextEnhanced(req.query.q, { mode, allSessions, limit, threshold }));
   } catch (err) {
     console.error("[GET /internal/context-search] error:", err.message);
     reply.code(500).send({ error: err.message });
@@ -2419,12 +2419,13 @@ app.get("/internal/context-search", async (req, reply) => {
 });
 
 // 记忆池检索：MCP 工具 memory_search 用（x-internal-key 鉴权）
+// retrieveHybrid = 语义余弦(bge-small-zh) + 字面 + 重要级混合；embed-server 不可用自动降级纯字面
 app.get("/internal/memory-pool/retrieve", async (req, reply) => {
   try {
     const q = String(req.query.q || "").trim();
     const topK = Number(req.query.limit) || 5;
     const category = String(req.query.category || "").trim();
-    const items = memoryPool.retrieve(q, { topK, category: category || undefined });
+    const items = await memoryPool.retrieveHybrid(q, { topK, category: category || undefined });
     reply.send({ ok: true, total: items.length, items });
   } catch (err) {
     console.error("[GET /internal/memory-pool/retrieve] error:", err.message);
@@ -2563,6 +2564,8 @@ app.get("/admin/memories/keywords", { preHandler: basicAuth }, async (req, reply
 // 记忆池（8 分类结构化记忆）管理
 // ========================
 require("./routes/memory-pool")(app, { basicAuth });
+// 聊天页主题云同步 + 背景图/头像转存（/v1/themes, /v1/upload-image, /uploads/:file）
+require("./routes/themes")(app, { baseDir: __dirname });
 app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const b = req.body || {};
@@ -2600,6 +2603,34 @@ app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, re
     }
     if (!texts.length) return reply.code(400).send({ error: "无可解析的摘要" });
     const list = texts.slice(0, 200);
+    // 一键入池（direct）：不调 LLM，按摘要里现成的【分类】标签本地正则拆分后入库（重要级默认 0.5）；无分类标签的摘要不入池
+    if (b.direct === true) {
+      const directLabel = "直接入池（" + list.length + " 块）";
+      const logId = addCompactionLog({ action: "reparse", label: directLabel, status: "pending", message: "开始直接入池 " + list.length + " 段摘要..." }).id;
+      let dAdded = 0, dMerged = 0, dFailed = 0, dSkipped = 0;
+      for (const t of list) {
+        try {
+          const blocks = memoryPool.parseCategoryBlocks(t.summary, { noFallback: true });
+          if (!blocks.length) { dSkipped++; continue; }
+          for (const blk of blocks) {
+            const r = await memoryPool.ingestSummary(blk.content, {
+              source: "compaction-direct",
+              block_id: t.block_id,
+              directCategory: blk.category,
+              directImportance: 0.5
+            });
+            if (r.added) dAdded += r.added;
+            if (r.merged) dMerged += r.merged;
+            if (r.failed) dFailed += r.failed;
+          }
+        } catch (e) {
+          dFailed++;
+          console.error("[memory-pool] 直接入池失败:", e.message);
+        }
+      }
+      addCompactionLog({ id: logId, action: "reparse", label: directLabel, status: "success", message: "已入池 " + list.length + " 段 -> 新增 " + dAdded + " / 合并 " + dMerged + " / 失败 " + dFailed + " / 跳过(无分类标签) " + dSkipped });
+      return reply.send({ success: true, direct: true, processed: list.length, added: dAdded, merged: dMerged, failed: dFailed, skipped: dSkipped });
+    }
     const isMerge = b.merge === true && list.length > 1;
     const logLabelUse = isMerge ? ("合并再解析（" + list.length + " 块）") : logLabel;
     const logId = addCompactionLog({ action: "reparse", label: logLabelUse, status: "pending", message: "开始解析 " + list.length + " 段摘要..." }).id;
@@ -3364,7 +3395,14 @@ function compressiblePosMap() {
 }
 
 function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
-  const records = contextReplacements.loadItems().filter(it => !it.removed);
+  // 多会话：记录显式按当前会话过滤（与 applyReplacements 套用、blocks 路由 manualRecordsSorted 同口径），
+  // 不再只靠"锚点锚不到就跳过"的软隔离——跨会话内容撞键时其他会话的块会被误显示/误操作。
+  const curSession = contextReplacements.getActiveSession() || "default";
+  // 手工块序号单一来源：manualRecordsSorted()（按会话过滤+排序）的下标，
+  // 预览中因锚点/窗口被跳过的块不占序号，避免后续块 blockIndex 漂移导致 blocks 路由错位。
+  const manualOrdinals = new Map();
+  contextReplacements.manualRecordsSorted().forEach(function (rec, i) { manualOrdinals.set(rec.id, i); });
+  const records = contextReplacements.loadItems().filter(it => !it.removed && (!it.session || it.session === curSession));
   const items = contextReplacements.compressibleItems();
   const totalCompressible = items.length;
   const compactCount = totalCompressible;
@@ -3492,10 +3530,13 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
   chunks.sort(function (a, b) { return a.pos - b.pos; });
   chunks.forEach(function (c, i) { c.index = i + 1; c.pos = undefined; });
 
-  // 手工块序号（与页面 blockOrdinal 一致）
-  let manualOrdinal = -1;
+  // 手工块序号：直接用 manualRecordsSorted()（按会话过滤+排序）的下标，与 blocks 路由同源；
+  // 服务端保证每个通过会话过滤的手工 chunk 都能查到序号（records 与 manualRecordsSorted 过滤口径一致）
   chunks.forEach(function (c) {
-    if (c.source === "manual") { manualOrdinal++; c.blockIndex = manualOrdinal; }
+    if (c.source === "manual") {
+      const ord = manualOrdinals.get(c.id);
+      if (ord !== undefined) c.blockIndex = ord;
+    }
   });
 
   // 未覆盖区：union 覆盖范围取补集
@@ -3922,29 +3963,8 @@ app.post("/admin/context-compaction/blocks", { preHandler: basicAuth }, async (r
 
 // 摘要生成：gap = 未覆盖区按范围新建手工记录并生成替换正文（默认不启用，需点「替换」才生效）；
 // block = 已有手工记录重新生成正文
-function autoIngestSummary(summary, blockId, label) {
-  if (!summary || typeof summary !== "string") return;
-  const logLabel = label || "再解析";
-  // 关闭「摘要再解析入库」后，摘要替换/生成不再自动入池（手动「重新解析入库」仍可显式触发）
-  if (memoryPool.getConfig().reparse_enabled === false) {
-    console.log("[memory-pool] 摘要再解析入库已关闭，跳过自动归入");
-    addCompactionLog({ action: "reparse", label: logLabel, status: "skipped", message: "自动归入已关闭（reparse_enabled=false），跳过" });
-    return;
-  }
-  memoryPool.ingestSummary(summary, { source: "compaction", block_id: blockId || null })
-    .then(function (r) {
-      if (r.skipped) {
-        addCompactionLog({ action: "reparse", label: logLabel, status: "skipped", message: "再解析：摘要已存在，跳过" });
-        return;
-      }
-      addCompactionLog({ action: "reparse", label: logLabel, status: "success", message: "再解析：新增 " + (r.added || 0) + " / 合并 " + (r.merged || 0) + " / 失败 " + (r.failed || 0) });
-      console.log("[memory-pool] 自动归入:", JSON.stringify({ added: r.added, merged: r.merged, failed: r.failed }));
-    })
-    .catch(function (e) {
-      addCompactionLog({ action: "reparse", label: logLabel, status: "error", message: "再解析失败：" + e.message });
-      console.error("[memory-pool] 自动归入失败:", e.message);
-    });
-}
+// 2026-09-02 起摘要生成/替换不再自动解析入池：入池统一由管理台手动触发
+//（「解析入池」= LLM 提炼；「一键入池」= 摘要全文直接入库，均不自动跑）
 
 
 // ---------------- 摘要生成日志（内存队列，最近 100 条） ----------------
@@ -3996,7 +4016,6 @@ app.post("/admin/context-compaction/generate", { preHandler: basicAuth }, async 
         return reply.send({ ok: false, message: saved.message });
       }
       addCompactionLog({ id: logId, action: "gap", startIdx: start, endIdx: end, label: "消息" + start + "-" + end + "块", status: "success", message: "生成成功，" + gen.length + " 字" });
-      autoIngestSummary(gen.summary, null, "消息" + start + "-" + end + "块");
       return reply.send({
         ok: true,
         action: "gap",
@@ -4064,14 +4083,12 @@ app.post("/admin/context-compaction/generate", { preHandler: basicAuth }, async 
       saved = contextReplacements.updateReplacement(rec.id, gen.summary);
       if (!saved.ok) return reply.send({ ok: false, message: saved.error });
       addCompactionLog({ id: blockLogId, action: "block", blockIndex: body.blockIndex, repId: repId, label: blockLogLabel, status: "success", message: "生成成功，" + gen.length + " 字" });
-      autoIngestSummary(gen.summary, rec.id, blockLogLabel);
       return reply.send({ ok: true, action: "block", repId: rec.id, length: gen.length, message: "已重新生成替换正文（" + gen.length + " 字）。" });
     }
     const blockIndex = Number(body.blockIndex);
     saved = contextReplacements.setManualRecordText(blockIndex, gen.summary);
     if (!saved.ok) return reply.send({ ok: false, message: saved.message });
     addCompactionLog({ id: blockLogId, action: "block", blockIndex: blockIndex, repId: repId, label: blockLogLabel, status: "success", message: "生成成功，" + gen.length + " 字" });
-    autoIngestSummary(gen.summary, rec.id, blockLogLabel);
     return reply.send({ ok: true, action: "block", blockIndex: blockIndex, length: gen.length, message: "已重新生成替换正文（" + gen.length + " 字）。" });
   } catch (err) {
     console.error("[context-compactor] 摘要生成失败:", err.message);
@@ -5532,6 +5549,10 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err, address) => {
   console.log(`✅ Gateway 运行在 ${address}`);
   // 启动重挂「消息扣住」释放定时器（若曾有未到点的扣住时段）
   try { armQuietRelease(); } catch (e) { console.warn("[quiet] 启动重挂释放定时器失败:", e.message); }
+  // 消息向量后台预热（embed-server 就绪通常更快，等 15s 避开启动高峰；失败由检索时惰性补算兜底）
+  setTimeout(() => {
+    try { contextReplacements.startMsgVectorWarmup(); } catch (e) { console.warn("[context-search] 向量预热启动失败:", e.message); }
+  }, 15000);
   setTimeout(async () => {
     try {
       const headers = { "Content-Type": "application/json" };

@@ -13,6 +13,8 @@
 
  // API 基址：兼容 nginx 反代前缀（/heartbeat/admin）与直连（/admin）
  const ADMIN_API = location.pathname.indexOf('/heartbeat/admin/') === 0 ? '/heartbeat/admin' : '/admin';
+ // 会话选择器：null = 跟随聊天页 localStorage.han_current_session；否则使用管理员在下拉框里选定的会话
+ let ADMIN_SESSION = null;
 
 // 读取 cookie（供 CSRF token 使用）
 function getCookie(name) {
@@ -49,7 +51,7 @@ function getCookie(name) {
     // 压缩/替换接口自动带上当前会话（聊天与管理台同源，可读 localStorage.han_current_session）
     if (url.indexOf('/context-compaction') >= 0 || url.indexOf('/context-replacements') >= 0) {
       try {
-        const sid = localStorage.getItem('han_current_session') || 'default';
+        const sid = ADMIN_SESSION || localStorage.getItem('han_current_session') || 'default';
         if (url.indexOf('session_id=') < 0) {
           const sep = url.indexOf('?') >= 0 ? '&' : '?';
           url = url + sep + 'session_id=' + encodeURIComponent(sid);
@@ -167,6 +169,36 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
  * 应用初始化：恢复上次导航 tab、拉取初始环境数据、渲染各模块。
  * 认证失败时在 headerSub 给出提示并停止后续加载。
  */
+ // ---------- 会话选择器：解耦聊天页 han_current_session，管理台可显式指定要操作哪个会话 ----------
+ function currentAdminSession(){ return ADMIN_SESSION || localStorage.getItem('han_current_session') || 'default'; }
+ async function initAdminSessionSelector(){
+   const sel = document.getElementById('adm-session-sel');
+   if(!sel) return;
+   try{
+     const r = await fetch('/v1/sessions', { credentials:'include' });
+     let sessions = [];
+     try{ const j = await r.json(); if(j && j.sessions) sessions = j.sessions; }catch(e){}
+     let html = '<option value="">跟随聊天页当前会话</option>';
+     for(const s of sessions){
+       const cnt = (s && s.real!=null) ? s.real : (s ? (s.total||0) : 0);
+       const nm = (s && s.name) || (s && s.id) || '';
+       html += '<option value="'+escHtml(s.id)+'">'+escHtml(nm)+'（'+cnt+'条）</option>';
+     }
+     sel.innerHTML = html;
+     const saved = localStorage.getItem('han_admin_session') || '';
+     ADMIN_SESSION = saved || null;
+     sel.value = saved;
+   }catch(e){}
+ }
+ function onAdminSessionChange(){
+   const sel = document.getElementById('adm-session-sel');
+   const v = sel ? sel.value : '';
+   ADMIN_SESSION = v || null;
+   try{ if(v) localStorage.setItem('han_admin_session', v); else localStorage.removeItem('han_admin_session'); }catch(e){}
+   try{ loadCompactionPreview(); }catch(e){}
+   try{ if(typeof loadReplaceLog==='function') loadReplaceLog(); }catch(e){}
+ }
+
  async function initApp(){
    initCollapsibleCards();
    // 恢复上次停留的导航 tab（刷新后不再回到心跳页）
@@ -197,6 +229,7 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    loadSendConfig();
    loadMemoryWakeConfig();
    renderDiary();
+   initAdminSessionSelector();
  }
  
   // ---------- 摘要生成日志（悬浮球 + 弹窗，可拖动） ----------
@@ -876,7 +909,6 @@ function toast(msg){
 
       document.getElementById('mw-decay-days').value=c.decay_days!=null?c.decay_days:30;
 
-       document.getElementById('mw-reparse-enabled').checked=c.reparse_enabled!==false;
        document.getElementById('mw-reparse-warm').checked=c.reparse_warm!==false;
         document.getElementById('mw-reparse-maxchars').value=c.reparse_max_chars!=null?c.reparse_max_chars:30;
         document.getElementById('mw-reparse-maxitems').value=c.reparse_max_items!=null?c.reparse_max_items:8;
@@ -885,11 +917,7 @@ function toast(msg){
       document.getElementById('mw-cross-diary').checked=c.cross_inject_diary!==false;
       document.getElementById('mw-cross-memory').checked=c.cross_inject_memory!==false;
       document.getElementById('mw-cross-starred').checked=c.cross_inject_starred!==false;
-      document.getElementById('mw-cross-always').checked=c.cross_inject_always===true;
-      document.getElementById('mw-cross-maxmsgs').value=c.cross_inject_max_msgs!=null?c.cross_inject_max_msgs:2;
-       document.getElementById('mw-cross-days').value=c.cross_inject_diary_days!=null?c.cross_inject_diary_days:3;
-       document.getElementById('mw-cross-mempercat').value=c.cross_inject_memory_per_category!=null?c.cross_inject_memory_per_category:2;
-       document.getElementById('mw-cross-summary-days').value=c.cross_inject_summary_days!=null?c.cross_inject_summary_days:7;
+       document.getElementById('mw-cross-days').value=c.cross_inject_diary_count!=null?c.cross_inject_diary_count:3;
        document.getElementById('mw-cross-startopk').value=c.cross_inject_starred_topk!=null?c.cross_inject_starred_topk:10;
     }catch(e){ if(msg)msg.textContent='读取记忆池参数失败: '+e.message; }
     if(msg)msg.textContent='';
@@ -910,7 +938,6 @@ function toast(msg){
 
     up2.decay_days=Number(document.getElementById('mw-decay-days').value)||30;
 
-     up2.reparse_enabled=document.getElementById('mw-reparse-enabled').checked;
      up2.reparse_warm=document.getElementById('mw-reparse-warm').checked;
       up2.reparse_max_chars=Number(document.getElementById('mw-reparse-maxchars').value)||30;
       up2.reparse_max_items=Number(document.getElementById('mw-reparse-maxitems').value)||8;
@@ -919,11 +946,7 @@ function toast(msg){
     up2.cross_inject_diary=document.getElementById('mw-cross-diary').checked;
     up2.cross_inject_memory=document.getElementById('mw-cross-memory').checked;
     up2.cross_inject_starred=document.getElementById('mw-cross-starred').checked;
-    up2.cross_inject_always=document.getElementById('mw-cross-always').checked;
-    up2.cross_inject_max_msgs=Number(document.getElementById('mw-cross-maxmsgs').value)||2;
-     up2.cross_inject_diary_days=Number(document.getElementById('mw-cross-days').value)||3;
-     up2.cross_inject_memory_per_category=Number(document.getElementById('mw-cross-mempercat').value)||2;
-     up2.cross_inject_summary_days=Number(document.getElementById('mw-cross-summary-days').value)||7;
+     up2.cross_inject_diary_count=Number(document.getElementById('mw-cross-days').value)||3;
      up2.cross_inject_starred_topk=Number(document.getElementById('mw-cross-startopk').value)||10;
     try{
       const r=await fetch(ADMIN_API+'/memory-pool/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(up2)});
@@ -1452,7 +1475,9 @@ function ccBuildSummaryStatsHtml(d, t){
        count=c.count||Math.max(0,end-start+1);
      }else{
        blockOrdinal++;
-       blockIndex=blockOrdinal; // 非AI块顺序 == blocks 数组顺序
+       // 优先服务端 manualRecordsSorted()（按会话过滤）给出的 blockIndex，与服务端 blocks 路由同源；
+       // 本地计数只是老预览无该字段时的兜底，自己数会在跨会话/块被锚点过滤时错位
+       blockIndex=(typeof c.blockIndex==='number')?c.blockIndex:blockOrdinal;
        start=c.blockStart+1;
        end=c.blockEnd+1;
        count=end-start+1;
@@ -1505,7 +1530,7 @@ function ccBuildSummaryStatsHtml(d, t){
            +'</div>'
          : '')
        +'</div>'
-       +'<div class="cc-swipe-del"><button class="cc-swipe-del-btn" onclick="removeSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">移除</button></div>'
+       +'<div class="cc-swipe-del"><button class="cc-swipe-del-btn" onclick="removeSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">移除</button><button class="cc-swipe-del-btn cc-swipe-del-btn-ingest" onclick="ingestSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">入池</button></div>'
        +'</div>';
    });
  
@@ -1807,7 +1832,7 @@ function updateCcStatusBar(d){
            todo.push({type: 'ai', repId: c.repId, idx: idx, label: '块 #' + idx});
          }else{
            const manualChunks = chunks.filter(function(x){ return !x.aiRep; });
-           const blockIndex = manualChunks.indexOf(c);
+           const blockIndex = (typeof c.blockIndex==='number')?c.blockIndex:manualChunks.indexOf(c);
            if(blockIndex >= 0) todo.push({type: 'block', blockIndex: blockIndex, idx: idx, label: '块 #' + idx});
          }
        }
@@ -1880,7 +1905,7 @@ function updateCcStatusBar(d){
        if(c.aiRep){
          todo.push({type: 'ai', repId: c.repId, idx: idx, label: '块 #' + idx});
        }else{
-         const blockIndex = manualChunks.indexOf(c);
+         const blockIndex = (typeof c.blockIndex==='number')?c.blockIndex:manualChunks.indexOf(c);
          todo.push({type: 'manual', blockIndex: blockIndex, idx: idx, label: '块 #' + idx});
        }
      }
@@ -1955,6 +1980,31 @@ function updateCcStatusBar(d){
    updateMultiSelectBar();
  }
 
+ // 单块入池：按摘要里现成的【分类】标签本地拆分直接入库（不调 LLM）
+ async function ingestSingleBlock(cid, blockIndex, isAi){
+   const d = AppState.compactionPlan;
+   if(!d) return;
+   const c = (d.chunks || []).find(function(x){ return x.index === cid; });
+   if(!c || c.enabled === false){ toast('该块未替换，无法入池'); return; }
+   if(!confirm('将该块摘要按【分类】标签拆分后直接入池（不调用 AI 解析，重要级默认）？')) return;
+   const msg = document.getElementById('compaction-msg');
+   if(msg) msg.textContent = '正在按分类直接入池…';
+   try{
+     const r = await fetch(ADMIN_API + '/memory-pool/reparse', {
+       method: 'POST', headers: {'Content-Type': 'application/json'},
+       body: JSON.stringify({chunkIds: [c.id], direct: true})
+     });
+     const j = await r.json();
+     if(j.error) throw new Error(j.error);
+     const s = '已入池 ' + j.processed + ' 段 -> 新增 ' + j.added + ' / 合并 ' + j.merged + ' / 失败 ' + j.failed + (j.skipped ? ' / 跳过(无分类标签) ' + j.skipped : '');
+     if(msg) msg.textContent = s;
+     toast(s);
+   }catch(e){
+     if(msg) msg.textContent = '直接入池失败: ' + e.message;
+     toast('直接入池失败: ' + e.message);
+   }
+ }
+
  // 批量导出
  function batchExportBlocks(){
    if(!AppState.ccSelectedChunks.size) return;
@@ -2020,7 +2070,7 @@ function updateCcStatusBar(d){
        if(c.aiRep){
          todo.push({type: 'ai', repId: c.repId, idx: idx, label: '块 #' + idx});
        }else{
-         const blockIndex = manualChunks.indexOf(c);
+         const blockIndex = (typeof c.blockIndex==='number')?c.blockIndex:manualChunks.indexOf(c);
          if(blockIndex >= 0) todo.push({type: 'manual', blockIndex: blockIndex, idx: idx, label: '块 #' + idx});
        }
      }
@@ -2118,7 +2168,7 @@ async function replaceAllPendingBlocks(){
   let done=0;
   for(let i=0;i<pending.length;i++){
     const c=pending[i];
-    const blockIndex=ccList.indexOf(c);
+    const blockIndex=(typeof c.blockIndex==='number')?c.blockIndex:ccList.indexOf(c);
     if(msg) msg.textContent='正在替换块 #'+c.index+'（第 '+(i+1)+'/'+pending.length+'）…';
     try{
       const r=await fetch(ADMIN_API+'/context-compaction/blocks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'toggle',blockIndex:blockIndex,enabled:true})});
@@ -3423,7 +3473,8 @@ let lastPendingCount = null;
     el.innerHTML='<div class="loading">加载中...</div>';
     const info=document.getElementById('cross-inject-info');
     try{
-      const r=await fetch(ADMIN_API + '/cross-window-inject');
+      const sid=(typeof ADMIN_SESSION!=='undefined'&&ADMIN_SESSION)||localStorage.getItem('han_current_session')||'';
+      const r=await fetch(ADMIN_API + '/cross-window-inject?session_id='+encodeURIComponent(sid));
       const d=await r.json();
       if(d.error){ el.innerHTML='<div class="empty">加载失败: '+d.error+'</div>'; return; }
       const txt=d.text||'';
@@ -4054,6 +4105,7 @@ async function deletePinned(id){
 
   function initMemPoolView(){
     window.__memShowSunk=false;
+    window.__memShowPinned=false;
     populateMemPoolCatOptions();
     loadMemPool();
   }
@@ -4100,7 +4152,8 @@ async function deletePinned(id){
     const stats=d.stats||{}, allItems=d.items||[];
     window.__memPoolData=d;
     let items;
-    if(window.__memShowSunk) items=allItems.filter(function(x){return x.active===false;});
+    if(window.__memShowPinned) items=allItems.filter(function(x){return x.pinned===true;});
+    else if(window.__memShowSunk) items=allItems.filter(function(x){return x.active===false;});
     else items=allItems.filter(function(x){return x.active!==false;});
     window.__memPoolItems=items;
     const st=document.getElementById('mempool-stats');
@@ -4108,7 +4161,7 @@ async function deletePinned(id){
       st.innerHTML=''
         +'<span class="mp-stat">共 <b>'+stats.total+'</b> 条</span>'
         +'<span class="mp-stat">活跃 <b>'+stats.active+'</b></span>'
-        +'<span class="mp-stat">已pin <b>'+stats.pinned+'</b></span>'
+        +'<span class="mp-stat toggle'+(window.__memShowPinned?' on':'')+'" onclick="toggleMemPoolPinned()" title="点一下只看已置顶记忆，再点回到活跃">已pin <b>'+stats.pinned+'</b></span>'
         +'<span class="mp-stat toggle'+(window.__memShowSunk?' on':'')+'" onclick="toggleMemPoolSunk()" title="点一下只看已沉底记忆，再点回到活跃">已沉底 <b>'+stats.sunk+'</b></span>';
     }
     const el=document.getElementById('mempool-list');
@@ -4179,6 +4232,12 @@ async function deletePinned(id){
   }
   function toggleMemPoolSunk(){
     window.__memShowSunk=!window.__memShowSunk;
+    if(window.__memShowSunk) window.__memShowPinned=false;
+    if(window.__memPoolData){ renderMemPool(window.__memPoolData); } else { loadMemPool(); }
+  }
+  function toggleMemPoolPinned(){
+    window.__memShowPinned=!window.__memShowPinned;
+    if(window.__memShowPinned) window.__memShowSunk=false;
     if(window.__memPoolData){ renderMemPool(window.__memPoolData); } else { loadMemPool(); }
   }
   function openMemPoolAdd(){

@@ -42,13 +42,6 @@
    <button type="button" class="btn btn-primary" onclick="restartService()" style="margin-top:4px;background:#c89098">重启服务</button>
 
 </div>
-<!-- Tab: 聊天 -->
-<div class="tab-content" id="tab-chat">
-  <div class="chat-embed-wrap">
-    <div id="chatLoadError">聊天界面加载中…<br>若长时间空白，请检查 /chat 是否能直接访问。</div>
-    <iframe id="chatFrame" class="chat-iframe" title="聊天" frameborder="0" allow="camera; microphone; fullscreen"></iframe>
-  </div>
-</div>
 
 <!-- Tab 2: 配置 -->
 <div class="tab-content" id="tab-config">
@@ -100,21 +93,16 @@
           <label class="cc-cfg-field">去重阈值<input type="number" id="mw-dedup" min="0" max="1" step="0.05"></label>
           <label class="cc-cfg-field">衰减半衰期(天)<input type="number" id="mw-decay-days" min="1" step="1"></label>
           <div class="cc-cfg-group-title">再解析（压缩摘要 → 记忆池）</div>
-          <label class="cc-cfg-field cc-cfg-check">摘要再解析入库（LLM）<span class="cc-sw"><input type="checkbox" id="mw-reparse-enabled"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
           <label class="cc-cfg-field cc-cfg-check">再解析·温暖风格<span class="cc-sw"><input type="checkbox" id="mw-reparse-warm"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
           <label class="cc-cfg-field">再解析·每条字数上限<input type="number" id="mw-reparse-maxchars" min="5" step="1"></label>
           <label class="cc-cfg-field">再解析·每段最多条数<input type="number" id="mw-reparse-maxitems" min="1" step="1"></label>
           <label class="cc-cfg-field">合并解析·总字数上限<input type="number" id="mw-reparse-mergemaxchars" min="0" step="100"></label>
           <div class="cc-cfg-group-title">跨窗口注入</div>
           <label class="cc-cfg-field cc-cfg-check">总开关<span class="cc-sw"><input type="checkbox" id="mw-cross-enabled"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
-          <label class="cc-cfg-field cc-cfg-check">固定注入(整场会话一直带)<span class="cc-sw"><input type="checkbox" id="mw-cross-always"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
-          <label class="cc-cfg-field">消息少于 N 条才注入<input type="number" id="mw-cross-maxmsgs" min="1" step="1"></label>
           <label class="cc-cfg-field cc-cfg-check">日记<span class="cc-sw"><input type="checkbox" id="mw-cross-diary"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
           <label class="cc-cfg-field cc-cfg-check">高重要记忆<span class="cc-sw"><input type="checkbox" id="mw-cross-memory"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
           <label class="cc-cfg-field cc-cfg-check">标星<span class="cc-sw"><input type="checkbox" id="mw-cross-starred"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
-          <label class="cc-cfg-field">日记天数<input type="number" id="mw-cross-days" min="0" step="1"></label>
-          <label class="cc-cfg-field">每类注入条数<input type="number" id="mw-cross-mempercat" min="1" step="1"></label>
-          <label class="cc-cfg-field">摘要最近天数<input type="number" id="mw-cross-summary-days" min="1" step="1"></label>
+          <label class="cc-cfg-field">日记份数<input type="number" id="mw-cross-days" min="1" step="1"></label>
           <label class="cc-cfg-field">标星条数<input type="number" id="mw-cross-startopk" min="1" step="1"></label>
         </div>
        <div class="cc-cfg-btns">
@@ -239,6 +227,9 @@
          <h2 class="cc-head-h2">上下文压缩</h2>
        </div>
        <div class="cc-head-actions">
+         <label class="cc-session-sel" title="选择要操作的会话（默认跟随聊天页当前会话）">会话
+           <select id="adm-session-sel" onchange="onAdminSessionChange()" aria-label="选择会话"></select>
+         </label>
          <button type="button" class="cc-btn secondary" onclick="loadCompactionPreview()">刷新</button>
          <button type="button" class="cc-btn secondary" id="cc-expandall-btn" onclick="toggleCcExpandAll()">全部展开</button>
          <button type="button" class="cc-btn secondary" id="cc-multiselect-btn" onclick="toggleCcMultiSelect()">多选</button>
@@ -483,9 +474,6 @@
 <div class="tab-bar">
   <button type="button" class="tab-item active" data-tab="status" onclick="switchTab('status')">
     <span class="tab-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span><span class="tab-label">状态</span>
-  </button>
-  <button type="button" class="tab-item" data-tab="chat" onclick="switchTab('chat')">
-    <span class="tab-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span><span class="tab-label">聊天</span>
   </button>
   <button type="button" class="tab-item" data-tab="config" onclick="switchTab('config')">
     <span class="tab-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span><span class="tab-label">配置</span>

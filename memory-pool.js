@@ -18,6 +18,7 @@ const POOL_CONFIG_FILE = path.join(DATA_DIR, "memory_pool_config.json");
 
 let cache = null;
 let flushTimer = null;
+let warmTimer = null;
 let dirty = false;
 
 const CATEGORIES = ["关于她", "关于我们", "锚点", "信号", "对话摘要"];
@@ -153,6 +154,9 @@ async function init() {
     Object.assign(CONFIG, await fs.readJson(POOL_CONFIG_FILE));
   } catch (e) {}
   flushTimer = setInterval(flush, 5000);
+  // 语义向量后台预热（embed-server 启动 8s 后开始，此后每 10 分钟增量刷新，覆盖新增/编辑）
+  setTimeout(() => { warmVectors().catch(() => {}); }, 8000);
+  warmTimer = setInterval(() => { warmVectors().catch(() => {}); }, 10 * 60 * 1000);
 }
 
 function load() {
@@ -175,7 +179,7 @@ function flush() {
   }
 }
 
-async function shutdown() { if (flushTimer) clearInterval(flushTimer); flush(); }
+async function shutdown() { if (flushTimer) clearInterval(flushTimer); if (warmTimer) clearInterval(warmTimer); flush(); }
 
 function saveNow() { atomicWriteJson(POOL_FILE, cache); dirty = false; }
 
@@ -235,6 +239,7 @@ function add(entry) {
     dup.similarity = merged.similarity;
     dup.updated_at = nowIso();
     dup.source = dup.source || e.source;
+    invalidateVector(dup.id); // 内容/分类可能已变，旧向量作废
     dirty = true; flush();
     return { entry: dup, dup: true };
   }
@@ -253,6 +258,7 @@ function update(id, patch) {
   if (patch.pinned !== undefined) it.pinned = !!patch.pinned;
   if (patch.active !== undefined) it.active = !!patch.active;
   it.updated_at = nowIso();
+  if (patch.content !== undefined || patch.category !== undefined) invalidateVector(id);
   dirty = true; flush();
   return it;
 }
@@ -394,9 +400,117 @@ function retrieve(query, opts) {
   });
 }
 
+// ---------------- 本地语义向量（embed-server，bge-small-zh-v1.5） ----------------
+// 向量缓存 data/memory_pool_vectors.json：{ id: { h: 内容指纹, v: 512 维（已 L2 归一化） } }
+// embed-server 不可用时（熔断期）自动退化为 retrieve() 原字面公式，主链路不受影响。
+const embedClient = require("./utils/embed-client");
+const VECTOR_FILE = path.join(DATA_DIR, "memory_pool_vectors.json");
+let vectorCache = null;
+
+function vecMap() {
+  if (!vectorCache) {
+    try { vectorCache = fs.readJsonSync(VECTOR_FILE); } catch (e) { vectorCache = {}; }
+    if (!vectorCache || typeof vectorCache !== "object" || Array.isArray(vectorCache)) vectorCache = {};
+  }
+  return vectorCache;
+}
+
+function saveVecMap() {
+  try { fs.writeJsonSync(VECTOR_FILE, vectorCache); } catch (e) { /* 缓存写失败只影响下次冷启动 */ }
+}
+
+function entryHash(e) {
+  return crypto.createHash("sha1").update(String(e.category || "") + "\u0000" + String(e.content || "")).digest("hex").slice(0, 12);
+}
+
+function invalidateVector(id) {
+  const m = vecMap();
+  if (m[id]) { delete m[id]; saveVecMap(); }
+}
+
+// 保证一组条目的向量就绪（缺失/内容变更的批量补算）；返回 false = 语义不可用
+async function ensureVectors(rows) {
+  const m = vecMap();
+  const missing = rows.filter(function (r) {
+    const c = m[r.id];
+    return !c || c.h !== entryHash(r) || !Array.isArray(c.v) || c.v.length === 0;
+  });
+  if (!missing.length) return true;
+  const vecs = await embedClient.embedBatch(missing.map(function (r) { return r.category + "：" + r.content; }));
+  if (!vecs) return false;
+  missing.forEach(function (r, i) {
+    if (vecs[i] && vecs[i].length) m[r.id] = { h: entryHash(r), v: vecs[i] };
+  });
+  saveVecMap();
+  return true;
+}
+
+// 后台预热：把全部 active 条目嵌入（增量，算过的跳过）
+async function warmVectors() {
+  if (embedClient.fused()) return;
+  const rows = load().filter(r => r.active !== false);
+  await ensureVectors(rows);
+}
+
+function dotProduct(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return 0;
+  let s = 0;
+  for (let i = 0; i < a.length; i++) s += a[i] * b[i];
+  return s;
+}
+
+// 混合检索（memory_search 用）：0.55 语义余弦 + 0.20 字面 + 0.25 重要级×衰减；
+// 语义服务不可用 → 原封回落 retrieve() 字面公式。返回结构两者一致。
+async function retrieveHybrid(query, opts) {
+  opts = opts || {};
+  const q = String(query || "").trim();
+  if (!q) return retrieve(query, opts);
+  const rows = load().filter(r => r.active !== false && (!opts.category || String(r.category || "") === String(opts.category)));
+  if (!rows.length) return [];
+  if (embedClient.fused()) return retrieve(query, opts);
+  const ready = await ensureVectors(rows);
+  if (!ready) return retrieve(query, opts);
+  const qv = await embedClient.embedBatch([q], true, 8000);
+  if (!qv) return retrieve(query, opts);
+  const m = vecMap();
+  const qt = tokensOf(q);
+  const scored = rows.map(r => {
+    const v = (m[r.id] || {}).v;
+    const sem = v ? Math.max(0, dotProduct(qv[0], v)) : 0; // 均已归一化，点积即余弦
+    const lit = qt.size ? contentSimilarity(r.content + " " + (r.category || ""), q) : 0;
+    const imp = Number(r.importance) || 0.5;
+    const decay = decayFactor(r);
+    return { r, sem, sim: lit, score: 0.55 * sem + 0.20 * lit + 0.25 * imp * decay };
+  });
+  const topK = Math.max(1, Number(opts.topK) || Number(CONFIG.retrieval_top_k) || 5);
+  scored.sort((a, b) => b.score - a.score || b.sem - a.sem);
+  const picked = scored.slice(0, topK);
+  const autoPinTh = Math.max(2, Number(CONFIG.auto_pin_retrieval_count) || 5);
+  for (const p of picked) {
+    p.r.retrieval_count = Number(p.r.retrieval_count || 0) + 1;
+    p.r.last_retrieved_at = nowIso();
+    p.r.updated_at = nowIso();
+    if (p.r.pinned !== true && p.r.retrieval_count >= autoPinTh) p.r.pinned = true;
+    dirty = true;
+  }
+  return picked.map(p => {
+    const r = p.r;
+    return {
+      id: r.id,
+      content: r.content,
+      category: r.category,
+      importance: r.importance,
+      pinned: r.pinned === true,
+      created_at: r.created_at,
+      updated_at: r.updated_at
+    };
+  });
+}
+
 // ---------------- 压缩摘要 → 记忆池 ----------------
 // 从压缩摘要里提取【分类】标记文本（正则兜底），再调用 LLM 客观再解析 → 结构化记忆
-function parseCategoryBlocks(text) {
+function parseCategoryBlocks(text, opts) {
+  opts = opts || {};
   const blocks = [];
   const re = /【([^】]+)】\s*([\s\S]*?)(?=【[^】]+】|$)/g;
   let m;
@@ -412,7 +526,8 @@ function parseCategoryBlocks(text) {
   }
   if (blocks.length) return blocks;
 
-  // 无分类标记：整段按“对话摘要”兜底
+  // 无分类标记：默认整段按“对话摘要”兜底；noFallback=true 时返回空（调用方决定不入池）
+  if (opts.noFallback) return [];
   const t = String(text || "").trim();
   if (t) return [{ category: "对话摘要", content: t }];
   return [];
@@ -849,7 +964,7 @@ module.exports = {
   init, shutdown, flush,
   CATEGORIES, CATEGORY_LABELS,
   list, stats, get, add, update, remove, sink, revive,
-  retrieve, ingestSummary, parseCategoryBlocks, reparseSummaryViaLLM, buildReparsePrompt,
+  retrieve, retrieveHybrid, warmVectors, ingestSummary, parseCategoryBlocks, reparseSummaryViaLLM, buildReparsePrompt,
   contentSimilarity, tokensOf, decayFactor, scoreOf,
   buildCleanPrompt, cleanPool,
   setConfig, getConfig, poolKeywords,

@@ -335,6 +335,8 @@
  .cc-head-h2{font-family:'Noto Serif SC',serif;font-size:19px;font-weight:600;color:var(--tab-active);letter-spacing:1px;margin:0;line-height:1.4}
  .cc-head-sub{font-size:12px;color:var(--text3);margin-top:4px;line-height:1.7}
  .cc-head-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;flex-shrink:0}
+  .cc-session-sel{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--text2)}
+  .cc-session-sel select{padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,0.8);font-size:11px;color:var(--text2);max-width:200px}
   .cc-head-actions .cc-btn{padding:5px 10px;font-size:10.5px}
 .cc-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:6px 11px;border:1px solid var(--border);border-radius:10px;background:#fff;color:var(--text2);font-size:11px;font-family:inherit;cursor:pointer;white-space:nowrap;transition:all .2s;line-height:1.4}
  .cc-btn:active{transform:scale(.96)}
@@ -359,9 +361,10 @@
   .cc-chunk{padding:13px 15px;margin-bottom:0;position:relative;z-index:2}
   .cc-chunk-swipe{position:relative;overflow:hidden;margin-bottom:10px;border-radius:var(--radius)}
  .cc-chunk-swipe .cc-chunk{transition:transform .25s ease;will-change:transform;touch-action:pan-y}
- .cc-chunk-swipe.swiped .cc-chunk{transform:translateX(-96px)}
- .cc-swipe-del{position:absolute;top:0;right:0;bottom:0;z-index:1;display:flex;align-items:stretch;padding:8px}
+ .cc-chunk-swipe.swiped .cc-chunk{transform:translateX(-184px)}
+ .cc-swipe-del{position:absolute;top:0;right:0;bottom:0;z-index:1;display:flex;align-items:stretch;gap:8px;padding:8px}
  .cc-swipe-del-btn{flex:1;display:flex;align-items:center;justify-content:center;min-width:80px;background:linear-gradient(180deg,#f06b6b,#d05050);color:#fff;border:none;border-radius:12px;font-size:12px;font-weight:600;letter-spacing:2px;cursor:pointer;font-family:"Noto Sans SC",sans-serif;box-shadow:0 2px 8px rgba(192,80,80,.35)}
+ .cc-swipe-del-btn.cc-swipe-del-btn-ingest{background:linear-gradient(180deg,#6a9a5a,#4a7440);box-shadow:0 2px 8px rgba(106,154,90,.35)}
   .cc-head-toggle{display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:5px 12px;border:1px solid rgba(200,144,152,.4);border-radius:999px;background:rgba(200,144,152,.08);color:var(--accent);font-size:11px;font-weight:600;font-family:inherit;cursor:pointer;flex-shrink:0;margin-left:auto;line-height:1.4;transition:all .2s}
  .cc-head-toggle:active{background:rgba(200,144,152,.18)}
  .cc-head-toggle:disabled{opacity:.5;pointer-events:none}
