@@ -49,6 +49,13 @@ async function init() {
   flushTimer = setInterval(flush, 5000);
   if (READONLY) {
     console.log("[memory-engine] 只读模式：pin/状态由 gateway 进程负责写盘");
+    // 只读进程（wake_up）周期性从磁盘重载 pinned，避免 gateway 更新 pinned.json 后本进程长期用旧缓存
+    setInterval(async function () {
+      try {
+        const rawPinned = await fs.readJson(PINNED_FILE);
+        pinnedMemories = Array.isArray(rawPinned) ? rawPinned : [];
+      } catch (e) { /* 文件暂时不可读则保持现状 */ }
+    }, 30000).unref();
   }
 }
 

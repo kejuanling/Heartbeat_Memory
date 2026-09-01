@@ -25,6 +25,7 @@ const MAX_REASONING_CHARS = 4000; // 思考链最多保留字符数，避免过�
 // 不发送到 MCP 服务器（记忆池是服务端全局共享，无独立 MCP server）。
 // ========================
 const SURFACE_MEMORY_NAME = "surface_memory";
+const MEMORY_RECALL_NAME = "memory_recall";
 const SURFACE_CATEGORIES = ["关于她", "关于我们", "锚点", "信号", "对话摘要"];
 
 const NATIVE_TOOLS = [
@@ -39,6 +40,24 @@ const NATIVE_TOOLS = [
         type: "object",
         properties: {
           query: { type: "string", description: "要检索的话题/关键词（必填）" },
+          top_k: { type: "number", description: "最多返回的条数，默认 5，上限 20", minimum: 1, maximum: 20 },
+          category: { type: "string", description: "可选：只检索某个分类（关于她/关于我们/锚点/信号/对话摘要）" }
+        },
+        required: ["query"]
+      }
+    }
+  },
+  {
+    exposedName: MEMORY_RECALL_NAME,
+    serverName: "native",
+    tool: {
+      name: MEMORY_RECALL_NAME,
+      description:
+        "按【语义/含义】从长期记忆池检索相关记忆。与 surface_memory（按关键词词面匹配）不同：当你觉得词面命中不好、或想按一段意思/问题找记忆（即便用词不同）时用它。传入你想找的问题或记忆的大意，系统会用语义模型从记忆池里挑出最相关的条目返回。若当前上下文缺某段相关过往记忆，可用它补上。",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "想找的记忆/问题（必填），描述含义而非精确字词" },
           top_k: { type: "number", description: "最多返回的条数，默认 5，上限 20", minimum: 1, maximum: 20 },
           category: { type: "string", description: "可选：只检索某个分类（关于她/关于我们/锚点/信号/对话摘要）" }
         },
@@ -81,6 +100,92 @@ async function callSurfaceMemory(args) {
       })
     };
   }
+}
+
+// 语义记忆召回：词面预筛候选 (~40) -> 上游免费模型按语义挑相关 -> 只返回挑中
+async function callMemoryRecall(args, ctx) {
+  try {
+    const query = String((args && args.query) || "").trim();
+    if (!query) {
+      return {
+        markdown: JSON.stringify({
+          type: "tool_error",
+          error: "invalid_query",
+          message: "memory_recall 需要 query（想找的记忆/问题）。"
+        })
+      };
+    }
+    const topK = Math.max(1, Math.min(20, Number((args && args.top_k) || 5) || 5));
+    const category = (args && args.category && SURFACE_CATEGORIES.includes(String(args.category)))
+      ? String(args.category)
+      : undefined;
+    // 1. 词面预筛：拿全部 active 记忆，按词面相似度取前 ~40 做候选
+    const rows = memoryPool.list({ active: true, category: category || undefined });
+    const qt = memoryPool.tokensOf(query);
+    const scored = rows.map(function (r) {
+      const sim = qt.size ? memoryPool.contentSimilarity((r.content || "") + " " + (r.category || ""), query) : 0;
+      return { r, sim };
+    });
+    scored.sort(function (a, b) {
+      return (b.sim - a.sim) || ((Number(b.r.importance) || 0) - (Number(a.r.importance) || 0));
+    });
+    const cands = scored.slice(0, 40);
+    if (cands.length === 0) return { markdown: "未找到相关记忆。" };
+
+    // 2. 上游免费模型按语义挑最相关的 topK（失败/未配置则回退词面 topK）
+    const picked = await rerankMemories(query, cands, topK, ctx);
+
+    const results = [];
+    for (const p of picked) {
+      if (!p || !p.r) continue;
+      results.push("【" + (p.r.category || "其他") + "】" + (p.r.content || "") + (p.r.pinned ? "（置顶）" : ""));
+    }
+    if (results.length === 0) return { markdown: "未找到语义相关的记忆。" };
+    return { markdown: "语义检索到 " + results.length + " 条相关记忆：\n" + results.join("\n") };
+  } catch (e) {
+    return {
+      markdown: JSON.stringify({
+        type: "tool_error",
+        error: "memory_recall_error",
+        message: e.message || String(e)
+      })
+    };
+  }
+}
+
+// 用上游免费模型从候选中按语义挑 topK；返回候选对象数组
+async function rerankMemories(query, cands, topK, ctx) {
+  const upUrl = ctx && ctx.upstreamUrl;
+  const upKey = ctx && ctx.upstreamKey;
+  const model = ctx && ctx.model;
+  const fallback = cands.slice(0, topK);
+  if (!upUrl || !upKey || !model) return fallback;
+  const list = cands.map(function (c, i) {
+    return i + ": 【" + (c.r.category || "其他") + "】" + String(c.r.content || "").slice(0, 300);
+  }).join("\n");
+  const system = "你是记忆检索助手。根据用户查询，从下面候选记忆里挑出【语义上最相关、对回答最有帮助】的若干条。只返回候选编号数组（编号从 0 开始，如 [3,7,9]），按相关性从高到低，最多 " + topK + " 条。若都不相关或无法判断，返回 []。不要输出编号之外的任何内容。";
+  const user = "用户查询（按含义找记忆）：" + query + "\n候选记忆：\n" + list;
+  const controller = new AbortController();
+  const timer = setTimeout(function () { controller.abort(); }, 20000);
+  let resp;
+  try {
+    resp = await fetch(upUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + upKey },
+      body: JSON.stringify({ model: model, messages: [{ role: "system", content: system }, { role: "user", content: user }], temperature: 0, max_tokens: 256 }),
+      signal: controller.signal
+    });
+  } finally { clearTimeout(timer); }
+  if (!resp.ok) return fallback;
+  const data = await resp.json().catch(function () { return null; });
+  const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+  if (!content) return fallback;
+  const arrayText = (String(content).match(/\[[^\]]*\]/g) || []).pop() || "";
+  const nums = (String(arrayText).match(/\d+/g) || []).map(Number).filter(function (n) { return n >= 0 && n < cands.length; });
+  const seen = new Set();
+  const out = [];
+  for (const n of nums) { if (!seen.has(n)) { out.push(cands[n]); seen.add(n); } }
+  return out.slice(0, topK).length ? out.slice(0, topK) : fallback;
 }
 
 /**
@@ -189,6 +294,8 @@ async function runWithTools({
       try {
         if (name === SURFACE_MEMORY_NAME) {
           result = await callSurfaceMemory(args);
+        } else if (name === MEMORY_RECALL_NAME) {
+          result = await callMemoryRecall(args, { upstreamUrl, upstreamKey, model });
         } else {
           result = await callToolByExposedName(serverClients, routes, name, args);
         }
@@ -204,7 +311,7 @@ async function runWithTools({
       toolHistory.push({
         name,
         args,
-        result: _truncateResult(result.markdown || "", error ? 0 : 800),
+        result: _truncateResult(result.markdown || "", error ? 0 : 100000),
         error
       });
     }
@@ -213,7 +320,7 @@ async function runWithTools({
   // 汇总思考链（截断上限）
   const reasoning = reasoningParts.join("\n\n").slice(0, MAX_REASONING_CHARS);
 
-  return { text: finalText, rounds, usage: totalUsage, routes, reasoning, toolHistory };
+  return { text: finalText, rounds, usage: totalUsage, routes, reasoning, toolHistory, finalMessages: working.slice() };
 }
 
 // 解析 function 的 arguments（可能是字符串或对象）

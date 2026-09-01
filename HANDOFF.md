@@ -1,5 +1,11 @@
 # Dylan Heartbeat 系统 — 会话交接(给下一位 Agent)
 
+> **规矩(2026-09-02 起)**:按日期的工作明细写在本地 `工作记录/工作记录_YYYY-MM-DD.md`(没有就新建),本文件只留一行索引 + 下面 0-7 节稳定信息,不再滚动堆条目。
+
+## 工作日志索引(明细在 工作记录/工作记录_日期.md)
+- 2026-09-02:压缩/替换去自动解析入池+多选工具栏「一键入池」(不调LLM全文直入);记忆检索升级本地真语义(embed-server pm2 8795/bge-small-zh int8/混合检索/全量降级);路径整理(全系统收敛 /opt,软链降级纯别名);邮箱 MCP 挂 pm2 email-mcp、决策痕迹禁用;chat.html 分段连播 v2→v5(覆盖全入口/历史静态/间隔自适应);打开页面默认进最后活跃会话;压缩手工块跨会话错位修复;流式回复 QQ 式分段弹出;主题保存/背景上传修复;前端/后端代码审查(发现并修复 P0 CSRF bug + P1 tools 路由鉴权,已上线验证,详见 工作记录_2026-09-02)
+- 2026-09-01:修 yun-mcp-v2(TimeoutStopSec、PATH 修正、git 工具单文件聚焦)
+
 ## 0. 怎么访问云服务器(唯一接入方式)
 - 通过 MCP 服务 yun-mcp-v2 (Http://120.76.99.224:9010/sse), header X-API-Key: Rsh200506@11111。
 - 工具: list_dir / read_file / write_file / search_text / file_info / run_command / get_server_status / git_status / git_log / git_diff。
@@ -16,9 +22,12 @@ cat /opt/dylan-heartbeat/ops/status.sh
 ## 1. 架构 / 运行服务
 - server.js 网关(端口 3000, node /opt/dylan-heartbeat/server.js, pm2 进程名 gateway)
 - wake_up.js 心跳/唤醒( node, pm2 进程名 wake-up)
-- unified_server.py 统一后端(端口 8777, python3 /root/workspace/unified_server.py, 蓝图 /todo /diary /monthly /notes /goban)
-- email_server.py(5000), yun-mcp-v2(9010, 本MCP), zzf-mcp(8890), tools_server(8771), spicy-monopoly(8773), netease(3303), decision-trail(8787), ocr-api(8790)
+- email_server.py 邮箱 MCP(端口 5000, workspace/ 下, pm2 进程名 email-mcp)
+- unified_server.py 统一后端(端口 8777, systemd unified-backend, 路径 /opt/dylan-heartbeat/workspace/unified_server.py, 蓝图 /todo /diary /monthly /notes /goban)
+- tools_server(8771, systemd mcp-tools), yun-mcp-v2(9010, 本MCP), zzf-mcp(8890), spicy-monopoly(8773), netease(3303), ocr-api(8790)
+- decision-trail(8787)已停用:进程未跑,mcp-servers.json 已禁用,nginx 路由还在
 - nginx /etc/nginx/nginx.conf (listen 9001 http / 9002 ssl): /heartbeat/ -> 网关3000(去前缀); /admin -> 301 /heartbeat; /co-api/ -> 3000/internal/co/; /screenshot-api/ -> 3000/internal/screenshot/; /v1 -> 3000; /todo|/diary|/monthly -> 8777; /ocr-api -> 8790; /decision-trail -> 8787
+- 路径规范:项目唯一真身 /opt/dylan-heartbeat;/root/workspace 只是软链别名,不再新增引用(详见 系统介绍.md 路径地图)
 
 ## 2. 凭据 / .env(/opt/dylan-heartbeat/.env)
 - ADMIN_USER / ADMIN_PASSWORD (管理台 basicAuth, header Authorization: Basic base64(u:p))
@@ -41,7 +50,7 @@ cat /opt/dylan-heartbeat/ops/status.sh
 - admin-mobile.html(62K) + admin-mobile.css(85K) + admin-mobile.js(230K)
 - utils/push.js(7工具) routes/push-events.js routes/memory-pool.js
 - ops/ (status.sh backup.sh cleanup.sh) data/(16M) backups/_bak_graveyard/ archives/(461M orphans tar.gz) archive/
-- workspace/(unified_server.py chat.html co-view.html index.html daily-涵/ diary/ monthly/ decision-trail/ mcp-tools/ 等)
+- workspace/(unified_server.py email_server.py chat.html co-view.html index.html daily-涵/ diary/ monthly/ decision-trail/ mcp-tools/ 等)
 - server.js 5611->5414 行; admin-mobile.html 356K->62K; 磁盘 38%->36%, 腾出 ~617MB
 
 ## 5. 验证手法(复用)
@@ -62,3 +71,4 @@ cat /opt/dylan-heartbeat/ops/status.sh
 - data/config.json 被 memory-engine 和 context-compactor 共用(不同键共存)
 - contentKey 两模块一致(sha256(role+0+contentToText).slice32); contentToText 仅差软删除保护(compactor 对 deleted 返回空). 现有标星兼容
 - 管理台只有一个入口 /heartbeat/admin(用户用这个), /admin 是 301 跳转
+- 管理台 MCP 服务器页(PUT /admin/mcp/servers)会整体覆写 mcp-servers.json, 手改后要读回确认; 改它之后需 pm2 restart gateway(启动后有 _mcpClientsCache)

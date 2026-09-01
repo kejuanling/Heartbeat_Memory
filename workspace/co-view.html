@@ -729,7 +729,7 @@ function toggleShare(){
   if (shareMode) { stopShare(); return; }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
     if (window.isSecureContext === false) {
-      addMsg('sys', '截屏需要 HTTPS 或 localhost：请改用 https://服务器IP:9002 打开本页（首次有证书提示，点「继续访问」即可）');
+      addMsg('sys', '截屏需要 HTTPS 或 localhost：请改用 https://dqbnv.ccwu.cc 打开本页（首次有证书提示，点「继续访问」即可）');
     } else {
       addMsg('sys', '当前浏览器不支持屏幕共享，建议用电脑 Chrome / Edge');
     }

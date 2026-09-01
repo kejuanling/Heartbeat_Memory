@@ -65,7 +65,7 @@ module.exports = function registerMemoryPoolRoutes(app, { basicAuth }) {
     try {
       const q = String((req.body || {}).query || '').trim();
       const topK = Number((req.body || {}).topK) || 5;
-      const items = memoryPool.retrieve(q, { topK });
+      const items = await memoryPool.retrieveHybrid(q, { topK });
       reply.send({ success: true, items, config: memoryPool.getConfig() });
     } catch (err) { reply.code(500).send({ error: err.message }); }
   });

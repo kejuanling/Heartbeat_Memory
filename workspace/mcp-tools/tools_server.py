@@ -427,6 +427,33 @@ TOOLS["phone_records"] = {
     "handler": tool_phone_records
 }
 
+# ── 12. 手机状态快照（han 手机：电池/当前App/位置，来自 8080 phone-report-api）──
+_PHONE_REPORT_TOKEN = "rsh"  # 对应 phone-report-api(8080) systemd unit 的 AUTH_TOKEN
+_OWNER = "han"  # 这是唯一的主人，即 han 本人的手机；没有"别的用户"
+
+def tool_phone_state(args):
+    # 固定读 han 自己的手机；不接受任意"用户"参数，避免误会成多账号
+    user_id = _OWNER
+    import urllib.request, urllib.parse
+    url = "http://localhost:8080/state/latest?user_id=" + urllib.parse.quote(user_id)
+    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + _PHONE_REPORT_TOKEN})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+        return {"owner": user_id, "state": data.get("state")}
+    except Exception as e:
+        return {"error": str(e)}
+
+TOOLS["phone_state"] = {
+    "description": "读 han 本人手机最近一次主动上报的状态快照：电池电量、当前正在用的 App、位置（地点）。这是 han 自己手机的信息，只有一份、没有其他用户。若还没上报过则返回 state=None。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {}
+    },
+    "handler": tool_phone_state
+}
+
+
 # ── 永久注入上下文（pin）：与记忆池工具分开 ──
 # pin 写入 data/pinned.json，随每次对话/唤醒注入 system prompt，跨窗口永久生效；
 # 记忆池（memories_*）是按需浮现的长期记忆库，两者用途不同。

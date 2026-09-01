@@ -2,7 +2,10 @@
   "disabled": [
     "moments_count",
     "moments_delete",
-    "moments_edit"
+    "moments_edit",
+    "pin_add",
+    "pin_delete",
+    "pin_update"
   ],
   "descriptions": {
     "diary_comment": "回复她的碎碎念。",
@@ -17,6 +20,7 @@
     "context_replace": "把上下文中的一些无用的、无聊的、已经沉淀的片段替换为自己写的记忆。",
     "context_search": "检索原始上下文对话内容。关键词按空格分词，部分命中也会返回，命中越多越靠前。",
     "period_get": "查看她是否在经期中。",
+    "period_set": "设置经期：把某天标记为经期开始或结束。",
     "moments_list": "查看心动时刻记录列表。默认按时间倒序返回最近 200 条，limit<=0 取全部",
     "moments_count": "统计心动时刻：总条数、按分类/阶段/是否定义时刻分组、最近N条预览。",
     "memory_search": "检索长期记忆池（五大类记忆库：关于她/关于我们/锚点/信号/对话摘要）。返回相关记忆条目（含内容、分类、重要度、来源）。可用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池。区别于 context_search（检索原始对话原文）。"

@@ -608,8 +608,13 @@ function manualStart(it) {
 }
 
 function manualRecordsSorted() {
+  // 多会话：手工块序号空间（blockIndex）按会话隔离，与 applyReplacements 套用口径一致
+  //（无 session 字段的旧块视为通用，各会话均可见可操作）。不过滤时其他会话的块会占据
+  // 全局序号，导致 blocks 路由按 blockIndex 错位命中别的会话的块。
+  const cur = activeSessionOr() || "default";
   return loadItems()
     .filter(it => it.source === "manual" && !it.removed)
+    .filter(it => !it.session || it.session === cur)
     .sort((a, b) => manualStart(a) - manualStart(b));
 }
 
@@ -657,7 +662,8 @@ function addManualRecord(start, end, enabled) {
   const filtered = [];
   let removedCount = 0;
   for (const it of items) {
-    if (it.source === "manual") {
+    // 只吞并同会话（或无 session 的通用旧块）的重叠手工块，跨会话块序号互不重叠、不能误吞
+    if (it.source === "manual" && (!it.session || it.session === built.record.session)) {
       const rs = it.range && it.range.start_index;
       const re = it.range && it.range.end_index;
       if (Number.isInteger(rs) && Number.isInteger(re) && rs <= built.record.range.end_index && re >= built.record.range.start_index) {
@@ -1582,7 +1588,8 @@ function _buildSemanticCache(messages) {
   return SEMANTIC_CACHE;
 }
 
-function semanticSearchMessages(messages, query, limit, threshold) {
+// ── 字符 bigram TF-IDF 余弦（旧版伪语义，保留为 embed-server 不可用时的降级路径） ──
+function _tfidfSearchMessages(messages, query, limit, threshold) {
   if (!threshold) threshold = 0.05;
   if (!limit) limit = 20;
   var cache = _buildSemanticCache(messages);
@@ -1651,6 +1658,166 @@ function semanticSearchMessages(messages, query, limit, threshold) {
   }
   results.sort(function(a, b) { return b.score - a.score; });
   return results.slice(0, limit);
+}
+
+// ── 本地语义向量检索（embed-server，bge-small-zh-v1.5） ──
+// 消息向量缓存 data/context_msg_vectors.json：{ ver, order:[sig...], vecs:{ sig: base64(Float32Array) } }
+// sig = sha1(检索文本) 前 16 位，内容不变即可复用；上限 2 万条，超出按插入顺序淘汰。
+// 服务不可用（熔断）/超时 → 自动回退 _tfidfSearchMessages（旧字面逻辑），主链路不受影响。
+const embedClient = require("./utils/embed-client");
+const MSG_VECTOR_FILE = path.join(DATA_DIR, "context_msg_vectors.json");
+const MSG_VECTOR_MAX = 20000;
+const MSG_VECTOR_EMBED_CAP = 32;    // 单次检索最多补算条数（长文单条 100-300ms，32 条 ~5s 内；全量靠 warmup）
+let msgVecMap = null;               // Map sig -> Float32Array（已归一化）
+let msgVecOrder = [];
+let msgVecDirty = false;
+let msgVecSaveTimer = null;
+
+function _sigOfText(t) {
+  return crypto.createHash("sha1").update(String(t || "")).digest("hex").slice(0, 16);
+}
+
+function _b64ToF32(b64) {
+  const buf = Buffer.from(b64, "base64");
+  return new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 4));
+}
+
+function _f32ToB64(arr) {
+  return Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength).toString("base64");
+}
+
+function _msgVecLoad() {
+  if (msgVecMap) return msgVecMap;
+  msgVecMap = new Map();
+  try {
+    const raw = JSON.parse(fs.readFileSync(MSG_VECTOR_FILE, "utf8"));
+    const vecs = raw && raw.vecs && typeof raw.vecs === "object" ? raw.vecs : {};
+    const order = Array.isArray(raw.order) ? raw.order : Object.keys(vecs);
+    for (const sig of order) {
+      if (!vecs[sig]) continue;
+      const v = _b64ToF32(vecs[sig]);
+      if (v.length) { msgVecMap.set(sig, v); msgVecOrder.push(sig); }
+    }
+  } catch (e) { /* 无缓存文件，冷启动 */ }
+  return msgVecMap;
+}
+
+function _msgVecScheduleSave() {
+  msgVecDirty = true;
+  if (msgVecSaveTimer) return;
+  msgVecSaveTimer = setTimeout(function () {
+    msgVecSaveTimer = null;
+    if (!msgVecDirty) return;
+    msgVecDirty = false;
+    try {
+      while (msgVecOrder.length > MSG_VECTOR_MAX) msgVecMap.delete(msgVecOrder.shift());
+      const vecs = {};
+      for (const sig of msgVecOrder) {
+        const v = msgVecMap.get(sig);
+        if (v) vecs[sig] = _f32ToB64(v);
+      }
+      fs.writeFileSync(MSG_VECTOR_FILE, JSON.stringify({ ver: 1, order: msgVecOrder, vecs }));
+    } catch (e) { /* 写失败只影响下次冷启动 */ }
+  }, 3000);
+}
+
+function _msgVecSet(sig, v) {
+  const m = _msgVecLoad();
+  if (!m.has(sig)) msgVecOrder.push(sig);
+  else msgVecOrder = msgVecOrder.filter(function (s) { return s !== sig; }).concat([sig]);
+  m.set(sig, Float32Array.from(v));
+  _msgVecScheduleSave();
+}
+
+// 核心补算：给一组文本补缺失向量（无上限，调用方自己分批）；返回 false = embed 不可用
+// 嵌入输入统一截前 256 字符：长消息全量嵌入单条要 100-300ms 且稀释主题；前 256 字（2-3 句）主题表征足够，吞吐翻倍
+const MSG_TEXT_CLIP = 256;
+async function _ensureMsgVectorsRaw(texts, timeoutMs) {
+  const m = _msgVecLoad();
+  const missing = [];
+  for (const t of texts) {
+    const sig = _sigOfText(t);
+    if (!m.has(sig) && !missing.some(function (x) { return x.sig === sig; })) missing.push({ sig: sig, text: String(t).slice(0, MSG_TEXT_CLIP) });
+  }
+  if (!missing.length) return true;
+  const vecs = await embedClient.embedBatch(missing.map(function (x) { return x.text; }), false, timeoutMs || 15000);
+  if (!vecs) return false;
+  missing.forEach(function (x, i) { if (vecs[i] && vecs[i].length) _msgVecSet(x.sig, vecs[i]); });
+  return true;
+}
+
+// 语义检索消息（async）：BGE 真语义余弦；不可用/向量补算失败 → 降级 TF-IDF（阈值沿用旧 0.08）
+async function semanticSearchMessages(messages, query, limit, threshold) {
+  if (!threshold) threshold = 0.45; // BGE 余弦分布：同义 ~0.5-0.8，无关底噪 ~0.30-0.36，0.45 起步较稳
+  if (!limit) limit = 20;
+  if (embedClient.fused()) return _tfidfSearchMessages(messages, query, limit, 0.08);
+  const texts = messages.map(function (m) { return _msgSearchText(m); });
+  const items = [];
+  for (let i = 0; i < texts.length; i++) {
+    if (texts[i]) items.push({ idx: i, text: texts[i] });
+  }
+  if (!items.length) return [];
+  // 单次补算设上限：超限部分本轮跳过（由 warmup 兜底），不阻塞检索
+  const capped = items.slice(0, MSG_VECTOR_EMBED_CAP);
+  const ready = await _ensureMsgVectorsRaw(capped.map(function (x) { return x.text; }), 20000);
+  if (!ready) return _tfidfSearchMessages(messages, query, limit, 0.08);
+  const qv = await embedClient.embedBatch([String(query || "")], true, 8000);
+  if (!qv) return _tfidfSearchMessages(messages, query, limit, 0.08);
+  const q = Float32Array.from(qv[0]);
+  const m = _msgVecLoad();
+  const results = [];
+  for (const it of items) {
+    const v = m.get(_sigOfText(it.text));
+    if (!v) continue;
+    let dot = 0;
+    for (let k = 0; k < q.length; k++) dot += q[k] * v[k];
+    if (dot >= threshold) results.push({ idx: it.idx, score: dot });
+  }
+  results.sort(function (a, b) { return b.score - a.score; });
+  return results.slice(0, limit);
+}
+
+// 后台预热：全部会话时间线 + 导入对话的消息向量分批补算（server 启动后调用一次）
+let _warmBusy = false;
+async function startMsgVectorWarmup() {
+  if (_warmBusy) return;
+  _warmBusy = true;
+  try {
+    const texts = new Set();
+    for (const mm of loadAllSessionTimelines()) {
+      const t = _msgSearchText(mm);
+      if (t) texts.add(t);
+    }
+    try {
+      const mod = require("./imported-conversations");
+      for (const mm of (mod.getMessages ? mod.getMessages() : [])) {
+        const t = _msgSearchText(mm);
+        if (t) texts.add(t);
+      }
+    } catch (e) { /* 导入模块缺失则跳过 */ }
+    const arr = Array.from(texts);
+    let done = 0;
+    const CH = 12;                  // 长文单条 100-300ms，12 条批 ~2-4s 稳在超时内
+    const deadline = Date.now() + 30 * 60 * 1000; // 总时长上限 30 分钟
+    for (let i = 0; i < arr.length; i += CH) {
+      if (Date.now() > deadline) break;
+      if (embedClient.fused()) {
+        // 熔断期（60s）：等它结束再继续，而不是放弃——否则中断后无自动恢复
+        await new Promise(function (r) { setTimeout(r, 65000); });
+        if (embedClient.fused()) break; // 等完仍在熔断 = embed-server 真挂了，停
+        continue;
+      }
+      const ok = await _ensureMsgVectorsRaw(arr.slice(i, i + CH), 60000);
+      if (!ok) continue; // 本批失败（已进熔断）：下轮循环会等熔断结束再试
+      done += Math.min(CH, arr.length - i);
+      await new Promise(function (r) { setTimeout(r, 150); });
+    }
+    console.log("[context-search] 消息向量预热:", done, "/", arr.length);
+  } catch (e) {
+    console.log("[context-search] 消息向量预热中断:", e.message);
+  } finally {
+    _warmBusy = false;
+  }
 }
 
 function searchTimeline(query, limit) {
@@ -1787,15 +1954,16 @@ function searchTimeline(query, limit) {
   return { ok: true, total: scored.length, matches: matches.slice(0, maxReturn) };
 }
 
-// ── 增强版上下文搜索：支持跨会话 + 语义检索 ──
-function searchContextEnhanced(query, options) {
+// ── 增强版上下文搜索：支持跨会话 + 语义检索（embed-server 真语义，降级 TF-IDF） ──
+async function searchContextEnhanced(query, options) {
   const q = String(query || "").trim();
   if (!q) return { ok: false, error: "查询不能为空" };
   const opts = options || {};
   const mode = opts.mode === "keyword" ? "keyword" : "semantic";
   const allSessions = !!opts.allSessions;
   const maxReturn = Math.max(1, Math.min(100, Math.floor(Number(opts.limit) || 10)));
-  const threshold = opts.threshold !== undefined ? Number(opts.threshold) : (mode === "semantic" ? 0.08 : 0);
+  // semantic 阈值含义随引擎变化：BGE 余弦默认 0.45（旧 TF-IDF 0.08 仅作降级时用）
+  const threshold = opts.threshold !== undefined ? Number(opts.threshold) : (mode === "semantic" ? 0.45 : 0);
   
   var allMsgs = [];
   if (allSessions) {
@@ -1858,7 +2026,7 @@ function searchContextEnhanced(query, options) {
   var scored = [];
   
   if (mode === "semantic") {
-    const results = semanticSearchMessages(allMsgs, q, Math.min(maxReturn * 10, 200), threshold);
+    const results = await semanticSearchMessages(allMsgs, q, Math.min(maxReturn * 10, 200), threshold);
     for (let r = 0; r < results.length; r++) {
       const m = allMsgs[results[r].idx];
       if (!allSessions && m.source === "timeline" && m.time) {
@@ -2296,6 +2464,7 @@ module.exports = {
   getReplaceLog,
   searchTimeline,
   searchContextEnhanced,
+  startMsgVectorWarmup,
   loadAllSessionTimelines,
   resolveRange,
   loadItems,

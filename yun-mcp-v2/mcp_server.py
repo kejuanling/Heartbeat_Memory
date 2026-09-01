@@ -347,11 +347,16 @@ def get_server_status() -> str:
 
 def _git_run(path: str, args: list) -> str:
     p = _safe_resolve(path)
-    if not p.is_dir():
-        return f"错误: 不是目录: {p}"
+    if not p.exists():
+        return f"错误: 路径不存在: {p}"
+    # 传单文件时定位到所在目录（git -C 会向上找仓库根），并把 diff/status/log 聚焦到该文件
+    file_part = None
+    if p.is_file():
+        file_part = p.name
+        p = p.parent
     try:
         proc = subprocess.run(
-            ["git", "-C", str(p), *args],
+            ["git", "-C", str(p), *args] + (["--", file_part] if file_part else []),
             capture_output=True, text=True, timeout=20,
             encoding="utf-8", errors="replace",
         )
@@ -367,20 +372,20 @@ def _git_run(path: str, args: list) -> str:
 
 @mcp.tool()
 def git_status(path: str) -> str:
-    """查看项目目录的 git 状态：当前分支、已修改/未跟踪文件（只读）。"""
+    """查看项目的 git 状态：当前分支、已修改/未跟踪文件（只读）。path 传项目目录或单文件（传文件时只显示该文件的状态）。"""
     return _git_run(path, ["status", "--short", "--branch"])
 
 
 @mcp.tool()
 def git_log(path: str, count: int = 10) -> str:
-    """查看最近提交记录（只读）。count 为条数。"""
+    """查看最近提交记录（只读）。count 为条数。path 传项目目录或单文件（传文件时只显示该文件的提交历史）。"""
     count = max(1, min(int(count), 100))
     return _git_run(path, ["log", "--oneline", "-n", str(count)])
 
 
 @mcp.tool()
 def git_diff(path: str, staged: bool = False) -> str:
-    """查看工作区改动内容（只读）。staged=True 时查看已暂存（git add 过）的改动。"""
+    """查看工作区改动内容（只读）。staged=True 时查看已暂存（git add 过）的改动。path 传项目目录（整个仓库的改动）或单文件（只看该文件的改动）。"""
     args = ["diff"] + (["--cached"] if staged else [])
     return _git_run(path, args)
 
