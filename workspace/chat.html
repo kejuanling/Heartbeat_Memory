@@ -145,8 +145,8 @@ header.hd-custom .hd-mid{align-items:flex-start}
 }
 /* 让消息行占满列后，非气泡富内容(头像行/工具/思考/语音/操作行)保持自身宽度、不被拉满 */
 .msg .mhead,.msg .act-tok,.msg .vmsg,.msg .tok{align-self:flex-start}
-/* 多气泡消息：外层容器不再整体进场，交给内部各 .bubble.pop 按顺序逐个弹出 */
-.msg:has(.bubble.pop){animation:none}
+/* 多段历史消息：完全静态显示（只有新消息才逐条弹出，打开页面不播动画） */
+.msg.multi{animation:none}
 @keyframes msgIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 .msg.user{align-self:flex-end;align-items:flex-end}
 .msg.ai{align-self:flex-start;align-items:flex-start}
@@ -251,8 +251,7 @@ header.hd-custom .hd-mid{align-items:flex-start}
 #chat[data-layout="custom"] .msg.ai .bubble::after,
 #chat[data-layout="custom"] .msg.user .bubble::after{content:none}
 /* 分割气泡依次弹出 */
-@keyframes popIn{from{opacity:0;transform:scale(.92) translateY(4px)}to{opacity:1;transform:none}}
-.msg .bubble.pop{animation:popIn .28s ease both}
+@keyframes msgIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 .msg.ai.stream-in .bubble{animation:msgIn .35s ease both}
 /* ===== 独立语音播放条（QQ 语音条：圆形播放键 + 居中心跳波 + 秒数；内容另起一行显示） ===== */
 .vmsg{
@@ -1508,7 +1507,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
               <div style="margin-top:10px"><label>max_tokens<span class="tag">可选</span></label><input type="number" min="1" id="maxTokInput" placeholder="留空不限制"></div>
             </div>
             <button type="button" class="mcp-btn primary" id="aiSaveBtn" style="margin-top:12px" onclick="saveSettingsAll()">保存 AI 设置</button>
-            </div></div><div class="set-panel" data-acc="memwake"><div class="set-acc-h" data-acc="memwake">记忆与唤醒参数<span class="ar">▾</span></div><div class="set-sec"><div class="set-sec-label">唤醒</div><div class="field"><label>唤醒历史最大条数</label><input type="number" id="mwWake" value="80"></div><div class="set-sec-label">记忆池</div><div class="field"><label>去重阈值</label><input type="number" step="0.05" min="0" max="1" id="mwDedup" value="0.78"></div><div class="field"><label>衰减半衰期（天）</label><input type="number" step="1" min="1" id="mwDecay" value="30"></div><div class="set-sec-label">再解析（压缩摘要 → 记忆池）</div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">摘要再解析入库</label><label class="adm-sw"><input type="checkbox" id="mwReparse" checked><i></i></label></div><div class="field"><label>每条字数上限</label><input type="number" step="1" min="5" id="mwRmax" value="30"></div><div class="field"><label>每段最多条数</label><input type="number" step="1" min="1" id="mwRmaxitems" value="8"></div><div class="set-sec-label">跨窗口注入</div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">总开关</label><label class="adm-sw"><input type="checkbox" id="mwCross" checked><i></i></label></div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">固定注入</label><label class="adm-sw"><input type="checkbox" id="mwAlways"><i></i></label></div><div class="field"><label>消息少于 N 条</label><input type="number" step="1" min="1" id="mwMaxmsgs" value="2"></div><div class="field"><label>日记天数</label><input type="number" step="1" min="0" id="mwDays" value="3"></div><div class="field"><label>每类注入条数</label><input type="number" step="1" min="1" id="mwMempercat" value="2"></div><div class="field"><label>摘要最近天数</label><input type="number" step="1" min="1" id="mwSumdays" value="7"></div><div class="field"><label>标星条数</label><input type="number" step="1" min="1" id="mwStartopk" value="10"></div><div class="mcp-msg" id="mwMsg"></div><button type="button" class="mcp-btn primary" id="mwSaveBtn">保存参数</button></div></div><div class="set-panel" data-acc="sendcfg"><div class="set-acc-h" data-acc="sendcfg">对话发送配置<span class="ar">▾</span></div><div class="set-sec"><div class="field">
+            </div></div><div class="set-panel" data-acc="memwake"><div class="set-acc-h" data-acc="memwake">记忆与唤醒参数<span class="ar">▾</span></div><div class="set-sec"><div class="set-sec-label">唤醒</div><div class="field"><label>唤醒历史最大条数</label><input type="number" id="mwWake" value="80"></div><div class="set-sec-label">记忆池</div><div class="field"><label>去重阈值</label><input type="number" step="0.05" min="0" max="1" id="mwDedup" value="0.78"></div><div class="field"><label>衰减半衰期（天）</label><input type="number" step="1" min="1" id="mwDecay" value="30"></div><div class="set-sec-label">再解析（压缩摘要 → 记忆池）</div><div class="field"><label>每条字数上限</label><input type="number" step="1" min="5" id="mwRmax" value="30"></div><div class="field"><label>每段最多条数</label><input type="number" step="1" min="1" id="mwRmaxitems" value="8"></div><div class="set-sec-label">跨窗口注入</div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">总开关</label><label class="adm-sw"><input type="checkbox" id="mwCross" checked><i></i></label></div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">固定注入</label><label class="adm-sw"><input type="checkbox" id="mwAlways"><i></i></label></div><div class="field"><label>消息少于 N 条</label><input type="number" step="1" min="1" id="mwMaxmsgs" value="2"></div><div class="field"><label>日记天数</label><input type="number" step="1" min="0" id="mwDays" value="3"></div><div class="field"><label>每类注入条数</label><input type="number" step="1" min="1" id="mwMempercat" value="2"></div><div class="field"><label>摘要最近天数</label><input type="number" step="1" min="1" id="mwSumdays" value="7"></div><div class="field"><label>标星条数</label><input type="number" step="1" min="1" id="mwStartopk" value="10"></div><div class="mcp-msg" id="mwMsg"></div><button type="button" class="mcp-btn primary" id="mwSaveBtn">保存参数</button></div></div><div class="set-panel" data-acc="sendcfg"><div class="set-acc-h" data-acc="sendcfg">对话发送配置<span class="ar">▾</span></div><div class="set-sec"><div class="field">
               <label>保留最近 N 条带图消息的历史图片（0=不保留，当前发送的图始终保留）</label>
               <input type="number" id="imgKeepTurns" min="0" step="1" value="8">
             </div>
@@ -1832,7 +1831,7 @@ const pickMode=document.getElementById("pickMode");
 const avatarFile=document.getElementById("avatarFile");
 let avatarTarget="";
 function bindAvatarUpload(btnId,target){const b=document.getElementById(btnId);if(!b)return;b.addEventListener("click",function(){avatarTarget=target;if(avatarFile){avatarFile.value="";avatarFile.click();}});}
-if(avatarFile)avatarFile.addEventListener("change",function(){const f=avatarFile.files[0];if(!f)return;if(f.size>1.5*1024*1024){showToast("头像图过大，请选小于1.5MB");avatarFile.value="";return;}const fr=new FileReader();fr.onload=function(){const t=avatarTarget==="ai"?aiAvatarInput:userAvatarInput;if(t)t.value=fr.result;};fr.readAsDataURL(f);});
+if(avatarFile)avatarFile.addEventListener("change",async function(){const f=avatarFile.files[0];if(!f)return;if(f.size>1.5*1024*1024){showToast("头像图过大，请选小于1.5MB");avatarFile.value="";return;}const fr=new FileReader();fr.onload=async function(){const t=avatarTarget==="ai"?aiAvatarInput:userAvatarInput;if(!t)return;try{t.value=await uploadImageToServer(fr.result);}catch(e){t.value=fr.result;showToast("转存服务器失败，暂存本地（占用存储空间）");}};fr.readAsDataURL(f);});
 bindAvatarUpload("userAvatarUp","user");
 bindAvatarUpload("aiAvatarUp","ai");
 /* ---- 主题设置输入 ---- */
@@ -1968,16 +1967,48 @@ let liveDebounce=null;
 function liveReloadNow(){
   // 正在发送/流式中不打断（自身的回复正实时渲染）；等待下一次事件或在发送结束后由调用方补拉
   if(sending) return;
+  if(_segBusy) return;   // 分段连播中：本轮跳过，结束后自动补拉一次兜底
   if(liveDebounce) clearTimeout(liveDebounce);
   liveDebounce=setTimeout(async ()=>{
     const localMsgs=loadMsgs();
     const hist=await fetchHistory();
     if(hist&&hist.length){
+      // 尾部新增检测（前缀不变、仅追加）：新增消息走 QQ 式分段连播，一条条弹出而不是整块刷新
+      let added=[];
+      if(localMsgs.length&&hist.length>localMsgs.length){
+        let same=true;
+        for(let i=0;i<localMsgs.length;i++){
+          const a=hist[i]&&hist[i].content,b=localMsgs[i]&&localMsgs[i].content;
+          const av=(typeof a==="string")?a:JSON.stringify(a),bv=(typeof b==="string")?b:JSON.stringify(b);
+          if(av!==bv){same=false;break;}
+        }
+        if(same)added=hist.slice(localMsgs.length);
+      }
+      const playables=added.filter(function(m){return m&&(m.role==="user"||m.role==="assistant"||m.role==="ai");});
+      // 完全无变化就不重建（避免每次 SSE 都把整列多段气泡的进场动画重播一遍）
+      if(!added.length&&hist.length===localMsgs.length){
+        let sameAll=hist.length===localMsgs.length;
+        if(sameAll){ for(let i=0;i<hist.length;i++){ const a=hist[i]&&hist[i].content,b=localMsgs[i]&&localMsgs[i].content; const av=(typeof a==="string")?a:JSON.stringify(a),bv=(typeof b==="string")?b:JSON.stringify(b); if(av!==bv){sameAll=false;break;} } }
+        if(sameAll) return;
+      }
       // 以服务器为准，但把本地富字段(思考链/工具/token)补回匹配的助手消息（兼容旧数据）
       msgs=mergeEnrichment(hist,localMsgs);
       rehydrateCallFlagsFromMarkers(msgs);   // 实时刷新同样按 <call_id> 标记折叠通话
       saveMsgs();
-      renderAll(); if(autoScroll!==false) scrollBottom();
+      if(playables.length){
+        // AI 主动消息/别的设备新消息：按连发节奏逐条弹出
+        _segBusy=true;
+        try{
+          playables.forEach(function(m){segEnqueueMsg(m);});
+          await SEGQ.drained();
+        }catch(e){ _segBusy=false; }
+        _segBusy=false;
+        renderAllNoAnim(true);          // 静默重建校准（无动画，视觉无感）
+        if(autoScroll!==false) scrollBottom();
+        setTimeout(liveReloadNow,600);  // 连播期间漏掉的 history_update 补拉一次
+      }else{
+        renderAll(); if(autoScroll!==false) scrollBottom();
+      }
     }
   }, 250);
 }
@@ -2522,9 +2553,10 @@ function makeMsgEl(m,idx,grpCls){
     const splitRe=new RegExp("\\n\\s*"+esc+"\\s*\\n");   // 仅当分隔符独立成行（前后是换行）才分气泡
     let parts=full.split(splitRe).map(p=>p.trim()).filter(p=>p);
     if(parts.length<=1){parts=[full];}
+    if(parts.length>1)d.classList.add("multi");
     parts.forEach(function(p,pi){
       const host=buildUnit();
-      const b=document.createElement("div");b.className="bubble"+(parts.length>1?" pop":"");if(parts.length>1)b.style.animationDelay=(pi*0.18)+"s";
+      const b=document.createElement("div");b.className="bubble";
       // 必须先挂到 host，否则 renderAiContent 里 insertBefore(pre, bubble) 因 bubble 不是
       // host 子节点而抛 NotFoundError，导致带 reasoning/tools 的 AI 消息整条不渲染。
       host.appendChild(b);
@@ -2668,6 +2700,72 @@ function loadMoreNewer(){
   }
 }
 let _winActive=true;
+// 置位时渲染不加气泡进场动画：流式分段逐条弹出后收尾重建用，避免整块动画重播
+let _noAnim=false;
+function renderAllNoAnim(keepPos){ _noAnim=true; try{renderAll(keepPos);}finally{_noAnim=false;} }
+/* ===== AI 消息 QQ 式分段连播（三条入口共用）=====
+   页面流式发送(逐chunk喂) / 非流式发送(整段一次喂) / SSE补拉新消息(整条喂)。
+   每段内容收齐后整条弹出一个气泡，一条接一条；连发时限速，贴近真人发消息节奏。 */
+let _segBusy=false;      // 连播进行中标记（SSE 补拉重入保护）
+const SEGQ={q:[],running:false,lastAt:0,   // 弹出队列：每条弹出前等待其"打字时长"（segGapFor 按字数算）
+  push:function(fn,gap){this.q.push({fn:fn,gap:(typeof gap==="number"&&gap>=0)?gap:380});if(this.running)return;this.running=true;const s=this;(function step(){const it=s.q.shift();if(!it){s.running=false;return;}const wait=Math.max(0,(s.lastAt+it.gap)-Date.now());setTimeout(function(){try{s.lastAt=Date.now();it.fn();}catch(e){}step();},wait);})();},
+  drained:function(){const s=this;const t0=Date.now();return new Promise(function(res){(function w(){(!s.running&&!s.q.length||Date.now()-t0>45000)?res():setTimeout(w,110);})();});}
+};
+// 打字节奏：按段的有效字数估"打完这条要多久"——短句快连发、长段等久点，模拟真人
+// 300ms 起手 + 60ms/字，钳在 [400ms, 2600ms]（约 5 字≈0.6s / 20 字≈1.5s / 40+ 字封顶 2.6s）
+function segGapFor(t){
+  const n=(String(t)||"").replace(/\s+/g,"").length;
+  return Math.max(400,Math.min(2600,300+n*60));
+}
+function segSplitText(text){   // 与 makeMsgEl 相同的拆段逻辑（先剥标签再按分隔符拆）
+  const c=(stripCurrentTime(stripInnerTags(text)).clean)||"";
+  const de=(cfg.bubble_delim||"").replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+  let ps=c.split(new RegExp("\\n\\s*"+de+"\\s*\\n")).map(function(p){return p.trim();}).filter(function(p){return p;});
+  if(!ps.length)ps=[""];
+  return ps;
+}
+function segPopOne(text,srcMsg,first){   // 弹出单条气泡 DOM（复用 makeMsgEl 完整渲染：头像/名称/思考/语音/胶囊）
+  const fake={role:(srcMsg&&srcMsg.role)||"assistant",content:text,
+    reasoning:(first&&(srcMsg&&srcMsg.reasoning))||"",
+    tools:(first&&(srcMsg&&srcMsg.tools))||[],
+    time:(srcMsg&&srcMsg.time)||new Date().toISOString()};
+  const el=makeMsgEl(fake,-1,"");
+  if(!el)return;
+  el.classList.add("stream-in");
+  removeEmpty();
+  chatEl.appendChild(el);
+  if(autoScroll)scrollBottom();
+}
+function segEnqueueMsg(m){   // 把一条消息拆段全部入队（user 消息整条入队，AI 消息按分隔符拆段）；间隔按每段字数
+  if(!m)return;
+  const isAI=(m.role==="assistant"||m.role==="ai");
+  if(!isAI){ const t=msgText(m); SEGQ.push(function(){segPopOne(t,m,false);},segGapFor(t)); return; }
+  if(m._callB||typeof m.content==="string"&&m.content.indexOf("【工具调用记录】")===0||typeof m.content==="string"&&m.content.indexOf("【通话记录】")===0){ return; }   // 界面不渲染的消息不播
+  const src=m;
+  const ps=segSplitText(typeof m.content==="string"?m.content:"");
+  ps.forEach(function(t,i){
+    SEGQ.push(function(){segPopOne(t,src,i===0);},segGapFor(t));
+  });
+}
+function makeSegPlayer(srcMsg){   // 流式喂入式播放器：feed 喂当前全文（可多次），flush 补弹最后一段并等队列走完
+  let done=0;
+  function feed(full){
+    const ps=segSplitText(full);
+    while(done<ps.length-1){
+      const t=ps[done];done++;const first=(done===1);
+      SEGQ.push(function(){segPopOne(t,srcMsg,first);},segGapFor(t));
+    }
+  }
+  async function flush(full){
+    const ps=segSplitText(full);
+    while(done<ps.length){
+      const t=ps[done];done++;const first=(done===1);
+      SEGQ.push(function(){segPopOne(t,srcMsg,first);},segGapFor(t));
+    }
+    await SEGQ.drained();
+  }
+  return {feed:feed,flush:flush};
+}
 function renderAll(keepPos){
   // 会话切换自动复位窗口（避免上一个会话的定位窗口被沿用）
   if(_winSession!==currentSession){ _winSession=currentSession; _lockFrom=false; _from=0; _to=null; }
@@ -2727,7 +2825,7 @@ async function request(finalMsgs){
   if(sending)return;
   sending=true;setSendState(true);aborter=new AbortController();
   appendTypingBox();
-  let full="",reasoning="",usage=null,tools=[],reader=null;
+  let full="",reasoning="",usage=null,tools=[],reader=null,flushStreamSegs=null;
   const isStream=(cfg.send_mode||"stream")==="stream" || cfg.send_mode===undefined;
   try{
     const payload={
@@ -2759,17 +2857,33 @@ async function request(finalMsgs){
     }
     if(!resp.ok){const t=await resp.text().catch(()=>"");throw new Error("HTTP "+resp.status+" : "+(t.slice(0,200)||resp.statusText));}
     if(!isStream){
-      // 非流式：直接读整段 JSON 回复，一次性显示（不显示思考链/工具痕迹）
+      // 非流式：直接读整段 JSON 回复（不显示思考链/工具痕迹）；展示同样走 QQ 式分段连播
       const j=await resp.json().catch(()=>null);
       if(!j||!j.choices||!j.choices[0])throw new Error("上游返回格式异常");
       const msg=j.choices[0].message||{};
       full=typeof msg.content==="string"?msg.content:"";
       if((j.usage)){usage=j.usage;}
       if(j.choices[0].finish_reason==="length"){/* 截断提示 */ }
+      if(full){
+        const p=makeSegPlayer(null);p.feed(full);
+        flushStreamSegs=function(){return p.flush(full);};
+      }
     } else {
     reader=resp.body.getReader();
     const dec=new TextDecoder();let buf="";
-    let streamBubble=null;  // 流式气泡元素，第一个 content 来的时候才创建
+    /* ===== QQ 式分段连播（流式）=====
+       正文按分隔符拆段，每段内容收齐后整条弹出一个气泡（带头像/名称），一条接一条；
+       不再做整条打字机。思考/工具阶段先临时显示思考，第一条正文段弹出时并入。
+       flushStreamSegs：收尾补弹剩余段（含最后一段），供正常结束/停止/出错三处共用。 */
+    let thinkEl=null;      // 思考阶段临时气泡
+    const thinkRemove=function(){ if(thinkEl){thinkEl.remove();thinkEl=null;} };
+    // reasoning/tools 在流式过程中持续累积，用 getter 让第一段弹出时取到当前值
+    const playerSrc={role:"assistant",get reasoning(){return reasoning;},get tools(){return tools;},time:null};
+    const player=makeSegPlayer(playerSrc);
+    flushStreamSegs=async function(){
+      await player.flush(full);
+      thinkRemove();
+    };
     while(true){
       const {done,value}=await reader.read();
       if(done)break;
@@ -2787,30 +2901,37 @@ async function request(finalMsgs){
           const hasContent = delta && delta.content;
           const hasReasoning = delta && delta.reasoning_content;
           if(delta){if(delta.content)full+=delta.content;if(delta.reasoning_content)reasoning+=delta.reasoning_content;if(delta.tool_trace){tools=delta.tool_trace;}}
-          // 第一个有内容的 chunk 到达时才创建气泡（去掉三个点的加载状态）
-          if((hasContent || hasReasoning) && !streamBubble){
+          // 思考/工具阶段：第一条正文段弹出前，临时气泡只显示思考过程
+          if(hasReasoning && !thinkEl && !SEGQ.running && !SEGQ.q.length){
             removeEmpty();
-            const d=document.createElement("div");d.className="msg ai stream-in";d.dataset.idx="-1";
-            d.innerHTML='<div class="bubble"></div>';
-            chatEl.appendChild(d);
-            streamBubble = d;
+            thinkEl=document.createElement("div");thinkEl.className="msg ai stream-in";thinkEl.dataset.idx="-1";
+            thinkEl.innerHTML='<div class="bubble"></div>';
+            chatEl.appendChild(thinkEl);
           }
-          if(streamBubble){renderAI(streamBubble,streamBubble.querySelector(".bubble"),full,reasoning,tools);if(autoScroll)scrollBottom();}
+          if(thinkEl){renderAI(thinkEl,thinkEl.querySelector(".bubble"),"",reasoning,tools);if(autoScroll)scrollBottom();}
+          // 正文：每凑齐一段（分隔符出现）就整条弹出，一条接一条
+          if(hasContent){ player.feed(full); }
         }catch(e){}
       }
     }
     }
-    // 入库
+    // 入库（分段连播：先把剩余未弹的段一条条补弹完，再静默重建，不重播整块动画）
+    if(flushStreamSegs){await flushStreamSegs();}
     finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});
-    msgs=finalMsgs;saveMsgs();renderAll(autoScroll===false);
+    msgs=finalMsgs;saveMsgs();
+    if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
   }catch(err){
     if(err.name==="AbortError"){
+      try{if(flushStreamSegs){await flushStreamSegs();}}catch(e){}
       if(full){finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});}
-      msgs=finalMsgs;saveMsgs();renderAll(autoScroll===false);
+      msgs=finalMsgs;saveMsgs();
+      if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
       if(full)showToast("已停止生成");
     }else{
+      try{if(flushStreamSegs){await flushStreamSegs();}}catch(e){}
       if(full){finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});}
-      msgs=finalMsgs;saveMsgs();renderAll(autoScroll===false);
+      msgs=finalMsgs;saveMsgs();
+      if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
       showError(err.message);
     }
   }finally{
@@ -3426,9 +3547,32 @@ function applyThemePreview(){
   root.setProperty("--bubble-opacity",String(Number(bubbleOpacity.value)/100));
   root.setProperty("--bubble-blur",bubbleBlur.value+"px");
   root.setProperty("--radius",bubbleRadius.value+"px");
+  // 背景即时预览：输入值与已存 cfg 不同才套用，否则回到已存背景（含清空图后还原）
+  const img=(bgImageInput&&bgImageInput.value||"").trim();
+  const cfgImg=cfg.bg_image||"";
+  if(img&&img!==cfgImg){
+    document.body.style.background='linear-gradient(160deg, rgba(253,246,237,.62), rgba(240,221,208,.62)), url("'+img+'") center / cover no-repeat fixed';
+    return;
+  }
+  if(!img&&cfgImg){ applyTheme(); return; }
+  const col=(bgColorInput&&bgColorInput.value)||"";
+  const savedCol=cfg.bg_color||"";
+  if(col&&col!=="#f4f1ee"&&col!==savedCol){
+    document.body.style.background='linear-gradient(160deg, '+col+' 0%, '+shade(col,-12)+' 100%)';
+    document.body.style.backgroundAttachment="fixed";
+    return;
+  }
+  applyTheme();
 }
 /* ===== 保存主题（最多 3 个，点回可切换） ===== */
 const LS_THEMES="han_saved_themes";
+// 图片转存服务器：dataURL 换 /uploads/ 短 URL，避免大 base64 撑爆 localStorage（配额满后保存会静默失败）
+async function uploadImageToServer(dataUrl){
+  const r=await fetch("/v1/upload-image",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({data:dataUrl})});
+  const j=await r.json().catch(function(){return {};});
+  if(r.ok&&j&&j.ok&&j.url)return j.url;
+  throw new Error((j&&j.error)||("HTTP "+r.status));
+}
 function themeInputs(){
   const or=function(v,d){ return (v!==null&&v!==undefined&&v!=="")?v:d; };
   return {
@@ -3451,7 +3595,9 @@ function themeInputs(){
 function loadSavedThemes(){ try{ const a=JSON.parse(localStorage.getItem(LS_THEMES)||"[]"); return Array.isArray(a)?a:[]; }catch(e){ return []; } }
 function syncThemesToServer(replace){
   const arr=loadSavedThemes();
-  fetch("/v1/themes",{method:"PUT",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key},credentials:"include",body:JSON.stringify({themes:arr,replace:!!replace})}).catch(function(){});
+  fetch("/v1/themes",{method:"PUT",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({themes:arr,replace:!!replace})}).then(function(r){
+    if(!r.ok) showToast("主题云端同步失败（"+r.status+"），仅存本机");
+  }).catch(function(){ showToast("主题云端同步失败：网关未连接，仅存本机"); });
 }
 async function loadThemesFromServer(){
   try{
@@ -3468,14 +3614,21 @@ async function loadThemesFromServer(){
     renderSavedThemes();
   }catch(e){}
 }
-function saveCustomTheme(){
+async function saveCustomTheme(){
   const name=(document.getElementById("themeNameInput")&&document.getElementById("themeNameInput").value||"").trim();
   const th=themeInputs(); th.name=name||("主题 "+(loadSavedThemes().length+1));
+  // 背景图还是本地 dataURL 时先转存服务器，否则主题存进 localStorage 很容易撑爆配额
+  if(/^data:image\//.test(th.bg_image||"")){
+    try{ th.bg_image=await uploadImageToServer(th.bg_image); }
+    catch(e){ showToast("背景图未能转存服务器（"+(e.message||"")+"）"); }
+  }
   let arr=loadSavedThemes().filter(function(t){ return t.name!==th.name; });
   arr.push(th); if(arr.length>20) arr=arr.slice(-20);
-  try{ localStorage.setItem(LS_THEMES, JSON.stringify(arr)); }catch(e){}
+  let savedLocal=true;
+  try{ localStorage.setItem(LS_THEMES, JSON.stringify(arr)); }catch(e){ savedLocal=false; }
   if(document.getElementById("themeNameInput"))document.getElementById("themeNameInput").value="";
-  syncThemesToServer(); renderSavedThemes(); showToast("主题已保存");
+  syncThemesToServer(); renderSavedThemes(savedLocal?null:arr);
+  showToast(savedLocal?"主题已保存":"本机存储空间不足，主题仅同步到云端，换设备可恢复");
 }
 function applyCustomTheme(t){
   if(!t) return;
@@ -3502,9 +3655,9 @@ function themeSwatch(t){
   const ok=/^#[0-9a-fA-F]{3,8}$/.test(c);
   return '<span class="st-swatch" style="background:'+(ok?c:"#d9a3a8")+'"></span>';
 }
-function renderSavedThemes(){
+function renderSavedThemes(srcArr){
   const el=document.getElementById("savedThemes"); if(!el) return;
-  const arr=loadSavedThemes();
+  const arr=Array.isArray(srcArr)?srcArr:loadSavedThemes();
   if(!arr.length){ el.innerHTML='<div class="data-tip">还没有保存的主题，点「保存」存一个。</div>'; return; }
   el.innerHTML=arr.map(function(t,i){ return '<div class="saved-theme" data-i="'+i+'">'+themeSwatch(t)+'<span class="st-n">'+escapeHtml(t.name)+'</span><button type="button" class="st-del" title="删除主题">×</button></div>'; }).join("");
   el.querySelectorAll(".saved-theme").forEach(function(e){
@@ -3591,7 +3744,16 @@ bgImageFile.addEventListener("change",function(){
   const f=bgImageFile.files[0];if(!f)return;
   if(f.size>1.5*1024*1024){showToast("背景图过大，请选小于 1.5MB");bgImageFile.value="";return;}
   const fr=new FileReader();
-  fr.onload=function(){bgImageInput.value=fr.result;renderThemeValues();applyThemePreview();};
+  fr.onload=async function(){
+    try{
+      bgImageInput.value=await uploadImageToServer(fr.result);
+      showToast("背景图已上传");
+    }catch(e){
+      bgImageInput.value=fr.result;
+      showToast("转存服务器失败，暂存本地（"+(e.message||"")+"）");
+    }
+    renderThemeValues();applyThemePreview();
+  };
   fr.readAsDataURL(f);
 });
 applyTheme();
@@ -3766,7 +3928,7 @@ async function toggleMcpTool(i, ti, enabled){
     const disabled=tools.filter(function(x){ return x && x.enabled===false; }).map(function(x){ return x.name; });
     const nm=t.name;
     const newDisabled = enabled? disabled.filter(function(n){ return n!==nm; }) : (disabled.indexOf(nm)<0? disabled.concat([nm]) : disabled);
-    const r=await fetch("/admin/tools",{ method:"PUT", headers: mcpAuthHeaders(), body: JSON.stringify({ disabled: newDisabled }), credentials:"include" });
+    const r=await fetch("/heartbeat/admin/tools",{ method:"PUT", headers: mcpAuthHeaders(), body: JSON.stringify({ disabled: newDisabled }), credentials:"include" });
     const j=await r.json().catch(function(){ return {}; });
     if(!r.ok){ if(mcpToolsMsg) mcpToolsMsg.textContent=(j&&j.error)||"保存失败"; __mcpToolsBusy=false; return; }
     t.enabled = enabled;
@@ -4605,7 +4767,9 @@ async function loadSessionCc(id){
       const cached=!!c.cached, enabled=c.enabled!==false;
       const stCls=cached?(enabled?'on':'off'):'todo';
       const stTxt=cached?(enabled?'已替换':'已停用'):'待生成';
-      const bIdx=c.manual?(window.__ccOrd=(window.__ccOrd||0)):-1; if(c.manual){ window.__ccOrd++; }
+      // 手工块序号优先用服务端 manualRecordsSorted()（按会话过滤）给出的 blockIndex；
+      // 本地计数只是老版本预览无该字段时的兜底，自己数会在跨会话/块被锚点过滤时错位
+      const bIdx=c.manual?((typeof c.blockIndex==='number')?c.blockIndex:(window.__ccOrd=(window.__ccOrd||0))):-1; if(c.manual&&typeof c.blockIndex!=='number'){ window.__ccOrd++; }
       // 生成摘要/替换等操作实际在管理台做；这里只保留「替换/取消替换」快捷开关，未生成块不给按钮
       const actionB=cached
         ? '<button class="cc-act'+(enabled?'':' off')+'" data-ccact="toggle" data-manual="'+(isAi?'0':'1')+'" data-idx="'+bIdx+'" data-repid="'+encodeURIComponent(repIdOf(c))+'">'+(enabled?'取消替换':'替换')+'</button>'
@@ -4618,7 +4782,9 @@ async function loadSessionCc(id){
     body.querySelectorAll('[data-ccact]').forEach(function(b){
       b.addEventListener("click",function(){ const act=b.dataset.ccact,manual=b.dataset.manual==="1",idx=Number(b.dataset.idx),repId=decodeURIComponent(b.dataset.repid||"");
         const bodyObj=manual?{action:"toggle",blockIndex:idx,enabled:b.textContent==="替换"}:{id:repId,enabled:b.textContent==="替换"};
-        const url=manual?ccBase()+"/context-compaction/blocks":ccBase()+"/context-replacements/toggle";
+        // POST 也必须带 session_id（服务端 onRequest 钩子只认 query）：否则 ALS 落回 default，
+        // 手工块 blockIndex 会在主会话的块列表里错位命中
+        const url=(manual?ccBase()+"/context-compaction/blocks":ccBase()+"/context-replacements/toggle")+"?session_id="+encodeURIComponent(id||"default");
         fetch(url,{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":ccGetCookie("admin_csrf")},body:JSON.stringify(bodyObj),credentials:"include"}).then(function(){ loadSessionCc(id); });
       });
     });
@@ -4993,14 +5159,17 @@ async function deleteSession(id){
     const nameMap=JSON.parse(localStorage.getItem("han_session_names")||"{}");
     delete nameMap[id];localStorage.setItem("han_session_names",JSON.stringify(nameMap));
     if(currentSession===id){
-      // 若删除的是当前会话，回退到主会话
-      currentSession="default";
-      localStorage.setItem("han_current_session","default");
+      // 删除的是当前会话：落到剩余会话里最后活跃的那个；主会话已废弃，仅在没有任何会话时才回退它
+      sessionList=sessionList.filter(s=>s.id!==id);
+      const best=sessionList.slice().sort((a,b)=>((b.last_time||"")>(a.last_time||"")?1:((b.last_time||"")<(a.last_time||"")?-1:0)))[0];
+      const target=(best&&best.id)?best.id:"default";
+      currentSession=target;
+      localStorage.setItem("han_current_session",target);
       applyHeader();
       msgs=[];const h=await fetchHistory();
       if(h&&h.length){msgs=h;saveMsgs();}else{msgs=loadMsgs();}
       renderAll();
-      startLiveEvents();   // 删除回退到主会话后重新订阅
+      startLiveEvents();   // 切到回退会话后重新订阅
     }
     showToast(j.error?("删除失败:"+j.error):"已删除");
   }catch(e){showToast("删除失败:"+(e.message||""));}
@@ -5367,6 +5536,15 @@ function rehydrateCallFlagsFromMarkers(arr){
 async function initChat(){
   currentSession=localStorage.getItem("han_current_session")||"default";
   await loadSessions();
+  // 主会话(default)已废弃：恢复到 default 或已不存在的会话时，自动落到列表里最后活跃的会话
+  if((currentSession==="default"||!sessionList.some(s=>s.id===currentSession))&&sessionList.length){
+    const best=sessionList.slice().sort((a,b)=>((b.last_time||"")>(a.last_time||"")?1:((b.last_time||"")<(a.last_time||"")?-1:0)))[0];
+    if(best&&best.id&&best.id!==currentSession){
+      currentSession=best.id;
+      localStorage.setItem("han_current_session",best.id);
+      renderSessionList();   // loadSessions 渲染列表时 active 还是旧值，这里补一次
+    }
+  }
   pullSessionNames();   // 拉取跨设备改名映射
   pullSessionPins();    // 拉取跨设备会话置顶
   const localMsgs=loadMsgs();               // 本地缓存：保留思考链/工具/token 等完整数据
@@ -5485,8 +5663,9 @@ function admFetch(url, opts){
   var admin = url.charAt(0)==='/' || url.indexOf(BASE)===0;
   var isCtx = url.indexOf('/context-compaction')>=0 || url.indexOf('/context-replacements')>=0;
   var isPush = url.indexOf('/push-events')>=0;
-  // GET 请求：session_id 加在 URL 上
-  if((isCtx || isPush) && url.indexOf('session_id=')<0 && (opts.method||'GET')==='GET'){
+  // session_id 加在 URL 上（压缩/替换接口 GET 和 POST 都要带：服务端会话钩子只认 query，
+  // POST 漏带会把操作落到主会话的 ALS 上下文）；push-events 的 POST 走 body.session_id，此处仅 GET 补
+  if(url.indexOf('session_id=')<0 && (isCtx || (isPush && (opts.method||'GET')==='GET'))){
     var sep = url.indexOf('?')>=0 ? '&' : '?';
     url = url + sep + 'session_id=' + encodeURIComponent(sessId());
   }
@@ -5803,7 +5982,7 @@ function renderSendCfg(body){
   }).catch(function(e){ body.innerHTML='<div class="adm-empty">加载失败: '+esc(e.message)+'</div>'; });
 }
 
-/* ---------------- 记忆与唤醒参数（设置页 · 由原菜单卡片迁移） ---------------- */function loadMemWakeSettings(){  Promise.all([admGet(BASE+'/config'), admGet(BASE+'/memory-pool/config')]).then(function(res){    var c=res[0], m=res[1];    function num(v,d){ return v!=null?v:d; }    function setVal(id,v){ var el=document.getElementById(id); if(el) el.value=v; }    function setChk(id,b){ var el=document.getElementById(id); if(el) el.checked=!!b; }    setVal('mwWake',num(c.wake_history_max_messages,80));    setVal('mwDedup',num(m.dedup_threshold,0.78));    setVal('mwDecay',num(m.decay_days,30));    setChk('mwReparse',m.reparse_enabled!==false);    setVal('mwRmax',num(m.reparse_max_chars,30));    setVal('mwRmaxitems',num(m.reparse_max_items,8));    setChk('mwCross',m.cross_inject_enabled!==false);    setChk('mwAlways',m.cross_inject_always===true);    setVal('mwMaxmsgs',num(m.cross_inject_max_msgs,2));    setVal('mwDays',num(m.cross_inject_diary_days,3));    setVal('mwMempercat',num(m.cross_inject_memory_per_category,2));    setVal('mwSumdays',num(m.cross_inject_summary_days,7));    setVal('mwStartopk',num(m.cross_inject_starred_topk,10));  }).catch(function(e){ var m=document.getElementById('mwMsg'); if(m) m.textContent='加载失败: '+(e&&e.message||e); });}function saveMemWakeSettings(){  var up={wake_history_max_messages:Number(document.getElementById('mwWake').value)||0};  var up2={    dedup_threshold:Number(document.getElementById('mwDedup').value)||0.78,    decay_days:Number(document.getElementById('mwDecay').value)||30,    reparse_enabled:document.getElementById('mwReparse').checked,    reparse_max_chars:Number(document.getElementById('mwRmax').value)||30,    reparse_max_items:Number(document.getElementById('mwRmaxitems').value)||8,    cross_inject_enabled:document.getElementById('mwCross').checked,    cross_inject_always:document.getElementById('mwAlways').checked,    cross_inject_max_msgs:Number(document.getElementById('mwMaxmsgs').value)||2,    cross_inject_diary_days:Number(document.getElementById('mwDays').value)||3,    cross_inject_memory_per_category:Number(document.getElementById('mwMempercat').value)||2,    cross_inject_summary_days:Number(document.getElementById('mwSumdays').value)||7,    cross_inject_starred_topk:Number(document.getElementById('mwStartopk').value)||10  };  Promise.all([admPost(BASE+'/config',up), admPost(BASE+'/memory-pool/config',up2)]).then(function(res){    var bad=res.some(function(j){ return j&&j.error; });    var m=document.getElementById('mwMsg');    if(m){ m.textContent=bad?'部分参数保存失败':'已保存，下次请求/重启生效（跨窗口注入即时生效）。'; }    showToast(bad?'部分参数保存失败':'记忆与唤醒参数已保存');  }).catch(function(e){ var m=document.getElementById('mwMsg'); if(m) m.textContent='保存失败: '+(e&&e.message||e); });}if(document.getElementById('mwSaveBtn')){  document.getElementById('mwSaveBtn').addEventListener('click', saveMemWakeSettings);}
+/* ---------------- 记忆与唤醒参数（设置页 · 由原菜单卡片迁移） ---------------- */function loadMemWakeSettings(){  Promise.all([admGet(BASE+'/config'), admGet(BASE+'/memory-pool/config')]).then(function(res){    var c=res[0], m=res[1];    function num(v,d){ return v!=null?v:d; }    function setVal(id,v){ var el=document.getElementById(id); if(el) el.value=v; }    function setChk(id,b){ var el=document.getElementById(id); if(el) el.checked=!!b; }    setVal('mwWake',num(c.wake_history_max_messages,80));    setVal('mwDedup',num(m.dedup_threshold,0.78));    setVal('mwDecay',num(m.decay_days,30));    setVal('mwRmax',num(m.reparse_max_chars,30));    setVal('mwRmaxitems',num(m.reparse_max_items,8));    setChk('mwCross',m.cross_inject_enabled!==false);    setChk('mwAlways',m.cross_inject_always===true);    setVal('mwMaxmsgs',num(m.cross_inject_max_msgs,2));    setVal('mwDays',num(m.cross_inject_diary_days,3));    setVal('mwMempercat',num(m.cross_inject_memory_per_category,2));    setVal('mwSumdays',num(m.cross_inject_summary_days,7));    setVal('mwStartopk',num(m.cross_inject_starred_topk,10));  }).catch(function(e){ var m=document.getElementById('mwMsg'); if(m) m.textContent='加载失败: '+(e&&e.message||e); });}function saveMemWakeSettings(){  var up={wake_history_max_messages:Number(document.getElementById('mwWake').value)||0};  var up2={    dedup_threshold:Number(document.getElementById('mwDedup').value)||0.78,    decay_days:Number(document.getElementById('mwDecay').value)||30,    reparse_max_chars:Number(document.getElementById('mwRmax').value)||30,    reparse_max_items:Number(document.getElementById('mwRmaxitems').value)||8,    cross_inject_enabled:document.getElementById('mwCross').checked,    cross_inject_always:document.getElementById('mwAlways').checked,    cross_inject_max_msgs:Number(document.getElementById('mwMaxmsgs').value)||2,    cross_inject_diary_days:Number(document.getElementById('mwDays').value)||3,    cross_inject_memory_per_category:Number(document.getElementById('mwMempercat').value)||2,    cross_inject_summary_days:Number(document.getElementById('mwSumdays').value)||7,    cross_inject_starred_topk:Number(document.getElementById('mwStartopk').value)||10  };  Promise.all([admPost(BASE+'/config',up), admPost(BASE+'/memory-pool/config',up2)]).then(function(res){    var bad=res.some(function(j){ return j&&j.error; });    var m=document.getElementById('mwMsg');    if(m){ m.textContent=bad?'部分参数保存失败':'已保存，下次请求/重启生效（跨窗口注入即时生效）。'; }    showToast(bad?'部分参数保存失败':'记忆与唤醒参数已保存');  }).catch(function(e){ var m=document.getElementById('mwMsg'); if(m) m.textContent='保存失败: '+(e&&e.message||e); });}if(document.getElementById('mwSaveBtn')){  document.getElementById('mwSaveBtn').addEventListener('click', saveMemWakeSettings);}
 /* ---------------- 记忆池 ---------------- */
 var _mpRefresh = null;
 function refreshMemPoolList(){ if(_mpRefresh) _mpRefresh(); }
@@ -6188,8 +6367,9 @@ function loadCcPreview(box){
         var st=((typeof c.blockStart==='number'&&c.blockStart>=0)?c.blockStart+1:((c.firstIdx>=0?c.firstIdx:0)+1));
         var en=((typeof c.blockEnd==='number'&&c.blockEnd>=0)?c.blockEnd+1:((c.lastIdx>=st-1)+1));
         var cached=!!c.cached, enabled=c.enabled!==false;
-        // 手工块用「手工块序号(0起)」，AI 块用 repId
-        var manualOrd = c.manual ? (window.__ccManualOrd=(window.__ccManualOrd||0), window.__ccManualOrd++) : -1;
+        // 手工块序号(0起)：优先服务端 manualRecordsSorted()（按会话过滤）给出的 blockIndex，
+        // 本地计数只是老预览无该字段时的兜底；AI 块用 repId
+        var manualOrd = c.manual ? ((typeof c.blockIndex==='number')?c.blockIndex:(window.__ccManualOrd=(window.__ccManualOrd||0), window.__ccManualOrd++)) : -1;
         var keyAttr = isAi ? ('data-repid="'+esc(c.repId||'')+'"') : ('data-idx="'+manualOrd+'"');
         return '<div class="adm-item"><div class="adm-item-h"><span style="font-weight:600">块 #'+c.index+'</span><span style="color:'+(cached?'var(--accent-deep)':'var(--ink3)')+'">'+(cached?'<span style="color:var(--accent-deep)">'+(enabled?'已替换':'已停用')+'</span>':'待生成')+'</span><span style="color:var(--ink3)">'+st+'~'+en+' 条 · '+((c.chars||0))+' 字</span><span style="margin-left:auto"></span>'+(cached?'<button data-cc="toggle" data-manual="'+(isAi?'0':'1')+'" data-en="'+(enabled?'1':'0')+'" '+keyAttr+'>'+(enabled?'取消替换':'替换')+'</button>':'<button data-cc="gen" data-manual="'+(isAi?'0':'1')+'" '+keyAttr+'>生成摘要</button>')+'</div><div class="adm-item-b">'+esc(c.head||c.summary||'')+'</div></div>';
       }).join(''))+'</div>'

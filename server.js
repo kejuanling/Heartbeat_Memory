@@ -2984,7 +2984,7 @@ app.get("/admin/tools", { preHandler: basicAuth }, async (req, reply) => {
   }
 });
 
-app.put("/admin/tools", { preHandler: basicAuth }, async (req, reply) => {
+app.put("/admin/tools", { preHandler: mcpManageAuth }, async (req, reply) => {
   try {
     const body = req.body || {};
     const existing = readJsonFileSafe(MCP_TOOLS_CONFIG, {});
