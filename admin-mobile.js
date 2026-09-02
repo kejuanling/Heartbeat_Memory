@@ -1168,7 +1168,7 @@ function toast(msg){
      if(!j.results.length){ box.innerHTML='<div class="empty">没有命中「'+escapeHtml(q)+'」的原文</div>'; return; }
      box.innerHTML = j.results.map(function(x){
        const chunk = x.chunk;
-       let chunkTag = '<span class="mem-tag" style="background:#7f8c8d;color:#fff">未覆盖</span>';
+       let chunkTag = '';
        if(chunk){
          chunkTag = '<span class="mem-tag" style="background:'+(chunk.source==='manual'?'#8e44ad':'#2980b9')+';color:#fff">块 #'+chunk.chunkIndex+'</span>'
            + (chunk.summary ? '<span class="cc-orig-sum" title="'+escapeHtml(chunk.summary)+'">'+escapeHtml(chunk.summary)+'</span>' : '');
@@ -1226,14 +1226,15 @@ function toast(msg){
      el.innerHTML=list.map(function(x){
        let tH=''; try{ tH=x.markedAt?new Date(x.markedAt).toLocaleString('zh-CN',{hour12:false}) : (x.time||''); }catch(err){}
        const roleCls = x.role==='user' ? 'color:var(--accent)' : (x.role==='system' ? 'color:var(--tab-active)' : 'color:var(--text)');
-       const chunkTag = x.chunk
-         ? '<span class="mem-tag" style="background:'+(x.chunk.source==='manual'?'#8e44ad':'#2980b9')+';color:#fff">块 #'+x.chunk.chunkIndex+'</span>'
-         : '<span class="mem-tag" style="background:#7f8c8d;color:#fff">未覆盖</span>';
+       // 进入上下文标记（替代原「未覆盖」标签）：绿=正文当前在发给模型的上下文中，灰=不在
+       const ctxTag = x.in_context
+         ? '<span class="mem-tag" style="background:#27ae60;color:#fff" title="该标星正文当前在发给模型的上下文中">已入上下文</span>'
+         : '<span class="mem-tag" style="background:#95a5a6;color:#fff" title="该标星正文当前不在发给模型的上下文中">未入上下文</span>';
        return '<div style="padding:8px 0;border-bottom:1px dashed var(--border)">'
          +'<div style="display:flex;align-items:center;gap:6px">'
          +'<span style="font-size:11px;color:var(--text3)">第 '+x.index+' 条</span>'
          +'<span style="font-size:11px;'+roleCls+'">'+escHtml2(x.role||'')+'</span>'
-         +chunkTag
+         +ctxTag
          +'<button type="button" onclick="openMarkEdit(this)" data-key="'+x.key+'" title="编辑正文" aria-label="编辑正文" style="flex-shrink:0;padding:2px 8px;border:1px solid var(--border);border-radius:6px;background:rgba(0,0,0,0.02);color:var(--text2);font-size:11px;cursor:pointer">编辑</button>'
          +'<button style="margin-left:auto;flex-shrink:0" class="cc-msg-mark on" data-key="'+x.key+'" onclick="unmarkMsg(this)" title="取消标星：将后此消息可被摘要覆盖" aria-pressed="true" aria-label="取消标星">★</button>'
          +'</div>'
@@ -1403,7 +1404,9 @@ function ccBuildSummaryStatsHtml(d, t){
     +'<span class="cc-mini-item'+(t.chunkCount?'':' zero')+'"><b>'+(t.chunkCount||0)+'</b><i>块</i></span>'
     +'<span class="cc-mini-item'+(t.cachedCount?'':' zero')+'"><b>'+(t.cachedCount||0)+'</b><i>缓存</i></span>'
     +'<span class="cc-mini-item"><b>'+fmtCcNum(t.totalChars||0)+'</b><i>字</i></span>'
-    +'</div>';
+    +(t.hiddenCount>0?'<span class="cc-mini-item zero"><b>'+(t.hiddenCount||0)+'</b><i>隐藏</i></span>':'')
+    +'</div>'
+    +(t.hiddenCount>0?'<div class="cc-hidden-tip">最早 <b>'+(t.hiddenCount||0)+'</b> 块已隐藏、未进入上下文（活跃块上限 '+(t.maxActiveBlocks||'?')+'，手动+AI 合计保留最近 N 个）；如需保留信息，建议将块解析入池。</div>':'');
 }
 
 /**
@@ -1484,17 +1487,22 @@ function ccBuildSummaryStatsHtml(d, t){
      }
      const expanded=AppState.ccExpanded.has(c.index);
      const enabled = c.enabled!==false;
+     const hidden = !!c.hidden;
      const timeLabel = isAi
        ? (c.range_label||'')
        : ((c.startTime||'?')+' ~ '+(c.endTime||'?'));
      html+='<div class="cc-chunk-swipe" data-cid="'+c.index+'">'
-       +'<div class="card cc-chunk'+(c.cached?'':' pending')+'">'
+       +'<div class="card cc-chunk'+(c.cached?'':' pending')+(hidden?' cc-chunk-hidden':'')+'">'
        + (AppState.ccMultiSelectMode?'<input type="checkbox" class="cc-chk" '+(AppState.ccSelectedChunks.has(c.index)?'checked':'')+' onclick="event.stopPropagation();toggleCcChunkSelect(\'chunk\','+c.index+')" title="选中此块">':'')+'<div class="cc-chunk-head" onclick="toggleCcExpand('+c.index+')">'
        +(c.cached?'<span class="cc-chunk-arrow">'+(expanded?'▾':'▸')+'</span>':'')
        +'<span class="cc-chunk-title '+(isAi?'ai':'manual')+'">块 #'+c.index+'</span>'
-       +'<span class="cc-badge '+(isAi?(enabled?'done':'off'):(c.cached?(enabled?'done':'warn'):'todo'))+'">'+(isAi?(enabled?'已替换':'已停用'):(c.cached?(enabled?'已替换':'待替换'):'待生成'))+'</span>'
+       +(hidden
+         ? '<span class="cc-badge off">已隐藏</span>'
+         : '<span class="cc-badge '+(isAi?(enabled?'done':'off'):(c.cached?(enabled?'done':'warn'):'todo'))+'">'+(isAi?(enabled?'已替换':'已停用'):(c.cached?(enabled?'已替换':'待替换'):'待生成'))+'</span>')
        +'<span class="cc-chunk-stat">'+count+' 条 · '+fmtCcNum(c.chars)+' 字</span>'
-       +'<button class="cc-btn cc-head-toggle'+(enabled?' on':'')+(c.cached?'':' gen')+'" onclick="event.stopPropagation();'+(c.cached?'toggleCcReplace('+c.index+','+blockIndex+','+(isAi?1:0)+')':'regenerateBlockSummary('+c.index+','+blockIndex+')')+'"'+((!c.cached&&AppState.ccBlockGenerating.has(c.index))?' disabled':'')+'>'+(c.cached?(enabled?'取消替换':'替换'):(AppState.ccBlockGenerating.has(c.index)?'生成中…':'✦ 生成摘要'))+'</button>'
+       +(hidden
+         ? ''
+         : '<button class="cc-btn cc-head-toggle'+(enabled?' on':'')+(c.cached?'':' gen')+'" onclick="event.stopPropagation();'+(c.cached?'toggleCcReplace('+c.index+','+blockIndex+','+(isAi?1:0)+')':'regenerateBlockSummary('+c.index+','+blockIndex+')')+'"'+((!c.cached&&AppState.ccBlockGenerating.has(c.index))?' disabled':'')+'>'+(c.cached?(enabled?'取消替换':'替换'):(AppState.ccBlockGenerating.has(c.index)?'生成中…':'✦ 生成摘要'))+'</button>')
        +'</div>'
        +'<div class="cc-meta">第 '+start+'~'+end+' 条 · '+escHtml(timeLabel)+'</div>'
        +'<div class="cc-preview">'+escHtml(c.head||'')+'</div>'
@@ -2776,7 +2784,8 @@ function ccArmAllGapAutoLoad(){
      'cc-cfg-gap':c.compaction_gap_minutes,
      'cc-cfg-chunk':c.compaction_chunk_size,
      'cc-cfg-chunk-min':c.compaction_chunk_min,
-     'cc-cfg-chunk-max':c.compaction_chunk_max
+     'cc-cfg-chunk-max':c.compaction_chunk_max,
+     'cc-cfg-max-blocks':c.compaction_max_active_blocks
    };
    Object.keys(fields).forEach(function(id){
      const el=document.getElementById(id);
@@ -2820,7 +2829,8 @@ function ccArmAllGapAutoLoad(){
     compaction_chunk_min: chunkMin,
     compaction_chunk_max: chunkMax,
     compaction_include_thinking: getC('cc-cfg-think'),
-    compaction_compress_events: getC('cc-cfg-events')
+    compaction_compress_events: getC('cc-cfg-events'),
+    compaction_max_active_blocks: Math.max(0, Math.floor(Number(get('cc-cfg-max-blocks'))||0))
   };
   const msg=document.getElementById('cc-config-msg');
   if(msg) msg.textContent=(notes.length?('提示：'+notes.join('；')):'')+' 保存中...';

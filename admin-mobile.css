@@ -319,6 +319,9 @@
  .cfg-mini-btn:active{transform:scale(.96)}
  /* ── 上下文压缩页 UI ── */
  .cc-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;line-height:1.4;flex-shrink:0;letter-spacing:.3px}
+/* 超出活跃块上限被隐藏的块：置灰 + 顶部提示建议入池 */
+.cc-chunk-hidden{opacity:.55}
+.cc-hidden-tip{font-size:11px;color:#a8845c;background:rgba(233,196,138,.14);border:1px dashed rgba(210,170,110,.35);border-radius:8px;padding:7px 10px;margin:0 0 8px;line-height:1.5}
  .cc-badge.todo{background:rgba(200,144,152,.12);color:var(--accent);animation:ccTodoPulse 2.2s ease-in-out infinite}
  .cc-badge.gen{background:rgba(200,144,152,.14);color:var(--accent)}
  .cc-badge.warn{background:rgba(230,160,70,.12);color:#d48b2f}

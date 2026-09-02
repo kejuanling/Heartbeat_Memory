@@ -302,6 +302,90 @@ module.exports = function registerChatRoutes(app, deps) {
 
 
 
+  // 系统提示词备份跨设备同步（存 data/prompt-backups.json，与 /v1/themes 同模式）
+  const PROMPT_BACKUPS_FILE = path.join(baseDir, 'data', 'prompt-backups.json');
+  app.get('/v1/prompt-backups', async (req, reply) => {
+    try {
+      let backups = [];
+      try { if (fsp.existsSync(PROMPT_BACKUPS_FILE)) backups = JSON.parse(fsp.readFileSync(PROMPT_BACKUPS_FILE, 'utf-8')) || []; } catch (e) {}
+      if (!Array.isArray(backups)) backups = [];
+      reply.send({ ok: true, backups });
+    } catch (err) {
+      console.error('[GET /v1/prompt-backups] error:', err.message);
+      reply.code(500).send({ error: err.message });
+    }
+  });
+  app.put('/v1/prompt-backups', async (req, reply) => {
+    try {
+      const body = (req.body && typeof req.body === 'object') ? req.body : {};
+      const backups = Array.isArray(body.backups) ? body.backups : [];
+      const now = new Date().toISOString();
+      const clean = backups.filter(b => b && typeof b === 'object' && typeof b.content === 'string')
+        .map(b => ({
+          id: String(b.id || '').slice(0, 64) || ('pb_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)),
+          name: String(b.name || '未命名').slice(0, 60),
+          content: b.content,
+          createdAt: String(b.createdAt || now).slice(0, 40),
+          updatedAt: String(b.updatedAt || now).slice(0, 40)
+        })).slice(0, 50);
+      let existing = [];
+      try { if (fsp.existsSync(PROMPT_BACKUPS_FILE)) existing = JSON.parse(fsp.readFileSync(PROMPT_BACKUPS_FILE, 'utf-8')) || []; } catch (e) {}
+      if (!Array.isArray(existing)) existing = [];
+      // 防空覆盖：服务器已有备份却收到空数组时保留原数据，除非显式 replace（与 themes 一致）
+      if (clean.length === 0 && existing.length > 0 && !body.replace) {
+        reply.send({ ok: true, saved: false, skipped: 'empty', count: existing.length });
+        return;
+      }
+      fsp.ensureDirSync(path.join(baseDir, 'data'));
+      fsp.writeFileSync(PROMPT_BACKUPS_FILE, JSON.stringify(clean, null, 2), 'utf-8');
+      reply.send({ ok: true, saved: true, count: clean.length });
+    } catch (err) {
+      console.error('[PUT /v1/prompt-backups] error:', err.message);
+      reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // 会话合并：读多个源会话时间线，按消息时间稳定排序合并写入新会话时间线；源会话不动。
+  // 前端生成新 sid 传入（与 newSession 流程一致），服务端只负责合并与落盘。
+  app.post('/v1/sessions/merge', async (req, reply) => {
+    try {
+      const body = (req.body && typeof req.body === 'object') ? req.body : {};
+      const ids = Array.isArray(body.ids) ? body.ids.map(x => String(x || '').trim()).filter(Boolean) : [];
+      if (ids.length < 2) return reply.code(400).send({ error: '至少选择两个会话' });
+      for (const id of ids) {
+        if (id === 'default') return reply.code(400).send({ error: '主会话不参与合并' });
+        if (!/^[A-Za-z0-9_-]+$/.test(id)) return reply.code(400).send({ error: '非法会话ID: ' + id });
+      }
+      const target = String(body.target || '').trim();
+      if (!target || !/^[A-Za-z0-9_-]+$/.test(target)) return reply.code(400).send({ error: '非法目标会话ID' });
+      if (ids.indexOf(target) >= 0) return reply.code(400).send({ error: '目标会话不能是源会话' });
+      if (fsp.existsSync(timelineFileFor(target))) return reply.code(409).send({ error: '目标会话已存在' });
+
+      // 各源会话按自身顺序取真实消息；无 time 的消息沿用同会话内前一条的时间，保持相对顺序。
+      // 全局按 (ts, 源序, 会话内序) 稳定排序 —— buildTimeline 不重排真实消息，顺序由此保证。
+      const entries = [];
+      let total = 0;
+      ids.forEach((id, si) => {
+        let lastTs = 0;
+        loadTimeline(id).filter(isRealMessageForTimeline).forEach((m, oi) => {
+          const ts = (m.time && Number(new Date(m.time))) || 0;
+          if (ts) lastTs = ts;
+          entries.push({ m, ts: ts || lastTs, si, oi });
+          total++;
+        });
+      });
+      if (total === 0) return reply.code(400).send({ error: '所选会话都没有消息' });
+      entries.sort((a, b) => (a.ts - b.ts) || (a.si - b.si) || (a.oi - b.oi));
+      const rebuilt = buildTimeline(entries.map(e => e.m), target);
+      saveTimeline(rebuilt, target);
+      console.log(`[sessions/merge] 合并 ${ids.length} 个会话 -> ${target}（${total} 条源消息）`);
+      reply.send({ ok: true, session_id: target, merged: total, total: rebuilt.filter(isRealMessageForTimeline).length });
+    } catch (err) {
+      console.error('[POST /v1/sessions/merge] error:', err.message);
+      reply.code(500).send({ error: err.message });
+    }
+  });
+
   // 实时事件流（SSE）：聊天页用 EventSource 订阅本会话，收到 history_update 后拉一次历史。
   app.get('/v1/events', async (req, reply) => {
     const sessionId = String(req.query.session_id || req.headers['x-session-id'] || '').trim() || 'default';

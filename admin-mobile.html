@@ -137,6 +137,8 @@
            <input type="checkbox" id="cc-cfg-think"></label>
          <label class="cc-cfg-field cc-cfg-check">压缩特殊事件
            <input type="checkbox" id="cc-cfg-events"></label>
+         <label class="cc-cfg-field">活跃块上限（手动+AI 合计保留最近 N 个，0=不限）
+           <input type="number" id="cc-cfg-max-blocks" min="0" step="1"></label>
        </div>
         <div class="cc-cfg-hint" id="cc-config-hint"><b>生效范围提醒</b>：「保留最近 / 消息少于 N 条 / 摘要字数 / 分块间隔 / 思考 / 事件」 作用于「整段对话的自动压缩计划」；<b>「自动分块目标 / 最少 / 最多条数」</b>同时作用于「整段对话自动压缩计划」和「未覆盖区·自动分块」。请保持：摘要最少 ≤ 摘要最多；块最少 ≤ 目标 ≤ 块最多。</div>
 

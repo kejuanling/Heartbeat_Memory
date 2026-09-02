@@ -3530,6 +3530,15 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
   chunks.sort(function (a, b) { return a.pos - b.pos; });
   chunks.forEach(function (c, i) { c.index = i + 1; c.pos = undefined; });
 
+  // 活跃块上限：与发送侧 applyReplacements 同口径（手动+AI 合计保留时间线上最近 N 个）。
+  // 超限的最早块仅标记 hidden 展示，不进上下文；enabled/摘要数据不动。
+  const previewMaxActive = Math.max(0, Math.floor(Number(contextCompactor.loadConfig().compaction_max_active_blocks) || 0));
+  let hiddenCount = 0;
+  if (previewMaxActive > 0 && chunks.length > previewMaxActive) {
+    hiddenCount = chunks.length - previewMaxActive;
+    chunks.forEach(function (c, i) { if (i < hiddenCount) c.hidden = true; });
+  }
+
   // 手工块序号：直接用 manualRecordsSorted()（按会话过滤+排序）的下标，与 blocks 路由同源；
   // 服务端保证每个通过会话过滤的手工 chunk 都能查到序号（records 与 manualRecordsSorted 过滤口径一致）
   chunks.forEach(function (c) {
@@ -3601,6 +3610,8 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
       cachedCount: chunks.filter(function (c) { return c.cached; }).length,
       totalChars: totalChars,
       estCompressedChars: estCompressedChars,
+      hiddenCount: hiddenCount,
+      maxActiveBlocks: previewMaxActive,
       estSavedChars: Math.max(0, totalChars - estCompressedChars)
     }
   };
@@ -3639,7 +3650,35 @@ app.get("/admin/context-compaction/search", { preHandler: basicAuth }, async (re
 // 已标星消息列表：统一管理所有被标星的原正文
 app.get("/admin/context-compaction/marked-list", { preHandler: basicAuth }, async (req, reply) => {
   try {
-    reply.send(contextReplacements.listMarked());
+    const res = contextReplacements.listMarked();
+    // in_context：该标星正文当前是否实际在最后一次发给 LLM 的上下文里
+    // （记忆碎片原句 / 所在块摘要保留 / 原文仍在窗口，统一按归一化正文前缀匹配捕获文本）
+    try {
+      const norm = function (s) { return String(s || "").toLowerCase().replace(/\s+/g, ""); };
+      let captureText = "";
+      if (Array.isArray(lastLLMMessages)) {
+        captureText = lastLLMMessages.map(function (m) {
+          const c = m && m.content;
+          if (typeof c === "string") return c;
+          if (Array.isArray(c)) return c.map(function (p) { return (p && typeof p.text === "string") ? p.text : ""; }).join("");
+          return "";
+        }).join("\n");
+        captureText = norm(captureText);
+      }
+      if (captureText) {
+        (res.results || []).forEach(function (r) {
+          const full = norm(r.content);
+          if (!full) { r.in_context = false; return; }
+          const probe = full.length > 100 ? full.slice(0, 100) : full;
+          r.in_context = captureText.indexOf(probe) >= 0;
+        });
+      } else {
+        (res.results || []).forEach(function (r) { r.in_context = false; });
+      }
+    } catch (e) {
+      (res.results || []).forEach(function (r) { if (r.in_context === undefined) r.in_context = false; });
+    }
+    reply.send(res);
   } catch (err) {
     reply.code(500).send({ error: err.message });
   }

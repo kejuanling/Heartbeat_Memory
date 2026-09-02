@@ -35,7 +35,10 @@ const DEFAULT_CONFIG = {
   compaction_summary_max_chars: 1200,
   compaction_summary_min_chars: 250,
   compaction_include_thinking: false,
-  compaction_compress_events: true
+  compaction_compress_events: true,
+  // 活跃块上限：手动+AI 块合计只保留时间线上最近的 N 个进入上下文（0=不限，默认关）。
+  // 超限的最早块仅隐藏不注入，块的 enabled/摘要数据不动，调大即恢复。
+  compaction_max_active_blocks: 0
 };
 
 const DEFAULT_COMPACTION_SYSTEM =

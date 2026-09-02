@@ -24,6 +24,27 @@ const MEMORY_POOL_CONFIG_FILE = path.join(DATA_DIR, "memory_pool_config.json");
 const MAX_MEMORY_CHARS = 100000;
 
 // ========================
+// 活跃块上限（compaction_max_active_blocks，存在 data/config.json，属压缩模块配置）。
+// 这里不能 require context-compactor（对方已 require 本模块，会循环依赖），直接读单键。
+// 带文件 mtime 缓存，每次请求至多一次磁盘读小文件。
+// ========================
+let _maxActiveCache = { mtime: -1, value: 0 };
+function loadMaxActiveBlocks() {
+  try {
+    const st = fs.statSync(CONFIG_FILE);
+    const mtime = st.mtimeMs;
+    if (_maxActiveCache.mtime !== mtime) {
+      const cfg = readJson(CONFIG_FILE, {});
+      const v = Math.max(0, Math.floor(Number(cfg && cfg.compaction_max_active_blocks) || 0));
+      _maxActiveCache = { mtime: mtime, value: v };
+    }
+    return _maxActiveCache.value;
+  } catch (e) {
+    return 0;
+  }
+}
+
+// ========================
 // 每次请求的替换/压缩记录（供管理台查看；含对话/共影/唤醒等所有来源）
 // ========================
 const REPLACE_LOG_FILE = path.join(DATA_DIR, "context_replace_log.json");
@@ -1237,6 +1258,12 @@ function applyReplacements(messages, source) {
   items = items
     .filter(function (it) { return tlPos.has(it.id); })
     .sort(function (a, b) { return tlPos.get(a.id) - tlPos.get(b.id); });
+  // 活跃块上限：手动+AI 块合计只保留时间线上最近的 N 个（0=不限）。
+  // 超限的最早块隐藏、摘要不注入本次上下文；块的 enabled/摘要数据不动，调大上限即恢复。
+  const maxActiveBlocks = loadMaxActiveBlocks();
+  if (maxActiveBlocks > 0 && items.length > maxActiveBlocks) {
+    items = items.slice(items.length - maxActiveBlocks);
+  }
   if (items.length === 0) return messages;
 
   const replacements = [];

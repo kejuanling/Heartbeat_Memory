@@ -673,6 +673,25 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .saved-theme .st-swatch{width:16px;height:16px;border-radius:50%;flex-shrink:0;border:1px solid rgba(0,0,0,.08);box-shadow:inset 0 0 0 1px rgba(0,0,0,.04)}
 .saved-theme .st-del{margin-left:2px;width:18px;height:18px;border:none;background:none;color:var(--ink3);font-size:15px;line-height:1;cursor:pointer;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s}
 .saved-theme .st-del:hover{color:#c97070;background:rgba(216,131,131,.14)}
+/* 提示词备份（AI 设置内）：与保存主题同风格，列表纵向排布 */
+.pb-row{display:flex;align-items:center;gap:8px}
+.pb-row input[type="text"]{flex:1;min-width:0;border:1px solid rgba(200,144,152,.25);border-radius:var(--radius-sm);padding:9px 11px;font-size:13px;color:var(--ink);outline:none;background:#fff;font-family:inherit}
+.pb-row input[type="text"]:focus{border-color:var(--accent)}
+.pb-btn{flex:none;min-width:64px;padding:9px 14px;white-space:nowrap;border:1px solid rgba(200,144,152,.25);border-radius:var(--radius-sm);background:var(--accent-soft);color:var(--ink);font-size:13px;cursor:pointer;font-family:inherit}
+.pb-btn:active{background:var(--accent)}
+.pb-list{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.pb-item{display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid rgba(200,144,152,.18);border-radius:10px;background:rgba(200,144,152,.05);font-size:13px;color:var(--ink)}
+.pb-item .pb-name{flex:1;min-width:0;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pb-item .pb-name:hover{color:var(--accent)}
+.pb-item.on{border-color:var(--accent);background:var(--accent-soft)}
+.pb-item .pb-badge{flex:none;font-size:10px;color:var(--accent);border:1px solid var(--accent);border-radius:999px;padding:1px 8px}
+.pb-item .pb-op{flex:none;width:24px;height:24px;border:none;background:none;color:var(--ink3);font-size:13px;line-height:1;cursor:pointer;border-radius:50%;display:inline-flex;align-items:center;justify-content:center}
+.pb-item .pb-op:hover{color:var(--accent);background:rgba(200,144,152,.12)}
+.pb-item .pb-op.del:hover{color:#c97070;background:rgba(216,131,131,.14)}
+.pb-empty{font-size:12px;color:var(--ink3);padding:4px 0}
+/* 新建会话弹窗下拉框 */
+.np-sel{width:100%;box-sizing:border-box;border:1px solid rgba(200,144,152,.25);border-radius:var(--radius-sm);padding:10px 11px;font-size:13px;color:var(--ink);background:#fff;font-family:inherit;outline:none}
+.np-tip{font-size:11px;color:var(--ink3);margin-top:6px}
 /* 头像与名称区域两条一组 */
 .theme-sec-title{font-size:12px;font-weight:600;color:var(--accent-deep);margin:14px 0 6px}
 /* 显示与行为 / 渲染设置 内部再分小节 */
@@ -868,6 +887,9 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .cc-block-a button{border:1px solid rgba(200,144,152,.25);background:none;border-radius:7px;font-size:11px;color:var(--ink2);padding:4px 9px;cursor:pointer}
 .cc-block-a button.p{background:var(--accent-grad);color:#fff;font-weight:600;border:none}
 /* 压缩块「替换/取消替换」快捷开关 */
+/* 隐藏块（超出活跃块上限）：置灰 + 顶部文字提示建议入池 */
+.cc-block-hidden{opacity:.55}
+.cc-hidden-tip{font-size:11px;color:#a8845c;background:rgba(233,196,138,.14);border:1px dashed rgba(210,170,110,.35);border-radius:8px;padding:7px 10px;margin:6px 0 8px;line-height:1.5}
 .cc-block-h .cc-act{flex-shrink:0;border:none;border-radius:8px;padding:5px 11px;font-size:11px;cursor:pointer;background:rgba(216,131,131,.16);color:#c86b6b;font-weight:500}
 .cc-block-h .cc-act.off{background:rgba(120,200,150,.16);color:#3a9d67}
 .cc-block-h .cc-act:active{transform:scale(.96)}
@@ -906,6 +928,10 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .session-item .s-meta{font-size:11px;color:var(--ink3)}
 .session-item .s-ops{display:flex;gap:6px;margin-top:3px}
 .session-item .s-op{border:1px solid rgba(200,144,152,.3);background:none;border-radius:8px;padding:3px 8px;font-size:11px;color:var(--accent-deep);cursor:pointer}
+.session-item .s-check{width:18px;height:18px;border-radius:50%;border:1.5px solid rgba(200,144,152,.45);display:inline-flex;align-items:center;justify-content:center;font-size:11px;color:#fff;flex-shrink:0;transition:all .12s}
+.session-item .s-check.on{background:var(--accent-deep);border-color:var(--accent-deep)}
+.session-item.merging .s-name .s-del{display:none}
+.drawer-btn.merge-armed{background:var(--accent-deep)!important;color:#fff!important}
 
 
 /* ===== 整合：小世界 / 管理台 子页样式（原独立样式块） ===== */
@@ -1105,6 +1131,9 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 /* 标星卡片：星按钮 + 编辑按钮 */
 .adm-star{flex-shrink:0;border:none;background:none;font-size:17px;line-height:1;color:#cfc0b6;padding:2px 4px;cursor:pointer}
 .adm-star.on{color:#e0b04a}
+/* 标星列表「进入上下文」小信号灯：粉色=正文在当前发给模型的上下文中，灰=不在 */
+.ctx-lamp{flex-shrink:0;display:inline-block;width:9px;height:9px;border-radius:50%;background:#c9c2bb;box-shadow:0 0 0 2px rgba(0,0,0,.04)}
+.ctx-lamp.on{background:var(--accent);box-shadow:0 0 0 2px rgba(200,144,152,.18)}
 .adm-editbtn{flex-shrink:0;border:1px solid rgba(200,144,152,.3);background:none;border-radius:7px;font-size:11px;color:var(--accent-deep);padding:3px 9px;cursor:pointer}
 .adm-editbtn.p{background:var(--accent-grad);color:#fff;border:none;font-weight:600}
 /* MCP/供应商 列表项：启用开关（右侧） */
@@ -1254,6 +1283,8 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
       <button class="drawer-btn" id="newSessionBtn">＋ 新建</button>
       <button class="drawer-btn ghost" id="exportSessionBtn">导出</button>
       <button class="drawer-btn ghost" id="importSessionBtn">导入</button>
+      <button class="drawer-btn ghost" id="mergeSessionBtn" title="选择多个会话合并为一个新会话（原会话保留）">合并</button>
+      <button class="drawer-btn ghost" id="mergeCancelBtn" style="display:none">取消</button>
     </div>
     <div class="session-search"><span class="si"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg></span><input id="sessionSearch" placeholder="搜索会话内容…" autocomplete="off"><span class="mode-toggle" id="sessionSearchMode" title="点击切换搜索模式">语义</span></div>
     <div id="sessionSearchResults" class="session-results" style="display:none"></div>
@@ -1499,6 +1530,11 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
               <textarea id="promptInput" placeholder="（可选）粘贴你原本在用的人设。留空则不注入系统提示。"></textarea>
             </div>
             <div class="field">
+              <label>提示词备份<span class="tag">点名称=设为全局默认</span></label>
+              <div class="pb-row"><input type="text" id="pbNameInput" placeholder="备份名称…" maxlength="30" autocomplete="off"><button type="button" class="pb-btn" id="pbSaveBtn">存为备份</button></div>
+              <div id="pbList" class="pb-list"><div class="pb-empty">暂无备份</div></div>
+            </div>
+            <div class="field">
               <label>生成参数</label>
               <div class="row">
                 <div><label>temperature</label><input type="number" step="0.1" min="0" max="2" id="tempInput" placeholder="0.8"></div>
@@ -1507,7 +1543,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
               <div style="margin-top:10px"><label>max_tokens<span class="tag">可选</span></label><input type="number" min="1" id="maxTokInput" placeholder="留空不限制"></div>
             </div>
             <button type="button" class="mcp-btn primary" id="aiSaveBtn" style="margin-top:12px" onclick="saveSettingsAll()">保存 AI 设置</button>
-            </div></div><div class="set-panel" data-acc="memwake"><div class="set-acc-h" data-acc="memwake">记忆与唤醒参数<span class="ar">▾</span></div><div class="set-sec"><div class="set-sec-label">唤醒</div><div class="field"><label>唤醒历史最大条数</label><input type="number" id="mwWake" value="80"></div><div class="set-sec-label">记忆池</div><div class="field"><label>去重阈值</label><input type="number" step="0.05" min="0" max="1" id="mwDedup" value="0.78"></div><div class="field"><label>衰减半衰期（天）</label><input type="number" step="1" min="1" id="mwDecay" value="30"></div><div class="set-sec-label">再解析（压缩摘要 → 记忆池）</div><div class="field"><label>每条字数上限</label><input type="number" step="1" min="5" id="mwRmax" value="30"></div><div class="field"><label>每段最多条数</label><input type="number" step="1" min="1" id="mwRmaxitems" value="8"></div><div class="set-sec-label">跨窗口注入</div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">总开关</label><label class="adm-sw"><input type="checkbox" id="mwCross" checked><i></i></label></div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">固定注入</label><label class="adm-sw"><input type="checkbox" id="mwAlways"><i></i></label></div><div class="field"><label>消息少于 N 条</label><input type="number" step="1" min="1" id="mwMaxmsgs" value="2"></div><div class="field"><label>日记天数</label><input type="number" step="1" min="0" id="mwDays" value="3"></div><div class="field"><label>每类注入条数</label><input type="number" step="1" min="1" id="mwMempercat" value="2"></div><div class="field"><label>摘要最近天数</label><input type="number" step="1" min="1" id="mwSumdays" value="7"></div><div class="field"><label>标星条数</label><input type="number" step="1" min="1" id="mwStartopk" value="10"></div><div class="mcp-msg" id="mwMsg"></div><button type="button" class="mcp-btn primary" id="mwSaveBtn">保存参数</button></div></div><div class="set-panel" data-acc="sendcfg"><div class="set-acc-h" data-acc="sendcfg">对话发送配置<span class="ar">▾</span></div><div class="set-sec"><div class="field">
+            </div></div><div class="set-panel" data-acc="memwake"><div class="set-acc-h" data-acc="memwake">记忆与唤醒参数<span class="ar">▾</span></div><div class="set-sec"><div class="set-sec-label">唤醒</div><div class="field"><label>唤醒历史最大条数</label><input type="number" id="mwWake" value="80"></div><div class="set-sec-label">记忆池</div><div class="field"><label>去重阈值</label><input type="number" step="0.05" min="0" max="1" id="mwDedup" value="0.78"></div><div class="field"><label>衰减半衰期（天）</label><input type="number" step="1" min="1" id="mwDecay" value="30"></div><div class="set-sec-label">再解析（压缩摘要 → 记忆池）</div><div class="field"><label>每条字数上限</label><input type="number" step="1" min="5" id="mwRmax" value="30"></div><div class="field"><label>每段最多条数</label><input type="number" step="1" min="1" id="mwRmaxitems" value="8"></div><div class="set-sec-label">跨窗口注入</div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">总开关</label><label class="adm-sw"><input type="checkbox" id="mwCross" checked><i></i></label></div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">固定注入</label><label class="adm-sw"><input type="checkbox" id="mwAlways"><i></i></label></div><div class="field"><label>消息少于 N 条</label><input type="number" step="1" min="1" id="mwMaxmsgs" value="2"></div><div class="field"><label>日记天数</label><input type="number" step="1" min="0" id="mwDays" value="3"></div><div class="field"><label>每类注入条数</label><input type="number" step="1" min="1" id="mwMempercat" value="2"></div><div class="field"><label>摘要最近天数</label><input type="number" step="1" min="1" id="mwSumdays" value="7"></div><div class="field"><label>标星条数</label><input type="number" step="1" min="1" id="mwStartopk" value="10"></div><div class="set-sec-label">压缩</div><div class="field"><label>活跃块保留上限（0=不限）</label><input type="number" step="1" min="0" id="mwCcmax" value="0"><div style="font-size:11px;color:var(--ink3);margin-top:4px">手动+AI 块合计只保留时间线上最近的 N 个进入上下文，更早的块隐藏不注入（数据不删，调大即恢复）。</div></div><div class="mcp-msg" id="mwMsg"></div><button type="button" class="mcp-btn primary" id="mwSaveBtn">保存参数</button></div></div><div class="set-panel" data-acc="sendcfg"><div class="set-acc-h" data-acc="sendcfg">对话发送配置<span class="ar">▾</span></div><div class="set-sec"><div class="field">
               <label>保留最近 N 条带图消息的历史图片（0=不保留，当前发送的图始终保留）</label>
               <input type="number" id="imgKeepTurns" min="0" step="1" value="8">
             </div>
@@ -1776,6 +1812,8 @@ function applySettingsToUI(){
   if(typeof userAvatarInput!=="undefined" && userAvatarInput) userAvatarInput.value=cfg.user_avatar||"";
   if(typeof aiAvatarInput!=="undefined" && aiAvatarInput) aiAvatarInput.value=cfg.ai_avatar||"";
   if(typeof bubbleDelimInput!=="undefined" && bubbleDelimInput) bubbleDelimInput.value=cfg.bubble_delim;
+  // 云端设置拉取后 api_key 已就绪，顺带刷新提示词备份列表（渲染「默认使用中」标记要用最新全局人设）
+  loadPromptBackups();
 }
 async function syncSettingsFromCloud(){
   const got=await pullSettingsFromCloud();
@@ -2811,7 +2849,8 @@ function showError(msg){
 // 组装发送给网关的消息；若"回传思考链"，assistant 带上 reasoning_content（多轮时模型可参考）
 function buildMessages(list){
   const out=[];
-  if(system_prompt && typeof system_prompt==="string" && system_prompt.trim())out.push({role:"system",content:system_prompt});
+  const sp=resolveSessionSystemPrompt();   // 会话级提示词优先（新建会话时选的备份），否则全局人设
+  if(sp && typeof sp==="string" && sp.trim())out.push({role:"system",content:sp});
   list.forEach(m=>{
     let c=m.content;
     if(Array.isArray(c))c=c.map(x=>x.type==="image_url"?{type:"image_url",image_url:{url:x.image_url.url}}:{type:"text",text:(x.text||"")});
@@ -3477,6 +3516,93 @@ function saveSettingsAll(){
   pushSettingsToCloud().then(function(ok){ if(ok===false){ showToast("云端同步失败，请重新登录后再试"); } });
 }
 if(saveBtn) saveBtn.onclick=saveSettingsAll;
+
+/* ===== 系统提示词备份 =====
+   云同步 /v1/prompt-backups；设置页点名称=设为全局默认（写入 system_prompt 并云同步）；
+   新建会话下拉选择的备份仅该会话生效（han_session_prompts 映射，发送时覆盖全局人设）。 */
+let promptBackups=[];
+const LS_SESSION_PROMPTS="han_session_prompts";
+function getSessionPromptMap(){ try{ return JSON.parse(localStorage.getItem(LS_SESSION_PROMPTS)||"{}")||{}; }catch(e){ return {}; } }
+function setSessionPrompt(sid,backupId){ const m=getSessionPromptMap(); if(backupId) m[sid]=backupId; else delete m[sid]; try{ localStorage.setItem(LS_SESSION_PROMPTS,JSON.stringify(m)); }catch(e){} }
+function resolveSessionSystemPrompt(){
+  const bid=currentSession&&getSessionPromptMap()[currentSession];
+  if(bid){ const b=promptBackups.find(function(x){return x.id===bid;}); if(b&&typeof b.content==="string"&&b.content.trim()) return b.content.trim(); }
+  return system_prompt;
+}
+async function loadPromptBackups(){
+  try{
+    const r=await fetch("/v1/prompt-backups",{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
+    const j=await r.json().catch(function(){return {};});
+    promptBackups=(j&&Array.isArray(j.backups))?j.backups:[];
+  }catch(e){ promptBackups=[]; }
+  renderPromptBackups();
+}
+function putPromptBackups(){
+  return fetch("/v1/prompt-backups",{method:"PUT",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({backups:promptBackups,replace:true})})
+    .then(function(r){return r.json();}).catch(function(){return {};});
+}
+function renderPromptBackups(){
+  const el=document.getElementById("pbList"); if(!el) return;
+  if(!promptBackups.length){ el.innerHTML='<div class="pb-empty">暂无备份（编辑好人设后起个名字存一份）</div>'; return; }
+  const hasDef=!!(system_prompt&&system_prompt.trim());
+  el.innerHTML=promptBackups.map(function(b){
+    const isDef=hasDef&&((b.content||"").trim()===system_prompt.trim());
+    return '<div class="pb-item'+(isDef?' on':'')+'" data-id="'+escapeHtml(b.id)+'">'
+      +'<span class="pb-name" data-pbact="default" title="设为全局默认人设">'+escapeHtml(b.name||'未命名')+'</span>'
+      +(isDef?'<span class="pb-badge">默认使用中</span>':'')
+      +'<button class="pb-op" data-pbact="edit" title="查看 / 编辑">✎</button>'
+      +'<button class="pb-op del" data-pbact="del" title="删除备份">×</button>'
+      +'</div>';
+  }).join('');
+  Array.prototype.forEach.call(el.querySelectorAll(".pb-item"),function(it){
+    it.addEventListener("click",function(ev){
+      const t=ev.target.closest?ev.target.closest("[data-pbact]"):null; if(!t) return;
+      ev.stopPropagation();
+      const act=t.getAttribute("data-pbact"), id=it.getAttribute("data-id");
+      const b=promptBackups.find(function(x){return x.id===id;}); if(!b) return;
+      if(act==="default"){
+        system_prompt=(b.content||"").trim();
+        try{ localStorage.setItem(LS_PROMPT,system_prompt); }catch(e){}
+        const pi=document.getElementById("promptInput"); if(pi) pi.value=system_prompt;
+        renderPromptBackups();
+        showToast("已设为全局默认，正在云端同步…");
+        pushSettingsToCloud().then(function(ok){ if(ok===false) showToast("云端同步失败，请重新登录后再试"); });
+      } else if(act==="edit"){
+        openEditModal("编辑提示词备份",
+          '<div class="field"><label>名称</label><input type="text" id="pb-ed-name" value="'+escapeHtml(b.name||"")+'" maxlength="30"></div>'
+          +'<div class="field"><label>内容</label><textarea id="pb-ed-content" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid rgba(200,144,152,.25);border-radius:var(--radius-sm);font-size:13px;color:var(--ink);background:#fff;min-height:260px;resize:vertical;font-family:inherit;line-height:1.6">'+escapeHtml(b.content||"")+'</textarea></div>',
+          function(){
+            const nv=document.getElementById("pb-ed-content").value;
+            if(!nv.trim()){ showToast("内容不能为空"); return false; }
+            b.name=(document.getElementById("pb-ed-name").value||"").trim()||"未命名";
+            b.content=nv; b.updatedAt=new Date().toISOString();
+            putPromptBackups().then(function(j){ showToast(j&&j.saved?"备份已更新":"备份更新失败"); renderPromptBackups(); });
+          },"保存");
+      } else if(act==="del"){
+        if(!confirm("删除这个提示词备份？（不影响当前已生效的全局人设）")) return;
+        promptBackups=promptBackups.filter(function(x){return x.id!==id;});
+        putPromptBackups().then(function(j){ showToast(j&&j.saved?"已删除":"删除失败"); renderPromptBackups(); });
+      }
+    });
+  });
+}
+function savePromptBackupFromInput(){
+  const ni=document.getElementById("pbNameInput");
+  const content=(promptInput&&promptInput.value)||"";
+  if(!content.trim()){ showToast("当前系统人设为空，先填写再保存"); return; }
+  const now=new Date().toISOString();
+  promptBackups.push({id:"pb_"+Date.now().toString(36)+Math.random().toString(36).slice(2,8),name:((ni&&ni.value)||"").trim()||("备份 "+(promptBackups.length+1)),content:content,createdAt:now,updatedAt:now});
+  putPromptBackups().then(function(j){
+    showToast(j&&j.saved?"已保存备份":"保存失败");
+    if(ni) ni.value="";
+    renderPromptBackups();
+  });
+}
+(function(){
+  const b=document.getElementById("pbSaveBtn");
+  if(b) b.addEventListener("click",savePromptBackupFromInput);
+})();
+loadPromptBackups();
 
 /* ===== 对话发送配置（设置里，简洁：一个数字 + 即时保存） ===== */
 async function loadSendCfgSettings(){
@@ -4761,21 +4887,25 @@ async function loadSessionCc(id){
     const t=(j&&j.totals)||{};
     if(!chunks.length&&!gaps.length){ body.innerHTML='<div class="adm-empty">该会话暂无压缩块</div>'; return; }
     let html='<div class="cc-summary">摘要后约 <b>'+(t.estCompressedChars||0)+'</b> 字 · '+(t.chunkCount||0)+' 块 · 共 '+(t.totalChars||0)+' 字</div>';
+    if(t.hiddenCount>0){
+      html+='<div class="cc-hidden-tip">最早 <b>'+t.hiddenCount+'</b> 块已隐藏、未进入上下文（活跃块上限 '+(t.maxActiveBlocks||'?')+'，手动+AI 合计保留最近 N 个）；如需保留信息，建议去管理台将其入池。</div>';
+    }
     html+=chunks.map(function(c){
       const isAi=!!c.aiRep;
       const st=((typeof c.blockStart==='number'&&c.blockStart>=0)?c.blockStart+1:((c.firstIdx>=0?c.firstIdx:0)+1));
       const en=((typeof c.blockEnd==='number'&&c.blockEnd>=0)?c.blockEnd+1:((c.lastIdx>=st-1)+1));
       const cached=!!c.cached, enabled=c.enabled!==false;
-      const stCls=cached?(enabled?'on':'off'):'todo';
-      const stTxt=cached?(enabled?'已替换':'已停用'):'待生成';
+      const hidden=!!c.hidden;
+      const stCls=hidden?'off':(cached?(enabled?'on':'off'):'todo');
+      const stTxt=hidden?'已隐藏':(cached?(enabled?'已替换':'已停用'):'待生成');
       // 手工块序号优先用服务端 manualRecordsSorted()（按会话过滤）给出的 blockIndex；
       // 本地计数只是老版本预览无该字段时的兜底，自己数会在跨会话/块被锚点过滤时错位
       const bIdx=c.manual?((typeof c.blockIndex==='number')?c.blockIndex:(window.__ccOrd=(window.__ccOrd||0))):-1; if(c.manual&&typeof c.blockIndex!=='number'){ window.__ccOrd++; }
-      // 生成摘要/替换等操作实际在管理台做；这里只保留「替换/取消替换」快捷开关，未生成块不给按钮
-      const actionB=cached
+      // 生成摘要/替换等操作实际在管理台做；这里只保留「替换/取消替换」快捷开关，未生成块/已隐藏块不给按钮
+      const actionB=(cached&&!hidden)
         ? '<button class="cc-act'+(enabled?'':' off')+'" data-ccact="toggle" data-manual="'+(isAi?'0':'1')+'" data-idx="'+bIdx+'" data-repid="'+encodeURIComponent(repIdOf(c))+'">'+(enabled?'取消替换':'替换')+'</button>'
         : '';
-      return '<div class="cc-block"><div class="cc-block-h"><span style="font-weight:600">块 #'+c.index+'</span><span class="st '+stCls+'">'+stTxt+'</span><span style="color:var(--ink3)">'+st+'~'+en+' 条 · '+(c.chars||0)+' 字</span><span style="margin-left:auto"></span>'+actionB+'</div><div class="cc-block-b cc-collapse" data-full="'+escapeHtml(c.summary||c.head||c.summary||'')+'"><div class="cc-fade">'+escapeHtml(c.head||c.summary||'')+'</div><div class="cc-full" style="display:none">'+escapeHtml(c.summary||'')+'</div><div class="cc-toggle">展开全文 ▾</div></div></div>';
+      return '<div class="cc-block'+(hidden?' cc-block-hidden':'')+'"><div class="cc-block-h"><span style="font-weight:600">块 #'+c.index+'</span><span class="st '+stCls+'">'+stTxt+'</span><span style="color:var(--ink3)">'+st+'~'+en+' 条 · '+(c.chars||0)+' 字</span><span style="margin-left:auto"></span>'+actionB+'</div><div class="cc-block-b cc-collapse" data-full="'+escapeHtml(c.summary||c.head||c.summary||'')+'"><div class="cc-fade">'+escapeHtml(c.head||c.summary||'')+'</div><div class="cc-full" style="display:none">'+escapeHtml(c.summary||'')+'</div><div class="cc-toggle">展开全文 ▾</div></div></div>';
     }).join('');
     html+=gaps.length?('<div style="font-size:11px;color:var(--ink3);margin:4px 0 8px">未覆盖区 '+gaps.length+' 处</div>'+gaps.map(function(g){ return '<div class="cc-block"><div class="cc-uncovered-head" data-st="'+g.startIdx+'" data-en="'+g.endIdx+'"><span class="cc-gap-arrow">▸</span><span class="cc-gap-title">未覆盖</span><span class="cc-gap-meta">第 '+g.startIdx+'–'+g.endIdx+' 条 · '+g.count+' 条</span></div><div class="cc-uncovered-body" style="display:none"></div></div>'; }).join('')):'';
     html+='<a class="cc-goto-admin" href="/heartbeat/admin/mobile?tab=compaction" target="_blank">去管理台压缩页 <span class="arrow">→</span></a>';
@@ -4856,7 +4986,8 @@ function renderSessionList(){
   });
   list.forEach(s=>{
     const item=document.createElement("div");
-    item.className="session-item"+(s.id===currentSession?" active":"");
+    const merging=!!mergeMode;
+    item.className="session-item"+(s.id===currentSession?" active":"")+(merging?" merging":"");
     // 名字优先取本地改名映射(han_session_names)，其次服务器 name，兜底 id/主会话。
     let name="";
     try{
@@ -4866,10 +4997,11 @@ function renderSessionList(){
     if(!name)name=s.name||(s.id==="default"?"主会话":s.id);
     const pinned=isPinned(s.id);
     const meta=(pinned?'<span class="s-badge pin">置顶</span>':'')+(s.real!=null?(""+s.real+" 条"):"")+(s.last_time?(" · "+fmtTime(new Date(s.last_time))):"");
-    item.innerHTML='<div class="s-name">'+escapeHtml(name)+'<button class="s-del" data-id="'+escapeHtml(s.id)+'" title="删除"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button></div>'+
+    const checkHtml=merging?('<span class="s-check'+(mergeSel.has(s.id)?' on':'')+'">'+(mergeSel.has(s.id)?'✓':'')+'</span>'):'';
+    item.innerHTML='<div class="s-name">'+checkHtml+escapeHtml(name)+'<button class="s-del" data-id="'+escapeHtml(s.id)+'" title="删除"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button></div>'+
       '<div class="s-meta">'+escapeHtml(meta)+'</div>'+
       '<div class="s-ops"><button class="s-op" data-op="pin" data-id="'+escapeHtml(s.id)+'">'+(pinned?"取消置顶":"置顶")+'</button><button class="s-op" data-op="cc" data-id="'+escapeHtml(s.id)+'">压缩</button><button class="s-op" data-op="export" data-id="'+escapeHtml(s.id)+'">导出</button><button class="s-op" data-op="rename" data-id="'+escapeHtml(s.id)+'">改名</button></div>';
-    item.querySelector(".s-name > .s-del").addEventListener("click",e=>{e.stopPropagation();deleteSession(s.id);});
+    item.querySelector(".s-name > .s-del").addEventListener("click",e=>{e.stopPropagation();if(merging){toggleMergeSel(s.id);}else{deleteSession(s.id);}});
     item.querySelectorAll(".s-op").forEach(btn=>btn.addEventListener("click",e=>{
       e.stopPropagation();
       const op=btn.dataset.op,id=btn.dataset.id;
@@ -4878,10 +5010,53 @@ function renderSessionList(){
       if(op==="rename")renameSession(id);
       if(op==="cc")openSessionCc(id);
     }));
-    item.addEventListener("click",()=>switchSession(s.id));
+    item.addEventListener("click",()=>{ if(merging){ toggleMergeSel(s.id); } else { switchSession(s.id); } });
     el.appendChild(item);
   });
+  updateMergeBar();
 }
+// ===== 会话合并（原会话保留，多选后合成新会话）=====
+let mergeMode=false, mergeSel=new Set();
+function toggleMergeMode(){
+  mergeMode=!mergeMode;
+  mergeSel.clear();
+  renderSessionList();
+  updateMergeBar();
+  showToast(mergeMode?"已进入合并模式：勾选 ≥2 个会话后点「合并」":"已退出合并模式");
+}
+function toggleMergeSel(id){
+  if(mergeSel.has(id)) mergeSel.delete(id); else mergeSel.add(id);
+  renderSessionList();
+  updateMergeBar();
+}
+function updateMergeBar(){
+  const n=mergeSel.size;
+  const ns=document.getElementById("newSessionBtn"), ex=document.getElementById("exportSessionBtn"),
+        im=document.getElementById("importSessionBtn"), mb=document.getElementById("mergeSessionBtn"),
+        mc=document.getElementById("mergeCancelBtn");
+  if(ns) ns.style.display=mergeMode?"none":"";
+  if(ex) ex.style.display=mergeMode?"none":"";
+  if(im) im.style.display=mergeMode?"none":"";
+  if(mb){ mb.textContent=mergeMode?("合并 "+n+" 个"):"合并"; mb.classList.toggle("merge-armed", mergeMode&&n>=2); }
+  if(mc) mc.style.display=mergeMode?"":"none";
+}
+async function doMergeSessions(){
+  const ids=[...mergeSel];
+  if(ids.length<2){ showToast("至少勾选 2 个会话"); return; }
+  if(!confirm("合并 "+ids.length+" 个会话为一个新会话？原会话数据保留不动，压缩块不迁移。")) return;
+  try{
+    const r=await fetch("/v1/sessions/merge",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({ids:ids})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){ showToast(j.error||"合并失败"); return; }
+    mergeMode=false; mergeSel.clear();
+    await loadSessions();
+    renderSessionList();
+    updateMergeBar();
+    showToast("已合并为「"+(j.name||j.session_id||"新会话")+"」，共 "+(j.merged||j.total||0)+" 条");
+    if(j.session_id){ switchSession(j.session_id); }
+  }catch(e){ showToast("合并失败:"+(e.message||"")); }
+}
+
 // 置顶/取消置顶会话（本地），置顶的排在列表最前
 function togglePinSession(id){
   let pinnedArr=[];
@@ -5134,13 +5309,24 @@ async function switchSession(id){
   alignLocalStars();   // 切会话后按已拉取的标记列表对齐本会话标星 UI
 }
 
-// 新建会话
+// 新建会话：先弹下拉框选本会话提示词（默认=跟随全局人设；选备份=仅本会话生效），取消则不创建
 function newSession(){
+  const opts='<option value="">默认（跟随全局人设）</option>'+promptBackups.map(function(b){
+    return '<option value="'+escapeHtml(b.id)+'">'+escapeHtml(b.name||'未命名')+'</option>';
+  }).join('');
+  openEditModal("新建会话",
+    '<div class="field"><label>本会话使用的提示词</label><select class="np-sel" id="np-prompt">'+opts+'</select>'
+    +'<div class="np-tip">选择的备份仅对这个会话生效；「默认」跟随设置里的全局人设。点取消则不创建。</div></div>',
+    function(){ createSessionWithPrompt((document.getElementById("np-prompt")||{}).value||""); },
+    "创建");
+}
+function createSessionWithPrompt(backupId){
   const sid=genSessionId();
   localStorage.setItem("han_current_session",sid);
   // 清空当前显示
   currentSession=sid;
   pushCurrentSession();   // 跨设备同步：新会话也上报
+  setSessionPrompt(sid, backupId);
   msgs=[];saveMsgs();
   renderAll();
   closeDrawer();
@@ -5149,6 +5335,7 @@ function newSession(){
   sessionList.push({id:sid,name:sid,total:0,real:0,last_time:null,is_default:false});
   renderSessionList();
   startLiveEvents();   // 空会话也订阅，等 AI 主动消息/别设备消息进来时即时可刷新
+  showToast(backupId?"新会话已创建，本会话使用所选提示词":"新会话已创建");
 }
 
 // 删除会话：调用后端 DELETE /v1/sessions/:id 真正删除独立时间线文件
@@ -5160,6 +5347,7 @@ async function deleteSession(id){
     const j=await r.json().catch(()=>({}));
     // 本地清掉该会话缓存
     localStorage.removeItem(LS_MSGS+"_"+id);
+    setSessionPrompt(id,"");   // 顺带清掉会话级提示词映射
     const nameMap=JSON.parse(localStorage.getItem("han_session_names")||"{}");
     delete nameMap[id];localStorage.setItem("han_session_names",JSON.stringify(nameMap));
     if(currentSession===id){
@@ -5415,6 +5603,8 @@ async function importSession(file){
 document.getElementById("newSessionBtn").onclick=newSession;
 document.getElementById("exportSessionBtn").onclick=()=>exportSession(currentSession);
 document.getElementById("importSessionBtn").onclick=()=>document.getElementById("importFile").click();
+document.getElementById("mergeSessionBtn").onclick=function(){ if(mergeMode){ doMergeSessions(); } else { toggleMergeMode(); } };
+document.getElementById("mergeCancelBtn").onclick=toggleMergeMode;
 // 数据管理按钮：设置面板里
 if(document.getElementById("clearLocalCacheBtn"))document.getElementById("clearLocalCacheBtn").onclick=clearLocalCache;
 if(document.getElementById("exportAllDataBtn"))document.getElementById("exportAllDataBtn").onclick=exportAllLocalData;
@@ -6070,7 +6260,7 @@ function renderSendCfg(body){
   }).catch(function(e){ body.innerHTML='<div class="adm-empty">加载失败: '+esc(e.message)+'</div>'; });
 }
 
-/* ---------------- 记忆与唤醒参数（设置页 · 由原菜单卡片迁移） ---------------- */function loadMemWakeSettings(){  Promise.all([admGet(BASE+'/config'), admGet(BASE+'/memory-pool/config')]).then(function(res){    var c=res[0], m=res[1];    function num(v,d){ return v!=null?v:d; }    function setVal(id,v){ var el=document.getElementById(id); if(el) el.value=v; }    function setChk(id,b){ var el=document.getElementById(id); if(el) el.checked=!!b; }    setVal('mwWake',num(c.wake_history_max_messages,80));    setVal('mwDedup',num(m.dedup_threshold,0.78));    setVal('mwDecay',num(m.decay_days,30));    setVal('mwRmax',num(m.reparse_max_chars,30));    setVal('mwRmaxitems',num(m.reparse_max_items,8));    setChk('mwCross',m.cross_inject_enabled!==false);    setChk('mwAlways',m.cross_inject_always===true);    setVal('mwMaxmsgs',num(m.cross_inject_max_msgs,2));    setVal('mwDays',num(m.cross_inject_diary_days,3));    setVal('mwMempercat',num(m.cross_inject_memory_per_category,2));    setVal('mwSumdays',num(m.cross_inject_summary_days,7));    setVal('mwStartopk',num(m.cross_inject_starred_topk,10));  }).catch(function(e){ var m=document.getElementById('mwMsg'); if(m) m.textContent='加载失败: '+(e&&e.message||e); });}function saveMemWakeSettings(){  var up={wake_history_max_messages:Number(document.getElementById('mwWake').value)||0};  var up2={    dedup_threshold:Number(document.getElementById('mwDedup').value)||0.78,    decay_days:Number(document.getElementById('mwDecay').value)||30,    reparse_max_chars:Number(document.getElementById('mwRmax').value)||30,    reparse_max_items:Number(document.getElementById('mwRmaxitems').value)||8,    cross_inject_enabled:document.getElementById('mwCross').checked,    cross_inject_always:document.getElementById('mwAlways').checked,    cross_inject_max_msgs:Number(document.getElementById('mwMaxmsgs').value)||2,    cross_inject_diary_days:Number(document.getElementById('mwDays').value)||3,    cross_inject_memory_per_category:Number(document.getElementById('mwMempercat').value)||2,    cross_inject_summary_days:Number(document.getElementById('mwSumdays').value)||7,    cross_inject_starred_topk:Number(document.getElementById('mwStartopk').value)||10  };  Promise.all([admPost(BASE+'/config',up), admPost(BASE+'/memory-pool/config',up2)]).then(function(res){    var bad=res.some(function(j){ return j&&j.error; });    var m=document.getElementById('mwMsg');    if(m){ m.textContent=bad?'部分参数保存失败':'已保存，下次请求/重启生效（跨窗口注入即时生效）。'; }    showToast(bad?'部分参数保存失败':'记忆与唤醒参数已保存');  }).catch(function(e){ var m=document.getElementById('mwMsg'); if(m) m.textContent='保存失败: '+(e&&e.message||e); });}if(document.getElementById('mwSaveBtn')){  document.getElementById('mwSaveBtn').addEventListener('click', saveMemWakeSettings);}
+/* ---------------- 记忆与唤醒参数（设置页 · 由原菜单卡片迁移） ---------------- */function loadMemWakeSettings(){  Promise.all([admGet(BASE+'/config'), admGet(BASE+'/memory-pool/config'), admGet(BASE+'/context-compaction/config')]).then(function(res){    var c=res[0], m=res[1], cc=(res[2]&&typeof res[2]==='object')?res[2]:{};    function num(v,d){ return v!=null?v:d; }    function setVal(id,v){ var el=document.getElementById(id); if(el) el.value=v; }    function setChk(id,b){ var el=document.getElementById(id); if(el) el.checked=!!b; }    setVal('mwWake',num(c.wake_history_max_messages,80));    setVal('mwDedup',num(m.dedup_threshold,0.78));    setVal('mwDecay',num(m.decay_days,30));    setVal('mwRmax',num(m.reparse_max_chars,30));    setVal('mwRmaxitems',num(m.reparse_max_items,8));    setChk('mwCross',m.cross_inject_enabled!==false);    setChk('mwAlways',m.cross_inject_always===true);    setVal('mwMaxmsgs',num(m.cross_inject_max_msgs,2));    setVal('mwDays',num(m.cross_inject_diary_days,3));    setVal('mwMempercat',num(m.cross_inject_memory_per_category,2));    setVal('mwSumdays',num(m.cross_inject_summary_days,7));    setVal('mwStartopk',num(m.cross_inject_starred_topk,10));    setVal('mwCcmax',num(cc.compaction_max_active_blocks,0));  }).catch(function(e){ var m=document.getElementById('mwMsg'); if(m) m.textContent='加载失败: '+(e&&e.message||e); });}function saveMemWakeSettings(){  var up={wake_history_max_messages:Number(document.getElementById('mwWake').value)||0};  var up2={    dedup_threshold:Number(document.getElementById('mwDedup').value)||0.78,    decay_days:Number(document.getElementById('mwDecay').value)||30,    reparse_max_chars:Number(document.getElementById('mwRmax').value)||30,    reparse_max_items:Number(document.getElementById('mwRmaxitems').value)||8,    cross_inject_enabled:document.getElementById('mwCross').checked,    cross_inject_always:document.getElementById('mwAlways').checked,    cross_inject_max_msgs:Number(document.getElementById('mwMaxmsgs').value)||2,    cross_inject_diary_days:Number(document.getElementById('mwDays').value)||3,    cross_inject_memory_per_category:Number(document.getElementById('mwMempercat').value)||2,    cross_inject_summary_days:Number(document.getElementById('mwSumdays').value)||7,    cross_inject_starred_topk:Number(document.getElementById('mwStartopk').value)||10  };  var up3={compaction_max_active_blocks:Math.max(0,Math.floor(Number(document.getElementById('mwCcmax').value)||0))};  Promise.all([admPost(BASE+'/config',up), admPost(BASE+'/memory-pool/config',up2), admPost(BASE+'/context-compaction/config',up3)]).then(function(res){    var bad=res.some(function(j){ return j&&j.error; });    var m=document.getElementById('mwMsg');    if(m){ m.textContent=bad?'部分参数保存失败':'已保存，下次请求/重启生效（跨窗口注入即时生效）。'; }    showToast(bad?'部分参数保存失败':'记忆与唤醒参数已保存');  }).catch(function(e){ var m=document.getElementById('mwMsg'); if(m) m.textContent='保存失败: '+(e&&e.message||e); });}if(document.getElementById('mwSaveBtn')){  document.getElementById('mwSaveBtn').addEventListener('click', saveMemWakeSettings);}
 /* ---------------- 记忆池 ---------------- */
 var _mpRefresh = null;
 function refreshMemPoolList(){ if(_mpRefresh) _mpRefresh(); }
@@ -6205,10 +6395,11 @@ function renderMarked(body){
   admGet(BASE+'/context-compaction/marked-list').then(function(j){
     var list=(j&&j.results)||[];
     if(!list.length){ body.innerHTML='<div class="adm-empty">暂无标星消息</div>'; return; }
-    body.innerHTML='<div class="adm-tip">共 '+list.length+' 条 · <b>★</b> 取消标星，点「编辑」修改。</div>'+list.map(function(x){
+    body.innerHTML='<div class="adm-tip">共 '+list.length+' 条 · <span class="ctx-lamp on"></span> 已进上下文 · <span class="ctx-lamp"></span> 未进 · <b>★</b> 取消标星，点「编辑」修改。</div>'+list.map(function(x){
       var c=x.role==='user'?'var(--accent)':(x.role==='system'?'var(--accent-deep)':'var(--ink)');
       var mt=(x.time||x.ts||x.at||'');
-      return '<div class="adm-item adm-mark" data-key="'+esc(x.key)+'" data-full="'+esc(x.content||'')+'"><div class="adm-item-h"><span>#'+(+x.index+1)+'</span><span style="color:'+c+'">'+esc(x.role||'')+'</span>'+(mt?'<span style="color:var(--ink3)">'+esc(mt)+'</span>':'')+'<span style="margin-left:auto"></span><button class="adm-star on" data-act="unmark" data-key="'+esc(x.key)+'" title="取消标星">★</button><button class="adm-editbtn" data-act="edit" data-key="'+esc(x.key)+'" data-iidx="#'+(+x.index+1)+' · '+esc(x.role||'')+'">编辑</button></div><div class="adm-mark-body"><div class="adm-mark-text">'+esc(x.content||'')+'</div></div></div>';
+      var inCtx=!!x.in_context;
+      return '<div class="adm-item adm-mark" data-key="'+esc(x.key)+'" data-full="'+esc(x.content||'')+'"><div class="adm-item-h"><span class="ctx-lamp'+(inCtx?' on':'')+'" title="'+(inCtx?'正文当前在发给模型的上下文中':'正文当前不在发给模型的上下文中')+'"></span><span>#'+(+x.index+1)+'</span><span style="color:'+c+'">'+esc(x.role||'')+'</span>'+(mt?'<span style="color:var(--ink3)">'+esc(mt)+'</span>':'')+'<span style="margin-left:auto"></span><button class="adm-star on" data-act="unmark" data-key="'+esc(x.key)+'" title="取消标星">★</button><button class="adm-editbtn" data-act="edit" data-key="'+esc(x.key)+'" data-iidx="#'+(+x.index+1)+' · '+esc(x.role||'')+'">编辑</button></div><div class="adm-mark-body"><div class="adm-mark-text">'+esc(x.content||'')+'</div></div></div>';
     }).join('');
     bindMarked(body);
   }).catch(function(e){ body.innerHTML='<div class="adm-empty">加载失败: '+esc(e.message)+'</div>'; });
