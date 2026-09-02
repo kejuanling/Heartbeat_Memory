@@ -2329,24 +2329,24 @@ function extractToolEchoBlocks(content){
   let m;
   while((m=re.exec(s))){
     const name=m[1].trim();
+    const matchEnd=re.lastIndex;   // 当前匹配结束位置：后续所有路径的唯一基准（stray exec 曾把它污染归零导致死循环）
     // 名称后必须是换行或直接跟 { [ 这类结构（工具结果），否则跳过
-    const after=s.slice(re.lastIndex);
-    if(!/^\s*\n?\s*[{\[（]/.test(after)) continue;
+    const after=s.slice(matchEnd);
+    if(!/^\s*\n?\s*[{\[（]/.test(after)){ re.lastIndex=matchEnd; continue; }
     // 找该工具块的结尾：下一处【工具 · 名称】或单独的 --- 或末尾
-    const nextIdx=re.exec(s.slice(re.lastIndex)); // 前瞻找下一个工具块（注意会推进 re，需回退）
-    // 用独立搜索更安全
-    const restAfter=s.slice(re.lastIndex);
+    // 用 search（不改 lastIndex）——绝不能用同一个 re 再 exec 别的字符串，会把全局游标打乱
+    const restAfter=after;
     const nextTool=restAfter.search(/【工具\s*[·．.]?\s*[^】\n]+】/);
     const sep=restAfter.search(/\n\s*---\s*\n/);
     let end=restAfter.length;
     if(nextTool>=0) end=Math.min(end,nextTool);
     if(sep>=0) end=Math.min(end,sep);
     const body=restAfter.slice(0,end).trim();
-    if(!body) continue;
+    if(!body){ re.lastIndex=matchEnd; continue; }
     found=true;
     capsules.push({ name, body });
     rebuilt+=s.slice(last,m.index)+ph;
-    last=re.lastIndex+end;
+    last=matchEnd+end;
     re.lastIndex=last;
   }
   if(!found) return null;
