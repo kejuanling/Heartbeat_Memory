@@ -1978,7 +1978,7 @@ function createCsrfToken() {
 function ensureCsrfCookie(req, reply) {
   const cookies = parseCookies(req.headers.cookie);
   if (cookies.admin_session && validSessionToken(cookies.admin_session) && !cookies.admin_csrf) {
-    reply.header("Set-Cookie", `admin_csrf=${createCsrfToken()}; Path=/; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_DAYS * 24 * 3600}`);
+    reply.header("Set-Cookie", `admin_csrf=${createCsrfToken()}; Path=/; Secure; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_DAYS * 24 * 3600}`);
   }
 }
 function parseCookies(header) {
@@ -2104,8 +2104,8 @@ app.post("/admin/mobile/login", async (req, reply) => {
   if (ok) {
     const csrf = createCsrfToken();
     reply.header("Set-Cookie", [
-      `admin_session=${createSessionToken()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_DAYS * 24 * 3600}`,
-      `admin_csrf=${csrf}; Path=/; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_DAYS * 24 * 3600}`
+      `admin_session=${createSessionToken()}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_DAYS * 24 * 3600}`,
+      `admin_csrf=${csrf}; Path=/; Secure; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_DAYS * 24 * 3600}`
     ]);
     reply.redirect(adminBasePath(req) + "/mobile");
     return;
@@ -2125,8 +2125,8 @@ app.post("/admin/chat-login", async (req, reply) => {
     // chat.html 内置卡片即可直接调 /heartbeat/admin/*（cookie 认证 + CSRF 双提交）。
     const csrf = createCsrfToken();
     reply.header("Set-Cookie", [
-      `admin_session=${createSessionToken()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_DAYS * 24 * 3600}`,
-      `admin_csrf=${csrf}; Path=/; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_DAYS * 24 * 3600}`
+      `admin_session=${createSessionToken()}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_DAYS * 24 * 3600}`,
+      `admin_csrf=${csrf}; Path=/; Secure; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_DAYS * 24 * 3600}`
     ]);
     reply.send({ ok: true });
     return;

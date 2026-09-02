@@ -93,6 +93,9 @@ function semanticSearch(index, query, threshold) {
   return results;
 }
 
+// ---- 会话列表元数据缓存（以文件 mtimeMs+size 为失效键，避免每次全量 loadTimeline）----
+const sessionMetaCache = new Map();
+
 module.exports = function registerChatRoutes(app, deps) {
   const {
     baseDir,
@@ -146,26 +149,34 @@ module.exports = function registerChatRoutes(app, deps) {
     });
   });
 
-  // 多会话列表：扫描本目录下所有 enhanced_messages*.json，返回会话摘要
+  // 多会话列表：扫描本目录下所有 enhanced_messages*.json，返回会话摘要（命中缓存只 stat 不重读）
   app.get('/v1/sessions', async (req, reply) => {
     try {
       const files = fsp.readdirSync(baseDir).filter(f => /^enhanced_messages[_-][A-Za-z0-9_-]+\.json$/.test(f));
       const sessions = [];
+      const seen = new Set();
       for (const f of files) {
         const sid = f.replace(/^enhanced_messages_/, '').replace(/\.json$/, '');
         if (!sid || sid === 'default') continue;
+        seen.add(sid);
         try {
+          const filePath = path.join(baseDir, f);
+          const st = fsp.statSync(filePath);
+          const cached = sessionMetaCache.get(sid);
+          if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) {
+            sessions.push({ id: sid, name: sid, total: cached.total, real: cached.real, last_time: cached.last_time, is_default: false });
+            continue;
+          }
           const arr = loadTimeline(sid);
           const real = arr.filter(isRealMessageForTimeline);
-          sessions.push({
-            id: sid,
-            name: sid,
-            total: arr.length,
-            real: real.length,
-            last_time: (arr[arr.length - 1] && arr[arr.length - 1].time) || null,
-            is_default: false
-          });
+          const meta = { mtimeMs: st.mtimeMs, size: st.size, total: arr.length, real: real.length, last_time: (arr[arr.length - 1] && arr[arr.length - 1].time) || null };
+          sessionMetaCache.set(sid, meta);
+          sessions.push({ id: sid, name: sid, total: meta.total, real: meta.real, last_time: meta.last_time, is_default: false });
         } catch (e) {}
+      }
+      // 清理已删除会话的缓存项，避免陈旧
+      for (const k of Array.from(sessionMetaCache.keys())) {
+        if (!seen.has(k)) sessionMetaCache.delete(k);
       }
       reply.send({ ok: true, sessions });
     } catch (err) {
