@@ -172,10 +172,37 @@ module.exports = function registerChatRoutes(app, deps) {
       const cfg = contextCompactor.loadConfig();
       const limit = Number(cfg.compaction_context_limit_chars) || 0;
       if (!cfg.compaction_context_remind_enabled || limit <= 0) return;
+      const chars = countLLMTextChars(llmMessages);
+      // 注意顺序：必须先做「低于上限清理」再判「已有提醒不重复塞」——
+      // 旧提醒会被特殊事件机制每轮注入回来，若先判「已有」就提前返回，永远走不到清理
+      if (chars <= limit) {
+        // 已不超限：当轮消息流里不再带提醒，落盘的活跃提醒也标记删除——提示彻底消失；
+        // 之后再次超限时（流里查不到提醒）会重新塞一条带新时间边界的
+        let inStream = false;
+        for (let i = llmMessages.length - 1; i >= 0; i--) {
+          const m = llmMessages[i];
+          if (m && (m.kind === 'ctx_limit' || (typeof m.content === 'string' && m.content.startsWith(CTX_LIMIT_HEAD)))) {
+            llmMessages.splice(i, 1);
+            inStream = true;
+          }
+        }
+        let onDisk = false;
+        try {
+          const timeline = loadTimeline(sessionId);
+          for (const m of timeline) {
+            if (m && m.kind === 'ctx_limit' && !m.deleted) { m.deleted = true; onDisk = true; }
+          }
+          if (onDisk) saveTimeline(timeline, sessionId);
+        } catch (cleanErr) {
+          console.warn('[ctx-limit] 低于上限清理落盘提醒失败（不影响转发）:', cleanErr.message);
+        }
+        if (inStream || onDisk) {
+          console.log(`[ctx-limit] 会话 ${sessionId || 'default'} 上下文 ${chars} 字符已低于上限 ${limit}，容量提醒已移除（再超限会重新提醒）`);
+        }
+        return;
+      }
       // 消息流里已有提醒（未随压缩消亡/未被窗口过滤）就不重复塞；kind 标记与文本开头双保险
       if (llmMessages.some(m => m && (m.kind === 'ctx_limit' || (typeof m.content === 'string' && m.content.startsWith(CTX_LIMIT_HEAD))))) return;
-      const chars = countLLMTextChars(llmMessages);
-      if (chars <= limit) return;
 
       // 建议整理段：流里最早的一段未压缩真实对话（跳过 system/摘要块/特殊事件/工具消息），
       // 取前 100 条，用 timeByKey 反查首末时间——给 AI 明确时间边界，防选错段压错范围。
