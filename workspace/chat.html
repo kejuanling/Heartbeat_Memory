@@ -777,21 +777,22 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 /* 工具胶囊（API 工具调用痕迹） */
 .tool-trace{
   width:100%;margin-bottom:8px;border-left:3px solid rgba(92,134,166,.35);
-  padding:6px 10px;border-radius:0 8px 8px 0;
+  padding:7px 12px;border-radius:0 8px 8px 0;
   background:rgba(92,134,166,.07);font-size:12.5px;color:var(--ink2);
-  line-height:1.6;cursor:pointer;user-select:none;-webkit-user-select:none;
+  line-height:1.5;cursor:pointer;user-select:none;-webkit-user-select:none;
 }
-.tool-trace .tt-h{font-size:11px;color:#5a86a6;letter-spacing:.5px;display:flex;align-items:center;gap:6px}
-.tool-trace .tt-icon{font-size:12px}
-.tool-trace .tt-name{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:#4a7a9c;font-weight:600}
+.tool-trace .tt-h{font-size:11px;color:#5a86a6;letter-spacing:.3px;display:flex;align-items:center;gap:7px;flex-wrap:nowrap;min-width:0}
+.tool-trace .tt-h>*{flex-shrink:0}
+.tool-trace .tt-icon{font-size:12px;display:inline-flex}
+.tool-trace .tt-name{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:#4a7a9c;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tool-trace .tt-a{font-size:10px;color:var(--ink3);margin-left:auto;transition:transform .2s}
 .tool-trace.open .tt-a{transform:rotate(180deg)}
 .tool-trace .tt-body{display:none;margin-top:6px;font-size:12px}
 .tool-trace.open .tt-body{display:block}
 .tool-trace .tt-arg{color:var(--ink2);margin-bottom:5px;white-space:pre-wrap;word-break:break-all}
 .tool-trace .tt-res{white-space:pre-wrap;word-break:break-all;color:var(--ink);background:rgba(255,255,255,.45);border-radius:6px;padding:6px 8px;margin:0;max-height:180px;overflow:auto;font-size:11.5px}
-.tool-trace .tt-err{display:inline-block;margin-top:5px;font-size:11px;color:#a5554a;background:rgba(200,90,80,.10);padding:1px 8px;border-radius:999px}
-.tool-trace .tt-ok{display:inline-block;margin-top:5px;font-size:11px;color:#4a8a5c;background:rgba(60,140,90,.10);padding:1px 8px;border-radius:999px}
+.tool-trace .tt-err{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:#a5554a;background:rgba(200,90,80,.10);padding:1px 8px;border-radius:999px;white-space:nowrap}
+.tool-trace .tt-ok{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:#4a8a5c;background:rgba(60,140,90,.10);padding:1px 8px;border-radius:999px;white-space:nowrap}
 
 /* 空态 */
 #empty{
@@ -1053,6 +1054,12 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .adm-rowli .adm-card-b::-webkit-scrollbar{width:6px}
 .adm-rowli .adm-card-b::-webkit-scrollbar-thumb{background:rgba(200,144,152,.55);border-radius:3px}
 .adm-rowli .adm-card-b::-webkit-scrollbar-track{background:transparent}
+/* 统一滚动条:主题粉半透明(#chat/.session-list/.cc-body 保持隐藏不动) */
+.sheet,.modal-card,.cr-body,.mnav,.settings-home,.settings-page,.session-results,.mcp-tools-view,.cc-block-b .cc-full,.cc-uncovered-body,.tool-trace .tt-res,.bubble pre,.adm-rowli .adm-card-b{scrollbar-width:thin;scrollbar-color:rgba(200,144,152,.45) transparent}
+.sheet::-webkit-scrollbar,.modal-card::-webkit-scrollbar,.cr-body::-webkit-scrollbar,.mnav::-webkit-scrollbar,.settings-home::-webkit-scrollbar,.settings-page::-webkit-scrollbar,.session-results::-webkit-scrollbar,.mcp-tools-view::-webkit-scrollbar,.cc-block-b .cc-full::-webkit-scrollbar,.cc-uncovered-body::-webkit-scrollbar,.tool-trace .tt-res::-webkit-scrollbar,.bubble pre::-webkit-scrollbar,.adm-rowli .adm-card-b::-webkit-scrollbar{width:6px;height:6px}
+.sheet::-webkit-scrollbar-track,.modal-card::-webkit-scrollbar-track,.cr-body::-webkit-scrollbar-track,.mnav::-webkit-scrollbar-track,.settings-home::-webkit-scrollbar-track,.settings-page::-webkit-scrollbar-track,.session-results::-webkit-scrollbar-track,.mcp-tools-view::-webkit-scrollbar-track,.cc-block-b .cc-full::-webkit-scrollbar-track,.cc-uncovered-body::-webkit-scrollbar-track,.tool-trace .tt-res::-webkit-scrollbar-track,.bubble pre::-webkit-scrollbar-track,.adm-rowli .adm-card-b::-webkit-scrollbar-track{background:transparent}
+.sheet::-webkit-scrollbar-thumb,.modal-card::-webkit-scrollbar-thumb,.cr-body::-webkit-scrollbar-thumb,.mnav::-webkit-scrollbar-thumb,.settings-home::-webkit-scrollbar-thumb,.settings-page::-webkit-scrollbar-thumb,.session-results::-webkit-scrollbar-thumb,.mcp-tools-view::-webkit-scrollbar-thumb,.cc-block-b .cc-full::-webkit-scrollbar-thumb,.cc-uncovered-body::-webkit-scrollbar-thumb,.tool-trace .tt-res::-webkit-scrollbar-thumb,.bubble pre::-webkit-scrollbar-thumb,.adm-rowli .adm-card-b::-webkit-scrollbar-thumb{background:rgba(200,144,152,.45);border-radius:999px}
+.sheet::-webkit-scrollbar-thumb:hover,.modal-card::-webkit-scrollbar-thumb:hover,.cr-body::-webkit-scrollbar-thumb:hover,.mnav::-webkit-scrollbar-thumb:hover,.settings-home::-webkit-scrollbar-thumb:hover,.settings-page::-webkit-scrollbar-thumb:hover,.session-results::-webkit-scrollbar-thumb:hover,.mcp-tools-view::-webkit-scrollbar-thumb:hover,.cc-block-b .cc-full::-webkit-scrollbar-thumb:hover,.cc-uncovered-body::-webkit-scrollbar-thumb:hover,.tool-trace .tt-res::-webkit-scrollbar-thumb:hover,.bubble pre::-webkit-scrollbar-thumb:hover,.adm-rowli .adm-card-b::-webkit-scrollbar-thumb:hover{background:rgba(200,144,152,.8)}
 /* 卡片内顶部工具条在滚动时吸顶，避免被滚走 */
 .adm-rowli .adm-card-b .adm-head{position:sticky;top:0;z-index:2;background:var(--bg1);padding-bottom:6px;border-bottom:1px solid rgba(200,144,152,.16);margin-bottom:6px}
 /* 顶部小工具条：刷新/操作，统一最小高度避免展开跳变 */
@@ -2303,7 +2310,7 @@ function renderToolCapsule(t){
   if(t&&t.error){badge='<span class="tt-err"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> 失败</span>';res=(t.result||t.error||"");}
   else{badge='<span class="tt-ok">✓ 已执行</span>';res=(t&&t.result)||"";}
   const argHtml=args&&args!=="{}"?('<div class="tt-arg">参数：'+escapeHtml(args)+'</div>'):'';
-  return '<div class="tool-trace"><span class="tt-h"><span class="tt-icon"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4L15 12l-3-3z"/></svg></span>调用工具 <span class="tt-name">'+escapeHtml(name)+'</span> '+badge+'<span class="tt-a">▾</span></span><div class="tt-body">'+argHtml+'<pre class="tt-res">'+escapeHtml(res)+(res? "":"（无返回）")+'</pre></div></div>';
+  return '<div class="tool-trace"><span class="tt-h"><span class="tt-icon"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4L15 12l-3-3z"/></svg></span><span class="tt-name">'+escapeHtml(name)+'</span>'+badge+'<span class="tt-a">▾</span></span><div class="tt-body">'+argHtml+'<pre class="tt-res">'+escapeHtml(res)+(res? "":"（无返回）")+'</pre></div></div>';
 }
 function renderToolCapsules(tools){
   if(!tools||!tools.length)return "";
@@ -2935,16 +2942,13 @@ async function request(finalMsgs){
     const dec=new TextDecoder();let buf="";
     /* ===== QQ 式分段连播（流式）=====
        正文按分隔符拆段，每段内容收齐后整条弹出一个气泡（带头像/名称），一条接一条；
-       不再做整条打字机。思考/工具阶段先临时显示思考，第一条正文段弹出时并入。
+       不再做整条打字机。思考链/工具链不单独先显，第一条正文气泡弹出时并入显示（用户 2026-09-02 拍板）。
        flushStreamSegs：收尾补弹剩余段（含最后一段），供正常结束/停止/出错三处共用。 */
-    let thinkEl=null;      // 思考阶段临时气泡
-    const thinkRemove=function(){ if(thinkEl){thinkEl.remove();thinkEl=null;} };
     // reasoning/tools 在流式过程中持续累积，用 getter 让第一段弹出时取到当前值
     const playerSrc={role:"assistant",get reasoning(){return reasoning;},get tools(){return tools;},time:null};
     const player=makeSegPlayer(playerSrc);
     flushStreamSegs=async function(){
       await player.flush(full);
-      thinkRemove();
     };
     while(true){
       const {done,value}=await reader.read();
@@ -2961,17 +2965,8 @@ async function request(finalMsgs){
           if(json.usage){usage=json.usage;}
           const delta=json.choices&&json.choices[0]&&json.choices[0].delta;
           const hasContent = delta && delta.content;
-          const hasReasoning = delta && delta.reasoning_content;
           if(delta){if(delta.content)full+=delta.content;if(delta.reasoning_content)reasoning+=delta.reasoning_content;if(delta.tool_trace){tools=delta.tool_trace;}}
-          // 思考/工具阶段：第一条正文段弹出前，临时气泡只显示思考过程
-          if(hasReasoning && !thinkEl && !SEGQ.running && !SEGQ.q.length){
-            removeEmpty();
-            thinkEl=document.createElement("div");thinkEl.className="msg ai stream-in";thinkEl.dataset.idx="-1";
-            thinkEl.innerHTML='<div class="bubble"></div>';
-            chatEl.appendChild(thinkEl);
-          }
-          if(thinkEl){renderAI(thinkEl,thinkEl.querySelector(".bubble"),"",reasoning,tools);if(autoScroll)scrollBottom();}
-          // 正文：每凑齐一段（分隔符出现）就整条弹出，一条接一条
+          // 正文：每凑齐一段（分隔符出现）就整条弹出，一条接一条；思考链/工具链随第一段带入
           if(hasContent){ player.feed(full); }
         }catch(e){}
       }
@@ -4009,7 +4004,7 @@ function renderMcpServers(){
 function viewMcpTools(i){ openMcpForm(i,'tools'); }
 function toggleMcpEnable(i, enabled){
   const s=_mcpServers[i]; if(!s)return;
-  const body={ servers: _mcpServers.map(function(x){ return { id:x.id, name:x.name, type:x.type, url:x.url, command:x.command, args:x.args||[], headers:x.headers||{}, enabled:x.enabled!==false }; }) };
+  const body={ servers: _mcpServers.map(function(x){ return { id:x.id, name:x.name, type:x.type, url:x.url, command:x.command, args:x.args||[], headers:x.headers||{}, allowTools:x.allowTools, enabled:x.enabled!==false }; }) };
   body.servers[i].enabled=enabled;
   fetch("/heartbeat/admin/mcp/servers",{method:"PUT",headers:mcpAuthHeaders(),body:JSON.stringify(body),credentials:"include"}).then(function(r){return r.json();}).then(function(){ toast(enabled?"已启用":"已停用"); renderMcpServers(); });
 }
@@ -4103,7 +4098,7 @@ async function saveMcpServers(){
   const type=mcpType.value; const urlOrCmd=mcpUrl.value.trim();
   const headersObj=(function(){ try{ const h=JSON.parse(mcpHeaders.value||"{}"); return (h&&typeof h==="object")? h: {}; }catch(e){ return null; } })();
   if(headersObj===null){ mcpMsg.textContent="请求头不是合法 JSON"; return; }
-  const body={ servers: _mcpServers.map(function(s){ return { id:s.id, name:s.name, type:s.type, url:s.url, command:s.command, args:s.args||[], headers:s.headers||{}, enabled:s.enabled!==false }; }) };
+  const body={ servers: _mcpServers.map(function(s){ return { id:s.id, name:s.name, type:s.type, url:s.url, command:s.command, args:s.args||[], headers:s.headers||{}, allowTools:s.allowTools, enabled:s.enabled!==false }; }) };
   const params={ type: type, enabled: mcpEnabled.checked, headers: headersObj };
   if(type==="stdio"){ params.command=urlOrCmd; params.url=undefined; params.args=mcpArgs.value.trim()? mcpArgs.value.trim().split(/\s+/): []; }
   else { params.url=urlOrCmd; params.command=undefined; }
@@ -4119,7 +4114,7 @@ async function saveMcpServers(){
 }
 async function deleteMcp(i){
   if(!confirm("删除该 MCP 服务器？")) return;
-  const body={ servers: _mcpServers.filter(function(_,k){ return k!==i; }).map(function(s){ return { id:s.id, name:s.name, type:s.type, url:s.url, command:s.command, args:s.args||[], headers:s.headers||{}, enabled:s.enabled!==false }; }) };
+  const body={ servers: _mcpServers.filter(function(_,k){ return k!==i; }).map(function(s){ return { id:s.id, name:s.name, type:s.type, url:s.url, command:s.command, args:s.args||[], headers:s.headers||{}, allowTools:s.allowTools, enabled:s.enabled!==false }; }) };
   try{
     const r=await fetch("/heartbeat/admin/mcp/servers",{ method:"PUT", headers: mcpAuthHeaders(), body: JSON.stringify(body), credentials:"include" });
     const j=await r.json(); if(!r.ok){ mcpMsg.textContent=j.error||"删除失败"; return; }
@@ -4909,7 +4904,7 @@ async function loadSessionCc(id){
     const chunks=(j&&j.chunks)||[], gaps=((j&&j.uncovered&&j.uncovered.gaps)||[]);
     const t=(j&&j.totals)||{};
     if(!chunks.length&&!gaps.length){ body.innerHTML='<div class="adm-empty">该会话暂无压缩块</div>'; return; }
-    let html='<div class="cc-summary">摘要后约 <b>'+(t.estCompressedChars||0)+'</b> 字 · '+(t.chunkCount||0)+' 块 · 共 '+(t.totalChars||0)+' 字</div>';
+    let html='<div class="cc-summary">实际约 <b>'+(t.estCompressedChars||0)+'</b> 字 · '+(t.chunkCount||0)+' 块 · 共 '+(t.totalChars||0)+' 字</div>';
     if(t.hiddenCount>0){
       html+='<div class="cc-hidden-tip">最早 <b>'+t.hiddenCount+'</b> 块已隐藏、未进入上下文（活跃块上限 '+(t.maxActiveBlocks||'?')+'，手动+AI 合计保留最近 N 个）；如需保留信息，建议去管理台将其入池。</div>';
     }
@@ -4931,7 +4926,7 @@ async function loadSessionCc(id){
       return '<div class="cc-block'+(hidden?' cc-block-hidden':'')+'"><div class="cc-block-h"><span style="font-weight:600">块 #'+c.index+'</span><span class="st '+stCls+'">'+stTxt+'</span><span style="color:var(--ink3)">'+st+'~'+en+' 条 · '+(c.chars||0)+' 字</span><span style="margin-left:auto"></span>'+actionB+'</div><div class="cc-block-b cc-collapse" data-full="'+escapeHtml(c.summary||c.head||c.summary||'')+'"><div class="cc-fade">'+escapeHtml(c.head||c.summary||'')+'</div><div class="cc-full" style="display:none">'+escapeHtml(c.summary||'')+'</div><div class="cc-toggle">展开全文 ▾</div></div></div>';
     }).join('');
     html+=gaps.length?('<div style="font-size:11px;color:var(--ink3);margin:4px 0 8px">未覆盖区 '+gaps.length+' 处</div>'+gaps.map(function(g){ return '<div class="cc-block"><div class="cc-uncovered-head" data-st="'+g.startIdx+'" data-en="'+g.endIdx+'"><span class="cc-gap-arrow">▸</span><span class="cc-gap-title">未覆盖</span><span class="cc-gap-meta">第 '+g.startIdx+'–'+g.endIdx+' 条 · '+g.count+' 条</span></div><div class="cc-uncovered-body" style="display:none"></div></div>'; }).join('')):'';
-    html+='<a class="cc-goto-admin" href="/heartbeat/admin/mobile?tab=compaction" target="_blank">去管理台压缩页 <span class="arrow">→</span></a>';
+    html+='<a class="cc-goto-admin" href="/heartbeat/admin/mobile?tab=compaction&session='+encodeURIComponent(id||"default")+'" target="_blank">去管理台压缩页 <span class="arrow">→</span></a>';
     body.innerHTML=html;
     body.querySelectorAll('[data-ccact]').forEach(function(b){
       b.addEventListener("click",function(){ const act=b.dataset.ccact,manual=b.dataset.manual==="1",idx=Number(b.dataset.idx),repId=decodeURIComponent(b.dataset.repid||"");
@@ -6666,7 +6661,7 @@ function loadCcPreview(box){
     var gaps=((d&&d.uncovered&&d.uncovered.gaps)||[]);
     var t=(d&&d.totals)||{};
     if(!chunks.length&&!gaps.length){ box.innerHTML='<div class="adm-empty">该会话暂无压缩块</div>'; return; }
-    box.innerHTML='<div class="adm-tip">摘要后约 '+(t.estCompressedChars||0)+' 字 · '+(t.chunkCount||0)+' 块 · 共 '+(t.totalChars||0)+' 字</div>'
+    box.innerHTML='<div class="adm-tip">实际约 '+(t.estCompressedChars||0)+' 字 · '+(t.chunkCount||0)+' 块 · 共 '+(t.totalChars||0)+' 字</div>'
       +'<div><div style="font-size:12px;font-weight:600;color:var(--ink2);margin-bottom:6px">压缩块</div>'
       + (window.__ccManualOrd=0, chunks.map(function(c){
         var isAi=!!c.aiRep;
