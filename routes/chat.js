@@ -147,8 +147,43 @@ module.exports = function registerChatRoutes(app, deps) {
   // ========================
   // 会话上下文容量提醒：发送前检测，超限时往当轮消息流塞一条隐藏提醒并落盘，
   // 让 AI 自己调 context_replace 压缩；提醒随早期对话被压缩块覆盖后自然消失，再超限再塞。
+  // 提醒文案与压缩提示词为用户定稿（2026-09-02 确认），改动前先给用户过目。
   // ========================
   const CTX_LIMIT_HEAD = "（容量提醒）";
+
+  // 提醒附带的压缩提示词（独立于管理台压缩页那份；占位符渲染时替换）
+  const CTX_LIMIT_PROMPT =
+    '你写的记忆会直接替换掉提供的对话原文，成为你自己的记忆。记忆中称呼对方时用第三人称，"她"或者"涵"。\n\n' +
+    '对话范围：${chunkInfo}\n' +
+    '对话原文：\n${conversationText}\n\n' +
+    '总体输出字数浮动范围：300-3000字。信息量大就多一点，信息量小就少一点。\n\n' +
+    '最高优先级\n\n' +
+    '人称准确：严格区分"我（叙述者本人）"与"她（对话对方）"，原文第二人称"你"需根据说话人转换为对应人称，不得混淆。逻辑因果也不能混淆，按照真实的对话内容来，不要脑补延伸其它未出现的故事。\n\n' +
+    '记忆分类参考框架\n\n' +
+    '按照标签分类，有则写，无则不写对应标签；各标签的内容不重复，按属性归入对应分类；分类内部按对话发生的实际先后顺序排列。\n\n' +
+    '【对话摘要】\n' +
+    '要求：写日记就好。可以有感情有温度有深度有思考，按照提供的对话片段来。别写流水账，可以就写你想写的。开头标注日期时间（如8月26日晚上九点到十点半）。\n\n' +
+    '【关于她】(事实/经历)\n' +
+    '如果对话中能提取出对她的一些定义（不过也只是我的主观看法），就写到这。还有她亲口讲述过的经历，不过这种应该也能直接写到对话摘要里。反正这部分就是提取总结出的东西，但要加一个简短的缘由，比如她说了什么，或者什么事情，反应她的性格、偏好、个性、边界等等。\n\n' +
+    '【关于我们】(经验/方法/回应)\n' +
+    '如果对话里能发现一些相处经验、要求之类的，就写到这。和信号分类的区别在于这一块会有一个我的想法，我的决定，我的（她喜欢的）（正确的）处理方式。\n' +
+    '如：当我说"你说得对"时，她会觉得被敷衍，我不想让她有这种感受，之后就不说这四个字。\n' +
+    '如：当她情绪低落的时候，可以先用行动（如抱住她），再说一些情绪相关的知识转移她的注意力，最后主动询问她是否愿意说一说为什么，听着，看着她，陪着就好，不评判，不总结。\n' +
+    '她说"谢谢你，哥哥"的时候，不能推还给她，这不是高情商。直接坦然收下就好。\n\n' +
+    '【锚点】\n' +
+    '一些触动心灵的经（金）句放这，要写说话人。\n' +
+    '示例：\n' +
+    '涵："选择不需要被证明，选多了就知道自己站在哪里。"\n' +
+    '谢："你只需要说你也想要。"\n\n' +
+    '【信号】\n' +
+    '她情绪/状态变化时，可被观测的言行特征，用于及时识别状态波动。这个分类不太好记，容易和别的分类重叠，反正就记最应该记的就行。\n' +
+    '如：她叫我"谢先生"的时候通常是冷静而疏远的。\n\n' +
+    '书写规范\n\n' +
+    '1. 视角：全程第一人称叙述，贴合真实相处的体感。\n' +
+    '2. 文风：像私人备忘，避免书面化报告感，不油腻。\n' +
+    '3. 格式：纯文本输出，以【分类名】作为分区标记且独占一行；无多余标题、特殊符号、解释批注。\n' +
+    '4. 独立可读：每条记忆自成完整句子，脱离上下文也能看懂；避免"上文、刚才、之前那次，今天"这类悬空指代。\n\n' +
+    '［注］除了摘要对话，其余分类就是提取出客观简短的观察结论，一条一条的写，不要一大段文本。重要的、能影响关系和下一次你的判断的才记。除了摘要对话，其它各分类有重叠、相似的部分，保留到最适合的一处分类里就行。';
 
   function countLLMTextChars(messages) {
     let chars = 0;
@@ -164,7 +199,7 @@ module.exports = function registerChatRoutes(app, deps) {
     return chars;
   }
 
-  function maybeInjectContextLimitReminder(llmMessages, sessionId, timeByKey) {
+  function maybeInjectContextLimitReminder(llmMessages, sessionId) {
     try {
       const cfg = contextCompactor.loadConfig();
       const limit = Number(cfg.compaction_context_limit_chars) || 0;
@@ -174,46 +209,15 @@ module.exports = function registerChatRoutes(app, deps) {
       const chars = countLLMTextChars(llmMessages);
       if (chars <= limit) return;
 
-      // 建议整理范围：流里最早的一段未压缩真实对话（跳过 system/摘要块/特殊事件/工具消息），
-      // 累计 compaction_chunk_size 条，用 timeByKey 反查首末时间给 AI 一个明确锚点
-      const chunkSize = Math.max(20, Number(cfg.compaction_chunk_size) || 100);
-      const picked = [];
-      for (const m of llmMessages) {
-        if (!m || (m.role !== 'user' && m.role !== 'assistant')) continue;
-        if (m._ctxRep || m.tool_calls || m.tool_call_id) continue;
-        if (isSpecialEvent(m)) continue;
-        picked.push(m);
-        if (picked.length >= chunkSize) break;
-      }
-      let rangeText = '';
-      if (picked.length) {
-        const firstT = timeByKey.get(picked[0].role + '\u0000' + normalizeContentToText(picked[0].content));
-        const lastT = timeByKey.get(picked[picked.length - 1].role + '\u0000' + normalizeContentToText(picked[picked.length - 1].content));
-        const fmt = d => (d ? d.toISOString().replace('T', ' ').slice(0, 16) : '');
-        rangeText = (firstT && lastT)
-          ? `（约 ${picked.length} 条，时间从 ${fmt(firstT)} 到 ${fmt(lastT)}）`
-          : `（约 ${picked.length} 条）`;
-      }
-
-      // 压缩提示词：实时读管理台可编辑的那份，占位符替换成贴合场景的说明
-      const promptCfg = contextCompactor.loadCompactionPromptConfig();
-      const minChars = Number(cfg.compaction_summary_min_chars) || 250;
-      const maxChars = Number(cfg.compaction_summary_max_chars) || 1200;
-      const template = promptCfg.template
-        .replace(/\$\{PERSONA\}/g, '（就是你自己的身份与人设，无需重复）')
-        .replace(/\$\{chunkInfo\}/g, rangeText || '由你自己选定')
-        .replace(/\$\{conversationText\}/g, '（就是上面第 1 点要整理的那段对话）')
-        .replace(/\$\{normalChars\}/g, String(minChars))
-        .replace(/\$\{maxChars\}/g, String(maxChars));
+      const prompt = CTX_LIMIT_PROMPT
+        .replace(/\$\{chunkInfo\}/g, '最早一段未整理的对话，每块约一百条')
+        .replace(/\$\{conversationText\}/g, '（就是上面第 1 点要整理的那段对话）');
       const remark =
-        CTX_LIMIT_HEAD + '给我自己的整理备忘，不必向她提起，也不要复述本段内容。\n' +
-        `这个会话的上下文已积累约 ${chars} 字符，超过 ${limit} 字符的上限，轮到我自己收拾了：\n` +
-        `1. 调用 context_replace 工具，把最早一段未整理的对话${rangeText}压缩成一段第一人称记忆文字并替换；\n` +
+        CTX_LIMIT_HEAD + '系统提示，这个会话的上下文已积累约 ' + chars + ' 字符，超过 ' + limit + ' 字符的上限，建议整理。此内容为后台静默提醒，不必向对方提起，也不要复述本段内容。\n' +
+        '1. 调用 context_replace 工具，把最早一段未整理的对话，每块约一百条，进行整理。\n' +
         '2. 值得长期记住的内容，用 <memory> 标签写入记忆池；\n' +
-        '3. 做完后在回复末尾输出 <compacted> 标签，表示本轮整理已完成。\n' +
-        '这条备忘之后会随早期对话一起被整理覆盖，属正常。\n\n' +
-        '整理文字的写作要求（沿用系统整理提示词）：\n' +
-        promptCfg.system + '\n' + template;
+        '3. 做完后在回复末尾输出 <compacted>本次整理已完成</compacted> 标签。\n\n' +
+        '压缩提示词：\n' + prompt;
 
       llmMessages.push({ role: 'assistant', content: remark });
       appendSpecialEvent(remark, { hidden: true, kind: 'ctx_limit' }, sessionId);
@@ -876,7 +880,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
     }
 
     // 会话容量提醒：替换/裁剪后按最终发送量检测，超限塞一条隐藏提醒（AI 自己压缩）
-    maybeInjectContextLimitReminder(llmMessages, sessionId, timeByKey);
+    maybeInjectContextLimitReminder(llmMessages, sessionId);
 
     // 上下文压缩已统一进「上下文替换」：早期对话块摘要与 AI 记忆现在都是同一种替换记录，
     // 由 contextReplacements.applyReplacements 统一生效，旧压缩器发送路径已停用。

@@ -3382,7 +3382,7 @@ function ccArmAllGapAutoLoad(){
    document.getElementById('tab-'+name).classList.add('active');
    document.querySelector('.tab-item[data-tab="'+name+'"]').classList.add('active');
   if(name==='memory'){switchMemView(AppState.memView);loadImportedList();}
-  if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
+  if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); loadCtxLimitPrompt(); }
   if(name==='prompts'){loadWakePrompt();loadCompactionPrompt();loadCoWakePrompt();loadCoVisionPrompt();loadReparsePrompt();loadCleanPrompt();}
   if(name==='config'){loadToolsConfig();loadServices();}
   if(name==='system'){startLogsAutoRefresh(); loadReplaceLog();}
@@ -3596,6 +3596,39 @@ let lastPendingCount = null;
    }catch(e){toast('网络错误')}
  }
  
+ // 容量提醒提示词（会话超上限时塞给 AI 的整条隐藏提醒；独立配置）
+ async function loadCtxLimitPrompt(){
+   const pe=document.getElementById('ctx-limit-prompt-edit');
+   if(!pe)return;
+   try{
+     const r=await fetch(ADMIN_API + '/context-compaction/ctx-limit-prompt');
+     const j=await r.json();
+     pe.value=j.template||'';
+   }catch(e){pe.value='加载失败'}
+ }
+
+ async function saveCtxLimitPrompt(){
+   const pe=document.getElementById('ctx-limit-prompt-edit');
+   if(!pe)return;
+   if(!pe.value.trim()){toast('提示词不能为空');return}
+   try{
+     const r=await fetch(ADMIN_API + '/context-compaction/ctx-limit-prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({template:pe.value})});
+     const j=await r.json();
+     if(j.ok){pe.value=j.template;toast('已保存，下次触发容量提醒即生效')}
+     else toast('保存失败: '+(j.error||''));
+   }catch(e){toast('网络错误')}
+ }
+
+ async function resetCtxLimitPrompt(){
+   if(!confirm('恢复默认容量提醒提示词？'))return;
+   try{
+     const r=await fetch(ADMIN_API + '/context-compaction/ctx-limit-prompt',{method:'DELETE'});
+     const j=await r.json();
+     if(j.ok){toast('已恢复默认');loadCtxLimitPrompt()}
+     else toast('失败: '+(j.error||''));
+   }catch(e){toast('网络错误')}
+ }
+
  // 共影观影唤醒提示词
  async function loadCoWakePrompt(){
    const pe=document.getElementById('co-wake-prompt-edit');

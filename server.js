@@ -3866,6 +3866,34 @@ app.delete("/admin/logs/compaction-prompt", { preHandler: basicAuth }, async (re
   }
 });
 
+// 容量提醒提示词（会话超上限时塞给 AI 的整条提醒；独立配置，与压缩提示词互不关联）
+app.get("/admin/context-compaction/ctx-limit-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    reply.send({ template: contextCompactor.loadCtxLimitPrompt() });
+  } catch (err) {
+    reply.send({ error: err.message });
+  }
+});
+
+app.post("/admin/context-compaction/ctx-limit-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const r = contextCompactor.saveCtxLimitPrompt(req.body && req.body.template);
+    if (!r.ok) return reply.code(400).send({ error: r.message });
+    reply.send({ ok: true, template: r.template });
+  } catch (err) {
+    reply.code(400).send({ error: err.message });
+  }
+});
+
+app.delete("/admin/context-compaction/ctx-limit-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const r = contextCompactor.resetCtxLimitPrompt();
+    reply.send(r);
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
 // 历史版本恢复/删除（恢复：前端压缩页历史版本按钮使用）
 app.post("/admin/context-compaction/restore", { preHandler: basicAuth }, async (req, reply) => {
   const body = req.body || {};
