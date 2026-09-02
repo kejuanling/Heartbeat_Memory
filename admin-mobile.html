@@ -276,20 +276,6 @@
       </div>
     </div>
 
-    <div class="card" data-collapse-id="ctx-limit-prompt" data-default="collapsed" style="margin-top:14px">
-      <div class="card-title collapsible" onclick="toggleCard(this)"><span>容量提醒提示词</span><span class="collapse-arrow">▾</span></div>
-      <div class="card-body">
-        <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">会话上下文超过容量上限时，网关塞给 AI 的整条隐藏提醒（前端不显示）。占位符：${chars}=当前字符数、${limit}=容量上限、${chunkInfo}=建议整理范围、${conversationText}=要整理的对话。开头「（容量提醒）」是系统识别标记，保存时会强制校验，不可删改。与「提示词」页的压缩提示词互相独立。</div>
-        <textarea id="ctx-limit-prompt-edit" rows="14" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;line-height:1.6;font-family:monospace;resize:vertical;"></textarea>
-        <div class="env-row" style="margin-top:8px;gap:8px;">
-          <button type="button" class="btn btn-primary" onclick="saveCtxLimitPrompt()" style="flex:1;background:var(--accent)">保存</button>
-          <button type="button" class="btn btn-outline" onclick="loadCtxLimitPrompt()" style="flex:1">重新载入</button>
-          <button type="button" class="btn btn-outline" onclick="resetCtxLimitPrompt()" style="flex:1">恢复默认</button>
-        </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 data/ctx_limit_prompt.json，下次触发容量提醒即生效。</div>
-      </div>
-    </div>
-
 </div>
 
 
@@ -318,6 +304,19 @@
          <button type="button" class="btn btn-outline" onclick="resetCompactionPrompt()" style="flex:1">恢复默认</button>
        </div>
        <div style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 data/compaction_prompt.json，下次生成压缩摘要即生效。</div>
+     </div>
+   </div>
+   <div class="card" data-collapse-id="ctx-limit-prompt" data-default="collapsed">
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>容量提醒提示词</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-body">
+       <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">会话上下文超过容量上限时，网关塞给 AI 的整条隐藏提醒（前端不显示）。占位符：${chars}=当前字符数、${limit}=容量上限、${chunkInfo}=建议整理范围、${conversationText}=要整理的对话。开头「（容量提醒）」是系统识别标记，保存时会强制校验，不可删改。与上面的压缩上下文提示词互相独立。</div>
+       <textarea id="ctx-limit-prompt-edit" rows="14" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;line-height:1.6;font-family:monospace;resize:vertical;"></textarea>
+       <div class="env-row" style="margin-top:8px;gap:8px;">
+         <button type="button" class="btn btn-primary" onclick="saveCtxLimitPrompt()" style="flex:1;background:var(--accent)">保存</button>
+         <button type="button" class="btn btn-outline" onclick="loadCtxLimitPrompt()" style="flex:1">重新载入</button>
+         <button type="button" class="btn btn-outline" onclick="resetCtxLimitPrompt()" style="flex:1">恢复默认</button>
+       </div>
+       <div style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 data/ctx_limit_prompt.json，下次触发容量提醒即生效。</div>
      </div>
    </div>
        <div class="card" data-collapse-id="reparse-prompt-config" data-default="collapsed">

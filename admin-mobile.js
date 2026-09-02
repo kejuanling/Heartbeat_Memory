@@ -3384,8 +3384,8 @@ function ccArmAllGapAutoLoad(){
    document.getElementById('tab-'+name).classList.add('active');
    document.querySelector('.tab-item[data-tab="'+name+'"]').classList.add('active');
   if(name==='memory'){switchMemView(AppState.memView);loadImportedList();}
-  if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); loadCtxLimitPrompt(); }
-  if(name==='prompts'){loadWakePrompt();loadCompactionPrompt();loadCoWakePrompt();loadCoVisionPrompt();loadReparsePrompt();loadCleanPrompt();}
+  if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
+  if(name==='prompts'){loadWakePrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadCoWakePrompt();loadCoVisionPrompt();loadReparsePrompt();loadCleanPrompt();}
   if(name==='config'){loadToolsConfig();loadServices();}
   if(name==='system'){startLogsAutoRefresh(); loadReplaceLog();}
   if(name!=='system'){stopLogsAutoRefresh();}
