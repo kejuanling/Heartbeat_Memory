@@ -3249,6 +3249,7 @@ function branchFromMsg(idx){
   try{ parents=JSON.parse(localStorage.getItem("han_branch_parents")||"{}"); }catch(e){}
   parents[sid]={fromSession:srcSession,fromIndex:idx,createdAt:new Date().toISOString()};
   try{ localStorage.setItem("han_branch_parents",JSON.stringify(parents)); }catch(e){}
+  pushSessionParents();   // 跨设备同步分支父级
   const seg=msgText(m).replace(/\s+/g," ").slice(0,12);
   const named=("分支 · "+(seg||"从该消息"));
   let nameMap={}; try{ nameMap=JSON.parse(localStorage.getItem("han_session_names")||"{}"); }catch(e){}
@@ -5129,6 +5130,7 @@ async function switchSession(id){
   closeDrawer();
   renderSessionList();
   startLiveEvents();   // 切到新会话后重新订阅该会话的实时更新
+  alignLocalStars();   // 切会话后按已拉取的标记列表对齐本会话标星 UI
 }
 
 // 新建会话
@@ -5230,6 +5232,69 @@ async function pullSessionPins(){
     try{ localStorage.setItem("han_pinned_sessions",JSON.stringify(pins)); }catch(e){}
     pushSessionPins();
   }catch(e){}
+}
+
+// 会话分支父级跨设备同步（存到服务器 data/session-branches.json）
+async function pushSessionParents(){
+  try{
+    let parents={}; try{ parents=JSON.parse(localStorage.getItem("han_branch_parents")||"{}"); }catch(e){ parents={}; }
+    const r=await fetch("/heartbeat/admin/session-branches",{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":getCookie("admin_csrf")},body:JSON.stringify({branches:parents}),credentials:"include"});
+    return r.ok;
+  }catch(e){ return false; }
+}
+async function pullSessionParents(){
+  try{
+    const r=await fetch("/heartbeat/admin/session-branches",{headers:{"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include"});
+    if(!r.ok) return;
+    const j=await r.json();
+    const serverBranches=(j&&j.branches)||{};
+    let parents={}; try{ parents=JSON.parse(localStorage.getItem("han_branch_parents")||"{}"); }catch(e){ parents={}; }
+    let changed=false;
+    for(const k of Object.keys(serverBranches)){
+      const v=serverBranches[k];
+      if(v && typeof v==="object" && !parents[k]){
+        parents[k]={fromSession:String(v.fromSession||""),fromIndex:(Number(v.fromIndex)>=0)?Number(v.fromIndex):0,createdAt:String(v.createdAt||"")};
+        changed=true;
+      }
+    }
+    if(changed){ try{ localStorage.setItem("han_branch_parents",JSON.stringify(parents)); }catch(e){} }
+    pushSessionParents();   // 双向收敛：本地独有项也推回服务器
+  }catch(e){}
+}
+
+// 标星 UI 状态跨设备对齐：从管理台标记列表(sha256 key)拉取，按 key 对齐本地 UI 标星缓存(djb2 key)
+// 只在成功拉到完整 marked-list 时做双向对齐（服务器有→本地加；服务器无→本地移除），避免拉取失败误删
+let _serverMarkedKeys=null;   // Set(sha256 key) | null=未拉取成功
+async function pullStarredKeysFromServer(){
+  try{
+    const r=await fetch(ccBase()+"/context-compaction/marked-list",{headers:{"X-CSRF-Token":ccGetCookie("admin_csrf")},credentials:"include"});
+    if(!r.ok) return false;
+    const j=await r.json();
+    const arr=Array.isArray(j)?j:(Array.isArray(j&&j.items)?j.items:(Array.isArray(j&&j.results)?j.results:[]));
+    _serverMarkedKeys=new Set();
+    arr.forEach(function(it){ if(it&&typeof it.key==="string"&&it.key){ _serverMarkedKeys.add(it.key); } });
+    if(_serverMarkedKeys.size){ alignLocalStars(); }
+    return true;
+  }catch(e){ return false; }
+}
+async function alignLocalStars(){
+  if(!_serverMarkedKeys||!_serverMarkedKeys.size) return;
+  if(!msgs||!msgs.length) return;
+  let keys=[]; try{ keys=JSON.parse(localStorage.getItem("han_starred_keys")||"[]"); }catch(e){ keys=[]; }
+  const set=new Set(keys);
+  let changed=false;
+  const tasks=msgs.map(function(m){
+    return msgStarKeyBackend(m).then(function(sha){
+      const dj=msgStarKeySync(m);
+      if(_serverMarkedKeys.has(sha)){ if(!set.has(dj)){ set.add(dj); changed=true; } }
+      else if(set.has(dj)){ set.delete(dj); changed=true; }
+    }).catch(function(){});
+  });
+  await Promise.all(tasks);
+  if(changed){
+    try{ localStorage.setItem("han_starred_keys",JSON.stringify(Array.from(set))); }catch(e){}
+    renderAll(true);   // 保持位置刷新，让★即时显示/消失
+  }
 }
 
 // 导出会话
@@ -5547,6 +5612,8 @@ async function initChat(){
   }
   pullSessionNames();   // 拉取跨设备改名映射
   pullSessionPins();    // 拉取跨设备会话置顶
+  pullSessionParents(); // 拉取跨设备分支父级
+  pullStarredKeysFromServer();   // 标星 UI 状态从管理台标记列表对齐（异步，渲染后生效）
   const localMsgs=loadMsgs();               // 本地缓存：保留思考链/工具/token 等完整数据
   // 始终向网关拉一次，保证另一台设备发的消息能同步进来；失败则回退本地缓存。
   // 优先用服务器权威数据，避免本地缓存脏了(比如某浏览器历史遗留/重复消息)导致显示不完整、滚动错位。
@@ -5649,7 +5716,6 @@ init();
 var BASE = '/heartbeat/admin';
 
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
-function getCookie(n){ try{ var m=document.cookie.match(new RegExp('(?:^|; )'+n.replace(/[.$?*|{}()[\]\\/+^]/g,'\\$&')+'=([^;]*)')); return m?decodeURIComponent(m[1]):''; }catch(e){ return ''; } }
 function txt(v){ return v==null?'':String(v); }
 function toast(t){ if(typeof showToast==='function'){ showToast(t); } }
 

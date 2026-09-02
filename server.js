@@ -5310,6 +5310,36 @@ app.put("/admin/session-pins", { preHandler: basicAuth }, async (req, reply) => 
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
+// 会话分支父级跨设备同步（存 data/session-branches.json）
+const SESSION_BRANCHES_FILE = path.join(__dirname, "data", "session-branches.json");
+app.get("/admin/session-branches", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    let branches = {};
+    try { if (fs.existsSync(SESSION_BRANCHES_FILE)) branches = JSON.parse(fs.readFileSync(SESSION_BRANCHES_FILE, "utf-8")) || {}; } catch (e) {}
+    reply.send({ ok: true, branches });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+app.put("/admin/session-branches", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const body = (req.body && typeof req.body === "object") ? req.body : {};
+    const branches = (body.branches && typeof body.branches === "object") ? body.branches : {};
+    fs.ensureDirSync(path.dirname(SESSION_BRANCHES_FILE));
+    const clean = {};
+    for (const k of Object.keys(branches)) {
+      const v = branches[k];
+      if (v && typeof v === "object") {
+        clean[k] = {
+          fromSession: String(v.fromSession || ""),
+          fromIndex: (Number(v.fromIndex) >= 0) ? Number(v.fromIndex) : 0,
+          createdAt: String(v.createdAt || "")
+        };
+      }
+    }
+    fs.writeFileSync(SESSION_BRANCHES_FILE, JSON.stringify(clean, null, 2), "utf-8");
+    reply.send({ ok: true, saved: true, count: Object.keys(clean).length });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
 // ======================== 网页视频解析（共影） ========================
 // 抓取网页页面，提取候选视频地址（video 标签 / og:video / 页面内视频链接）
 async function fetchPageLimited(pageUrl, maxBytes) {
