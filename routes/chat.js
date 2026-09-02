@@ -178,13 +178,22 @@ module.exports = function registerChatRoutes(app, deps) {
       if (chars <= limit) return;
 
       // 建议整理段：流里最早的一段未压缩真实对话（跳过 system/摘要块/特殊事件/工具消息），
-      // 取前 100 条，用 timeByKey 反查首末时间——给 AI 明确时间边界，防选错段压错范围
+      // 取前 100 条，用 timeByKey 反查首末时间——给 AI 明确时间边界，防选错段压错范围。
+      // 标星原句会保留在摘要前继续出现在上下文（设计如此），但它们不是「未压缩对话」——
+      // 必须跳过，否则建议区间起点会落在已压缩区里的标星漏网原句上（渲染时间一直指向旧段）
       const CHUNK_TARGET = 100;
+      let starredKeys = null;
+      try { starredKeys = contextReplacements.loadMarks(); } catch (e) { starredKeys = null; }
+      const isStarredMsg = m => {
+        if (!starredKeys || !m) return false;
+        try { return Boolean(starredKeys[contextReplacements.contentKey(m)]); } catch (e) { return false; }
+      };
       const picked = [];
       for (const m of llmMessages) {
         if (!m || (m.role !== 'user' && m.role !== 'assistant')) continue;
         if (m._ctxRep || m.tool_calls || m.tool_call_id) continue;
         if (isSpecialEvent(m)) continue;
+        if (isStarredMsg(m)) continue;
         picked.push(m);
         if (picked.length >= CHUNK_TARGET) break;
       }
