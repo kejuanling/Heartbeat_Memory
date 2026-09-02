@@ -817,6 +817,17 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .hd-typing-text{font-weight:500}
 @keyframes tp{0%,60%,100%{opacity:.3;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
 
+/* 顶部加载进度条：header 底缘细条，网络请求进行中且超过 250ms 才出现 */
+#topLoading{position:absolute;left:0;right:0;bottom:-2px;height:2px;overflow:hidden;opacity:0;transition:opacity .18s;pointer-events:none;z-index:6}
+#topLoading.on{opacity:1}
+#topLoading i{position:absolute;top:0;bottom:0;width:38%;border-radius:2px;background:linear-gradient(90deg,transparent,var(--accent),var(--accent-deep));animation:topLoad 1.1s ease-in-out infinite}
+@keyframes topLoad{0%{left:-40%}100%{left:105%}}
+/* 切会话转圈：消息区半透明遮罩 + 居中 spinner */
+#chatSwitching{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(255,255,255,.5);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);z-index:5;pointer-events:none}
+#chatSwitching.on{display:flex}
+#chatSwitching .cs-spin{width:30px;height:30px;border-radius:50%;border:3px solid var(--accent-soft);border-top-color:var(--accent);animation:csSpin .8s linear infinite}
+@keyframes csSpin{to{transform:rotate(360deg)}}
+
 /* toast */
 #toast{
   position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(10px);
@@ -1269,6 +1280,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
   <button class="hd-btn" id="worldBtn" title="小世界"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/></svg></button>
   <button class="hd-btn" id="voiceBtn" title="语音通话"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.6a2 2 0 0 1-.5 2.1L8 9.6a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.8.3 1.7.5 2.6.6a2 2 0 0 1 1.7 2z"/></svg></button>
   <button class="hd-btn" id="navBtn" title="菜单"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+  <div id="topLoading"><i></i></div>
 </header>
 
 <!-- 会话侧边栏抽屉 -->
@@ -1325,6 +1337,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 </div>
 
 <div id="chat">
+  <div id="chatSwitching"><span class="cs-spin"></span></div>
   <div id="empty">
     <div class="big"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.6L18 9.4l-4.2 1.8L12 16l-1.8-4.8L6 9.4l4.2-1.8z"/></svg></div>
     <div class="t1">跟我说说话吧</div>
@@ -1543,7 +1556,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
               <div style="margin-top:10px"><label>max_tokens<span class="tag">可选</span></label><input type="number" min="1" id="maxTokInput" placeholder="留空不限制"></div>
             </div>
             <button type="button" class="mcp-btn primary" id="aiSaveBtn" style="margin-top:12px" onclick="saveSettingsAll()">保存 AI 设置</button>
-            </div></div><div class="set-panel" data-acc="memwake"><div class="set-acc-h" data-acc="memwake">记忆与唤醒参数<span class="ar">▾</span></div><div class="set-sec"><div class="set-sec-label">唤醒</div><div class="field"><label>唤醒历史最大条数</label><input type="number" id="mwWake" value="80"></div><div class="set-sec-label">记忆池</div><div class="field"><label>去重阈值</label><input type="number" step="0.05" min="0" max="1" id="mwDedup" value="0.78"></div><div class="field"><label>衰减半衰期（天）</label><input type="number" step="1" min="1" id="mwDecay" value="30"></div><div class="set-sec-label">再解析（压缩摘要 → 记忆池）</div><div class="field"><label>每条字数上限</label><input type="number" step="1" min="5" id="mwRmax" value="30"></div><div class="field"><label>每段最多条数</label><input type="number" step="1" min="1" id="mwRmaxitems" value="8"></div><div class="set-sec-label">跨窗口注入</div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">总开关</label><label class="adm-sw"><input type="checkbox" id="mwCross" checked><i></i></label></div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">固定注入</label><label class="adm-sw"><input type="checkbox" id="mwAlways"><i></i></label></div><div class="field"><label>消息少于 N 条</label><input type="number" step="1" min="1" id="mwMaxmsgs" value="2"></div><div class="field"><label>日记天数</label><input type="number" step="1" min="0" id="mwDays" value="3"></div><div class="field"><label>每类注入条数</label><input type="number" step="1" min="1" id="mwMempercat" value="2"></div><div class="field"><label>摘要最近天数</label><input type="number" step="1" min="1" id="mwSumdays" value="7"></div><div class="field"><label>标星条数</label><input type="number" step="1" min="1" id="mwStartopk" value="10"></div><div class="set-sec-label">压缩</div><div class="field"><label>活跃块保留上限（0=不限）</label><input type="number" step="1" min="0" id="mwCcmax" value="0"><div style="font-size:11px;color:var(--ink3);margin-top:4px">手动+AI 块合计只保留时间线上最近的 N 个进入上下文，更早的块隐藏不注入（数据不删，调大即恢复）。</div></div><div class="mcp-msg" id="mwMsg"></div><button type="button" class="mcp-btn primary" id="mwSaveBtn">保存参数</button></div></div><div class="set-panel" data-acc="sendcfg"><div class="set-acc-h" data-acc="sendcfg">对话发送配置<span class="ar">▾</span></div><div class="set-sec"><div class="field">
+            </div></div><div class="set-panel" data-acc="memwake"><div class="set-acc-h" data-acc="memwake">记忆与唤醒参数<span class="ar">▾</span></div><div class="set-sec"><div class="set-sec-label">唤醒</div><div class="field"><label>唤醒历史最大条数</label><input type="number" id="mwWake" value="80"></div><div class="set-sec-label">记忆池</div><div class="field"><label>去重阈值</label><input type="number" step="0.05" min="0" max="1" id="mwDedup" value="0.78"></div><div class="field"><label>衰减半衰期（天）</label><input type="number" step="1" min="1" id="mwDecay" value="30"></div><div class="set-sec-label">再解析（压缩摘要 → 记忆池）</div><div class="field"><label>每条字数上限</label><input type="number" step="1" min="5" id="mwRmax" value="30"></div><div class="field"><label>每段最多条数</label><input type="number" step="1" min="1" id="mwRmaxitems" value="8"></div><div class="set-sec-label">跨窗口注入</div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">总开关</label><label class="adm-sw"><input type="checkbox" id="mwCross" checked><i></i></label></div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">固定注入</label><label class="adm-sw"><input type="checkbox" id="mwAlways"><i></i></label></div><div class="field"><label>消息少于 N 条</label><input type="number" step="1" min="1" id="mwMaxmsgs" value="2"></div><div class="field"><label>日记天数</label><input type="number" step="1" min="0" id="mwDays" value="3"></div><div class="field"><label>每类注入条数</label><input type="number" step="1" min="1" id="mwMempercat" value="2"></div><div class="field"><label>摘要最近天数</label><input type="number" step="1" min="1" id="mwSumdays" value="7"></div><div class="field"><label>标星条数</label><input type="number" step="1" min="1" id="mwStartopk" value="10"></div><div class="set-sec-label">压缩</div><div class="field"><label>活跃块保留上限（0=不限）</label><input type="number" step="1" min="0" id="mwCcmax" value="0"><div style="font-size:11px;color:var(--ink3);margin-top:4px">手动+AI 块合计只保留时间线上最近的 N 个进入上下文，更早的块隐藏不注入（数据不删，调大即恢复）。</div></div><div class="field"><label>上下文容量上限（字符，0=不限）</label><input type="number" step="1000" min="0" id="mwClim" value="30000"><div style="font-size:11px;color:var(--ink3);margin-top:4px">发给 AI 的上下文字符超过上限时，网关塞一条隐藏提醒，让 AI 自己调工具压缩整理（前端看不到这条提醒）。</div></div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">容量提醒开关</label><label class="adm-sw"><input type="checkbox" id="mwClimOn" checked><i></i></label></div><div class="mcp-msg" id="mwMsg"></div><button type="button" class="mcp-btn primary" id="mwSaveBtn">保存参数</button></div></div><div class="set-panel" data-acc="sendcfg"><div class="set-acc-h" data-acc="sendcfg">对话发送配置<span class="ar">▾</span></div><div class="set-sec"><div class="field">
               <label>保留最近 N 条带图消息的历史图片（0=不保留，当前发送的图始终保留）</label>
               <input type="number" id="imgKeepTurns" min="0" step="1" value="8">
             </div>
@@ -1816,9 +1829,12 @@ function applySettingsToUI(){
   loadPromptBackups();
 }
 async function syncSettingsFromCloud(){
-  const got=await pullSettingsFromCloud();
-  if(got){ applySettingsToUI(); applyHeader(); renderPicks(); applyTheme(); renderAll(); }
-  return got;
+  topLoadStart();
+  try{
+    const got=await pullSettingsFromCloud();
+    if(got){ applySettingsToUI(); applyHeader(); renderPicks(); applyTheme(); renderAll(); }
+    return got;
+  }finally{topLoadEnd();}
 }
 
 /* ================= 元素 ================= */
@@ -1980,8 +1996,14 @@ function loadMsgs(){
 }
 function saveMsgs(){ try{ localStorage.setItem(LS_MSGS+"_"+currentSession,JSON.stringify(msgs)); }catch(e){ /* 配额满或超限时忽略，避免中断发送/流式 */ } }
 
+/* 顶部加载指示：in-flight 计数，超过 250ms 才显示，防快速请求闪烁 */
+let _topLoadCnt=0,_topLoadTimer=null;
+function topLoadStart(){_topLoadCnt++;if(_topLoadCnt===1){_topLoadTimer=setTimeout(function(){var el=document.getElementById("topLoading");if(el)el.classList.add("on");},250);}}
+function topLoadEnd(){_topLoadCnt=Math.max(0,_topLoadCnt-1);if(_topLoadCnt===0){if(_topLoadTimer){clearTimeout(_topLoadTimer);_topLoadTimer=null;}var el=document.getElementById("topLoading");if(el)el.classList.remove("on");}}
+
 /* 从网关拉取完整历史（首次打开 / 刷新时用），失败回退本地 */
 async function fetchHistory(){
+  topLoadStart();
   try{
     const r=await fetch(HISTORY_API+"?session_id="+encodeURIComponent(currentSession),{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
     if(!r.ok)return null;
@@ -1989,6 +2011,7 @@ async function fetchHistory(){
     if(!j||!Array.isArray(j.items))return null;
     return j.items;
   }catch(e){return null;}
+  finally{topLoadEnd();}
 }
 // 全局：强制重新拉取完整对话并重渲染（供菜单“请求完整上下文”调用）
 window.refreshFullContext=async function(){
@@ -5294,15 +5317,19 @@ async function switchSession(id){
   localStorage.setItem("han_current_session",id);
   pushCurrentSession();   // 跨设备同步：上报当前打开的会话
   applyHeader();
-  const localMsgs=loadMsgs();    // 本地缓存：保留思考链/工具/token
-  // 优先用服务器权威数据（避免本地脏缓存导致不完整），服务器为空才回退本地。
-  const history=await fetchHistory();
-  if(history&&history.length){
-    msgs=mergeEnrichment(history,localMsgs); saveMsgs();
-  }else{
-    msgs=localMsgs||[];
-  }
-  renderAll();scrollBottom();
+  const csEl=document.getElementById("chatSwitching");
+  if(csEl)csEl.classList.add("on");
+  try{
+    const localMsgs=loadMsgs();    // 本地缓存：保留思考链/工具/token
+    // 优先用服务器权威数据（避免本地脏缓存导致不完整），服务器为空才回退本地。
+    const history=await fetchHistory();
+    if(history&&history.length){
+      msgs=mergeEnrichment(history,localMsgs); saveMsgs();
+    }else{
+      msgs=localMsgs||[];
+    }
+    renderAll();scrollBottom();
+  }finally{ if(csEl)csEl.classList.remove("on"); }
   closeDrawer();
   renderSessionList();
   startLiveEvents();   // 切到新会话后重新订阅该会话的实时更新
@@ -6260,7 +6287,7 @@ function renderSendCfg(body){
   }).catch(function(e){ body.innerHTML='<div class="adm-empty">加载失败: '+esc(e.message)+'</div>'; });
 }
 
-/* ---------------- 记忆与唤醒参数（设置页 · 由原菜单卡片迁移） ---------------- */function loadMemWakeSettings(){  Promise.all([admGet(BASE+'/config'), admGet(BASE+'/memory-pool/config'), admGet(BASE+'/context-compaction/config')]).then(function(res){    var c=res[0], m=res[1], cc=(res[2]&&typeof res[2]==='object')?res[2]:{};    function num(v,d){ return v!=null?v:d; }    function setVal(id,v){ var el=document.getElementById(id); if(el) el.value=v; }    function setChk(id,b){ var el=document.getElementById(id); if(el) el.checked=!!b; }    setVal('mwWake',num(c.wake_history_max_messages,80));    setVal('mwDedup',num(m.dedup_threshold,0.78));    setVal('mwDecay',num(m.decay_days,30));    setVal('mwRmax',num(m.reparse_max_chars,30));    setVal('mwRmaxitems',num(m.reparse_max_items,8));    setChk('mwCross',m.cross_inject_enabled!==false);    setChk('mwAlways',m.cross_inject_always===true);    setVal('mwMaxmsgs',num(m.cross_inject_max_msgs,2));    setVal('mwDays',num(m.cross_inject_diary_days,3));    setVal('mwMempercat',num(m.cross_inject_memory_per_category,2));    setVal('mwSumdays',num(m.cross_inject_summary_days,7));    setVal('mwStartopk',num(m.cross_inject_starred_topk,10));    setVal('mwCcmax',num(cc.compaction_max_active_blocks,0));  }).catch(function(e){ var m=document.getElementById('mwMsg'); if(m) m.textContent='加载失败: '+(e&&e.message||e); });}function saveMemWakeSettings(){  var up={wake_history_max_messages:Number(document.getElementById('mwWake').value)||0};  var up2={    dedup_threshold:Number(document.getElementById('mwDedup').value)||0.78,    decay_days:Number(document.getElementById('mwDecay').value)||30,    reparse_max_chars:Number(document.getElementById('mwRmax').value)||30,    reparse_max_items:Number(document.getElementById('mwRmaxitems').value)||8,    cross_inject_enabled:document.getElementById('mwCross').checked,    cross_inject_always:document.getElementById('mwAlways').checked,    cross_inject_max_msgs:Number(document.getElementById('mwMaxmsgs').value)||2,    cross_inject_diary_days:Number(document.getElementById('mwDays').value)||3,    cross_inject_memory_per_category:Number(document.getElementById('mwMempercat').value)||2,    cross_inject_summary_days:Number(document.getElementById('mwSumdays').value)||7,    cross_inject_starred_topk:Number(document.getElementById('mwStartopk').value)||10  };  var up3={compaction_max_active_blocks:Math.max(0,Math.floor(Number(document.getElementById('mwCcmax').value)||0))};  Promise.all([admPost(BASE+'/config',up), admPost(BASE+'/memory-pool/config',up2), admPost(BASE+'/context-compaction/config',up3)]).then(function(res){    var bad=res.some(function(j){ return j&&j.error; });    var m=document.getElementById('mwMsg');    if(m){ m.textContent=bad?'部分参数保存失败':'已保存，下次请求/重启生效（跨窗口注入即时生效）。'; }    showToast(bad?'部分参数保存失败':'记忆与唤醒参数已保存');  }).catch(function(e){ var m=document.getElementById('mwMsg'); if(m) m.textContent='保存失败: '+(e&&e.message||e); });}if(document.getElementById('mwSaveBtn')){  document.getElementById('mwSaveBtn').addEventListener('click', saveMemWakeSettings);}
+/* ---------------- 记忆与唤醒参数（设置页 · 由原菜单卡片迁移） ---------------- */function loadMemWakeSettings(){  Promise.all([admGet(BASE+'/config'), admGet(BASE+'/memory-pool/config'), admGet(BASE+'/context-compaction/config')]).then(function(res){    var c=res[0], m=res[1], cc=(res[2]&&typeof res[2]==='object')?res[2]:{};    function num(v,d){ return v!=null?v:d; }    function setVal(id,v){ var el=document.getElementById(id); if(el) el.value=v; }    function setChk(id,b){ var el=document.getElementById(id); if(el) el.checked=!!b; }    setVal('mwWake',num(c.wake_history_max_messages,80));    setVal('mwDedup',num(m.dedup_threshold,0.78));    setVal('mwDecay',num(m.decay_days,30));    setVal('mwRmax',num(m.reparse_max_chars,30));    setVal('mwRmaxitems',num(m.reparse_max_items,8));    setChk('mwCross',m.cross_inject_enabled!==false);    setChk('mwAlways',m.cross_inject_always===true);    setVal('mwMaxmsgs',num(m.cross_inject_max_msgs,2));    setVal('mwDays',num(m.cross_inject_diary_days,3));    setVal('mwMempercat',num(m.cross_inject_memory_per_category,2));    setVal('mwSumdays',num(m.cross_inject_summary_days,7));    setVal('mwStartopk',num(m.cross_inject_starred_topk,10));    setVal('mwCcmax',num(cc.compaction_max_active_blocks,0));    setVal('mwClim',num(cc.compaction_context_limit_chars,30000));    setChk('mwClimOn',cc.compaction_context_remind_enabled!==false);  }).catch(function(e){ var m=document.getElementById('mwMsg'); if(m) m.textContent='加载失败: '+(e&&e.message||e); });}function saveMemWakeSettings(){  var up={wake_history_max_messages:Number(document.getElementById('mwWake').value)||0};  var up2={    dedup_threshold:Number(document.getElementById('mwDedup').value)||0.78,    decay_days:Number(document.getElementById('mwDecay').value)||30,    reparse_max_chars:Number(document.getElementById('mwRmax').value)||30,    reparse_max_items:Number(document.getElementById('mwRmaxitems').value)||8,    cross_inject_enabled:document.getElementById('mwCross').checked,    cross_inject_always:document.getElementById('mwAlways').checked,    cross_inject_max_msgs:Number(document.getElementById('mwMaxmsgs').value)||2,    cross_inject_diary_days:Number(document.getElementById('mwDays').value)||3,    cross_inject_memory_per_category:Number(document.getElementById('mwMempercat').value)||2,    cross_inject_summary_days:Number(document.getElementById('mwSumdays').value)||7,    cross_inject_starred_topk:Number(document.getElementById('mwStartopk').value)||10  };  var up3={compaction_max_active_blocks:Math.max(0,Math.floor(Number(document.getElementById('mwCcmax').value)||0)),compaction_context_limit_chars:Math.max(0,Math.floor(Number(document.getElementById('mwClim').value)||0)),compaction_context_remind_enabled:document.getElementById('mwClimOn').checked};  Promise.all([admPost(BASE+'/config',up), admPost(BASE+'/memory-pool/config',up2), admPost(BASE+'/context-compaction/config',up3)]).then(function(res){    var bad=res.some(function(j){ return j&&j.error; });    var m=document.getElementById('mwMsg');    if(m){ m.textContent=bad?'部分参数保存失败':'已保存，下次请求/重启生效（跨窗口注入即时生效）。'; }    showToast(bad?'部分参数保存失败':'记忆与唤醒参数已保存');  }).catch(function(e){ var m=document.getElementById('mwMsg'); if(m) m.textContent='保存失败: '+(e&&e.message||e); });}if(document.getElementById('mwSaveBtn')){  document.getElementById('mwSaveBtn').addEventListener('click', saveMemWakeSettings);}
 /* ---------------- 记忆池 ---------------- */
 var _mpRefresh = null;
 function refreshMemPoolList(){ if(_mpRefresh) _mpRefresh(); }

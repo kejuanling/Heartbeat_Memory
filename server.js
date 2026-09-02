@@ -646,16 +646,17 @@ function buildQuietHeldReply(reply) {
 function createContentTagFilter() {
   let buf = "";
   let inTag = false;
-  let tagType = ""; // "memory" | "pin" | "wake" | "quiet"
+  let tagType = ""; // "memory" | "pin" | "wake" | "quiet" | "compacted"
 
-  // 判断 tail（从某个 "<" 开始的小写文本）是否可能是 memory/pin/wake 开标签
+  // 判断 tail（从某个 "<" 开始的小写文本）是否可能是 memory/pin/wake/compacted 开标签
   function isPotentialOpen(tail) {
-    if (/^<(memory|pin|wake|quiet)(\s[^>]*)?>/.test(tail)) return true; // 完整开标签（可带属性）
-    if (/^<(memory|pin|wake|quiet)\s[^>]*$/.test(tail)) return true;     // 属性写法进行中
-    if (/^<(memory|pin|wake|quiet)$/.test(tail)) return true;            // 恰好 <memory / <pin / <wake / <quiet
+    if (/^<(memory|pin|wake|quiet|compacted)(\s[^>]*)?>/.test(tail)) return true; // 完整开标签（可带属性）
+    if (/^<(memory|pin|wake|quiet|compacted)\s[^>]*$/.test(tail)) return true;     // 属性写法进行中
+    if (/^<(memory|pin|wake|quiet|compacted)$/.test(tail)) return true;            // 恰好 <memory / <pin / <wake / <quiet / <compacted
     if (/^<m(?:e(?:m(?:o(?:r)?)?)?)?$/.test(tail)) return true; // <m <me <mem <memo <memor
     if (/^<p(?:i)?$/.test(tail)) return true;                  // <p <pi
     if (/^<w(?:a(?:k)?)?$/.test(tail)) return true;            // <w <wa <wak
+    if (/^<c(?:o(?:m(?:p(?:a(?:c(?:t)?)?)?)?)?)?$/.test(tail)) return true; // <c <co <com <comp ... <compacte
     if (tail === "<") return true;
     return false;
   }
@@ -664,7 +665,7 @@ function createContentTagFilter() {
   function findOpenIndex(str) {
     const lower = str.toLowerCase();
     const candidates = [];
-    const re = /<(?=[mpwq])/g;
+    const re = /<(?=[mpwqc])/g;
     let m;
     while ((m = re.exec(lower)) !== null) {
       candidates.push(m.index);
@@ -685,7 +686,7 @@ function createContentTagFilter() {
       buf += delta;
       for (;;) {
         if (inTag) {
-          const closeRe = tagType === "memory" ? /<\/memory>/i : tagType === "pin" ? /<\/pin>/i : tagType === "quiet" ? /<\/quiet>/i : /<\/wake>/i;
+          const closeRe = tagType === "memory" ? /<\/memory>/i : tagType === "pin" ? /<\/pin>/i : tagType === "quiet" ? /<\/quiet>/i : tagType === "compacted" ? /<\/compacted>/i : /<\/wake>/i;
           const m = closeRe.exec(buf);
           if (m) {
             buf = buf.slice(m.index + m[0].length);
@@ -701,10 +702,10 @@ function createContentTagFilter() {
         if (open !== -1) {
           if (open > 0) emit(buf.slice(0, open));
           buf = buf.slice(open);
-          if (/^<(memory|pin|wake|quiet)(\s[^>]*)?>/.test(buf.toLowerCase())) {
+          if (/^<(memory|pin|wake|quiet|compacted)(\s[^>]*)?>/.test(buf.toLowerCase())) {
             inTag = true;
             const lowerBuf = buf.toLowerCase();
-            tagType = lowerBuf.startsWith("<pin") ? "pin" : lowerBuf.startsWith("<wake") ? "wake" : lowerBuf.startsWith("<quiet") ? "quiet" : "memory";
+            tagType = lowerBuf.startsWith("<pin") ? "pin" : lowerBuf.startsWith("<wake") ? "wake" : lowerBuf.startsWith("<quiet") ? "quiet" : lowerBuf.startsWith("<compacted") ? "compacted" : "memory";
           }
           return;
         }
@@ -867,6 +868,7 @@ function classifySpecialEvent(msg) {
   if (c.includes("共影）")) out.push("co");
   if (c.includes("截图）") || c.includes("截图唤醒）")) out.push("screenshot");
   if (c.includes("记忆碎片")) out.push("star");
+  if (c.includes("（容量提醒）")) out.push("ctxlimit");
   return out;
 }
 
@@ -1068,7 +1070,8 @@ function appendSpecialEvent(content, extra, sessionId) {
   timeline.push(newEvent);
   saveTimeline(timeline, sessionId);
   // 特殊事件（唤醒/日记/共影/推送）落库后，通知该会话所有打开的聊天页刷新。
-  sseNotify(sessionId);
+  // hidden 事件（如会话容量提醒）只进 AI 上下文，不推前端。
+  if (!newEvent.hidden) sseNotify(sessionId);
   // 批注 2026-07-15：特殊事件可能包含推送正文；日志只记录长度，避免公开部署时泄漏私密内容。
   console.log(`\n已记录特殊事件 (session ${sessionId || "default"}, position ${newEvent.position}, chars ${normalizeContentToText(content).length})\n`);
 }
@@ -1402,6 +1405,7 @@ require("./routes/chat")(app, {
   parseWakeTagAndSchedule,
   parseQuietTagAndSchedule,
   createContentTagFilter,
+  appendSpecialEvent,
   MCP_ENABLED,
   summarizeMessagesForLog,
   setLastLLMCapture

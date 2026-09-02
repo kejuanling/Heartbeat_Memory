@@ -218,7 +218,7 @@ function isSpecialEvent(msg) {
   if (!msg || msg.role !== "assistant") return false;
   const c = String(msg.content || "").replace(/\s+/g, " ").trim();
   if (!c) return false;
-  const structuredStart = /^（\s*(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|刚刚|自动唤醒|自动写了日记|记忆浮现|时间标记|摘要|共影|截图|记忆碎片)/.test(c);
+  const structuredStart = /^（\s*(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|刚刚|自动唤醒|自动写了日记|记忆浮现|时间标记|摘要|共影|截图|记忆碎片|容量提醒)/.test(c);
   if (!structuredStart) return false;
   return (
     c.indexOf("刚刚给宝宝发了 Bark") !== -1 ||
@@ -234,7 +234,8 @@ function isSpecialEvent(msg) {
     c.indexOf("共影）") !== -1 ||
     c.indexOf("截图）") !== -1 ||
     c.indexOf("截图唤醒）") !== -1 ||
-    c.indexOf("记忆碎片") !== -1
+    c.indexOf("记忆碎片") !== -1 ||
+    c.indexOf("（容量提醒）") !== -1
   );
 }
 
@@ -359,6 +360,8 @@ function eventInjectionVisibleKeys() {
 // 该消息是否属于「真实请求会注入」的特殊事件；非特殊事件恒返回 true
 function isEventInjectionVisible(msg) {
   if (!isSpecialEvent(msg)) return true;
+  // 容量提醒恒视为可见（可被压缩块覆盖）：visibleKeys 基于主会话计算，多会话下会对不上
+  if (msg && msg.kind === "ctx_limit") return true;
   return eventInjectionVisibleKeys().has(eventKey(msg));
 }
 

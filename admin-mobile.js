@@ -2785,7 +2785,8 @@ function ccArmAllGapAutoLoad(){
      'cc-cfg-chunk':c.compaction_chunk_size,
      'cc-cfg-chunk-min':c.compaction_chunk_min,
      'cc-cfg-chunk-max':c.compaction_chunk_max,
-     'cc-cfg-max-blocks':c.compaction_max_active_blocks
+     'cc-cfg-max-blocks':c.compaction_max_active_blocks,
+     'cc-cfg-ctx-limit':(c.compaction_context_limit_chars!==undefined?c.compaction_context_limit_chars:30000)
    };
    Object.keys(fields).forEach(function(id){
      const el=document.getElementById(id);
@@ -2795,6 +2796,8 @@ function ccArmAllGapAutoLoad(){
    if(th) th.checked=!!c.compaction_include_thinking;
    const ev=document.getElementById('cc-cfg-events');
    if(ev) ev.checked=c.compaction_compress_events!==false;
+   const cr=document.getElementById('cc-cfg-ctx-remind');
+   if(cr) cr.checked=c.compaction_context_remind_enabled!==false;
  }
  
  // 保存压缩参数配置
@@ -2830,7 +2833,9 @@ function ccArmAllGapAutoLoad(){
     compaction_chunk_max: chunkMax,
     compaction_include_thinking: getC('cc-cfg-think'),
     compaction_compress_events: getC('cc-cfg-events'),
-    compaction_max_active_blocks: Math.max(0, Math.floor(Number(get('cc-cfg-max-blocks'))||0))
+    compaction_max_active_blocks: Math.max(0, Math.floor(Number(get('cc-cfg-max-blocks'))||0)),
+    compaction_context_limit_chars: Math.max(0, Math.floor(Number(get('cc-cfg-ctx-limit'))||0)),
+    compaction_context_remind_enabled: getC('cc-cfg-ctx-remind')
   };
   const msg=document.getElementById('cc-config-msg');
   if(msg) msg.textContent=(notes.length?('提示：'+notes.join('；')):'')+' 保存中...';

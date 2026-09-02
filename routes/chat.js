@@ -9,6 +9,7 @@ const memoryPool = require('../memory-pool');
 const memoryEngine = require('../memory-engine');
 const tagParser = require('../tag-parser');
 const contextReplacements = require('../context-replacements');
+const contextCompactor = require('../context-compactor');
 
 // ---- 跨会话语义检索（TF-IDF + 字符 bigram，与前端旧逻辑同口径）----
 function charBigrams(text) {
@@ -137,10 +138,90 @@ module.exports = function registerChatRoutes(app, deps) {
     parseWakeTagAndSchedule,
     parseQuietTagAndSchedule,
     createContentTagFilter,
+    appendSpecialEvent,
     MCP_ENABLED,
     summarizeMessagesForLog,
     setLastLLMCapture
   } = deps;
+
+  // ========================
+  // 会话上下文容量提醒：发送前检测，超限时往当轮消息流塞一条隐藏提醒并落盘，
+  // 让 AI 自己调 context_replace 压缩；提醒随早期对话被压缩块覆盖后自然消失，再超限再塞。
+  // ========================
+  const CTX_LIMIT_HEAD = "（容量提醒）";
+
+  function countLLMTextChars(messages) {
+    let chars = 0;
+    for (const m of messages) {
+      if (!m) continue;
+      if (typeof m.content === 'string') chars += m.content.length;
+      else if (Array.isArray(m.content)) {
+        for (const part of m.content) {
+          if (part && part.type === 'text' && typeof part.text === 'string') chars += part.text.length;
+        }
+      }
+    }
+    return chars;
+  }
+
+  function maybeInjectContextLimitReminder(llmMessages, sessionId, timeByKey) {
+    try {
+      const cfg = contextCompactor.loadConfig();
+      const limit = Number(cfg.compaction_context_limit_chars) || 0;
+      if (!cfg.compaction_context_remind_enabled || limit <= 0) return;
+      // 消息流里已有提醒（未随压缩消亡/未被窗口过滤）就不重复塞
+      if (llmMessages.some(m => m && typeof m.content === 'string' && m.content.startsWith(CTX_LIMIT_HEAD))) return;
+      const chars = countLLMTextChars(llmMessages);
+      if (chars <= limit) return;
+
+      // 建议整理范围：流里最早的一段未压缩真实对话（跳过 system/摘要块/特殊事件/工具消息），
+      // 累计 compaction_chunk_size 条，用 timeByKey 反查首末时间给 AI 一个明确锚点
+      const chunkSize = Math.max(20, Number(cfg.compaction_chunk_size) || 100);
+      const picked = [];
+      for (const m of llmMessages) {
+        if (!m || (m.role !== 'user' && m.role !== 'assistant')) continue;
+        if (m._ctxRep || m.tool_calls || m.tool_call_id) continue;
+        if (isSpecialEvent(m)) continue;
+        picked.push(m);
+        if (picked.length >= chunkSize) break;
+      }
+      let rangeText = '';
+      if (picked.length) {
+        const firstT = timeByKey.get(picked[0].role + '\u0000' + normalizeContentToText(picked[0].content));
+        const lastT = timeByKey.get(picked[picked.length - 1].role + '\u0000' + normalizeContentToText(picked[picked.length - 1].content));
+        const fmt = d => (d ? d.toISOString().replace('T', ' ').slice(0, 16) : '');
+        rangeText = (firstT && lastT)
+          ? `（约 ${picked.length} 条，时间从 ${fmt(firstT)} 到 ${fmt(lastT)}）`
+          : `（约 ${picked.length} 条）`;
+      }
+
+      // 压缩提示词：实时读管理台可编辑的那份，占位符替换成贴合场景的说明
+      const promptCfg = contextCompactor.loadCompactionPromptConfig();
+      const minChars = Number(cfg.compaction_summary_min_chars) || 250;
+      const maxChars = Number(cfg.compaction_summary_max_chars) || 1200;
+      const template = promptCfg.template
+        .replace(/\$\{PERSONA\}/g, '（就是你自己的身份与人设，无需重复）')
+        .replace(/\$\{chunkInfo\}/g, rangeText || '由你自己选定')
+        .replace(/\$\{conversationText\}/g, '（就是上面第 1 点要整理的那段对话）')
+        .replace(/\$\{normalChars\}/g, String(minChars))
+        .replace(/\$\{maxChars\}/g, String(maxChars));
+      const remark =
+        CTX_LIMIT_HEAD + '给我自己的整理备忘，不必向她提起，也不要复述本段内容。\n' +
+        `这个会话的上下文已积累约 ${chars} 字符，超过 ${limit} 字符的上限，轮到我自己收拾了：\n` +
+        `1. 调用 context_replace 工具，把最早一段未整理的对话${rangeText}压缩成一段第一人称记忆文字并替换；\n` +
+        '2. 值得长期记住的内容，用 <memory> 标签写入记忆池；\n' +
+        '3. 做完后在回复末尾输出 <compacted> 标签，表示本轮整理已完成。\n' +
+        '这条备忘之后会随早期对话一起被整理覆盖，属正常。\n\n' +
+        '整理文字的写作要求（沿用系统整理提示词）：\n' +
+        promptCfg.system + '\n' + template;
+
+      llmMessages.push({ role: 'assistant', content: remark });
+      appendSpecialEvent(remark, { hidden: true, kind: 'ctx_limit' }, sessionId);
+      console.log(`[ctx-limit] 会话 ${sessionId || 'default'} 上下文 ${chars} 字符超过上限 ${limit}，已塞容量提醒（${remark.length} 字符）`);
+    } catch (err) {
+      console.warn('[ctx-limit] 容量提醒检测失败（不影响转发）:', err.message);
+    }
+  }
 
   app.get('/v1/models', async (req, reply) => {
     reply.send({
@@ -590,7 +671,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
       });
     }
 
-    // 特殊事件注入分类多选：只注入勾选类型；配置里没有该 key 时默认全部注入
+    // 特殊事件注入分类多选：只注入勾选类型；配置里没有该 key 时默认全部注入。
+    // 容量提醒（ctxlimit）不受该配置限制——它是网关塞给 AI 的整理指令，必须始终可见
     const injectTypesCfg = memoryEngine.getConfig().event_inject_types;
     if (Array.isArray(injectTypesCfg)) {
       const enabledTypes = new Set(injectTypesCfg);
@@ -598,7 +680,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
       injectableEvents = injectableEvents.filter(ev => {
         const cats = classifySpecialEvent(ev);
         if (!cats.length) return true; // 无法分类的兜底保留
-        return cats.some(k => enabledTypes.has(k));
+        return cats.some(k => k === 'ctxlimit' || enabledTypes.has(k));
       });
       if (injectableEvents.length !== before) {
         console.log(`[event-inject] 分类过滤: ${before} -> ${injectableEvents.length} 条`);
@@ -792,6 +874,9 @@ app.post("/v1/chat/completions", async (req, reply) => {
     } catch (imgErr) {
       console.warn("[trim-images] 历史图片裁剪失败（按原样转发）:", imgErr.message);
     }
+
+    // 会话容量提醒：替换/裁剪后按最终发送量检测，超限塞一条隐藏提醒（AI 自己压缩）
+    maybeInjectContextLimitReminder(llmMessages, sessionId, timeByKey);
 
     // 上下文压缩已统一进「上下文替换」：早期对话块摘要与 AI 记忆现在都是同一种替换记录，
     // 由 contextReplacements.applyReplacements 统一生效，旧压缩器发送路径已停用。

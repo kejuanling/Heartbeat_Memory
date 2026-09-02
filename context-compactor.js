@@ -38,7 +38,12 @@ const DEFAULT_CONFIG = {
   compaction_compress_events: true,
   // 活跃块上限：手动+AI 块合计只保留时间线上最近的 N 个进入上下文（0=不限，默认关）。
   // 超限的最早块仅隐藏不注入，块的 enabled/摘要数据不动，调大即恢复。
-  compaction_max_active_blocks: 0
+  compaction_max_active_blocks: 0,
+  // 会话上下文容量提醒：发给 AI 的上下文字符超过该值时，网关往时间线塞一条隐藏提醒事件，
+  // 让 AI 自己调 context_replace 压缩（0=不限）。
+  compaction_context_limit_chars: 30000,
+  // 容量提醒总开关：关掉后不再检测和塞提醒。
+  compaction_context_remind_enabled: true
 };
 
 const DEFAULT_COMPACTION_SYSTEM =
@@ -1884,6 +1889,7 @@ module.exports = {
   saveCutPoints,
   resolveCutPointConfig,
   listCutPointConfigs,
+  loadCompactionPromptConfig,
   buildCompactionPrompt,
   generateSummary,
   generateBlockSummary,
