@@ -1278,6 +1278,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
   <div class="drawer-panel cc-panel">
     <div class="drawer-head">
       <span id="ccDrawerTitle">压缩</span>
+      <select id="cc-session-sel" aria-label="选择会话" style="margin:0 10px 0 auto;max-width:150px;font-size:12px;padding:3px 6px;border-radius:8px;border:1px solid rgba(200,144,152,.3);background:rgba(255,255,255,.6);color:var(--ink2)"></select>
       <button class="drawer-close" id="ccClose"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>
     <div id="ccBody" class="cc-body"><div class="adm-load">加载中…</div></div>
@@ -5117,6 +5118,7 @@ async function switchSession(id){
   saveMsgs();
   currentSession=id;
   localStorage.setItem("han_current_session",id);
+  pushCurrentSession();   // 跨设备同步：上报当前打开的会话
   applyHeader();
   const localMsgs=loadMsgs();    // 本地缓存：保留思考链/工具/token
   // 优先用服务器权威数据（避免本地脏缓存导致不完整），服务器为空才回退本地。
@@ -5139,6 +5141,7 @@ function newSession(){
   localStorage.setItem("han_current_session",sid);
   // 清空当前显示
   currentSession=sid;
+  pushCurrentSession();   // 跨设备同步：新会话也上报
   msgs=[];saveMsgs();
   renderAll();
   closeDrawer();
@@ -5167,6 +5170,7 @@ async function deleteSession(id){
       const target=(best&&best.id)?best.id:"default";
       currentSession=target;
       localStorage.setItem("han_current_session",target);
+      pushCurrentSession();   // 跨设备同步：删除当前会话后落到的新会话也上报
       applyHeader();
       msgs=[];const h=await fetchHistory();
       if(h&&h.length){msgs=h;saveMsgs();}else{msgs=loadMsgs();}
@@ -5260,6 +5264,22 @@ async function pullSessionParents(){
     if(changed){ try{ localStorage.setItem("han_branch_parents",JSON.stringify(parents)); }catch(e){} }
     pushSessionParents();   // 双向收敛：本地独有项也推回服务器
   }catch(e){}
+}
+
+// 当前会话跨设备同步（单用户：手机/电脑打开同一会话）
+async function pushCurrentSession(){
+  try{
+    const r=await fetch("/heartbeat/admin/current-session",{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":getCookie("admin_csrf")},body:JSON.stringify({session:currentSession||""}),credentials:"include"});
+    return r.ok;
+  }catch(e){ return false; }
+}
+async function pullCurrentSession(){
+  try{
+    const r=await fetch("/heartbeat/admin/current-session",{headers:{"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include"});
+    if(!r.ok) return null;
+    const j=await r.json();
+    return (j&&j.session)||null;
+  }catch(e){ return null; }
 }
 
 // 标星 UI 状态跨设备对齐：从管理台标记列表(sha256 key)拉取，按 key 对齐本地 UI 标星缓存(djb2 key)
@@ -5600,6 +5620,8 @@ function rehydrateCallFlagsFromMarkers(arr){
 }
 async function initChat(){
   currentSession=localStorage.getItem("han_current_session")||"default";
+  const remoteCur=await pullCurrentSession();   // 跨设备同步：以服务器"最后打开的会话"优先
+  if(remoteCur){ currentSession=remoteCur; }
   await loadSessions();
   // 主会话(default)已废弃：恢复到 default 或已不存在的会话时，自动落到列表里最后活跃的会话
   if((currentSession==="default"||!sessionList.some(s=>s.id===currentSession))&&sessionList.length){
@@ -5629,6 +5651,7 @@ async function initChat(){
   else if(!msgs || !msgs.length){ chatEl.innerHTML=""; chatEl.appendChild(emptyEl); }
   startLiveEvents();   // 订阅本会话实时更新（别的设备/唤醒主动消息即时出现）
   applyHeader();       // 恢复真实会话后刷新左上角标题（刷新后名称不再错）
+  pushCurrentSession(); // 跨设备同步：把当前会话上报到服务器（无记录时建立，有记录时刷新时间戳）
 }
 async function init(){
   if(!isLoggedIn()){ showLogin(); return; }
@@ -5772,7 +5795,7 @@ var CARDS = [
   { group:'log', id:'wakelog',    n:'唤醒原始日志', d:'最近唤醒日志', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4a7 7 0 0 0-7 7v4a3 3 0 0 0 3 3h1v-8H5a6 6 0 0 1 12 0h-3v8h1a3 3 0 0 0 3-3v-4a7 7 0 0 0-7-7z"/><line x1="12" y1="4" x2="12" y2="2"/></svg>' },
   { group:'log', id:'push',       n:'推送管理',   d:'修改 · 删除推送记录', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>' },
 
-  { group:'tool', id:'reqctx',    n:'当前请求上下文', d:'只读查看实际发送内容', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 8 7 8"/></svg>' }
+  { group:'log', id:'reqctx',    n:'当前请求上下文', d:'只读查看实际发送内容', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 8 7 8"/></svg>' }
 ];
 var CARD_GROUPS = [
   { key:'sys', n:'系统配置' },
@@ -6410,8 +6433,29 @@ function syncUpdatePushMsg(oldContent, newContent){
 var CC_SESSION='default';
 function renderCompaction(body){
   body.innerHTML='<div class="adm-load">加载中…</div>';
-  // 每个会话的压缩按钮都指向该会话，不再加会话选择器；直接加载该会话的压缩块
+  fillCcSessionSel();   // 填充会话下拉框并选中当前 CC_SESSION
   loadCcPreview(body);
+}
+// 压缩抽屉会话选择器：可切换查看任意会话的压缩块（默认跟随打开时的会话）
+function fillCcSessionSel(){
+  var sel=document.getElementById('cc-session-sel');
+  if(!sel) return;
+  var opts='';
+  (sessionList||[]).forEach(function(s){
+    if(!s||!s.id) return;
+    var nm=(s.name&&s.name!==s.id)?s.name:s.id;
+    opts+='<option value="'+esc(s.id)+'"'+(String(s.id)===String(CC_SESSION)?' selected':'')+'>'+esc(nm)+'</option>';
+  });
+  if(!opts) opts='<option value="'+esc(CC_SESSION||'default')+'">当前会话</option>';
+  sel.innerHTML=opts;
+  sel.onchange=onCcSessionChange;
+}
+function onCcSessionChange(){
+  var sel=document.getElementById('cc-session-sel');
+  if(!sel) return;
+  CC_SESSION=sel.value||'default';
+  var body=document.getElementById('ccBody');
+  if(body){ body.innerHTML='<div class="adm-load">加载中…</div>'; loadCcPreview(body); }
 }
 function ccUrl(path){
   var sep=path.indexOf('?')>=0?'&':'?';

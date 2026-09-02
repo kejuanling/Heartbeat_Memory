@@ -5340,6 +5340,26 @@ app.put("/admin/session-branches", { preHandler: basicAuth }, async (req, reply)
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
+// 当前会话跨设备同步（存 data/current-session.json；单用户最后打开的会话）
+const CURRENT_SESSION_FILE = path.join(__dirname, "data", "current-session.json");
+app.get("/admin/current-session", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    let cur = null;
+    try { if (fs.existsSync(CURRENT_SESSION_FILE)) cur = JSON.parse(fs.readFileSync(CURRENT_SESSION_FILE, "utf-8")); } catch (e) {}
+    reply.send({ ok: true, session: (cur && cur.session) || "", updatedAt: (cur && cur.updatedAt) || "" });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+app.put("/admin/current-session", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const body = (req.body && typeof req.body === "object") ? req.body : {};
+    const sid = String(body.session || "").trim();
+    if (!sid) return reply.code(400).send({ error: "session 不能为空" });
+    fs.ensureDirSync(path.dirname(CURRENT_SESSION_FILE));
+    fs.writeFileSync(CURRENT_SESSION_FILE, JSON.stringify({ session: sid, updatedAt: new Date().toISOString() }, null, 2), "utf-8");
+    reply.send({ ok: true, saved: true, session: sid });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
 // ======================== 网页视频解析（共影） ========================
 // 抓取网页页面，提取候选视频地址（video 标签 / og:video / 页面内视频链接）
 async function fetchPageLimited(pageUrl, maxBytes) {
