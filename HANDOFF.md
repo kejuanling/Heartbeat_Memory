@@ -3,7 +3,7 @@
 > **规矩(2026-09-02 起)**:按日期的工作明细写在本地 `工作记录/工作记录_YYYY-MM-DD.md`(没有就新建),本文件只留一行索引 + 下面 0-7 节稳定信息,不再滚动堆条目。
 
 ## 工作日志索引(明细在 工作记录/工作记录_日期.md)
-- 2026-09-02:压缩/替换去自动解析入池+多选工具栏「一键入池」(不调LLM全文直入);记忆检索升级本地真语义(embed-server pm2 8795/bge-small-zh int8/混合检索/全量降级);路径整理(全系统收敛 /opt,软链降级纯别名);邮箱 MCP 挂 pm2 email-mcp、决策痕迹禁用;chat.html 分段连播 v2→v5(覆盖全入口/历史静态/间隔自适应);打开页面默认进最后活跃会话;压缩手工块跨会话错位修复;流式回复 QQ 式分段弹出;主题保存/背景上传修复;前端/后端代码审查(修复 P0 CSRF + P1 tools 路由鉴权,已上线)+六方向系统性排查(发现并修复 cookie Secure 与 sessions 索引缓存,已上线验证)+MCP 连接失败日志排查(核实为历史误报:enabled 双过滤正常、邮箱服务正常,flush+restart 已清,+前端优化(nginx /chat 协商缓存304+getCookie去重)+会话元数据跨设备同步补齐(标星UI对齐marked-list/分支父级session-branches/当前会话current-session,均服务器双向收敛)+管理菜单reqctx移日志组,详见 工作记录_2026-09-02)
+- 2026-09-02:压缩/替换去自动解析入池+多选工具栏「一键入池」(不调LLM全文直入);记忆检索升级本地真语义(embed-server pm2 8795/bge-small-zh int8/混合检索/全量降级);路径整理(全系统收敛 /opt,软链降级纯别名);邮箱 MCP 挂 pm2 email-mcp、决策痕迹禁用;chat.html 分段连播 v2→v5(覆盖全入口/历史静态/间隔自适应);打开页面默认进最后活跃会话;压缩手工块跨会话错位修复;流式回复 QQ 式分段弹出;主题保存/背景上传修复;前端/后端代码审查(修复 P0 CSRF + P1 tools 路由鉴权,已上线)+六方向系统性排查(发现并修复 cookie Secure 与 sessions 索引缓存,已上线验证)+MCP 连接失败日志排查(核实为历史误报:enabled 双过滤正常、邮箱服务正常,flush+restart 已清,+前端优化(nginx /chat 协商缓存304+getCookie去重)+会话元数据跨设备同步补齐(标星UI对齐marked-list/分支父级session-branches/当前会话current-session,均服务器双向收敛)+管理菜单reqctx移日志组,+四功能上线(会话合并/压缩块上限/标星in_context标记/提示词备份+新建会话两级选择),git 08aaa42,详见 工作记录_2026-09-02)
 - 2026-09-01:修 yun-mcp-v2(TimeoutStopSec、PATH 修正、git 工具单文件聚焦)
 
 ## 0. 怎么访问云服务器(唯一接入方式)
