@@ -15,6 +15,9 @@ const { nowIso } = require("./time_utils");
 const DATA_DIR = process.env.MEMORY_DATA_DIR || path.join(__dirname, "data");
 const POOL_FILE = path.join(DATA_DIR, "memory_pool.json");
 const POOL_CONFIG_FILE = path.join(DATA_DIR, "memory_pool_config.json");
+// 只读模式（wake-up 进程）：与 memory-engine 同款守卫。记忆池是 gateway/wake-up 共享数据，
+// 双进程各自整文件覆盖写会互相回滚，只读进程必须拦截一切落盘与内存改写。
+const READONLY = process.env.MEMORY_ENGINE_READONLY === "1";
 
 let cache = null;
 let flushTimer = null;
@@ -227,6 +230,7 @@ function get(id) {
 }
 
 function add(entry) {
+  if (READONLY) { console.warn("[memory-pool] 只读模式，忽略新增/合并"); return { entry: null, dup: false }; }
   const rows = load();
   const e = normalizeEntry(entry);
   const dup = findDuplicate(e);
@@ -249,6 +253,7 @@ function add(entry) {
 }
 
 function update(id, patch) {
+  if (READONLY) { console.warn("[memory-pool] 只读模式，忽略更新"); return null; }
   const rows = load();
   const it = rows.find(r => r.id === id);
   if (!it) return null;
@@ -264,6 +269,7 @@ function update(id, patch) {
 }
 
 function remove(id) {
+  if (READONLY) { console.warn("[memory-pool] 只读模式，忽略删除"); return false; }
   const rows = load();
   const i = rows.findIndex(r => r.id === id);
   if (i < 0) return false;
@@ -273,6 +279,7 @@ function remove(id) {
 }
 
 function sink(id) {
+  if (READONLY) return null;
   const it = get(id);
   if (!it) return null;
   it.active = false;
@@ -282,6 +289,7 @@ function sink(id) {
 }
 
 function revive(id) {
+  if (READONLY) return null;
   const it = get(id);
   if (!it) return null;
   it.active = true;
@@ -343,6 +351,7 @@ function mergeEntries(dup, e) {
 }
 
 function supersedeBlock(blockId) {
+  if (READONLY) return 0;
   if (!blockId || typeof blockId !== "string") return 0;
   const rows = load();
   let n = 0;
@@ -373,7 +382,9 @@ function retrieve(query, opts) {
   scored.sort((a, b) => b.score - a.score || b.sim - a.sim);
   const picked = scored.slice(0, topK);
   const autoPinTh = Math.max(2, Number(CONFIG.auto_pin_retrieval_count) || 5);
+  // 只读模式：检索计数/自动置顶也是写，跳过以免覆盖 gateway 侧的 memory_pool.json
   for (const p of picked) {
+    if (READONLY) break;
     p.r.retrieval_count = Number(p.r.retrieval_count || 0) + 1;
     p.r.last_retrieved_at = nowIso();
     p.r.updated_at = nowIso();
@@ -416,6 +427,7 @@ function vecMap() {
 }
 
 function saveVecMap() {
+  if (READONLY) return;
   try { fs.writeJsonSync(VECTOR_FILE, vectorCache); } catch (e) { /* 缓存写失败只影响下次冷启动 */ }
 }
 
@@ -487,6 +499,7 @@ async function retrieveHybrid(query, opts) {
   const picked = scored.slice(0, topK);
   const autoPinTh = Math.max(2, Number(CONFIG.auto_pin_retrieval_count) || 5);
   for (const p of picked) {
+    if (READONLY) break;
     p.r.retrieval_count = Number(p.r.retrieval_count || 0) + 1;
     p.r.last_retrieved_at = nowIso();
     p.r.updated_at = nowIso();
@@ -629,6 +642,7 @@ async function reparseSummaryViaLLM(text, cfg) {
 // 把一段压缩摘要「再解析 + 去重」进入记忆池；返回新增/合并统计
 async function ingestSummary(summaryText, opts) {
   opts = opts || {};
+  if (READONLY) { console.warn("[memory-pool] 只读模式，忽略摘要入池"); return { ok: true, skipped: true, readonly: true, added: 0, merged: 0, failed: 0 }; }
   const source = opts.source || "compaction";
   const blockId = opts.block_id || null;
   // 直接分类/重要级：memory 标签里写了 {category,importance} 时，跳过 LLM 再解析，直接入库。
@@ -768,6 +782,7 @@ function selectReferenceContext(chunk, refPool, topk, th) {
 
 async function cleanPool(opts) {
   opts = opts || {};
+  if (READONLY) return { ok: false, error: "只读模式（wake-up）不执行记忆池整理" };
   const preview = opts.preview !== false;
   const rows = load();
   const active = rows.filter(function (r) { return r.active !== false; });
@@ -953,6 +968,7 @@ function poolKeywords(limit) {
 }
 
 function setConfig(updates) {
+  if (READONLY) return getConfig();
   Object.assign(CONFIG, updates || {});
   try { atomicWriteJson(POOL_CONFIG_FILE, CONFIG); } catch (e) {}
   return CONFIG;

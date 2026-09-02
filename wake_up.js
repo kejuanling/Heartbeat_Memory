@@ -658,8 +658,11 @@ function buildWakePrompt(currentTime, diffMinutes, weatherContext = "", phoneCon
   if (fs.existsSync(promptFile)) {
     const template = fs.readFileSync(promptFile, "utf-8");
     let out = template;
-    // 天气：兼容模板里的 `${weatherContext}` / `${weather}` / 旧中文占位符 `${天气信息（可选）}`
+    // 时间与沉默时长（此前漏替换，AI 唤醒时看到的是字面占位符；与 env/默认模板分支保持一致）
     out = out
+      .replace(/\$\{currentTime\}/g, currentTime)
+      .replace(/\$\{diffMinutes\}/g, diffMinutes)
+      // 天气：兼容模板里的 `${weatherContext}` / `${weather}` / 旧中文占位符 `${天气信息（可选）}`
       .replace(/\$\{weatherContext\}/g, weatherContext)
       .replace(/\$\{weather\}/g, weatherContext)
       .replace(/\$\{天气信息（可选）\}/g, weatherContext);

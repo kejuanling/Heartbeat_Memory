@@ -153,18 +153,41 @@ module.exports = function registerChatRoutes(app, deps) {
   // ========================
   const CTX_LIMIT_HEAD = "（容量提醒）";
 
-  function countLLMTextChars(messages) {
-    let chars = 0;
+  // 摘要占位消息：被压缩块替换成的一段「（回忆 · … /（对话摘要 …」消息（与 context-replacements.js isReplacementMemoryMessage 同口径）
+  function isSummaryPlaceholder(m) {
+    if (!m || m.role !== 'assistant') return false;
+    const c = String(m.content || '');
+    return c.startsWith('（回忆 · ') || c.startsWith('（对话摘要');
+  }
+
+  // 该消息是否为标星原句（用户手动标星，跨窗口保留，不算待整理积压）
+  function isMarkedMessage(m) {
+    if (!m) return false;
+    try { return Boolean(contextReplacements.loadMarks()[contextReplacements.contentKey(m)]); }
+    catch (e) { return false; }
+  }
+
+  // 容量提醒统计口径：只统计「还没被压缩块覆盖的历史消息原文」。
+  // maybeInject 在 applyReplacements 之后运行，llmMessages 中被压缩块替换的部分已是摘要占位（isSummaryPlaceholder），
+  // 未压缩的原文仍是原始 user/assistant 内容。因此过滤掉 system / 摘要占位 / 特殊事件 / 工具 / 标星原文（标星保留在上下文但并非待整理积压）即可。
+  function countUncompressedOriginalChars(messages) {
+    let charTotal = 0;
     for (const m of messages) {
       if (!m) continue;
-      if (typeof m.content === 'string') chars += m.content.length;
+      if (m.role === 'system') continue;
+      if (m.role !== 'user' && m.role !== 'assistant') continue;
+      if (m._ctxRep || m._ccSummary || m.tool_calls || m.tool_call_id) continue;
+      if (isSummaryPlaceholder(m)) continue;
+      if (isSpecialEvent(m)) continue;
+      if (isMarkedMessage(m)) continue; // 标星原文本就要保留在上下文，不算待整理积压
+      if (typeof m.content === 'string') charTotal += m.content.length;
       else if (Array.isArray(m.content)) {
         for (const part of m.content) {
-          if (part && part.type === 'text' && typeof part.text === 'string') chars += part.text.length;
+          if (part && part.type === 'text' && typeof part.text === 'string') charTotal += part.text.length;
         }
       }
     }
-    return chars;
+    return charTotal;
   }
 
   function maybeInjectContextLimitReminder(llmMessages, sessionId, timeByKey) {
@@ -172,7 +195,7 @@ module.exports = function registerChatRoutes(app, deps) {
       const cfg = contextCompactor.loadConfig();
       const limit = Number(cfg.compaction_context_limit_chars) || 0;
       if (!cfg.compaction_context_remind_enabled || limit <= 0) return;
-      const chars = countLLMTextChars(llmMessages);
+      const chars = countUncompressedOriginalChars(llmMessages);
       // 注意顺序：必须先做「低于上限清理」再判「已有提醒不重复塞」——
       // 旧提醒会被特殊事件机制每轮注入回来，若先判「已有」就提前返回，永远走不到清理
       if (chars <= limit) {
@@ -505,6 +528,13 @@ module.exports = function registerChatRoutes(app, deps) {
       entries.sort((a, b) => (a.ts - b.ts) || (a.si - b.si) || (a.oi - b.oi));
       const rebuilt = buildTimeline(entries.map(e => e.m), target);
       saveTimeline(rebuilt, target);
+      // 源会话压缩块迁移到合并会话：matched 内容锚点在目标时间线重定位，按内容序列去重。
+      // 源会话数据保留，仅块归属变更（源会话此后按原文展示，避免同批消息多会话重复压缩）。
+      let migrateStat = null;
+      try {
+        migrateStat = contextReplacements.migrateSessionBlocks(ids, target);
+        if (migrateStat) console.log(`[sessions/merge] 迁移压缩块:`, JSON.stringify(migrateStat));
+      } catch (e) { console.error('[sessions/merge] 迁移压缩块失败:', e.message); }
       console.log(`[sessions/merge] 合并 ${ids.length} 个会话 -> ${target}（${total} 条源消息）`);
       reply.send({ ok: true, session_id: target, merged: total, total: rebuilt.filter(isRealMessageForTimeline).length });
     } catch (err) {
@@ -1023,7 +1053,13 @@ app.post("/v1/chat/completions", async (req, reply) => {
           // 把 AI 回复追加到 kelivoMessages，然后重建时间线
           kelivoMessages.push({ role: "assistant", content: cleanText });
           const rebuilt = buildTimeline(kelivoMessages, sessionId);
-          saveTimeline(rebuilt, sessionId);
+          // 与首保存同一门禁：非客户端聊天请求不落盘，防止旁路请求拿回复时覆盖会话历史
+          if (isClientChat && (kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0)) {
+            saveTimeline(rebuilt, sessionId);
+            sseNotify(sessionId);
+          } else {
+            console.log("[timeline] 跳过回复落盘 (非流式, isClientChat=" + isClientChat + ")");
+          }
         }
       } catch (parseErr) {
         console.warn("[memory] 非流式响应 JSON 解析失败:", parseErr.message);
@@ -1140,8 +1176,13 @@ app.post("/v1/chat/completions", async (req, reply) => {
         // 富字段一并落时间线：reasoning/tokens，跨设备刷新不再丢
         kelivoMessages.push({ role: "assistant", content: cleanFull, reasoning: aiThinking || "", tokens: aiUsage || null });
         const rebuiltStream = buildTimeline(kelivoMessages, sessionId);
-        saveTimeline(rebuiltStream, sessionId);
-        sseNotify(sessionId);
+        // 与首保存同一门禁：非客户端聊天请求不落盘，防止旁路请求拿回复时覆盖会话历史
+        if (isClientChat && (kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0)) {
+          saveTimeline(rebuiltStream, sessionId);
+          sseNotify(sessionId);
+        } else {
+          console.log("[timeline] 跳过回复落盘 (流式, isClientChat=" + isClientChat + ")");
+        }
         // 缓存本次已生成的回复，供同 client_msg_id 的重复请求直接回放。
         if (cleanFull && body && body.client_msg_id) {
           setRecentReply(String(body.client_msg_id).trim(), {

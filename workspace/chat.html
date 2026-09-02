@@ -155,7 +155,7 @@ header.hd-custom .hd-mid{align-items:flex-start}
 .msg.ai .meta{display:none} /* 时间统一走居中时间线(renderAll), 不再贴气泡 */
 .mhead{display:flex;align-items:center;gap:7px;padding:0 3px;margin-bottom:5px;max-width:100%}
 .mhead .mav{width:26px;height:26px;border-radius:50%;background:var(--accent-grad);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-family:"Noto Serif SC",serif;box-shadow:0 1px 4px rgba(176,122,106,.2)}
-.mhead .mav img{width:100%;height:100%;object-fit:cover;border-radius:50%}
+.mhead .mav img{width:100%;height:100%;object-fit:contain;border-radius:50%;background:#fff}
 .msg.ai .mhead .mav{background:linear-gradient(135deg,var(--accent-deep),#9d8f8a)}
 .mhead .mnm{font-size:11px;color:var(--ink2);letter-spacing:.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .message-avatar{display:none}
@@ -202,7 +202,7 @@ header.hd-custom .hd-mid{align-items:flex-start}
 #chat[data-layout] .msg.user .mrow{flex-direction:row-reverse}
 #chat[data-layout] .mrow .mav{width:34px;height:34px;border-radius:50%;flex-shrink:0;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--accent-grad);color:#fff;font-size:15px;font-family:"Noto Serif SC",serif;box-shadow:0 1px 4px rgba(176,122,106,.2)}
 #chat[data-layout] .msg.ai .mrow .mav{background:linear-gradient(135deg,var(--accent-deep),#9d8f8a)}
-#chat[data-layout] .mrow .mav img{width:100%;height:100%;object-fit:cover;display:block}
+#chat[data-layout] .mrow .mav img{width:100%;height:100%;object-fit:contain;display:block;background:#fff}
 /* 头像对齐气泡顶部（有名称行时下移一个名称行高；无名称时对齐顶部） */
 #chat[data-layout] .mrow .mav{margin-top:16px}
 #chat[data-layout] .mrow:not(:has(.mnm)) .mav{margin-top:0}
@@ -1563,7 +1563,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
               <div style="margin-top:10px"><label>max_tokens<span class="tag">可选</span></label><input type="number" min="1" id="maxTokInput" placeholder="留空不限制"></div>
             </div>
             <button type="button" class="mcp-btn primary" id="aiSaveBtn" style="margin-top:12px" onclick="saveSettingsAll()">保存 AI 设置</button>
-            </div></div><div class="set-panel" data-acc="memwake"><div class="set-acc-h" data-acc="memwake">记忆与唤醒参数<span class="ar">▾</span></div><div class="set-sec"><div class="set-sec-label">唤醒</div><div class="field"><label>唤醒历史最大条数</label><input type="number" id="mwWake" value="80"></div><div class="set-sec-label">记忆池</div><div class="field"><label>去重阈值</label><input type="number" step="0.05" min="0" max="1" id="mwDedup" value="0.78"></div><div class="field"><label>衰减半衰期（天）</label><input type="number" step="1" min="1" id="mwDecay" value="30"></div><div class="set-sec-label">再解析（压缩摘要 → 记忆池）</div><div class="field"><label>每条字数上限</label><input type="number" step="1" min="5" id="mwRmax" value="30"></div><div class="field"><label>每段最多条数</label><input type="number" step="1" min="1" id="mwRmaxitems" value="8"></div><div class="set-sec-label">跨窗口注入</div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">总开关</label><label class="adm-sw"><input type="checkbox" id="mwCross" checked><i></i></label></div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">固定注入</label><label class="adm-sw"><input type="checkbox" id="mwAlways"><i></i></label></div><div class="field"><label>消息少于 N 条</label><input type="number" step="1" min="1" id="mwMaxmsgs" value="2"></div><div class="field"><label>日记天数</label><input type="number" step="1" min="0" id="mwDays" value="3"></div><div class="field"><label>每类注入条数</label><input type="number" step="1" min="1" id="mwMempercat" value="2"></div><div class="field"><label>摘要最近天数</label><input type="number" step="1" min="1" id="mwSumdays" value="7"></div><div class="field"><label>标星条数</label><input type="number" step="1" min="1" id="mwStartopk" value="10"></div><div class="set-sec-label">压缩</div><div class="field"><label>活跃块保留上限（0=不限）</label><input type="number" step="1" min="0" id="mwCcmax" value="0"><div style="font-size:11px;color:var(--ink3);margin-top:4px">手动+AI 块合计只保留时间线上最近的 N 个进入上下文，更早的块隐藏不注入（数据不删，调大即恢复）。</div></div><div class="field"><label>上下文容量上限（字符，0=不限）</label><input type="number" step="1000" min="0" id="mwClim" value="30000"><div style="font-size:11px;color:var(--ink3);margin-top:4px">发给 AI 的上下文字符超过上限时，网关塞一条隐藏提醒，让 AI 自己调工具压缩整理（前端看不到这条提醒）。</div></div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">容量提醒开关</label><label class="adm-sw"><input type="checkbox" id="mwClimOn" checked><i></i></label></div><div class="mcp-msg" id="mwMsg"></div><button type="button" class="mcp-btn primary" id="mwSaveBtn">保存参数</button></div></div><div class="set-panel" data-acc="sendcfg"><div class="set-acc-h" data-acc="sendcfg">对话发送配置<span class="ar">▾</span></div><div class="set-sec"><div class="field">
+            </div></div><div class="set-panel" data-acc="memwake"><div class="set-acc-h" data-acc="memwake">记忆与唤醒参数<span class="ar">▾</span></div><div class="set-sec"><div class="set-sec-label">唤醒</div><div class="field"><label>唤醒历史最大条数</label><input type="number" id="mwWake" value="80"></div><div class="set-sec-label">记忆池</div><div class="field"><label>去重阈值</label><input type="number" step="0.05" min="0" max="1" id="mwDedup" value="0.78"></div><div class="field"><label>衰减半衰期（天）</label><input type="number" step="1" min="1" id="mwDecay" value="30"></div><div class="set-sec-label">再解析（压缩摘要 → 记忆池）</div><div class="field"><label>每条字数上限</label><input type="number" step="1" min="5" id="mwRmax" value="30"></div><div class="field"><label>每段最多条数</label><input type="number" step="1" min="1" id="mwRmaxitems" value="8"></div><div class="set-sec-label">跨窗口注入</div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">总开关</label><label class="adm-sw"><input type="checkbox" id="mwCross" checked><i></i></label></div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">固定注入</label><label class="adm-sw"><input type="checkbox" id="mwAlways"><i></i></label></div><div class="field"><label>消息少于 N 条</label><input type="number" step="1" min="1" id="mwMaxmsgs" value="2"></div><div class="field"><label>日记天数</label><input type="number" step="1" min="0" id="mwDays" value="3"></div><div class="field"><label>每类注入条数</label><input type="number" step="1" min="1" id="mwMempercat" value="2"></div><div class="field"><label>摘要最近天数</label><input type="number" step="1" min="1" id="mwSumdays" value="7"></div><div class="field"><label>标星条数</label><input type="number" step="1" min="1" id="mwStartopk" value="10"></div><div class="set-sec-label">压缩</div><div class="field"><label>活跃块保留上限（0=不限）</label><input type="number" step="1" min="0" id="mwCcmax" value="0"><div style="font-size:11px;color:var(--ink3);margin-top:4px">手动+AI 块合计只保留时间线上最近的 N 个进入上下文，更早的块隐藏不注入（数据不删，调大即恢复）。</div></div><div class="field" style="font-size:11px;color:var(--ink3);margin-top:4px">上下文容量上限与容量提醒开关请在「管理台 → 日志与推送」统一设置。</div><div class="mcp-msg" id="mwMsg"></div><button type="button" class="mcp-btn primary" id="mwSaveBtn">保存参数</button></div></div><div class="set-panel" data-acc="sendcfg"><div class="set-acc-h" data-acc="sendcfg">对话发送配置<span class="ar">▾</span></div><div class="set-sec"><div class="field">
               <label>保留最近 N 条带图消息的历史图片（0=不保留，当前发送的图始终保留）</label>
               <input type="number" id="imgKeepTurns" min="0" step="1" value="8">
             </div>
@@ -2516,7 +2516,7 @@ function classifyTimelineEvent(msg){
 }
 function fillMav(av,isAI){
   const avS=isAI?(cfg.ai_avatar||(cfg.ai_name||"谢").slice(0,1)):(cfg.user_avatar||(cfg.user_name||"我").slice(0,1));
-  if(/^(data:image|https?:|\/\/)/.test(avS)){const img=document.createElement("img");img.src=avS;img.alt="";img.style.cssText="width:100%;height:100%;object-fit:cover;border-radius:50%";av.appendChild(img);}else{av.textContent=avS;}
+  if(/^(data:image|https?:|\/\/|\/uploads\/)/.test(avS)){const img=document.createElement("img");img.src=avS;img.alt="";img.style.cssText="width:100%;height:100%;object-fit:contain;border-radius:50%;background:#fff";av.appendChild(img);}else{av.textContent=avS;}
 }
 function callRecordBubble(m){
   const d=document.createElement("div"); d.className="msg "+(m.role==="user"?"user":"ai")+" call-record";
@@ -3500,7 +3500,7 @@ function populateSettings(){
   bubbleDelimInput.value=cfg.bubble_delim;
   renderPicks();renderThemeValues();applyThemePreview();
 }
-function saveSettingsAll(){
+async function saveSettingsAll(){
   const k=keyInput.value.trim();
   if(k){api_key=k;}
   system_prompt=(promptInput.value||"").trim();
@@ -3524,6 +3524,14 @@ function saveSettingsAll(){
   cfg.user_name=userNameInput.value.trim()||"我";
   cfg.user_avatar=userAvatarInput.value.trim()||"";
   cfg.ai_avatar=aiAvatarInput.value.trim()||"";
+  // 防御：背景/头像若是 dataURL base64，先转存为 /uploads/ URL，避免大 base64 存进 localStorage 或云端撑爆
+  for(const _fk of ["bg_image","user_avatar","ai_avatar"]){
+    const _v=cfg[_fk];
+    if(typeof _v==="string" && /^data:image\//.test(_v)){
+      try{ const _u=await uploadImageToServer(_v); if(_u) cfg[_fk]=_u; }
+      catch(_e){ showToast("「"+_fk+"」图片未能上传服务器，已用原图",2000); }
+    }
+  }
   if(k){try{localStorage.setItem(LS_KEY,api_key);}catch(e){}}
   try{localStorage.setItem(LS_PROMPT,system_prompt);}catch(e){}
   saveCfg();
@@ -3774,6 +3782,8 @@ async function saveCustomTheme(){
   if(document.getElementById("themeNameInput"))document.getElementById("themeNameInput").value="";
   syncThemesToServer(); renderSavedThemes(savedLocal?null:arr);
   showToast(savedLocal?"主题已保存":"本机存储空间不足，主题仅同步到云端，换设备可恢复");
+  // 保存主题即作为当前生效主题，并同步上云（否则刷新被云端旧 cfg 覆盖、背景被改回）
+  try{ applyCustomTheme(th); }catch(e){ saveCfg(); applyTheme(); pushSettingsToCloud(); }
 }
 function applyCustomTheme(t){
   if(!t) return;
@@ -3794,6 +3804,8 @@ function applyCustomTheme(t){
   if(chatEl)chatEl.setAttribute("data-layout",cfg.bubble_style||"qq");
   renderPicks(); renderThemeValues(); applyTheme(); applyHeader(); saveCfg();
   showToast("已切换到「"+(t.name||"主题")+"」");
+  // 关键：应用生效主题后立即上云，否则刷新时云端旧 cfg 权威覆盖，背景会被改回（应用主题必须同步持久化）
+  pushSettingsToCloud().then(function(ok){ if(ok===false) showToast("云端同步失败，请重新登录后再试"); });
 }
 function themeSwatch(t){
   const c=(t&&(t.user_bubble||t.bg_color))||"";
@@ -5063,7 +5075,8 @@ async function doMergeSessions(){
   if(ids.length<2){ showToast("至少勾选 2 个会话"); return; }
   if(!confirm("合并 "+ids.length+" 个会话为一个新会话？原会话数据保留不动，压缩块不迁移。")) return;
   try{
-    const r=await fetch("/v1/sessions/merge",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({ids:ids})});
+    const target=genSessionId();   // 后端 /v1/sessions/merge 强校验并据此落盘，必须传新会话ID
+    const r=await fetch("/v1/sessions/merge",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({ids:ids,target:target})});
     const j=await r.json().catch(()=>({}));
     if(!r.ok){ showToast(j.error||"合并失败"); return; }
     mergeMode=false; mergeSel.clear();
@@ -5333,14 +5346,19 @@ async function switchSession(id){
 
 // 新建会话：先弹下拉框选本会话提示词（默认=跟随全局人设；选备份=仅本会话生效），取消则不创建
 function newSession(){
-  const opts='<option value="">默认（跟随全局人设）</option>'+promptBackups.map(function(b){
-    return '<option value="'+escapeHtml(b.id)+'">'+escapeHtml(b.name||'未命名')+'</option>';
-  }).join('');
-  openEditModal("新建会话",
-    '<div class="field"><label>本会话使用的提示词</label><select class="np-sel" id="np-prompt">'+opts+'</select>'
-    +'<div class="np-tip">选择的备份仅对这个会话生效；「默认」跟随设置里的全局人设。点取消则不创建。</div></div>',
-    function(){ createSessionWithPrompt((document.getElementById("np-prompt")||{}).value||""); },
-    "创建");
+  try{
+    const opts='<option value="">默认（跟随全局人设）</option>'+promptBackups.map(function(b){
+      return '<option value="'+escapeHtml(b.id)+'">'+escapeHtml(b.name||'未命名')+'</option>';
+    }).join('');
+    openEditModal("新建会话",
+      '<div class="field"><label>本会话使用的提示词</label><select class="np-sel" id="np-prompt">'+opts+'</select>'
+      +'<div class="np-tip">选择的备份仅对这个会话生效；「默认」跟随设置里的全局人设。点取消则不创建。</div></div>',
+      function(){ try{ createSessionWithPrompt((document.getElementById("np-prompt")||{}).value||""); }catch(err){ showToast("新建失败:"+(err&&err.message||err)); } },
+      "创建");
+  }catch(err){
+    console.error("[newSession]",err);
+    showToast("新建会话出错:"+(err&&err.message||err));
+  }
 }
 function createSessionWithPrompt(backupId){
   const sid=genSessionId();
@@ -5622,11 +5640,31 @@ async function importSession(file){
   }catch(e){showToast("导入失败:"+e.message);}
 }
 
-document.getElementById("newSessionBtn").onclick=newSession;
-document.getElementById("exportSessionBtn").onclick=()=>exportSession(currentSession);
-document.getElementById("importSessionBtn").onclick=()=>document.getElementById("importFile").click();
-document.getElementById("mergeSessionBtn").onclick=function(){ if(mergeMode){ doMergeSessions(); } else { toggleMergeMode(); } };
-document.getElementById("mergeCancelBtn").onclick=toggleMergeMode;
+(function(){
+  // 抽屉按钮绑定：逐个隔离，某个元素缺失/某处报错不影响其余按钮，也便于复测时定位
+  const bind=function(id,fn){
+    try{ const el=document.getElementById(id); if(el){ el.onclick=fn; return true; } console.warn("[drawer-btn] 未找到 #"+id); return false; }
+    catch(e){ console.error("[drawer-btn] 绑定 #"+id+" 失败",e); return false; }
+  };
+  bind("newSessionBtn",newSession);
+  bind("exportSessionBtn",function(){ exportSession&&exportSession(currentSession); });
+  bind("importSessionBtn",function(){ const fi=document.getElementById("importFile"); if(fi) fi.click(); });
+  bind("mergeSessionBtn",function(){ if(mergeMode){ doMergeSessions&&doMergeSessions(); } else { toggleMergeMode&&toggleMergeMode(); } });
+  bind("mergeCancelBtn",toggleMergeMode);
+})();
+// 全局报错浮层：仅当复测仍没反应时，把真实 JS 报错弹出来便于定位（去重，最多每 8s 弹一条）
+if(!window.__se_topErrorHooked){
+  window.__se_topErrorHooked=1;
+  window.addEventListener("error",function(ev){
+    try{
+      if(window.__se_toastHidden===1) return;
+      const msg=(ev&&ev.error&&(ev.error.message||ev.error))||ev.message||"未知脚本错误";
+      const ln=(ev.lineno!==undefined&&ev.lineno!==null)?" @行"+ev.lineno:"";
+      if(typeof showToast==="function") showToast("【前端报错】"+msg+ln);
+      else console.error("[前端报错]",msg,ln);
+    }catch(e){ console.error("[前端报错监听异常]",e); }
+  },true);
+}
 // 数据管理按钮：设置面板里
 if(document.getElementById("clearLocalCacheBtn"))document.getElementById("clearLocalCacheBtn").onclick=clearLocalCache;
 if(document.getElementById("exportAllDataBtn"))document.getElementById("exportAllDataBtn").onclick=exportAllLocalData;
@@ -6000,13 +6038,13 @@ var CARDS = [
   { group:'mem', id:'mempool',    n:'记忆池',     d:'新增 · 整理 · 检索', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 1 5 5v9a5 5 0 0 1-10 0V7a5 5 0 0 1 5-5z"/><path d="M12 12v6"/></svg>' },
   { group:'mem', id:'marked',     n:'上下文已标星', d:'标星消息 · 防止被摘要覆盖', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1Z"/></svg>' },
   { group:'mem', id:'pin',        n:'永久注入上下文', d:'固定注入 · 排序', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 3h6l1 7 2 2H6l2-2z"/></svg>' },
-  { group:'mem', id:'cross',      n:'跨窗口注入', d:'新窗口注入预览', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' },
-  { group:'mem', id:'repllog',    n:'替换记录',   d:'每次请求的压缩/替换记录', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>' },
 
   { group:'log', id:'wakelog',    n:'唤醒原始日志', d:'最近唤醒日志', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4a7 7 0 0 0-7 7v4a3 3 0 0 0 3 3h1v-8H5a6 6 0 0 1 12 0h-3v8h1a3 3 0 0 0 3-3v-4a7 7 0 0 0-7-7z"/><line x1="12" y1="4" x2="12" y2="2"/></svg>' },
   { group:'log', id:'push',       n:'推送管理',   d:'修改 · 删除推送记录', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>' },
 
-  { group:'log', id:'reqctx',    n:'当前请求上下文', d:'只读查看实际发送内容', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 8 7 8"/></svg>' }
+  { group:'log', id:'reqctx',    n:'当前请求上下文', d:'只读查看实际发送内容', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 8 7 8"/></svg>' },
+  { group:'log', id:'cross',      n:'跨窗口注入', d:'新窗口注入预览', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' },
+  { group:'log', id:'repllog',    n:'替换记录',   d:'每次请求的压缩/替换记录', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>' }
 ];
 var CARD_GROUPS = [
   { key:'sys', n:'系统配置' },
@@ -6282,7 +6320,35 @@ function renderSendCfg(body){
   }).catch(function(e){ body.innerHTML='<div class="adm-empty">加载失败: '+esc(e.message)+'</div>'; });
 }
 
-/* ---------------- 记忆与唤醒参数（设置页 · 由原菜单卡片迁移） ---------------- */function loadMemWakeSettings(){  Promise.all([admGet(BASE+'/config'), admGet(BASE+'/memory-pool/config'), admGet(BASE+'/context-compaction/config')]).then(function(res){    var c=res[0], m=res[1], cc=(res[2]&&typeof res[2]==='object')?res[2]:{};    function num(v,d){ return v!=null?v:d; }    function setVal(id,v){ var el=document.getElementById(id); if(el) el.value=v; }    function setChk(id,b){ var el=document.getElementById(id); if(el) el.checked=!!b; }    setVal('mwWake',num(c.wake_history_max_messages,80));    setVal('mwDedup',num(m.dedup_threshold,0.78));    setVal('mwDecay',num(m.decay_days,30));    setVal('mwRmax',num(m.reparse_max_chars,30));    setVal('mwRmaxitems',num(m.reparse_max_items,8));    setChk('mwCross',m.cross_inject_enabled!==false);    setChk('mwAlways',m.cross_inject_always===true);    setVal('mwMaxmsgs',num(m.cross_inject_max_msgs,2));    setVal('mwDays',num(m.cross_inject_diary_days,3));    setVal('mwMempercat',num(m.cross_inject_memory_per_category,2));    setVal('mwSumdays',num(m.cross_inject_summary_days,7));    setVal('mwStartopk',num(m.cross_inject_starred_topk,10));    setVal('mwCcmax',num(cc.compaction_max_active_blocks,0));    setVal('mwClim',num(cc.compaction_context_limit_chars,30000));    setChk('mwClimOn',cc.compaction_context_remind_enabled!==false);  }).catch(function(e){ var m=document.getElementById('mwMsg'); if(m) m.textContent='加载失败: '+(e&&e.message||e); });}function saveMemWakeSettings(){  var up={wake_history_max_messages:Number(document.getElementById('mwWake').value)||0};  var up2={    dedup_threshold:Number(document.getElementById('mwDedup').value)||0.78,    decay_days:Number(document.getElementById('mwDecay').value)||30,    reparse_max_chars:Number(document.getElementById('mwRmax').value)||30,    reparse_max_items:Number(document.getElementById('mwRmaxitems').value)||8,    cross_inject_enabled:document.getElementById('mwCross').checked,    cross_inject_always:document.getElementById('mwAlways').checked,    cross_inject_max_msgs:Number(document.getElementById('mwMaxmsgs').value)||2,    cross_inject_diary_days:Number(document.getElementById('mwDays').value)||3,    cross_inject_memory_per_category:Number(document.getElementById('mwMempercat').value)||2,    cross_inject_summary_days:Number(document.getElementById('mwSumdays').value)||7,    cross_inject_starred_topk:Number(document.getElementById('mwStartopk').value)||10  };  var up3={compaction_max_active_blocks:Math.max(0,Math.floor(Number(document.getElementById('mwCcmax').value)||0)),compaction_context_limit_chars:Math.max(0,Math.floor(Number(document.getElementById('mwClim').value)||0)),compaction_context_remind_enabled:document.getElementById('mwClimOn').checked};  Promise.all([admPost(BASE+'/config',up), admPost(BASE+'/memory-pool/config',up2), admPost(BASE+'/context-compaction/config',up3)]).then(function(res){    var bad=res.some(function(j){ return j&&j.error; });    var m=document.getElementById('mwMsg');    if(m){ m.textContent=bad?'部分参数保存失败':'已保存，下次请求/重启生效（跨窗口注入即时生效）。'; }    showToast(bad?'部分参数保存失败':'记忆与唤醒参数已保存');  }).catch(function(e){ var m=document.getElementById('mwMsg'); if(m) m.textContent='保存失败: '+(e&&e.message||e); });}if(document.getElementById('mwSaveBtn')){  document.getElementById('mwSaveBtn').addEventListener('click', saveMemWakeSettings);}
+/* ---------------- 记忆与唤醒参数（设置页 · 由原菜单卡片迁移） ---------------- */function loadMemWakeSettings(){
+  (function(){ // 记忆与唤醒参数改由管理台统一维护：此处整卡只读，避免同名双入口（服务端 /admin/chat-settings 亦拦截管理台专属键）。
+    var pnl=document.querySelector('.set-panel[data-acc="memwake"]');
+    if(!pnl) return;
+    var ins=pnl.querySelectorAll('input');
+    for(var i=0;i<ins.length;i++){ ins[i].disabled=true; try{ ins[i].setAttribute('readonly','readonly'); }catch(e){} }
+    var sb=document.getElementById('mwSaveBtn'); if(sb){ sb.style.display='none'; }
+    if(!document.getElementById('mwReadonlyNote')){
+      var note=document.createElement('div');
+      note.id='mwReadonlyNote';
+      note.className='mcp-msg';
+      note.style.cssText='margin:6px 0;padding:6px 8px;border-radius:6px;font-size:12px;line-height:1.5;color:var(--ink3);background:var(--bg1, rgba(0,0,0,0.03));';
+      note.textContent='以上参数由管理台统一维护，此处仅只读展示，如需修改请前往管理台。';
+      var hdr=pnl.querySelector('.set-acc-h');
+      if(hdr) hdr.insertAdjacentElement('afterend', note); else pnl.insertBefore(note, pnl.firstChild);
+    }
+  })();  Promise.all([admGet(BASE+'/config'), admGet(BASE+'/memory-pool/config'), admGet(BASE+'/context-compaction/config')]).then(function(res){    var c=res[0], m=res[1], cc=(res[2]&&typeof res[2]==='object')?res[2]:{};    function num(v,d){ return v!=null?v:d; }    function setVal(id,v){ var el=document.getElementById(id); if(el) el.value=v; }    function setChk(id,b){ var el=document.getElementById(id); if(el) el.checked=!!b; }    setVal('mwWake',num(c.wake_history_max_messages,80));    setVal('mwDedup',num(m.dedup_threshold,0.78));    setVal('mwDecay',num(m.decay_days,30));    setVal('mwRmax',num(m.reparse_max_chars,30));    setVal('mwRmaxitems',num(m.reparse_max_items,8));    setChk('mwCross',m.cross_inject_enabled!==false);    setChk('mwAlways',m.cross_inject_always===true);    setVal('mwMaxmsgs',num(m.cross_inject_max_msgs,2));    setVal('mwDays',num(m.cross_inject_diary_days,3));    setVal('mwMempercat',num(m.cross_inject_memory_per_category,2));    setVal('mwSumdays',num(m.cross_inject_summary_days,7));    setVal('mwStartopk',num(m.cross_inject_starred_topk,10));    setVal('mwCcmax',num(cc.compaction_max_active_blocks,0));  }).catch(function(e){ var m=document.getElementById('mwMsg'); if(m) m.textContent='加载失败: '+(e&&e.message||e); });}function saveMemWakeSettings(){  var up={wake_history_max_messages:Number(document.getElementById('mwWake').value)||0};  var up2={    dedup_threshold:Number(document.getElementById('mwDedup').value)||0.78,    decay_days:Number(document.getElementById('mwDecay').value)||30,    reparse_max_chars:Number(document.getElementById('mwRmax').value)||30,    reparse_max_items:Number(document.getElementById('mwRmaxitems').value)||8,    cross_inject_enabled:document.getElementById('mwCross').checked,    cross_inject_always:document.getElementById('mwAlways').checked,    cross_inject_max_msgs:Number(document.getElementById('mwMaxmsgs').value)||2,    cross_inject_diary_days:Number(document.getElementById('mwDays').value)||3,    cross_inject_memory_per_category:Number(document.getElementById('mwMempercat').value)||2,    cross_inject_summary_days:Number(document.getElementById('mwSumdays').value)||7,    cross_inject_starred_topk:Number(document.getElementById('mwStartopk').value)||10  };  var up3={compaction_max_active_blocks:Math.max(0,Math.floor(Number(document.getElementById('mwCcmax').value)||0))};  Promise.all([admPost(BASE+'/config',up), admPost(BASE+'/memory-pool/config',up2), admPost(BASE+'/context-compaction/config',up3)]).then(function(res){
+    // 用后端返回的最新 config 回填「压缩」重叠字段，避免与管理台互相用旧值覆盖
+    try{
+      var cc=(res[2]&&res[2].config)?res[2].config:null;
+      if(cc){
+        if(cc.compaction_max_active_blocks!==undefined){ var e2=document.getElementById('mwCcmax'); if(e2) e2.value=cc.compaction_max_active_blocks; }
+      }
+    }catch(err){}
+    var bad=res.some(function(j){ return j&&j.error; });    var m=document.getElementById('mwMsg');    if(m){ m.textContent=bad?'部分参数保存失败':'已保存，下次请求/重启生效（跨窗口注入即时生效）。'; }    showToast(bad?'部分参数保存失败':'记忆与唤醒参数已保存');  }).catch(function(e){ var m=document.getElementById('mwMsg'); if(m) m.textContent='保存失败: '+(e&&e.message||e); });}if(document.getElementById('mwSaveBtn')){  document.getElementById('mwSaveBtn').addEventListener('click', saveMemWakeSettings);}
+// 只读化入口必须可达：本段 IIFE 内函数对第一段脚本全局不可见（设置页 switch 处的 typeof 检查恒 undefined，
+// 禁输入/藏保存按钮/提示从未执行）。这里挂到 window 并在加载时自执行一次（函数幂等，重复执行无害）。
+window.loadMemWakeSettings = loadMemWakeSettings;
+try { loadMemWakeSettings(); } catch (e) { console.warn('[memwake] 只读化执行失败:', e); }
 /* ---------------- 记忆池 ---------------- */
 var _mpRefresh = null;
 function refreshMemPoolList(){ if(_mpRefresh) _mpRefresh(); }
