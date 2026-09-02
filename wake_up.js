@@ -652,30 +652,6 @@ function stripPosition(messages) {
   return messages.map(({ position, time, ...rest }) => rest);
 }
 
-// 跨窗口注入：与对话侧(routes/chat.js)同口径，读取磁盘上的跨窗口记忆快照
-// data/cross_snapshot_<sid>.json（相关记忆 + 记忆碎片 + 近期日记）。
-// 若唤醒活跃会话无快照则回退 default，再没有则返回空字符串（不注入该层）。
-function readCrossSnapshot(sessionId) {
-  try {
-    const safe = String(sessionId || "default").replace(/[^A-Za-z0-9_-]/g, "") || "default";
-    const candidates = [
-      path.join(__dirname, "data", "cross_snapshot_" + safe + ".json"),
-      path.join(__dirname, "data", "cross_snapshot_default.json")
-    ];
-    for (const file of candidates) {
-      if (fs.existsSync(file)) {
-        const snap = JSON.parse(fs.readFileSync(file, "utf-8"));
-        if (snap && typeof snap.text === "string" && snap.text.trim()) {
-          return snap.text.trim();
-        }
-      }
-    }
-  } catch (e) {
-    console.warn("[wake-up] 读取跨窗口记忆快照失败:", e.message);
-  }
-  return "";
-}
-
 function buildWakePrompt(currentTime, diffMinutes, weatherContext = "", phoneContext = "") {
   // 优先读取独立的提示词文件（推荐方式）
   const promptFile = path.join(__dirname, "wake_prompt.txt");
@@ -832,7 +808,10 @@ async function runWakeUpInner() {
     });
   }
 
-  let historyMsgs = filterMemoryMsgs(cleanMessages.filter(msg => msg.role !== "system"));
+  // 容量提醒（kind=ctx_limit）只在正常聊天（有工具）时可见：唤醒链路没有工具，
+  // AI 看到提醒也做不了压缩，徒增困惑——唤醒时直接滤掉
+  let historyMsgs = filterMemoryMsgs(cleanMessages.filter(msg => msg.role !== "system"))
+    .filter(m => !m || m.kind !== "ctx_limit");
 
   // 唤醒不需要工具调用链（对话侧才有）；历史内容统一为纯文本
   historyMsgs = historyMsgs
@@ -873,17 +852,11 @@ async function runWakeUpInner() {
   // system = 唤醒提示词 + 人设(cleanSP) + 永久上下文(pinned)
   const systemContent = [wakePrompt, cleanSP, pinnedContext].filter(Boolean).join("\n\n");
 
-  // 跨窗口记忆快照（与对话侧三层结构一致：system -> assistant(跨窗口记忆) -> user 任务）
-  const crossSnapshotText = readCrossSnapshot(wakeSessionId);
-
   const wakeMessages = [
     {
       role: "system",
       content: systemContent
     },
-    ...(crossSnapshotText
-      ? [{ role: "assistant", content: "## 跨窗口记忆\n" + crossSnapshotText }]
-      : []),
     {
       // 批注 2026-07-15：Claude/部分 New API 适配器会把 system 抽成独立字段；
       // 唤醒请求如果全是 system，上游 messages 会变空，因此最近记录必须作为 user 任务输入发送。
@@ -903,9 +876,6 @@ ${historyText}`
 
   // 批注 2026-07-15：wake-up prompt 会包含最近聊天记录；
   // 默认日志只写摘要，避免公开部署时把完整上下文刷进 pm2 日志。
-  if (crossSnapshotText) console.log("[wake-up] 已注入跨窗口记忆（" + crossSnapshotText.length + " 字符）");
-  else console.log("[wake-up] 无跨窗口记忆快照可注入（回退为空）");
-
   console.log("\n===== WAKE MESSAGES SUMMARY =====\n");
   console.log(JSON.stringify(summarizeWakeMessages(wakeMessages)));
 

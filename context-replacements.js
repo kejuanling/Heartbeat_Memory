@@ -490,8 +490,20 @@ const _activeSessionAls = new AsyncLocalStorage();
 function setActiveSession(sid) { _activeSessionAls.enterWith(sid || null); }
 function getActiveSession() { return _activeSessionAls.getStore() || null; }
 function activeSessionOr(sessionId) { return (sessionId !== undefined && sessionId !== null) ? sessionId : getActiveSession(); }
+
+// MCP 工具回调的会话兜底：AI 在聊天中调 context_replace 时，工具服务器(8771)回调 /internal/apply
+// 是独立请求，ALS 已丢（此前会错落到 default 会话/主会话时间线）。
+// 聊天侧进入工具循环前 noteMcpChatSession(sessionId) 登记，回调 90 秒内用它兜底。
+let _mcpChatSession = null;
+let _mcpChatAt = 0;
+function noteMcpChatSession(sid) { _mcpChatSession = sid || null; _mcpChatAt = Date.now(); }
+function recentMcpChatSession(maxAgeMs) {
+  return (Date.now() - _mcpChatAt <= (maxAgeMs || 90000)) ? _mcpChatSession : null;
+}
+function effectiveSession(sessionId) { return activeSessionOr(sessionId) || recentMcpChatSession(); }
+
 function loadTimeline(sessionId) {
-  const sid = activeSessionOr(sessionId);
+  const sid = effectiveSession(sessionId);
   if (sid && sid !== "default") {
     const safe = String(sid).replace(/[^A-Za-z0-9_-]/g, "");
     return readJson(path.join(__dirname, "enhanced_messages_" + safe + ".json"), []);
@@ -575,6 +587,18 @@ function resolveRange(range) {
 // ========================
 // 新增替换（AI 工具）
 // ========================
+// AI 替换区间保护：不许覆盖最近 N 条近期对话（防 AI 把近期细节压成摘要伤连贯）。
+// 读 data/config.json 的 compaction_protect_recent_messages（0=不保护），默认 40。
+function loadProtectRecentMessages() {
+  try {
+    const cfg = readJson(CONFIG_FILE, {});
+    const v = Number(cfg && cfg.compaction_protect_recent_messages);
+    return isFinite(v) ? Math.max(0, Math.floor(v)) : 40;
+  } catch (e) {
+    return 40;
+  }
+}
+
 function addReplacement(options) {
   const text = String((options && (options.text || options.memory)) || "").trim();
   if (!text) return { ok: false, error: "替换正文不能为空" };
@@ -584,11 +608,23 @@ function addReplacement(options) {
   const resolved = resolveRange(options && options.range);
   if (!resolved.ok) return resolved;
 
+  // 保护最近 N 条：区间末端进入保护区就拒绝，AI 需选更早的时间段
+  const protectN = loadProtectRecentMessages();
+  if (protectN > 0) {
+    const total = nonSystemMessages(loadTimeline()).length;
+    if (resolved.end_index >= total - protectN) {
+      return {
+        ok: false,
+        error: "该范围覆盖到了最近 " + protectN + " 条消息（近期对话受保护，不参与压缩）。请把 end_time 提前，选择更早的时间段。"
+      };
+    }
+  }
+
   const item = {
     id: "ctxrep_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8),
     created_at: nowIso(),
     source: "ai",
-    session: activeSessionOr() || "default",   // 多会话：记录归属当前会话，只在该会话内套用
+    session: effectiveSession() || "default",   // 多会话：记录归属当前会话（ALS / MCP 工具回调兜底），只在该会话内套用
     text: text,
     memory: text,
     range: (options && options.range) || {},
@@ -604,9 +640,9 @@ function addReplacement(options) {
   const items = loadItems();
   items.push(item);
   saveItems(items);
-  console.log("[context-replacements] 新增替换（AI）：", item.range_label, "->", text.slice(0, 40).replace(/\n/g, " "), "...");
+  console.log("[context-replacements] 新增替换（AI）：session=" + item.session, item.range_label, "->", text.slice(0, 40).replace(/\n/g, " "), "...");
 
-  return { ok: true, id: item.id, count: item.count, range_label: item.range_label, message: "已记录替换：" + item.count + " 条消息 → 替换正文" };
+  return { ok: true, id: item.id, session: item.session, count: item.count, range_label: item.range_label, message: "已记录替换：" + item.count + " 条消息 → 替换正文" };
 }
 
 // ========================
@@ -2515,6 +2551,7 @@ module.exports = {
   loadTimeline,
   setActiveSession,
   getActiveSession,
+  noteMcpChatSession,
   extractPoolKeywords,
   searchRelatedSegments,
   searchCompactionOriginal,

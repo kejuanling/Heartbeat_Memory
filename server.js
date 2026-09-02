@@ -2384,6 +2384,23 @@ app.post("/internal/context-replacements/apply", async (req, reply) => {
   try {
     const body = req.body || {};
     const result = contextReplacements.addReplacement({ range: body.range || {}, memory: body.memory });
+    // AI 压缩成功 → 该会话的容量提醒使命完成，标记删除；
+    // 若上下文仍超上限，下次请求会带新的时间段重新提醒，一段一段压到达标为止。
+    if (result && result.ok && result.session) {
+      try {
+        const timeline = loadTimeline(result.session);
+        let removed = false;
+        for (const m of timeline) {
+          if (m && m.kind === "ctx_limit" && !m.deleted) { m.deleted = true; removed = true; }
+        }
+        if (removed) {
+          saveTimeline(timeline, result.session);
+          console.log("[ctx-limit] AI 已完成一次压缩，清除会话 " + result.session + " 的容量提醒（仍超限会重新提醒）");
+        }
+      } catch (cleanErr) {
+        console.warn("[ctx-limit] 清除容量提醒失败（不影响替换结果）:", cleanErr.message);
+      }
+    }
     reply.send(result);
   } catch (err) {
     console.error("[POST /internal/context-replacements/apply] error:", err.message);

@@ -44,7 +44,9 @@ const DEFAULT_CONFIG = {
   // 让 AI 自己调 context_replace 压缩（0=不限）。
   compaction_context_limit_chars: 30000,
   // 容量提醒总开关：关掉后不再检测和塞提醒。
-  compaction_context_remind_enabled: true
+  compaction_context_remind_enabled: true,
+  // AI 替换区间保护：AI 建的替换块不许覆盖最近 N 条近期对话（0=不保护），越界会被拒绝。
+  compaction_protect_recent_messages: 40
 };
 
 const DEFAULT_COMPACTION_SYSTEM =

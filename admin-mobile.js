@@ -2786,7 +2786,8 @@ function ccArmAllGapAutoLoad(){
      'cc-cfg-chunk-min':c.compaction_chunk_min,
      'cc-cfg-chunk-max':c.compaction_chunk_max,
      'cc-cfg-max-blocks':c.compaction_max_active_blocks,
-     'cc-cfg-ctx-limit':(c.compaction_context_limit_chars!==undefined?c.compaction_context_limit_chars:30000)
+     'cc-cfg-ctx-limit':(c.compaction_context_limit_chars!==undefined?c.compaction_context_limit_chars:30000),
+     'cc-cfg-protect-recent':(c.compaction_protect_recent_messages!==undefined?c.compaction_protect_recent_messages:40)
    };
    Object.keys(fields).forEach(function(id){
      const el=document.getElementById(id);
@@ -2835,7 +2836,8 @@ function ccArmAllGapAutoLoad(){
     compaction_compress_events: getC('cc-cfg-events'),
     compaction_max_active_blocks: Math.max(0, Math.floor(Number(get('cc-cfg-max-blocks'))||0)),
     compaction_context_limit_chars: Math.max(0, Math.floor(Number(get('cc-cfg-ctx-limit'))||0)),
-    compaction_context_remind_enabled: getC('cc-cfg-ctx-remind')
+    compaction_context_remind_enabled: getC('cc-cfg-ctx-remind'),
+    compaction_protect_recent_messages: Math.max(0, Math.floor(Number(get('cc-cfg-protect-recent'))||0))
   };
   const msg=document.getElementById('cc-config-msg');
   if(msg) msg.textContent=(notes.length?('提示：'+notes.join('；')):'')+' 保存中...';
