@@ -2132,22 +2132,43 @@ function inlineMd(s){
   return s;
 }
 function renderMd(text){
+  // 先按 ``` 围栏切段（配对扫描），代码块内部（含空行）整块渲染，不参与空行分段；
+  // 旧版先 split(/\n\n+/) 再匹配围栏，含空行的代码块会被拆坏（``` 直接当正文显示）
+  let html="";
+  const lines=String(text||"").split("\n");
+  let buf=[];
+  const flushBuf=function(){ if(buf.length){ html+=renderTextBlocks(buf.join("\n")); buf=[]; } };
+  let i=0;
+  while(i<lines.length){
+    if(/^```/.test(lines[i])){
+      let j=i+1;
+      while(j<lines.length && !/^```/.test(lines[j])) j++;
+      if(j<lines.length){
+        flushBuf();
+        const code=escapeHtml(lines.slice(i+1,j).join("\n").replace(/\n$/,""));
+        const wrap=cfg.code_wrap?' class="code-wrap"':'';
+        if(cfg.fold_code){
+          html+='<details class="code-fold"><summary>代码块</summary><pre'+wrap+'><code>'+code+'</code></pre></details>';
+        }else{
+          html+='<pre'+wrap+'><code>'+code+'</code></pre>';
+        }
+        i=j+1;
+        continue;
+      }
+      // 未闭合围栏：按普通文本行继续（流式未收完时保持旧版行为，收齐后自然成块）
+    }
+    buf.push(lines[i]);
+    i++;
+  }
+  flushBuf();
+  return html;
+}
+function renderTextBlocks(text){
   const blocks=text.split(/\n\n+/);
   let html="";
   for(let b of blocks){
     b=b.trim(); if(!b)continue;
-    let m=b.match(/^```(.*)\n([\s\S]*?)```$/);
-    if(m){
-      const code=escapeHtml(m[2].replace(/\n$/,""));
-      const wrap=cfg.code_wrap?' class="code-wrap"':'';
-      if(cfg.fold_code){
-        html+='<details class="code-fold"><summary>代码块</summary><pre'+wrap+'><code>'+code+'</code></pre></details>';
-      }else{
-        html+='<pre'+wrap+'><code>'+code+'</code></pre>';
-      }
-      continue;
-    }
-    m=b.match(/^(#{1,4})\s+(.+)$/);
+    let m=b.match(/^(#{1,4})\s+(.+)$/);
     if(m){const l=m[1].length;html+="<h"+l+">"+inlineMd(m[2])+"</h"+l+">";continue;}
     if(/^>/.test(b)){const lines=b.split("\n").map(x=>x.replace(/^>\s?/,"")).join("<br>");html+="<blockquote>"+inlineMd(lines)+"</blockquote>";continue;}
     if(/^[-*]\s/m.test(b)){const items=b.split("\n").map(x=>x.replace(/^\s*[-*]\s+/,"")).filter(x=>x);html+="<ul>"+items.map(i=>"<li>"+inlineMd(i)+"</li>").join("")+"</ul>";continue;}
@@ -6015,6 +6036,9 @@ function toast(t){ if(typeof showToast==='function'){ showToast(t); } }
 window.chatToast = toast;
 window.chatAdmGet = function(u){ return admGet(u); };
 window.chatAdmBase = BASE;
+// 桥接：第一段脚本（newSession / 提示词备份编辑）会直接调用 openEditModal，
+// 不挂 window 会 ReferenceError（与 chatToast 同款跨段桥接，函数声明已提升，此处可安全赋值）
+window.openEditModal = openEditModal;
 
 /* 会话相关：压缩/替换接口自动带 session_id（与 admin-mobile 一致，读取 han_current_session） */
 function sessId(){ try{ return localStorage.getItem('han_current_session')||'default'; }catch(e){ return 'default'; } }

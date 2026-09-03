@@ -735,6 +735,10 @@ async function runWakeUp() {
   wakeRunning = true;
   try {
     await runWakeUpInner();
+  } catch (err) {
+    // 定时唤醒入口（runTimedWake）由 setTimeout 触发、无人兜底，异常会成为
+    // unhandled rejection 直接杀死进程（Node 15+ 默认 throw）；统一在此记日志吃掉
+    console.error("[wake-up] 唤醒执行失败:", err && err.message ? err.message : err);
   } finally {
     wakeRunning = false;
   }

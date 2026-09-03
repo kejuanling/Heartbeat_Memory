@@ -549,8 +549,13 @@ function tryWake(){
   if (sending) return;
   var now = Date.now();
   if (now - lastChatAt < 1000) return;
-  var image = captureFrame();
-  if (!image) return;
+  var image = null;
+  try { image = captureFrame(); }
+  catch (capErr) {
+    // 跨域视频会污染画布，toDataURL 必抛 SecurityError：降级为纯字幕唤醒继续工作
+    image = null;
+    setStatus('跨域视频无法截图，按字幕看一眼');
+  }
   lastWakeAt = now;
   var subtitle = shareMode ? '' : currentSubtitle();
   var title = shareMode ? (watchingTitle() || '屏幕共享') : videoTitle;
@@ -582,11 +587,12 @@ async function manualWakePeek(){
   var intervalMs = 700;
   var count = Math.max(2, Math.round((sec * 1000) / intervalMs));
   for (var i = 0; i < count; i++) {
-    var f = captureFrame();
+    var f = null;
+    try { f = captureFrame(); } catch (capErr) { f = null; }   // 跨域画布污染时降级跳过该帧
     if (f) frames.push(f);
     if (i < count - 1) await new Promise(function(res){ setTimeout(res, intervalMs); });
   }
-  if (!frames.length) { addMsg('sys', '没截到画面，先点「截屏」开始共享'); return; }
+  if (!frames.length) { addMsg('sys', '画面无法截取（跨域视频限制或未在播放），这次看不了'); return; }
   lastWakeAt = Date.now();
   wakeInFlight = true;
   var subtitle = shareMode ? '' : currentSubtitle();
@@ -879,6 +885,11 @@ function pipSend(doc){
   var input = doc.getElementById('pip-input');
   var text = input.value.trim();
   if (!text) return;
+  // 回复进行中先不清空输入直接返回（清了又发不出去等于吞掉用户文字），placeholder 提示稍后再发
+  if (sending) {
+    try { input.placeholder = '上一条还在回复中，稍等再发'; } catch (e) {}
+    return;
+  }
   input.value = '';
   sendChatText(text, true);
 }

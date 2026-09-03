@@ -823,6 +823,8 @@ function updateManualRecordRange(index, start, end) {
   const absorbed = [];
   for (const it of items) {
     if (it.id === cur.id || it.removed) continue;
+    // 只吞并同会话（或无 session 的通用旧块）的块，跨会话块定位撞上也不能误吞（与 addManualRecord 同口径）
+    if (it.session && it.session !== cur.session) continue;
     const r = recordCompRange(it, compItems);
     if (!r) continue;
     if (r.start <= mergedEnd && r.end >= mergedStart) {
@@ -873,6 +875,8 @@ function updateAiRecordRange(repId, startIdx, endIdx) {
   const absorbed = [];
   for (const it of list) {
     if (it.id === repId || it.removed) continue;
+    // 只吞并同会话（或无 session 的通用旧块）的块，跨会话块定位撞上也不能误吞（与 addManualRecord 同口径）
+    if (it.session && it.session !== rec.session) continue;
     const r = recordCompRange(it, items);
     if (!r) continue;
     if (r.start <= mergedEnd && r.end >= mergedStart) {
