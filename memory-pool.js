@@ -367,7 +367,7 @@ function supersedeBlock(blockId) {
 }
 
 // ---------------- 检索（记忆池工具） ----------------
-// 返回 topK 条；仅统计检索次数，不自动置顶（置顶由管理台手动固定）
+// 返回 topK 条；检索会计数并按阈值自动置顶（历史行为；管理台也可手动固定置顶）
 function retrieve(query, opts) {
   opts = opts || {};
   const topK = Math.max(1, Number(opts.topK) || Number(CONFIG.retrieval_top_k) || 5);
@@ -382,17 +382,20 @@ function retrieve(query, opts) {
   scored.sort((a, b) => b.score - a.score || b.sim - a.sim);
   const picked = scored.slice(0, topK);
   const autoPinTh = Math.max(2, Number(CONFIG.auto_pin_retrieval_count) || 5);
-  // 只读模式：检索计数/自动置顶也是写，跳过以免覆盖 gateway 侧的 memory_pool.json
-  for (const p of picked) {
-    if (READONLY) break;
-    p.r.retrieval_count = Number(p.r.retrieval_count || 0) + 1;
-    p.r.last_retrieved_at = nowIso();
-    p.r.updated_at = nowIso();
-    // 多次检索自动置顶：达到阈值即固定为置顶，让「相关记忆」跨窗口块能稳定带上它
-    if (p.r.pinned !== true && p.r.retrieval_count >= autoPinTh) {
-      p.r.pinned = true;
+  // 只读模式：检索计数/自动置顶也是写，跳过以免覆盖 gateway 侧的 memory_pool.json；
+  // 空查询不计数：否则多次空查询测试会把无关记忆顶成置顶，污染跨窗口注入
+  const shouldCount = !!(query && String(query).trim());
+  if (!READONLY && shouldCount) {
+    for (const p of picked) {
+      p.r.retrieval_count = Number(p.r.retrieval_count || 0) + 1;
+      p.r.last_retrieved_at = nowIso();
+      p.r.updated_at = nowIso();
+      // 多次检索自动置顶：达到阈值即固定为置顶，让「相关记忆」跨窗口块能稳定带上它
+      if (p.r.pinned !== true && p.r.retrieval_count >= autoPinTh) {
+        p.r.pinned = true;
+      }
+      dirty = true;
     }
-    dirty = true;
   }
   // Reads no longer write to disk immediately: batch via the 5s flushTimer to avoid write amplification.
   // 返回精简字段：只要展示/编辑需要的 id/content/category/importance/pinned + 时间戳，
@@ -476,7 +479,8 @@ function dotProduct(a, b) {
 async function retrieveHybrid(query, opts) {
   opts = opts || {};
   const q = String(query || "").trim();
-  if (!q) return retrieve(query, opts);
+  // 空查询直接返回空：否则 top-K 全部被计数+可能触发自动置顶，多次空查询测试会污染置顶
+  if (!q) return [];
   const rows = load().filter(r => r.active !== false && (!opts.category || String(r.category || "") === String(opts.category)));
   if (!rows.length) return [];
   if (embedClient.fused()) return retrieve(query, opts);

@@ -184,11 +184,22 @@ async function sendPushNotification({ title, body }) {
       tags: process.env.NTFY_TAGS
     });
 
-    const response = await fetch(server, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload)
-    });
+    // 推送必须有超时：否则对端挂起会卡住唤醒流程，wakeRunning 互斥会让后续唤醒全部静默跳过
+    let response;
+    try {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 15000);
+      try {
+        response = await fetch(server, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(payload),
+          signal: ctl.signal
+        });
+      } finally { clearTimeout(timer); }
+    } catch (e) {
+      return { ok: false, providerLabel: "ntfy", reason: "推送请求失败/超时: " + e.message };
+    }
     const responseText = await response.text();
     if (!response.ok) {
       return { ok: false, providerLabel: "ntfy", reason: responseText || `HTTP ${response.status}` };
@@ -211,11 +222,22 @@ async function sendPushNotification({ title, body }) {
     icon: process.env.CUSTOM_ICON_URL
   };
 
-  const response = await fetch("https://api.day.app/push", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(barkPayload)
-  });
+  // 推送必须有超时：否则对端挂起会卡住唤醒流程，wakeRunning 互斥会让后续唤醒全部静默跳过
+  let response;
+  try {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 15000);
+    try {
+      response = await fetch("https://api.day.app/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(barkPayload),
+        signal: ctl.signal
+      });
+    } finally { clearTimeout(timer); }
+  } catch (e) {
+    return { ok: false, providerLabel: "Bark", reason: "推送请求失败/超时: " + e.message };
+  }
 
   const responseText = await response.text();
   let result = {};
@@ -1056,19 +1078,28 @@ ${historyText}`
     }
 
     try {
-      const aiReplyResponse = await fetch(GATEWAY_URL, {
-        method: "POST",
-        headers: internalHeaders(),
-        body: JSON.stringify({
-          content: rawAiText,
-          event: eventContent,
-          diary: diaryResult.diaryContent || "",
-          push_meta: pushMeta,
-          session_id: wakeSessionId
-        })
-      });
+      // 回写必须有超时 + 非 2xx 必须留痕：否则网关重启中/密钥不匹配时回复静默丢失，排查无迹
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 30000);
+      let aiReplyResponse;
+      try {
+        aiReplyResponse = await fetch(GATEWAY_URL, {
+          method: "POST",
+          headers: internalHeaders(),
+          body: JSON.stringify({
+            content: rawAiText,
+            event: eventContent,
+            diary: diaryResult.diaryContent || "",
+            push_meta: pushMeta,
+            session_id: wakeSessionId
+          }),
+          signal: ctl.signal
+        });
+      } finally { clearTimeout(timer); }
       if (aiReplyResponse.ok) {
         console.log("\n已保存 AI 完整回复到时间线\n");
+      } else {
+        console.error("\n保存 AI 完整回复失败: 网关返回 HTTP " + aiReplyResponse.status + "（本次唤醒产出可能未落时间线，仅存在于推送中）");
       }
     } catch (err) {
       console.error("\n保存 AI 完整回复失败:", err.message);

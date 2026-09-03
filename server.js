@@ -153,11 +153,17 @@ const IS_RAILWAY_RUNTIME = Boolean(
 const TIMELINE_FILE = "enhanced_messages.json";
 // 多会话：按 sessionId 计算对应的时间线文件。
 // 空/缺省 sessionId 走默认主会话（enhanced_messages.json），100% 兼容旧行为。
-function timelineFileFor(sessionId) {
-  if (!sessionId || sessionId === "default") return TIMELINE_FILE;
+// 清洗后为空的会话ID（如纯中文）用哈希生成稳定文件名：否则不同会话会共用 enhanced_messages_.json 串数据。
+function safeSessionToken(sessionId) {
+  if (!sessionId || sessionId === "default") return "default";
   // 只允许安全的会话ID字符，防止路径穿越
   const safe = String(sessionId).replace(/[^A-Za-z0-9_-]/g, "");
-  return "enhanced_messages_" + safe + ".json";
+  return safe || ("h" + crypto.createHash("md5").update(String(sessionId)).digest("hex").slice(0, 12));
+}
+function timelineFileFor(sessionId) {
+  const token = safeSessionToken(sessionId);
+  if (token === "default") return TIMELINE_FILE;
+  return "enhanced_messages_" + token + ".json";
 }
 // 对话侧闹钟与唤醒侧共用同一份调度文件：gateway 写入，wake-up 轮询感知后挂定时器
 const WAKE_SCHEDULE_PATH = path.join(__dirname, "data", "wake_schedule.json");
@@ -536,15 +542,24 @@ function armQuietRelease() {
   if (!end) return;
   const delayMs = end.getTime() - Date.now();
   if (delayMs <= 0) {
-    try { releaseHeldMessages(); } catch (err) { console.error("[quiet] 释放失败:", err.message); }
-    clearQuietSchedule();
+    releaseQuietOnce();
     return;
   }
-  quietReleaseTimer = setTimeout(async () => {
-    try { await releaseHeldMessages(); } catch (err) { console.error("[quiet] 释放失败:", err.message); }
-    clearQuietSchedule();
-  }, delayMs);
+  quietReleaseTimer = setTimeout(releaseQuietOnce, delayMs);
   console.log(`[quiet] 已挂扣住释放定时器：${formatDateTimeInTimeZone(end, TIME_ZONE)}（${Math.round(delayMs / 60000)} 分钟后）`);
+}
+
+// 释放一次：成功才清调度；失败保留调度文件并 60 秒后退避重试，
+// 否则释放失败仍清掉调度后，滞留的扣住消息从此再无自动释放路径
+async function releaseQuietOnce() {
+  try {
+    await releaseHeldMessages();
+    clearQuietSchedule();
+  } catch (err) {
+    console.error("[quiet] 释放失败，60 秒后重试:", err.message);
+    if (quietReleaseTimer) clearTimeout(quietReleaseTimer);
+    quietReleaseTimer = setTimeout(releaseQuietOnce, 60000);
+  }
 }
 
 function quietMsgSignature(m) {
@@ -566,18 +581,26 @@ function collectTrailingUnansweredUserMessages(msgs) {
 
 function holdNewUserMessages(kelivoMessages) {
   const held = readHeldMessages();
-  const heldSigs = new Set(held.map(m => quietMsgSignature(m)));
+  // 按签名计数一一对应：签名相同的消息，已扣住几条就跳过几条，剩下的照常扣住。
+  // 原来的 Set 去重会把免打扰期间重复发送的相同文本（如连发两条"好的"）整条吞掉。
+  const heldCount = {};
+  for (const m of held) {
+    const sig = quietMsgSignature(m);
+    heldCount[sig] = (heldCount[sig] || 0) + 1;
+  }
+  const seen = {};
   let added = 0;
   for (const m of kelivoMessages) {
     if (!isRealMessageForTimeline(m) || m.role !== "user") continue;
     const sig = quietMsgSignature(m);
-    if (heldSigs.has(sig)) continue;
+    seen[sig] = (seen[sig] || 0) + 1;
+    if (seen[sig] <= (heldCount[sig] || 0)) continue;
     held.push({
       role: "user",
       content: normalizeContentToText(m.content),
       held_at: new Date().toISOString()
     });
-    heldSigs.add(sig);
+    heldCount[sig] = (heldCount[sig] || 0) + 1;
     added++;
   }
   if (added > 0) writeHeldMessages(held);
@@ -935,14 +958,15 @@ function buildTimeline(kelivoMessages, sessionId) {
     const key = m.role + "\u0000" + normalizeContentToText(m.content);
     if (!oldByContent.has(key)) oldByContent.set(key, m);
   }
-  // 本批最后一条实时 user 消息（接收时刻≈真实时间，供唤醒判断使用）
-  let lastUserFallback = null;
+  // 本批最后一条实时 user 消息的下标（接收时刻≈真实时间，供唤醒判断使用）；
+  // 用下标而不是对象引用：map 展开后是新对象，引用比较永远为 false
+  let lastUserFallbackIdx = -1;
   function toValidDate(value) {
     if (!value) return null;
     const d = new Date(value);
     return isNaN(d.getTime()) ? null : d;
   }
-  function resolveMessageTime(msg) {
+  function resolveMessageTime(msg, idx) {
     const direct = toValidDate(msg.time);
     if (direct) return direct;
     const old = oldByContent.get(msg.role + "\u0000" + normalizeContentToText(msg.content));
@@ -952,7 +976,7 @@ function buildTimeline(kelivoMessages, sessionId) {
     if (fromContent) return fromContent;
     // 只有本批最后一条实时 user 消息才回填服务器接收时刻（Kelivo 实时推送≈真实时间）；
     // 其余消息不再盖伪时间，避免历史消息全部堆在同一时刻导致时间感失真
-    if (lastUserFallback && msg === lastUserFallback) return new Date();
+    if (idx != null && idx === lastUserFallbackIdx) return new Date();
     return null;
   }
   function timeIsoOrUndefined(msg) {
@@ -968,12 +992,23 @@ function buildTimeline(kelivoMessages, sessionId) {
   // 存储层历史图片保留（与请求层 keep_recent_image_turns 一致）：窗口内保留真实 image_url；窗口外的更早带图消息压成 [图片] 占位，避免 JSON 无限膨胀。
   const realForTimeline = kelivoMessages.filter(isRealMessageForTimeline);
   const hasAnyImagePart = function (msg) { return Array.isArray(msg && msg.content) && msg.content.some(p => p && isImageContentPart(p)); };
+  // 提前算好"本批最后一条实时 user 消息"的下标：resolveMessageTime 在下面 map 时就要用它，
+  // 原实现赋值晚于使用导致回填分支永不生效
+  lastUserFallbackIdx = -1;
+  for (let i = realForTimeline.length - 1; i >= 0; i--) {
+    if (realForTimeline[i].role === "user") { lastUserFallbackIdx = i; break; }
+  }
   let keepImgTurns = Number((typeof memoryEngine.getConfig === 'function' && memoryEngine.getConfig()).keep_recent_image_turns);
-  if (!Number.isFinite(keepImgTurns) || keepImgTurns < 0) keepImgTurns = Number(process.env.KEEP_RECENT_IMAGE_TURNS) || 8;
+  // 与请求层语义一致：0 = 不保留任何历史图片；只有无效/负值才回退默认 8（原 Number()||8 会把合法的 0 错变成 8）
+  if (!Number.isFinite(keepImgTurns) || keepImgTurns < 0) {
+    const envVal = Number(process.env.KEEP_RECENT_IMAGE_TURNS);
+    keepImgTurns = (Number.isFinite(envVal) && envVal >= 0) ? envVal : 8;
+  }
   const imgMsgIdx = [];
   realForTimeline.forEach(function (m, i) { if (hasAnyImagePart(m)) imgMsgIdx.push(i); });
   let keepFromIdx = 0;
   if (Number.isFinite(keepImgTurns) && keepImgTurns > 0 && imgMsgIdx.length > keepImgTurns) keepFromIdx = imgMsgIdx[imgMsgIdx.length - keepImgTurns];
+  if (keepImgTurns === 0) keepFromIdx = realForTimeline.length; // 0 = 全部压成占位，不保留任何历史图片
   const keepImgSet = new Set();
   for (let i = keepFromIdx; i < realForTimeline.length; i++) { if (hasAnyImagePart(realForTimeline[i])) keepImgSet.add(i); }
   const newRealMessages = realForTimeline
@@ -984,7 +1019,7 @@ function buildTimeline(kelivoMessages, sessionId) {
       }
       return normalizeMessageForTimeline(m);
     })
-    .map(m => ({ ...m, _t: resolveMessageTime(m) }));
+    .map(function (m, i) { return { ...m, _t: resolveMessageTime(m, i) }; });
 
   const oldSpecialEvents = oldTimeline.filter(isSpecialEvent).sort((a, b) => {
     const timeA = extractTimestampWithMemory(a);
@@ -1017,7 +1052,7 @@ function buildTimeline(kelivoMessages, sessionId) {
     return true;
   });
 
-  lastUserFallback = [...unique].reverse().find(m => m.role === "user") || null;
+  // lastUserFallback 已在上方（map 之前）提前计算，这里不再赋值（原赋值晚于使用，是死代码）
 
   const result = [];
   if (latestSP) result.push({ ...latestSP, position: 0, time: timeIsoOrUndefined(latestSP) });
@@ -1533,8 +1568,9 @@ const CROSS_SNAPSHOT_DIR = path.join(__dirname, "data");
 const CROSS_SNAPSHOT_VERSION = 4;  // 升版本：加 fingerprint 字段，旧快照自动重建
 const CROSS_SNAPSHOT_TTL_MS = 10 * 60 * 1000;  // 超时兜底（10分钟），防止指纹漏判导致永久不更新
 function crossSnapshotFile(sessionId) {
-  const safe = String(sessionId || "default").replace(/[^A-Za-z0-9_-]/g, "") || "default";
-  return path.join(CROSS_SNAPSHOT_DIR, "cross_snapshot_" + safe + ".json");
+  // 与 timelineFileFor 用同一套会话名规则（safeSessionToken）：保证同一会话的时间线与快照归属一致
+  const token = safeSessionToken(sessionId || "default");
+  return path.join(CROSS_SNAPSHOT_DIR, "cross_snapshot_" + token + ".json");
 }
 function crossFingerprint(cfg) {
   // 跨窗口快照指纹：置顶记忆 + 标星 + 日记目录 mtime 任一变化即重建。
@@ -1670,10 +1706,29 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
   // 这里把最终回复也写回当前会话的时间线。
   if (r && r.text) {
     try {
-      const baseMsgs = Array.isArray(kelivoMessages) && kelivoMessages.length
+      // 关键修复：以服务器现有时间线为基，不再用前端请求里可能被截断的消息数组全量覆盖。
+      // 旧写法拿 kelivoMessages/messages/body.messages 整体重建并 saveTimeline——
+      // 前端一旦只带了局部历史（如分页只传 500 条），服务器的完整历史会被整个覆盖丢光。
+      const existing = loadTimeline(sessionId);
+      // 请求里确有、但服务器时间线还缺的真实对话消息（通常是本轮新增的 user 消息），
+      // 按 role+content 去重补进，绝不重复追写历史，避免本地局部数据覆盖服务器完整数据。
+      const reqMsgs = Array.isArray(kelivoMessages) && kelivoMessages.length
         ? kelivoMessages
         : (messages || body.messages || []);
-      const newMsgs = baseMsgs.slice();
+      const existingKeys = new Set();
+      for (const m of existing) {
+        if (m && m.content != null) existingKeys.add(m.role + "\u0000" + normalizeContentToText(m.content));
+      }
+      const appended = [];
+      for (const m of reqMsgs) {
+        if (!m || m.role === "system" || isSpecialEvent(m) || m.tool_calls || m.tool_call_id) continue;
+        if (!isRealMessageForTimeline(m)) continue;
+        const key = m.role + "\u0000" + normalizeContentToText(m.content);
+        if (existingKeys.has(key)) continue;
+        existingKeys.add(key);
+        appended.push(m);
+      }
+      const newMsgs = existing.concat(appended);
       // 保留工具调用记录：写成一条带标记的 assistant 消息入时间线，
       // 让模型跨轮能"记住"工具结果（大小交给上下文压缩兜底）；前端渲染时跳过这条。
       let toolNote = "";
@@ -1686,11 +1741,12 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         newMsgs.push({ role: "assistant", content: "【工具调用记录】\n" + toolNote });
       }
       // 富字段一并落时间线：reasoning/tools/tokens，跨设备刷新不再丢（前端 /v1/history 读取这些字段）。
+      // buildTimeline 内部按 role+content 去重，重试/重复写回不会追加重复回复。
       newMsgs.push({ role: "assistant", content: aiClean, reasoning: r.reasoning || "", tools: r.toolHistory || [], tokens: r.usage || null });
       const rebuilt = buildTimeline(newMsgs, sessionId);
       saveTimeline(rebuilt, sessionId);
       sseNotify(sessionId);
-      console.log("[mcp] AI 回复已写回时间线 (session=" + (sessionId || "default") + ", chars=" + r.text.length + ")");
+      console.log("[mcp] AI 回复已写回时间线 (session=" + (sessionId || "default") + ", chars=" + r.text.length + ", timeline=" + rebuilt.length + ")");
     } catch (wr) {
       console.warn("[mcp] 写回时间线失败:", wr.message);
     }
@@ -2351,6 +2407,13 @@ app.post("/admin/restart", { preHandler: basicAuth }, async (req, reply) => {
     }
   } else if (!ALLOWED_RESTART_CMDS.some(prefix => trimmedCmd.startsWith(prefix))) {
     console.error("重启命令不在白名单内，已拒绝:", trimmedCmd);
+    return;
+  }
+  // 剥掉「cd <dir> && 」前缀后，剩余命令不允许再出现命令拼接/管道/替换符（2>&1 重定向除外）：
+  // 否则 "pm2 restart gateway && <任意命令>" 可借前缀白名单绕过校验
+  const execPart = (cdMatch ? cdMatch[2] : trimmedCmd).replace(/2>&1/g, "");
+  if (/[;&|`]|\$\(/.test(execPart)) {
+    console.error("重启命令含拼接/管道等非法片段，已拒绝:", trimmedCmd);
     return;
   }
   // 经 sh -c 执行：支持 cd && 与 2>&1 重定向；白名单已在上方校验，避免任意命令注入。
@@ -3052,6 +3115,8 @@ app.get("/admin/mcp/servers", { preHandler: mcpManageAuth }, async (req, reply) 
     const cfg = JSON.parse(fs.readFileSync(MCP_SERVERS_CONFIG, "utf-8"));
     const list = (cfg.servers || []).map(async function (s) {
       const base = { id: s.id, name: s.name, type: s.type, url: s.url, command: s.command, args: s.args || [], headers: s.headers || {}, enabled: s.enabled !== false };
+      // 工具白名单原样带回前端，避免管理台保存时丢失（PUT 端会保留该字段）
+      if (Array.isArray(s.allowTools)) base.allowTools = s.allowTools.map(String);
       if (s.enabled === false) return Object.assign(base, { connected: false, tools: [], toolCount: 0, note: "已停用" });
       try {
         const probe = await mcpProbeServer(s);
@@ -3070,6 +3135,11 @@ app.get("/admin/mcp/servers", { preHandler: mcpManageAuth }, async (req, reply) 
             return { name: nm, description: (descs[nm] != null ? descs[nm] : (t && t.description) || ""), enabled: disabled.indexOf(nm) < 0, params: params };
           }).filter(function (t) { return t.name; });
           return Object.assign(base, probe, { tools: enriched, toolCount: enriched.length, managedTools: true });
+        }
+        // 白名单内工具才注入模型，管理台展示保持一致（看不到被滤掉的工具）
+        if (Array.isArray(base.allowTools) && Array.isArray(probe.tools)) {
+          probe.tools = probe.tools.filter((t) => base.allowTools.indexOf(t && t.name) >= 0);
+          probe.toolCount = probe.tools.length;
         }
         return Object.assign(base, probe);
       } catch (e) {
@@ -3094,6 +3164,8 @@ app.put("/admin/mcp/servers", { preHandler: mcpManageAuth }, async (req, reply) 
       if (s.command) o.command = String(s.command);
       if (Array.isArray(s.args)) o.args = s.args.map(String);
       if (s.headers && typeof s.headers === "object") o.headers = s.headers;
+      // 工具白名单：透传保留（mcp-service.loadTools 据此过滤注入给模型的工具）
+      if (Array.isArray(s.allowTools)) o.allowTools = s.allowTools.map(String);
       return o;
     }).filter(function (s) { return s.id && s.name; });
     writeJsonFileAtomic(MCP_SERVERS_CONFIG, { servers: clean });
@@ -3614,7 +3686,18 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
     };
   }
 
-  const estCompressedChars = chunks.reduce(function (s, c) { return s + c.chars; }, 0);
+  // 「实际约」口径：已启用且有摘要的块计摘要字数；取消替换/未生成摘要的块与未覆盖区计原文
+  // （与发送侧 applyReplacements「enabled!==false 且有摘要才套用」一致）；隐藏块不进上下文不计入
+  const rangeChars = function (s, e) {
+    let n = 0;
+    for (let i = Math.max(0, s); i <= Math.min(items.length - 1, e); i++) n += String(items[i].msg.content || "").length;
+    return n;
+  };
+  const estCompressedChars = chunks.reduce(function (s, c) {
+    if (c.hidden) return s;
+    if (c.enabled !== false && c.summary) return s + String(c.summary).length;
+    return s + rangeChars(c.blockStart, c.blockEnd);
+  }, 0) + gapRanges.reduce(function (s, g) { return s + rangeChars(g.start, g.end); }, 0);
   return {
     enabled: chunks.length > 0,
     config: contextCompactor.loadConfig(),
@@ -5339,11 +5422,46 @@ app.post("/admin/config", { preHandler: basicAuth }, async (req, reply) => {
 // 把 chat.html 的前端设置（api_key / system_prompt / cfg）整体存到服务器，
 // 换浏览器输入同一 key 后自动拉取覆盖本地，保持一致。用 basicAuth（管理台会话 cookie 亦可）。
 const CHAT_SETTINGS_FILE = path.join(__dirname, "chat-settings.json");
+// 参数归属表：设置页(chat-settings.json.cfg)只该改「界面/聊天显示类」参数；凡属管理台专属的行为参数
+// （记忆池/跨窗口注入/容量提醒/上下文上限/历史分页等）一律拒绝从设置页接口写入与下发，杜绝"同名摆设"假开关。
+function consoleOwnedCfgKeys() {
+  const blocked = new Set([
+    // 容量提醒 / 上下文上限 / 历史分页：管理台唯一权威（设置页不显示假开关）
+    "capacity_remind_enabled", "capacity_remind_threshold", "context_limit", "history_limit",
+    "pagination", "history_pagination", "conversation_pagination", "max_history",
+    // 记忆池 / 跨窗口注入：由控制台 /config 与 /memory-pool/config 管理
+    "cross_inject_enabled", "cross_inject_diary", "cross_inject_diary_count", "cross_inject_diary_days",
+    "cross_inject_memory", "cross_inject_memory_per_category", "cross_inject_push", "cross_inject_starred",
+    "cross_inject_starred_topk", "cross_inject_summary_days", "cross_inject_always", "cross_inject_max_msgs",
+    // 记忆解析 / 清理 / 去重
+    "reparse_enabled", "reparse_max_chars", "reparse_max_items", "reparse_merge_max_chars",
+    "reparse_system_prompt", "reparse_user_prompt", "reparse_warm",
+    "clean_enabled", "clean_max_items", "clean_ref_dup_threshold", "clean_ref_threshold", "clean_ref_topk",
+    "clean_system_prompt", "clean_temperature", "clean_user_prompt",
+    "dedup_anchor_threshold", "dedup_cross_threshold", "dedup_threshold",
+    "retrieval_top_k", "decay_days", "auto_pin_retrieval_count"
+  ]);
+  // 运行时以 data/memory_pool_config.json 为准：把该文件当前已有的键也并入拦截集，防漏（新增参数无需改代码）。
+  try {
+    const mpf = path.join(__dirname, "data", "memory_pool_config.json");
+    if (fs.existsSync(mpf)) {
+      const mp = JSON.parse(fs.readFileSync(mpf, "utf-8")) || {};
+      for (const k of Object.keys(mp)) blocked.add(k);
+    }
+  } catch (e) {}
+  return blocked;
+}
 app.get("/admin/chat-settings", { preHandler: basicAuth }, async (req, reply) => {
   try {
     if (!fs.existsSync(CHAT_SETTINGS_FILE)) return reply.send({ ok: true, exists: false });
-    const data = JSON.parse(fs.readFileSync(CHAT_SETTINGS_FILE, "utf-8"));
-    reply.send({ ok: true, exists: true, data: data || {} });
+    const data = JSON.parse(fs.readFileSync(CHAT_SETTINGS_FILE, "utf-8")) || {};
+    if (data.cfg && typeof data.cfg === "object") {
+      const blocked = consoleOwnedCfgKeys();
+      const cleanCfg = {};
+      for (const k of Object.keys(data.cfg)) if (!blocked.has(k)) cleanCfg[k] = data.cfg[k];
+      data.cfg = cleanCfg;
+    }
+    reply.send({ ok: true, exists: true, data });
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 app.put("/admin/chat-settings", { preHandler: basicAuth }, async (req, reply) => {
@@ -5352,7 +5470,15 @@ app.put("/admin/chat-settings", { preHandler: basicAuth }, async (req, reply) =>
     const clean = {};
     if (typeof body.api_key === "string") clean.api_key = body.api_key;
     if (typeof body.system_prompt === "string") clean.system_prompt = body.system_prompt;
-    if (body.cfg && typeof body.cfg === "object") clean.cfg = body.cfg;
+    if (body.cfg && typeof body.cfg === "object") {
+      const blocked = consoleOwnedCfgKeys();
+      const cfg = {};
+      for (const k of Object.keys(body.cfg)) {
+        if (blocked.has(k)) { console.warn("[chat-settings] 拦截管理台专属参数从设置页写入:", k); continue; }
+        cfg[k] = body.cfg[k];
+      }
+      clean.cfg = cfg;
+    }
     writeJsonFileAtomic(CHAT_SETTINGS_FILE, clean);
     reply.send({ ok: true, saved: true });
   } catch (err) { reply.code(500).send({ error: err.message }); }
@@ -5450,7 +5576,36 @@ app.put("/admin/current-session", { preHandler: basicAuth }, async (req, reply) 
 
 // ======================== 网页视频解析（共影） ========================
 // 抓取网页页面，提取候选视频地址（video 标签 / og:video / 页面内视频链接）
+// 内网/保留地址判断：/internal/co/resolve 是服务端代抓网页，必须挡住对内网与云元数据的探测（SSRF）
+function isPrivateHost(hostname) {
+  const h = String(hostname || "").toLowerCase();
+  if (!h) return true;
+  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local") || h === "0.0.0.0") return true;
+  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (m) {
+    const a = Number(m[1]), b = Number(m[2]);
+    if (a === 127 || a === 10 || a === 0) return true;              // 回环 / 私网 / 未指定
+    if (a === 172 && b >= 16 && b <= 31) return true;               // 172.16/12
+    if (a === 192 && b === 168) return true;                        // 192.168/16
+    if (a === 169 && b === 254) return true;                        // 云元数据 169.254/16
+  }
+  return false;
+}
+
 async function fetchPageLimited(pageUrl, maxBytes) {
+  let parsedUrl;
+  try { parsedUrl = new URL(pageUrl); } catch (e) { throw new Error("无效的网页地址"); }
+  if (!/^https?:$/.test(parsedUrl.protocol)) throw new Error("仅支持 http/https 网页地址");
+  if (isPrivateHost(parsedUrl.hostname)) throw new Error("该地址指向内网/保留地址，不允许抓取");
+  // 域名也要防解析到内网 IP（DNS 指向 127.0.0.1 / 内网服务的绕过手法）
+  try {
+    const dns = require("dns").promises;
+    const lookup = await dns.lookup(parsedUrl.hostname);
+    if (isPrivateHost(lookup.address)) throw new Error("该域名解析到内网地址，不允许抓取");
+  } catch (e) {
+    if (/内网/.test(e.message)) throw e;
+    throw new Error("域名解析失败: " + e.message);
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
   try {

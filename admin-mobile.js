@@ -15,6 +15,11 @@
  const ADMIN_API = location.pathname.indexOf('/heartbeat/admin/') === 0 ? '/heartbeat/admin' : '/admin';
  // 会话选择器：null = 跟随聊天页 localStorage.han_current_session；否则使用管理员在下拉框里选定的会话
  let ADMIN_SESSION = null;
+ // URL 带 session=xxx（如聊天页压缩弹窗「去管理台压缩页」跳转）时自动选中该会话，效果同手动在下拉里选一次并记住
+ try{
+   const _urlSid = new URLSearchParams(location.search).get('session');
+   if(_urlSid){ ADMIN_SESSION = _urlSid; localStorage.setItem('han_admin_session', _urlSid); }
+ }catch(e){}
 
 // 读取 cookie（供 CSRF token 使用）
 function getCookie(name) {
@@ -195,6 +200,8 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    const v = sel ? sel.value : '';
    ADMIN_SESSION = v || null;
    try{ if(v) localStorage.setItem('han_admin_session', v); else localStorage.removeItem('han_admin_session'); }catch(e){}
+   // 必须复位块消息缓存：ccMsgFetchDone 不复位的话，新会话的块原文会永远停在"消息加载中"
+   try{ if(typeof resetCcMsgCache==='function') resetCcMsgCache(); }catch(e){}
    try{ loadCompactionPreview(); }catch(e){}
    try{ if(typeof loadReplaceLog==='function') loadReplaceLog(); }catch(e){}
  }
@@ -416,12 +423,14 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
  }
 
  function clearCompactionLogs(){
-   const body = document.getElementById('logPanelBody');
-   if(body) body.innerHTML = '<div class="log-panel-empty">暂无生成记录</div>';
-   lastLogId = null;
-   AppState.unreadLogCount = 0;
-   updateLogBadge();
-   toast('日志列表已清空');
+   // 服务端没有删除接口，「清空」实际改为标记已读：对齐最新日志并清零角标，
+   // 否则 3 秒轮询立刻把列表"复活"，按钮具有误导性
+   fetch(ADMIN_API + '/context-compaction/logs').then(r=>r.json()).then(function(d){
+     if(d && d.logs && d.logs.length > 0){ lastLogId = d.logs[0].id; }
+     AppState.unreadLogCount = 0;
+     updateLogBadge();
+     toast('已全部标为已读');
+   }).catch(function(){ toast('操作失败，请重试'); });
  }
 
  document.addEventListener('DOMContentLoaded', function(){
@@ -436,6 +445,7 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
      if(d && d.logs && d.logs.length > 0){
        if(lastLogId && d.logs[0].id !== lastLogId){
          AppState.unreadLogCount++;
+         lastLogId = d.logs[0].id;   // 必须对齐：原来只自增不更新，角标变成"每 5 秒 +1"的轮询计数
          updateLogBadge();
        }
        if(!lastLogId) lastLogId = d.logs[0].id;
@@ -1399,7 +1409,7 @@ function ccBuildMergedItems(d){
  */
 function ccBuildSummaryStatsHtml(d, t){
   return '<div class="cc-stats">'
-    +'<span class="cc-mini-main"><span class="l">摘要后约</span><b>'+fmtCcNum(t.estCompressedChars||0)+'</b><span class="unit">字</span></span>'
+    +'<span class="cc-mini-main"><span class="l">实际约</span><b>'+fmtCcNum(t.estCompressedChars||0)+'</b><span class="unit">字</span></span>'
     +'<span class="cc-mini-item"><b>'+d.totalCompressible+'</b><i>条</i></span>'
     +'<span class="cc-mini-item'+(t.chunkCount?'':' zero')+'"><b>'+(t.chunkCount||0)+'</b><i>块</i></span>'
     +'<span class="cc-mini-item'+(t.cachedCount?'':' zero')+'"><b>'+(t.cachedCount||0)+'</b><i>缓存</i></span>'
@@ -2845,6 +2855,15 @@ function ccArmAllGapAutoLoad(){
     const r=await fetch(ADMIN_API+'/context-compaction/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),credentials:'include'});
     const j=await r.json();
     if(!r.ok){ if(msg) msg.textContent=j.error||'保存失败'; toast(j.error||'保存失败'); return; }
+    // 用后端返回的最新 config 回填「与设置页/聊天页重叠」的字段，避免用本表单的过期值覆盖另一端刚保存的值
+    if(j && j.config){
+      const cfg=j.config;
+      const setV=function(id,v){ const el=document.getElementById(id); if(el) el.value=(v!==undefined?v:''); };
+      const setC=function(id,b){ const el=document.getElementById(id); if(el) el.checked=!!b; };
+      if(j.config.compaction_context_limit_chars!==undefined) setV('cc-cfg-ctx-limit', j.config.compaction_context_limit_chars);
+      if(j.config.compaction_max_active_blocks!==undefined) setV('cc-cfg-max-blocks', j.config.compaction_max_active_blocks);
+      setC('cc-cfg-ctx-remind', j.config.compaction_context_remind_enabled!==false);
+    }
     if(msg) msg.textContent=(notes.length?('已自动修正：'+notes.join('；')+'。'):'已保存。')+' 下次预览/请求生效。';
     toast(notes.length?'压缩参数已保存（已自动修正冲突项）':'压缩参数已保存');
     resetCcMsgCache();
@@ -2879,14 +2898,16 @@ function ccArmAllGapAutoLoad(){
  }
  
  function clampCcInput(input, i, field, max){
+   const before=input.value;
    const raw=Number(input.value);
    const clamped=Math.min(Math.max(1, Math.floor(raw)||1), Number(max)||1);
-   if(String(clamped)!==String(input.value)){
+   if(String(clamped)!==String(before)){
      input.value=clamped;
      const msg=document.getElementById('compaction-msg');
      if(msg){ setTimeout(function(){ msg.textContent='输入超出范围，已自动修正为第 '+clamped+' 条。'; }, 0); }
+     // 只有值被修正过才补发更新：onchange 已为未修正的值发过一次，onblur 再发就是重复 POST
+     updateCompactionBoundary(i, field, input.value);
    }
-   updateCompactionBoundary(i, field, input.value);
  }
  
  function updateCompactionBoundary(i, field, raw){
@@ -2937,14 +2958,16 @@ function ccArmAllGapAutoLoad(){
  
  
   function clampAiCcInput(input, index, field, max){
+    const before=input.value;
     const raw=Number(input.value);
     const clamped=Math.min(Math.max(1, Math.floor(raw)||1), Number(max)||1);
-    if(String(clamped)!==String(input.value)){
+    if(String(clamped)!==String(before)){
       input.value=clamped;
       const msg=document.getElementById('compaction-msg');
       if(msg){ setTimeout(function(){ msg.textContent='输入超出范围，已自动修正为第 '+clamped+' 条。'; }, 0); }
+      // 只有值被修正过才补发更新：onchange 已发过一次，onblur 再发就是重复 POST
+      updateAiBoundary(index, field, input.value);
     }
-    updateAiBoundary(index, field, input.value);
   }
 
   function updateAiBoundary(index, field, raw){
@@ -3506,10 +3529,9 @@ let lastPendingCount = null;
    loadPinned();
    loadPushLog();
    loadCrossWindowInject();
-   loadWakePrompt();
-   loadCompactionPrompt();
-   loadCoWakePrompt();
-   loadCoVisionPrompt();
+   // 注意：这里不再加载各提示词（loadWakePrompt/loadCompactionPrompt 等）——
+   // 它们与「提示词」tab 共用同一批 textarea，切到系统页重拉会静默覆盖用户未保存的编辑；
+   // 提示词统一由切到 prompts tab 时的入口加载（见 tab 切换处）
    loadScreenshotWakePromptLog();
    loadScreenshotVisionPromptLog();
    // 完整上下文改为折叠时按需加载(懒加载)，不再自动/定时拉取，避免每5秒重渲染大体积数据卡死

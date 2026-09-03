@@ -80,8 +80,8 @@ async function extractAndStore(text) {
     if (parsed && parsed.content) {
       const entry = {
         title: parsed.title || '',
-        content: parsed.content,
-        order: 0
+        content: parsed.content
+        // 不传 order：交给 memory-engine 追加到尾部，避免 AI 顺手写的钉选永远插到最前打乱手动排序
       };
       promises.push(
         memoryEngine.addPinnedMemory(entry).then(result => {

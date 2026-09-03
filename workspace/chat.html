@@ -2837,7 +2837,11 @@ function makeSegPlayer(srcMsg){   // 流式喂入式播放器：feed 喂当前�
 function renderAll(keepPos){
   // 会话切换自动复位窗口（避免上一个会话的定位窗口被沿用）
   if(_winSession!==currentSession){ _winSession=currentSession; _lockFrom=false; _from=0; _to=null; }
+  // 先摘下切会话转圈遮罩再清空，否则第一次 renderAll 就把它删掉，遮罩此后永久失效
+  const csKeep=document.getElementById("chatSwitching");
+  if(csKeep&&csKeep.parentNode===chatEl)chatEl.removeChild(csKeep);
   chatEl.innerHTML="";
+  if(csKeep)chatEl.appendChild(csKeep);
   removeEmpty();
   if(!msgs.length){chatEl.appendChild(emptyEl);if(keepPos!==true)scrollBottom();return;}
   if(!_lockFrom){ _from=Math.max(0,msgs.length-_WIN); _to=null; }
@@ -2890,9 +2894,12 @@ function buildMessages(list){
   });
   return out;
 }
-async function request(finalMsgs){
-  if(sending)return;
-  sending=true;setSendState(true);aborter=new AbortController();
+async function request(finalMsgs, fromSend){
+  // send() 已提前置位 sending（防连点入列），fromSend 放行；其余入口（重新生成）仍受重入保护
+  if(sending&&!fromSend)return;
+  if(!fromSend){ sending=true;setSendState(true); }
+  aborter=new AbortController();
+  const sidAtStart=currentSession;   // 收尾时校验：请求期间切了会话就不回写（防旧会话消息写进新会话的缓存）
   appendTypingBox();
   let full="",reasoning="",usage=null,tools=[],reader=null,flushStreamSegs=null;
   const isStream=(cfg.send_mode||"stream")==="stream" || cfg.send_mode===undefined;
@@ -2975,20 +2982,26 @@ async function request(finalMsgs){
     // 入库（分段连播：先把剩余未弹的段一条条补弹完，再静默重建，不重播整块动画）
     if(flushStreamSegs){await flushStreamSegs();}
     finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});
-    msgs=finalMsgs;saveMsgs();
-    if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
+    if(currentSession===sidAtStart){
+      msgs=finalMsgs;saveMsgs();
+      if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
+    }
   }catch(err){
     if(err.name==="AbortError"){
       try{if(flushStreamSegs){await flushStreamSegs();}}catch(e){}
       if(full){finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});}
-      msgs=finalMsgs;saveMsgs();
-      if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
+      if(currentSession===sidAtStart){
+        msgs=finalMsgs;saveMsgs();
+        if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
+      }
       if(full)showToast("已停止生成");
     }else{
       try{if(flushStreamSegs){await flushStreamSegs();}}catch(e){}
       if(full){finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});}
-      msgs=finalMsgs;saveMsgs();
-      if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
+      if(currentSession===sidAtStart){
+        msgs=finalMsgs;saveMsgs();
+        if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
+      }
       showError(err.message);
     }
   }finally{
@@ -3022,8 +3035,10 @@ async function request(finalMsgs){
 async function send(){
   const text=inputEl.value.trim();
   if(sending)return;
-  if(!text&&!imgData.length)return;
-  if(!api_key){ showToast("请先到 ☰ 菜单→设置→连接 填访问口令(GATEWAY_API_KEY)"); return; }
+  // 先占位再走 fetchHistory 异步窗口：否则快速连点/回车会在 sending 置位前双双入列
+  sending=true;setSendState(true);
+  if(!text&&!imgData.length){ sending=false;setSendState(false); return; }
+  if(!api_key){ sending=false;setSendState(false); showToast("请先到 ☰ 菜单→设置→连接 填访问口令(GATEWAY_API_KEY)"); return; }
   if(!msgs.length){
     msgs=loadMsgs();
     if(!msgs.length){
@@ -3043,7 +3058,7 @@ async function send(){
   inputEl.value="";inputEl.style.height="auto";imgData=[];renderPreviews();
   updateSelBar();
   renderAll();scrollBottom();     // 先立即显示用户消息，再进入 AI 加载/流式
-  request(msgs);
+  request(msgs,true);
 }
 function setSendState(on){
   if(on){sendBtn.classList.add("disabled","stop-btn");sendBtn.textContent="■";}
@@ -3383,7 +3398,7 @@ selDel.addEventListener("click",()=>{
     const el=chatEl.querySelector('.msg[data-idx="'+i+'"]');
     if(el)el.remove();
   });
-  const newMsgs=msgs.filter(function(m,i){return selectSet.indexOf(i)<0;});
+  const newMsgs=msgs.filter(function(m,i){return !selectSet.has(i);});
   msgs=newMsgs;
   saveMsgs();selectSet.clear();updateSelBar();
   if(!msgs.length){ chatEl.innerHTML=""; chatEl.appendChild(emptyEl); exitSelect(); }
@@ -4018,7 +4033,7 @@ function toggleMcpEnable(i, enabled){
   const s=_mcpServers[i]; if(!s)return;
   const body={ servers: _mcpServers.map(function(x){ return { id:x.id, name:x.name, type:x.type, url:x.url, command:x.command, args:x.args||[], headers:x.headers||{}, allowTools:x.allowTools, enabled:x.enabled!==false }; }) };
   body.servers[i].enabled=enabled;
-  fetch("/heartbeat/admin/mcp/servers",{method:"PUT",headers:mcpAuthHeaders(),body:JSON.stringify(body),credentials:"include"}).then(function(r){return r.json();}).then(function(){ toast(enabled?"已启用":"已停用"); renderMcpServers(); });
+  fetch("/heartbeat/admin/mcp/servers",{method:"PUT",headers:mcpAuthHeaders(),body:JSON.stringify(body),credentials:"include"}).then(function(r){return r.json();}).then(function(){ chatToast(enabled?"已启用":"已停用"); renderMcpServers(); });
 }
 function openMcpForm(i, tab){
   const has=(i!=null && !isNaN(i)) && _mcpServers[i];
@@ -4153,7 +4168,7 @@ async function loadProviders(){
     // 无供应商时：把管理台「心跳唤醒」所用的模型自动作为一条供应商加进来并启用
     if(!_providers.length){
       try{
-        const en=await admGet(BASE+'/env');
+        const en=await chatAdmGet(chatAdmBase+'/env');
         const env=(en&&en.env)||{};
         const url=env.TARGET_API_URL||"", key=env.TARGET_API_KEY||"", model=env.MODEL_NAME||"deepseek-v4-flash-vision-exp";
         if(url&&key){
@@ -4187,7 +4202,7 @@ function toggleProvEnable(i, enabled){
   const p=_providers[i]; if(!p)return;
   const body={ providers: _providers.map(function(x){ return { id:x.id, name:x.name, api_url:x.api_url, api_key:x.api_key||"", model:x.model||"", enabled:x.enabled!==false }; }) };
   body.providers[i].enabled=enabled;
-  fetch("/heartbeat/admin/ai-providers",{method:"PUT",headers:mcpAuthHeaders(),body:JSON.stringify(body),credentials:"include"}).then(function(r){return r.json();}).then(function(){ toast(enabled?"已启用":"已停用"); renderProviders(); });
+  fetch("/heartbeat/admin/ai-providers",{method:"PUT",headers:mcpAuthHeaders(),body:JSON.stringify(body),credentials:"include"}).then(function(r){return r.json();}).then(function(){ chatToast(enabled?"已启用":"已停用"); renderProviders(); });
 }
 function openProvForm(i){
   const has=(i!=null && !isNaN(i)) && _providers[i];
@@ -4667,7 +4682,8 @@ function callAddCaption(text){
   const d=document.createElement("div"); d.className="call-caption";
   d.innerHTML='<span class="cap-text">'+escapeHtml(String(text||""))+'</span>';
   box.appendChild(d);
-  const all=box.querySelectorAll('.call-caption'); while(all.length>8){ box.removeChild(all[0]); }
+  // 用实时 children 集合裁剪：querySelectorAll 返回静态快照，对已移除节点重复 removeChild 会抛异常中断 TTS
+  while(box.children.length>8){ box.removeChild(box.children[0]); }
 }
 function callOpen(){
   const ov=callEl("callOverlay"); if(!ov)return;
@@ -4923,7 +4939,7 @@ async function loadSessionCc(id){
     html+=chunks.map(function(c){
       const isAi=!!c.aiRep;
       const st=((typeof c.blockStart==='number'&&c.blockStart>=0)?c.blockStart+1:((c.firstIdx>=0?c.firstIdx:0)+1));
-      const en=((typeof c.blockEnd==='number'&&c.blockEnd>=0)?c.blockEnd+1:((c.lastIdx>=st-1)+1));
+      const en=((typeof c.blockEnd==='number'&&c.blockEnd>=0)?c.blockEnd+1:(c.lastIdx+1));
       const cached=!!c.cached, enabled=c.enabled!==false;
       const hidden=!!c.hidden;
       const stCls=hidden?'off':(cached?(enabled?'on':'off'):'todo');
@@ -5026,10 +5042,10 @@ function renderSessionList(){
     }catch(e){}
     if(!name)name=s.name||(s.id==="default"?"主会话":s.id);
     const pinned=isPinned(s.id);
-    const meta=(pinned?'<span class="s-badge pin">置顶</span>':'')+(s.real!=null?(""+s.real+" 条"):"")+(s.last_time?(" · "+fmtTime(new Date(s.last_time))):"");
+    const meta=(pinned?'<span class="s-badge pin">置顶</span>':'')+escapeHtml((s.real!=null?(""+s.real+" 条"):"")+(s.last_time?(" · "+fmtTime(new Date(s.last_time))):""));
     const checkHtml=merging?('<span class="s-check'+(mergeSel.has(s.id)?' on':'')+'">'+(mergeSel.has(s.id)?'✓':'')+'</span>'):'';
     item.innerHTML='<div class="s-name">'+checkHtml+escapeHtml(name)+'<button class="s-del" data-id="'+escapeHtml(s.id)+'" title="删除"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button></div>'+
-      '<div class="s-meta">'+escapeHtml(meta)+'</div>'+
+      '<div class="s-meta">'+meta+'</div>'+
       '<div class="s-ops"><button class="s-op" data-op="pin" data-id="'+escapeHtml(s.id)+'">'+(pinned?"取消置顶":"置顶")+'</button><button class="s-op" data-op="cc" data-id="'+escapeHtml(s.id)+'">压缩</button><button class="s-op" data-op="export" data-id="'+escapeHtml(s.id)+'">导出</button><button class="s-op" data-op="rename" data-id="'+escapeHtml(s.id)+'">改名</button></div>';
     item.querySelector(".s-name > .s-del").addEventListener("click",e=>{e.stopPropagation();if(merging){toggleMergeSel(s.id);}else{deleteSession(s.id);}});
     item.querySelectorAll(".s-op").forEach(btn=>btn.addEventListener("click",e=>{
@@ -5113,8 +5129,8 @@ function updateSessionItem(id){
   const pinned=pinnedArr.indexOf(id)>=0;
   const btn=item.querySelector('.s-op[data-op="pin"]'); if(btn) btn.textContent=pinned?"取消置顶":"置顶";
   const s=(typeof sessionList!=="undefined"&&sessionList)?sessionList.find(function(x){return x.id===id;}):null;
-  const meta=(pinned?'<span class="s-badge pin">置顶</span>':'')+(s&&s.real!=null?(""+s.real+" 条"):"")+(s&&s.last_time?(" · "+fmtTime(new Date(s.last_time))):"");
-  const me=item.querySelector(".s-meta"); if(me) me.innerHTML=escapeHtml(meta);
+  const meta=(pinned?'<span class="s-badge pin">置顶</span>':'')+escapeHtml((s&&s.real!=null?(""+s.real+" 条"):"")+(s&&s.last_time?(" · "+fmtTime(new Date(s.last_time))):""));
+  const me=item.querySelector(".s-meta"); if(me) me.innerHTML=meta;
   function pinState(sidv){ let arr=[]; try{ arr=JSON.parse(localStorage.getItem("han_pinned_sessions")||"[]"); }catch(e){} return arr.indexOf(sidv)>=0; }
   function lastOf(kind){
     let last=null;
@@ -5319,6 +5335,8 @@ async function switchSessionAndLocate(sid,idx){
 // 切换会话
 async function switchSession(id){
   if(id===currentSession){closeDrawer();return;}
+  // 回复/连播进行中切会话会让收尾逻辑把旧会话消息写进新会话缓存，先挡下
+  if(sending||_segBusy){ showToast("回复进行中，等这轮结束再切换会话"); return; }
   // 保存当前会话到本地，再切到目标会话
   saveMsgs();
   currentSession=id;
@@ -5361,6 +5379,8 @@ function newSession(){
   }
 }
 function createSessionWithPrompt(backupId){
+  // 回复/连播进行中新建会话会让收尾逻辑把旧会话消息写进新会话缓存，先挡下
+  if(sending||_segBusy){ showToast("回复进行中，等这轮结束再新建会话"); return; }
   const sid=genSessionId();
   localStorage.setItem("han_current_session",sid);
   // 清空当前显示
@@ -5990,6 +6010,11 @@ var BASE = '/heartbeat/admin';
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
 function txt(v){ return v==null?'':String(v); }
 function toast(t){ if(typeof showToast==='function'){ showToast(t); } }
+// 跨 script 块桥接：第一段脚本（供应商/MCP 启停、自动导入）拿不到本 IIFE 的私有符号，
+// 直接引用会 ReferenceError 且被吞掉。挂到 window 供对方调用。
+window.chatToast = toast;
+window.chatAdmGet = function(u){ return admGet(u); };
+window.chatAdmBase = BASE;
 
 /* 会话相关：压缩/替换接口自动带 session_id（与 admin-mobile 一致，读取 han_current_session） */
 function sessId(){ try{ return localStorage.getItem('han_current_session')||'default'; }catch(e){ return 'default'; } }

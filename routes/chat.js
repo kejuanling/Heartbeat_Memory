@@ -386,12 +386,13 @@ module.exports = function registerChatRoutes(app, deps) {
       const mode = String(req.query.mode || 'keyword').trim() === 'semantic' ? 'semantic' : 'keyword';
       const limit = Math.min(Number(req.query.limit) || 200, 500);
       if (!q) return reply.send({ ok: true, mode, total: 0, results: [] });
-      const files = fsp.readdirSync(baseDir).filter(f => /^enhanced_messages[_-][A-Za-z0-9_-]+\.json$/.test(f));
+      const files = fsp.readdirSync(baseDir).filter(f => f === 'enhanced_messages.json' || /^enhanced_messages[_-][A-Za-z0-9_-]+\.json$/.test(f));
       const ql = q.toLowerCase();
       const items = [];
       for (const f of files) {
-        const sid = f.replace(/^enhanced_messages_/, '').replace(/\.json$/, '');
-        if (!sid || sid === 'default') continue;
+        // 主会话文件 enhanced_messages.json 的 sid 是 default，必须纳入搜索（否则主要聊天内容永远搜不到）
+        const sid = f === 'enhanced_messages.json' ? 'default' : f.replace(/^enhanced_messages_/, '').replace(/\.json$/, '');
+        if (!sid) continue;
         let arr = [];
         try { arr = loadTimeline(sid); } catch (e) { continue; }
         arr.filter(isRealMessageForTimeline).forEach((m, i) => {
@@ -1060,6 +1061,12 @@ app.post("/v1/chat/completions", async (req, reply) => {
           } else {
             console.log("[timeline] 跳过回复落盘 (非流式, isClientChat=" + isClientChat + ")");
           }
+          // 非流式同样写幂等缓存：同 client_msg_id 的重发直接回放，不重复调上游/重复写时间线
+          if (cleanText && body && body.client_msg_id) {
+            setRecentReply(String(body.client_msg_id).trim(), {
+              text: cleanText, model: body.model || "", reasoning: aiThinking || "", tools: [], usage: (parsed && parsed.usage) || null, ts: Date.now()
+            });
+          }
         }
       } catch (parseErr) {
         console.warn("[memory] 非流式响应 JSON 解析失败:", parseErr.message);
@@ -1090,13 +1097,16 @@ app.post("/v1/chat/completions", async (req, reply) => {
     const contentFilter = createContentTagFilter();
     const emitRawLine = (line) => reply.raw.write(line + "\n");
     let sseBuffer = "";
+    // UTF-8 流式解码：多字节字符（中文/emoji）可能被网络分包从字节中间切开，
+    // 逐 chunk 独立 toString 会产出 U+FFFD 乱码并破坏 <memory>/<pin> 等标签的字节层匹配
+    const sseDecoder = new TextDecoder("utf-8");
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       streamChunks.push(value);
 
-      sseBuffer += Buffer.from(value).toString("utf-8");
+      sseBuffer += sseDecoder.decode(value, { stream: true });
       let nl;
       while ((nl = sseBuffer.indexOf("\n")) !== -1) {
         const rawLine = sseBuffer.slice(0, nl);

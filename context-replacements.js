@@ -638,11 +638,59 @@ function addReplacement(options) {
   };
 
   const items = loadItems();
+  // 跨会话摘要复用：内容序列与任一已有块完全一致（特殊事件不计入，对齐 makeChunk 签名口径）时，
+  // 复用其摘要正文，避免对相同内容重复压缩。新块仍打本会话标签，只在各自会话内套用（不跨会话串扰）。
+  const shareSig = matchedShareSig(item.matched);
+  if (shareSig) {
+    const shared = items.find(function (it) {
+      return !it.removed && it.enabled !== false &&
+        typeof it.text === "string" && it.text.trim() &&
+        it.source === item.source &&
+        matchedShareSig(it.matched) === shareSig;
+    });
+    if (shared && shared.text && shared.text !== item.text) {
+      item.text = shared.text;
+      console.log("[context-replacements] 跨会话复用摘要：", item.range_label, "<-", shared.id, shared.session);
+    }
+  }
   items.push(item);
   saveItems(items);
   console.log("[context-replacements] 新增替换（AI）：session=" + item.session, item.range_label, "->", text.slice(0, 40).replace(/\n/g, " "), "...");
 
   return { ok: true, id: item.id, session: item.session, count: item.count, range_label: item.range_label, message: "已记录替换：" + item.count + " 条消息 → 替换正文" };
+}
+
+// 会话合并时迁移压缩块：把源会话的块归属到目标会话（target 时间线按 matched 内容锚点定位，range 仅用于展示，不依赖不迁移）。
+// 多个源会话存在内容序列完全一致的块时合并为一个（matchedShareSig，与跨会话摘要复用的签名口径一致）。
+// 源会话数据保留：仅块归属变更，源会话此后按原文展示而非旧摘要，避免同一批消息在多个会话重复压缩。
+function migrateSessionBlocks(sourceIds, targetId) {
+  const src = new Set(Array.isArray(sourceIds) ? sourceIds : []);
+  if (src.size === 0 || !targetId) return { migrated: 0, skippedDup: 0, skippedNoMatch: 0 };
+  const items = loadItems();
+  const keep = [];
+  const seenSig = new Set();
+  let migrated = 0, skippedDup = 0, skippedNoMatch = 0;
+  items.forEach(function (it) {
+    if (!it || it.removed) return;
+    if (!it.session || !src.has(it.session)) { keep.push(it); return; }
+    const matched = (Array.isArray(it.matched) && it.matched.length > 0) ? it.matched : [];
+    if (matched.length === 0) { skippedNoMatch++; return; }
+    const sig = matchedShareSig(matched);
+    if (sig) {
+      if (seenSig.has(sig)) { skippedDup++; return; }
+      seenSig.add(sig);
+    }
+    keep.push(Object.assign({}, it, {
+      session: targetId,
+      id: "ctxrep_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8),
+      created_at: nowIso()
+    }));
+    migrated++;
+  });
+  saveItems(keep);
+  console.log("[context-replacements] 会话合并迁移压缩块: " + sourceIds.length + " 源会话 -> " + targetId +
+    " 迁移=" + migrated + " 去重=" + skippedDup + " 无匹配=" + skippedNoMatch);
+  return { migrated: migrated, skippedDup: skippedDup, skippedNoMatch: skippedNoMatch };
 }
 
 // ========================
@@ -962,7 +1010,9 @@ function splitRangeByGaps(start, end, cfg) {
     if (!built.ok) continue;
     const filtered = [];
     for (const it of itemsList) {
-      if (it.source === "manual") {
+      // 只吞并同会话（或无 session 的通用旧块）的重叠手工块，与 addManualRecord 同口径：
+      // 跨会话块序号空间互相独立，重叠很正常，不加过滤会把其他会话的块整批误删
+      if (it.source === "manual" && (!it.session || it.session === built.record.session)) {
         const rs = it.range && it.range.start_index;
         const re = it.range && it.range.end_index;
         if (Number.isInteger(rs) && Number.isInteger(re) && rs <= seg.end && re >= seg.start) {
@@ -1127,6 +1177,19 @@ function loadMarks() {
 function contentKey(msg) {
   const text = contentToText(msg);
   return crypto.createHash("sha256").update((msg && msg.role ? msg.role : "") + "\u0000" + text).digest("hex").slice(0, 32);
+}
+
+// 块内容共享签名：对齐 makeChunk 口径，只统计普通对话（role+content），特殊事件不计入，
+// 用于判定「不同会话里内容序列完全一致」的块，从而跨会话复用摘要正文。
+function matchedShareSig(matched) {
+  const hash = crypto.createHash("sha256");
+  (Array.isArray(matched) ? matched : []).forEach(function (m) {
+    if (!m) return;
+    try { if (isSpecialEvent(m)) return; } catch (e) { /* 单条失败不阻断 */ }
+    hash.update(String(m.role || "") + "\u0000" + contentToText(m));
+    hash.update("\u0001");
+  });
+  return hash.digest("hex").slice(0, 32);
 }
 
 function saveMarks(marks) {
@@ -1408,7 +1471,10 @@ function applyReplacements(messages, source) {
       return !(rp.endIdx < srcStart || rp.startIdx > srcEnd);
     });
     if (dup) {
-      const curNewer = String(item.created_at || "") >= String(dup.itemSer || "|");
+      // dup.itemSer 形如 "created_at|id"，比较时只取 created_at 部分；
+      // 否则拿纯 created_at 与含 id 的整串比较，同秒创建时短串恒小，后块永远替换不掉先块
+      const dupCreatedAt = String(dup.itemSer || "|").split("|")[0];
+      const curNewer = String(item.created_at || "") >= dupCreatedAt;
       if (curNewer) {
         dup.message = curMsg;
         dup.minT = blkMin;
@@ -2521,6 +2587,7 @@ function searchCompactionOriginal(keyword, maxResults) {
 module.exports = {
   isReplacementMemoryMessage,
   addReplacement,
+  migrateSessionBlocks,
   removeReplacement,
   toggleReplacement,
   updateReplacement,
