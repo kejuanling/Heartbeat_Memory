@@ -236,7 +236,11 @@ async function add(entry) {
   // 先文本近重复（快、稳），未命中再走语义向量近邻（抓“同义不同词”）
   const dup = findDuplicate(e) || await findSemanticDuplicate(e);
   if (dup) {
-    // 合并：保留更高重要级，轻微上浮；不新增重复条目
+    // 完全相同（同分类+同内容）→ 已存在，幂等跳过所有副作用，不重复入库也不提权
+    if (entryHash(e) === entryHash(dup)) {
+      return { entry: dup, dup: true, already: true };
+    }
+    // 文本/语义近似但不同 → 合并：保留更高重要级，轻微上浮；不新增重复条目
     const merged = mergeEntries(dup, e);
     dup.importance = merged.importance;
     dup.content = merged.content;
@@ -248,7 +252,7 @@ async function add(entry) {
     dup.source = dup.source || e.source;
     invalidateVector(dup.id); // 内容/分类可能已变，旧向量作废
     dirty = true; flush();
-    return { entry: dup, dup: true };
+    return { entry: dup, dup: true, already: false };
   }
   rows.push(e);
   dirty = true; flush();
@@ -723,7 +727,7 @@ async function ingestSummary(summaryText, opts) {
       importance: importance != null ? importance : 0.5,
       source
     });
-    return { ok: true, added: r.dup ? 0 : 1, merged: r.dup ? 1 : 0, failed: 0, fallback: false };
+    return { ok: true, added: r.dup ? 0 : 1, merged: (r.dup && !r.already) ? 1 : 0, already: r.already ? 1 : 0, failed: 0, fallback: false };
   }
   const mergeBlockIds = Array.isArray(opts.blockIds) ? opts.blockIds.map(String).filter(Boolean) : [];
   const hash = crypto.createHash("sha1").update(String(summaryText || "")).digest("hex");
@@ -739,7 +743,7 @@ async function ingestSummary(summaryText, opts) {
     supersedeBlock(blockId);
   }
   const parsedMemories = Array.isArray(parsed.memories) ? parsed.memories : [];
-  let added = 0, merged = 0, failed = 0;
+  let added = 0, merged = 0, failed = 0, already = 0;
   for (const m of parsedMemories) {
     // 合并发的条目不挂单一 block_id（它可能同时吸收了多个块）；单块仍精确挂 block_id
     const attachBlock = mergeBlockIds.length ? null : blockId;
@@ -750,9 +754,9 @@ async function ingestSummary(summaryText, opts) {
       source,
       block_id: attachBlock
     });
-    if (r.dup) merged++; else added++;
+    if (r.already) already++; else if (r.dup) merged++; else added++;
   }
-  return { ok: true, added, merged, failed, fallback: !!parsed.fallback, error: parsed.error || null };
+  return { ok: true, added, merged, failed, already, fallback: !!parsed.fallback, error: parsed.error || null };
 }
 
 // ---------------- 整理记忆池（全局清洗 + 打标记 + 参考去重） ----------------

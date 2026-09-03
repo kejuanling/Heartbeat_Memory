@@ -1994,7 +1994,7 @@ function updateCcStatusBar(d){
      });
      const j = await r.json();
      if(j.error) throw new Error(j.error);
-     const s = '已解析 ' + j.processed + ' 段 -> 新增 ' + j.added + ' / 合并 ' + j.merged + ' / 失败 ' + j.failed;
+     const s = '已解析 ' + j.processed + ' 段 -> 新增 ' + j.added + ' / 合并 ' + j.merged + ' / 失败 ' + j.failed + (j.already ? ' / 已存在(已入过) ' + j.already : '');
      if(msg) msg.textContent = s;
      toast(s);
    }catch(e){
@@ -2020,7 +2020,7 @@ function updateCcStatusBar(d){
      });
      const j = await r.json();
      if(j.error) throw new Error(j.error);
-     const s = '已入池 ' + j.processed + ' 段 -> 新增 ' + j.added + ' / 合并 ' + j.merged + ' / 失败 ' + j.failed + (j.skipped ? ' / 跳过(无分类标签) ' + j.skipped : '');
+     const s = '已入池 ' + j.processed + ' 段 -> 新增 ' + j.added + ' / 合并 ' + j.merged + ' / 失败 ' + j.failed + (j.skipped ? ' / 跳过(无分类标签) ' + j.skipped : '') + (j.already ? ' / 已存在(已入过) ' + j.already : '');
      if(msg) msg.textContent = s;
      toast(s);
    }catch(e){
