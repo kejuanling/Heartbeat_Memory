@@ -5450,7 +5450,7 @@ function consoleOwnedCfgKeys() {
     // 记忆池 / 跨窗口注入：由控制台 /config 与 /memory-pool/config 管理
     "cross_inject_enabled", "cross_inject_diary", "cross_inject_diary_count", "cross_inject_diary_days",
     "cross_inject_memory", "cross_inject_memory_per_category", "cross_inject_push", "cross_inject_starred",
-    "cross_inject_starred_topk", "cross_inject_summary_days", "cross_inject_always", "cross_inject_max_msgs",
+    "cross_inject_starred_topk", "cross_inject_summary_days",
     // 记忆解析 / 清理 / 去重
     "reparse_enabled", "reparse_max_chars", "reparse_max_items", "reparse_merge_max_chars",
     "reparse_system_prompt", "reparse_user_prompt", "reparse_warm",
