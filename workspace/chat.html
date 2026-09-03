@@ -3052,7 +3052,9 @@ async function send(){
   }else{
     userContent=(text?text+"\n"+timeTag:timeTag);
   }
-  msgs.push({role:"user",content:userContent,time:new Date().toISOString(), _callB:(_call&&_call.open)?_call.batchId:undefined});
+  // 新消息赋稳定 id：用户连发两句完全相同的话会有不同 id，服务端按 id 防重不会并成一条（同句都保留）
+  const _newMid=(typeof crypto!=="undefined"&&crypto.randomUUID)?crypto.randomUUID():(Date.now()+"-"+Math.random().toString(36).slice(2));
+  msgs.push({id:_newMid,role:"user",content:userContent,time:new Date().toISOString(), _callB:(_call&&_call.open)?_call.batchId:undefined});
   inputEl.value="";inputEl.style.height="auto";imgData=[];renderPreviews();
   updateSelBar();
   renderAll();scrollBottom();     // 先立即显示用户消息，再进入 AI 加载/流式

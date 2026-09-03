@@ -1178,12 +1178,17 @@ function appendRequestMessages(sessionId, reqMsgs) {
     changed = true;
   }
 
-  // 3) 去重补齐：请求里盘上还缺的真实消息按序追加（user 与 assistant 都补，防旧缓存设备回补丢消息）
+  // 3) 去重补齐：请求里盘上还缺的真实消息按序追加（user 与 assistant 都补，防旧缓存设备回补丢消息）。
+  //    按 id 防重优先：有 id 的消息只按 id 判存在（真正重复消息跳过；连发同句两条不同 id 都保留，
+  //    不再被 role+content 键并掉）；无 id 的请求消息（前端未赋 id）回退 role+content 键防重（保留旧行为）。
+  const diskById = new Set(existing.filter(function (m) { return m && m.id; }).map(function (m) { return m.id; }));
   const diskKeys = new Set(existing.filter(function (m) { return m && m.content != null; }).map(keyOf));
   const appended = [];
   for (const m of reqReal) {
+    if (m.id && diskById.has(m.id)) continue;
     const k = keyOf(m);
-    if (diskKeys.has(k)) continue;
+    if (!m.id && diskKeys.has(k)) continue;
+    if (m.id) diskById.add(m.id);
     diskKeys.add(k);
     appended.push(m);
   }
