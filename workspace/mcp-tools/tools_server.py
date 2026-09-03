@@ -663,12 +663,22 @@ def tool_context_search(args):
     except Exception as e:
         return {"error": str(e)}
     if data.get("ok"):
-        return {"query": q, "total": data.get("total", 0), "matches": data.get("matches", []), "mode": data.get("mode"), "scope": "all" if scope == "all" else "current"}
+        # 同一段原文在「会话时间线」和「导入对话」两个来源各存一份，检索会各出一条；
+        # 输出前按内容去重（matches 已按分数降序，保留先出现的高分条），每条只留 AI 要读的字段
+        seen = set()
+        matches = []
+        for m in data.get("matches", []):
+            c = m.get("content") or ""
+            if not c or c in seen:
+                continue
+            seen.add(c)
+            matches.append({"content": c, "time": m.get("time"), "role": m.get("role")})
+        return {"total": len(matches), "matches": matches}
     return {"error": data.get("error", "检索失败")}
 
 
 TOOLS["context_search"] = {
-    "description": "语义检索所有会话的原始上下文和导入对话（含已被压缩区域的原文）。默认跨所有会话、语义模式，用描述性语句也能搜到相关内容；返回相关消息段落及时间、角色、所属会话，相邻命中自动合并。可用于：回忆旧对话细节、找某段聊过的内容、确认要替换的范围。注意：仅当前会话模式下最近5分钟内容不返回。",
+    "description": "语义检索所有会话的原始上下文和导入对话（含已被压缩区域的原文）。默认跨所有会话、语义模式，用描述性语句也能搜到相关内容；返回相关消息段落及时间、角色，相邻命中自动合并，相同内容只保留一条。可用于：回忆旧对话细节、找某段聊过的内容、确认要替换的范围。注意：仅当前会话模式下最近5分钟内容不返回。",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -708,13 +718,21 @@ def tool_memory_search(args):
     except Exception as e:
         return {"error": str(e)}
     if data.get("ok"):
-        items = data.get("items", [])
-        return {"query": q, "category": category or None, "total": data.get("total", len(items)), "items": items}
+        # 只留 AI 要读的内容/分类/重要度；时间戳类字段无用（updated_at 每次检索都会被刷成当前时间，纯噪声），并防内容重复
+        seen = set()
+        items = []
+        for it in data.get("items", []):
+            c = it.get("content") or ""
+            if not c or c in seen:
+                continue
+            seen.add(c)
+            items.append({"content": c, "category": it.get("category"), "importance": it.get("importance")})
+        return {"total": len(items), "items": items}
     return {"error": data.get("error", "检索失败")}
 
 
 TOOLS["memory_search"] = {
-    "description": "检索长期记忆池（五大类记忆库：关于她/关于我们/锚点/信号/对话摘要）。返回相关记忆条目（含内容、分类、重要度、来源）。可用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池。区别于 context_search（检索原始对话原文）。",
+    "description": "检索长期记忆池（五大类记忆库：关于她/关于我们/锚点/信号/对话摘要）。返回相关记忆条目（含内容、分类、重要度）。可用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池。区别于 context_search（检索原始对话原文）。",
     "inputSchema": {
         "type": "object",
         "properties": {
