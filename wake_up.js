@@ -1120,9 +1120,13 @@ function getCheckIntervalMs() {
 async function scheduleNextCheck() {
   try {
     reloadEnvFromFile();
-    // 发送心跳
+    // 发送心跳（8s 超时：gateway 半死时 undici 默认 300s 才报错，检查循环会被卡死顺延）
     try {
-      await fetch(HEARTBEAT_URL, { method: "POST", headers: internalHeaders(), body: "{}" });
+      const hbController = new AbortController();
+      const hbTimer = setTimeout(() => hbController.abort(), 8000);
+      try {
+        await fetch(HEARTBEAT_URL, { method: "POST", headers: internalHeaders(), body: "{}", signal: hbController.signal });
+      } finally { clearTimeout(hbTimer); }
     } catch {}
     await runWakeUp();
   } catch (err) {

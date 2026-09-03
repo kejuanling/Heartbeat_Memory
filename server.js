@@ -632,19 +632,21 @@ async function releaseHeldMessages() {
   ];
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
-  let response;
+  let responseText;
   try {
-    response = await fetch(targetApiUrl, {
+    const response = await fetch(targetApiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${targetApiKey}` },
       body: JSON.stringify({ model: modelName, messages, temperature: 0.8, top_p: 0.95, stream: false }),
       signal: controller.signal
     });
+    // body 读取也必须在超时窗口内：上游回完头再挂起时，读 body 同样会卡住整个释放流程
+    responseText = await response.text();
+    var _respStatus = response.status;
   } finally { clearTimeout(timer); }
-  const responseText = await response.text();
   let data;
   try { data = JSON.parse(responseText); } catch (err) { throw new Error("模型返回非 JSON: " + responseText.slice(0, 200)); }
-  if (!response.ok) throw new Error("模型请求失败 HTTP " + response.status + ": " + responseText.slice(0, 200));
+  if (_respStatus !== 200) throw new Error("模型请求失败 HTTP " + _respStatus + ": " + responseText.slice(0, 200));
   const aiText = String(normalizeContentToText(data?.choices?.[0]?.message?.content) || "").trim();
   if (aiText) {
     const clean = stripInternalTags(aiText) || aiText;
@@ -3429,8 +3431,41 @@ app.post("/admin/asr", { preHandler: mcpManageAuth }, async (req, reply) => {
 
 app.get("/admin/services", { preHandler: basicAuth }, async (req, reply) => {
   try {
-    const list = MANAGED_SERVICES.map(function (svc) {
-      return { name: svc.name, label: svc.label, type: svc.type, status: serviceStatus(svc) };
+    // 并行查状态，替代串行 execSync：后者会同步阻塞事件循环（9 个服务逐条跑，
+    // systemd 异常时单条最多 20s，期间所有聊天/SSE/上游转发全部冻结）
+    const { exec } = require("child_process");
+    const runAsync = (cmd) => new Promise((resolve) => {
+      exec(cmd, { encoding: "utf-8", timeout: 20000 }, (err, stdout) => {
+        // systemctl is-active 对非活跃服务以非零退出码输出 "inactive"：以 stdout 为准（与原 execSync 口径一致），
+        // 无 stdout 才退回错误消息
+        const out = String(stdout || "").trim();
+        resolve(out || (err ? String(err.message || "").trim() : ""));
+      });
+    });
+    // pm2 型服务只跑一次 jlist，从进程表 JSON 解析状态（pm2 jlist 输出整表，逐条跑太浪费）
+    const hasPm2 = MANAGED_SERVICES.some(s => s.type === "pm2");
+    const [pm2Raw, ...statuses] = await Promise.all([
+      hasPm2 ? runAsync("pm2 jlist") : Promise.resolve("[]"),
+      ...MANAGED_SERVICES.map(function (svc) {
+        if (svc.type === "systemd") return runAsync("systemctl is-active " + svc.name);
+        if (svc.type === "pm2") return Promise.resolve("");
+        return runAsync("ss -ltn 2>/dev/null | grep -c ':" + svc.port + " ' || true");
+      })
+    ]);
+    let pm2List = [];
+    try { pm2List = JSON.parse(pm2Raw || "[]"); } catch (e) {}
+    const list = MANAGED_SERVICES.map(function (svc, i) {
+      if (svc.type === "pm2") {
+        const app = pm2List.find(p => p && p.name === svc.name);
+        const status = app ? ((app.pm2_env && app.pm2_env.status) || "unknown") : "stopped";
+        return { name: svc.name, label: svc.label, type: svc.type, status: status };
+      }
+      if (svc.type === "port") {
+        const n = Number(statuses[i] || 0);
+        const status = n > 0 ? "running" : "stopped";
+        return { name: svc.name, label: svc.label, type: svc.type, status: status };
+      }
+      return { name: svc.name, label: svc.label, type: svc.type, status: statuses[i] || "unknown" };
     });
     reply.send({ services: list });
   } catch (err) {
@@ -3609,13 +3644,17 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
       range_label: it.range_label || "",
       original_preview: matched.slice(0, 2).map(m => ({ role: m.role, content: String(m.content || "").slice(0, 150) })),
       history: (Array.isArray(it.history) ? it.history : []).map(function (h, i) { return { index: i, summary: h.summary, generatedAt: h.generatedAt, mode: h.mode || (manual ? "edited" : "ai"), manual: h.manual === true || manual }; }).slice(0, 8),
-      msgs: includeMessages ? matched.map(function (m, i) {
+      msgs: includeMessages ? matched.map((function () {
+        // loadMarks 提到循环外：matched 数百条时逐条调用会放大读盘（现走缓存，仍省每条的重复调用）
+        const _marks = contextReplacements.loadMarks ? contextReplacements.loadMarks() : {};
+        return function (m, i) {
         const _key = contextReplacements.contentKey(m);
         // 手工块：编号=存储起点+块内序号（matched 与压缩切片一一对应），避免锚点撞键漂移；
         // 存储编号失效（换窗口）时退回内容锚点编号
         const _num = (hasStoredIdx && storedValid) ? (storedStart + i) : (itemPosByKey.has(nKeyOf(m)) ? itemPosByKey.get(nKeyOf(m)) : null);
-        return { role: m.role, content: typeof m.content === "string" ? m.content : "", key: _key, marked: !!contextReplacements.loadMarks()[_key], num: _num };
-      }) : undefined,
+        return { role: m.role, content: typeof m.content === "string" ? m.content : "", key: _key, marked: !!_marks[_key], num: _num };
+        };
+      })()) : undefined,
       pos: compStart
     });
   });
@@ -4700,7 +4739,10 @@ function coTimelineMessages(maxChars) {
   let total = 0;
   for (let i = timeline.length - 1; i >= 0; i--) {
     const m = timeline[i];
-    const content = String(m && m.content || '');
+    // system（人设）不进历史：coBuildHistory 已在首位拼了 system（人设+永久上下文），
+    // 再把时间线里的 system 当 user 消息混入会整段重复注入（几千字）
+    if (!m || m.role === 'system') continue;
+    const content = String(m.content || '');
     if (!content.trim()) continue;
     const role = (m.role === 'assistant' || m.role === 'user') ? m.role : 'user';
     const cost = content.length + 8;
@@ -4804,9 +4846,11 @@ function resolveVisionModel(feature) {
 
 async function describeCoFrame({ image, frames, subtitle, duration, noPrompt }) {
   const now = Date.now();
+  // 缓存 key 用内容哈希：dataURL 前 120-200 字符是固定文件头/量化表（同设备截图几乎恒同），
+  // 直接做 key 会让 5 秒窗口内不同画面互相命中旧描述
   const imgKey = (Array.isArray(frames) && frames.length)
-    ? "multi:" + frames.length + ":" + String(frames[0] || "").slice(0, 120)
-    : String(image || "").slice(0, 200);
+    ? "multi:" + frames.length + ":" + crypto.createHash("sha1").update(String(frames[0] || "")).digest("hex").slice(0, 16)
+    : "img:" + crypto.createHash("sha1").update(String(image || "")).digest("hex").slice(0, 16);
   if (coFrameCache.key && coFrameCache.key === imgKey && now - coFrameCache.at < 5000) {
     return coFrameCache.description;
   }
@@ -5088,6 +5132,9 @@ app.post("/internal/co/wake", async (req, reply) => {
 
 // 推送（Bark / ntfy，与唤醒系统同一套配置）
 async function sendPushNotification({ title, body }) {
+  // 15s 超时：Bark/ntfy 对端挂起时不能卡住免打扰释放等调用方（与 wake_up.js 同名函数同口径）
+  const pushController = new AbortController();
+  const pushTimer = setTimeout(() => pushController.abort(), 15000);
   try {
     const provider = (readEnvValue("PUSH_PROVIDER") || "bark").trim().toLowerCase();
     if (provider === "ntfy") {
@@ -5099,7 +5146,7 @@ async function sendPushNotification({ title, body }) {
       if (token) headers.Authorization = `Bearer ${token}`;
       const { buildNtfyPayload } = require("./ntfy_priority");
       const payload = buildNtfyPayload({ topic, title, message: body, priority: readEnvValue("NTFY_PRIORITY"), tags: readEnvValue("NTFY_TAGS") });
-      const response = await fetch(server, { method: "POST", headers, body: JSON.stringify(payload) });
+      const response = await fetch(server, { method: "POST", headers, body: JSON.stringify(payload), signal: pushController.signal });
       const responseText = await response.text();
       if (!response.ok) return { ok: false, reason: responseText || `HTTP ${response.status}` };
       return { ok: true };
@@ -5110,7 +5157,8 @@ async function sendPushNotification({ title, body }) {
     const response = await fetch("https://api.day.app/push", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, body, device_key: barkKey, icon: readEnvValue("CUSTOM_ICON_URL") })
+      body: JSON.stringify({ title, body, device_key: barkKey, icon: readEnvValue("CUSTOM_ICON_URL") }),
+      signal: pushController.signal
     });
     const responseText = await response.text();
     let result = {};
@@ -5120,7 +5168,9 @@ async function sendPushNotification({ title, body }) {
     }
     return { ok: true };
   } catch (err) {
-    return { ok: false, reason: err.message };
+    return { ok: false, reason: err.name === "AbortError" ? "推送超时(15s)" : err.message };
+  } finally {
+    clearTimeout(pushTimer);
   }
 }
 

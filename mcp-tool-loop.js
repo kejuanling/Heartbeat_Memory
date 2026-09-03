@@ -236,10 +236,15 @@ async function runWithTools({
       top_p,
       max_tokens
     };
-    // 只在还有工具时注入 tools（最后一轮如果没有工具就不带）
+    // 只在还有工具时注入 tools；最后一轮带 tools 定义但 tool_choice="none"：
+    // 保持 tools 定义能让严格上游接受带 tool_calls/tool 历史的请求（历史里引用过的工具必须在 tools 里），
+    // tool_choice="none" 阻止模型再发起新一轮工具调用
     if (round < maxToolRounds && openaiTools.length > 0) {
       body.tools = openaiTools;
       body.tool_choice = "auto";
+    } else if (openaiTools.length > 0) {
+      body.tools = openaiTools;
+      body.tool_choice = "none";
     }
 
     const controller = new AbortController();
@@ -315,6 +320,17 @@ async function runWithTools({
         error
       });
     }
+  }
+
+  // 兜底：轮次耗尽模型仍在出 tool_calls 时 finalText 为空。这里取末轮正文/占位提示，
+  // 避免 handleMcpRequest 因空文本跳过时间线写入、客户端收到无日志的空回复
+  if (!finalText || !String(finalText).trim()) {
+    const lastMsg = working.length && working[working.length - 1];
+    finalText = (lastMsg && lastMsg.role === "assistant" && lastMsg.content) || "";
+    if (!finalText.trim()) {
+      finalText = "（工具调用轮次已达上限，模型未给出最终回复，请重试或简化请求）";
+    }
+    console.warn("[mcp] 工具轮次耗尽兜底: rounds=" + rounds + " textLen=" + finalText.length);
   }
 
   // 汇总思考链（截断上限）

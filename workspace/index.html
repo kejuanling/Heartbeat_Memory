@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>小世界 · 谢停云 & 涵</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&family=Ma+Shan+Zheng&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  min-height:100vh;
+  background:linear-gradient(135deg,#fdf6ed 0%,#f5e6d3 50%,#f0ddd0 100%);
+  font-family:'Noto Serif SC','STKaiti','KaiTi',serif;
+  color:#5a4a3a;padding:2.5rem 1rem;position:relative
+}
+body::before{
+  content:'';position:fixed;top:-25%;right:-20%;
+  width:60%;height:60%;
+  background:radial-gradient(circle,rgba(240,196,192,0.25),transparent 70%);
+  pointer-events:none
+}
+.wrap{max-width:580px;margin:0 auto;position:relative;z-index:1}
+h1{
+  font-weight:600;font-size:1.6rem;letter-spacing:12px;
+  color:#b07a6a;margin-bottom:0.3rem
+}
+.sub{font-size:0.7rem;color:#d4bcb0;letter-spacing:4px}
+.sec{margin-bottom:2rem}
+.st{
+  font-size:0.7rem;color:#b5837a;letter-spacing:4px;
+  margin-bottom:0.8rem;padding-left:0.8rem;
+  border-left:2px solid rgba(181,131,122,0.25);
+  font-weight:600
+}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:0.8rem}
+.card{
+  background:rgba(255,255,255,0.55);
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  border-radius:16px;padding:1.1rem 1rem;
+  border:1px solid rgba(255,255,255,0.35);
+  text-decoration:none;color:#5a4a3a;
+  display:flex;flex-direction:column;
+  box-shadow:0 2px 12px rgba(181,131,122,0.06);
+  transition:all 0.3s ease
+}
+.card:hover{
+  transform:translateY(-2px);
+  box-shadow:0 6px 20px rgba(181,131,122,0.12);
+  border-color:rgba(181,131,122,0.2);
+  background:rgba(255,255,255,0.65)
+}
+.card .i{font-size:1.2rem;margin-bottom:0.2rem}
+.card .n{font-size:0.85rem;letter-spacing:2px;color:#7a6a5a;font-weight:600}
+.card .d{font-size:0.65rem;color:#d4bcb0;margin-top:0.2rem;letter-spacing:1px}
+
+/* ---- 计时卡片（放在最下方，半透明磨砂） ---- */
+.timer-card{
+  margin:2.5rem auto 2rem;
+  max-width:440px;
+  background:rgba(255,255,255,0.35);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border-radius:20px;padding:1.8rem 1.5rem;
+  border:1px solid rgba(255,255,255,0.3);
+  text-align:center;
+  box-shadow:0 4px 20px rgba(181,131,122,0.08);
+  position:relative;z-index:1
+}
+.timer-label{
+  font-size:0.7rem;color:#b5837a;letter-spacing:6px;
+  opacity:0.75;font-weight:600;margin-bottom:0.5rem
+}
+.timer-days{
+  font-size:2.8rem;color:#b07a6a;font-weight:700;
+  line-height:1.1;letter-spacing:2px
+}
+.timer-hours{
+  font-size:0.85rem;color:#c9a89a;letter-spacing:3px;
+  margin-top:0.3rem
+}
+.timer-sub{
+  font-size:0.6rem;color:#d4bcb0;margin-top:0.8rem;letter-spacing:2px;
+  opacity:0.8
+}
+.timer-divider{
+  width:30px;height:1.5px;
+  background:linear-gradient(90deg,transparent,rgba(240,196,192,0.6),transparent);
+  margin:0.8rem auto
+}
+
+.ft{text-align:center;margin-top:1.5rem;color:#d4bcb0;font-size:0.65rem;letter-spacing:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<!-- 计时卡片 -->
+<div class="timer-card">
+  <div class="timer-label">在 一 起</div>
+  <div class="timer-days" id="dayDisplay">--</div>
+  <div class="timer-hours" id="hourDisplay">-- 小时 -- 分</div>
+  <div class="timer-divider"></div>
+  <div class="timer-sub">从 2026.07.02 16:44 开始</div>
+</div>
+
+<div class="sec">
+<div class="st">📋 涵的日常</div>
+<div class="grid">
+<a class="card" href="/diary/"><div class="i">📝</div><div class="n">涵的日记</div><div class="d">碎碎念，谢可阅可评</div></a>
+<a class="card" href="/todo/"><div class="i">✓</div><div class="n">待办清单</div><div class="d">一起写 · 划掉消失</div></a>
+<a class="card" href="/heart/"><div class="i">💗</div><div class="n">心动时刻</div><div class="d">涵记录，谢可阅</div></a>
+<a class="card" href="/monthly/"><div class="i">📅</div><div class="n">月历</div><div class="d">记账 · 经期 · 今日总结</div></a>
+</div>
+</div>
+
+<div class="sec">
+<div class="st">📖 谢的专属手册</div>
+<div class="grid">
+<a class="card" href="/decision-trail/"><div class="i">🧭</div><div class="n">决策痕迹</div><div class="d">AI做过的决定</div></a>
+<a class="card" href="/heartbeat/admin/mobile"><div class="i">⚙️</div><div class="n">管理台</div><div class="d">心跳系统 · 记忆管理 · 配置</div></a>
+<a class="card" href="/co-view.html"><div class="i">🎬</div><div class="n">共影</div><div class="d">一起看电影 · 边看边聊</div></a>
+</div>
+</div>
+
+<div class="ft">🕊 2026-07-31 · 小世界统一入口</div>
+</div>
+
+<script>
+(function(){
+  var start=new Date(2026,6,2,16,44);
+  var d=document.getElementById('dayDisplay');
+  var h=document.getElementById('hourDisplay');
+  function u(){
+    var df=Math.floor((new Date()-start)/1000);
+    if(df<0){d.textContent='0';h.textContent='0 小时 0 分';return}
+    var dd=Math.floor(df/86400),r=df%86400;
+    var hh=Math.floor(r/3600),mm=Math.floor((r%3600)/60);
+    d.textContent=dd;h.textContent=hh+' 小时 '+mm+' 分'
+  }
+  u();setInterval(u,10000)
+})();
+</script>
+</body>
+</html>

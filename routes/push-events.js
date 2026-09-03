@@ -1,18 +1,21 @@
 'use strict';
 // 推送回显管理路由（自 server.js 拆出；依赖 basicAuth + 项目根 baseDir）
 const path = require('path');
+const crypto = require('crypto');
 const fsx = require('fs-extra');
 const { parsePushEcho, parseWakeEcho, buildPushEcho, fmtLocalAt, pushEchoMeta, toEpoch, writeTimelineAtomic } = require('../utils/push');
 
 const TIMELINE_FILE = 'enhanced_messages.json';
 
+// 与 server.js safeSessionToken 同口径：清洗为空 → md5 哈希文件名，
+// 避免纯中文等非法字符 sid 被错误解析到主会话时间线（读错数据/改错会话）
 function timelinePathFor(baseDir, sessionId) {
   if (!sessionId || sessionId === 'default') {
     return path.join(baseDir, TIMELINE_FILE);
   }
   const safe = String(sessionId).replace(/[^A-Za-z0-9_-]/g, '');
-  if (!safe) return path.join(baseDir, TIMELINE_FILE);
-  return path.join(baseDir, `enhanced_messages_${safe}.json`);
+  const token = safe || ('h' + crypto.createHash('md5').update(String(sessionId)).digest('hex').slice(0, 12));
+  return path.join(baseDir, `enhanced_messages_${token}.json`);
 }
 
 // 扫描所有会话时间线文件，返回 [{ sessionId, path }]

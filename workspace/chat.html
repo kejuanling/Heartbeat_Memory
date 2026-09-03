@@ -3055,11 +3055,11 @@ async function request(finalMsgs, fromSend){
 }
 async function send(){
   const text=inputEl.value.trim();
-  if(sending)return;
+  if(sending)return false;
   // 先占位再走 fetchHistory 异步窗口：否则快速连点/回车会在 sending 置位前双双入列
   sending=true;setSendState(true);
-  if(!text&&!imgData.length){ sending=false;setSendState(false); return; }
-  if(!api_key){ sending=false;setSendState(false); showToast("请先到 ☰ 菜单→设置→连接 填访问口令(GATEWAY_API_KEY)"); return; }
+  if(!text&&!imgData.length){ sending=false;setSendState(false); return false; }
+  if(!api_key){ sending=false;setSendState(false); showToast("请先到 ☰ 菜单→设置→连接 填访问口令(GATEWAY_API_KEY)"); return false; }
   if(!msgs.length){
     msgs=loadMsgs();
     if(!msgs.length){
@@ -3080,6 +3080,7 @@ async function send(){
   updateSelBar();
   renderAll();scrollBottom();     // 先立即显示用户消息，再进入 AI 加载/流式
   request(msgs,true);
+  return true;
 }
 function setSendState(on){
   if(on){sendBtn.classList.add("disabled","stop-btn");sendBtn.textContent="■";}
@@ -3250,6 +3251,7 @@ async function toggleStarMsg(){
   try{
     const key=await msgStarKeyBackend(m);
     const r=await fetch(ccBase()+"/context-compaction/mark",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":ccGetCookie("admin_csrf")},body:JSON.stringify({key:key,marked:want,content:content,role:role}),credentials:"include"});
+    if(!r.ok){ showToast("标星失败: HTTP "+r.status); return; }
     const j=await r.json().catch(function(){return {};});
     if(j&&j.ok===false){ showToast("标星失败: "+(j.error||"")); return; }
     setStarMsgLocal(m,want);
@@ -3424,11 +3426,9 @@ selDel.addEventListener("click",()=>{
   saveMsgs();selectSet.clear();updateSelBar();
   if(!msgs.length){ chatEl.innerHTML=""; chatEl.appendChild(emptyEl); exitSelect(); }
   else {
-    // 重排 data-idx（只改属性，不重渲染内容）
-    const all=chatEl.querySelectorAll(".msg[data-idx]");
-    let n=0;
-    for(let i=0;i<all.length;i++){ all[i].setAttribute("data-idx",String(n)); n++; }
-    renderAll(); // 多选删除后统一重排一次，保证位置与 select 状态正确
+    // 窗口化渲染下 DOM 里的 data-idx 是全局索引（窗口首条≠0），逐元素重排必错；
+    // 直接全量重建即可（renderAll 会复位窗口并按 msgs 重编号）
+    renderAll();
   }
   showToast("已删除 "+indexes.length+" 条");
   syncTimelineLocal();   // 多选删除即刻同步到服务端时间线
@@ -3794,12 +3794,9 @@ async function loadThemesFromServer(){
     const j=await r.json();
     const arr=Array.isArray(j&&j.themes)?j.themes:[];
     if(!arr.length){ return; } // 服务器为空：绝不覆盖本地（防刷新丢主题）
-    const local=loadSavedThemes();
-    const merged=local.slice(0);
-    const names={}; local.forEach(function(t){ if(t&&t.name)names[t.name]=1; });
-    let added=false;
-    arr.forEach(function(t){ if(t&&t.name&&!names[t.name]){ merged.push(t); names[t.name]=1; added=true; } });
-    if(added){ try{ localStorage.setItem(LS_THEMES,JSON.stringify(merged)); }catch(e){} }
+    // 主题在服务端是全量镜像（增/删/改都会整表 PUT）：拉取时以服务器为准直接替换本地，
+    // 避免"服务器已删的主题本地永远删不掉、又被下一次 PUT 推回去"的僵尸循环
+    try{ localStorage.setItem(LS_THEMES,JSON.stringify(arr)); }catch(e){}
     renderSavedThemes();
   }catch(e){}
 }
@@ -4554,7 +4551,20 @@ function callInitiate(fromAI){
   const msg="<phone>【发起通话】"+subject+"发起了通话，是否接听？请用 <result>yes</result> 或 <result>no</result> 表态，然后直接说你想说的话（不要使用 <voice> 标签）。</phone><call_id>"+_call.batchId+"</call_id>";
   _callPending=true;
   inputEl.value=msg;
-  send();
+  // send() 在无口令等场景会提前返回 false：_callPending 若悬挂，下一次正常回复会被误当来电处理。
+  // 这里兜底复位并静默收起通话页（不走 callClose，避免往时间线写 0 秒通话记录）
+  Promise.resolve(send()).then(function(ok){
+    if(ok===false){
+      _callPending=false;
+      inputEl.value="";
+      try{
+        var ov=document.getElementById("callOverlay");
+        if(ov)ov.classList.remove("open");
+        _call.open=false;_call.active=false;
+        stopVoiceChan();
+      }catch(e){}
+    }
+  });
 }
 loadVoiceCfg();
 

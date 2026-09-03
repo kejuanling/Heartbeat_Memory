@@ -571,6 +571,8 @@ function tryWake(){
         document.getElementById('wake-last').textContent = '刚才说了句话';
       } else if (j && j.error) {
         if (String(j.error).indexOf('Invalid internal key') >= 0) { setStatus('密钥错误'); }
+        // 非密钥错误（视觉 Key 失效/上游限流等）至少落到"上次看了一眼"栏，持续失败不再零感知
+        else { var _wl = document.getElementById('wake-last'); if (_wl) _wl.textContent = '上次出错：' + String(j.error).slice(0, 60); }
       }
     })
     .catch(function(){})
@@ -773,7 +775,8 @@ function stopShare(){
   shareMode = false;
   if (screenStream) { screenStream.getTracks().forEach(function(t){ t.stop(); }); screenStream = null; }
   if (screenVid) screenVid.srcObject = null;
-  if (wakeTimer) { clearInterval(wakeTimer); wakeTimer = null; }
+  // 唤醒定时器保留：复选框勾选状态才是"自动看一眼"的开关（与 toggleShare 的启动条件一致）。
+  // 共享停止后若回到视频播放，自动看一眼继续工作；视频未播时 tryWake 自身有 paused 守卫会跳过，不会误触发
   var btn = document.getElementById('fp-share');
   btn.textContent = '▶ 截屏'; btn.classList.remove('on');
   setFpStatus('');

@@ -1171,9 +1171,11 @@ function buildMemoryMessage(item) {
 // ---------------- 重要内容标记（星星） ----------------
 // 与 context-compactor 共用 data/context_compaction_marks.json，key 用 contentKey
 const MARKS_FILE = path.join(DATA_DIR, "context_compaction_marks.json");
+// 走 readJson 的 mtime 缓存：该函数在压缩页预览/容量提醒的消息级循环里被高频调用，
+// 之前的裸 readFileSync 在 matched 数百条时放大成数百次全量读盘
 function loadMarks() {
   try {
-    const data = JSON.parse(fs.readFileSync(MARKS_FILE, "utf-8"));
+    const data = readJson(MARKS_FILE, null);
     if (data && data.marks && typeof data.marks === "object") return data.marks;
   } catch (err) { /* 无标记 */ }
   return {};
@@ -2557,6 +2559,7 @@ function searchCompactionOriginal(keyword, maxResults) {
   const { items, map } = buildCompactionChunkMap();
   const maxReturn = Math.max(1, Math.min(200, Math.floor(Number(maxResults) || 50)));
   const results = [];
+  const _loopMarks = loadMarks();   // 提到循环外：命中数百条时逐条 loadMarks 是重复开销
   items.forEach(function (e, i) {
     const content = typeof e.msg.content === "string" ? e.msg.content : contentToText(e.msg);
     if (!content) return;
@@ -2575,7 +2578,7 @@ function searchCompactionOriginal(keyword, maxResults) {
       time: t ? fmtWall(t) : "",
       content: content.length > 300 ? content.slice(0, 300) + "…" : content,
       key: key,
-      marked: !!loadMarks()[key],
+      marked: !!_loopMarks[key],
       chunk: info ? {
         chunkIndex: info.chunkIndex,
         chunkId: info.chunkId,

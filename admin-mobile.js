@@ -56,7 +56,7 @@ function getCookie(name) {
     // 压缩/替换接口自动带上当前会话（聊天与管理台同源，可读 localStorage.han_current_session）
     if (url.indexOf('/context-compaction') >= 0 || url.indexOf('/context-replacements') >= 0) {
       try {
-        const sid = ADMIN_SESSION || localStorage.getItem('han_current_session') || 'default';
+        const sid = currentAdminSession();   // 统一入口，兜底口径与选择器一致
         if (url.indexOf('session_id=') < 0) {
           const sep = url.indexOf('?') >= 0 ? '&' : '?';
           url = url + sep + 'session_id=' + encodeURIComponent(sid);
@@ -3513,7 +3513,7 @@ let lastPendingCount = null;
     el.innerHTML='<div class="loading">加载中...</div>';
     const info=document.getElementById('cross-inject-info');
     try{
-      const sid=(typeof ADMIN_SESSION!=='undefined'&&ADMIN_SESSION)||localStorage.getItem('han_current_session')||'';
+      const sid=currentAdminSession();   // 统一入口，空会话兜底 'default' 而非空串
       const r=await fetch(ADMIN_API + '/cross-window-inject?session_id='+encodeURIComponent(sid));
       const d=await r.json();
       if(d.error){ el.innerHTML='<div class="empty">加载失败: '+d.error+'</div>'; return; }
@@ -4357,12 +4357,20 @@ async function deletePinned(id){
   }
   async function sinkMemPool(id){
     if(!confirm('沉底该条记忆？沉底后不再参与检索浮现。'))return;
-    try{ await fetch(ADMIN_API+'/memory-pool/sink',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})}); toast('已沉底'); loadMemPool(); }
-    catch(e){ toast('操作失败: '+e.message); }
+    try{
+      const r=await fetch(ADMIN_API+'/memory-pool/sink',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})});
+      const d=await r.json().catch(function(){return {};});
+      if(d.error){ toast('操作失败: '+d.error); return; }
+      toast('已沉底'); loadMemPool();
+    }catch(e){ toast('操作失败: '+e.message); }
   }
   async function reviveMemPool(id){
-    try{ await fetch(ADMIN_API+'/memory-pool/revive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})}); toast('已恢复'); loadMemPool(); }
-    catch(e){ toast('操作失败: '+e.message); }
+    try{
+      const r=await fetch(ADMIN_API+'/memory-pool/revive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})});
+      const dv=await r.json().catch(function(){return {};});
+      if(dv.error){ toast('操作失败: '+dv.error); return; }
+      toast('已恢复'); loadMemPool();
+    }catch(e){ toast('操作失败: '+e.message); }
   }
   async function togglePinMemPool(id, v){
     try{

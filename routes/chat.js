@@ -98,6 +98,10 @@ function semanticSearch(index, query, threshold) {
 // ---- 会话列表元数据缓存（以文件 mtimeMs+size 为失效键，避免每次全量 loadTimeline）----
 const sessionMetaCache = new Map();
 
+// ---- 跨会话搜索索引缓存（以全部时间线文件的 mtime+size 指纹为失效键）----
+// 前端仅 180ms 防抖，连续击键会连续触发 /v1/search；items 收集 + TF-IDF 建索引都按指纹复用
+const searchIndexCache = { fp: null, index: null };
+
 module.exports = function registerChatRoutes(app, deps) {
   const {
     baseDir,
@@ -388,27 +392,47 @@ module.exports = function registerChatRoutes(app, deps) {
       if (!q) return reply.send({ ok: true, mode, total: 0, results: [] });
       const files = fsp.readdirSync(baseDir).filter(f => f === 'enhanced_messages.json' || /^enhanced_messages[_-][A-Za-z0-9_-]+\.json$/.test(f));
       const ql = q.toLowerCase();
-      const items = [];
-      for (const f of files) {
-        // 主会话文件 enhanced_messages.json 的 sid 是 default，必须纳入搜索（否则主要聊天内容永远搜不到）
-        const sid = f === 'enhanced_messages.json' ? 'default' : f.replace(/^enhanced_messages_/, '').replace(/\.json$/, '');
-        if (!sid) continue;
-        let arr = [];
-        try { arr = loadTimeline(sid); } catch (e) { continue; }
-        arr.filter(isRealMessageForTimeline).forEach((m, i) => {
-          const text = normalizeContentToText(m.content) || '';
-          if (!text) return;
-          items.push({ sid, sidx: i, name: sid, text });
-        });
+      // 指纹缓存：任一时间线文件变化（mtime/size/增删）才重建 items，否则直接复用
+      let fp = '';
+      try {
+        fp = files.map(f => {
+          const st = fsp.statSync(path.join(baseDir, f));
+          return f + ':' + st.mtimeMs + ':' + st.size;
+        }).join('|');
+      } catch (e) { fp = String(Date.now()); } // stat 失败则本次放弃缓存命中
+      let items = [];
+      if (searchIndexCache.fp === fp && searchIndexCache.items) {
+        items = searchIndexCache.items;
+      } else {
+        for (const f of files) {
+          // 主会话文件 enhanced_messages.json 的 sid 是 default，必须纳入搜索（否则主要聊天内容永远搜不到）
+          const sid = f === 'enhanced_messages.json' ? 'default' : f.replace(/^enhanced_messages_/, '').replace(/\.json$/, '');
+          if (!sid) continue;
+          let arr = [];
+          try { arr = loadTimeline(sid); } catch (e) { continue; }
+          arr.filter(isRealMessageForTimeline).forEach((m, i) => {
+            const text = normalizeContentToText(m.content) || '';
+            if (!text) return;
+            items.push({ sid, sidx: i, name: sid, text });
+          });
+        }
+        searchIndexCache.fp = fp;
+        searchIndexCache.items = items;
       }
       let results = [];
       if (mode === 'keyword') {
         items.forEach(it => { if (it.text.toLowerCase().includes(ql)) results.push({ sid: it.sid, sidx: it.sidx, name: it.name, text: it.text, score: 1 }); });
         results = results.slice(0, limit);
       } else {
-        const idx = buildSemIndex(items);
-        const hits = semanticSearch(idx, q, 0.06);
-        results = hits.slice(0, limit).map(h => { const it = idx.items[h.i]; return { sid: it.sid, sidx: it.sidx, name: it.name, text: it.text, score: h.score }; });
+        // 指纹命中时直接复用已建索引（TF-IDF 建索引是大头，不能每次请求重跑）
+        let index = (searchIndexCache.fp === fp) ? searchIndexCache.index : null;
+        if (!index) {
+          index = buildSemIndex(items);
+          searchIndexCache.fp = fp;
+          searchIndexCache.index = index;
+        }
+        const hits = semanticSearch(index, q, 0.06);
+        results = hits.slice(0, limit).map(h => { const it = index.items[h.i]; return { sid: it.sid, sidx: it.sidx, name: it.name, text: it.text, score: h.score }; });
       }
       reply.send({ ok: true, mode, total: results.length, results });
     } catch (err) {
