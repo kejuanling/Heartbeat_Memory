@@ -1779,7 +1779,8 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         max_tokens: body.max_tokens
       });
       if (pass && pass.ok && !pass.fellBackToTools) {
-        directResult = { text: pass.text || "", reasoning: pass.reasoning || "", usage: pass.usage || null, toolHistory: [], rounds: 0 };
+        // T-0922：直通可能带后置工具续跑（先文本后工具），toolHistory 有值时随收尾写时间线/前端工具胶囊
+        directResult = { text: pass.text || "", reasoning: pass.reasoning || "", usage: pass.usage || null, toolHistory: pass.toolHistory || [], rounds: pass.rounds || 0 };
       }
       // fellBackToTools=true：直通已识别到工具调用，让下方 runWithTools 接管
     } catch (streamErr) {

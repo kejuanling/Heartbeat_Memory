@@ -214,21 +214,33 @@ async function runWithTools({
   top_p,
   max_tokens,
   maxToolRounds = DEFAULT_MAX_TOOL_ROUNDS,
-  fetchFn = fetch
+  fetchFn = fetch,
+  resume = null
 }) {
   // 1. 加载 MCP 工具，并叠加内置 native 工具（surface_memory），转成 OpenAI tools[]
   const routes = await loadTools(serverClients);
   const allRoutes = NATIVE_TOOLS.concat(routes || []);
   const openaiTools = toOpenAITools(allRoutes);
+  const toolCtx = { serverClients, routes, upstreamUrl, upstreamKey, model };
 
   let working = messages.slice();
-  let finalText = "";
   let totalUsage = null;
   let rounds = 0;
 
   // 收集思考链（reasoning_content）与工具调用记录（tool_trace）
   const reasoningParts = [];
   const toolHistory = [];
+  // T-0922 修复：每一轮模型说过的话都收集（同轮"文本+工具调用"混合时文本不再丢弃），
+  // 按轮次拼接为最终回复——与主流聊天一致："我帮你查一下" →（工具跑）→ 结果补充
+  const contentParts = [];
+
+  // 直通续跑模式（T-0922）：流式直通路径已把该 assistant 消息（含 tool_calls）透传给客户端，
+  // 从"执行其工具"开始接续；其 content 客户端已见过，不进 contentParts（避免重复显示）
+  if (resume && resume.assistantMsg) {
+    const am = resume.assistantMsg;
+    working.push({ role: "assistant", content: am.content || "", tool_calls: am.tool_calls });
+    await executeToolCalls(am.tool_calls || [], working, toolHistory, toolCtx);
+  }
 
   for (let round = 0; round < maxToolRounds + 1; round++) {
     rounds = round;
@@ -283,65 +295,70 @@ async function runWithTools({
     const rtext = String(msg.reasoning_content || msg.reasoning || "").trim();
     if (rtext) reasoningParts.push(rtext);
 
+    // 收集本轮正文（混合轮文本保留，见 contentParts 注释）
+    const ctext = String(msg.content || "").trim();
+    if (ctext) contentParts.push(ctext);
+
     // 记录这一轮 assistant 消息（含 tool_calls 则保留）
     working.push({ role: "assistant", content: msg.content || "", tool_calls: msg.tool_calls });
 
     // 没有 tool_calls -> 结束
     const toolCalls = msg.tool_calls;
-    if (!toolCalls || toolCalls.length === 0) {
-      finalText = msg.content || "";
-      break;
-    }
+    if (!toolCalls || toolCalls.length === 0) break;
 
     // 执行每个 tool_call，并记录到 toolHistory 供前端展示
-    for (const tc of toolCalls) {
-      const fn = tc.function || {};
-      const name = fn.name || "";
-      const args = _parseArgs(fn.arguments);
-      let result;
-      let error = null;
-      try {
-        if (name === SURFACE_MEMORY_NAME) {
-          result = await callSurfaceMemory(args);
-        } else if (name === MEMORY_RECALL_NAME) {
-          result = await callMemoryRecall(args, { upstreamUrl, upstreamKey, model });
-        } else {
-          result = await callToolByExposedName(serverClients, routes, name, args);
-        }
-      } catch (e) {
-        error = e.message || String(e);
-        result = { markdown: JSON.stringify({ type: "tool_error", error: "mcp_service_error", message: error }) };
-      }
-      working.push({
-        role: "tool",
-        tool_call_id: tc.id,
-        // 截断超大工具结果：时间线/后续轮次上下文都不需要完整大结果，30k 字符足够模型引用
-        content: _truncateResult(result.markdown || "", MAX_TOOL_RESULT_CHARS)
-      });
-      toolHistory.push({
-        name,
-        args,
-        result: _truncateResult(result.markdown || "", error ? 0 : 20000),
-        error
-      });
-    }
+    await executeToolCalls(toolCalls, working, toolHistory, toolCtx);
   }
 
-  // 兜底：轮次耗尽模型仍在出 tool_calls 时 finalText 为空。这里取末轮正文/占位提示，
-  // 避免 handleMcpRequest 因空文本跳过时间线写入、客户端收到无日志的空回复
-  if (!finalText || !String(finalText).trim()) {
-    const lastMsg = working.length && working[working.length - 1];
-    finalText = (lastMsg && lastMsg.role === "assistant" && lastMsg.content) || "";
-    if (!finalText.trim()) {
-      finalText = "（工具调用轮次已达上限，模型未给出最终回复，请重试或简化请求）";
-    }
-    console.warn("[mcp] 工具轮次耗尽兜底: rounds=" + rounds + " textLen=" + finalText.length);
+  // 最终回复 = 各轮正文拼接；兜底：轮次耗尽模型全程没说过话时占位提示，
+  // 避免 handleMcpRequest 因空文本跳过时间线写入、客户端收到无日志的空回复。
+  // resume 模式除外：客户端已有直通文本，这里为空就空着，由调用方决定。
+  let text = contentParts.join("\n\n").trim();
+  if (!text && !(resume && resume.assistantMsg)) {
+    text = "（工具调用轮次已达上限，模型未给出最终回复，请重试或简化请求）";
+    console.warn("[mcp] 工具轮次耗尽兜底: rounds=" + rounds + " textLen=0");
   }
 
   // 汇总思考链（截断上限）
   const reasoning = reasoningParts.join("\n\n").slice(0, MAX_REASONING_CHARS);
 
-  return { text: finalText, rounds, usage: totalUsage, routes, reasoning, toolHistory, finalMessages: working.slice() };
+  return { text, rounds, usage: totalUsage, routes, reasoning, toolHistory, finalMessages: working.slice() };
+}
+
+// 执行一批 tool_call：结果写入 working（供下一轮上游请求）与 toolHistory（供前端展示）
+async function executeToolCalls(toolCalls, working, toolHistory, ctx) {
+  const { serverClients, routes, upstreamUrl, upstreamKey, model } = ctx;
+  for (const tc of toolCalls) {
+    const fn = tc.function || {};
+    const name = fn.name || "";
+    const args = _parseArgs(fn.arguments);
+    let result;
+    let error = null;
+    try {
+      if (name === SURFACE_MEMORY_NAME) {
+        result = await callSurfaceMemory(args);
+      } else if (name === MEMORY_RECALL_NAME) {
+        result = await callMemoryRecall(args, { upstreamUrl, upstreamKey, model });
+      } else {
+        result = await callToolByExposedName(serverClients, routes, name, args);
+      }
+    } catch (e) {
+      error = e.message || String(e);
+      result = { markdown: JSON.stringify({ type: "tool_error", error: "mcp_service_error", message: error }) };
+    }
+    working.push({
+      role: "tool",
+      tool_call_id: tc.id,
+      // 截断超大工具结果：时间线/后续轮次上下文都不需要完整大结果，30k 字符足够模型引用
+      content: _truncateResult(result.markdown || "", MAX_TOOL_RESULT_CHARS)
+    });
+    toolHistory.push({
+      name,
+      args,
+      result: _truncateResult(result.markdown || "", error ? 0 : 20000),
+      error
+    });
+  }
 }
 
 // 解析 function 的 arguments（可能是字符串或对象）
@@ -542,6 +559,23 @@ async function tryStreamPassthrough({
   let fullText = "";
   let reasoning = "";
   let usage = null;
+  // T-0922 修复：聚合流式 tool_calls（模型"先说话后调工具"时，阶段一判定被首个 content 骗过、
+  // 走了透传，标准 delta.tool_calls 事件被原样发给前端但前端不消费、工具未执行）。
+  // 流式 tool_calls 是分片增量：按 index 聚合，id/name 首片给全、arguments 逐片拼接。
+  const toolCallAcc = [];
+  const accToolCall = (tcs) => {
+    for (const tc of tcs) {
+      if (!tc) continue;
+      const idx = typeof tc.index === "number" ? tc.index : 0;
+      let slot = toolCallAcc[idx];
+      if (!slot) slot = toolCallAcc[idx] = { id: "", name: "", args: "" };
+      if (tc.id) slot.id = tc.id;
+      if (tc.function) {
+        if (tc.function.name) slot.name += tc.function.name;
+        if (typeof tc.function.arguments === "string") slot.args += tc.function.arguments;
+      }
+    }
+  };
   // 继续解析并采集全文（供调用方写时间线 / 提取 <memory> 等标签）
   const collect = (rawLine) => {
     if (!rawLine.startsWith("data:")) return;
@@ -554,6 +588,7 @@ async function tryStreamPassthrough({
     const delta = choice.delta || {};
     if (typeof delta.content === "string") fullText += delta.content;
     if (delta.reasoning_content) reasoning += delta.reasoning_content;
+    if (Array.isArray(delta.tool_calls) && delta.tool_calls.length) accToolCall(delta.tool_calls);
     if (evt.usage) usage = evt.usage;
   };
   try {
@@ -580,6 +615,44 @@ async function tryStreamPassthrough({
     }
     // 上游流结束时若尾巴残留一条未换行的 data 行，补采一次，避免最后一条 content 丢失
     if (sseBuf) collect(sseBuf.replace(/\r$/, ""));
+    // T-0922 修复：模型"先说话后调工具"被直通误判后，漏掉的工具调用在此补上——
+    // 客户端流尚未 end：补执行工具循环（resume 断点续跑），把后续回复续写进同一轮流。
+    // 客户端体验：先看到流式文本（真流式），工具执行完后继续收到补充内容，接近主流"边说边查再补充"。
+    const pending = toolCallAcc.filter(s => s && s.name).map((s, i) => ({
+      id: s.id || ("call_pt_" + Date.now() + "_" + i),
+      type: "function",
+      function: { name: s.name, arguments: s.args || "{}" }
+    }));
+    if (pending.length) {
+      try {
+        console.log("[mcp] 流式直通发现后置工具调用（先文本后工具），补执行并续写: " + pending.map(t => t.function.name).join(","));
+        const r2 = await runWithTools({
+          upstreamUrl, upstreamKey, model, messages, serverClients,
+          temperature, top_p, max_tokens,
+          resume: { assistantMsg: { role: "assistant", content: fullText, tool_calls: pending } }
+        });
+        // 续写（伪流式）：思考链 → 工具记录 → 后续正文；直通阶段的 fullText 已发给客户端，不重发
+        const sse = buildSSE(r2.text || "", { model, reasoning: r2.reasoning || "", toolHistory: r2.toolHistory || [], usage: r2.usage || null });
+        const rd = sse.getReader();
+        while (true) {
+          const { done, value } = await rd.read();
+          if (done) break;
+          emit(value);
+        }
+        try { reply.raw.end(); } catch {}
+        return {
+          ok: true, fellBackToTools: false,
+          text: [fullText, r2.text].filter(t => t && String(t).trim()).join("\n\n"),
+          reasoning: [reasoning, r2.reasoning].filter(t => t && String(t).trim()).join("\n\n"),
+          usage: r2.usage || usage,
+          toolHistory: r2.toolHistory || [],
+          rounds: r2.rounds
+        };
+      } catch (resumeErr) {
+        // 续跑失败：客户端已收到直通文本，正常收尾返回已透传内容（仅工具结果缺失）
+        console.warn("[mcp] 直通后置工具续跑失败（客户端已收到文本）:", resumeErr.message);
+      }
+    }
   } catch (e) {
     try { reply.raw.end(); } catch {}
     return { ok: false, fellBackToTools: false };
