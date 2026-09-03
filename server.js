@@ -932,7 +932,9 @@ function buildTimeline(kelivoMessages, sessionId) {
   for (let i = realForTimeline.length - 1; i >= 0; i--) {
     if (realForTimeline[i].role === "user") { lastUserFallbackIdx = i; break; }
   }
-  let keepImgTurns = Number((typeof memoryEngine.getConfig === 'function' && memoryEngine.getConfig()).keep_recent_image_turns);
+  // 布尔值是无效配置（Number(false)=0 会被误当成合法的"0=不保留"），与 NaN/负值一样回退默认
+  const _rawKeepTurns = (typeof memoryEngine.getConfig === 'function' && memoryEngine.getConfig()).keep_recent_image_turns;
+  let keepImgTurns = (typeof _rawKeepTurns === 'boolean') ? NaN : Number(_rawKeepTurns);
   // 与请求层语义一致：0 = 不保留任何历史图片；只有无效/负值才回退默认 8（原 Number()||8 会把合法的 0 错变成 8）
   if (!Number.isFinite(keepImgTurns) || keepImgTurns < 0) {
     const envVal = Number(process.env.KEEP_RECENT_IMAGE_TURNS);
@@ -1469,7 +1471,7 @@ function starredContextText(limit) {
     for (const m of matched) {
       if (!m || m.role === "system") continue;
       let k = null;
-      try { k = contextReplacements.contentKey ? contextReplacements.contentKey(m) : contextReplacements.contentKey(m); } catch (e) {}
+      try { k = contextReplacements.contentKey ? contextReplacements.contentKey(m) : null; } catch (e) {}
       if (k && marks[k] && !seenKeys.has(k)) {
         seenKeys.add(k);
         const role = m.role === "user" ? USER_DISPLAY_NAME : AI_DISPLAY_NAME;
@@ -1751,7 +1753,7 @@ app.post("/internal/wake-event", async (req, reply) => {
         appendSpecialEvent(event, {
           event_type: "push",
           push_at: String(push_meta.at || ""),
-          push_user: String(push_meta.user || "") || (process.env.USER_DISPLAY_NAME || "用户"),
+          push_user: String(push_meta.user || "") || (readEnvValue("USER_DISPLAY_NAME") || "用户"),
           push_channel: String(push_meta.channel || "Bark"),
           push_title: String(push_meta.title || "").trim(),
           push_body: String(push_meta.body || "").trim(),
@@ -1963,7 +1965,8 @@ function validSessionToken(token) {
   if (user !== process.env.ADMIN_USER) return false;
   if (!/^\d+$/.test(expS) || Number(expS) < Date.now()) return false;
   const expected = crypto.createHmac("sha256", getSessionSecret()).update(`${expS}.${user}`).digest("hex");
-  if (sig.length !== expected.length) return false;
+  // 非hex签名会让 Buffer.from(...,"hex") 解析成空/短buffer，timingSafeEqual 直接抛错变 500——先校验字符集，异常一律按 401 拒绝
+  if (!/^[0-9a-f]+$/i.test(sig) || sig.length !== expected.length) return false;
   return crypto.timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(expected, "hex"));
 }
 function createCsrfToken() {
@@ -2930,11 +2933,14 @@ function serviceControl(svc, action) {
       return { ok: r.ok, status: serviceStatus(svc), output: r.output };
     }
     if (action === "stop") {
-      const r = runShellCommand("pkill -f " + svc.pattern + " || true; sleep 1");
+      // pattern 首字符转字符类（如 pm2 → [p]m2）：pkill -f 按正则匹配整条命令行时不再命中执行中的 sh -c 自身
+      const killPat = "[" + String(svc.pattern).slice(0, 1) + "]" + String(svc.pattern).slice(1);
+      const r = runShellCommand("pkill -f " + killPat + " || true; sleep 1");
       return { ok: true, status: serviceStatus(svc), output: "已发送停止信号" };
     }
     if (action === "restart") {
-      runShellCommand("pkill -f " + svc.pattern + " || true; sleep 1");
+      const killPat = "[" + String(svc.pattern).slice(0, 1) + "]" + String(svc.pattern).slice(1);
+      runShellCommand("pkill -f " + killPat + " || true; sleep 1");
       const r = runShellCommand(svc.cmd + " ; sleep 1; echo restarted");
       return { ok: true, status: serviceStatus(svc), output: r.output };
     }
@@ -4767,6 +4773,7 @@ async function describeCoFrame({ image, frames, subtitle, duration, noPrompt }) 
     });
     // 手动 👁 纯图请求被拒时：补上默认提示词重试一次，保证功能可用
     if (noPrompt && !resp.ok) {
+      try { await resp.arrayBuffer(); } catch (e) {}   // 先消费旧响应体释放连接，避免重试时旧连接悬挂
       content = imgContent.concat({ type: "text", text: textParts.join("\n") });
       payload.messages[0].content = content;
       resp = await fetch(apiUrl, {
@@ -5727,7 +5734,7 @@ app.get("/admin/logs/context", { preHandler: basicAuth }, async (req, reply) => 
 // ========================
 app.get("/test-bark", async (req, reply) => {
   const formattedTime = formatDateTimeInTimeZone(new Date(), TIME_ZONE);
-  appendSpecialEvent(`（${formattedTime} 刚刚给${process.env.USER_DISPLAY_NAME || "用户"}发了 Bark：这是一条测试推送。）`);
+  appendSpecialEvent(`（${formattedTime} 刚刚给${readEnvValue("USER_DISPLAY_NAME") || "用户"}发了 Bark：这是一条测试推送。）`);
   reply.send({ success: true });
 });
 
@@ -5779,6 +5786,8 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err, address) => {
   }, 15000);
   setTimeout(async () => {
     try {
+      // 启动时自发心跳一次：避免 gateway 重启后管理台把 wake-up 闪显为离线（等 wake-up 下一拍才恢复）。
+      // 副作用（已知口径）：gateway 每次重启会让「wake-up 在线」状态保真一个心跳周期，即便 wake-up 实际已挂。
       const headers = { "Content-Type": "application/json" };
       const internalKey = readEnvValue("INTERNAL_API_KEY");
       if (internalKey) headers["x-internal-key"] = internalKey;

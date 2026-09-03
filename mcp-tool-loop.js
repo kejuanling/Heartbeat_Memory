@@ -18,6 +18,10 @@ const memoryPool = require("./memory-pool");
 
 const DEFAULT_MAX_TOOL_ROUNDS = 6;
 const MAX_REASONING_CHARS = 4000; // 思考链最多保留字符数，避免过长
+// 轮内上游超时：与 server.js 全局口径一致（此前硬编码 120s，比全局 180s 短，长回复会先于全局超时被误杀）
+const UPSTREAM_TIMEOUT_MS = Number(process.env.UPSTREAM_TIMEOUT_MS) || 180000;
+// 单条工具结果写进时间线的截断上限：防止超大结果（读文件/长网页）把 enhanced_messages.json 撑爆
+const MAX_TOOL_RESULT_CHARS = 30000;
 
 // ========================
 // 内置（native）记忆浮现工具：surface_memory
@@ -248,7 +252,7 @@ async function runWithTools({
     }
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 120000);
+    const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
     let resp;
     try {
       resp = await fetchFn(upstreamUrl, {
@@ -311,12 +315,13 @@ async function runWithTools({
       working.push({
         role: "tool",
         tool_call_id: tc.id,
-        content: result.markdown || ""
+        // 截断超大工具结果：时间线/后续轮次上下文都不需要完整大结果，30k 字符足够模型引用
+        content: _truncateResult(result.markdown || "", MAX_TOOL_RESULT_CHARS)
       });
       toolHistory.push({
         name,
         args,
-        result: _truncateResult(result.markdown || "", error ? 0 : 100000),
+        result: _truncateResult(result.markdown || "", error ? 0 : 20000),
         error
       });
     }
@@ -359,6 +364,8 @@ function _truncateResult(text, max = 800) {
 /**
  * 把最终文本 + 思考链 + 工具记录转成 OpenAI 兼容 SSE 流。
  * 事件顺序：思考链 → 工具记录(tool_trace) → 正文 content → 结束。
+ * 注意：这是伪流式——事件虽按小块切分，但整包一次性 enqueue 下发（无逐块延迟），
+ * 仅保证客户端走与真流式相同的解析路径。
  * @returns {ReadableStream}
  */
 function buildSSE(text, {

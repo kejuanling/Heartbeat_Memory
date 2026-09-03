@@ -191,8 +191,14 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
      }
      sel.innerHTML = html;
      const saved = localStorage.getItem('han_admin_session') || '';
-     ADMIN_SESSION = saved || null;
      sel.value = saved;
+     if (saved && sel.value !== saved) {
+       // 已删除的会话不在选择器里：清掉残留，避免后续请求打到空会话
+       try{ localStorage.removeItem('han_admin_session'); }catch(e){}
+       ADMIN_SESSION = null;
+     } else {
+       ADMIN_SESSION = saved || null;
+     }
    }catch(e){}
  }
  function onAdminSessionChange(){
@@ -563,7 +569,7 @@ function toast(msg){
      const r=await apiRequest('POST', ADMIN_API + '/save', body, {busy:document.getElementById('env-save-btn')});
      if(!r.ok) return;
      const j=r.data||{};
-     if(j.success){toast('已保存，已热生效');closeModal('envModal');fetch(ADMIN_API+'/env').then(r=>r.json()).then(d=>{AppState.INITIAL_DATA=d;}).catch(()=>{});}
+     if(j.success){toast('已保存，已热生效');closeModal('envModal');fetch(ADMIN_API+'/env').then(r=>r.json()).then(d=>{AppState.INITIAL_DATA=d;renderEnv();}).catch(()=>{});}
      else toast('保存失败: '+j.error);
    }catch(e){toast('网络错误: '+e.message)}
  }
@@ -1766,7 +1772,7 @@ function updateCcStatusBar(d){
    AppState.ccSelectedChunks.forEach(function(key){
      if(String(key).startsWith('gap-')){
        canGenerate++; // 未覆盖区可以生成摘要
-       canRemove++;   // 未覆盖区不能移除（它本身就是未覆盖的），但切分出的块可以移除，这里先不算
+       // 未覆盖区本身不能移除，不计入 canRemove（否则按钮可点但 batchRemoveBlocks 会跳过，数量对不上）
      }else{
        const idx = Number(key);
        const c = chunks.find(function(x){ return x.index === idx; });
@@ -3919,12 +3925,14 @@ let lastPendingCount = null;
  
  async function serviceAction(name, action){
    if(!confirm('确认对「'+name+'」执行「'+action+'」？'))return;
-   const el=document.getElementById('services-list');
    try{
      const r=await fetch(ADMIN_API + '/services/'+encodeURIComponent(name)+'/'+action,{method:'POST',headers:{'Content-Type':'application/json'}});
      const j=await r.json();
+     if(j && j.error) toast('执行失败: '+j.error);
+     else if(j && j.output) toast('已'+action+' · '+(j.status||'')+': '+String(j.output).slice(0,80));
+     else toast('已执行 '+action);
      loadServices();
-   }catch(e){el.innerHTML='<span class="empty">网络错误</span>'}
+   }catch(e){ toast('网络错误: '+e.message); }
  }
  
  async function loadPinned(){
@@ -4620,6 +4628,7 @@ async function deletePinned(id){
    try{
      const r=await fetch(ADMIN_API+'/imported-conversations');
      const j=await r.json();
+     loadPoolStats(j);
      const recs=j.records||[];
      el.innerHTML=recs.length?recs.map(function(rec){
        return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">'+
@@ -4633,16 +4642,14 @@ async function deletePinned(id){
  // ============ 检索池：统计 / 搜索导入的对话 ============
  let poolSearchTimer=null;
  async function loadSearchPool(){
-   loadPoolStats();
-   loadImportedList();
+   loadImportedList();   // 内部顺带刷新统计：两个面板同源 /imported-conversations，只请求一次
    runPoolSearch();
  }
- async function loadPoolStats(){
+ async function loadPoolStats(preloaded){
    const el=document.getElementById('pool-stats');
    if(!el)return;
    try{
-     const r=await fetch(ADMIN_API+'/imported-conversations');
-     const j=await r.json();
+     const j = preloaded || await (await fetch(ADMIN_API+'/imported-conversations')).json();
      const s=j.stats||{};
      el.innerHTML='<span>记录 <b>'+s.records+'</b> 份</span>'+
        '<span>消息 <b>'+s.messages+'</b> 条</span>'+

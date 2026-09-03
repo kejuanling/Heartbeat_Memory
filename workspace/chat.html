@@ -1944,7 +1944,7 @@ const vpCancelBtn=document.getElementById("vpCancelBtn");
 const vpMsg=document.getElementById("vpMsg");
 let _providers=[];
 // ---- 语音服务（多供应商列表）----
-let _voiceCfg={ enabled:false };           // 仅保留 enabled 总开关（兼容 callOpen 检查）
+let _voiceCfg={ enabled:true };            // 恒 true（总开关已移除，语音可用性由各供应商开关决定）；字段仅为兼容服务端 payload 契约
 let _voiceProviders=[];                     // 语音供应商列表
 let _voiceActiveId="";                      // 当前生效供应商 id
 let _voiceEditingIndex=null;                // 模态编辑中的供应商下标（null=新增）
@@ -2013,8 +2013,8 @@ function liveReloadNow(){
       const playables=added.filter(function(m){return m&&(m.role==="user"||m.role==="assistant"||m.role==="ai");});
       // 完全无变化就不重建（避免每次 SSE 都把整列多段气泡的进场动画重播一遍）
       if(!added.length&&hist.length===localMsgs.length){
-        let sameAll=hist.length===localMsgs.length;
-        if(sameAll){ for(let i=0;i<hist.length;i++){ const a=hist[i]&&hist[i].content,b=localMsgs[i]&&localMsgs[i].content; const av=(typeof a==="string")?a:JSON.stringify(a),bv=(typeof b==="string")?b:JSON.stringify(b); if(av!==bv){sameAll=false;break;} } }
+        let sameAll=true;
+        for(let i=0;i<hist.length;i++){ const a=hist[i]&&hist[i].content,b=localMsgs[i]&&localMsgs[i].content; const av=(typeof a==="string")?a:JSON.stringify(a),bv=(typeof b==="string")?b:JSON.stringify(b); if(av!==bv){sameAll=false;break;} }
         if(sameAll) return;
       }
       // 以服务器为准，但把本地富字段(思考链/工具/token)补回匹配的助手消息（兼容旧数据）
@@ -2171,6 +2171,10 @@ function fmtTime(t){
   const now=new Date();
   if(d.getFullYear()===now.getFullYear()&&d.getMonth()===now.getMonth()&&d.getDate()===now.getDate()){
     return pad(d.getHours())+":"+pad(d.getMinutes());
+  }
+  // 跨年消息带上年份，避免"去年的一条"与"今年同月同日"无法区分
+  if(d.getFullYear()!==now.getFullYear()){
+    return pad(d.getFullYear()%100)+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())+" "+pad(d.getHours())+":"+pad(d.getMinutes());
   }
   return pad(d.getMonth()+1)+"-"+pad(d.getDate())+" "+pad(d.getHours())+":"+pad(d.getMinutes());
 }
@@ -2541,15 +2545,15 @@ function makeMsgEl(m,idx,grpCls){
     const mt=msgTime(m);
     const t=fmtTime(mt);
     if(evt==="push"){
-      // 推送：作为一条"系统/事件"样式的消息气泡居中轻量展示
-      d.innerHTML='<div class="ev-bubble ev-push"><span class="ev-tag">推送</span><span class="ev-time">'+escapeHtml(t)+'</span><div class="ev-body">'+escapeHtml(msgText(m))+'</div></div>';
+      // 推送：作为一条"系统/事件"样式的消息气泡居中轻量展示（剥 <current_time> 等标签，别把标签文字显示出来）
+      d.innerHTML='<div class="ev-bubble ev-push"><span class="ev-tag">推送</span><span class="ev-time">'+escapeHtml(t)+'</span><div class="ev-body">'+escapeHtml(stripCurrentTime(msgText(m)).clean)+'</div></div>';
     } else if(evt==="silent"){
       // 未推送：与"日期分隔线"一致，屏幕中间横排
-      d.innerHTML='<div class="ev-silent">'+escapeHtml(msgText(m))+'</div>';
+      d.innerHTML='<div class="ev-silent">'+escapeHtml(stripCurrentTime(msgText(m)).clean)+'</div>';
     } else {
       // 日记：保持原样渲染
       const bubble=document.createElement("div");bubble.className="bubble";
-      bubble.innerHTML=escapeHtml(msgText(m));
+      bubble.innerHTML=escapeHtml(stripCurrentTime(msgText(m)).clean);
       d.appendChild(bubble);
     }
     return d;
@@ -3101,7 +3105,7 @@ function compressImage(dataUrl, maxW){
         c.getContext("2d").drawImage(img,0,0,w,h);
         let out=c.toDataURL("image/jpeg",0.82);
         // 压缩后仍过大则直接缩放为原尺寸 jpeg，保底
-        if(out.length>2_000_000 && w>800){ const c2=document.createElement("canvas"); const w2=800; const h2=Math.round(h*(w2/w)); c2.width=w2; c2.height=h2; c2.getContext("2d").drawImage(img,0,0,w2,h2); out=c2.toDataURL("image/jpeg",0.8); }
+        if(out.length>2000000 && w>800){ const c2=document.createElement("canvas"); const w2=800; const h2=Math.round(h*(w2/w)); c2.width=w2; c2.height=h2; c2.getContext("2d").drawImage(img,0,0,w2,h2); out=c2.toDataURL("image/jpeg",0.8); }
         resolve(out);
       };
       img.onerror=function(){ resolve(dataUrl); };   // 非图片或解码失败时退回原值（如 PDF/文本）
@@ -3150,7 +3154,8 @@ function openAct(idx){
   actRegen.style.display=(m.role==="ai"||m.role==="assistant")?"flex":"none";
   actBranch.style.display="flex";
   actStar.style.display="flex";
-  actStarTxt.textContent=(isStarredMsg(m))?"取消标星":"标星";
+  const actStarTxtEl=document.getElementById("actStarTxt");
+  if(actStarTxtEl) actStarTxtEl.textContent=(isStarredMsg(m))?"取消标星":"标星";
   actStar.classList.toggle("on", !!isStarredMsg(m));
   actMulti.style.display="flex";
   actDel.style.display="flex";
@@ -3647,7 +3652,7 @@ function renderThemeValues(){
   bubbleRadiusVal.textContent=bubbleRadius.value+"px";
   if(fontSizeVal)fontSizeVal.textContent=fontSizeInput.value+"px";
   const hasImg=(bgImageInput.value.trim()!=="");
-  const hasColor=(bgColorInput.value!=="" && bgColorInput.value!=="#f5e6d3");
+  const hasColor=(bgColorInput.value!=="" && bgColorInput.value!=="#f4f1ee");
   bgColorVal.textContent=(!hasImg&&!hasColor)?"默认渐变":(hasImg?"自定义图片":"已自定义");
 }
 function hexToRgba(hex,a){
@@ -3685,7 +3690,7 @@ function applyThemePreview(){
   }
   applyTheme();
 }
-/* ===== 保存主题（最多 3 个，点回可切换） ===== */
+/* ===== 保存主题（最多保留 20 个，点回可切换） ===== */
 const LS_THEMES="han_saved_themes";
 // 图片转存服务器：dataURL 换 /uploads/ 短 URL，避免大 base64 撑爆 localStorage（配额满后保存会静默失败）
 async function uploadImageToServer(dataUrl){
@@ -4642,7 +4647,7 @@ function callOpen(){
   if(callEl("callStatus"))callEl("callStatus").textContent="正在呼叫…";
   if(_call.timer)clearInterval(_call.timer);
   const ap=activeVoiceProvider();
-  if(!ap || !ap.api_key){ callAddCaption("语音服务未启用，请在 设置→语音服务 里配置。","提示"); }
+  if(!ap || !ap.api_key){ callAddCaption("语音服务未启用，请在 设置→语音服务 里配置。"); }
 }
 function callActivate(opening){
   if(!_call.open) return;
@@ -4662,7 +4667,7 @@ async function callSpeak(text){
     const a=await ttsSpeak(clean);
     if(!a) return;
     _call.audio=a;
-    callAddCaption(clean, cfg.ai_name||"谢意行");
+    callAddCaption(clean);
     try{ await a.play(); }
     catch(perr){ callAddCaption("点击一下屏幕再听语音（受系统自动播放限制）","提示"); }
   }catch(e){ callAddCaption("语音播放失败: "+(e&&e.message?e.message:"未知错误"),"提示"); }
@@ -5149,7 +5154,7 @@ async function switchSessionAndLocate(sid,idx){
   renderAll(true);
   closeDrawer();
   renderSessionList();
-  requestAnimationFrame(function(){ renderAll(true);
+  requestAnimationFrame(function(){
     const el=chatEl.querySelector('.msg[data-idx="'+idx+'"]');
     if(el){ el.scrollIntoView({behavior:"smooth",block:"center"}); el.classList.add("flash"); setTimeout(function(){el.classList.remove("flash");},1600); }
     else{ _lockFrom=false; renderAll(false); }
@@ -5427,8 +5432,8 @@ function parseImportText(text){
   const title=(lines[i]||"").trim(); 
   // 标题就是第一行非空；跳过它。但如果标题本身也像消息头部（可能是纯内容无标题），则以标题行是否含时间判断
   const firstIsHeader=(lines[i]||"").match(headerRe);
-  if(firstIsHeader) i=Math.max(0,i-0); // 标题可能是第一条头部，不跳过它，交给下面块解析
-  else i++;
+  // 标题可能是第一条头部：不跳过它，交给下面块解析（i 保持不变）；否则跳过标题行
+  if(!firstIsHeader) i++;
   const rest=lines.slice(i).join("\n");
   // 分隔符宽松：`---` 前后可有任意空行
   const blocks=rest.split(/\n?\s*[-–—]{3,}\s*\n?/).map(function(b){return b.trim();}).filter(Boolean);
@@ -5507,19 +5512,6 @@ async function importSession(file){
   bind("mergeSessionBtn",function(){ if(mergeMode){ doMergeSessions&&doMergeSessions(); } else { toggleMergeMode&&toggleMergeMode(); } });
   bind("mergeCancelBtn",toggleMergeMode);
 })();
-// 全局报错浮层：仅当复测仍没反应时，把真实 JS 报错弹出来便于定位（去重，最多每 8s 弹一条）
-if(!window.__se_topErrorHooked){
-  window.__se_topErrorHooked=1;
-  window.addEventListener("error",function(ev){
-    try{
-      if(window.__se_toastHidden===1) return;
-      const msg=(ev&&ev.error&&(ev.error.message||ev.error))||ev.message||"未知脚本错误";
-      const ln=(ev.lineno!==undefined&&ev.lineno!==null)?" @行"+ev.lineno:"";
-      if(typeof showToast==="function") showToast("【前端报错】"+msg+ln);
-      else console.error("[前端报错]",msg,ln);
-    }catch(e){ console.error("[前端报错监听异常]",e); }
-  },true);
-}
 // 数据管理按钮：设置面板里
 if(document.getElementById("clearLocalCacheBtn"))document.getElementById("clearLocalCacheBtn").onclick=clearLocalCache;
 if(document.getElementById("exportAllDataBtn"))document.getElementById("exportAllDataBtn").onclick=exportAllLocalData;
@@ -5639,7 +5631,7 @@ if(loginPass)loginPass.addEventListener("keydown",function(e){ if(e.key==="Enter
 if(loginUser)loginUser.addEventListener("keydown",function(e){ if(e.key==="Enter"){e.preventDefault(); if(loginPass)loginPass.focus(); } });
 
 // 以服务器消息为准（role+原文匹配），把本地缓存里助手的富字段(思考链/工具/token)补回对应消息，
-// 这样跨设备重载后仍能显示 token 统计等（服务器的 /v1/history 不带这些富字段）。
+// 这样跨设备重载后仍能显示 token 统计等（服务器已返回 reasoning/tools/tokens，但通话标记等本地字段仍需补回）。
 function mergeEnrichment(serverItems, localMsgs){
   const out=(serverItems||[]).slice();
   // 用「角色 + 归一化正文」做匹配键（标签/空白忽略），兼容带协议标签的消息

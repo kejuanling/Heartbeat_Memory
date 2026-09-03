@@ -164,10 +164,11 @@ module.exports = function registerChatRoutes(app, deps) {
     return c.startsWith('（回忆 · ') || c.startsWith('（对话摘要');
   }
 
-  // 该消息是否为标星原句（用户手动标星，跨窗口保留，不算待整理积压）
-  function isMarkedMessage(m) {
+  // 该消息是否为标星原句（用户手动标星，跨窗口保留，不算待整理积压）。
+  // marks 可由调用方循环外取一次传入，避免消息循环内反复查询（loadMarks 虽有 mtime 缓存，statSync 仍有开销）
+  function isMarkedMessage(m, marks) {
     if (!m) return false;
-    try { return Boolean(contextReplacements.loadMarks()[contextReplacements.contentKey(m)]); }
+    try { return Boolean((marks || contextReplacements.loadMarks())[contextReplacements.contentKey(m)]); }
     catch (e) { return false; }
   }
 
@@ -175,6 +176,8 @@ module.exports = function registerChatRoutes(app, deps) {
   // maybeInject 在 applyReplacements 之后运行，llmMessages 中被压缩块替换的部分已是摘要占位（isSummaryPlaceholder），
   // 未压缩的原文仍是原始 user/assistant 内容。因此过滤掉 system / 摘要占位 / 特殊事件 / 工具 / 标星原文（标星保留在上下文但并非待整理积压）即可。
   function countUncompressedOriginalChars(messages) {
+    let marks = null;
+    try { marks = contextReplacements.loadMarks(); } catch (e) { marks = null; }
     let charTotal = 0;
     for (const m of messages) {
       if (!m) continue;
@@ -183,7 +186,7 @@ module.exports = function registerChatRoutes(app, deps) {
       if (m._ctxRep || m._ccSummary || m.tool_calls || m.tool_call_id) continue;
       if (isSummaryPlaceholder(m)) continue;
       if (isSpecialEvent(m)) continue;
-      if (isMarkedMessage(m)) continue; // 标星原文本就要保留在上下文，不算待整理积压
+      if (isMarkedMessage(m, marks)) continue; // 标星原文本就要保留在上下文，不算待整理积压
       if (typeof m.content === 'string') charTotal += m.content.length;
       else if (Array.isArray(m.content)) {
         for (const part of m.content) {
@@ -194,8 +197,10 @@ module.exports = function registerChatRoutes(app, deps) {
     return charTotal;
   }
 
-  function maybeInjectContextLimitReminder(llmMessages, sessionId, timeByKey) {
-    try {
+  // 疑似有落盘 ctx_limit 提醒的会话（进程内存）：低于上限时据此跳过全量读盘清理。
+  // 重启后为空——盘上遗留提醒会被特殊事件机制注入回流，流内出现时仍会触发读盘清理，闭环安全。
+  const _ctxLimitReminderSessions = new Set();
+  function maybeInjectContextLimitReminder(llmMessages, sessionId, timeByKey) {    try {
       const cfg = contextCompactor.loadConfig();
       const limit = Number(cfg.compaction_context_limit_chars) || 0;
       if (!cfg.compaction_context_remind_enabled || limit <= 0) return;
@@ -214,12 +219,16 @@ module.exports = function registerChatRoutes(app, deps) {
           }
         }
         let onDisk = false;
+        // 内存标记说没有落盘提醒且消息流里也没看到（inStream=false）时，跳过全量读盘——
+        // 稳态（从未超限或已清干净）下零读盘；流里出现旧提醒时仍会读盘清理（特殊事件机制会把盘上提醒注回来，闭环安全）
+        if (!_ctxLimitReminderSessions.has(sessionId || 'default') && !inStream) return;
         try {
           const timeline = loadTimeline(sessionId);
           for (const m of timeline) {
             if (m && m.kind === 'ctx_limit' && !m.deleted) { m.deleted = true; onDisk = true; }
           }
           if (onDisk) saveTimeline(timeline, sessionId);
+          if (!onDisk) _ctxLimitReminderSessions.delete(sessionId || 'default');
         } catch (cleanErr) {
           console.warn('[ctx-limit] 低于上限清理落盘提醒失败（不影响转发）:', cleanErr.message);
         }
@@ -290,6 +299,7 @@ module.exports = function registerChatRoutes(app, deps) {
 
       llmMessages.push({ role: 'assistant', content: remark });
       appendSpecialEvent(remark, { hidden: true, kind: 'ctx_limit' }, sessionId);
+      _ctxLimitReminderSessions.add(sessionId || 'default');
       console.log(`[ctx-limit] 会话 ${sessionId || 'default'} 上下文 ${chars} 字符超过上限 ${limit}，已塞容量提醒（${remark.length} 字符）`);
     } catch (err) {
       console.warn('[ctx-limit] 容量提醒检测失败（不影响转发）:', err.message);
@@ -700,7 +710,9 @@ app.post("/v1/chat/completions", async (req, reply) => {
     });
 
     // ========================
-    // 消息扣住（免打扰）：扣住时段内新用户消息待处理，不转发给模型
+    // 消息扣住（免打扰）：扣住时段内新用户消息待处理，不转发给模型。
+    // 设计口径：免打扰只服务主陪伴会话（isMainChat）——<quiet> 调度文件本身是全局一份，
+    // 其他会话不受扣住影响、照常对话；释放流程（唤醒/总结/推送）也只针对主会话。
     // ========================
     if (isMainChat && isQuietActive()) {
       const trailing = collectTrailingUnansweredUserMessages(kelivoMessages);

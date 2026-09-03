@@ -142,7 +142,8 @@ function scoreOf(entry) {
 async function init() {
   await fs.ensureDir(DATA_DIR);
   try {
-    cache = Array.isArray(await fs.readJson(POOL_FILE)) ? await fs.readJson(POOL_FILE) : [];
+    const arr = await fs.readJson(POOL_FILE);   // 读一次，别对同一文件连读两遍
+    cache = Array.isArray(arr) ? arr : [];
   } catch (e) {
     cache = [];
   }

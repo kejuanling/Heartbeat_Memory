@@ -13,7 +13,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { AsyncLocalStorage } = require("async_hooks");
-const { nowIso } = require("./time_utils");
+const { nowIso, zonedWallTimeToDate, resolveTimeZone } = require("./time_utils");
 
 const DATA_DIR = path.join(__dirname, "data");
 const REPLACEMENTS_FILE = path.join(DATA_DIR, "context_replacements.json");
@@ -136,6 +136,7 @@ function backupFile(file) {
 }
 
 // nowIso 已统一到 time_utils 模块（原先本模块与 memory-pool 各有一份相同实现）
+const TIME_ZONE = resolveTimeZone();
 
 // 判断消息是否为「替换」生成的占位消息（压缩/唤醒等环节需保护，避免被吞掉）
 function isReplacementMemoryMessage(msg) {
@@ -158,7 +159,8 @@ function messageTime(m) {
       const dd = Number(match[3]);
       const hh = match[4] ? Number(match[4]) : 0;
       const mm = match[5] ? Number(match[5]) : 0;
-      const d = new Date(y, mo - 1, dd, hh, mm);
+      // 墙上时间按业务时区（Asia/Shanghai）解析，别按服务器本地时区——换 UTC 主机会整体偏 8 小时
+      const d = zonedWallTimeToDate({ year: y, month: mo, day: dd, hour: hh, minute: mm }, TIME_ZONE);
       if (!isNaN(d.getTime())) return d;
     }
   }
@@ -176,7 +178,8 @@ function parseRangeBound(value) {
     const dd = Number(m[3]);
     const hh = m[4] ? Number(m[4]) : 0;
     const mm = m[5] ? Number(m[5]) : 0;
-    const d = new Date(y, mo - 1, dd, hh, mm);
+    // 与 messageTime 同口径：按业务时区解析，不依赖服务器本地时区
+    const d = zonedWallTimeToDate({ year: y, month: mo, day: dd, hour: hh, minute: mm }, TIME_ZONE);
     return isNaN(d.getTime()) ? null : d;
   }
   const d = new Date(s);
@@ -456,6 +459,8 @@ function activeSessionOr(sessionId) { return (sessionId !== undefined && session
 // MCP 工具回调的会话兜底：AI 在聊天中调 context_replace 时，工具服务器(8771)回调 /internal/apply
 // 是独立请求，ALS 已丢（此前会错落到 default 会话/主会话时间线）。
 // 聊天侧进入工具循环前 noteMcpChatSession(sessionId) 登记，回调 90 秒内用它兜底。
+// 已知局限（单例残余面）：多设备并发各自进入工具循环时后登记者覆盖前者，先发起的回调可能拿到错误会话；
+// 单用户场景概率极低，彻底修复需回调请求携带会话标识（改工具服务器协议），暂不展开。
 let _mcpChatSession = null;
 let _mcpChatAt = 0;
 function noteMcpChatSession(sid) { _mcpChatSession = sid || null; _mcpChatAt = Date.now(); }
@@ -1578,14 +1583,13 @@ function loadAllSessionTimelines() {
     const sid = f.slice("enhanced_messages_".length, -".json".length);
     try {
       const data = readJson(path.join(dir, f), []);
+      // 必须拷贝后再打标记：readJson 命中缓存时返回的是缓存里的原对象，直接改会污染进程级缓存，
+      // 让 loadTimeline 等其他链路读到的消息莫名带上 _session/_sidx
       const nonSys = (Array.isArray(data) ? data : []).filter(function(m) {
         return m && m.role !== "system";
+      }).map(function(m, i) {
+        return Object.assign({}, m, { _session: sid, _sidx: i });
       });
-      // 给每条打上 session 标记
-      for (let i = 0; i < nonSys.length; i++) {
-        nonSys[i]._session = sid;
-        nonSys[i]._sidx = i;
-      }
       all.push.apply(all, nonSys);
     } catch(e) { /* skip */ }
   }

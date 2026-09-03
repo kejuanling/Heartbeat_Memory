@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>小世界 · 谢停云 & 涵</title>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&family=Ma+Shan+Zheng&display=swap" rel="stylesheet">
+<!-- Google Fonts 大陆不可达：异步加载不阻塞首屏，失败时回退本地楷体字体栈 -->
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&family=Ma+Shan+Zheng&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{
@@ -125,7 +126,7 @@ h1{
 
 <script>
 (function(){
-  var start=new Date(2026,6,2,16,44);
+  var start=new Date('2026-07-02T16:44:00+08:00');   // 显式东八区，避免海外设备按本地时区解释
   var d=document.getElementById('dayDisplay');
   var h=document.getElementById('hourDisplay');
   function u(){

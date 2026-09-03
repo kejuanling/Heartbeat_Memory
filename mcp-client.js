@@ -151,7 +151,13 @@ class StdioMcpTransport {
   }
 
   close() {
-    if (this.proc) this.proc.stdin.end();
+    if (!this.proc) return;
+    try { this.proc.stdin.end(); } catch (e) {}
+    // 兜底杀进程：部分子进程不因 stdin 关闭而退出（如自带 REPL 的 node 脚本），残留会占资源
+    const p = this.proc;
+    try { p.kill(); } catch (e) {}
+    const killTimer = setTimeout(() => { try { p.kill("SIGKILL"); } catch (e) {} }, 2000);
+    if (killTimer.unref) killTimer.unref();
   }
 }
 

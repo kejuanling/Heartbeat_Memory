@@ -270,6 +270,11 @@ body{
 <script>
 var API_BASE = '/co-api';
 var videoEl = document.getElementById('video');
+var _videoBlobUrl = null;   // 本地影片的 blob URL，换源/换文件时释放，避免内存泄漏
+videoEl.addEventListener('error', function(){
+  if (!videoEl.getAttribute('src')) return;
+  addMsg('sys', '视频加载失败：链接可能已失效或格式不支持（跨域直链可能被对方禁止外链播放）');
+});
 var localKey = localStorage.getItem('co_internal_key') || '';
 var frameInterval = 30;
 var videoTitle = '';
@@ -435,6 +440,7 @@ function loadVideo(){
   var url = document.getElementById('video-url').value.trim();
   if (!url) return;
   document.getElementById('video-empty').style.display = 'none';
+  if (_videoBlobUrl) { try { URL.revokeObjectURL(_videoBlobUrl); _videoBlobUrl = null; } catch(e){} }
   videoEl.src = url;
   videoEl.load();
   videoTitle = extractTitleFromUrl(url);
@@ -444,7 +450,9 @@ document.getElementById('video-file').addEventListener('change', function(){
   var f = this.files && this.files[0];
   if (!f) return;
   document.getElementById('video-empty').style.display = 'none';
-  videoEl.src = URL.createObjectURL(f);
+  if (_videoBlobUrl) { try { URL.revokeObjectURL(_videoBlobUrl); } catch(e){} }
+  _videoBlobUrl = URL.createObjectURL(f);
+  videoEl.src = _videoBlobUrl;
   videoEl.load();
   videoTitle = f.name.replace(/\.[^.]+$/, '');
   addMsg('sys', '开始看本地影片《' + videoTitle + '》（仅本机播放，不上传）');
@@ -453,7 +461,10 @@ document.getElementById('video-file').addEventListener('change', function(){
 // ---------- 字幕 ----------
 function applySubtitleBlob(blobUrl){
   var old = videoEl.querySelector('track');
-  if (old) old.remove();
+  if (old) {
+    if (old.src && old.src.indexOf('blob:') === 0) { try { URL.revokeObjectURL(old.src); } catch(e){} }
+    old.remove();
+  }
   var track = document.createElement('track');
   track.kind = 'subtitles';
   track.label = '字幕';
@@ -737,7 +748,7 @@ function toggleShare(){
   if (shareMode) { stopShare(); return; }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
     if (window.isSecureContext === false) {
-      addMsg('sys', '截屏需要 HTTPS 或 localhost：请改用 https://dqbnv.ccwu.cc 打开本页（首次有证书提示，点「继续访问」即可）');
+      addMsg('sys', '截屏需要 HTTPS 或 localhost：请改用 https://' + location.host + ' 打开本页（首次有证书提示，点「继续访问」即可）');
     } else {
       addMsg('sys', '当前浏览器不支持屏幕共享，建议用电脑 Chrome / Edge');
     }
@@ -820,7 +831,8 @@ document.getElementById('fp-head').addEventListener('pointerup', function(){
   if (!fpDrag) return;
   fpDrag = null;
   var p = document.getElementById('float-panel');
-  fpPos = { x: parseInt(p.style.left, 10) || null, y: parseInt(p.style.top, 10) || null };
+  var px = parseInt(p.style.left, 10), py = parseInt(p.style.top, 10);
+  fpPos = { x: Number.isFinite(px) ? px : null, y: Number.isFinite(py) ? py : null };
   try { localStorage.setItem('co_fp_pos', JSON.stringify(fpPos)); } catch(e){}
 });
 
@@ -897,8 +909,9 @@ function pipSend(doc){
   sendChatText(text, true);
 }
 
-// 定时拉取管理台配置：间隔改动自动生效，不用刷新页面
+// 定时拉取管理台配置：间隔改动自动生效，不用刷新页面（页面隐藏时跳过，省请求）
 setInterval(function(){
+  if (document.hidden) return;
   fetch(API_BASE + '/config', { headers: authHeaders() })
     .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
     .then(function(j){

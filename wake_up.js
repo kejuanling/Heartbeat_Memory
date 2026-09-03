@@ -636,7 +636,9 @@ function getLastUserTime(messages) {
 function getLastMessageTime(messages) {
   const reversed = [...messages].reverse();
   for (const msg of reversed) {
-    if (msg.role === "user" || msg.role === "assistant") {
+    // 口径=用户最后消息：AI 回复/唤醒事件（assistant）不重置沉默计时，
+    // 否则沉默时长被自己的输出不断刷新，唤醒/推送比阈值系统性推迟
+    if (msg.role === "user") {
       const fromField = dateFromField(msg);
       if (fromField) return fromField;
       const content = normalizeContentToText(msg.content);
