@@ -1084,30 +1084,6 @@ app.post("/v1/chat/completions", async (req, reply) => {
       return clean;
     });
 
-    // T-0923：把历史工具调用链（工具名+参数+结果，来自时间线 assistant 的 tools 富字段）还原注入上下文，
-    // 供模型跨轮"想起"之前调过什么工具、传了什么参数、返回了什么。纯文本轮（时间线无工具调用）不注入。
-    // 按用户拍板：全部历史工具链、不截断。
-    try {
-      const tl = loadTimeline(sessionId);
-      const parts = [];
-      let c = 0;
-      for (const m of tl) {
-        if (!m || m.role !== "assistant" || !Array.isArray(m.tools) || !m.tools.length) continue;
-        const lines = m.tools.map(function (t) {
-          const name = t.name || "?";
-          const args = (typeof t.args === "string") ? t.args : JSON.stringify(t.args == null ? {} : t.args);
-          const res = t.error ? ("[出错] " + t.error) : String(t.result == null ? "" : t.result);
-          return `工具 ${name}\n调用参数: ${args}\n返回: ${res}`;
-        });
-        parts.push(`#${++c} 次工具调用:\n` + lines.join("\n"));
-      }
-      if (parts.length) {
-        sanitizedMessages.push({ role: "assistant", content: "【以下是你（助手）在此会话此前真实调用过的工具及返回记录（来自系统日志），供你跨轮回顾引用，不是本次新调用】\n" + parts.join("\n\n") });
-      }
-    } catch (hcErr) {
-      console.warn("[timeline] 注入历史工具链失败:", hcErr.message);
-    }
-
 
     // === MCP_TOOL_LOOP_BEGIN ===
     // MCP 工具循环：启用时若为主聊天，走 MCP 分支（工具轮次非流式，最终流式回传）
