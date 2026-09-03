@@ -112,6 +112,9 @@ module.exports = function registerChatRoutes(app, deps) {
     normalizeMessageForTimeline,
     buildTimeline,
     saveTimeline,
+    appendMessages,
+    appendRequestMessages,
+    tailHasReply,
     sseSubscribe,
     sseUnsubscribe,
     sseNotify,
@@ -742,9 +745,9 @@ app.post("/v1/chat/completions", async (req, reply) => {
     // 防误伤：仅当"这是客户端聊天请求"且"携带真实消息"时才写时间线，
     // 否则一律跳过，防止一次异常请求把完整历史冲成空壳
     if (isClientChat && (kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0)) {
-      saveTimeline(finalTimeline, sessionId);
-      // 用户消息落时间线后，通知该会话所有打开的聊天页（别台设备实时看到这条新消息）。
-      sseNotify(sessionId);
+      // 方案二增量：落盘改为以盘上为基同步差量（新消息补齐/人设同步/重生成清尾），
+      // 不再拿请求全量重建覆盖；finalTimeline 仅服务后续事件注入与时间映射。通知由同步函数按需发出。
+      appendRequestMessages(sessionId, kelivoMessages);
     } else {
       console.log("[timeline] 跳过时间线保存 (isClientChat=" + isClientChat + ", 真实消息=" + kelivoMessages.some(isRealMessageForTimeline) + ")");
     }
@@ -1140,13 +1143,11 @@ app.post("/v1/chat/completions", async (req, reply) => {
             parsed.choices[0].message.content = cleanText;
             finalResponseText = JSON.stringify(parsed);
           }
-          // 把 AI 回复追加到 kelivoMessages，然后重建时间线
-          kelivoMessages.push({ role: "assistant", content: cleanText });
-          const rebuilt = buildTimeline(kelivoMessages, sessionId);
-          // 与首保存同一门禁：非客户端聊天请求不落盘，防止旁路请求拿回复时覆盖会话历史
+          // 方案二增量：回复只追加一条；盘尾已有同内容回复（重试/重发）则跳过，不重复写
           if (isClientChat && (kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0)) {
-            saveTimeline(rebuilt, sessionId);
-            sseNotify(sessionId);
+            if (!tailHasReply(sessionId, cleanText)) {
+              appendMessages(sessionId, [{ role: "assistant", content: cleanText }]);
+            }
           } else {
             console.log("[timeline] 跳过回复落盘 (非流式, isClientChat=" + isClientChat + ")");
           }
@@ -1272,13 +1273,12 @@ app.post("/v1/chat/completions", async (req, reply) => {
           console.warn("[memory] 流式标签解析失败:", err.message);
           return aiFullContent;
         });
-        // 富字段一并落时间线：reasoning/tokens，跨设备刷新不再丢
-        kelivoMessages.push({ role: "assistant", content: cleanFull, reasoning: aiThinking || "", tokens: aiUsage || null });
-        const rebuiltStream = buildTimeline(kelivoMessages, sessionId);
-        // 与首保存同一门禁：非客户端聊天请求不落盘，防止旁路请求拿回复时覆盖会话历史
+        // 方案二增量：回复只追加一条（富字段 reasoning/tokens 一并落，跨设备刷新不丢）；
+        // 盘尾已有同内容回复（重试/重发）则跳过，不重复写
         if (isClientChat && (kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0)) {
-          saveTimeline(rebuiltStream, sessionId);
-          sseNotify(sessionId);
+          if (!tailHasReply(sessionId, cleanFull)) {
+            appendMessages(sessionId, [{ role: "assistant", content: cleanFull, reasoning: aiThinking || "", tokens: aiUsage || null }]);
+          }
         } else {
           console.log("[timeline] 跳过回复落盘 (流式, isClientChat=" + isClientChat + ")");
         }

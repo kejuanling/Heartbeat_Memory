@@ -1029,21 +1029,148 @@ function buildTimeline(kelivoMessages, sessionId) {
 
 
 // ========================
+// 追加消息（增量原语）
+// ========================
+// 方案二核心：把「每次写时间线 = 整文件重建覆盖」拆成「只往后追加」。
+// 批量版一次读盘/写盘/通知；新消息 position 依次 maxPos+0.5+i，绝不改动已有消息的
+// position —— 增量写入后 position 单调稳定，可作后续 patch 定位键。
+// opts.silent=true 时不推送前端；任一非 hidden 消息落库才会 sseNotify（与特殊事件 hidden 语义一致）。
+function appendMessages(sessionId, msgs, opts) {
+  opts = opts || {};
+  const list = (Array.isArray(msgs) ? msgs : [msgs]).filter(Boolean);
+  if (!list.length) return [];
+  const timeline = loadTimeline(sessionId);
+  let maxPos = 0;
+  for (const m of timeline) {
+    if (m && m.position && m.position > maxPos) maxPos = m.position;
+  }
+  const out = list.map(function (m, i) {
+    const nm = { time: new Date().toISOString(), ...m, position: maxPos + 0.5 + i };
+    timeline.push(nm);
+    return nm;
+  });
+  saveTimeline(timeline, sessionId);
+  if (!opts.silent && out.some(m => !m.hidden)) sseNotify(sessionId);
+  return out;
+}
+
+function appendMessage(sessionId, msg, opts) {
+  return appendMessages(sessionId, [msg], opts)[0] || null;
+}
+
+// 工具调用记录消息判定（服务器写入格式：assistant + 「【工具调用记录】」开头）
+function isToolNoteMessage(m) {
+  return !!m && m.role === "assistant" && typeof m.content === "string" && m.content.startsWith("【工具调用记录】");
+}
+
+// 盘尾最后一条真实回复是否与新回复同内容（重试/断线重发防重：命中则跳过追加，不重复写）
+function tailHasReply(sessionId, content) {
+  const timeline = loadTimeline(sessionId);
+  for (let i = timeline.length - 1; i >= 0; i--) {
+    const m = timeline[i];
+    if (!m || m.role === "system") continue;
+    if (isToolNoteMessage(m)) continue;
+    if (isSpecialEvent(m)) continue;
+    return m.role === "assistant" && normalizeContentToText(m.content) === normalizeContentToText(content);
+  }
+  return false;
+}
+
+// 以盘上为基同步「请求消息」：人设同步 + 去重补齐 + 尾部对齐，替代拿请求全量重建覆盖。
+// 用于发消息首保存 / MCP 写回：盘上永远是完整历史，请求里缺的补、多的（重生成换掉的旧回复）按覆盖语义清尾。
+function appendRequestMessages(sessionId, reqMsgs) {
+  const existing = loadTimeline(sessionId);
+  const reqList = Array.isArray(reqMsgs) ? reqMsgs : [];
+  const keyOf = function (m) { return m.role + "\u0000" + normalizeContentToText(m.content); };
+  const reqReal = reqList.filter(function (m) {
+    return m && !m.tool_calls && !m.tool_call_id && !isSpecialEvent(m) && (m.role === "user" || m.role === "assistant");
+  });
+  const reqKeys = new Set(reqReal.map(keyOf));
+  const reqLastReal = reqReal.length ? reqReal[reqReal.length - 1] : null;
+  let changed = false;
+
+  // 1) 人设同步：请求最新 system 与盘上不同则原地替换，盘上没有则补到首位（saveTimeline 兜底置顶）
+  const reqSPs = reqList.filter(function (m) { return m && m.role === "system"; });
+  if (reqSPs.length) {
+    const cleanedSP = normalizeMessageForTimeline(reqSPs[reqSPs.length - 1]);
+    const diskSP = existing.find(function (m) { return m && m.role === "system"; });
+    if (!diskSP) {
+      existing.unshift({ ...cleanedSP, position: 0 });
+      changed = true;
+    } else if (normalizeContentToText(diskSP.content) !== normalizeContentToText(cleanedSP.content)) {
+      diskSP.content = cleanedSP.content;
+      changed = true;
+    }
+  }
+
+  // 2) 尾部对齐（重生成覆盖语义）：仅当请求最后一条真实消息是 user（用户在等一条新回复）才做；
+  //    连播/后台续写（请求尾是 assistant）不对齐，历史原样保留。
+  //    从盘尾往前收集「不在请求键集的 assistant 真实回复」（【工具调用记录】视为附属一并入段），
+  //    遇到请求内消息 / user / 特殊事件即停。收集到的整段只有在其前一条锚点消息属于请求键集
+  //    （= 重生成：user 消息双方都在，仅回复被换掉）时才清除；锚点也不在请求集
+  //    （= 跨设备/局部请求滞后，别端刚写的回复）则原样保留，绝不误删。
+  let cut = existing.length;
+  if (reqLastReal && reqLastReal.role === "user") {
+    for (let i = existing.length - 1; i >= 0; i--) {
+      const m = existing[i];
+      if (!m || m.role === "system") continue;
+      if (isToolNoteMessage(m)) continue;
+      if (m.role === "assistant" && !isSpecialEvent(m) && !reqKeys.has(keyOf(m))) { cut = i; continue; }
+      break;
+    }
+    if (cut < existing.length) {
+      let anchor = -1;
+      for (let i = cut - 1; i >= 0; i--) {
+        const m = existing[i];
+        if (!m || m.role === "system" || isToolNoteMessage(m) || isSpecialEvent(m)) continue;
+        anchor = i;
+        break;
+      }
+      const anchorInReq = anchor >= 0 && reqKeys.has(keyOf(existing[anchor]));
+      if (!anchorInReq) cut = existing.length;
+    }
+  }
+  let removedTail = 0;
+  if (cut < existing.length) {
+    removedTail = existing.length - cut;
+    existing.splice(cut);
+    changed = true;
+  }
+
+  // 3) 去重补齐：请求里盘上还缺的真实消息按序追加（user 与 assistant 都补，防旧缓存设备回补丢消息）
+  const diskKeys = new Set(existing.filter(function (m) { return m && m.content != null; }).map(keyOf));
+  const appended = [];
+  for (const m of reqReal) {
+    const k = keyOf(m);
+    if (diskKeys.has(k)) continue;
+    diskKeys.add(k);
+    appended.push(m);
+  }
+  if (appended.length) {
+    let maxPos = 0;
+    for (const m of existing) {
+      if (m && m.position && m.position > maxPos) maxPos = m.position;
+    }
+    for (let i = 0; i < appended.length; i++) {
+      existing.push({ time: new Date().toISOString(), ...appended[i], position: maxPos + 0.5 + i });
+    }
+    changed = true;
+  }
+
+  if (changed) {
+    saveTimeline(existing, sessionId);
+    sseNotify(sessionId);
+  }
+  return { appended: appended.length, removedTail: removedTail, changed: changed };
+}
+
+// ========================
 // 追加特殊事件
 // ========================
 function appendSpecialEvent(content, extra, sessionId) {
-  const timeline = loadTimeline(sessionId);
-  let maxPos = 0;
-  for (const msg of timeline) {
-    if (msg.position && msg.position > maxPos) maxPos = msg.position;
-  }
-  const newEvent = { role: "assistant", content, position: maxPos + 0.5, time: new Date().toISOString(), ...(extra || {}) };
-  timeline.push(newEvent);
-  saveTimeline(timeline, sessionId);
-  // 特殊事件（唤醒/日记/共影/推送）落库后，通知该会话所有打开的聊天页刷新。
-  // hidden 事件（如会话容量提醒）只进 AI 上下文，不推前端。
-  if (!newEvent.hidden) sseNotify(sessionId);
-  // 批注 2026-07-15：特殊事件可能包含推送正文；日志只记录长度，避免公开部署时泄漏私密内容。
+  const newEvent = appendMessage(sessionId, { role: "assistant", content, ...(extra || {}) });
+  // 特殊事件（唤醒/日记/共影/推送）落库后，appendMessage 已按 hidden 决定是否推前端刷新；
+  // 这里仅保留长度日志（特殊事件可能含推送正文，只记长度避免泄漏）。
   console.log(`\n已记录特殊事件 (session ${sessionId || "default"}, position ${newEvent.position}, chars ${normalizeContentToText(content).length})\n`);
 }
 
@@ -1345,6 +1472,10 @@ require("./routes/chat")(app, {
   normalizeMessageForTimeline,
   buildTimeline,
   saveTimeline,
+  appendMessage,
+  appendMessages,
+  appendRequestMessages,
+  tailHasReply,
   sseSubscribe,
   sseUnsubscribe,
   sseNotify,
@@ -1705,47 +1836,30 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
   // 这里把最终回复也写回当前会话的时间线。
   if (r && r.text) {
     try {
-      // 关键修复：以服务器现有时间线为基，不再用前端请求里可能被截断的消息数组全量覆盖。
-      // 旧写法拿 kelivoMessages/messages/body.messages 整体重建并 saveTimeline——
-      // 前端一旦只带了局部历史（如分页只传 500 条），服务器的完整历史会被整个覆盖丢光。
-      const existing = loadTimeline(sessionId);
-      // 请求里确有、但服务器时间线还缺的真实对话消息（通常是本轮新增的 user 消息），
-      // 按 role+content 去重补进，绝不重复追写历史，避免本地局部数据覆盖服务器完整数据。
+      // 方案二增量：以盘上为基同步请求差量（人设同步/去重补齐/重生成尾部对齐），
+      // 不再拿请求消息数组全量重建覆盖——前端只带局部历史（分页/懒加载）也不会丢服务器完整历史。
       const reqMsgs = Array.isArray(kelivoMessages) && kelivoMessages.length
         ? kelivoMessages
         : (messages || body.messages || []);
-      const existingKeys = new Set();
-      for (const m of existing) {
-        if (m && m.content != null) existingKeys.add(m.role + "\u0000" + normalizeContentToText(m.content));
-      }
-      const appended = [];
-      for (const m of reqMsgs) {
-        if (!m || m.role === "system" || isSpecialEvent(m) || m.tool_calls || m.tool_call_id) continue;
-        if (!isRealMessageForTimeline(m)) continue;
-        const key = m.role + "\u0000" + normalizeContentToText(m.content);
-        if (existingKeys.has(key)) continue;
-        existingKeys.add(key);
-        appended.push(m);
-      }
-      const newMsgs = existing.concat(appended);
+      const syncRes = appendRequestMessages(sessionId, reqMsgs);
       // 保留工具调用记录：写成一条带标记的 assistant 消息入时间线，
       // 让模型跨轮能"记住"工具结果（大小交给上下文压缩兜底）；前端渲染时跳过这条。
-      let toolNote = "";
+      const toAppend = [];
       if (r.toolHistory && r.toolHistory.length) {
-        toolNote = r.toolHistory.map(function (t) {
+        const toolNote = r.toolHistory.map(function (t) {
           const head = "【工具 · " + (t.name || "") + "】";
           const body = t.error ? ("[出错] " + t.error) : (t.result ? String(t.result) : "");
           return head + (body ? (" " + body) : "");
         }).join("\n");
-        newMsgs.push({ role: "assistant", content: "【工具调用记录】\n" + toolNote });
+        toAppend.push({ role: "assistant", content: "【工具调用记录】\n" + toolNote });
       }
       // 富字段一并落时间线：reasoning/tools/tokens，跨设备刷新不再丢（前端 /v1/history 读取这些字段）。
-      // buildTimeline 内部按 role+content 去重，重试/重复写回不会追加重复回复。
-      newMsgs.push({ role: "assistant", content: aiClean, reasoning: r.reasoning || "", tools: r.toolHistory || [], tokens: r.usage || null });
-      const rebuilt = buildTimeline(newMsgs, sessionId);
-      saveTimeline(rebuilt, sessionId);
-      sseNotify(sessionId);
-      console.log("[mcp] AI 回复已写回时间线 (session=" + (sessionId || "default") + ", chars=" + r.text.length + ", timeline=" + rebuilt.length + ")");
+      // 盘尾已有同内容回复（重试/重复写回）则跳过，不重复追写。
+      if (!tailHasReply(sessionId, aiClean)) {
+        toAppend.push({ role: "assistant", content: aiClean, reasoning: r.reasoning || "", tools: r.toolHistory || [], tokens: r.usage || null });
+      }
+      if (toAppend.length) appendMessages(sessionId, toAppend);
+      console.log("[mcp] AI 回复已写回时间线 (session=" + (sessionId || "default") + ", chars=" + r.text.length + ", 补齐=" + syncRes.appended + ", 清尾=" + syncRes.removedTail + ", 追加=" + toAppend.length + ")");
     } catch (wr) {
       console.warn("[mcp] 写回时间线失败:", wr.message);
     }
