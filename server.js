@@ -1596,13 +1596,47 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
   if (!targetApiUrl || !targetApiKey) return false;
 
   const model = (prov && prov.model) || body.model || readEnvValue("MODEL_NAME");
-  const r = await mcp.runWithTools({
-    upstreamUrl: targetApiUrl,
-    upstreamKey: targetApiKey,
-    model,
-    messages: messages || body.messages || [],
-    serverClients: clients
-  });
+
+  // === 流式直通快速路径（普通聊天提速）===
+  // 多数用户提问并不会触发工具调用，此前却一律走 runWithTools 非流式等完整生成（首字 30s+）。
+  // 这里先尝试流式直通：逐块透传且检测 tool_calls；无工具调用就透传到底（首字立即出），
+  // 发现工具调用则回退到下方 runWithTools 多轮循环（工具能力零损失）。
+  // 仅在"非流式回放请求"或"请求里已带工具调用历史"时不尝试，交给原逻辑确保多轮工具对话稳定。
+  const requestHasToolHistory = Array.isArray(messages) && messages.some(m => m && (m.tool_calls || m.tool_call_id));
+  let directResult = null; // 流式直通成功(无工具)时的结果，与 runWithTools 返回结构兼容，供底部统一收尾
+  if (body.stream === true && !requestHasToolHistory) {
+    try {
+      const pass = await mcp.tryStreamPassthrough({
+        upstreamUrl: targetApiUrl,
+        upstreamKey: targetApiKey,
+        model,
+        messages: messages || body.messages || [],
+        serverClients: clients,
+        body,
+        reply,
+        temperature: body.temperature,
+        top_p: body.top_p,
+        max_tokens: body.max_tokens
+      });
+      if (pass && pass.ok && !pass.fellBackToTools) {
+        directResult = { text: pass.text || "", reasoning: pass.reasoning || "", usage: pass.usage || null, toolHistory: [], rounds: 0 };
+      }
+      // fellBackToTools=true：直通已识别到工具调用，让下方 runWithTools 接管
+    } catch (streamErr) {
+      console.warn("[mcp] 流式直通快速路径失败，回退工具循环:", streamErr.message);
+    }
+  }
+
+  let r = directResult;
+  if (!r) {
+    r = await mcp.runWithTools({
+      upstreamUrl: targetApiUrl,
+      upstreamKey: targetApiKey,
+      model,
+      messages: messages || body.messages || [],
+      serverClients: clients
+    });
+  }
 
   // 工具循环跑完后，把「完整消息序列」捕获进 lastLLMMessages，
   // 让「当前请求上下文」如实展示带 tool_calls / tool 结果的真实链路（而非基础上下文）。
@@ -1696,7 +1730,10 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
   }
 
   // 把最终文本转成 OpenAI 兼容 SSE 流（工具轮次已结束，这里流式回传最终结果）
+  // 注意：若走的是上方"流式直通快速路径"，reply.raw 已经 writeHead 并透传/结束完毕，
+  // 不能再回传（否则二次 writeHead 报错）；此时仅保留副作用收尾（时间线/幂等缓存已在上方完成）。
   if (body.stream === true) {
+    if (directResult) return true;   // 已直通透传完毕，无需再回传
     const stream = mcp.buildSSE(aiClean, { model, usage: r.usage, reasoning: r.reasoning, toolHistory: r.toolHistory });
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream",

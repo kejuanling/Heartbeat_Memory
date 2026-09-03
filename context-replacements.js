@@ -627,19 +627,19 @@ function addReplacement(options) {
   return { ok: true, id: item.id, session: item.session, count: item.count, range_label: item.range_label, message: "已记录替换：" + item.count + " 条消息 → 替换正文" };
 }
 
-// 会话合并时迁移压缩块：把源会话的块归属到目标会话（target 时间线按 matched 内容锚点定位，range 仅用于展示，不依赖不迁移）。
+// 会话合并时复制压缩块到目标会话（target 时间线按 matched 内容锚点定位，range 仅用于展示，不依赖不迁移）。
 // 多个源会话存在内容序列完全一致的块时合并为一个（matchedShareSig，与跨会话摘要复用的签名口径一致）。
-// 源会话数据保留：仅块归属变更，源会话此后按原文展示而非旧摘要，避免同一批消息在多个会话重复压缩。
+// 复制语义：源会话的块保留（源会话继续显示摘要），同时复制一份归属到目标会话。
 function migrateSessionBlocks(sourceIds, targetId) {
   const src = new Set(Array.isArray(sourceIds) ? sourceIds : []);
   if (src.size === 0 || !targetId) return { migrated: 0, skippedDup: 0, skippedNoMatch: 0 };
   const items = loadItems();
-  const keep = [];
+  const out = items.slice();
   const seenSig = new Set();
   let migrated = 0, skippedDup = 0, skippedNoMatch = 0;
   items.forEach(function (it) {
     if (!it || it.removed) return;
-    if (!it.session || !src.has(it.session)) { keep.push(it); return; }
+    if (!it.session || !src.has(it.session)) return;
     const matched = (Array.isArray(it.matched) && it.matched.length > 0) ? it.matched : [];
     if (matched.length === 0) { skippedNoMatch++; return; }
     const sig = matchedShareSig(matched);
@@ -647,17 +647,75 @@ function migrateSessionBlocks(sourceIds, targetId) {
       if (seenSig.has(sig)) { skippedDup++; return; }
       seenSig.add(sig);
     }
-    keep.push(Object.assign({}, it, {
+    out.push(Object.assign({}, it, {
       session: targetId,
       id: "ctxrep_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8),
       created_at: nowIso()
     }));
     migrated++;
   });
-  saveItems(keep);
-  console.log("[context-replacements] 会话合并迁移压缩块: " + sourceIds.length + " 源会话 -> " + targetId +
-    " 迁移=" + migrated + " 去重=" + skippedDup + " 无匹配=" + skippedNoMatch);
+  saveItems(out);
+  console.log("[context-replacements] 会话合并复制压缩块: " + sourceIds.length + " 源会话 -> " + targetId +
+    " 复制=" + migrated + " 去重=" + skippedDup + " 无匹配=" + skippedNoMatch);
   return { migrated: migrated, skippedDup: skippedDup, skippedNoMatch: skippedNoMatch };
+}
+
+// 会话分支时继承压缩块：把源会话中「完全落在分支点之前」的块复制到新会话。
+// 判定：块 matched 最后一条非特殊事件消息在源会话「真实消息」序列里的位置 ≤ 分支点位置。
+// 索引空间与前端 msgs 一致（/v1/history 的 isRealMessageForTimeline 口径：排除 system/tool/特殊事件），
+// 分支点用前端传入的 msgs 下标 branchIndex 直接定位，块用内容锚点定位。
+// 跨边界块不继承（摘要不完整）。源会话块保留（复制语义），新块打新会话标签，只在新会话内套用。
+function inheritSessionBlocks(srcSession, newSession, branchIndex) {
+  if (!srcSession || !newSession || !Number.isInteger(branchIndex) || branchIndex < 0) {
+    return { inherited: 0, skippedNoMatch: 0, skippedCross: 0 };
+  }
+  const items = loadItems();
+  const out = items.slice();
+  const timeline = loadTimeline(srcSession);
+  const real = [];
+  (Array.isArray(timeline) ? timeline : []).forEach(function (m, i) {
+    if (!m || m.role === "system") return;
+    if (m.tool_calls) return;
+    if (isSpecialEvent(m)) return;
+    const text = contentToText(m);
+    if (m.role === "user" && String(text).trim().startsWith("<system>")) return;
+    if (m.role !== "user" && m.role !== "assistant") return;
+    real.push({ msg: m, arrIdx: i });
+  });
+  if (branchIndex >= real.length) {
+    return { inherited: 0, skippedNoMatch: 0, skippedCross: 0, error: "分支点下标超出源会话消息数" };
+  }
+  const branchPos = branchIndex;
+  const keyToPos = new Map();
+  real.forEach(function (e, p) {
+    const k = normalizedCompareKey(e.msg);
+    if (!keyToPos.has(k)) keyToPos.set(k, p);
+  });
+  let inherited = 0, skippedNoMatch = 0, skippedCross = 0;
+  items.forEach(function (it) {
+    if (!it || it.removed) return;
+    if (it.session !== srcSession) return;
+    const matched = (Array.isArray(it.matched) && it.matched.length > 0) ? it.matched : [];
+    if (matched.length === 0) { skippedNoMatch++; return; }
+    let lastPos = -1;
+    for (let i = matched.length - 1; i >= 0; i--) {
+      if (isSpecialEvent(matched[i])) continue;
+      const p = keyToPos.get(normalizedCompareKey(matched[i]));
+      if (p !== undefined) { lastPos = p; break; }
+    }
+    if (lastPos < 0) { skippedNoMatch++; return; }
+    if (lastPos > branchPos) { skippedCross++; return; }
+    out.push(Object.assign({}, it, {
+      session: newSession,
+      id: "ctxrep_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8),
+      created_at: nowIso()
+    }));
+    inherited++;
+  });
+  saveItems(out);
+  console.log("[context-replacements] 会话分支继承压缩块: " + srcSession + " -> " + newSession +
+    " 继承=" + inherited + " 无匹配=" + skippedNoMatch + " 跨边界=" + skippedCross);
+  return { inherited: inherited, skippedNoMatch: skippedNoMatch, skippedCross: skippedCross };
 }
 
 // ========================
@@ -2428,6 +2486,7 @@ module.exports = {
   isReplacementMemoryMessage,
   addReplacement,
   migrateSessionBlocks,
+  inheritSessionBlocks,
   removeReplacement,
   toggleReplacement,
   updateReplacement,

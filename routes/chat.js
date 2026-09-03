@@ -563,17 +563,40 @@ module.exports = function registerChatRoutes(app, deps) {
       entries.sort((a, b) => (a.ts - b.ts) || (a.si - b.si) || (a.oi - b.oi));
       const rebuilt = buildTimeline(entries.map(e => e.m), target);
       saveTimeline(rebuilt, target);
-      // 源会话压缩块迁移到合并会话：matched 内容锚点在目标时间线重定位，按内容序列去重。
-      // 源会话数据保留，仅块归属变更（源会话此后按原文展示，避免同批消息多会话重复压缩）。
+      // 源会话压缩块复制到合并会话：matched 内容锚点在目标时间线重定位，按内容序列去重。
+      // 复制语义：源会话块保留（源会话继续显示摘要），同时复制一份归属到目标会话。
       let migrateStat = null;
       try {
         migrateStat = contextReplacements.migrateSessionBlocks(ids, target);
-        if (migrateStat) console.log(`[sessions/merge] 迁移压缩块:`, JSON.stringify(migrateStat));
-      } catch (e) { console.error('[sessions/merge] 迁移压缩块失败:', e.message); }
+        if (migrateStat) console.log(`[sessions/merge] 复制压缩块:`, JSON.stringify(migrateStat));
+      } catch (e) { console.error('[sessions/merge] 复制压缩块失败:', e.message); }
       console.log(`[sessions/merge] 合并 ${ids.length} 个会话 -> ${target}（${total} 条源消息）`);
       reply.send({ ok: true, session_id: target, merged: total, total: rebuilt.filter(isRealMessageForTimeline).length });
     } catch (err) {
       console.error('[POST /v1/sessions/merge] error:', err.message);
+      reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // 会话分支：继承父会话中「完全落在分支点之前」的压缩块（复制语义，父会话块保留）。
+  // 前端开分支后调用，branchIndex 是分支点消息在前端 msgs（真实消息序列）里的下标。
+  app.post('/v1/sessions/branch-inherit', async (req, reply) => {
+    try {
+      const body = (req.body && typeof req.body === 'object') ? req.body : {};
+      const srcSession = String(body.srcSession || '').trim();
+      const newSession = String(body.newSession || '').trim();
+      const branchIndex = Number(body.branchIndex);
+      if (!srcSession || !newSession || !Number.isInteger(branchIndex) || branchIndex < 0) {
+        return reply.code(400).send({ error: '缺少参数' });
+      }
+      if (!/^[A-Za-z0-9_-]+$/.test(srcSession) || !/^[A-Za-z0-9_-]+$/.test(newSession)) {
+        return reply.code(400).send({ error: '非法会话ID' });
+      }
+      const stat = contextReplacements.inheritSessionBlocks(srcSession, newSession, branchIndex);
+      if (stat.error) return reply.code(404).send({ error: stat.error });
+      reply.send({ ok: true, inherited: stat.inherited, skippedNoMatch: stat.skippedNoMatch, skippedCross: stat.skippedCross });
+    } catch (err) {
+      console.error('[POST /v1/sessions/branch-inherit] error:', err.message);
       reply.code(500).send({ error: err.message });
     }
   });

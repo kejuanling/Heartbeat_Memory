@@ -428,8 +428,169 @@ function buildSSE(text, {
   });
 }
 
+/**
+ * 流式直通快速路径（普通聊天用）：
+ * 直接以 stream:true 请求上游，逐块透传给客户端；同时解析每个 chunk，
+ * 一旦发现 delta.tool_calls（模型想调工具）就中止透传，返回 { fellBackToTools: true }，
+ * 由调用方回退到 runWithTools 工具循环。全程无工具调用则直接透传到底。
+ *
+ * 判定时机：deepseek 等模型若要调用工具，首个含内容/工具声明的 chunk 即会有 tool_calls
+ * （先于任何 content 输出）。因此只读到"第一个决定性 chunk"即可判定：
+ *   - 先出现 content  → 无工具调用，立即 writeHead + 回放已缓冲 + 继续透传（首字立即出）
+ *   - 先出现 tool_calls → 不写 header（此时 reply.raw 仍干净），回退 runWithTools 接管
+ * 这样既拿到真流式，又保证"headers already sent"不会发生。
+ *
+ * @returns {Promise<{ok:boolean, fellBackToTools?:boolean}>}
+ */
+async function tryStreamPassthrough({
+  upstreamUrl,
+  upstreamKey,
+  model,
+  messages,
+  serverClients,
+  body,
+  reply,
+  temperature,
+  top_p,
+  max_tokens
+}) {
+  // 加载工具定义并注入 requests：让模型"有能力"调用工具，才能检测到 tool_calls。
+  const routes = await loadTools(serverClients);
+  const allRoutes = NATIVE_TOOLS.concat(routes || []);
+  const openaiTools = toOpenAITools(allRoutes);
+
+  const payload = {
+    model,
+    messages,
+    stream: true,
+    temperature,
+    top_p,
+    max_tokens,
+    ...(openaiTools.length ? { tools: openaiTools, tool_choice: "auto" } : {}),
+    ...(body && body.stream_options ? { stream_options: body.stream_options } : {})
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+  let resp;
+  try {
+    resp = await fetch(upstreamUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${upstreamKey}` },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!resp.ok || !resp.body) {
+    return { ok: false, fellBackToTools: false };
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+  let head = "";             // 阶段一判定"是 content"时那一行被 break 吞掉，需存起来供阶段二回放，否则回复开头丢 content
+  let decided = false;       // 是否已确立"无工具/有工具"
+  let sawToolCall = false;
+  let sawContent = false;
+
+  const analyzeLine = (rawLine) => {
+    if (!rawLine.startsWith("data:")) return false;
+    const payloadLine = rawLine.slice(5).replace(/^\s+/, "");
+    if (!payloadLine || payloadLine === "[DONE]") return false;
+    let evt;
+    try { evt = JSON.parse(payloadLine); } catch (e) { return false; }
+    const delta = evt && evt.choices && evt.choices[0] && evt.choices[0].delta;
+    if (delta && delta.tool_calls && delta.tool_calls.length) { sawToolCall = true; return true; }
+    if (delta && typeof delta.content === "string" && delta.content.length > 0) { sawContent = true; return true; }
+    return false;
+  };
+
+  // ---- 阶段一：读到第一个"决定性"chunk（content 或 tool_calls），期间只缓存不写头 ----
+  while (!decided && !sawToolCall) {
+    const { done, value } = await reader.read();
+    if (done) break; // 流自然结束且无决定性事件：视为无工具，正常透传
+    buffer += decoder.decode(value, { stream: true });
+    let nl;
+    while ((nl = buffer.indexOf("\n")) !== -1) {
+      const rawLine = buffer.slice(0, nl);
+      buffer = buffer.slice(nl + 1);
+      // 阶段一从 buffer 切走的每一行（role / reasoning_content / 首个 content 等）必须记入 head 回放，
+      // 否则客户端流会缺这些事件——"回复开头缺字"正是首个 content 行被吞（analyzeLine 返回布尔，
+      // 无法区分类型，故无条件全量回放，与上游字节一致）。
+      head += rawLine + "\n";
+      if (analyzeLine(rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine)) { decided = true; break; }
+    }
+    if (decided || sawToolCall) break;
+  }
+
+  // 发现工具调用：尚未写 header，交给 runWithTools 接管
+  if (sawToolCall) {
+    console.log("[mcp] 流式直通检测到工具调用，回退 runWithTools");
+    return { ok: true, fellBackToTools: true };
+  }
+
+  // ---- 阶段二：确认无工具，开始真正透传（写头 + 回放缓冲 + 继续读剩余流）----
+  console.log("[mcp] 流式直通: 本请求无工具调用，直接透传");
+  reply.raw.writeHead(resp.status, {
+    "Content-Type": resp.headers.get("content-type") || "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive"
+  });
+  const emit = (str) => { try { reply.raw.write(str); } catch (e) {} };
+  let fullText = "";
+  let reasoning = "";
+  let usage = null;
+  // 继续解析并采集全文（供调用方写时间线 / 提取 <memory> 等标签）
+  const collect = (rawLine) => {
+    if (!rawLine.startsWith("data:")) return;
+    const payloadLine = rawLine.slice(5).replace(/^\s+/, "");
+    if (!payloadLine || payloadLine === "[DONE]") return;
+    let evt;
+    try { evt = JSON.parse(payloadLine); } catch (e) { return; }
+    const choice = evt && evt.choices && evt.choices[0];
+    if (!choice) return;
+    const delta = choice.delta || {};
+    if (typeof delta.content === "string") fullText += delta.content;
+    if (delta.reasoning_content) reasoning += delta.reasoning_content;
+    if (evt.usage) usage = evt.usage;
+  };
+  try {
+    // 采集 buffer / chunk 里的 SSE data 行喂给 collect，让 fullText/reasoning/usage 真正累积。
+    // 透传字节流仍由 emit 原样写给客户端，这里只做旁路采集，绝不改动发给浏览器的内容。
+    let sseBuf = ""; // collect 只认单行 "data:"，chunk 可能含多行/半行，需按行切分
+    const collectFeed = (text) => {
+      sseBuf += text;
+      let nl;
+      while ((nl = sseBuf.indexOf("\n")) !== -1) {
+        const line = sseBuf.slice(0, nl);
+        sseBuf = sseBuf.slice(nl + 1);
+        collect(line.replace(/\r$/, ""));
+      }
+    };
+    if (head) { emit(head); collectFeed(head); }
+    if (buffer) { emit(buffer); collectFeed(buffer); }
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      emit(chunk);
+      collectFeed(chunk);
+    }
+    // 上游流结束时若尾巴残留一条未换行的 data 行，补采一次，避免最后一条 content 丢失
+    if (sseBuf) collect(sseBuf.replace(/\r$/, ""));
+  } catch (e) {
+    try { reply.raw.end(); } catch {}
+    return { ok: false, fellBackToTools: false };
+  }
+  try { reply.raw.end(); } catch {}
+  return { ok: true, fellBackToTools: false, text: fullText, reasoning, usage };
+}
+
 module.exports = {
   runWithTools,
   buildSSE,
+  tryStreamPassthrough,
   DEFAULT_MAX_TOOL_ROUNDS
 };
