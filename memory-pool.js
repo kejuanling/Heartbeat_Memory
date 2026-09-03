@@ -30,12 +30,20 @@ const CATEGORIES = ["关于她", "关于我们", "锚点", "信号", "对话摘�
 const DEFAULT_DEDUP_THRESHOLD = 0.78;
 const DEFAULT_DEDUP_CROSS_THRESHOLD = 0.92; // 跨类目：相似度 >= 才合并，防跨类误合并
 const DEFAULT_DEDUP_ANCHOR_THRESHOLD = 0.96; // 锚点原话：几乎一字不差才合并
+const DEFAULT_DEDUP_SEMANTIC_THRESHOLD = 0.80; // 语义近邻：同分类余弦 >= 视为同一条
+const DEFAULT_DEDUP_SEMANTIC_CROSS_THRESHOLD = 0.86; // 语义近邻：跨分类（防误合并）
+const DEFAULT_DEDUP_SEMANTIC_ANCHOR_THRESHOLD = 0.93; // 语义近邻：锚点原话（近义才合并）
+const DEFAULT_MAX_MERGED_FROM = 8;      // merged_from 面包屑上限条数
 const DEFAULT_DECAY_DAYS = 30;      // 30 天重要级衰减半衰期
 
 const CONFIG = {
   dedup_threshold: DEFAULT_DEDUP_THRESHOLD,
   dedup_cross_threshold: DEFAULT_DEDUP_CROSS_THRESHOLD,
   dedup_anchor_threshold: DEFAULT_DEDUP_ANCHOR_THRESHOLD,
+  dedup_semantic_threshold: DEFAULT_DEDUP_SEMANTIC_THRESHOLD,
+  dedup_semantic_cross_threshold: DEFAULT_DEDUP_SEMANTIC_CROSS_THRESHOLD,
+  dedup_semantic_anchor_threshold: DEFAULT_DEDUP_SEMANTIC_ANCHOR_THRESHOLD,
+  merged_from_max: DEFAULT_MAX_MERGED_FROM,
   decay_days: DEFAULT_DECAY_DAYS,
   retrieval_top_k: 5,
   // 多次检索自动置顶：检索次数达到该阈值即固定为置顶（相关记忆块稳定带上它）
@@ -221,11 +229,12 @@ function get(id) {
   return load().find(r => r.id === id) || null;
 }
 
-function add(entry) {
+async function add(entry) {
   if (READONLY) { console.warn("[memory-pool] 只读模式，忽略新增/合并"); return { entry: null, dup: false }; }
   const rows = load();
   const e = normalizeEntry(entry);
-  const dup = findDuplicate(e);
+  // 先文本近重复（快、稳），未命中再走语义向量近邻（抓“同义不同词”）
+  const dup = findDuplicate(e) || await findSemanticDuplicate(e);
   if (dup) {
     // 合并：保留更高重要级，轻微上浮；不新增重复条目
     const merged = mergeEntries(dup, e);
@@ -233,6 +242,8 @@ function add(entry) {
     dup.content = merged.content;
     dup.category = merged.category;
     dup.similarity = merged.similarity;
+    dup.fingerprint = merged.fingerprint;
+    dup.merged_from = merged.merged_from;
     dup.updated_at = nowIso();
     dup.source = dup.source || e.source;
     invalidateVector(dup.id); // 内容/分类可能已变，旧向量作废
@@ -305,6 +316,9 @@ function normalizeEntry(raw) {
   e.active = raw.active !== false;
   e.source = raw.source || "manual";
   e.block_id = raw.block_id || null;
+  e.fingerprint = raw.fingerprint || entryHash(e);
+  e.superseded_by = raw.superseded_by || null;
+  e.merged_from = Array.isArray(raw.merged_from) ? raw.merged_from.slice(-DEFAULT_MAX_MERGED_FROM) : [];
   return e;
 }
 
@@ -331,14 +345,53 @@ function findDuplicate(e) {
   return best;
 }
 
+// 语义向量近邻去重：用 bge 余弦抓“同义不同词”的重复（锚点跨类绝不合并）；embed 不可用时回落 null
+async function findSemanticDuplicate(e) {
+  if (embedClient.fused()) return null;
+  const rows = load().filter(r => r.active !== false && r.id !== e.id);
+  if (!rows.length) return null;
+  const ready = await ensureVectors(rows);
+  if (!ready) return null;
+  const qv = await embedClient.embedBatch([e.category + "：" + e.content], false, 8000);
+  if (!qv || !qv[0]) return null;
+  const sameTh = Number(CONFIG.dedup_semantic_threshold) || DEFAULT_DEDUP_SEMANTIC_THRESHOLD;
+  const crossTh = Number(CONFIG.dedup_semantic_cross_threshold) || DEFAULT_DEDUP_SEMANTIC_CROSS_THRESHOLD;
+  const anchorTh = Number(CONFIG.dedup_semantic_anchor_threshold) || DEFAULT_DEDUP_SEMANTIC_ANCHOR_THRESHOLD;
+  const m = vecMap();
+  let best = null, bestSim = 0;
+  for (const r of rows) {
+    const v = (m[r.id] || {}).v;
+    if (!Array.isArray(v) || !v.length) continue;
+    const cos = dotProduct(qv[0], v); // 均 L2 归一化，点积即余弦
+    const sameCat = r.category === e.category;
+    const involveAnchor = e.category === "锚点" || r.category === "锚点";
+    const th = involveAnchor ? (sameCat ? anchorTh : Infinity) : (sameCat ? sameTh : crossTh);
+    if (cos >= th && cos > bestSim) { best = r; bestSim = cos; }
+  }
+  if (best) best.similarity = Math.max(bestSim, best.similarity || 0);
+  return best;
+}
+
+// 被折入条目的轻量快照，供 merged_from 回滚/追溯
+function mergeSnap(x) {
+  return { content: x.content, category: x.category, importance: Number(x.importance) || 0.5, at: nowIso() };
+}
+
 function mergeEntries(dup, e) {
   const imp = Math.max(Number(dup.importance) || 0, Number(e.importance) || 0) + 0.02;
   const content = String(e.content || "").length > String(dup.content || "").length ? e.content : dup.content;
+  // 被折入条目的面包屑保留下来，供回滚/追溯（限 merged_from_max 条）
+  const mf = Array.isArray(dup.merged_from) ? dup.merged_from.slice() : [];
+  mf.push(mergeSnap(e));
+  const max = Math.max(0, Number(CONFIG.merged_from_max) || DEFAULT_MAX_MERGED_FROM);
+  if (mf.length > max) mf.splice(0, mf.length - max);
   return {
     importance: Math.min(1, imp),
     content,
     category: e.category || dup.category,
-    similarity: Math.max(Number(dup.similarity) || 0, Number(e.similarity) || 0)
+    similarity: Math.max(Number(dup.similarity) || 0, Number(e.similarity) || 0),
+    fingerprint: entryHash({ category: e.category || dup.category, content }),
+    merged_from: mf
   };
 }
 
@@ -522,14 +575,33 @@ function parseCategoryBlocks(text, opts) {
   opts = opts || {};
   const blocks = [];
   const re = /【([^】]+)】\s*([\s\S]*?)(?=【[^】]+】|$)/g;
+
+  // 摘要条目约定按空行分隔：每个空行隔开的段落独立成一条；兼容旧排版「段内多为 - / • 列表」时再按行拆
+  const splitSection = function (body) {
+    const segs = body.split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean);
+    if (!segs.length) return [];
+    const out = [];
+    for (const seg of segs) {
+      const lines = seg.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      const dashLike = lines.length > 1 && lines.filter((l) => /^[-—–•*]\s*/.test(l)).length >= Math.ceil(lines.length / 2);
+      if (dashLike) {
+        for (const l of lines) {
+          const c = l.replace(/^[-—–•*]\s*/, "").trim();
+          if (c) out.push(c);
+        }
+      } else {
+        out.push(seg);
+      }
+    }
+    return out;
+  };
+
   let m;
   while ((m = re.exec(String(text || ""))) !== null) {
     const cat = m[1].trim();
     const body = m[2].trim();
     if (!CATEGORIES.includes(cat)) continue;
-    // 按条目拆（行首破折号/短横线）；没有则整段当作一条
-    const parts = body.split(/\n\s*(?:[—–-]\s*|•\s*)/).map(s => s.trim()).filter(Boolean);
-    for (const p of parts.length ? parts : [body]) {
+    for (const p of splitSection(body)) {
       if (p) blocks.push({ category: cat, content: p });
     }
   }
@@ -645,7 +717,7 @@ async function ingestSummary(summaryText, opts) {
   const directCategory = opts.directCategory ? String(opts.directCategory).trim() : "";
   if (directCategory && directCategory !== "" && CATEGORIES.includes(directCategory)) {
     const importance = (opts.directImportance != null && isFinite(opts.directImportance)) ? Number(opts.directImportance) : null;
-    const r = add({
+    const r = await add({
       content: String(summaryText || "").trim(),
       category: directCategory,
       importance: importance != null ? importance : 0.5,
@@ -671,7 +743,7 @@ async function ingestSummary(summaryText, opts) {
   for (const m of parsedMemories) {
     // 合并发的条目不挂单一 block_id（它可能同时吸收了多个块）；单块仍精确挂 block_id
     const attachBlock = mergeBlockIds.length ? null : blockId;
-    const r = add({
+    const r = await add({
       content: m.content,
       category: m.category,
       importance: m.importance,
@@ -880,14 +952,17 @@ async function cleanPool(opts) {
         if (sim > bestPriorSim) bestPriorSim = sim;
       }
       let bestAliveSim = 0;
+      let bestAliveId = null;
       for (const rid of matchedIds) {
         const alive = byId.get(rid);
         if (!alive) continue;
         const sim = contentSimilarity(alive.content, r.content);
-        if (sim > bestAliveSim) bestAliveSim = sim;
+        if (sim > bestAliveSim) { bestAliveSim = sim; bestAliveId = rid; }
       }
       if (bestPriorSim >= dupTh || bestAliveSim >= MERGE_SINK_TH) {
-        changes.push({ id: r.id, type: "sink", from: { content: r.content, category: r.category, importance: Number(r.importance) || 0.5 }, to: null, sink: true });
+        // b) 被合并进某条保留记忆而沉底 → 记 superseded_by 指向合并目标，可回滚/追溯
+        const superseded_by = bestAliveSim >= MERGE_SINK_TH ? bestAliveId : undefined;
+        changes.push({ id: r.id, type: "sink", from: { content: r.content, category: r.category, importance: Number(r.importance) || 0.5 }, to: null, sink: true, superseded_by });
         sunkCount++;
       }
     }
@@ -908,10 +983,11 @@ async function cleanPool(opts) {
   let appliedAdd = 0;
   for (const ch of changes) {
     if (ch.type === "add") {
-      const rr = add({ content: ch.content, category: ch.category, importance: ch.importance, source: "clean" });
+      const rr = await add({ content: ch.content, category: ch.category, importance: ch.importance, source: "clean" });
       if (!rr.dup) appliedAdd++;
     } else if (ch.type === "sink") {
       sink(ch.id);
+      if (ch.superseded_by) { const it = get(ch.id); if (it) { it.superseded_by = ch.superseded_by; dirty = true; } }
     } else {
       update(ch.id, { content: ch.to.content, category: ch.to.category, importance: ch.to.importance, active: ch.sink ? false : undefined });
     }
