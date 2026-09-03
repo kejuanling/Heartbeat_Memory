@@ -2076,17 +2076,24 @@ function stopLiveEvents(){ if(liveES){ try{liveES.close();}catch(e){} liveES=nul
    让「服务器优先」的刷新/跨设备/实时推送不再回滚本地改动。
    防抖 + 失败静默（不阻塞交互），发送中不同步（避免和流式写回竞争）。 */
 let localEditSyncTimer=null;
-function syncTimelineLocal(){
+function syncTimelineLocal(ops){
   if(sending) return;
   if(localEditSyncTimer) clearTimeout(localEditSyncTimer);
   localEditSyncTimer=setTimeout(async ()=>{
     try{
-      // 只发真实用户/AI消息（与服务端 buildTimeline 过滤口径一致），带 time 以便重建保留时刻
-      const real=msgs.filter(function(m){return m&&(m.role==="user"||m.role==="assistant");}).map(function(m){return {role:m.role,content:m.content,time:m.time};});
+      // 优先 diff：编辑/删除按稳定 id 定点同步（position 稳定、不重排）；ops 为空或含无 id（本地新消息）时回退整份（旧兼容）
+      const useDiff=!!(ops&&ops.length&&ops.every(function(o){return o&&o.id;}));
+      const payload={session_id:currentSession};
+      if(useDiff){
+        payload.ops=ops;
+      } else {
+        // 只发真实用户/AI消息（与服务端 buildTimeline 过滤口径一致），带 time 以便重建保留时刻
+        payload.messages=msgs.filter(function(m){return m&&(m.role==="user"||m.role==="assistant");}).map(function(m){return {role:m.role,content:m.content,time:m.time};});
+      }
       const r=await fetch("/v1/timeline/sync",{
         method:"POST",
         headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-Client":"dylan-chat","X-CSRF-Token":getCookie("admin_csrf")},
-        body:JSON.stringify({session_id:currentSession,messages:real}),
+        body:JSON.stringify(payload),
         credentials:"include"
       });
     }catch(e){ /* 同步失败静默，下次发送仍会全量重建兜底 */ }
@@ -3252,6 +3259,7 @@ function saveEdit(){
   if(editIdx<0)return;
   const m=msgs[editIdx];if(!m){closeEdit();return;}
   const v=editInput.value;
+  const mid=m.id;   // 编辑前记住 id，用于 diff 定点同步
   if(Array.isArray(m.content)&&m.content.some(x=>x&&x.type==="image_url")){
     const imgs=m.content.filter(x=>x&&x.type==="image_url");
     m.content=v?[...imgs,{type:"text",text:v}]:imgs;
@@ -3261,7 +3269,8 @@ function saveEdit(){
   saveMsgs();renderAll();
   closeEdit();
   showToast("已保存");
-  syncTimelineLocal();   // 编辑即刻同步到服务端时间线
+  // diff 编辑：按 id 定点同步（position 稳定不重排）；无 id（本地新消息）回退整份
+  syncTimelineLocal(mid?[{op:'edit', id:mid, newContent: m.content}]:null);
 }
 editCancel.addEventListener("click",closeEdit);
 editMask.addEventListener("click",e=>{if(e.target===editMask)closeEdit();});
@@ -3283,6 +3292,8 @@ actDel.addEventListener("click",()=>{
 // 导致卡顿（markdown 重渲染是大头）。数据层 splice 后逐个更新后续 data-idx（只改属性，不重渲染内容）。
 function deleteSingleMsg(idx){
   if(idx<0||idx>=msgs.length)return;
+  const target=msgs[idx];
+  const tid=target&&target.id;   // 删除前记住 id，用于 diff 定点同步
   msgs.splice(idx,1);
   const el=chatEl.querySelector('.msg[data-idx="'+idx+'"]');
   if(el)el.remove();
@@ -3294,7 +3305,7 @@ function deleteSingleMsg(idx){
   }
   saveMsgs();
   if(!msgs.length){ chatEl.innerHTML=""; chatEl.appendChild(emptyEl); }
-  syncTimelineLocal();   // 删除即刻同步到服务端时间线
+  syncTimelineLocal(tid?[{op:'delete', id:tid}]:null);   // diff 删除；无 id 回退整份
 }
 
 actEdit.addEventListener("click",()=>{
@@ -3404,6 +3415,8 @@ selAll.addEventListener("click",()=>{
 selDel.addEventListener("click",()=>{
   if(!selectSet.size){showToast("请先选择");return;}
   const deleted=selectSet.size;
+  // 删除前收集被删消息的 id，用于 diff 定点同步
+  const delIds=[...selectSet].map(function(i){return msgs[i]&&msgs[i].id;}).filter(Boolean);
   // 精简：直接按 msgs 过滤 + 一次重建。窗口化渲染下 DOM data-idx 是全量索引、
   // 最终 renderAll 本来就会整体重建，原先"先逐条删 DOM 再重建"纯属多余遍历。
   msgs=msgs.filter(function(m,i){return !selectSet.has(i);});
@@ -3413,7 +3426,8 @@ selDel.addEventListener("click",()=>{
     renderAll();
   }
   showToast("已删除 "+deleted+" 条");
-  syncTimelineLocal();   // 多选删除即刻同步到服务端时间线
+  // diff 删除：按 id 定点；任一无 id（本地新消息）则回退整份
+  syncTimelineLocal(delIds.length? delIds.map(function(id){return {op:'delete', id:id};}) : null);
 });
 
 /* 会话命名辅助：新会话在 AI 首条回复到达后用回复开头命名（只动仍叫"会话id"的未命名会话） */

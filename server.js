@@ -746,6 +746,9 @@ function atomicWriteFileSync(file, content) {
 // ========================
 function saveTimeline(messages, sessionId) {
   const file = timelineFileFor(sessionId);
+  // 稳定 id：任何写盘路径都保证每条消息有唯一 id（老数据首次被写时补齐），
+  // 供「编辑/删除 diff 协议」按 id 定点 patch，position 不动、不再重排。system 也统一给 id。
+  for (const m of messages) { if (m && !m.id) m.id = crypto.randomUUID(); }
   const sp = messages.find(m => m.role === "system");
   const nonSP = messages.filter(m => m.role !== "system");
   // 兜底：任何写入路径都补齐缺失的 time（system 除外），避免历史消息/特殊事件缺时间
@@ -1045,7 +1048,7 @@ function appendMessages(sessionId, msgs, opts) {
     if (m && m.position && m.position > maxPos) maxPos = m.position;
   }
   const out = list.map(function (m, i) {
-    const nm = { time: new Date().toISOString(), ...m, position: maxPos + 0.5 + i };
+    const nm = { time: new Date().toISOString(), ...m, position: maxPos + 0.5 + i, id: m.id || crypto.randomUUID() };
     timeline.push(nm);
     return nm;
   });
@@ -1056,6 +1059,31 @@ function appendMessages(sessionId, msgs, opts) {
 
 function appendMessage(sessionId, msg, opts) {
   return appendMessages(sessionId, [msg], opts)[0] || null;
+}
+
+// 按稳定 id 定点修改一条消息（编辑同步）——只改这一条，保留其余消息 position，不重排。
+// patch 只覆盖传入的键（前端 diff 只发 {op:'edit', id, newContent} 类，不传 position/id）。
+function patchMessage(sessionId, id, patch) {
+  if (!id) return null;
+  const timeline = loadTimeline(sessionId);
+  const idx = timeline.findIndex(m => m && m.id === id);
+  if (idx < 0) return null;
+  timeline[idx] = { ...timeline[idx], ...patch, id };
+  saveTimeline(timeline, sessionId);
+  sseNotify(sessionId);
+  return timeline[idx];
+}
+
+// 按稳定 id 定点删除一条消息（删除同步）——只删这一条，其余 position 不动。
+function deleteMessage(sessionId, id) {
+  if (!id) return false;
+  const timeline = loadTimeline(sessionId);
+  const idx = timeline.findIndex(m => m && m.id === id);
+  if (idx < 0) return false;
+  timeline.splice(idx, 1);
+  saveTimeline(timeline, sessionId);
+  sseNotify(sessionId);
+  return true;
 }
 
 // 工具调用记录消息判定（服务器写入格式：assistant + 「【工具调用记录】」开头）
@@ -1489,6 +1517,8 @@ require("./routes/chat")(app, {
   appendMessages,
   appendRequestMessages,
   tailHasReply,
+  patchMessage,
+  deleteMessage,
   sseSubscribe,
   sseUnsubscribe,
   sseNotify,

@@ -115,6 +115,8 @@ module.exports = function registerChatRoutes(app, deps) {
     appendMessages,
     appendRequestMessages,
     tailHasReply,
+    patchMessage,
+    deleteMessage,
     sseSubscribe,
     sseUnsubscribe,
     sseNotify,
@@ -381,10 +383,15 @@ module.exports = function registerChatRoutes(app, deps) {
     try {
       const sessionId = String(req.query.session_id || req.headers['x-session-id'] || '').trim();
       const timeline = loadTimeline(sessionId);
+      // 稳定 id 迁移：老数据无 id，首次被 history 读到就补 uuid 并写回（前端据此做 diff 编辑/删除）。
+      let needWrite = false;
+      for (const m of timeline) { if (m && !m.id) { m.id = (require('crypto').randomUUID) ? require('crypto').randomUUID() : String(Date.now()) + '-' + Math.random().toString(36).slice(2); needWrite = true; } }
+      if (needWrite) saveTimeline(timeline, sessionId);
       const items = timeline
         .filter(isRealMessageForTimeline)
         .map(m => {
           const clean = { role: m.role };
+          if (m.id !== undefined) clean.id = m.id;
           if (m.content !== undefined) clean.content = m.content;
           if (m.time) clean.time = m.time;
           if (m.reasoning !== undefined) clean.reasoning = m.reasoning;
@@ -659,18 +666,36 @@ module.exports = function registerChatRoutes(app, deps) {
 
   // 本地编辑/删除同步：聊天页「编辑 / 删除消息」目前只改本机 localStorage，
   // 真正写回服务端时间线要靠下一次发消息的全量重建。这里补一个轻量端点。
+  // 双分支（兼容）：body.ops 是 diff 操作（新增，走 patch 定点、position 稳定）；
+  //               body.messages 是旧整份（保留，靠 buildTimeline 全量，编辑/删除生效但会重排 position）。
   app.post('/v1/timeline/sync', async (req, reply) => {
     try {
       const body = req.body || {};
       const isClientChat = (req.headers['x-client'] || '').trim() === 'dylan-chat';
       if (!isClientChat) return reply.code(403).send({ error: 'forbidden' });
       const sessionId = String(body.session_id || req.headers['x-session-id'] || '').trim();
+      // 新 diff 分支：body.ops = [{op:'edit',id,newContent} | {op:'delete',id}]，按 id 定点，不重排
+      if (Array.isArray(body.ops)) {
+        let ok = 0, miss = 0, del = 0;
+        for (const op of body.ops) {
+          if (!op || !op.id) continue;
+          if (op.op === 'edit') {
+            const r = patchMessage(sessionId, op.id, { content: op.newContent });
+            if (r) ok++; else miss++;
+          } else if (op.op === 'delete') {
+            if (deleteMessage(sessionId, op.id)) del++; else miss++;
+          }
+        }
+        console.log(`[timeline-sync] diff编辑/删除同步 (session=${sessionId || 'default'}, 改=${ok}, 删=${del}, 未命中=${miss})`);
+        return reply.send({ ok: true, edited: ok, deleted: del, missed: miss, session_id: sessionId || 'default' });
+      }
+      // 旧整份分支：保留兼容（老前端/退化场景）
       const messages = Array.isArray(body.messages) ? body.messages : [];
       const realMsgs = messages.filter(isRealMessageForTimeline).map(normalizeMessageForTimeline);
       const rebuilt = buildTimeline(realMsgs, sessionId);
       saveTimeline(rebuilt, sessionId);
       sseNotify(sessionId);
-      console.log(`[timeline-sync] 编辑/删除同步成功 (session=${sessionId || 'default'}, 条数=${rebuilt.length})`);
+      console.log(`[timeline-sync] 编辑/删除全量同步 (session=${sessionId || 'default'}, 条数=${rebuilt.length})`);
       reply.send({ ok: true, total: rebuilt.length, session_id: sessionId || 'default' });
     } catch (err) {
       console.error('[timeline-sync] error:', err.message);
