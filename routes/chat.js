@@ -121,6 +121,8 @@ module.exports = function registerChatRoutes(app, deps) {
     IDEMPOTENCY_TTL_MS,
     setRecentReply,
     buildCrossMemorySnapshot,
+    sessionCrossInjectOverride,
+    saveSessionCrossInjectOverride,
     prepareMessageForLLM,
     isQuietActive,
     collectTrailingUnansweredUserMessages,
@@ -597,6 +599,34 @@ module.exports = function registerChatRoutes(app, deps) {
       reply.send({ ok: true, inherited: stat.inherited, skippedNoMatch: stat.skippedNoMatch, skippedCross: stat.skippedCross });
     } catch (err) {
       console.error('[POST /v1/sessions/branch-inherit] error:', err.message);
+      reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // 会话级跨窗口注入覆盖（新建会话时设置）：true=本会话强制注入, false=本会话关闭, null=跟随全局。
+  // 仅影响该会话是否注入跨窗口记忆，不触碰管理台全局配置。
+  app.get('/v1/sessions/:id/cross-inject', async (req, reply) => {
+    try {
+      const sessionId = String(req.params.id || '').trim();
+      const override = deps.sessionCrossInjectOverride(sessionId);
+      reply.send({ session_id: sessionId, cross_inject_enabled: override, follow_global: override === null });
+    } catch (err) {
+      console.error('[GET /v1/sessions/:id/cross-inject] error:', err.message);
+      reply.code(500).send({ error: err.message });
+    }
+  });
+  app.post('/v1/sessions/:id/cross-inject', async (req, reply) => {
+    try {
+      const sessionId = String(req.params.id || '').trim();
+      const body = (req.body && typeof req.body === 'object') ? req.body : {};
+      let val = null;
+      if (body.enabled === true || body.enabled === 'true') val = true;
+      else if (body.enabled === false || body.enabled === 'false') val = false;
+      // 其余（undefined/null/''）→ null 跟随全局
+      const saved = deps.saveSessionCrossInjectOverride(sessionId, val);
+      reply.send({ ok: true, session_id: sessionId, cross_inject_enabled: val, saved: saved });
+    } catch (err) {
+      console.error('[POST /v1/sessions/:id/cross-inject] error:', err.message);
       reply.code(500).send({ error: err.message });
     }
   });

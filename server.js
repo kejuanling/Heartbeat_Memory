@@ -1354,6 +1354,8 @@ require("./routes/chat")(app, {
   IDEMPOTENCY_TTL_MS,
   setRecentReply,
   buildCrossMemorySnapshot,
+  sessionCrossInjectOverride,
+  saveSessionCrossInjectOverride,
   prepareMessageForLLM,
   isQuietActive,
   collectTrailingUnansweredUserMessages,
@@ -1501,6 +1503,7 @@ function starredContextText(limit) {
 // 话题相关交给 surface_memory 按需召回。加了 version 以让旧快照(旧格式)在下次请求时自动重建。
 // ========================
 const CROSS_SNAPSHOT_DIR = path.join(__dirname, "data");
+const SESSION_CFG_DIR = path.join(__dirname, "data", "session_cfg");   // 会话级配置（如跨窗口注入覆盖）；无文件=跟随全局
 const CROSS_SNAPSHOT_VERSION = 4;  // 升版本：加 fingerprint 字段，旧快照自动重建
 const CROSS_SNAPSHOT_TTL_MS = 10 * 60 * 1000;  // 超时兜底（10分钟），防止指纹漏判导致永久不更新
 function crossSnapshotFile(sessionId) {
@@ -1535,8 +1538,34 @@ function crossFingerprint(cfg) {
   } catch (e) {}
   return crypto.createHash("md5").update(parts.join("|")).digest("hex");
 }
+function sessionCrossInjectOverride(sessionId) {
+  // 会话级跨窗口注入覆盖：true=本会话强制注入, false=本会话关闭, null=跟随全局
+  const token = safeSessionToken(sessionId || "default");
+  const file = path.join(SESSION_CFG_DIR, token + ".json");
+  try {
+    if (fs.existsSync(file)) {
+      const o = fs.readJsonSync(file);
+      if (o && typeof o.cross_inject_enabled === "boolean") return o.cross_inject_enabled;
+    }
+  } catch (e) { console.warn("[session-cfg] 读取覆盖失败:", e.message); }
+  return null;
+}
+function saveSessionCrossInjectOverride(sessionId, enabled) {
+  const token = safeSessionToken(sessionId || "default");
+  const file = path.join(SESSION_CFG_DIR, token + ".json");
+  let o = {};
+  try { if (fs.existsSync(file)) o = fs.readJsonSync(file) || {}; } catch (e) { o = {}; }
+  if (enabled === null || enabled === undefined) delete o.cross_inject_enabled;
+  else o.cross_inject_enabled = !!enabled;
+  fs.ensureDirSync(SESSION_CFG_DIR);
+  fs.writeJsonSync(file, o);
+  return o;
+}
 function buildCrossMemorySnapshot(sessionId) {
   const cfg = memoryPool.getConfig();
+  // 会话级覆盖：本会话显式关闭 → 不注入；显式开启 → 继续，但要遵从全局总开关（全局关=全关）
+  const cfgOverride = sessionCrossInjectOverride(sessionId);
+  if (cfgOverride === false) return "";
   if (cfg.cross_inject_enabled === false) return "";
   const file = crossSnapshotFile(sessionId);
   const fp = crossFingerprint(cfg);
