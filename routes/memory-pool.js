@@ -60,13 +60,4 @@ module.exports = function registerMemoryPoolRoutes(app, { basicAuth }) {
       reply.send({ success: true, entry: r });
     } catch (err) { reply.code(500).send({ error: err.message }); }
   });
-
-  app.post('/admin/memory-pool/retrieve', { preHandler: basicAuth }, async (req, reply) => {
-    try {
-      const q = String((req.body || {}).query || '').trim();
-      const topK = Number((req.body || {}).topK) || 5;
-      const items = await memoryPool.retrieveHybrid(q, { topK });
-      reply.send({ success: true, items, config: memoryPool.getConfig() });
-    } catch (err) { reply.code(500).send({ error: err.message }); }
-  });
 };

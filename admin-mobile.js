@@ -2358,14 +2358,6 @@ function removeSingleBlock(idx, blockIndex, isAi){
   });
   return out;
 }
-function ccTopicSim(a,b){
-  const A=ccGapTopicTokens(a), B=ccGapTopicTokens(b);
-  if(!A.size || !B.size) return 0;
-  let inter=0;
-  A.forEach(function(x){ if(B.has(x)) inter++; });
-  const union=A.size+B.size-inter;
-  return union? inter/union : 0;
-}
 function ccGapSuggestCuts(key){
   const msgs=AppState.ccGapMsgByKey[key];
   if(!msgs || msgs.length<2) return [];
@@ -2442,19 +2434,6 @@ async function ccDoCutSegments(segs){
     if(msg) msg.textContent='切分失败: '+e.message;
     toast('切分失败: '+e.message);
   }
-}
-function ccGapApplyAllCuts(key){
-  const cut=ccGapSuggestCuts(key);
-  if(!cut.length){ toast('没有候选切点'); return; }
-  const part=String(key).split('-');
-  const gs=Number(part[0]), ge=Number(part[1]);
-  const points=cut.map(function(c){return c.cut;}).filter(function(n){return n>=gs&&n<ge;}).sort(function(a,b){return a-b;});
-  if(!points.length){ toast('没有可用的候选切点'); return; }
-  if(!confirm('按 '+points.length+' 个候选切点切分这个未覆盖区（形成 '+ (points.length+1) +' 块）？')) return;
-  const segs=[]; let prev=gs;
-  for(let i=0;i<points.length;i++){ segs.push([prev,points[i]]); prev=points[i]+1; }
-  segs.push([prev,ge]);
-  ccDoCutSegments(segs);
 }
 function ccGapToggleCuts(key){
   if(AppState.ccGapCutsOff.has(key)) AppState.ccGapCutsOff.delete(key); else AppState.ccGapCutsOff.add(key);
@@ -2870,28 +2849,8 @@ function ccArmAllGapAutoLoad(){
     loadCompactionPreview();
   }catch(e){ if(msg) msg.textContent='保存失败: '+e.message; toast('保存失败'); }
 }
-  function ccBlockOp(action){
-   resetCcMsgCache();
-   const msg=document.getElementById('compaction-msg');
-   if(msg) msg.textContent='处理中...';
-   fetch(ADMIN_API + '/context-compaction/blocks',{
-     method:'POST',headers:{'Content-Type':'application/json'},
-     body:JSON.stringify({action:action})
-   }).then(function(r){return r.json()}).then(function(d){
-     if(d && d.error) throw new Error(d.error);
-     if(d && d.ok===false){ if(msg) msg.textContent=(d.message||'操作未完成'); loadCompactionPreview(); return; }
-     if(msg){
-       if(action==='reset') msg.textContent='已恢复自动分块。';
-       else if(action==='add') msg.textContent=d.fixed?(d.message||'已固定边界。'):('已添加一块（约 '+d.addedCount+' 条），旧块边界不变。');
-       else if(action==='remove') msg.textContent='已移除最后一块，内容退回未覆盖区。';
-     }
-     loadCompactionPreview();
-   }).catch(function(e){
-     if(msg) msg.textContent='操作失败: '+e.message;
-   });
- }
- 
- function ccNumLiveCheck(input, max){
+
+function ccNumLiveCheck(input, max){
    const v=Number(input.value);
    const ok=!input.value||(v>=1&&v<=Number(max));
    input.classList.toggle('warn', !ok);

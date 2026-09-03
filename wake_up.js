@@ -430,25 +430,6 @@ async function fetchPhoneStateContext() {
   }
 }
 
-function loadTimelineMessages() {
-  if (!fs.existsSync(TIMELINE_PATH)) {
-    console.log("未找到 enhanced_messages.json");
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(fs.readFileSync(TIMELINE_PATH, "utf-8"));
-    if (!Array.isArray(parsed)) {
-      console.log("enhanced_messages.json 格式错误：顶层不是数组");
-      return null;
-    }
-    return parsed;
-  } catch (err) {
-    console.error("读取 enhanced_messages.json 失败:", err.message);
-    return null;
-  }
-}
-
 // ========================
 // 多会话：扫描所有会话语，解决"唤醒只盯主会话、感知不到分会话活跃"的问题。
 // 返回 [{ sessionId, messages }]，主会话 sessionId="default"。
@@ -594,10 +575,6 @@ async function runTimedWake() {
 
 function getNow() {
   return new Date();
-}
-
-function getChinaTimeString() {
-  return formatDateTimeInTimeZone(new Date(), TIME_ZONE);
 }
 
 function getLocalTimeString() {
@@ -811,7 +788,7 @@ async function runWakeUpInner() {
     console.warn("[pinned] 唤醒时注入失败:", pinErr.message);
   }
 
-  const wakePrompt = buildWakePrompt(getChinaTimeString(), diffMinutes, weatherContext, phoneContext);
+  const wakePrompt = buildWakePrompt(getLocalTimeString(), diffMinutes, weatherContext, phoneContext);
   let cleanMessages = stripPosition(messages);
 
   // 上下文记忆替换：唤醒时看到的也是 AI 写好的记忆而不是原文（源文件不动）

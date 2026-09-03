@@ -144,17 +144,6 @@ function isReplacementMemoryMessage(msg) {
   return c.startsWith("（回忆 · ") || c.startsWith("（对话摘要");
 }
 
-// 归一化内容：剥离内部标签（<memory>/<pin> 等）、压缩空白，用于消息匹配
-function normalizeContent(value) {
-  return String(value || "")
-    .replace(/<\s*memory\b[^>]*>[\s\S]*?<\/\s*memory\s*>/gi, " ")
-    .replace(/<\s*pin\b[^>]*>[\s\S]*?<\/\s*pin\s*>/gi, " ")
-    .replace(/<\s*(?:memory|pin)\b[^>]*>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 // 解析消息时间：优先 m.time，其次内容开头的墙上时间前缀
 function messageTime(m) {
   if (m && m.time) {
@@ -446,33 +435,6 @@ function publicItem(item) {
     removed: !!item.removed,
     enabled: item.enabled !== false
   };
-}
-
-// 压缩页预览用：额外带一小段被替换原文的预览（最多 2 条、每条截断）
-function listReplacementsForPreview() {
-  return loadItems().map(item => {
-    const pub = publicItem(item);
-    pub.original_preview = (item.matched || []).slice(0, 2).map(m => ({
-      role: m.role,
-      content: String(m.content || "").slice(0, 150)
-    }));
-    pub.start_time = (item.range && item.range.start_time) || "";
-    pub.end_time = (item.range && item.range.end_time) || "";
-    pub.messages = (item.matched || []).map(m => ({
-      role: m.role,
-      content: typeof m.content === "string" ? m.content : ""
-    }));
-    // 时间段 -> 时间线编号（0-based，展示时 +1）
-    const resolved = resolveRange(item.range);
-    if (resolved && resolved.ok) {
-      pub.firstIdx = resolved.start_index;
-      pub.lastIdx = resolved.end_index;
-    } else {
-      pub.firstIdx = -1;
-      pub.lastIdx = -1;
-    }
-    return pub;
-  });
 }
 
 function listReplacements() {
@@ -1958,139 +1920,6 @@ async function startMsgVectorWarmup() {
   }
 }
 
-function searchTimeline(query, limit) {
-  const q = String(query || "").trim();
-  if (!q) return { ok: false, error: "查询不能为空" };
-  const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
-  if (terms.length === 0) return { ok: false, error: "查询不能为空" };
-  const src = loadSearchableMessages();
-  const maxReturn = Math.max(1, Math.min(50, Math.floor(Number(limit) || 5)));
-
-  const now = Date.now();
-  const recentCutoff = now - CONTEXT_SEARCH_RECENT_EXCLUDE_MINUTES * 60000;
-  const repeatCutoff = now - CONTEXT_SEARCH_REPEAT_WINDOW_MINUTES * 60000;
-  for (const key of recentlyShown.keys()) {
-    if (recentlyShown.get(key) < repeatCutoff) recentlyShown.delete(key);
-  }
-
-  const scored = [];
-  const scan = function (m, isImported, ord) {
-    const content = typeof m.content === "string" ? m.content : "";
-    if (!content) return;
-    if (m.time) {
-      const t = new Date(m.time).getTime();
-      if (!isNaN(t) && t > recentCutoff) return;
-    }
-    const low = content.toLowerCase();
-    const hitTerms = [];
-    let totalHits = 0;
-    for (const t of terms) {
-      let c = 0;
-      let pos = 0;
-      while ((pos = low.indexOf(t, pos)) !== -1) {
-        c++;
-        totalHits++;
-        pos += t.length;
-      }
-      if (c > 0) hitTerms.push(t);
-    }
-    // 部分命中即返回：至少命中一个关键词；命中越多越靠前（与工具描述一致）
-    if (hitTerms.length === 0) return;
-    const coverage = hitTerms.length;
-    const density = (totalHits / content.length) * 100;
-    // pos = 消息真实位置：时间线用非系统数组下标，导入对话用大偏移 + 序号
-    const pos = isImported ? CONTEXT_SEARCH_IMPORTED_POS_OFFSET + ord : ord;
-    scored.push({
-      pos: pos,
-      source: isImported ? "imported" : "timeline",
-      record_id: isImported ? m.record_id : undefined,
-      msg_id: isImported ? m.msg_id : undefined,
-      role: m.role,
-      time: m.time || null,
-      score: Math.round((coverage * 100 + Math.min(density * 20, 40) + Math.min(totalHits, 10)) * 10) / 10,
-      coverage: coverage,
-      density: Math.round(density * 10) / 10,
-      hits: totalHits,
-      hit_terms: hitTerms,
-      content: content
-    });
-  };
-  src.timeline.forEach(function (m, i) { scan(m, false, i); });
-  src.imported.forEach(function (m, i) { scan(m, true, i); });
-
-  let kept = scored;
-  if (scored.length > CONTEXT_SEARCH_FILTER_MIN_HITS) {
-    const filtered = scored.filter(function (x) { return x.density >= CONTEXT_SEARCH_DENSITY_FLOOR; });
-    kept = filtered.length >= CONTEXT_SEARCH_MIN_KEEP ? filtered : scored.slice(0, CONTEXT_SEARCH_MIN_KEEP);
-  }
-
-  kept.sort(function (a, b) {
-    return b.coverage - a.coverage || b.density - a.density || b.hits - a.hits || a.pos - b.pos;
-  });
-
-  const groups = [];
-  const used = new Array(kept.length).fill(false);
-  for (let i = 0; i < kept.length; i++) {
-    if (used[i]) continue;
-    const group = [kept[i]];
-    used[i] = true;
-    for (let j = i + 1; j < kept.length; j++) {
-      if (used[j]) continue;
-      const lastPos = group[group.length - 1].pos;
-      if (Math.abs(kept[j].pos - lastPos) <= CONTEXT_SEARCH_MERGE_GAP) {
-        group.push(kept[j]);
-        used[j] = true;
-      }
-    }
-    groups.push(group);
-  }
-
-  const fresh = groups.filter(function (g) {
-    return !g.some(function (x) {
-      const key = x.msg_id || x.record_id || ("tl:" + x.pos);
-      const ts = recentlyShown.get(key);
-      return ts !== undefined && ts >= repeatCutoff;
-    });
-  });
-
-  const matches = fresh.map(function (g) {
-    const rep = g[0];
-    const content = rep.content;
-    const low = content.toLowerCase();
-    let snippet = content;
-    if (content.length > 500) {
-      let firstHit = -1;
-      for (const t of rep.hit_terms) {
-        const pos = low.indexOf(t);
-        if (pos >= 0 && (firstHit < 0 || pos < firstHit)) firstHit = pos;
-      }
-      const sliceStart = Math.max(0, Math.min(firstHit - 100, content.length - 500));
-      snippet = (sliceStart > 0 ? "…" : "") + content.slice(sliceStart, sliceStart + 500) + (content.length > sliceStart + 500 ? "…" : "");
-    }
-    const out = {
-      role: rep.role,
-      time: rep.time,
-      score: rep.score,
-      hit_terms: rep.hit_terms,
-      hits: g.reduce(function (s, x) { return s + x.hits; }, 0),
-      count: g.length,
-      content: snippet
-    };
-    if (rep.source === "imported") {
-      out.source = "imported";
-      out.record_id = rep.record_id;
-      out.msg_id = rep.msg_id;
-    }
-    return out;
-  });
-
-  for (const g of fresh) {
-    const rep = g[0];
-    recentlyShown.set(rep.msg_id || rep.record_id || ("tl:" + rep.pos), now);
-  }
-
-  return { ok: true, total: scored.length, matches: matches.slice(0, maxReturn) };
-}
 
 // ── 增强版上下文搜索：支持跨会话 + 语义检索（embed-server 真语义，降级 TF-IDF） ──
 async function searchContextEnhanced(query, options) {
@@ -2599,10 +2428,8 @@ module.exports = {
   toggleReplacement,
   updateReplacement,
   listReplacements,
-  listReplacementsForPreview,
   applyReplacements,
   getReplaceLog,
-  searchTimeline,
   searchContextEnhanced,
   startMsgVectorWarmup,
   loadAllSessionTimelines,

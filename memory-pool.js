@@ -25,13 +25,6 @@ let warmTimer = null;
 let dirty = false;
 
 const CATEGORIES = ["关于她", "关于我们", "锚点", "信号", "对话摘要"];
-const CATEGORY_LABELS = {
-  关于她: "关于她（她是谁）",
-  关于我们: "关于我们（怎么相处）",
-  锚点: "锚点（原话）",
-  信号: "信号（状态变化）",
-  对话摘要: "对话摘要（聊过什么）"
-};
 
 // 去重阈值：同类目相似度 >= 视为同一条
 const DEFAULT_DEDUP_THRESHOLD = 0.78;
@@ -183,8 +176,6 @@ function flush() {
 }
 
 async function shutdown() { if (flushTimer) clearInterval(flushTimer); if (warmTimer) clearInterval(warmTimer); flush(); }
-
-function saveNow() { atomicWriteJson(POOL_FILE, cache); dirty = false; }
 
 // ---------------- 查询 ----------------
 function list(opts) {
@@ -982,11 +973,10 @@ function getConfig() { return { ...CONFIG }; }
 
 module.exports = {
   init, shutdown, flush,
-  CATEGORIES, CATEGORY_LABELS,
+  CATEGORIES,
   list, stats, get, add, update, remove, sink, revive,
   retrieve, retrieveHybrid, warmVectors, ingestSummary, parseCategoryBlocks, reparseSummaryViaLLM, buildReparsePrompt,
   contentSimilarity, tokensOf, decayFactor, scoreOf,
   buildCleanPrompt, cleanPool,
-  setConfig, getConfig, poolKeywords,
-  get file() { return POOL_FILE; }
+  setConfig, getConfig, poolKeywords
 };

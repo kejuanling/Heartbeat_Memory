@@ -6,7 +6,6 @@ const path = require("path");
 const crypto = require("crypto");
 
 const DATA_DIR = process.env.MEMORY_DATA_DIR || path.join(__dirname, "data");
-const MEMORIES_FILE = path.join(DATA_DIR, "memories.json");
 const CONFIG_FILE = path.join(DATA_DIR, "config.json");
 const PINNED_FILE = path.join(DATA_DIR, "pinned.json");
 const DELETED_PINS_FILE = path.join(DATA_DIR, "deleted_pins.json");
@@ -14,8 +13,6 @@ const DELETED_PINS_FILE = path.join(DATA_DIR, "deleted_pins.json");
 let config = {};
 let pinnedMemories = [];
 let deletedPinSignatures = new Set();
-let flushTimer = null;
-let dirty = false;
 
 // 只读模式：wake-up 与 gateway 共享同一批数据文件，但只允许 gateway 写盘
 const READONLY = process.env.MEMORY_ENGINE_READONLY === "1";
@@ -46,7 +43,6 @@ async function init() {
     pinnedMemories = Array.isArray(rawPinned) ? rawPinned : [];
   } catch { pinnedMemories = []; }
   await loadDeletedSignatures();
-  flushTimer = setInterval(flush, 5000);
   if (READONLY) {
     console.log("[memory-engine] 只读模式：pin/状态由 gateway 进程负责写盘");
     // 只读进程（wake_up）周期性从磁盘重载 pinned，避免 gateway 更新 pinned.json 后本进程长期用旧缓存
@@ -196,20 +192,8 @@ function buildPinnedContext() {
   }).join('\n');
 }
 
-async function flush() {
-  if (READONLY) return;
-  if (!dirty) return;
-  try {
-    await atomicWriteJson(PINNED_FILE, pinnedMemories);
-    dirty = false;
-  } catch (err) {
-    console.error("[memory-engine] 刷盘失败:", err.message);
-  }
-}
-
+// 旧 flush/flushTimer 刷盘机制已移除：pin 写盘均为即时 atomicWriteJson，无延迟刷盘需求。
 async function shutdown() {
-  if (flushTimer) clearInterval(flushTimer);
-  await flush();
 }
 
 // ========================
@@ -252,70 +236,14 @@ function extractKeywordsFromText(text) {
   return words;
 }
 
-function loadLegacyMemories() {
-  try {
-    const raw = fs.readJsonSync(MEMORIES_FILE);
-    return Array.isArray(raw) ? raw : [];
-  } catch {
-    return [];
-  }
-}
-
-function getMemoryKeywords(limit) {
-  if (limit === undefined) limit = 80;
-  const memories = loadLegacyMemories();
-  const counts = new Map();
-  let totalMem = 0;
-  for (const m of memories) {
-    if (m.active === false) continue;
-    totalMem++;
-    const imp = Math.max(0.3, m.importance || 0.5);
-    const seen = new Set();
-    for (const w of extractKeywordsFromText(m.content)) {
-      if (seen.has(w)) continue;
-      seen.add(w);
-      const cur = counts.get(w) || { count: 0, weight: 0 };
-      cur.count += 1;
-      cur.weight += imp;
-      counts.set(w, cur);
-    }
-  }
-  const N = Math.max(2, totalMem);
-  return Array.from(counts.entries())
-    .filter(([w, c]) => c.count >= 2 && w.length >= 2 && !KEYWORD_STOP_WORDS.has(w))
-    .map(([word, c]) => ({
-      word,
-      count: c.count,
-      weight: Math.round(c.weight * Math.log(N / c.count) * 10) / 10
-    }))
-    .sort((a, b) => b.weight - a.weight || b.count - a.count)
-    .slice(0, limit);
-}
-
-function getStats() {
-  const memories = loadLegacyMemories();
-  const active = memories.filter(m => m.active);
-  const typeCount = {};
-  memories.forEach(m => { typeCount[m.type] = (typeCount[m.type] || 0) + 1; });
-  return { total: memories.length, active: active.length, byType: typeCount, similarCount: 0, similarGroups: 0 };
-}
-
 module.exports = {
-  init, shutdown, getStats, getMemoryKeywords,
+  init, shutdown,
   extractKeywordsFromText, KEYWORD_STOP_WORDS,
   get config() { return config; },
   getConfig() { return config; },
-  get memories() { return loadLegacyMemories(); },
   addPinnedMemory, updatePinnedMemory, deletePinnedMemory, reorderPinnedMemory, getPinnedMemories, buildPinnedContext,
   async updateConfig(updates) {
     Object.assign(config, updates);
     await atomicWriteJson(CONFIG_FILE, config);
-  },
-  async refreshConfig() {
-    try {
-      Object.assign(config, await fs.readJson(CONFIG_FILE));
-    } catch (err) {
-      // 读取失败时保持现有配置
-    }
   }
 };

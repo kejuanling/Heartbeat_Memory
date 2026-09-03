@@ -201,10 +201,6 @@ function shouldForwardMultimodalContent() {
   return !["text", "plain", "placeholder", "false", "off", "0"].includes(mode);
 }
 
-function isDataImageUrl(value) {
-  return typeof value === "string" && /^data:image\//i.test(value);
-}
-
 function isImageContentPart(part) {
   if (!part || typeof part !== "object") return false;
   if (part.image_url) return true;
@@ -281,12 +277,6 @@ function normalizeMessageForTimeline(msg) {
   return { ...msg, content: cleaned };
 }
 
-// 动态注入内容的提示头：明确告诉模型这段是系统注入、用户不可见
-function systemNotePrefix() {
-  return `（系统提示：以下内容${readEnvValue("USER_DISPLAY_NAME") || "用户"}不可见，仅供你参考）`;
-}
-
-
 // 历史图片裁剪：以「带图的 user 消息」为单位，发送给上游前只保留最后 keepTurns 条带图消息里的图片，
 // 更早消息中的图片统一替换为 [图片] 文本占位符，避免视觉模型反复重编码历史图片。
 // 当前正在发送的最后一条消息（数组末尾）里的图片始终保留，不计入历史窗口；keepTurns<=0 表示不保留任何历史图片。
@@ -354,30 +344,6 @@ function prepareMessageForLLM(msg) {
   return { ...msg, content: textContent };
 }
 
-function sanitizeForLog(value) {
-  if (typeof value === "string") {
-    if (isDataImageUrl(value)) {
-      const commaIndex = value.indexOf(",");
-      const prefix = commaIndex >= 0 ? value.slice(0, commaIndex + 1) : value.slice(0, 40);
-      return `${prefix}[base64 image omitted]`;
-    }
-    if (value.length > 1000) return `${value.slice(0, 1000)}... [truncated ${value.length - 1000} chars]`;
-    return value;
-  }
-
-  if (Array.isArray(value)) return value.map(sanitizeForLog);
-
-  if (value && typeof value === "object") {
-    const sanitized = {};
-    for (const [key, child] of Object.entries(value)) {
-      sanitized[key] = sanitizeForLog(child);
-    }
-    return sanitized;
-  }
-
-  return value;
-}
-
 function summarizeMessageForLog(msg) {
   const parts = Array.isArray(msg?.content) ? msg.content : [msg?.content];
   const textChars = parts.reduce((sum, part) => sum + getTextFromContentPart(part).length, 0);
@@ -405,24 +371,6 @@ function summarizeMessagesForLog(messages = []) {
     textChars += item.text_chars;
   }
   return { total: list.length, roles, text_chars: textChars, image_parts: imageParts, file_parts: fileParts };
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function safeJsonForInlineScript(value) {
-  return JSON.stringify(value)
-    .replace(/</g, "\\u003c")
-    .replace(/>/g, "\\u003e")
-    .replace(/&/g, "\\u0026")
-    .replace(/\u2028/g, "\\u2028")
-    .replace(/\u2029/g, "\\u2029");
 }
 
 // ========================
@@ -650,7 +598,6 @@ async function releaseHeldMessages() {
   const aiText = String(normalizeContentToText(data?.choices?.[0]?.message?.content) || "").trim();
   if (aiText) {
     const clean = stripInternalTags(aiText) || aiText;
-    appendSpecialEvent(clean, { event_type: "quiet_summary" });
     const pushResult = await sendPushNotification({ title: "扣住消息已处理", body: clean.slice(0, 300) });
     console.log(`[quiet] 总结回复已写入时间线${pushResult.ok ? "并推送" : "（推送失败：" + pushResult.reason + "）"}`);
   }
@@ -821,14 +768,6 @@ function parseTimestampLabel(value) {
   return zonedWallTimeToDate({ year: yyyy, month, day, hour, minute }, TIME_ZONE);
 }
 
-function stripLeadingTimestamp(content) {
-  // 批注 2026-07-15：兼容 Kelivo 有时把日期和时间贴在一起的前缀；
-  // 旧格式 "YYYY-MM-DD HH:mm" 继续保留，新格式 "YYYY-MM-DDHH:mm" 不再导致时间记忆/排序失效。
-  return String(content || "")
-    .replace(/^（?\s*\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[ T]?)\d{1,2}[:：]\d{2}[）\s]*/, "")
-    .trim();
-}
-
 function extractTimestamp(content) {
   return parseTimestampLabel(content);
 }
@@ -904,13 +843,6 @@ function isRealMessageForTimeline(msg) {
   const contentText = normalizeContentToText(msg.content);
   if (msg.role === "user" && contentText.trim().startsWith("<system>")) return false;
   return msg.role === "user" || msg.role === "assistant";
-}
-
-function isSystemRule(msg) {
-  if (msg.role === "system") return true;
-  const contentText = normalizeContentToText(msg.content);
-  if (msg.role === "user" && contentText.trim().startsWith("<system>")) return true;
-  return false;
 }
 
 // ========================
@@ -2634,18 +2566,6 @@ app.get("/admin/stats", { preHandler: basicAuth }, async (req, reply) => {
 
 // 查找相似记忆（重复检测）
 
-// 词云关键词（管理台：统计活跃记忆的关键词与权重，前端渲染词云卡片）
-app.get("/admin/memories/keywords", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const limit = parseInt(req.query.limit) || 80;
-    const keywords = typeof memoryPool.poolKeywords === "function" ? memoryPool.poolKeywords(limit) : [];
-    reply.send({ keywords });
-  } catch (err) {
-    console.error("[GET /admin/memories/keywords] error:", err.message);
-    reply.code(500).send({ error: err.message });
-  }
-});
-
 // ========================
 // 记忆池（8 分类结构化记忆）管理
 // ========================
@@ -2797,10 +2717,6 @@ function isPushEchoContent(s) {
   const c = String(s || "");
   return !!c && !c.includes("本次未发送") && /刚刚给.{1,24}发了.{1,24}?推送：/.test(c);
 }
-function isPushEcho(msg) {
-  if (!msg || msg.role !== "assistant") return false;
-  return isPushEchoContent(msg.content);
-}
 // 解析推送回显内容
 require("./routes/push-events")(app, { basicAuth, baseDir: __dirname });
 
@@ -2856,31 +2772,6 @@ app.post("/admin/context-replacements/update", { preHandler: basicAuth }, async 
     reply.code(500).send({ error: err.message });
   }
 });
-
-// 手动新增摘要：创建一个 manual 块并直接填入指定内容（不调模型；默认未启用，点块上「替换」才生效）
-app.post("/admin/context-replacements/add-manual", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const body = req.body || {};
-    const start = parseInt(body.start, 10);
-    const end = parseInt(body.end, 10);
-    const memory = String(body.memory || "").trim();
-    const enabled = body.enabled === true;
-    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
-      return reply.send({ ok: false, error: "无效的范围（start/end 为第几条，从 1 开始）" });
-    }
-    if (!memory) return reply.send({ ok: false, error: "摘要内容不能为空" });
-    const r = contextReplacements.addManualRecord(start - 1, end - 1, enabled);
-    if (!r.ok) return reply.send({ ok: false, error: r.message || r.error || "创建失败" });
-    const upd = contextReplacements.updateReplacement(r.record.id, memory);
-    if (!upd.ok) return reply.send({ ok: false, error: upd.error || "填写摘要失败" });
-    console.log("[POST /admin/context-replacements/add-manual] 已新增摘要：", start, "-", end, "->", String(memory.slice(0, 40)), "...");
-    reply.send({ ok: true, id: r.record.id, count: r.record.count, message: "已新增摘要：第 " + start + "–" + end + " 条" });
-  } catch (err) {
-    console.error("[POST /admin/context-replacements/add-manual] error:", err.message);
-    reply.code(500).send({ error: err.message });
-  }
-});
-
 
 app.get("/admin/context-replacements/logs", { preHandler: basicAuth }, async (req, reply) => {
   try {
@@ -3836,30 +3727,6 @@ app.get("/admin/context/keywords/related", { preHandler: basicAuth }, async (req
   } catch (err) {
     reply.code(500).send({ error: err.message });
   }
-});
-
-
-
-// 块原文分页：按块 id 定位 matched 区间，供块展开惰性加载
-app.get("/admin/context-compaction/block-messages", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const id = String(req.query.id || "").trim();
-    const limit = Math.max(1, Math.min(500, Math.floor(Number(req.query.limit) || 200)));
-    const offset = Math.max(0, Math.floor(Number(req.query.offset) || 0));
-    const rec = (contextReplacements.loadItems() || []).find(function (it) { return !it.removed && it.id === id; });
-    if (!rec) return reply.code(404).send({ error: "块不存在: " + id });
-    const matched = Array.isArray(rec.matched) ? rec.matched : [];
-    const total = matched.length;
-    const slice = (offset < total) ? matched.slice(offset, offset + limit) : [];
-    const marks = contextReplacements.loadMarks();
-    const posByKey = compressiblePosMap();
-    const items = slice.map(function (m) {
-      const _key = contextReplacements.contentKey(m);
-      const _k = nKeyOfMsg(m);
-      return { role: m.role || "", time: (m && m.time) || "", content: typeof m.content === "string" ? m.content : "", key: _key, marked: !!marks[_key], num: posByKey.has(_k) ? posByKey.get(_k) : null };
-    });
-    reply.send({ ok: true, id: id, total: total, offset: offset, returned: items.length, hasMore: (offset + items.length) < total, items: items });
-  } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
 // 编号范围预览（1-based）：返回范围内每条原文，供未覆盖区滚动窗使用
