@@ -2964,6 +2964,7 @@ async function request(finalMsgs, fromSend){
     if(currentSession===sidAtStart){
       msgs=finalMsgs;saveMsgs();
       if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
+      autoNameSessionWhenUntitled(full);
     }
   }catch(err){
     if(err.name==="AbortError"){
@@ -2972,6 +2973,7 @@ async function request(finalMsgs, fromSend){
       if(currentSession===sidAtStart){
         msgs=finalMsgs;saveMsgs();
         if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
+        autoNameSessionWhenUntitled(full);
       }
       if(full)showToast("已停止生成");
     }else{
@@ -2980,6 +2982,7 @@ async function request(finalMsgs, fromSend){
       if(currentSession===sidAtStart){
         msgs=finalMsgs;saveMsgs();
         if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
+        autoNameSessionWhenUntitled(full);
       }
       showError(err.message);
     }
@@ -3375,33 +3378,63 @@ function toggleSelect(idx){
   const n=Number(idx);
   if(selectSet.has(n))selectSet.delete(n);else selectSet.add(n);
   updateSelBar();
-  renderAll();
+  // 性能：只切换该条 DOM 的选中态，不整棵重绘 —— 大会话逐个勾选不再卡顿
+  const el=chatEl.querySelector('.msg[data-idx="'+n+'"]');
+  if(el)el.classList.toggle("selected",selectSet.has(n));
 }
 selCancel.addEventListener("click",exitSelect);
 selAll.addEventListener("click",()=>{
   msgs.forEach((m,i)=>selectSet.add(i));
-  updateSelBar();renderAll();
+  updateSelBar();
+  // 性能：只刷新已渲染(窗口内)消息的选中态，不整棵重绘
+  chatEl.querySelectorAll('.msg[data-idx]').forEach(el=>{
+    const v=Number(el.getAttribute("data-idx"));
+    if(!isNaN(v))el.classList.toggle("selected",selectSet.has(v));
+  });
 });
 selDel.addEventListener("click",()=>{
   if(!selectSet.size){showToast("请先选择");return;}
-  const indexes=Array.from(selectSet).sort((a,b)=>b-a);
-  // 从 DOM 里按索引从大到小移除，最后统一保存，避免对大会话全量 renderAll 卡顿。
-  indexes.forEach(i=>{
-    const el=chatEl.querySelector('.msg[data-idx="'+i+'"]');
-    if(el)el.remove();
-  });
-  const newMsgs=msgs.filter(function(m,i){return !selectSet.has(i);});
-  msgs=newMsgs;
+  const deleted=selectSet.size;
+  // 精简：直接按 msgs 过滤 + 一次重建。窗口化渲染下 DOM data-idx 是全量索引、
+  // 最终 renderAll 本来就会整体重建，原先"先逐条删 DOM 再重建"纯属多余遍历。
+  msgs=msgs.filter(function(m,i){return !selectSet.has(i);});
   saveMsgs();selectSet.clear();updateSelBar();
   if(!msgs.length){ chatEl.innerHTML=""; chatEl.appendChild(emptyEl); exitSelect(); }
   else {
-    // 窗口化渲染下 DOM 里的 data-idx 是全局索引（窗口首条≠0），逐元素重排必错；
-    // 直接全量重建即可（renderAll 会复位窗口并按 msgs 重编号）
     renderAll();
   }
-  showToast("已删除 "+indexes.length+" 条");
+  showToast("已删除 "+deleted+" 条");
   syncTimelineLocal();   // 多选删除即刻同步到服务端时间线
 });
+
+/* 会话命名辅助：新会话在 AI 首条回复到达后用回复开头命名（只动仍叫"会话id"的未命名会话） */
+function codeNameSnippet(txt){
+  return String(txt||"").replace(/\s+/g," ").trim().slice(0,12);
+}
+function sessionDisplayName(id){
+  let nm={}; try{ nm=JSON.parse(localStorage.getItem("han_session_names")||"{}"); }catch(e){}
+  if(nm[id])return nm[id];
+  const s=(sessionList||[]).find(x=>x.id===id);
+  if(s&&s.name&&s.name!==id)return s.name==="主会话"?"主会话":s.name;
+  return "";
+}
+async function autoNameSessionWhenUntitled(full){
+  const snip=codeNameSnippet(full);
+  if(!snip)return;                    // 无正文(纯工具链/空)不命名
+  try{
+    let nm={}; try{ nm=JSON.parse(localStorage.getItem("han_session_names")||"{}"); }catch(e){}
+    if(nm[currentSession])return;               // 分支/合并/手动改名过的不覆盖
+    const s=(sessionList||[]).find(x=>x.id===currentSession);
+    const curName=(s&&s.name)||"";
+    if(curName&&curName!==currentSession&&curName!=="未识别")return;  // 已有语义化名字不覆盖
+    nm[currentSession]=snip;
+    localStorage.setItem("han_session_names",JSON.stringify(nm));
+    if(s&&!s.name)s.name=snip;
+    applyHeader();
+    renderSessionList();
+    try{ pushSessionNames(); }catch(e){}
+  }catch(e){}
+}
 
 /* 点击消息（多选模式下切换选中） */
 chatEl.addEventListener("click",e=>{
@@ -5064,11 +5097,21 @@ async function doMergeSessions(){
     const r=await fetch("/v1/sessions/merge",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({ids:ids,target:target})});
     const j=await r.json().catch(()=>({}));
     if(!r.ok){ showToast(j.error||"合并失败"); return; }
+    // 合并自动命名：形如「合并 · 会话A · 会话B」，与分支命名同风格；超长截断。
+    const partNames=ids.map(function(id){ const n=sessionDisplayName(id); return n||"未命名"; });
+    let mergedName="合并 · "+partNames.join(" · ");
+    if(mergedName.length>36)mergedName=mergedName.slice(0,33)+"…";
+    {
+      const map=JSON.parse(localStorage.getItem("han_session_names")||"{}");
+      map[target]=mergedName;
+      localStorage.setItem("han_session_names",JSON.stringify(map));
+      try{ pushSessionNames(); }catch(e){}
+    }
     mergeMode=false; mergeSel.clear();
     await loadSessions();
     renderSessionList();
     updateMergeBar();
-    showToast("已合并为「"+(j.name||j.session_id||"新会话")+"」，共 "+(j.merged||j.total||0)+" 条");
+    showToast("已合并为「"+mergedName+"」，共 "+(j.merged||j.total||0)+" 条");
     if(j.session_id){ switchSession(j.session_id); }
   }catch(e){ showToast("合并失败:"+(e.message||"")); }
 }

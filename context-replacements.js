@@ -794,12 +794,14 @@ function addManualRecord(start, end, enabled) {
   const items = loadItems();
   const filtered = [];
   let removedCount = 0;
+  const compItems = compressibleItems();
   for (const it of items) {
     // 只吞并同会话（或无 session 的通用旧块）的重叠手工块，跨会话块序号互不重叠、不能误吞
     if (it.source === "manual" && (!it.session || it.session === built.record.session)) {
-      const rs = it.range && it.range.start_index;
-      const re = it.range && it.range.end_index;
-      if (Number.isInteger(rs) && Number.isInteger(re) && rs <= built.record.range.end_index && re >= built.record.range.start_index) {
+      // 吞并判定用「当前真实覆盖区间」而非存储 range：时间线增删后旧块的存储编号会漂移，
+      // 按过期存储编号判断会误吞内容已移动到别处的块，导致被顶块的内容退回未覆盖区（边界被顶）。
+      const cur = recordCompRange(it, compItems);
+      if (cur && cur.start <= built.record.range.end_index && cur.end >= built.record.range.start_index) {
         removedCount++;
         continue;
       }

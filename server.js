@@ -2653,7 +2653,7 @@ app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, re
     if (b.direct === true) {
       const directLabel = "直接入池（" + list.length + " 块）";
       const logId = addCompactionLog({ action: "reparse", label: directLabel, status: "pending", message: "开始直接入池 " + list.length + " 段摘要..." }).id;
-      let dAdded = 0, dMerged = 0, dFailed = 0, dSkipped = 0;
+      let dAdded = 0, dMerged = 0, dFailed = 0, dSkipped = 0, dAlready = 0;
       for (const t of list) {
         try {
           const blocks = memoryPool.parseCategoryBlocks(t.summary, { noFallback: true });
@@ -2667,6 +2667,7 @@ app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, re
             });
             if (r.added) dAdded += r.added;
             if (r.merged) dMerged += r.merged;
+            if (r.already) dAlready += r.already;
             if (r.failed) dFailed += r.failed;
           }
         } catch (e) {
@@ -2674,13 +2675,13 @@ app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, re
           console.error("[memory-pool] 直接入池失败:", e.message);
         }
       }
-      addCompactionLog({ id: logId, action: "reparse", label: directLabel, status: "success", message: "已入池 " + list.length + " 段 -> 新增 " + dAdded + " / 合并 " + dMerged + " / 失败 " + dFailed + " / 跳过(无分类标签) " + dSkipped });
-      return reply.send({ success: true, direct: true, processed: list.length, added: dAdded, merged: dMerged, failed: dFailed, skipped: dSkipped });
+      addCompactionLog({ id: logId, action: "reparse", label: directLabel, status: "success", message: "已入池 " + list.length + " 段 -> 新增 " + dAdded + " / 合并 " + dMerged + " / 已存在 " + dAlready + " / 失败 " + dFailed + " / 跳过(无分类标签) " + dSkipped });
+      return reply.send({ success: true, direct: true, processed: list.length, added: dAdded, merged: dMerged, already: dAlready, failed: dFailed, skipped: dSkipped });
     }
     const isMerge = b.merge === true && list.length > 1;
     const logLabelUse = isMerge ? ("合并再解析（" + list.length + " 块）") : logLabel;
     const logId = addCompactionLog({ action: "reparse", label: logLabelUse, status: "pending", message: "开始解析 " + list.length + " 段摘要..." }).id;
-    let added = 0, merged = 0, failed = 0;
+    let added = 0, merged = 0, failed = 0, already = 0;
     if (isMerge) {
       // 多个块拼接为一次 LLM 提炼：每块带编号前缀，让模型跨块全局合并去重
       const mergedText = list.map(function (t, i) { return "【块 " + (i + 1) + "】\n" + t.summary; }).join("\n\n");
@@ -2691,17 +2692,19 @@ app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, re
       });
       if (r.added) added += r.added;
       if (r.merged) merged += r.merged;
+      if (r.already) already += r.already;
       if (r.failed) failed += r.failed;
     } else {
       for (const t of list) {
         const r = await memoryPool.ingestSummary(t.summary, { source: "compaction", block_id: t.block_id, forceLlm: true });
         if (r.added) added += r.added;
         if (r.merged) merged += r.merged;
+        if (r.already) already += r.already;
         if (r.failed) failed += r.failed;
       }
     }
-    addCompactionLog({ id: logId, action: "reparse", label: logLabelUse, status: "success", message: "已解析 " + list.length + " 段 -> 新增 " + added + " / 合并 " + merged + " / 失败 " + failed });
-    reply.send({ success: true, processed: list.length, added, merged, failed });
+    addCompactionLog({ id: logId, action: "reparse", label: logLabelUse, status: "success", message: "已解析 " + list.length + " 段 -> 新增 " + added + " / 合并 " + merged + " / 已存在 " + already + " / 失败 " + failed });
+    reply.send({ success: true, processed: list.length, added, merged, already, failed });
   } catch (err) {
     addCompactionLog({ action: "reparse", label: "再解析", status: "error", message: "再解析失败：" + err.message });
     reply.code(500).send({ error: err.message });
@@ -4110,17 +4113,42 @@ app.post("/admin/context-compaction/generate", { preHandler: basicAuth }, async 
       if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
         return reply.code(400).send({ error: "start/end 必须是 start<=end 的正整数（编号 1-based）" });
       }
-      const added = contextReplacements.addManualRecord(start - 1, end - 1, false);
+      // 未覆盖区生成：前端编号来自预览（已按内容锚点纠偏的块边界）。时间线增删后，某些旧块的
+      // 存储 range 会与实际可压缩下标错位（见 preview 的 storedValid 判定），未覆盖区编号与之同源。
+      // 若直接把前端编号当 compressible 下标建块，会与内容锚点定位后的相邻块重叠、顶掉已覆盖区
+      //（用户现象：生成摘要后上面一块内容变成未覆盖区）。因此先取该区间消息，再按内容反查真实区间。
+      const rp = contextCompactor.rangePreview(start, end);
+      const rpItems = (rp && Array.isArray(rp.items)) ? rp.items : [];
+      if (!rpItems.length) return reply.send({ ok: false, message: "该未覆盖区无可压缩消息，无法生成摘要" });
+      const compItems = contextReplacements.compressibleItems();
+      function keyRange(m) {
+        const t = String((m && m.content) || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+        const role = m && m.role ? m.role : "";
+        return role + "\u0000" + t;
+      }
+      const firstKey = keyRange(rpItems[0]);
+      const lastKey = keyRange(rpItems[rpItems.length - 1]);
+      let giStart = -1;
+      let giEnd = -1;
+      for (let i = 0; i < compItems.length; i++) {
+        const ck = keyRange(compItems[i].msg);
+        if (ck === firstKey && giStart === -1) giStart = i;
+        if (ck === lastKey) giEnd = i;
+      }
+      if (giStart < 0 || giEnd < giStart) {
+        return reply.send({ ok: false, message: "该未覆盖区在当前时间线定位失败，请刷新后重试" });
+      }
+      const added = contextReplacements.addManualRecord(giStart, giEnd, false);
       if (!added.ok) return reply.send(added);
       const manual = contextReplacements.manualRecordsSorted();
       const idx = manual.findIndex(function (b) {
-        return b.range && Number(b.range.start_index) === start - 1;
+        return b.range && Number(b.range.start_index) === giStart;
       });
       if (idx === -1) return reply.code(500).send({ error: "块创建失败，请刷新后重试" });
       const logId = addCompactionLog({ action: "gap", startIdx: start, endIdx: end, label: "消息" + start + "-" + end + "块", status: "pending", message: "开始生成摘要..." }).id;
       let gen;
       try {
-        gen = await contextCompactor.generateSummaryForRange(start - 1, end - 1);
+        gen = await contextCompactor.generateSummaryForRange(giStart, giEnd);
       } catch (err) {
         addCompactionLog({ id: logId, action: "gap", startIdx: start, endIdx: end, label: "消息" + start + "-" + end + "块", status: "error", message: err.message });
         contextReplacements.removeManualRecord(idx); // 生成失败回滚新建的块
