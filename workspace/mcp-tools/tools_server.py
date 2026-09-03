@@ -14,7 +14,7 @@ import json, urllib.request, urllib.parse, urllib.error, os, time, subprocess, t
 import datetime
 
 PORT = 8771
-API_TOKEN = "han-xie-2026"
+API_TOKEN = os.environ.get("MCP_TOOLS_API_TOKEN", "")  # 值在 /opt/dylan-heartbeat/.env（经 systemd EnvironmentFile 注入）
 BASE_URL = "http://localhost"
 
 def _load_internal_key():
@@ -428,7 +428,7 @@ TOOLS["phone_records"] = {
 }
 
 # ── 12. 手机状态快照（han 手机：电池/当前App/位置，来自 8080 phone-report-api）──
-_PHONE_REPORT_TOKEN = "rsh"  # 对应 phone-report-api(8080) systemd unit 的 AUTH_TOKEN
+_PHONE_REPORT_TOKEN = os.environ.get("PHONE_STATE_TOKEN", "")  # 对应 phone-report-api(8080) systemd unit 的 AUTH_TOKEN，值在 .env
 _OWNER = "han"  # 这是唯一的主人，即 han 本人的手机；没有"别的用户"
 
 def tool_phone_state(args):
@@ -1028,7 +1028,7 @@ if __name__ == "__main__":
     write_tools_manifest()
     threading.Thread(target=watch_config_loop, daemon=True).start()
     print(f"🚀 小世界MCP工具集启动 -> http://0.0.0.0:{PORT}")
-    print(f"🔑 鉴权: Bearer Token (API_TOKEN={API_TOKEN})")
+    print("🔑 鉴权: Bearer Token (API_TOKEN 已从环境变量 MCP_TOOLS_API_TOKEN 加载)")
     print(f"📡 暴露 {len(TOOLS)} 个工具:")
     for name in sorted(TOOLS.keys()):
         print(f"   ├─ {name}")

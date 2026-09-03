@@ -403,7 +403,7 @@ async function fetchWeatherContext() {
 // 读 han 手机最近一次上报的状态快照（电池/当前App/位置），注入唤醒上下文
 // 数据在 phone-report-api(8080)，经 /state/latest 读取；user_id 固定为 han
 const PHONE_STATE_URL = "http://127.0.0.1:8080/state/latest?user_id=han";
-const PHONE_STATE_TOKEN = "rsh"; // 与 phone-api systemd unit 的 AUTH_TOKEN 一致
+const PHONE_STATE_TOKEN = process.env.PHONE_STATE_TOKEN || ""; // 与 phone-api systemd unit 的 AUTH_TOKEN 一致，值在 .env
 
 async function fetchPhoneStateContext() {
   try {

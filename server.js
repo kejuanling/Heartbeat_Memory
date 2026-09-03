@@ -2963,7 +2963,7 @@ const MANAGED_SERVICES = [
   { name: "heart-web", type: "pm2", label: "心跳网页 heart-web" },
   { name: "netease-music-mcp", type: "port", port: 3303, label: "网易云 MCP（3303）", cmd: "cd /opt/netease-music-mcp && PORT=3303 nohup node src/http-server.js > http-server.log 2>&1 &", pattern: "netease-music-mcp" },
   { name: "decision-trail", type: "port", port: 8787, label: "决策痕迹 MCP（8787）", cmd: "cd /root/workspace/decision-trail && PORT=8787 nohup node server.mjs >> logs/server.log 2>&1 &", pattern: "decision-trail" },
-  { name: "spicy-monopoly", type: "port", port: 8773, label: "涩涩大富翁 MCP（8773）", cmd: "cd /opt/dylan-heartbeat/spicy-monopoly && SPICY_MONOPOLY_MCP_TRANSPORT=streamable-http SPICY_MONOPOLY_MCP_HOST=0.0.0.0 SPICY_MONOPOLY_MCP_PORT=8773 SPICY_MONOPOLY_MCP_PATH=/mcp SPICY_MONOPOLY_MCP_BEARER_TOKEN=han-xie-2026 nohup node mcp-server.js > mcp_spicy.log 2>&1 &", pattern: "spicy-monopoly" }
+  { name: "spicy-monopoly", type: "port", port: 8773, label: "涩涩大富翁 MCP（8773）", cmd: `cd /opt/dylan-heartbeat/spicy-monopoly && SPICY_MONOPOLY_MCP_TRANSPORT=streamable-http SPICY_MONOPOLY_MCP_HOST=0.0.0.0 SPICY_MONOPOLY_MCP_PORT=8773 SPICY_MONOPOLY_MCP_PATH=/mcp SPICY_MONOPOLY_MCP_BEARER_TOKEN=${process.env.SPICY_MONOPOLY_MCP_BEARER_TOKEN || ""} nohup node mcp-server.js > mcp_spicy.log 2>&1 &`, pattern: "spicy-monopoly" }
 ];
 
 function readJsonFileSafe(file, fallback) {
@@ -5593,57 +5593,71 @@ function isPrivateHost(hostname) {
 }
 
 async function fetchPageLimited(pageUrl, maxBytes) {
-  let parsedUrl;
-  try { parsedUrl = new URL(pageUrl); } catch (e) { throw new Error("无效的网页地址"); }
-  if (!/^https?:$/.test(parsedUrl.protocol)) throw new Error("仅支持 http/https 网页地址");
-  if (isPrivateHost(parsedUrl.hostname)) throw new Error("该地址指向内网/保留地址，不允许抓取");
-  // 域名也要防解析到内网 IP（DNS 指向 127.0.0.1 / 内网服务的绕过手法）
-  try {
-    const dns = require("dns").promises;
-    const lookup = await dns.lookup(parsedUrl.hostname);
-    if (isPrivateHost(lookup.address)) throw new Error("该域名解析到内网地址，不允许抓取");
-  } catch (e) {
-    if (/内网/.test(e.message)) throw e;
-    throw new Error("域名解析失败: " + e.message);
-  }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000);
-  try {
-    const resp = await fetch(pageUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-      },
-      redirect: "follow",
-      signal: controller.signal
-    });
-    if (!resp.ok) {
-      if (resp.status === 403 || resp.status === 412) throw new Error("该网站有反爬保护，抓不到网页内容，建议直接用本地下载的视频");
-      if (resp.status === 404) throw new Error("网页不存在（404）");
-      if (resp.status === 429) throw new Error("网页访问太频繁被限流，稍后再试");
-      throw new Error("网页请求失败 HTTP " + resp.status);
+  const MAX_HOPS = 5;
+  let currentUrl = pageUrl;
+  for (let hop = 0; hop <= MAX_HOPS; hop++) {
+    let parsedUrl;
+    try { parsedUrl = new URL(currentUrl); } catch (e) { throw new Error("无效的网页地址"); }
+    if (!/^https?:$/.test(parsedUrl.protocol)) throw new Error("仅支持 http/https 网页地址");
+    if (isPrivateHost(parsedUrl.hostname)) throw new Error("该地址指向内网/保留地址，不允许抓取");
+    // 域名也要防解析到内网 IP（DNS 指向 127.0.0.1 / 内网服务的绕过手法）
+    try {
+      const dns = require("dns").promises;
+      const lookup = await dns.lookup(parsedUrl.hostname);
+      if (isPrivateHost(lookup.address)) throw new Error("该域名解析到内网地址，不允许抓取");
+    } catch (e) {
+      if (/内网/.test(e.message)) throw e;
+      throw new Error("域名解析失败: " + e.message);
     }
-    const ct = String(resp.headers.get("content-type") || "");
-    if (ct && !/html|text|json|xml/i.test(ct)) {
-      throw new Error("该地址返回的不是网页（" + ct.split(";")[0].trim() + "）");
-    }
-    const reader = resp.body.getReader();
-    const chunks = [];
-    let total = 0;
-    const max = maxBytes || 5 * 1024 * 1024;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) {
-        chunks.push(value);
-        total += value.length;
-        if (total > max) break;
+    // redirect: "manual" —— 重定向绝不自动跟随，Location 每跳都重新走上面的完整校验，防公网地址 302 绕道内网（SSRF）
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
+    try {
+      const resp = await fetch(currentUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        },
+        redirect: "manual",
+        signal: controller.signal
+      });
+      if (resp.status >= 300 && resp.status < 400) {
+        const loc = resp.headers.get("location");
+        try { await resp.arrayBuffer(); } catch (e) {} // 丢弃跳转响应体，释放连接
+        if (!loc) throw new Error("网页请求失败 HTTP " + resp.status + "（无重定向目标）");
+        if (hop >= MAX_HOPS) throw new Error("重定向次数过多，放弃抓取");
+        try { currentUrl = new URL(loc, currentUrl).href; } catch (e) { throw new Error("重定向地址无效"); }
+        continue;
       }
+      if (!resp.ok) {
+        if (resp.status === 403 || resp.status === 412) throw new Error("该网站有反爬保护，抓不到网页内容，建议直接用本地下载的视频");
+        if (resp.status === 404) throw new Error("网页不存在（404）");
+        if (resp.status === 429) throw new Error("网页访问太频繁被限流，稍后再试");
+        throw new Error("网页请求失败 HTTP " + resp.status);
+      }
+      const ct = String(resp.headers.get("content-type") || "");
+      if (ct && !/html|text|json|xml/i.test(ct)) {
+        throw new Error("该地址返回的不是网页（" + ct.split(";")[0].trim() + "）");
+      }
+      const reader = resp.body.getReader();
+      const chunks = [];
+      let total = 0;
+      const max = maxBytes || 5 * 1024 * 1024;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          chunks.push(value);
+          total += value.length;
+          if (total > max) break;
+        }
+      }
+      return { html: Buffer.concat(chunks).toString("utf-8"), finalUrl: resp.url || currentUrl };
+    } finally {
+      clearTimeout(timer);
     }
-    return { html: Buffer.concat(chunks).toString("utf-8"), finalUrl: resp.url || pageUrl };
-  } finally {
-    clearTimeout(timer);
   }
+  throw new Error("重定向次数过多，放弃抓取");
 }
 
 function coAbsUrl(base, u) {
