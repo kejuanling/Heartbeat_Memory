@@ -1076,6 +1076,15 @@ function tailHasReply(sessionId, content) {
   return false;
 }
 
+// 剥离前端为「给上游模型看」而拼进 content 的工具记录段（buildMessages 加的「【本回复前调用工具记录】…」）。
+// 只应存在于转发给上游时，绝不落进时间线（否则刷新后会当正文显示、工具胶囊丢失）。
+function stripFrontendToolNote(content) {
+  if (typeof content !== "string") return content;
+  const idx = content.indexOf("\n\n【本回复前调用工具记录】");
+  if (idx < 0) return content;
+  return content.slice(0, idx);
+}
+
 // 以盘上为基同步「请求消息」：人设同步 + 去重补齐 + 尾部对齐，替代拿请求全量重建覆盖。
 // 用于发消息首保存 / MCP 写回：盘上永远是完整历史，请求里缺的补、多的（重生成换掉的旧回复）按覆盖语义清尾。
 function appendRequestMessages(sessionId, reqMsgs) {
@@ -1084,6 +1093,10 @@ function appendRequestMessages(sessionId, reqMsgs) {
   const keyOf = function (m) { return m.role + "\u0000" + normalizeContentToText(m.content); };
   const reqReal = reqList.filter(function (m) {
     return m && !m.tool_calls && !m.tool_call_id && !isSpecialEvent(m) && (m.role === "user" || m.role === "assistant");
+  }).map(function (m) {
+    // 落盘前剥离前端拼段，避免污染时间线（content 保持干净，刷新靠 tools 富字段渲染胶囊）
+    const c = stripFrontendToolNote(m.content);
+    return c === m.content ? m : { ...m, content: c };
   });
   const reqKeys = new Set(reqReal.map(keyOf));
   const reqLastReal = reqReal.length ? reqReal[reqReal.length - 1] : null;
