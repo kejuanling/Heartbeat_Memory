@@ -3308,7 +3308,7 @@ async function toggleStarMsg(){
   const content=msgText(m); const role=m.role||"";
   try{
     const key=await msgStarKeyBackend(m);
-    const r=await fetch(ccBase()+"/context-compaction/mark",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":ccGetCookie("admin_csrf")},body:JSON.stringify({key:key,marked:want,content:content,role:role}),credentials:"include"});
+    const r=await fetch(ccBase()+"/context-compaction/mark",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":ccGetCookie("admin_csrf")},body:JSON.stringify({key:key,marked:want,content:content,role:role,msg_time:(m&&m.time)||""}),credentials:"include"});
     if(!r.ok){ showToast("标星失败: HTTP "+r.status); return; }
     const j=await r.json().catch(function(){return {};});
     if(j&&j.ok===false){ showToast("标星失败: "+(j.error||"")); return; }
