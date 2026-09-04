@@ -3927,6 +3927,49 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
     if (c.enabled !== false && c.summary) return s + String(c.summary).length;
     return s + rangeChars(c.blockStart, c.blockEnd);
   }, 0) + gapRanges.reduce(function (s, g) { return s + rangeChars(g.start, g.end); }, 0);
+
+  // 容量提醒 token 分解（2026-09-04 起，管理台展示用）：让用户看清"实际发送"里
+  // 未覆盖积压 / 标星原句 / 置顶记忆（永久上下文）/ 图片 各占多少。
+  // 均为估算（estimateTokens：中文≈1字/token，其余≈4字符/token；图片每张 EST_IMAGE_TOKENS）。
+  const textToken = function (t) { return contextCompactor.estimateTokens(String(t || '')); };
+  const rangeText = function (s, e) {
+    let out = '';
+    for (let i = Math.max(0, s); i <= Math.min(items.length - 1, e); i++) {
+      const c = items[i] && items[i].msg && items[i].msg.content;
+      if (typeof c === 'string') out += c;
+    }
+    return out;
+  };
+  const msgTextTokens = function (m) {
+    if (!m) return 0;
+    if (typeof m.content === 'string') return textToken(m.content);
+    if (Array.isArray(m.content)) {
+      let n = 0;
+      for (const p of m.content) if (p && p.type === 'text') n += textToken(p.text);
+      return n;
+    }
+    return 0;
+  };
+  const msgImageCount = function (m) {
+    if (!Array.isArray(m.content)) return 0;
+    return m.content.filter(function (p) { return p && (p.type === 'image' || p.type === 'image_url'); }).length;
+  };
+  let _previewMarks = {};
+  try { _previewMarks = (contextReplacements.loadMarks && contextReplacements.loadMarks()) || {}; } catch (e) { _previewMarks = {}; }
+  let markedTokens = 0, imageTokens = 0;
+  (nonSys || []).forEach(function (m) {
+    if (!m) return;
+    try { if (_previewMarks[contextReplacements.contentKey(m)]) markedTokens += msgTextTokens(m); } catch (e) { /* 单条失败忽略 */ }
+    imageTokens += msgImageCount(m) * contextCompactor.EST_IMAGE_TOKENS;
+  });
+  let pinnedTokens = 0;
+  try { pinnedTokens = textToken(memoryEngine.buildPinnedContext ? memoryEngine.buildPinnedContext() : ''); } catch (e) { pinnedTokens = 0; }
+  const uncoveredTokens = gapRanges.reduce(function (s, g) { return s + textToken(rangeText(g.start, g.end)); }, 0)
+    + chunks.filter(function (c) { return !c.hidden && !(c.enabled !== false && c.summary); })
+        .reduce(function (s, c) { return s + textToken(rangeText(c.blockStart, c.blockEnd)); }, 0);
+  const activeSummaryTokens = chunks.filter(function (c) { return !c.hidden && c.enabled !== false && c.summary; })
+    .reduce(function (s, c) { return s + textToken(c.summary); }, 0);
+  const estTotalTokens = uncoveredTokens + activeSummaryTokens + markedTokens + imageTokens + pinnedTokens;
   return {
     enabled: chunks.length > 0,
     config: contextCompactor.loadConfig(),
@@ -3945,7 +3988,12 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
       estCompressedChars: estCompressedChars,
       hiddenCount: hiddenCount,
       maxActiveBlocks: previewMaxActive,
-      estSavedChars: Math.max(0, totalChars - estCompressedChars)
+      estSavedChars: Math.max(0, totalChars - estCompressedChars),
+      estUncoveredTokens: uncoveredTokens,
+      markedTokens: markedTokens,
+      imageTokens: imageTokens,
+      pinnedTokens: pinnedTokens,
+      estTotalTokens: estTotalTokens
     }
   };
 }

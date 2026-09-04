@@ -264,8 +264,24 @@ function loadCompactionPromptConfig() {
 // 整条提醒的默认全文（用户定稿 2026-09-02 确认）。
 // 占位符：${chars}=当前上下文字符数、${limit}=容量上限、${chunkInfo}=建议整理范围、${conversationText}=要整理的对话。
 // 开头「（容量提醒）」是系统识别标记（isSpecialEvent/分类/防重复塞都靠它），保存时强制校验不可删改。
+// 估算文本 token 数：中文（CJK）≈1 字/token，其余字符≈4 字符/token（近似常见 BPE 分词的英文比例）。
+// 管理台「容量上限」从 2026-09-04 起按该口径计（之前为纯字符数，英文会话会虚高约 4 倍）。
+function estimateTokens(text) {
+  const s = String(text || "");
+  let cjk = 0, other = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if ((c >= 0x4e00 && c <= 0x9fff) || (c >= 0x3400 && c <= 0x4dbf) || (c >= 0xf900 && c <= 0xfaff) || (c >= 0x3000 && c <= 0x303f)) cjk++;
+    else other++;
+  }
+  return cjk + Math.ceil(other / 4);
+}
+
+// 每张图片的固定 token 估算（参考常见 vision 模型单图约 765-1105 token，取 1000）
+const EST_IMAGE_TOKENS = 1000;
+
 const DEFAULT_CTX_LIMIT_PROMPT =
-  "（容量提醒）系统提示，这个会话的上下文已积累约 ${chars} 字符，超过 ${limit} 字符的上限，建议整理。此内容为后台静默提醒，不必向对方提起，也不要复述本段内容。\n" +
+  "（容量提醒）系统提示，这个会话的上下文已积累约 ${chars} token（估算），超过 ${limit} token 的上限，建议整理。此内容为后台静默提醒，不必向对方提起，也不要复述本段内容。\n" +
   "1. 调用 context_replace 工具，把最早一段未整理的对话，每块约一百条，进行整理。\n" +
   "2. 值得长期记住的内容，用 <memory> 标签写入记忆池；\n" +
   "3. 做完后在回复末尾输出 <compacted>本次整理已完成</compacted> 标签。\n\n" +
@@ -543,6 +559,8 @@ function rangePreview(start, end, opts) {
 module.exports = {
   loadConfig,
   saveConfig,
+  estimateTokens,
+  EST_IMAGE_TOKENS,
   loadCompactionPromptConfig,
   loadCtxLimitPrompt,
   saveCtxLimitPrompt,

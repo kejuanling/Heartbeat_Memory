@@ -1420,9 +1420,12 @@ function ccBuildSummaryStatsHtml(d, t){
     +'<span class="cc-mini-item'+(t.chunkCount?'':' zero')+'"><b>'+(t.chunkCount||0)+'</b><i>块</i></span>'
     +'<span class="cc-mini-item'+(t.cachedCount?'':' zero')+'"><b>'+(t.cachedCount||0)+'</b><i>缓存</i></span>'
     +'<span class="cc-mini-item"><b>'+fmtCcNum(t.totalChars||0)+'</b><i>字</i></span>'
+    +'<span class="cc-mini-item" title="未覆盖对话积压的 token 估算（触发容量提醒的口径）"><b>'+fmtCcNum(t.estUncoveredTokens||0)+'</b><i>积压tok</i></span>'
+    +'<span class="cc-mini-item'+(t.estTotalTokens?'':' zero')+'" title="实际发送 token 估算 = 未覆盖积压 + 摘要块 + 标星原句 + 图片 + 置顶记忆（永久上下文）。估算口径：中文≈1字/token、英文≈4字符/token、图片每张约1000。"><b>'+fmtCcNum(t.estTotalTokens||0)+'</b><i>总tok</i></span>'
     +(t.hiddenCount>0?'<span class="cc-mini-item zero"><b>'+(t.hiddenCount||0)+'</b><i>隐藏</i></span>':'')
     +'</div>'
-    +(t.hiddenCount>0?'<div class="cc-hidden-tip">最早 <b>'+(t.hiddenCount||0)+'</b> 块已隐藏、未进入上下文（活跃块上限 '+(t.maxActiveBlocks||'?')+'，手动+AI 合计保留最近 N 个）；如需保留信息，建议将块解析入池。</div>':'');
+    +(t.hiddenCount>0?'<div class="cc-hidden-tip">最早 <b>'+(t.hiddenCount||0)+'</b> 块已隐藏、未进入上下文（活跃块上限 '+(t.maxActiveBlocks||'?')+'，手动+AI 合计保留最近 N 个）；如需保留信息，建议将块解析入池。</div>':'')
+    +'<div class="cc-token-tip" style="font-size:11px;color:#6B7280;margin-top:4px;">容量占用（token 估算）：未覆盖积压 <b>'+fmtCcNum(t.estUncoveredTokens||0)+'</b>，实际发送约 <b>'+fmtCcNum(t.estTotalTokens||0)+'</b>（含标星 <b>'+fmtCcNum(t.markedTokens||0)+'</b>、图片 <b>'+fmtCcNum(t.imageTokens||0)+'</b>、置顶记忆 <b>'+fmtCcNum(t.pinnedTokens||0)+'</b>）。容量上限见上方配置，超限时网关塞隐藏提醒。</div>';
 }
 
 /**

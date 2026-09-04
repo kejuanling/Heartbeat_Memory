@@ -180,21 +180,14 @@ module.exports = function registerChatRoutes(app, deps) {
     return c.startsWith('（回忆 · ') || c.startsWith('（对话摘要');
   }
 
-  // 该消息是否为标星原句（用户手动标星，跨窗口保留，不算待整理积压）。
-  // marks 可由调用方循环外取一次传入，避免消息循环内反复查询（loadMarks 虽有 mtime 缓存，statSync 仍有开销）
-  function isMarkedMessage(m, marks) {
-    if (!m) return false;
-    try { return Boolean((marks || contextReplacements.loadMarks())[contextReplacements.contentKey(m)]); }
-    catch (e) { return false; }
-  }
-
-  // 容量提醒统计口径：只统计「还没被压缩块覆盖的历史消息原文」。
-  // maybeInject 在 applyReplacements 之后运行，llmMessages 中被压缩块替换的部分已是摘要占位（isSummaryPlaceholder），
-  // 未压缩的原文仍是原始 user/assistant 内容。因此过滤掉 system / 摘要占位 / 特殊事件 / 工具 / 标星原文（标星保留在上下文但并非待整理积压）即可。
-  function countUncompressedOriginalChars(messages) {
-    let marks = null;
-    try { marks = contextReplacements.loadMarks(); } catch (e) { marks = null; }
-    let charTotal = 0;
+  // 容量提醒统计口径（2026-09-04 起）：按「未覆盖（未被压缩块替换）的对话原文」做 token 估算，
+  // 与管理台设置的容量上限（token 估算）比较。maybeInject 在 applyReplacements 之后运行，
+  // llmMessages 中被压缩块替换的部分已是摘要占位（isSummaryPlaceholder），未压缩的原文仍是原始 user/assistant 内容。
+  // 计入：user/assistant 原文文本 + 标星原句（applyReplacements 有 marks 保护、标星不会被压掉，但它确实占用上下文）
+  //       + 图片估算（每图 EST_IMAGE_TOKENS；历史图片已被 trim 裁剪、只留最近几轮，影响有限）。
+  // 排除：system / 摘要占位 / 特殊事件 / 工具消息 —— 这些不可由 AI 压缩整理，不计入"待整理积压"。
+  function countUncompressedTokens(messages) {
+    let tokTotal = 0;
     for (const m of messages) {
       if (!m) continue;
       if (m.role === 'system') continue;
@@ -202,15 +195,16 @@ module.exports = function registerChatRoutes(app, deps) {
       if (m._ctxRep || m._ccSummary || m.tool_calls || m.tool_call_id) continue;
       if (isSummaryPlaceholder(m)) continue;
       if (isSpecialEvent(m)) continue;
-      if (isMarkedMessage(m, marks)) continue; // 标星原文本就要保留在上下文，不算待整理积压
-      if (typeof m.content === 'string') charTotal += m.content.length;
+      if (typeof m.content === 'string') tokTotal += contextCompactor.estimateTokens(m.content);
       else if (Array.isArray(m.content)) {
         for (const part of m.content) {
-          if (part && part.type === 'text' && typeof part.text === 'string') charTotal += part.text.length;
+          if (!part) continue;
+          if (part.type === 'text' && typeof part.text === 'string') tokTotal += contextCompactor.estimateTokens(part.text);
+          else if (part.type === 'image' || part.type === 'image_url') tokTotal += contextCompactor.EST_IMAGE_TOKENS;
         }
       }
     }
-    return charTotal;
+    return tokTotal;
   }
 
   // 疑似有落盘 ctx_limit 提醒的会话（进程内存）：低于上限时据此跳过全量读盘清理。
@@ -220,10 +214,10 @@ module.exports = function registerChatRoutes(app, deps) {
       const cfg = contextCompactor.loadConfig();
       const limit = Number(cfg.compaction_context_limit_chars) || 0;
       if (!cfg.compaction_context_remind_enabled || limit <= 0) return;
-      const chars = countUncompressedOriginalChars(llmMessages);
+      const tokens = countUncompressedTokens(llmMessages);
       // 注意顺序：必须先做「低于上限清理」再判「已有提醒不重复塞」——
       // 旧提醒会被特殊事件机制每轮注入回来，若先判「已有」就提前返回，永远走不到清理
-      if (chars <= limit) {
+      if (tokens <= limit) {
         // 已不超限：当轮消息流里不再带提醒，落盘的活跃提醒也标记删除——提示彻底消失；
         // 之后再次超限时（流里查不到提醒）会重新塞一条带新时间边界的
         let inStream = false;
@@ -249,7 +243,7 @@ module.exports = function registerChatRoutes(app, deps) {
           console.warn('[ctx-limit] 低于上限清理落盘提醒失败（不影响转发）:', cleanErr.message);
         }
         if (inStream || onDisk) {
-          console.log(`[ctx-limit] 会话 ${sessionId || 'default'} 上下文 ${chars} 字符已低于上限 ${limit}，容量提醒已移除（再超限会重新提醒）`);
+          console.log(`[ctx-limit] 会话 ${sessionId || 'default'} 上下文 ${tokens} token（估算）已低于上限 ${limit}，容量提醒已移除（再超限会重新提醒）`);
         }
         return;
       }
@@ -307,16 +301,25 @@ module.exports = function registerChatRoutes(app, deps) {
         prompt = '';
       }
       const remark = prompt
-        .replace(/\$\{chars\}/g, String(chars))
+        .replace(/\$\{chars\}/g, String(tokens))
         .replace(/\$\{limit\}/g, String(limit))
         .replace(/\$\{chunkInfo\}/g, chunkInfo)
         .replace(/\$\{conversationText\}/g, '（就是上面第 1 点要整理的那段对话）');
       if (!remark.trim().startsWith(CTX_LIMIT_HEAD)) return; // 模板异常兜底：开头标记缺失就不塞，防识别失效
 
-      llmMessages.push({ role: 'assistant', content: remark });
+      // 插入位置：塞到「最后一条 user 之前」（紧跟本轮用户消息之前、而非整个消息流末尾），
+      // 避免对话序列以 assistant 收尾被部分模型当成"自己的上一条输出"续写。
+      let insIdx = -1;
+      for (let i = llmMessages.length - 1; i >= 0; i--) {
+        const mm = llmMessages[i];
+        if (mm && mm.role === 'user' && !isSpecialEvent(mm) && !mm.tool_call_id) { insIdx = i; break; }
+      }
+      const reminderMsg = { role: 'assistant', content: remark };
+      if (insIdx >= 0) llmMessages.splice(insIdx, 0, reminderMsg);
+      else llmMessages.push(reminderMsg);
       appendSpecialEvent(remark, { hidden: true, kind: 'ctx_limit' }, sessionId);
       _ctxLimitReminderSessions.add(sessionId || 'default');
-      console.log(`[ctx-limit] 会话 ${sessionId || 'default'} 上下文 ${chars} 字符超过上限 ${limit}，已塞容量提醒（${remark.length} 字符）`);
+      console.log(`[ctx-limit] 会话 ${sessionId || 'default'} 上下文 ${tokens} token（估算）超过上限 ${limit}，已塞容量提醒（${remark.length} 字符）`);
     } catch (err) {
       console.warn('[ctx-limit] 容量提醒检测失败（不影响转发）:', err.message);
     }
