@@ -1569,14 +1569,41 @@ require("./routes/chat")(app, {
 // ========================
 // 跨窗口自动注入：日记 + 高重要级记忆 + 标星内容（注入标题显示为「记忆碎片」，本质仍标星）
 // ========================
-function recentDiaryText(count) {
+// 会话创建时刻：取该会话时间线第一条消息的时间（首条消息 ≈ 会话创建时刻）。
+// 用于日记跨窗口注入的边界：只注入"创建日期之前"的日记。
+function sessionCreatedAtOf(sessionId) {
+  try {
+    const tl = loadTimeline(sessionId || "default");
+    for (const m of tl) {
+      if (m && m.time) return m.time;
+    }
+  } catch (e) {}
+  return null;
+}
+
+// 日记跨窗口注入（批注 2026-09-04）：只注入"本会话创建日期之前"的日记，
+// 按日期升序（旧在前新在后）取最近 count 篇；创建日期当天及之后的日记
+// 一律不进跨窗口块——它们在各自会话的时间线里按时间插位（appendSpecialEvent）。
+// 边界口径：日记文件名与 cutoff 都用 TIME_ZONE 本地日期（YYYY-MM-DD，严格小于）。
+function recentDiaryTextBefore(sessionId, count, createdIso) {
   const diaryDir = path.join(__dirname, "diary");
   let files = [];
   try { files = fs.readdirSync(diaryDir).filter(function (f) { return /^\d{4}-\d{2}-\d{2}\.md$/.test(f); }); } catch (e) { return ""; }
   if (!files.length) return "";
-  files.sort();
-  // 直接取最新的 count 份文件（按日期升序，旧在前新在后），不再按时间过滤
-  const picked = files.slice(-Math.max(1, Number(count) || 3));
+  files.sort(); // 升序：旧在前新在后
+  let cutoff = "";
+  try {
+    const d = new Date(createdIso);
+    if (!isNaN(d.getTime())) {
+      const p = getDatePartsInTimeZone(d, TIME_ZONE);
+      cutoff = p.year + "-" + p.month + "-" + p.day;
+    }
+  } catch (e) {}
+  if (!cutoff) return "";
+  // 只留 日记日期 < 会话创建日期
+  const before = files.filter(function (f) { return f.slice(0, 10) < cutoff; });
+  if (!before.length) return "";
+  const picked = before.slice(-Math.max(1, Number(count) || 3));
   const out = [];
   for (const f of picked) {
     try {
@@ -1585,36 +1612,6 @@ function recentDiaryText(count) {
     } catch (e) {}
   }
   return out.join("\n\n");
-}
-
-// 取最近 count 份日记文件，但排除"当前会话里已经以特殊事件(自动写了日记)插入过"的日期。
-// 批注 2026-08-30：日记跨窗口注入 = 别把"本会话 AI 写的日记"再塞到顶部（它已按时间线插入），
-// 只把"其它会话语的日记"作为跨窗口块注入。判定依据：当前会话时间线里是否存在该日期的「自动写了日记」事件。
-function recentDiaryTextExcluding(sessionId, count) {
-  const base = recentDiaryText(count);
-  if (!base) return "";
-  const sid = String(sessionId || "default");
-  // 收集当前会话时间线里已出现的日记日期（从「自动写了日记」特殊事件里提取 YYYY-MM-DD）
-  const presentDates = new Set();
-  try {
-    const tl = loadTimeline(sid);
-    for (const m of tl) {
-      if (!m || typeof m.content !== "string") continue;
-      if (!m.content.includes("自动写了日记")) continue;
-      const dm = m.content.match(/（?\s*(\d{4}-\d{2}-\d{2})/);
-      if (dm) presentDates.add(dm[1]);
-    }
-  } catch (e) {}
-  if (!presentDates.size) return base;
-  // 逐段过滤：recentDiaryText 输出形如 "### 2026-08-30\n内容"
-  const segments = base.split(/(?=^### )/m).map(function (s) { return s.trim(); }).filter(Boolean);
-  const kept = segments.filter(function (seg) {
-    const dm = seg.match(/^###\s*(\d{4}-\d{2}-\d{2})/);
-    if (!dm) return true;
-    if (presentDates.has(dm[1])) return false; // 本会话已按时间线插入，跳过跨窗口块
-    return true;
-  });
-  return kept.join("\n\n");
 }
 
 // ── 记忆碎片（标星内容）注入 ────────
@@ -1677,13 +1674,14 @@ function starredContextText(limit) {
 // 跨窗口记忆快照（每会话固定）
 // 批注 2026-08-30：相关记忆(置顶) + 标星(记忆碎片) + 近期日记 不再每次实时重建，
 // 而是"开新会话时抓一次快照并固定不变"。快照按 sessionId 存到 data/cross_snapshot_<sid>.json。
-// 日记不在此处（日记按时间线特殊事件插入，见 appendSpecialEvent/特殊事件注入）。
 // 2026-08-29 批注：相关记忆改为「只固定置顶记忆(手动+多次检索自动置顶)」，去掉按分类抽高重要级，
 // 话题相关交给 surface_memory 按需召回。加了 version 以让旧快照(旧格式)在下次请求时自动重建。
+// 2026-09-04 批注：近期日记只注入"本会话创建日期之前"的日记（快照存 created_at 固化边界），
+// 创建日期当天及之后的日记按时间线特殊事件插入（见 appendSpecialEvent）。
 // ========================
 const CROSS_SNAPSHOT_DIR = path.join(__dirname, "data");
 const SESSION_CFG_DIR = path.join(__dirname, "data", "session_cfg");   // 会话级配置（如跨窗口注入覆盖）；无文件=跟随全局
-const CROSS_SNAPSHOT_VERSION = 4;  // 升版本：加 fingerprint 字段，旧快照自动重建
+const CROSS_SNAPSHOT_VERSION = 5;  // 升版本：日记跨窗口改为"只注入会话创建日期之前"（快照存 created_at），旧快照自动重建
 const CROSS_SNAPSHOT_TTL_MS = 10 * 60 * 1000;  // 超时兜底（10分钟），防止指纹漏判导致永久不更新
 function crossSnapshotFile(sessionId) {
   // 与 timelineFileFor 用同一套会话名规则（safeSessionToken）：保证同一会话的时间线与快照归属一致
@@ -1748,10 +1746,13 @@ function buildCrossMemorySnapshot(sessionId) {
   if (cfg.cross_inject_enabled === false) return "";
   const file = crossSnapshotFile(sessionId);
   const fp = crossFingerprint(cfg);
+  // 会话创建时刻：优先时间线首条消息；其次旧快照里固化过的 created_at（防边界漂移）；都没有则用当前时刻（首次请求≈创建时刻）。
+  let createdIso = sessionCreatedAtOf(sessionId);
   // 已有快照：版本相符 + 指纹未变 + 未超 TTL 才复用；否则重建（置顶/标星/日记变化即更新）。
   try {
     if (fs.existsSync(file)) {
       const snap = fs.readJsonSync(file);
+      if (!createdIso && snap && snap.created_at) createdIso = snap.created_at;
       if (snap && snap.version === CROSS_SNAPSHOT_VERSION && typeof snap.text === "string" && snap.text
           && snap.fingerprint === fp
           && snap.captured_at && (Date.now() - new Date(snap.captured_at).getTime()) < CROSS_SNAPSHOT_TTL_MS) {
@@ -1759,6 +1760,7 @@ function buildCrossMemorySnapshot(sessionId) {
       }
     }
   } catch (e) { console.warn("[cross-snapshot] 读取快照失败:", e.message); }
+  if (!createdIso) createdIso = new Date().toISOString();
   // 未创建：本次抓一次并落盘
   const parts = [];
   if (cfg.cross_inject_memory !== false) {
@@ -1773,9 +1775,9 @@ function buildCrossMemorySnapshot(sessionId) {
     const st = starredContextText(Number(cfg.cross_inject_starred_topk) || 10);
     if (st) parts.push("## 记忆碎片\n" + st);
   }
-  // 日记：跨窗口注入（快照的一部分），但排除"本会话已按时间线插入过的日记"。
+  // 日记：跨窗口注入（快照的一部分），只注入"本会话创建日期之前"的日记。
   if (cfg.cross_inject_diary !== false) {
-    const dt = recentDiaryTextExcluding(sessionId, Number(cfg.cross_inject_diary_count) || 3);
+    const dt = recentDiaryTextBefore(sessionId, Number(cfg.cross_inject_diary_count) || 3, createdIso);
     if (dt) parts.push("## 近期日记\n" + dt);
   }
   const text = parts.join("\n\n");
@@ -1783,7 +1785,7 @@ function buildCrossMemorySnapshot(sessionId) {
   if (text) {
     try {
       fs.ensureDirSync(CROSS_SNAPSHOT_DIR);
-      fs.writeJsonSync(file, { session: sessionId || "default", captured_at: new Date().toISOString(), version: CROSS_SNAPSHOT_VERSION, fingerprint: fp, text });
+      fs.writeJsonSync(file, { session: sessionId || "default", created_at: createdIso, captured_at: new Date().toISOString(), version: CROSS_SNAPSHOT_VERSION, fingerprint: fp, text });
     } catch (e) { console.warn("[cross-snapshot] 写入快照失败:", e.message); }
   }
   return text;
