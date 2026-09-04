@@ -1836,6 +1836,43 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
     }
   }
 
+  // 方案2：工具循环逐轮即时回传。onEvent 把「本轮正文/思考 + 每工具 start/end」实时写成 SSE，
+  // 前端据此渲染工具卡与正文交错 + running→done 状态。仅流式请求启用；落盘/缓存仍用 r.toolHistory（终态）。
+  let streamStarted = false;
+  const streamDelta = (deltaObj) => {
+    if (!streamStarted) {
+      reply.raw.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+      streamStarted = true;
+    }
+    try {
+      reply.raw.write("data: " + JSON.stringify({
+        id: "chatcmpl-mcp",
+        object: "chat.completion.chunk",
+        created: Math.floor(Date.now() / 1000),
+        model,
+        choices: [{ index: 0, delta: deltaObj, finish_reason: null }]
+      }) + "\n\n");
+    } catch (e) {}
+  };
+  const onEvent = (evt) => {
+    if (!evt) return;
+    try {
+      if (evt.type === "text") {
+        // 逐段正文先剥标签/工具回声再下发，保证用户看不到 <memory> 等标签与模型自抄的工具结果；
+        // 存记忆副作用仍由收尾对完整文本做一次（extractAndStore）。
+        const clean = stripToolEchoBlocks(tagParser.stripTags(evt.text));
+        for (let i = 0; i < clean.length; i += 24) streamDelta({ content: clean.slice(i, i + 24) });
+      } else if (evt.type === "reasoning") {
+        const clean = tagParser.stripTags(evt.text);
+        for (let i = 0; i < clean.length; i += 60) streamDelta({ reasoning_content: clean.slice(i, i + 60) });
+      } else if (evt.type === "tool_start") {
+        streamDelta({ tool_start: { index: evt.index, id: evt.id, name: evt.name, args: evt.args } });
+      } else if (evt.type === "tool_end") {
+        streamDelta({ tool_end: { index: evt.index, id: evt.id, name: evt.name, args: evt.args, result: evt.result, error: evt.error, ok: evt.ok } });
+      }
+    } catch (e) {}
+  };
+
   let r = directResult;
   if (!r) {
     r = await mcp.runWithTools({
@@ -1843,7 +1880,8 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
       upstreamKey: targetApiKey,
       model,
       messages: messages || body.messages || [],
-      serverClients: clients
+      serverClients: clients,
+      onEvent: (body.stream === true) ? onEvent : null
     });
   }
 
@@ -1905,7 +1943,10 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
       // 富字段一并落时间线：reasoning/tools/tokens，跨设备刷新不再丢（前端 /v1/history 读取这些字段）。
       // 盘尾已有同内容回复（重试/重复写回）则跳过，不重复追写。
       if (!tailHasReply(sessionId, aiClean)) {
-        toAppend.push({ role: "assistant", content: aiClean, reasoning: r.reasoning || "", tools: r.toolHistory || [], tokens: r.usage || null });
+        toAppend.push({
+          role: "assistant", content: aiClean, reasoning: r.reasoning || "", tools: r.toolHistory || [], tokens: r.usage || null,
+          segments: (r.toolHistory && r.toolHistory.length) ? (r.segments || []).map(function(s){ return stripToolEchoBlocks(tagParser.stripTags(s)); }) : undefined   // 方案2刷新：正文段结构（已剥标签/工具回声），供前端交错插工具卡
+        });
       }
       if (toAppend.length) appendMessages(sessionId, toAppend);
       console.log("[mcp] AI 回复已写回时间线 (session=" + (sessionId || "default") + ", chars=" + r.text.length + ", 补齐=" + syncRes.appended + ", 清尾=" + syncRes.removedTail + ", 追加=" + toAppend.length + ")");
@@ -1926,6 +1967,7 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
   // 不能再回传（否则二次 writeHead 报错）；此时仅保留副作用收尾（时间线/幂等缓存已在上方完成）。
   if (body.stream === true) {
     if (directResult) return true;   // 已直通透传完毕，无需再回传
+    if (streamStarted) { try { reply.raw.end(); } catch {} return true; }   // 方案2：已用 onEvent 逐轮流式回传，避免 buildSSE 重复
     const stream = mcp.buildSSE(aiClean, { model, usage: r.usage, reasoning: r.reasoning, toolHistory: r.toolHistory });
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -5702,6 +5744,25 @@ app.put("/admin/session-pins", { preHandler: basicAuth }, async (req, reply) => 
     fs.ensureDirSync(path.dirname(SESSION_PINS_FILE));
     fs.writeFileSync(SESSION_PINS_FILE, JSON.stringify(pins, null, 2), "utf-8");
     reply.send({ ok: true, saved: true, count: pins.length });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+// 会话锁定唤醒（存 data/wake-locked.json）：唤醒进程只对这些会话各自独立计时并唤醒；置顶时可选一并锁定，取消置顶即解锁
+const WAKE_LOCKED_FILE = path.join(__dirname, "data", "wake-locked.json");
+app.get("/admin/wake-locked", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    let sessions = [];
+    try { if (fs.existsSync(WAKE_LOCKED_FILE)) { const v = JSON.parse(fs.readFileSync(WAKE_LOCKED_FILE, "utf-8")) || []; if (Array.isArray(v)) sessions = v; } } catch (e) {}
+    reply.send({ ok: true, sessions });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+app.put("/admin/wake-locked", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const body = (req.body && typeof req.body === "object") ? req.body : {};
+    const sessions = (body.sessions && Array.isArray(body.sessions)) ? body.sessions.filter(function (s) { return typeof s === "string" && s; }) : [];
+    fs.ensureDirSync(path.dirname(WAKE_LOCKED_FILE));
+    fs.writeFileSync(WAKE_LOCKED_FILE, JSON.stringify(sessions, null, 2), "utf-8");
+    reply.send({ ok: true, saved: true, count: sessions.length });
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 

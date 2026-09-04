@@ -771,6 +771,9 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .tool-trace .tt-res{white-space:pre-wrap;word-break:break-all;color:var(--ink);background:rgba(255,255,255,.45);border-radius:6px;padding:6px 8px;margin:0;max-height:180px;overflow:auto;font-size:11.5px}
 .tool-trace .tt-err{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:#a5554a;background:rgba(200,90,80,.10);padding:1px 8px;border-radius:999px;white-space:nowrap}
 .tool-trace .tt-ok{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:#4a8a5c;background:rgba(60,140,90,.10);padding:1px 8px;border-radius:999px;white-space:nowrap}
+.tool-trace .tt-run{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#8a6d3b;background:rgba(210,170,90,.14);padding:1px 8px;border-radius:999px;white-space:nowrap}
+.tool-trace .tt-spin{width:10px;height:10px;border-radius:50%;border:2px solid rgba(180,140,70,.35);border-top-color:#a8863f;animation:ttSpin .7s linear infinite;display:inline-block}
+@keyframes ttSpin{to{transform:rotate(360deg)}}
 
 /* 空态 */
 #empty{
@@ -902,6 +905,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .session-item .s-name{font-size:14px;font-weight:600;color:var(--ink);display:flex;align-items:center;gap:6px}
 .session-item .s-name .s-badge{font-size:10px;color:#fff;background:var(--accent);border-radius:8px;padding:1px 7px;flex-shrink:0}
 .session-item .s-meta .s-badge.pin{font-size:10px;color:#fff;background:var(--accent);border-radius:8px;padding:1px 6px;margin-right:4px}
+.session-item .s-meta .s-badge.lock{font-size:10px;color:#fff;background:#4a9a6b;border-radius:8px;padding:1px 6px;margin-right:4px}
 .session-item .s-name .s-del{margin-left:auto;border:none;background:none;color:var(--ink3);font-size:15px;cursor:pointer;padding:2px 6px}
 .session-item .s-name .s-del:hover{color:#d88383}
 .session-item .s-meta{font-size:11px;color:var(--ink3)}
@@ -1740,6 +1744,7 @@ let selectMode=false, selectSet=new Set(), actIdx=-1;
 // 多会话：当前会话ID（default=主会话），本地缓存会话名单
 let currentSession="default";
 let sessionList=[];
+let wakeLocked=[];   // 锁定唤醒会话集合（服务器端同步）
 
 function loadCfg(){
   try{
@@ -2299,9 +2304,10 @@ function estTokens(s){
 /* ================= 渲染 ================= */
 function renderToolCapsule(t){
   const name=(t&&t.name)||"tool";
-  const args=t&&t.args?JSON.stringify(t.args):"{}";
+  const args=(t&&t.args)?((typeof t.args==="string")?t.args:JSON.stringify(t.args)):"{}";
   let res="",badge="";
-  if(t&&t.error){badge='<span class="tt-err"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> 失败</span>';res=(t.result||t.error||"");}
+  if(t&&t.status==="running"){badge='<span class="tt-run"><span class="tt-spin"></span>执行中</span>';res="";}
+  else if(t&&t.error){badge='<span class="tt-err"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> 失败</span>';res=(t.result||t.error||"");}
   else{badge='<span class="tt-ok">✓ 已执行</span>';res=(t&&t.result)||"";}
   const argHtml=args&&args!=="{}"?('<div class="tt-arg">参数：'+escapeHtml(args)+'</div>'):'';
   return '<div class="tool-trace"><span class="tt-h"><span class="tt-icon"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4L15 12l-3-3z"/></svg></span><span class="tt-name">'+escapeHtml(name)+'</span>'+badge+'<span class="tt-a">▾</span></span><div class="tt-body">'+argHtml+'<pre class="tt-res">'+escapeHtml(res)+(res? "":"（无返回）")+'</pre></div></div>';
@@ -2309,6 +2315,44 @@ function renderToolCapsule(t){
 function renderToolCapsules(tools){
   if(!tools||!tools.length)return "";
   return tools.map(renderToolCapsule).join("");
+}
+// ===== 方案2：工具卡与正文交错 + running→done 状态（流式）=====
+// 把工具作为聊流里的独立块，紧跟所属正文段插入；running 卡执行完就地更新为 done/failed。
+let _streamActive=false;        // 当前是否处于"流式工具卡插入"模式
+let _streamAnchor=null;         // 当前聊流末尾锚点（chatEl 直接子元素），新块插到其后
+const _toolCards={};            // index -> {el, tool}
+function _finalTools(){
+  return Object.keys(_toolCards).map(function(k){return _toolCards[k].tool;})
+    .sort(function(a,b){return (a.index||0)-(b.index||0);});
+}
+function _insertStreamToolCard(tool){
+  let anchor=_streamAnchor;
+  if(!anchor||!chatEl.contains(anchor)){ anchor=lastAIBubble()||chatEl.lastElementChild; }
+  const tmp=document.createElement("div"); tmp.innerHTML=renderToolCapsule(tool);
+  const card=tmp.firstChild; card.classList.add("stream-in");
+  if(anchor&&anchor.nextSibling){ chatEl.insertBefore(card,anchor.nextSibling); }
+  else { chatEl.appendChild(card); }
+  card.addEventListener("click",function(){card.classList.toggle("open");});
+  _streamAnchor=card; _toolCards[tool.index]={el:card,tool:tool};
+  if(autoScroll)scrollBottom();
+}
+function _updateStreamToolCard(tool){
+  const cur=_toolCards[tool.index];
+  if(cur&&cur.el){
+    const tmp=document.createElement("div"); tmp.innerHTML=renderToolCapsule(tool);
+    const card=tmp.firstChild; cur.el.replaceWith(card);
+    card.addEventListener("click",function(){card.classList.toggle("open");});
+    _toolCards[tool.index]={el:card,tool:tool};
+    if(autoScroll)scrollBottom();
+  } else { _insertStreamToolCard(tool); }
+}
+function _onToolStart(ts){
+  const tool={index:ts.index,name:ts.name,args:ts.args,status:"running",result:"",error:null};
+  SEGQ.push(function(){ if(cfg.show_tools)_insertStreamToolCard(tool); },0);
+}
+function _onToolEnd(te){
+  const tool={index:te.index,name:te.name,args:te.args,result:te.result,error:te.error,status:te.ok?"done":"failed"};
+  SEGQ.push(function(){ if(cfg.show_tools)_updateStreamToolCard(tool); },0);
 }
 // 把模型抄进正文的「【工具 · NAME】 {...JSON...}」块抽出来，转成折叠胶囊（复用 renderToolCapsule）。
 // 因为这些块本质是工具返回，直接当 markdown 会渲染成一坨巨大 JSON 文本。
@@ -2413,7 +2457,7 @@ function bindVoiceMsg(el, text){
   });
   el.addEventListener("contextmenu", function(ev){ ev.preventDefault(); });
 }
-function renderAiContent(msgEl, bubble, content, reasoning, tools){
+function renderAiContent(msgEl, bubble, content, reasoning, tools, segments){
   content=stripInnerTags(content);   // 保证 <memory>/<pin>/<wake>/<quiet> 不显示给用户
   content=stripCurrentTime(content).clean;   // 保证 <current_time> 标签也不显示（流式/最终都剥掉）
   // 个别流向把气泡分隔符整串带进正文，此处置换成换行，避免当字面字符显示
@@ -2441,6 +2485,24 @@ function renderAiContent(msgEl, bubble, content, reasoning, tools){
         host.insertBefore(elb, anchor.nextSibling); anchor=elb;
       }
     });
+    bubble.style.display="none"; bubble.innerHTML="";
+  }else if(Array.isArray(segments)&&segments.length&&Array.isArray(tools)&&tools.length){
+    // 方案2刷新：正文按段渲染，工具卡按 afterSeg 插到对应段之后（与流式交错一致）
+    const host=bubble.parentNode||msgEl;
+    let sib=bubble.nextSibling;
+    while(sib){ const nx=sib.nextSibling; if(sib.nodeType===1&&(sib.classList.contains("bubble")||sib.classList.contains("tool-trace"))){ host.removeChild(sib); } sib=nx; }
+    let anchor=bubble;
+    const bySeg={};
+    tools.forEach(function(t){ const a=(typeof t.afterSeg==="number")?t.afterSeg:-1; (bySeg[a]=bySeg[a]||[]).push(t); });
+    segments.forEach(function(seg,i){
+      const cleanSeg=stripCurrentTime(stripInnerTags(seg)).clean;
+      const elb=document.createElement("div"); elb.className="bubble"; elb.innerHTML=(cfg.ai_md?renderMd(cleanSeg):escapeHtml(cleanSeg));
+      host.insertBefore(elb, anchor.nextSibling); anchor=elb;
+      const grp=bySeg[i];
+      if(grp&&grp.length){ grp.forEach(function(t){ const tc=document.createElement("div"); tc.innerHTML=renderToolCapsule(t); const card=tc.firstChild; host.insertBefore(card, anchor.nextSibling); card.addEventListener("click",function(){card.classList.toggle("open");}); anchor=card; }); }
+    });
+    // afterSeg 无对应正文段（-1=最前/超界=末尾）的工具统一放最后
+    [ -1, 999999 ].forEach(function(k){ const grp=bySeg[k]; if(grp&&grp.length){ grp.forEach(function(t){ const tc=document.createElement("div"); tc.innerHTML=renderToolCapsule(t); const card=tc.firstChild; host.insertBefore(card, anchor.nextSibling); card.addEventListener("click",function(){card.classList.toggle("open");}); anchor=card; }); } });
     bubble.style.display="none"; bubble.innerHTML="";
   }else if(toolEcho){
     let h=toolEcho.html;
@@ -2621,7 +2683,7 @@ function makeMsgEl(m,idx,grpCls){
       // 必须先挂到 host，否则 renderAiContent 里 insertBefore(pre, bubble) 因 bubble 不是
       // host 子节点而抛 NotFoundError，导致带 reasoning/tools 的 AI 消息整条不渲染。
       host.appendChild(b);
-      renderAiContent(host,b,p,(pi===0?m.reasoning:""),(pi===0?(m.tools||[]):[]));
+      renderAiContent(host,b,p,(pi===0?m.reasoning:""),(pi===0?(m.tools||[]):[]),(pi===0?m.segments:null));
     });
   } else {
     const host=buildUnit();
@@ -2789,6 +2851,7 @@ function segPopOne(text,srcMsg,first){   // 弹出单条气泡 DOM（复用 make
   el.classList.add("stream-in");
   removeEmpty();
   chatEl.appendChild(el);
+  if(_streamActive)_streamAnchor=el;   // 方案2：正文字段弹出后，把工具卡插入点锚到其后
   if(autoScroll)scrollBottom();
 }
 function segEnqueueMsg(m){   // 把一条消息拆段全部入队（user 消息整条入队，AI 消息按分隔符拆段）；间隔按每段字数
@@ -2896,7 +2959,8 @@ async function request(finalMsgs, fromSend){
   aborter=new AbortController();
   const sidAtStart=currentSession;   // 收尾时校验：请求期间切了会话就不回写（防旧会话消息写进新会话的缓存）
   appendTypingBox();
-  let full="",reasoning="",usage=null,tools=[],reader=null,flushStreamSegs=null;
+  let full="",reasoning="",usage=null,tools=[],reader=null,flushStreamSegs=null,_streamToolMode="live";
+  const syncToolSave=function(){ if(_streamToolMode!=="group"){ tools=_finalTools(); } };
   const isStream=(cfg.send_mode||"stream")==="stream" || cfg.send_mode===undefined;
   try{
     const payload={
@@ -2940,6 +3004,7 @@ async function request(finalMsgs, fromSend){
         flushStreamSegs=function(){return p.flush(full);};
       }
     } else {
+    _streamActive=true; for(const _k in _toolCards)delete _toolCards[_k];   // 方案2：进入流式工具卡插入模式
     reader=resp.body.getReader();
     const dec=new TextDecoder();let buf="";
     /* ===== QQ 式分段连播（流式）=====
@@ -2947,7 +3012,7 @@ async function request(finalMsgs, fromSend){
        不再做整条打字机。思考链/工具链不单独先显，第一条正文气泡弹出时并入显示（用户 2026-09-02 拍板）。
        flushStreamSegs：收尾补弹剩余段（含最后一段），供正常结束/停止/出错三处共用。 */
     // reasoning/tools 在流式过程中持续累积，用 getter 让第一段弹出时取到当前值
-    const playerSrc={role:"assistant",get reasoning(){return reasoning;},get tools(){return tools;},time:null};
+    const playerSrc={role:"assistant",get reasoning(){return reasoning;},get tools(){return _streamToolMode==="group"?tools:[];},time:null};
     const player=makeSegPlayer(playerSrc);
     flushStreamSegs=async function(){
       await player.flush(full);
@@ -2967,7 +3032,13 @@ async function request(finalMsgs, fromSend){
           if(json.usage){usage=json.usage;}
           const delta=json.choices&&json.choices[0]&&json.choices[0].delta;
           const hasContent = delta && delta.content;
-          if(delta){if(delta.content)full+=delta.content;if(delta.reasoning_content)reasoning+=delta.reasoning_content;if(delta.tool_trace){tools=delta.tool_trace;}}
+          if(delta){
+            if(delta.content)full+=delta.content;
+            if(delta.reasoning_content)reasoning+=delta.reasoning_content;
+            if(delta.tool_trace){tools=delta.tool_trace;_streamToolMode="group";}   // 旧整组（幂等回放）走 rw-wrap 兜底
+            if(delta.tool_start)_onToolStart(delta.tool_start);
+            if(delta.tool_end)_onToolEnd(delta.tool_end);
+          }
           // 正文：每凑齐一段（分隔符出现）就整条弹出，一条接一条；思考链/工具链随第一段带入
           if(hasContent){ player.feed(full); }
         }catch(e){}
@@ -2976,6 +3047,7 @@ async function request(finalMsgs, fromSend){
     }
     // 入库（分段连播：先把剩余未弹的段一条条补弹完，再静默重建，不重播整块动画）
     if(flushStreamSegs){await flushStreamSegs();}
+    syncToolSave();
     finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});
     if(currentSession===sidAtStart){
       msgs=finalMsgs;saveMsgs();
@@ -2985,7 +3057,8 @@ async function request(finalMsgs, fromSend){
   }catch(err){
     if(err.name==="AbortError"){
       try{if(flushStreamSegs){await flushStreamSegs();}}catch(e){}
-      if(full){finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});}
+      if(full){syncToolSave();
+    finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});}
       if(currentSession===sidAtStart){
         msgs=finalMsgs;saveMsgs();
         if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
@@ -2994,7 +3067,8 @@ async function request(finalMsgs, fromSend){
       if(full)showToast("已停止生成");
     }else{
       try{if(flushStreamSegs){await flushStreamSegs();}}catch(e){}
-      if(full){finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});}
+      if(full){syncToolSave();
+    finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});}
       if(currentSession===sidAtStart){
         msgs=finalMsgs;saveMsgs();
         if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
@@ -3004,6 +3078,7 @@ async function request(finalMsgs, fromSend){
     }
   }finally{
     sending=false;setSendState(false);aborter=null;
+    _streamActive=false; _streamAnchor=null;   // 方案2：结束流式工具卡插入模式
     showHeaderTyping(false);
     try{ if(reader && reader.cancel) reader.cancel(); }catch(e){}
     // 来电：AI 回复完成 → 解析 <phone> 表态，yes 则自动进通话并播报开场
@@ -5038,6 +5113,11 @@ async function loadSessions(){
     const j=await r.json();
     if(j&&Array.isArray(j.sessions)){sessionList=j.sessions;renderSessionList();}
   }catch(e){console.warn("loadSessions fail:",e.message);}
+  try{
+    const r2=await fetch("/heartbeat/admin/wake-locked",{headers:{"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include"});
+    const j2=await r2.json();
+    if(j2&&Array.isArray(j2.sessions)){wakeLocked=j2.sessions;renderSessionList();}
+  }catch(e){console.warn("loadSessions wake-locked fail:",e.message);}
 }
 function renderSessionList(){
   const el=document.getElementById("sessionList");
@@ -5052,6 +5132,7 @@ function renderSessionList(){
   let pinnedArr=[];
   try{ pinnedArr=JSON.parse(localStorage.getItem("han_pinned_sessions")||"[]"); }catch(e){ pinnedArr=[]; }
   const isPinned=function(id){ return pinnedArr.indexOf(id)>=0; };
+  const isLocked=function(id){ return wakeLocked.indexOf(id)>=0; };
   list.sort(function(a,b){
     const pa=isPinned(a.id)?1:0, pb=isPinned(b.id)?1:0;
     if(pa!==pb)return pb-pa;
@@ -5069,7 +5150,8 @@ function renderSessionList(){
     }catch(e){}
     if(!name)name=s.name||(s.id==="default"?"主会话":s.id);
     const pinned=isPinned(s.id);
-    const meta=(pinned?'<span class="s-badge pin">置顶</span>':'')+escapeHtml((s.real!=null?(""+s.real+" 条"):"")+(s.last_time?(" · "+fmtTime(new Date(s.last_time))):""));
+    const locked=isLocked(s.id);
+    const meta=(locked?'<span class="s-badge lock">锁定</span>':'')+(pinned?'<span class="s-badge pin">置顶</span>':'')+escapeHtml((s.real!=null?(""+s.real+" 条"):"")+(s.last_time?(" · "+fmtTime(new Date(s.last_time))):""));
     const checkHtml=merging?('<span class="s-check'+(mergeSel.has(s.id)?' on':'')+'">'+(mergeSel.has(s.id)?'✓':'')+'</span>'):'';
     item.innerHTML='<div class="s-name">'+checkHtml+escapeHtml(name)+'<button class="s-del" data-id="'+escapeHtml(s.id)+'" title="删除"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button></div>'+
       '<div class="s-meta">'+meta+'</div>'+
@@ -5141,14 +5223,33 @@ async function doMergeSessions(){
   }catch(e){ showToast("合并失败:"+(e.message||"")); }
 }
 
-// 置顶/取消置顶会话（本地），置顶的排在列表最前
+// 置顶/取消置顶会话（本地），置顶的排在列表最前；置顶时可选同时锁定唤醒
 function togglePinSession(id){
   let pinnedArr=[];
   try{ pinnedArr=JSON.parse(localStorage.getItem("han_pinned_sessions")||"[]"); }catch(e){ pinnedArr=[]; }
   const i=pinnedArr.indexOf(id);
-  if(i>=0){ pinnedArr.splice(i,1); showToast("已取消置顶"); }
-  else{ pinnedArr.unshift(id); showToast("已置顶"); }
+  if(i>=0){
+    // 取消置顶：一并解除该会话的唤醒锁定
+    pinnedArr.splice(i,1);
+    try{ localStorage.setItem("han_pinned_sessions",JSON.stringify(pinnedArr)); }catch(e){}
+    const wIdx=wakeLocked.indexOf(id);
+    if(wIdx>=0){ wakeLocked.splice(wIdx,1); pushWakeLocked(); showToast("已取消置顶，并解除唤醒锁定"); }
+    else{ showToast("已取消置顶"); }
+    updateSessionItem(id);
+    pushSessionPins();   // 跨设备同步置顶
+    return;
+  }
+  // 置顶：确认是否同时锁定唤醒（确定=置顶+锁定；取消=仅置顶）
+  const alsoLock=confirm("置顶该会话，并同时锁定唤醒（自动联系只对它进行）？\n\n确定 = 置顶 + 锁定唤醒\n取消 = 仅置顶");
+  pinnedArr.unshift(id);
   try{ localStorage.setItem("han_pinned_sessions",JSON.stringify(pinnedArr)); }catch(e){}
+  if(alsoLock){
+    if(wakeLocked.indexOf(id)<0) wakeLocked.push(id);
+    pushWakeLocked();
+    showToast("已置顶，并锁定唤醒");
+  } else {
+    showToast("已置顶");
+  }
   updateSessionItem(id);
   pushSessionPins();   // 跨设备同步置顶
 }
@@ -5166,7 +5267,8 @@ function updateSessionItem(id){
   const pinned=pinnedArr.indexOf(id)>=0;
   const btn=item.querySelector('.s-op[data-op="pin"]'); if(btn) btn.textContent=pinned?"取消置顶":"置顶";
   const s=(typeof sessionList!=="undefined"&&sessionList)?sessionList.find(function(x){return x.id===id;}):null;
-  const meta=(pinned?'<span class="s-badge pin">置顶</span>':'')+escapeHtml((s&&s.real!=null?(""+s.real+" 条"):"")+(s&&s.last_time?(" · "+fmtTime(new Date(s.last_time))):""));
+  const isLock=(typeof wakeLocked!=="undefined"&&wakeLocked)?wakeLocked.indexOf(id)>=0:false;
+  const meta=(isLock?'<span class="s-badge lock">锁定</span>':'')+(pinned?'<span class="s-badge pin">置顶</span>':'')+escapeHtml((s&&s.real!=null?(""+s.real+" 条"):"")+(s&&s.last_time?(" · "+fmtTime(new Date(s.last_time))):""));
   const me=item.querySelector(".s-meta"); if(me) me.innerHTML=meta;
   function pinState(sidv){ let arr=[]; try{ arr=JSON.parse(localStorage.getItem("han_pinned_sessions")||"[]"); }catch(e){} return arr.indexOf(sidv)>=0; }
   function lastOf(kind){
@@ -5397,6 +5499,12 @@ async function pushSessionNames(){
     const r=await fetch("/heartbeat/admin/session-names",{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":getCookie("admin_csrf")},body:JSON.stringify({names:map}),credentials:"include"});
     return r.ok;
   }catch(e){ return false; }
+}
+async function pushWakeLocked(){
+  try{
+    const r=await fetch("/heartbeat/admin/wake-locked",{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":getCookie("admin_csrf")},body:JSON.stringify({sessions:wakeLocked}),credentials:"include"});
+    return r.ok;
+  }catch(e){ console.warn("pushWakeLocked fail:",e.message); return false; }
 }
 async function pullSessionNames(){
   try{

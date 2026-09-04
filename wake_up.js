@@ -56,6 +56,7 @@ const {
 
 const TIMELINE_PATH = path.join(__dirname, "enhanced_messages.json");
 const WAKE_SCHEDULE_PATH = path.join(__dirname, "data", "wake_schedule.json");
+const WAKE_LOCKED_PATH = path.join(__dirname, "data", "wake-locked.json");
 let timedWakeTimer = null;
 const PORT = Number(process.env.PORT) || 3000;
 const GATEWAY_BASE_URL = (process.env.GATEWAY_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
@@ -480,6 +481,48 @@ function latestActiveTimeline() {
   return best;
 }
 
+// 锁定唤醒会话集合：读 data/wake-locked.json（网关侧写入），返回会话 id 数组；读失败/不存在返回 []
+function readWakeLockedSessions() {
+  try {
+    if (!fs.existsSync(WAKE_LOCKED_PATH)) return [];
+    const v = JSON.parse(fs.readFileSync(WAKE_LOCKED_PATH, "utf-8"));
+    return Array.isArray(v) ? v.filter(function (s) { return typeof s === "string" && s; }) : [];
+  } catch (e) {
+    console.warn("[wake-up] 读取锁定唤醒会话失败:", e.message);
+    return [];
+  }
+}
+
+// 按会话 id 取时间线（找不到返回 null）
+function getTimelineBySessionId(sessionId) {
+  const all = loadAllSessionTimelines();
+  const hit = all.find(function (tl) { return tl.sessionId === sessionId; });
+  return hit || null;
+}
+
+// 确定本轮要唤醒的会话目标：
+// - 有锁定集合 → 逐一取锁定会话（跳过已删/不存在的），各自独立判断；
+// - 无锁定 → 维持旧的"全局最后活跃单会话"。
+function collectWakeTargets() {
+  const locked = readWakeLockedSessions();
+  if (locked.length) {
+    const targets = [];
+    for (const sid of locked) {
+      const tl = getTimelineBySessionId(sid);
+      if (tl && Array.isArray(tl.messages) && tl.messages.length) {
+        console.log("[wake-up] 唤醒基于会话（锁定）: " + sid + "（共 " + tl.messages.length + " 条）");
+        targets.push({ sessionId: sid, messages: tl.messages });
+      } else {
+        console.warn("[wake-up] 锁定会话不存在/已删，跳过: " + sid);
+      }
+    }
+    return targets;
+  }
+  const active = latestActiveTimeline();
+  if (!active) return [];
+  return [{ sessionId: active.sessionId || "default", messages: active.messages }];
+}
+
 // 任一会话里是否存在"设定之后"的用户消息（用于定时唤醒作废判定）：
 // 用户可能在任何会话里主动找过 AI，不能只看主会话。
 function isUserActiveAnywhereSince(schedule) {
@@ -753,13 +796,17 @@ async function runWakeUpInner() {
     console.warn("[wake-up] 检查下次唤醒时间失败（忽略）:", scheduleErr.message);
   }
 
-  // 多会话：唤醒聚合所有会话，取最近仍活跃的会话语作为沉默判定/上下文的基础，
-  // 并把唤醒事件写回该会话（而非默认主会话），避免"主会话安静就乱唤醒 / 分会话活跃却感知不到"。
-  const activeTimeline = latestActiveTimeline();
-  if (!activeTimeline) { console.log("未找到任何会话语"); return; }
-  const messages = activeTimeline.messages;
-  const wakeSessionId = activeTimeline.sessionId || "default";
-  console.log("[wake-up] 唤醒基于会话: " + wakeSessionId + "（共 " + messages.length + " 条）");
+  // 多会话：锁定集合中每个会话各自独立计时、独立推送、写回各自会话；无锁定则按全局最后活跃（单会话）。
+  const targets = collectWakeTargets();
+  if (!targets.length) { console.log("未找到任何会话语"); return; }
+  for (const t of targets) { await runWakeForTarget(t); }
+}
+
+async function runWakeForTarget(target) {
+  // 针对单个会话的完整唤醒流程：沉默判定、上下文、推送、写回都基于这个会话。
+  const messages = target.messages;
+  const wakeSessionId = target.sessionId || "default";
+  console.log("[wake-up] 唤醒处理会话: " + wakeSessionId + "（共 " + messages.length + " 条）");
 
   const lastMessageTime = getLastMessageTime(messages);
   if (!lastMessageTime) {

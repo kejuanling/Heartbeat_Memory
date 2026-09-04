@@ -396,6 +396,7 @@ module.exports = function registerChatRoutes(app, deps) {
           if (m.time) clean.time = m.time;
           if (m.reasoning !== undefined) clean.reasoning = m.reasoning;
           if (m.tools !== undefined) clean.tools = m.tools;
+          if (m.segments !== undefined) clean.segments = m.segments;
           if (m.tokens !== undefined) clean.tokens = m.tokens;
           return clean;
         });

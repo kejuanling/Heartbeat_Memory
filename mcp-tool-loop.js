@@ -215,7 +215,8 @@ async function runWithTools({
   max_tokens,
   maxToolRounds = DEFAULT_MAX_TOOL_ROUNDS,
   fetchFn = fetch,
-  resume = null
+  resume = null,
+  onEvent = null
 }) {
   // 1. 加载 MCP 工具，并叠加内置 native 工具（surface_memory），转成 OpenAI tools[]
   const routes = await loadTools(serverClients);
@@ -233,6 +234,11 @@ async function runWithTools({
   // T-0922 修复：每一轮模型说过的话都收集（同轮"文本+工具调用"混合时文本不再丢弃），
   // 按轮次拼接为最终回复——与主流聊天一致："我帮你查一下" →（工具跑）→ 结果补充
   const contentParts = [];
+
+  // 方案2：逐轮即时回传。onEvent 把「本轮正文/思考 + 每个工具 start/end」实时推给调用方，
+  // 供前端渲染工具卡与正文交错 + running→done 状态。落盘/缓存仍用 toolHistory（终态快照），不受影响。
+  const emit = (evt) => { try { if (typeof onEvent === "function") onEvent(evt); } catch (e) {} };
+  let toolSeq = 0;
 
   // 直通续跑模式（T-0922）：流式直通路径已把该 assistant 消息（含 tool_calls）透传给客户端，
   // 从"执行其工具"开始接续；其 content 客户端已见过，不进 contentParts（避免重复显示）
@@ -293,11 +299,11 @@ async function runWithTools({
 
     // 收集思考链（兼容 reasoning_content 与 reasoning 两种字段）
     const rtext = String(msg.reasoning_content || msg.reasoning || "").trim();
-    if (rtext) reasoningParts.push(rtext);
+    if (rtext) { reasoningParts.push(rtext); emit({ type: "reasoning", text: rtext }); }
 
     // 收集本轮正文（混合轮文本保留，见 contentParts 注释）
     const ctext = String(msg.content || "").trim();
-    if (ctext) contentParts.push(ctext);
+    if (ctext) { contentParts.push(ctext); emit({ type: "text", text: ctext }); }
 
     // 记录这一轮 assistant 消息（含 tool_calls 则保留）
     working.push({ role: "assistant", content: msg.content || "", tool_calls: msg.tool_calls });
@@ -306,8 +312,9 @@ async function runWithTools({
     const toolCalls = msg.tool_calls;
     if (!toolCalls || toolCalls.length === 0) break;
 
-    // 执行每个 tool_call，并记录到 toolHistory 供前端展示
-    await executeToolCalls(toolCalls, working, toolHistory, toolCtx);
+    // 执行每个 tool_call，并记录到 toolHistory 供前端展示（方案2：逐工具实时推 tool_start/tool_end）
+    // afterSeg：该轮正文段已 push 进 contentParts，工具位于其最后一段之后
+    await executeToolCalls(toolCalls, working, toolHistory, toolCtx, emit, () => toolSeq++, contentParts.length - 1);
   }
 
   // 最终回复 = 各轮正文拼接；兜底：轮次耗尽模型全程没说过话时占位提示，
@@ -322,19 +329,24 @@ async function runWithTools({
   // 汇总思考链（截断上限）
   const reasoning = reasoningParts.join("\n\n").slice(0, MAX_REASONING_CHARS);
 
-  return { text, rounds, usage: totalUsage, routes, reasoning, toolHistory, finalMessages: working.slice() };
+  return { text, rounds, usage: totalUsage, routes, reasoning, toolHistory, segments: contentParts.slice(), finalMessages: working.slice() };
 }
 
 // 执行一批 tool_call：结果写入 working（供下一轮上游请求）与 toolHistory（供前端展示）
-async function executeToolCalls(toolCalls, working, toolHistory, ctx) {
+// 方案2 onEvent/nextIndex 可选：开启时每个工具实时推 tool_start（执行前）/tool_end（执行后），
+// 前端据此渲染"执行中→已完成/失败"状态卡；index 用于配对 start/end。老调用不传则跳过（兼容）。
+async function executeToolCalls(toolCalls, working, toolHistory, ctx, onEvent, nextIndex, afterSeg) {
   const { serverClients, routes, upstreamUrl, upstreamKey, model } = ctx;
   for (const tc of toolCalls) {
     const fn = tc.function || {};
     const name = fn.name || "";
     const args = _parseArgs(fn.arguments);
+    const index = (typeof nextIndex === "function") ? nextIndex() : toolHistory.length;
+    const id = tc.id || ("call_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7));
     let result;
     let error = null;
     try {
+      if (typeof onEvent === "function") onEvent({ type: "tool_start", index, id, name, args });
       if (name === SURFACE_MEMORY_NAME) {
         result = await callSurfaceMemory(args);
       } else if (name === MEMORY_RECALL_NAME) {
@@ -346,18 +358,21 @@ async function executeToolCalls(toolCalls, working, toolHistory, ctx) {
       error = e.message || String(e);
       result = { markdown: JSON.stringify({ type: "tool_error", error: "mcp_service_error", message: error }) };
     }
+    const resTrunc = _truncateResult(result.markdown || "", error ? 0 : 20000);
     working.push({
       role: "tool",
-      tool_call_id: tc.id,
+      tool_call_id: id,
       // 截断超大工具结果：时间线/后续轮次上下文都不需要完整大结果，30k 字符足够模型引用
       content: _truncateResult(result.markdown || "", MAX_TOOL_RESULT_CHARS)
     });
     toolHistory.push({
       name,
       args,
-      result: _truncateResult(result.markdown || "", error ? 0 : 20000),
-      error
+      result: resTrunc,
+      error,
+      afterSeg: (typeof afterSeg === "number") ? afterSeg : -1   // 方案2刷新：该工具位于第 afterSeg 段正文之后（-1=最前）
     });
+    if (typeof onEvent === "function") onEvent({ type: "tool_end", index, id, name, args, result: resTrunc, error, ok: !error });
   }
 }
 
