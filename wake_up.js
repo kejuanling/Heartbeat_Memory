@@ -502,25 +502,24 @@ function getTimelineBySessionId(sessionId) {
 
 // 确定本轮要唤醒的会话目标：
 // - 有锁定集合 → 逐一取锁定会话（跳过已删/不存在的），各自独立判断；
-// - 无锁定 → 维持旧的"全局最后活跃单会话"。
+// - 无锁定 → 不唤醒（用户拍板：锁定为空即关闭唤醒，不做全局"最后活跃"兜底）。
 function collectWakeTargets() {
   const locked = readWakeLockedSessions();
-  if (locked.length) {
-    const targets = [];
-    for (const sid of locked) {
-      const tl = getTimelineBySessionId(sid);
-      if (tl && Array.isArray(tl.messages) && tl.messages.length) {
-        console.log("[wake-up] 唤醒基于会话（锁定）: " + sid + "（共 " + tl.messages.length + " 条）");
-        targets.push({ sessionId: sid, messages: tl.messages });
-      } else {
-        console.warn("[wake-up] 锁定会话不存在/已删，跳过: " + sid);
-      }
-    }
-    return targets;
+  if (!locked.length) {
+    console.log("[wake-up] 未锁定任何会话，本次唤醒关闭");
+    return [];
   }
-  const active = latestActiveTimeline();
-  if (!active) return [];
-  return [{ sessionId: active.sessionId || "default", messages: active.messages }];
+  const targets = [];
+  for (const sid of locked) {
+    const tl = getTimelineBySessionId(sid);
+    if (tl && Array.isArray(tl.messages) && tl.messages.length) {
+      console.log("[wake-up] 唤醒基于会话（锁定）: " + sid + "（共 " + tl.messages.length + " 条）");
+      targets.push({ sessionId: sid, messages: tl.messages });
+    } else {
+      console.warn("[wake-up] 锁定会话不存在/已删，跳过: " + sid);
+    }
+  }
+  return targets;
 }
 
 // 任一会话里是否存在"设定之后"的用户消息（用于定时唤醒作废判定）：
@@ -771,9 +770,9 @@ async function runWakeUpInner() {
   console.log("开始自动唤醒");
   console.log("==========================\n");
 
-  // 多会话：锁定集合中每个会话各自独立计时、独立推送、写回各自会话；无锁定则按全局最后活跃（单会话）。
+  // 多会话：锁定集合中每个会话各自独立计时、独立推送、写回各自会话；无锁定则不唤醒（关闭唤醒）。
   const targets = collectWakeTargets();
-  if (!targets.length) { console.log("未找到任何会话语"); return; }
+  if (!targets.length) { console.log("[wake-up] 无唤醒目标（未锁定/锁定的会话已删），本次跳过"); return; }
 
   // AI 设置的「下一次主动唤醒时间」：设定后用户一旦主动找过 AI 则定时作废；
   // 未到点之前定时检查跳过（不影响对话）；已过期则清理。
