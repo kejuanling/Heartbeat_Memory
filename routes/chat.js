@@ -11,6 +11,7 @@ const tagParser = require('../tag-parser');
 const contextReplacements = require('../context-replacements');
 const contextCompactor = require('../context-compactor');
 const { formatDateTimeInTimeZone } = require('../time_utils');
+const { parsePushEcho, parseWakeEcho } = require('../utils/push');
 
 // ---- 跨会话语义检索（TF-IDF + 字符 bigram，与前端旧逻辑同口径）----
 function charBigrams(text) {
@@ -686,7 +687,27 @@ module.exports = function registerChatRoutes(app, deps) {
           const idx = timeline.findIndex(m => m && m.id === op.id);
           if (idx < 0) { miss++; continue; }
           if (op.op === 'edit') {
-            timeline[idx] = { ...timeline[idx], content: op.newContent, id: op.id };
+            const updated = { ...timeline[idx], content: op.newContent, id: op.id };
+            // 编辑特殊事件（推送回显/唤醒回显）：手动改 content 后，结构化元数据不再可信，
+            // 用规范格式重新解析并同步更新字段；解析失败则清除字段退化为普通消息，
+            // 避免管理台「推送管理」与聊天显示不一致。
+            if (updated.event_type || updated.push_title || updated.push_body) {
+              const parsed = parsePushEcho(op.newContent) || parseWakeEcho(op.newContent);
+              if (parsed) {
+                updated.event_type = (parsed.channel === '未发送') ? 'wake' : 'push';
+                updated.push_at = parsed.at || updated.push_at;
+                updated.push_user = parsed.user || updated.push_user;
+                updated.push_channel = parsed.channel;
+                updated.push_title = parsed.title;
+                updated.push_body = parsed.body;
+                updated.push_tail = parsed.tail;
+              } else {
+                delete updated.event_type;
+                delete updated.push_at; delete updated.push_user; delete updated.push_channel;
+                delete updated.push_title; delete updated.push_body; delete updated.push_tail;
+              }
+            }
+            timeline[idx] = updated;
             ok++;
           } else if (op.op === 'delete') {
             timeline.splice(idx, 1);

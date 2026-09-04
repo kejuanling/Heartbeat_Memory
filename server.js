@@ -2015,6 +2015,9 @@ app.post("/internal/wake-event", async (req, reply) => {
     // 批注 2026-08-29：多会话。唤醒侧(wake_up.js)现在会携带 session_id，把唤醒事件写到
     // 对应会话语，而不是永远堆在主会话。未携带时回退主会话（100% 兼容旧行为）。
     const evSession = typeof session_id === "string" && session_id.trim() ? String(session_id).trim() : null;
+    // 推送回显判定：成功推送时 event=回显（含标题+正文全文）、content=AI 完整回复（同正文）。
+    // 正文已含于回显，不再单独落库（避免上下文/时间线重复）；记忆标签解析仍照常执行。
+    const isPushEcho = !!(push_meta && event && isPushEchoContent(event));
     if (!content && !event && !diary) return reply.code(400).send({ error: "content or event is required" });
     if (diary) {
       appendSpecialEvent(`（${formatDateTimeInTimeZone(new Date(), TIME_ZONE)} 自动写了日记：${String(diary).trim()}）`, null, evSession);
@@ -2050,8 +2053,10 @@ app.post("/internal/wake-event", async (req, reply) => {
         } catch (e) {
           console.warn("[wake-event] 标签解析失败:", e.message);
         }
-        if (stored) {
+        if (stored && !isPushEcho) {
           appendSpecialEvent(stored, null, evSession);
+        } else if (isPushEcho) {
+          console.log(`[wake-event] 推送正文已含于回显，跳过正文单独落库 (chars=${stored.length})`);
         }
       }
     }

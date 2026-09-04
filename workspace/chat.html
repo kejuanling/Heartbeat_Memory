@@ -2566,7 +2566,7 @@ function classifyTimelineEvent(msg){
   if(c.indexOf("（")!==0)return null;
   if(/自动写了日记/.test(c))return "diary";
   if(/自动唤醒/.test(c)&&/未发送推送|未推送|本次未发送/.test(c))return "silent";
-  if(/刚刚给.*发了.*推送|发了Bark推送|发了.*推送/.test(c))return "push";
+  if(!c.includes("本次未发送")&&/刚刚给.{1,24}发了.{1,24}?推送：/.test(c))return "push";
   return null;
 }
 function fillMav(av,isAI){
@@ -3326,7 +3326,7 @@ function startEdit(idx){
   const m=msgs[idx];if(!m)return;
   editIdx=idx;
   editTitle.textContent=(m.role==="user"?"编辑这条消息":"编辑这条 AI 回复");
-  editInput.value=msgText(m);
+  editInput.value=stripCurrentTime(stripInnerTags(msgText(m))).clean;
   editMask.classList.remove("hidden");
   requestAnimationFrame(()=>{editInput.focus();const L=editInput.value.length;try{editInput.setSelectionRange(L,L);}catch(e){}});
 }
@@ -3339,11 +3339,15 @@ function saveEdit(){
   const m=msgs[editIdx];if(!m){closeEdit();return;}
   const v=editInput.value;
   const mid=m.id;   // 编辑前记住 id，用于 diff 定点同步
+  // 保存时保留原 <current_time> 时间标签（若原消息携带），保证编辑后消息仍带时间语义
+  const _origTxt=msgText(m);
+  const _origTag=(String(_origTxt).match(/<current_time>[\s\S]*?<\/current_time>/i)||[])[0]||"";
+  const finalV=(v&&_origTag&&v.indexOf("<current_time>")<0)?v+"\n"+_origTag:v;
   if(Array.isArray(m.content)&&m.content.some(x=>x&&x.type==="image_url")){
     const imgs=m.content.filter(x=>x&&x.type==="image_url");
-    m.content=v?[...imgs,{type:"text",text:v}]:imgs;
+    m.content=finalV?[...imgs,{type:"text",text:finalV}]:imgs;
   }else{
-    m.content=v;
+    m.content=finalV;
   }
   saveMsgs();renderAll();
   closeEdit();
