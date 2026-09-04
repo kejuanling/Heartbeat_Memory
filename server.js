@@ -1621,7 +1621,7 @@ function recentDiaryTextBefore(sessionId, count, createdIso) {
 // 互补:本函数=窗口注入取较早连贯片段; MCP 工具 moments_list=随时拉取最新记忆碎片。
 // 批注 2026-08-31:由"取最新N条再重排"改回"正序取前N"，最新内容交给 moments_list 工具。
 
-function starredContextText(limit) {
+function starredContextText(limit, createdIso) {
   // 标星注入的角色标签：AI 用【谢】、用户用【涵】(取 AI_DISPLAY_NAME / USER_DISPLAY_NAME,默认 谢/涵)
   const AI_DISPLAY_NAME = String(readEnvValue("AI_DISPLAY_NAME") || "谢");
   const USER_DISPLAY_NAME = String(readEnvValue("USER_DISPLAY_NAME") || "涵");
@@ -1629,8 +1629,15 @@ function starredContextText(limit) {
   try { marks = contextReplacements.loadMarks ? contextReplacements.loadMarks() : {}; } catch (e) { marks = {}; }
   const keys = Object.keys(marks || {});
   if (!keys.length) return "";
-  const items = [];
+  let items = [];
   const seenKeys = new Set();
+  // 时间锚点：优先原消息时间(entry.time)，其次标星时间(markedAt)，都没有=存量无时间记录
+  function itemTs(entry, m) {
+    if (entry && entry.time) return entry.time;
+    if (entry && entry.markedAt) return entry.markedAt;
+    if (m && m.time) return m.time;
+    return "";
+  }
   // 第一遍：优先用标星时存的原文 marks[key].content —— 与已标星列表 listMarked 口径一致。
   // 时间线/替换池查不到的历史标星也能注入，避免“近期新标不在标星内容段”。
   keys.forEach(function (key) {
@@ -1639,7 +1646,7 @@ function starredContextText(limit) {
     if (seenKeys.has(key)) return;
     seenKeys.add(key);
     const role = (entry.role === "user") ? USER_DISPLAY_NAME : AI_DISPLAY_NAME;
-    items.push({ text: "【" + role + "】 " + entry.content, markedAt: entry.markedAt || "" });
+    items.push({ text: "【" + role + "】 " + entry.content, ts: itemTs(entry, null) });
   });
   // 第二遍：兜底扫替换记录 matched，补早期没存原文的存量标星（按 key 去重）
   let replItems = [];
@@ -1654,20 +1661,27 @@ function starredContextText(limit) {
         seenKeys.add(k);
         const role = m.role === "user" ? USER_DISPLAY_NAME : AI_DISPLAY_NAME;
         const c = typeof m.content === "string" ? m.content : "";
-        if (c) items.push({ text: "【" + role + "】 " + c, markedAt: (marks[k] && marks[k].markedAt) || "" });
+        if (c) items.push({ text: "【" + role + "】 " + c, ts: itemTs(marks[k], m) });
       }
     }
   }
+  // 批注 2026-09-04：与日记对齐——只注入"本会话创建时间之前"的标星，之后的只在当前会话（原文仍保留在时间线）；
+  // 存量标星无时间字段时保守保留（不丢重要记忆）。createdIso 为空则不过滤（全量）。
+  if (createdIso) {
+    items = items.filter(function (x) { return !x.ts || x.ts < createdIso; });
+  }
+  if (!items.length) return "";
   const n = Number(limit) || 10;
   items.sort(function (a, b) {
-    const ta = a.markedAt || "";
-    const tb = b.markedAt || "";
+    const ta = a.ts || "";
+    const tb = b.ts || "";
     if (ta === tb) return 0;
     if (!ta) return 1;      // 无时间放最后
     if (!tb) return -1;
     return ta < tb ? -1 : 1;  // 升序：时间早的在前（按时间线顺序铺开）
   });
-  return items.slice(0, n).map(function (x) { return x.text; }).join("\n\n");
+  // 取"创建时间之前最近 n 条"（升序末尾），与近期日记口径一致
+  return items.slice(-n).map(function (x) { return x.text; }).join("\n\n");
 }
 
 // ========================
@@ -1681,7 +1695,7 @@ function starredContextText(limit) {
 // ========================
 const CROSS_SNAPSHOT_DIR = path.join(__dirname, "data");
 const SESSION_CFG_DIR = path.join(__dirname, "data", "session_cfg");   // 会话级配置（如跨窗口注入覆盖）；无文件=跟随全局
-const CROSS_SNAPSHOT_VERSION = 5;  // 升版本：日记跨窗口改为"只注入会话创建日期之前"（快照存 created_at），旧快照自动重建
+const CROSS_SNAPSHOT_VERSION = 6;  // 升版本：标星(记忆碎片)对齐日记——只注入会话创建时间之前 + 补原消息时间字段，旧快照自动重建
 function crossSnapshotFile(sessionId) {
   // 与 timelineFileFor 用同一套会话名规则（safeSessionToken）：保证同一会话的时间线与快照归属一致
   const token = safeSessionToken(sessionId || "default");
@@ -1770,7 +1784,7 @@ function buildCrossMemorySnapshot(sessionId) {
     }
   }
   if (cfg.cross_inject_starred !== false) {
-    const st = starredContextText(Number(cfg.cross_inject_starred_topk) || 10);
+    const st = starredContextText(Number(cfg.cross_inject_starred_topk) || 10, createdIso);
     if (st) parts.push("## 记忆碎片\n" + st);
   }
   // 日记：跨窗口注入（快照的一部分），只注入"本会话创建日期之前"的日记。
@@ -4104,7 +4118,7 @@ app.post("/admin/context-compaction/mark", { preHandler: basicAuth }, async (req
       }
       } catch (e) { /* 查找失败不阻断标星 */ }
     }
-    const markRes = contextReplacements.setMark(key, body.marked === true, { content: content, role: role });
+    const markRes = contextReplacements.setMark(key, body.marked === true, { content: content, role: role, msg_time: String(body.msg_time || "") });
     if (!markRes || markRes.ok === false) {
       return reply.code(400).send({ error: (markRes && markRes.error) || "标星失败" });
     }

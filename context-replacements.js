@@ -1251,7 +1251,7 @@ function findContentByKey(key) {
       try {
         if (contentKey(m) === key) {
           const c = contentToText(m);
-          if (c) return { content: c, role: m.role || "" };
+          if (c) return { content: c, role: m.role || "", time: m.time || "" };
         }
       } catch (e) { /* 单条失败忽略 */ }
     }
@@ -1265,9 +1265,14 @@ function setMark(key, marked, opt) {
     const entry = { markedAt: new Date().toISOString() };
     if (opt && opt.content) entry.content = opt.content;
     if (opt && opt.role) entry.role = opt.role;
-    if (!entry.content) {
+    // 原消息时间（跨窗口注入按"会话创建时间之前"过滤用）：优先显式传 msg_time，其次时间线反查补
+    if (opt && opt.msg_time) entry.time = String(opt.msg_time || "").trim();
+    if (!entry.content || !entry.time) {
       const orig = findContentByKey(key);
-      if (orig && orig.content) { entry.content = orig.content; entry.role = entry.role || orig.role; }
+      if (orig) {
+        if (!entry.content && orig.content) { entry.content = orig.content; entry.role = entry.role || orig.role; }
+        if (!entry.time && orig.time) entry.time = orig.time;
+      }
     }
     if (!entry.content) {
       console.warn("[context-replacements] 标星失败：无法回溯到原文 key=" + key);
@@ -2391,7 +2396,7 @@ function listMarked() {
     if (seenKeys.has(key)) return;
     seenKeys.add(key);
     displayIndex++;
-    const t = entry.markedAt;
+    const t = entry.time || entry.markedAt;
     results.push({
       index: displayIndex,
       role: entry.role || "assistant",
