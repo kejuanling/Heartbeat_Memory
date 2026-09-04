@@ -210,10 +210,34 @@ module.exports = function registerChatRoutes(app, deps) {
   // 疑似有落盘 ctx_limit 提醒的会话（进程内存）：低于上限时据此跳过全量读盘清理。
   // 重启后为空——盘上遗留提醒会被特殊事件机制注入回流，流内出现时仍会触发读盘清理，闭环安全。
   const _ctxLimitReminderSessions = new Set();
+  // 清理本会话时间线里落盘的历史容量提醒（kind=ctx_limit 且未删除 → 标记 deleted 并保存）。
+  // 供两处使用：① 开关关闭时（不注入新提醒，但旧提醒必须清掉，否则特殊事件机制仍会每轮注回）；
+  //           ② 低于上限时（提醒应消失，再超限才重新塞带新时间边界的）。
+  function clearDiskCtxLimitReminder(sessionId) {
+    let onDisk = false;
+    try {
+      const timeline = loadTimeline(sessionId);
+      for (const m of timeline) {
+        if (m && m.kind === 'ctx_limit' && !m.deleted) { m.deleted = true; onDisk = true; }
+      }
+      if (onDisk) saveTimeline(timeline, sessionId);
+      if (!onDisk) _ctxLimitReminderSessions.delete(sessionId || 'default');
+    } catch (cleanErr) {
+      console.warn('[ctx-limit] 清理落盘容量提醒失败（不影响转发）:', cleanErr.message);
+    }
+    return onDisk;
+  }
   function maybeInjectContextLimitReminder(llmMessages, sessionId, timeByKey) {    try {
       const cfg = contextCompactor.loadConfig();
       const limit = Number(cfg.compaction_context_limit_chars) || 0;
-      if (!cfg.compaction_context_remind_enabled || limit <= 0) return;
+      // 开关关闭：不注入新提醒，但仍清理本会话落盘的历史容量提醒——
+      // 否则旧提醒会被特殊事件机制每轮注回，表现成"关了开关还在注入"
+      if (!cfg.compaction_context_remind_enabled) {
+        const cleaned = clearDiskCtxLimitReminder(sessionId);
+        if (cleaned) console.log(`[ctx-limit] 容量提醒开关已关闭，已清理会话 ${sessionId || 'default'} 落盘的历史容量提醒`);
+        return;
+      }
+      if (limit <= 0) return;
       const tokens = countUncompressedTokens(llmMessages);
       // 注意顺序：必须先做「低于上限清理」再判「已有提醒不重复塞」——
       // 旧提醒会被特殊事件机制每轮注入回来，若先判「已有」就提前返回，永远走不到清理
@@ -232,16 +256,7 @@ module.exports = function registerChatRoutes(app, deps) {
         // 内存标记说没有落盘提醒且消息流里也没看到（inStream=false）时，跳过全量读盘——
         // 稳态（从未超限或已清干净）下零读盘；流里出现旧提醒时仍会读盘清理（特殊事件机制会把盘上提醒注回来，闭环安全）
         if (!_ctxLimitReminderSessions.has(sessionId || 'default') && !inStream) return;
-        try {
-          const timeline = loadTimeline(sessionId);
-          for (const m of timeline) {
-            if (m && m.kind === 'ctx_limit' && !m.deleted) { m.deleted = true; onDisk = true; }
-          }
-          if (onDisk) saveTimeline(timeline, sessionId);
-          if (!onDisk) _ctxLimitReminderSessions.delete(sessionId || 'default');
-        } catch (cleanErr) {
-          console.warn('[ctx-limit] 低于上限清理落盘提醒失败（不影响转发）:', cleanErr.message);
-        }
+        onDisk = clearDiskCtxLimitReminder(sessionId);
         if (inStream || onDisk) {
           console.log(`[ctx-limit] 会话 ${sessionId || 'default'} 上下文 ${tokens} token（估算）已低于上限 ${limit}，容量提醒已移除（再超限会重新提醒）`);
         }
@@ -922,6 +937,21 @@ app.post("/v1/chat/completions", async (req, reply) => {
       });
       if (injectableEvents.length !== before) {
         console.log(`[event-inject] 分类过滤: ${before} -> ${injectableEvents.length} 条`);
+      }
+    }
+
+    // 容量提醒注回受全局开关控制（2026-09-05 修复）：开关关闭时，历史遗留的容量提醒不再注入回流。
+    // 注：上方"必须始终可见"的默认设计前提是开关开启；用户显式关闭开关时应尊重"关=彻底不注入"，
+    // 与 maybeInject 的落盘清理配合，消除"关了开关还在注入"的残留。
+    if (contextCompactor.loadConfig().compaction_context_remind_enabled === false) {
+      const before = injectableEvents.length;
+      injectableEvents = injectableEvents.filter(ev => {
+        if (ev && ev.kind === 'ctx_limit') return false;
+        const cats = classifySpecialEvent(ev);
+        return !(Array.isArray(cats) && cats.indexOf('ctxlimit') >= 0);
+      });
+      if (injectableEvents.length !== before) {
+        console.log(`[ctx-limit] 容量提醒开关已关闭，跳过 ${before - injectableEvents.length} 条历史容量提醒注入`);
       }
     }
 
