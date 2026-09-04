@@ -774,6 +774,8 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .tool-trace .tt-run{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#8a6d3b;background:rgba(210,170,90,.14);padding:1px 8px;border-radius:999px;white-space:nowrap}
 .tool-trace .tt-spin{width:10px;height:10px;border-radius:50%;border:2px solid rgba(180,140,70,.35);border-top-color:#a8863f;animation:ttSpin .7s linear infinite;display:inline-block}
 @keyframes ttSpin{to{transform:rotate(360deg)}}
+/* 聊流内直接插入的工具胶囊（流式/穿插卡）：宽度与气泡一致，不撑满整行 */
+#chat > .tool-trace{max-width:min(84%,640px)}
 
 /* 空态 */
 #empty{
@@ -2522,13 +2524,13 @@ function renderAiContent(msgEl, bubble, content, reasoning, tools, segments){
       msgEl.insertBefore(wrap, bubble);
     }
   }
-  // 思考过程 / 工具痕迹：作为气泡外单独的块（不放进气泡），置于气泡上方独立一行
+  // 思考过程：作为气泡外单独的块（不放进气泡），置于气泡上方独立一行
+  // （工具痕迹不再顶部堆叠，统一走正文章节的穿插胶囊，避免与正文内工具胶囊重复）
   const showThink=!!reasoning && cfg.show_thinking;
-  const showTools=cfg.show_tools && tools && tools.length;
   let pre=bubble.previousElementSibling;
   if(pre && !(pre.classList&&pre.classList.contains("rw-wrap"))) pre=null;
   if(!pre){
-    if(showThink||showTools){ pre=document.createElement("div"); pre.className="rw-wrap"; if(bubble.parentNode===msgEl){ msgEl.insertBefore(pre,bubble); } else { msgEl.appendChild(pre); } }
+    if(showThink){ pre=document.createElement("div"); pre.className="rw-wrap"; if(bubble.parentNode===msgEl){ msgEl.insertBefore(pre,bubble); } else { msgEl.appendChild(pre); } }
   }
   if(pre){
     let ph="";
@@ -2536,10 +2538,8 @@ function renderAiContent(msgEl, bubble, content, reasoning, tools, segments){
       const rc=cfg.thinking_md?renderMd(reasoning):escapeHtml(reasoning);
       ph+='<div class="rw"><span class="rw-h"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1 0-2-.2-2.9-.5L4 21l1.5-5.6A8.5 8.5 0 1 1 21 11.5z"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="13" x2="14" y2="13"/></svg> 思考过程 <span class="rw-a">▾</span></span><div class="rw-c">'+rc+'</div></div>';
     }
-    if(showTools)ph+=renderToolCapsules(tools);
     pre.innerHTML=ph;
     pre.querySelectorAll(".rw").forEach(rw=>rw.addEventListener("click",()=>rw.classList.toggle("open")));
-    pre.querySelectorAll(".tool-trace").forEach(tt=>tt.addEventListener("click",()=>tt.classList.toggle("open")));
   }
   // 来自正文的工具胶囊（模型抄进 content 的【工具 · name】块）也需要绑定点击折叠
   if(toolEcho) bubble.querySelectorAll(".tool-trace").forEach(tt=>tt.addEventListener("click",()=>tt.classList.toggle("open")));
