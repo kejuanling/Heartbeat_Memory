@@ -1682,7 +1682,6 @@ function starredContextText(limit) {
 const CROSS_SNAPSHOT_DIR = path.join(__dirname, "data");
 const SESSION_CFG_DIR = path.join(__dirname, "data", "session_cfg");   // 会话级配置（如跨窗口注入覆盖）；无文件=跟随全局
 const CROSS_SNAPSHOT_VERSION = 5;  // 升版本：日记跨窗口改为"只注入会话创建日期之前"（快照存 created_at），旧快照自动重建
-const CROSS_SNAPSHOT_TTL_MS = 10 * 60 * 1000;  // 超时兜底（10分钟），防止指纹漏判导致永久不更新
 function crossSnapshotFile(sessionId) {
   // 与 timelineFileFor 用同一套会话名规则（safeSessionToken）：保证同一会话的时间线与快照归属一致
   const token = safeSessionToken(sessionId || "default");
@@ -1748,14 +1747,13 @@ function buildCrossMemorySnapshot(sessionId) {
   const fp = crossFingerprint(cfg);
   // 会话创建时刻：优先时间线首条消息；其次旧快照里固化过的 created_at（防边界漂移）；都没有则用当前时刻（首次请求≈创建时刻）。
   let createdIso = sessionCreatedAtOf(sessionId);
-  // 已有快照：版本相符 + 指纹未变 + 未超 TTL 才复用；否则重建（置顶/标星/日记变化即更新）。
+  // 已有快照：版本相符 + 指纹未变 才复用（批注 2026-09-04：去掉 TTL 超时重建，指纹不变即永久复用）；否则重建（置顶/标星/日记变化即更新）。
   try {
     if (fs.existsSync(file)) {
       const snap = fs.readJsonSync(file);
       if (!createdIso && snap && snap.created_at) createdIso = snap.created_at;
       if (snap && snap.version === CROSS_SNAPSHOT_VERSION && typeof snap.text === "string" && snap.text
-          && snap.fingerprint === fp
-          && snap.captured_at && (Date.now() - new Date(snap.captured_at).getTime()) < CROSS_SNAPSHOT_TTL_MS) {
+          && snap.fingerprint === fp) {
         return snap.text;
       }
     }
