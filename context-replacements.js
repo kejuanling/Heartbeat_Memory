@@ -1296,6 +1296,21 @@ function updateMark(key, opt) {
   return { ok: true, content: content };
 }
 
+// 自动同步到记忆池「心动时刻」分类时，把数据池条目 id 记在该标星条目上，
+// 供取消标星时反查并同步沉底对应记忆（标星数据文件仍允许存额外键，读取方按需取字段）。
+function setMarkPoolId(key, poolId) {
+  const marks = loadMarks();
+  if (!marks[key]) return null;
+  marks[key].poolId = poolId;
+  saveMarks(marks);
+  return poolId;
+}
+
+function getMarkPoolId(key) {
+  const marks = loadMarks();
+  return (marks[key] && marks[key].poolId) || null;
+}
+
 // 未发生替换时统一留痕：让每次请求都有记录，便于了解哪些请求没触发上下文替换
 function logNoReplace(count, source) {
   try {
@@ -2536,6 +2551,8 @@ module.exports = {
   loadMarks,
   setMark,
   updateMark,
+  setMarkPoolId,
+  getMarkPoolId,
   findContentByKey,
   contentKey,
   // 特殊事件结构化识别与注入窗口过滤（供 context-compactor / server 复用同一口径）

@@ -4122,6 +4122,24 @@ app.post("/admin/context-compaction/mark", { preHandler: basicAuth }, async (req
     if (!markRes || markRes.ok === false) {
       return reply.code(400).send({ error: (markRes && markRes.error) || "标星失败" });
     }
+    // 标星自动同步到记忆池「心动时刻」分类：新增标星写入一条，取消标星时按 poolId 沉底对应记忆。
+    if (body.marked === true) {
+      try {
+        const poolAdd = await memoryPool.add({ content: content || "（标星内容）", category: "心动时刻", importance: 0.7, source: "star" });
+        if (poolAdd && poolAdd.entry && poolAdd.entry.id) {
+          try { contextReplacements.setMarkPoolId(key, poolAdd.entry.id); } catch (e) { /* 记录 poolId 失败不影响标星 */ }
+        }
+      } catch (e) {
+        console.warn("[heart] 标星自动入「心动时刻」记忆池失败:", e.message);
+      }
+    } else {
+      try {
+        const poolId = contextReplacements.getMarkPoolId(key);
+        if (poolId) await memoryPool.sink(String(poolId));
+      } catch (e) {
+        console.warn("[heart] 取消标星沉底「心动时刻」记忆失败:", e.message);
+      }
+    }
     reply.send({ ok: true, key: key, marked: markRes.marked !== false });
   } catch (err) {
     reply.code(500).send({ error: err.message });

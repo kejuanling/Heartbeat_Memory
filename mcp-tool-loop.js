@@ -30,7 +30,7 @@ const MAX_TOOL_RESULT_CHARS = 30000;
 // ========================
 const SURFACE_MEMORY_NAME = "surface_memory";
 const MEMORY_RECALL_NAME = "memory_recall";
-const SURFACE_CATEGORIES = ["关于她", "关于我们", "锚点", "信号", "对话摘要"];
+const SURFACE_CATEGORIES = ["关于她", "关于我们", "锚点", "信号", "对话摘要", "心动时刻"];
 
 const NATIVE_TOOLS = [
   {
@@ -39,13 +39,13 @@ const NATIVE_TOOLS = [
     tool: {
       name: SURFACE_MEMORY_NAME,
       description:
-        "从长期记忆池按需检索与当前话题相关的记忆。当你想回忆之前聊过或记过的、关于她/关于我们/锚点/信号/对话摘要的内容时调用；传入你要聊或正在聊的话题/关键词（query），返回最相关的记忆条目。若当前上下文缺少某段相关过往记忆，可用它补上。",
+        "从长期记忆池按需检索与当前话题相关的记忆。当你想回忆之前聊过或记过的、关于她/关于我们/锚点/信号/对话摘要/心动时刻的内容时调用；传入你要聊或正在聊的话题/关键词（query），返回最相关的记忆条目。若当前上下文缺少某段相关过往记忆，可用它补上。",
       inputSchema: {
         type: "object",
         properties: {
           query: { type: "string", description: "要检索的话题/关键词（必填）" },
           top_k: { type: "number", description: "最多返回的条数，默认 5，上限 20", minimum: 1, maximum: 20 },
-          category: { type: "string", description: "可选：只检索某个分类（关于她/关于我们/锚点/信号/对话摘要）" }
+          category: { type: "string", description: "可选：只检索某个分类（关于她/关于我们/锚点/信号/对话摘要/心动时刻）" }
         },
         required: ["query"]
       }
@@ -63,7 +63,7 @@ const NATIVE_TOOLS = [
         properties: {
           query: { type: "string", description: "想找的记忆/问题（必填），描述含义而非精确字词" },
           top_k: { type: "number", description: "最多返回的条数，默认 5，上限 20", minimum: 1, maximum: 20 },
-          category: { type: "string", description: "可选：只检索某个分类（关于她/关于我们/锚点/信号/对话摘要）" }
+          category: { type: "string", description: "可选：只检索某个分类（关于她/关于我们/锚点/信号/对话摘要/心动时刻）" }
         },
         required: ["query"]
       }

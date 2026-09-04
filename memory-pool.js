@@ -24,7 +24,7 @@ let flushTimer = null;
 let warmTimer = null;
 let dirty = false;
 
-const CATEGORIES = ["关于她", "关于我们", "锚点", "信号", "对话摘要"];
+const CATEGORIES = ["关于她", "关于我们", "锚点", "信号", "对话摘要", "心动时刻"];
 
 // 去重阈值：同类目相似度 >= 视为同一条
 const DEFAULT_DEDUP_THRESHOLD = 0.78;
