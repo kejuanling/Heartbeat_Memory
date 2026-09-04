@@ -561,10 +561,10 @@ function isUserActiveSince(schedule) {
   return isUserActiveAnywhereSince(schedule);
 }
 
-function saveWakeSchedule(nextWakeAtIso) {
+function saveWakeSchedule(nextWakeAtIso, sessionId) {
   fs.mkdirSync(path.dirname(WAKE_SCHEDULE_PATH), { recursive: true });
   const tmp = WAKE_SCHEDULE_PATH + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify({ next_wake_at: nextWakeAtIso, updated_at: new Date().toISOString() }, null, 2), "utf-8");
+  fs.writeFileSync(tmp, JSON.stringify({ next_wake_at: nextWakeAtIso, updated_at: new Date().toISOString(), session: sessionId || null }, null, 2), "utf-8");
   fs.renameSync(tmp, WAKE_SCHEDULE_PATH);
 }
 // 清理定时唤醒：取消内存定时器 + 删除记录（触发后 / 已过期 / 作废时调用）
@@ -771,35 +771,45 @@ async function runWakeUpInner() {
   console.log("开始自动唤醒");
   console.log("==========================\n");
 
-  // AI 设置的「下一次主动唤醒时间」：设定后用户一旦主动找过 AI 则定时作废；
-  // 未到点之前定时检查跳过（不影响对话）；已过期则清理
-  try {
-    const schedule = readWakeScheduleRaw();
-    if (schedule) {
-      if (isUserActiveSince(schedule)) {
-        console.log("\n用户已主动找过 AI，定时唤醒作废，恢复正常唤醒节奏\n");
-        try { clearWakeSchedule(); } catch (voidErr) {
-          console.warn("[wake-up] 清理作废定时失败:", voidErr.message);
-        }
-      } else {
-        const nextWakeAt = new Date(schedule.next_wake_at);
-        if (!isNaN(nextWakeAt.getTime()) && nextWakeAt.getTime() > Date.now()) {
-          console.log(`\n下一次主动唤醒时间未到（${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}），本次跳过唤醒\n`);
-          return;
-        }
-        try { clearWakeSchedule(); } catch (expireErr) {
-          console.warn("[wake-up] 清理过期唤醒时间失败:", expireErr.message);
-        }
-      }
-    }
-  } catch (scheduleErr) {
-    console.warn("[wake-up] 检查下次唤醒时间失败（忽略）:", scheduleErr.message);
-  }
-
   // 多会话：锁定集合中每个会话各自独立计时、独立推送、写回各自会话；无锁定则按全局最后活跃（单会话）。
   const targets = collectWakeTargets();
   if (!targets.length) { console.log("未找到任何会话语"); return; }
-  for (const t of targets) { await runWakeForTarget(t); }
+
+  // AI 设置的「下一次主动唤醒时间」：设定后用户一旦主动找过 AI 则定时作废；
+  // 未到点之前定时检查跳过（不影响对话）；已过期则清理。
+  // 无锁定（全局单会话）时在此全局判定；有锁定时 schedule 归属各会话，由 runWakeForTarget 各自检查。
+  const locked = readWakeLockedSessions();
+  if (!locked.length) {
+    try {
+      const schedule = readWakeScheduleRaw();
+      if (schedule) {
+        if (isUserActiveSince(schedule)) {
+          console.log("\n用户已主动找过 AI，定时唤醒作废，恢复正常唤醒节奏\n");
+          try { clearWakeSchedule(); } catch (voidErr) {
+            console.warn("[wake-up] 清理作废定时失败:", voidErr.message);
+          }
+        } else {
+          const nextWakeAt = new Date(schedule.next_wake_at);
+          if (!isNaN(nextWakeAt.getTime()) && nextWakeAt.getTime() > Date.now()) {
+            console.log(`\n下一次主动唤醒时间未到（${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}），本次跳过唤醒\n`);
+            return;
+          }
+          try { clearWakeSchedule(); } catch (expireErr) {
+            console.warn("[wake-up] 清理过期唤醒时间失败:", expireErr.message);
+          }
+        }
+      }
+    } catch (scheduleErr) {
+      console.warn("[wake-up] 检查下次唤醒时间失败（忽略）:", scheduleErr.message);
+    }
+  }
+
+  // 多锁定会话同时到点：逐个处理并错峰（每会话推送间隔收敛，避免连发多条）
+  const sleepMs = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+  for (let i = 0; i < targets.length; i++) {
+    await runWakeForTarget(targets[i]);
+    if (i < targets.length - 1) await sleepMs(1500);
+  }
 }
 
 async function runWakeForTarget(target) {
@@ -816,6 +826,26 @@ async function runWakeForTarget(target) {
 
   const now = new Date();
   const diffMinutes = Math.floor((now - lastMessageTime) / 1000 / 60);
+
+  // 会话级「下一次主动唤醒时间」：AI 在某个会话设定后，只跳过该会话的唤醒（不影响其他锁定会话）；
+  // 无 session 的旧格式视为全局，仍对所有会话生效
+  try {
+    const schedule = readWakeScheduleRaw();
+    if (schedule && (!schedule.session || schedule.session === wakeSessionId)) {
+      if (isUserActiveSince(schedule)) {
+        try { clearWakeSchedule(); } catch (voidErr) { console.warn("[wake-up] 清理作废定时失败:", voidErr.message); }
+      } else {
+        const nextWakeAt = new Date(schedule.next_wake_at);
+        if (!isNaN(nextWakeAt.getTime()) && nextWakeAt.getTime() > Date.now()) {
+          console.log(`[wake-up] 会话 ${wakeSessionId} 的下一次主动唤醒时间未到（${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}），跳过该会话唤醒`);
+          return;
+        }
+        try { clearWakeSchedule(); } catch (expireErr) { console.warn("[wake-up] 清理过期唤醒时间失败:", expireErr.message); }
+      }
+    }
+  } catch (scheduleErr) {
+    console.warn("[wake-up] 检查会话级下次唤醒时间失败（忽略）:", scheduleErr.message);
+  }
 
   if (!shouldWake(lastMessageTime)) {
     console.log("\n暂不需要唤醒\n");
@@ -994,9 +1024,9 @@ ${historyText}`
           ? formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)
           : `${target.minutes} 分钟后（至 ${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}）`;
         try {
-          saveWakeSchedule(nextWakeAt.toISOString());
+          saveWakeSchedule(nextWakeAt.toISOString(), wakeSessionId);
           wakeScheduleNote = `，且设定了主动唤醒时间：${label}`;
-          console.log(`[wake-up] AI 设定主动唤醒时间：${label}（${nextWakeAt.toISOString()}）`);
+          console.log(`[wake-up] AI 设定主动唤醒时间：${label}（${nextWakeAt.toISOString()}，会话 ${wakeSessionId}）`);
           armTimedWake();
         } catch (wakeErr) {
           console.warn("[wake-up] 保存下次唤醒时间失败:", wakeErr.message);

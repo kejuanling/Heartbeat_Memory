@@ -238,6 +238,10 @@ async function add(entry) {
   if (dup) {
     // 完全相同（同分类+同内容）→ 已存在，幂等跳过所有副作用，不重复入库也不提权
     if (entryHash(e) === entryHash(dup)) {
+      // findDuplicate/findSemanticDuplicate 内部 mutate 的相似度上浮仅内存，这里按需持久化（避免重启即丢）
+      const simChanged = dup._simChanged === true;
+      delete dup._simChanged;
+      if (simChanged) { dirty = true; flush(); }
       return { entry: dup, dup: true, already: true };
     }
     // 文本/语义近似但不同 → 合并：保留更高重要级，轻微上浮；不新增重复条目
@@ -250,6 +254,7 @@ async function add(entry) {
     dup.merged_from = merged.merged_from;
     dup.updated_at = nowIso();
     dup.source = dup.source || e.source;
+    delete dup._simChanged; // 临时字段不落盘
     invalidateVector(dup.id); // 内容/分类可能已变，旧向量作废
     dirty = true; flush();
     return { entry: dup, dup: true, already: false };
@@ -345,7 +350,12 @@ function findDuplicate(e) {
     const sim = contentSimilarity(r.content, e.content);
     if (sim >= th && sim > bestSim) { best = r; bestSim = sim; }
   }
-  if (best) best.similarity = Math.max(bestSim, best.similarity || 0);
+  if (best) {
+    const prevSim = Number(best.similarity) || 0;
+    const nextSim = Math.max(bestSim, prevSim);
+    best.similarity = nextSim;
+    best._simChanged = nextSim > prevSim;  // 供 add() 幂等分支判断是否需要持久化（避免仅内存上浮重启即丢）
+  }
   return best;
 }
 
@@ -358,9 +368,16 @@ async function findSemanticDuplicate(e) {
   if (!ready) return null;
   const qv = await embedClient.embedBatch([e.category + "：" + e.content], false, 8000);
   if (!qv || !qv[0]) return null;
-  const sameTh = Number(CONFIG.dedup_semantic_threshold) || DEFAULT_DEDUP_SEMANTIC_THRESHOLD;
-  const crossTh = Number(CONFIG.dedup_semantic_cross_threshold) || DEFAULT_DEDUP_SEMANTIC_CROSS_THRESHOLD;
-  const anchorTh = Number(CONFIG.dedup_semantic_anchor_threshold) || DEFAULT_DEDUP_SEMANTIC_ANCHOR_THRESHOLD;
+  // 短文本 bge 余弦天然偏高，按长度分档提阈值，避免冷启动/短句误并
+  const _lenTh = function (base) {
+    const len = String(e.content || "").trim().length;
+    if (len < 10) return Math.min(1, base + 0.10);
+    if (len < 30) return Math.min(1, base + 0.05);
+    return base;
+  };
+  const sameTh = _lenTh(Number(CONFIG.dedup_semantic_threshold) || DEFAULT_DEDUP_SEMANTIC_THRESHOLD);
+  const crossTh = _lenTh(Number(CONFIG.dedup_semantic_cross_threshold) || DEFAULT_DEDUP_SEMANTIC_CROSS_THRESHOLD);
+  const anchorTh = _lenTh(Number(CONFIG.dedup_semantic_anchor_threshold) || DEFAULT_DEDUP_SEMANTIC_ANCHOR_THRESHOLD);
   const m = vecMap();
   let best = null, bestSim = 0;
   for (const r of rows) {
@@ -372,7 +389,12 @@ async function findSemanticDuplicate(e) {
     const th = involveAnchor ? (sameCat ? anchorTh : Infinity) : (sameCat ? sameTh : crossTh);
     if (cos >= th && cos > bestSim) { best = r; bestSim = cos; }
   }
-  if (best) best.similarity = Math.max(bestSim, best.similarity || 0);
+  if (best) {
+    const prevSim = Number(best.similarity) || 0;
+    const nextSim = Math.max(bestSim, prevSim);
+    best.similarity = nextSim;
+    best._simChanged = nextSim > prevSim;  // 供 add() 幂等分支判断是否需要持久化（避免仅内存上浮重启即丢）
+  }
   return best;
 }
 

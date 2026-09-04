@@ -1828,7 +1828,7 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
       });
       if (pass && pass.ok && !pass.fellBackToTools) {
         // T-0922：直通可能带后置工具续跑（先文本后工具），toolHistory 有值时随收尾写时间线/前端工具胶囊
-        directResult = { text: pass.text || "", reasoning: pass.reasoning || "", usage: pass.usage || null, toolHistory: pass.toolHistory || [], rounds: pass.rounds || 0 };
+        directResult = { text: pass.text || "", reasoning: pass.reasoning || "", usage: pass.usage || null, toolHistory: pass.toolHistory || [], rounds: pass.rounds || 0, segments: pass.segments || [] };
       }
       // fellBackToTools=true：直通已识别到工具调用，让下方 runWithTools 接管
     } catch (streamErr) {
@@ -2731,7 +2731,7 @@ app.post("/internal/memory-pool/add", async (req, reply) => {
     const b = req.body || {};
     const content = String(b.content || "").trim();
     if (!content) return reply.code(400).send({ error: "content 必填" });
-    const r = memoryPool.add({ content, category: b.category, importance: b.importance, source: "mcp" });
+    const r = await memoryPool.add({ content, category: b.category, importance: b.importance, source: "mcp" });
     reply.send({ success: true, dup: r.dup, entry: r.entry });
   } catch (err) {
     console.error("[POST /internal/memory-pool/add] error:", err.message);
@@ -4362,12 +4362,23 @@ app.post("/admin/context-compaction/generate", { preHandler: basicAuth }, async 
       }
       const firstKey = keyRange(rpItems[0]);
       const lastKey = keyRange(rpItems[rpItems.length - 1]);
+      // 纯内容 key 匹配在同文多次出现时会跨区间误匹配（giStart 取第一次/giEnd 取最后一次 → 范围错位）。
+      // 改为在 [start-1, end-1] 附近窗口内反查：giStart 取窗口内 firstKey 最后一次出现（最接近区间起点）、
+      // giEnd 取 giStart 之后 lastKey 第一次出现（最接近区间末尾），窗口限制避免误取区间外的重复内容。
+      const wantStart = start - 1;
+      const wantEnd = end - 1;
+      const W = 8;
+      const lo = Math.max(0, wantStart - W);
+      const hi = Math.min(compItems.length - 1, wantEnd + W);
       let giStart = -1;
       let giEnd = -1;
-      for (let i = 0; i < compItems.length; i++) {
-        const ck = keyRange(compItems[i].msg);
-        if (ck === firstKey && giStart === -1) giStart = i;
-        if (ck === lastKey) giEnd = i;
+      for (let i = hi; i >= lo; i--) {
+        if (keyRange(compItems[i].msg) === firstKey) { giStart = i; break; }
+      }
+      if (giStart >= 0) {
+        for (let i = giStart; i <= hi; i++) {
+          if (keyRange(compItems[i].msg) === lastKey) { giEnd = i; break; }
+        }
       }
       if (giStart < 0 || giEnd < giStart) {
         return reply.send({ ok: false, message: "该未覆盖区在当前时间线定位失败，请刷新后重试" });

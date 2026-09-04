@@ -655,13 +655,23 @@ async function tryStreamPassthrough({
           emit(value);
         }
         try { reply.raw.end(); } catch {}
+        // 方案2刷新：直通文本作为第 0 段，续跑轮次正文段随后；工具 afterSeg 相应 +1 偏移
+        const segs = [];
+        if (fullText && String(fullText).trim()) segs.push(fullText);
+        const segBase = segs.length;
+        (r2.segments || []).forEach(function(s){ if (s && String(s).trim()) segs.push(s); });
+        const th = (r2.toolHistory || []).map(function(t){
+          if (t && typeof t.afterSeg === "number" && t.afterSeg >= 0) return Object.assign({}, t, { afterSeg: t.afterSeg + segBase });
+          return t;
+        });
         return {
           ok: true, fellBackToTools: false,
           text: [fullText, r2.text].filter(t => t && String(t).trim()).join("\n\n"),
           reasoning: [reasoning, r2.reasoning].filter(t => t && String(t).trim()).join("\n\n"),
           usage: r2.usage || usage,
-          toolHistory: r2.toolHistory || [],
-          rounds: r2.rounds
+          toolHistory: th,
+          rounds: r2.rounds,
+          segments: segs
         };
       } catch (resumeErr) {
         // 续跑失败：客户端已收到直通文本，正常收尾返回已透传内容（仅工具结果缺失）

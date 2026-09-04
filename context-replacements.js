@@ -665,7 +665,7 @@ function migrateSessionBlocks(sourceIds, targetId) {
 // 索引空间与前端 msgs 一致（/v1/history 的 isRealMessageForTimeline 口径：排除 system/tool/特殊事件），
 // 分支点用前端传入的 msgs 下标 branchIndex 直接定位，块用内容锚点定位。
 // 跨边界块不继承（摘要不完整）。源会话块保留（复制语义），新块打新会话标签，只在新会话内套用。
-function inheritSessionBlocks(srcSession, newSession, branchIndex) {
+function inheritSessionBlocks(srcSession, newSession, branchIndex, anchorId) {
   if (!srcSession || !newSession || !Number.isInteger(branchIndex) || branchIndex < 0) {
     return { inherited: 0, skippedNoMatch: 0, skippedCross: 0 };
   }
@@ -682,10 +682,16 @@ function inheritSessionBlocks(srcSession, newSession, branchIndex) {
     if (m.role !== "user" && m.role !== "assistant") return;
     real.push({ msg: m, arrIdx: i });
   });
-  if (branchIndex >= real.length) {
+  // 优先用分支点消息 id 反查真实位置：前端 msgs 与服务端 real 下标空间可能不一致
+  //（前端本地新消息/服务端多写消息都会让下标错位），id 反查避免 over/under-inherit；无 id 或未命中回退前端下标。
+  let branchPos = branchIndex;
+  if (anchorId) {
+    const byId = real.findIndex(function(e) { return e.msg && e.msg.id === anchorId; });
+    if (byId >= 0) branchPos = byId;
+  }
+  if (branchPos >= real.length) {
     return { inherited: 0, skippedNoMatch: 0, skippedCross: 0, error: "分支点下标超出源会话消息数" };
   }
-  const branchPos = branchIndex;
   const keyToPos = new Map();
   real.forEach(function (e, p) {
     const k = normalizedCompareKey(e.msg);

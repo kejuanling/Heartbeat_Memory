@@ -605,7 +605,7 @@ module.exports = function registerChatRoutes(app, deps) {
       if (!/^[A-Za-z0-9_-]+$/.test(srcSession) || !/^[A-Za-z0-9_-]+$/.test(newSession)) {
         return reply.code(400).send({ error: '非法会话ID' });
       }
-      const stat = contextReplacements.inheritSessionBlocks(srcSession, newSession, branchIndex);
+      const stat = contextReplacements.inheritSessionBlocks(srcSession, newSession, branchIndex, body.anchorId ? String(body.anchorId) : undefined);
       if (stat.error) return reply.code(404).send({ error: stat.error });
       reply.send({ ok: true, inherited: stat.inherited, skippedNoMatch: stat.skippedNoMatch, skippedCross: stat.skippedCross });
     } catch (err) {
@@ -678,15 +678,26 @@ module.exports = function registerChatRoutes(app, deps) {
       // 新 diff 分支：body.ops = [{op:'edit',id,newContent} | {op:'delete',id}]，按 id 定点，不重排
       if (Array.isArray(body.ops)) {
         let ok = 0, miss = 0, del = 0;
+        // 批量：一次 load+save，避免多选删除大段时逐 op 各读写盘一次
+        const timeline = loadTimeline(sessionId);
+        let changed = false;
         for (const op of body.ops) {
           if (!op || !op.id) continue;
+          const idx = timeline.findIndex(m => m && m.id === op.id);
+          if (idx < 0) { miss++; continue; }
           if (op.op === 'edit') {
-            const r = patchMessage(sessionId, op.id, { content: op.newContent });
-            if (r) ok++; else miss++;
+            timeline[idx] = { ...timeline[idx], content: op.newContent, id: op.id };
+            ok++;
           } else if (op.op === 'delete') {
-            if (deleteMessage(sessionId, op.id)) del++; else miss++;
+            timeline.splice(idx, 1);
+            del++;
+          } else {
+            miss++;
+            continue;
           }
+          changed = true;
         }
+        if (changed) { saveTimeline(timeline, sessionId); sseNotify(sessionId); }
         console.log(`[timeline-sync] diff编辑/删除同步 (session=${sessionId || 'default'}, 改=${ok}, 删=${del}, 未命中=${miss})`);
         return reply.send({ ok: true, edited: ok, deleted: del, missed: miss, session_id: sessionId || 'default' });
       }

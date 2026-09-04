@@ -2092,8 +2092,8 @@ function syncTimelineLocal(ops){
       if(useDiff){
         payload.ops=ops;
       } else {
-        // 只发真实用户/AI消息（与服务端 buildTimeline 过滤口径一致），带 time 以便重建保留时刻
-        payload.messages=msgs.filter(function(m){return m&&(m.role==="user"||m.role==="assistant");}).map(function(m){return {role:m.role,content:m.content,time:m.time};});
+        // 只发真实用户/AI消息（与服务端 buildTimeline 过滤口径一致），带 time 以便重建保留时刻、带 id 避免服务端换新 uuid 导致后续 diff 编辑/删除 miss
+        payload.messages=msgs.filter(function(m){return m&&(m.role==="user"||m.role==="assistant");}).map(function(m){return {role:m.role,content:m.content,time:m.time,id:m.id};});
       }
       const r=await fetch("/v1/timeline/sync",{
         method:"POST",
@@ -2944,7 +2944,9 @@ function buildMessages(list){
       // 同时保留 base.tools 供服务器落盘（刷新靠 m.tools 渲染胶囊）；服务端写盘会剥离这段拼段防污染时间线。
       if(Array.isArray(m.tools)&&m.tools.length){
         base.tools=m.tools;
-        const txt=m.tools.map(function(t){return "【工具·"+t.name+"】参数="+(typeof t.args==="string"?t.args:JSON.stringify(t.args==null?{}:t.args))+(t.error?(" [出错] "+t.error):(" 返回="+String(t.result==null?"":t.result)));}).join("\n");
+        // 参数可能很大（图片/长文本工具），截断避免请求体膨胀
+        const _argStr=function(a){const s=(typeof a==="string")?a:JSON.stringify(a==null?{}:a);return s.length>500?s.slice(0,500)+"…":s;};
+        const txt=m.tools.map(function(t){return "【工具·"+t.name+"】参数="+_argStr(t.args)+(t.error?(" [出错] "+t.error):(" 返回="+String(t.result==null?"":t.result)));}).join("\n");
         base.content=(typeof c==="string"?c:"")+"\n\n【本回复前调用工具记录】\n"+txt;
       }
     }
@@ -3428,7 +3430,7 @@ async function branchFromMsg(idx){
     await fetch("/v1/sessions/branch-inherit",{
       method:"POST",
       headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},
-      body:JSON.stringify({srcSession:srcSession,newSession:sid,branchIndex:idx}),
+      body:JSON.stringify({srcSession:srcSession,newSession:sid,branchIndex:idx,anchorId:(msgs[idx]&&msgs[idx].id)||""}),
       credentials:"include"
     });
   }catch(e){ /* 继承失败不影响分支本身 */ }
