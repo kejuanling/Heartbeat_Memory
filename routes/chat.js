@@ -13,6 +13,14 @@ const contextCompactor = require('../context-compactor');
 const { formatDateTimeInTimeZone } = require('../time_utils');
 const { parsePushEcho, parseWakeEcho } = require('../utils/push');
 
+// 推送回显（成功推送的「刚刚给 X 发了 X 推送：」记录）需要在聊天页显示给用户看，
+// 其余特殊事件（容量提醒/唤醒/日记/记忆浮现等）保持对前端隐藏。
+function isPushEchoLike(m) {
+  if (!m || m.role !== 'assistant' || typeof m.content !== 'string') return false;
+  if (m.event_type === 'push') return true;
+  return !!parsePushEcho(m.content);
+}
+
 // ---- 跨会话语义检索（TF-IDF + 字符 bigram，与前端旧逻辑同口径）----
 function charBigrams(text) {
   if (!text) return [];
@@ -389,7 +397,7 @@ module.exports = function registerChatRoutes(app, deps) {
       for (const m of timeline) { if (m && !m.id) { m.id = (require('crypto').randomUUID) ? require('crypto').randomUUID() : String(Date.now()) + '-' + Math.random().toString(36).slice(2); needWrite = true; } }
       if (needWrite) saveTimeline(timeline, sessionId);
       const items = timeline
-        .filter(isRealMessageForTimeline)
+        .filter(m => isRealMessageForTimeline(m) || (m && !m.deleted && isPushEchoLike(m)))
         .map(m => {
           const clean = { role: m.role };
           if (m.id !== undefined) clean.id = m.id;
@@ -928,9 +936,17 @@ app.post("/v1/chat/completions", async (req, reply) => {
     if (!isMainChat) injectableEvents = [];
     console.log("本次注入的特殊事件数量:", injectableEvents.length);
 
+    // 客户端经 /v1/history 带回的推送回显会以普通 assistant 消息出现在 llmMessages，
+    // 与下面 injectableEvents 注入的同一条会重复 → 按 content 去重，保证上下文只出现一次。
+    const llmEventKeys = new Set();
+    for (const m of llmMessages) {
+      if (m && typeof m.content === "string") llmEventKeys.add(normalizeContentToText(m.content));
+    }
     for (const event of injectableEvents) {
+      const evKey = normalizeContentToText(event.content);
+      if (llmEventKeys.has(evKey)) continue; // 已在 llmMessages（客户端带回），跳过重复注入
       const eventTime = extractTimestampWithMemory(event) || extractCoRecordEventTime(event);
-      if (!eventTime) { llmMessages.push(event); continue; }
+      if (!eventTime) { llmMessages.push(event); llmEventKeys.add(evKey); continue; }
       let inserted = false;
       for (let i = 0; i < llmMessages.length; i++) {
         const m = llmMessages[i];
@@ -944,6 +960,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
         }
       }
       if (!inserted) llmMessages.push(event);
+      llmEventKeys.add(evKey);
     }
 
 
