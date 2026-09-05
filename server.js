@@ -1716,7 +1716,11 @@ function crossFingerprint(cfg) {
       let marks = {};
       try { marks = contextReplacements.loadMarks ? contextReplacements.loadMarks() : {}; } catch (e) { marks = {}; }
       const keys = Object.keys(marks || {}).sort();
-      parts.push("star:" + keys.length + ":" + keys.join(","));
+      // 指纹纳入每条标星内容的轻量摘要（长度+前 8 位 hash）：单条标星正文变化也触发重建（审查 2026-09-05 B3）
+      parts.push("star:" + keys.length + ":" + keys.map(function (k) {
+        const c = String((marks[k] && marks[k].content) || "");
+        return k + "@" + c.length + ":" + crypto.createHash("md5").update(c).digest("hex").slice(0, 8);
+      }).join(","));
     }
   } catch (e) {}
   try {
@@ -4166,23 +4170,40 @@ app.post("/admin/context-compaction/mark", { preHandler: basicAuth }, async (req
       }
       } catch (e) { /* 查找失败不阻断标星 */ }
     }
+    // 取消标星时 setMark 会先删除该 key，须提前读取 poolId/原文供沉底反查（0905 闭环验证暴露：原实现取不到）
+    const _prevPoolId = body.marked === true ? null : contextReplacements.getMarkPoolId(key);
+    let _prevMarkContent = "";
+    if (body.marked !== true) {
+      try { const _mk = (contextReplacements.loadMarks ? contextReplacements.loadMarks() : {}); if (_mk && _mk[key] && typeof _mk[key].content === "string") _prevMarkContent = _mk[key].content; } catch (e) {}
+    }
     const markRes = contextReplacements.setMark(key, body.marked === true, { content: content, role: role, msg_time: String(body.msg_time || "") });
     if (!markRes || markRes.ok === false) {
       return reply.code(400).send({ error: (markRes && markRes.error) || "标星失败" });
     }
     // 标星自动同步到记忆池「心动时刻」分类：新增标星写入一条，取消标星时按 poolId 沉底对应记忆。
     if (body.marked === true) {
-      try {
-        const poolAdd = await memoryPool.add({ content: content || "（标星内容）", category: "心动时刻", importance: 0.7, source: "star" });
-        if (poolAdd && poolAdd.entry && poolAdd.entry.id) {
-          try { contextReplacements.setMarkPoolId(key, poolAdd.entry.id); } catch (e) { /* 记录 poolId 失败不影响标星 */ }
+      // A1：找不到原文（content 空）时不往记忆池灌占位串，避免污染「心动时刻」（审查 2026-09-05 A1）
+      if (!content) {
+        console.log("[heart] 标星无原文，跳过记忆池「心动时刻」同步");
+      } else {
+        try {
+          const poolAdd = await memoryPool.add({ content: content, category: "心动时刻", importance: 0.7, source: "star" });
+          if (poolAdd && poolAdd.entry && poolAdd.entry.id) {
+            try { contextReplacements.setMarkPoolId(key, poolAdd.entry.id); } catch (e) { /* 记录 poolId 失败不影响标星 */ }
+          }
+        } catch (e) {
+          console.warn("[heart] 标星自动入「心动时刻」记忆池失败:", e.message);
         }
-      } catch (e) {
-        console.warn("[heart] 标星自动入「心动时刻」记忆池失败:", e.message);
       }
     } else {
+      // A3：poolId 用 setMark 前预读的值；缺失时按原文内容反查「心动时刻」沉底，避免取消标星漏沉（0905 闭环验证暴露）
       try {
-        const poolId = contextReplacements.getMarkPoolId(key);
+        let poolId = _prevPoolId;
+        if (!poolId && _prevMarkContent) {
+          const hits = (memoryPool.list ? memoryPool.list({ category: "心动时刻" }) : [])
+            .filter(function (r) { return r && r.active !== false && r.content && r.content.trim() === _prevMarkContent.trim(); });
+          if (hits.length) poolId = hits[0].id;
+        }
         if (poolId) await memoryPool.sink(String(poolId));
       } catch (e) {
         console.warn("[heart] 取消标星沉底「心动时刻」记忆失败:", e.message);

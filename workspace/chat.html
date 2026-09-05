@@ -2349,11 +2349,11 @@ function _updateStreamToolCard(tool){
   } else { _insertStreamToolCard(tool); }
 }
 function _onToolStart(ts){
-  const tool={index:ts.index,name:ts.name,args:ts.args,status:"running",result:"",error:null};
+  const tool={index:ts.index,name:ts.name,args:ts.args,status:"running",result:"",error:null,afterSeg:(typeof ts.afterSeg==="number")?ts.afterSeg:-1};
   SEGQ.push(function(){ if(cfg.show_tools)_insertStreamToolCard(tool); },0);
 }
 function _onToolEnd(te){
-  const tool={index:te.index,name:te.name,args:te.args,result:te.result,error:te.error,status:te.ok?"done":"failed"};
+  const tool={index:te.index,name:te.name,args:te.args,result:te.result,error:te.error,status:te.ok?"done":"failed",afterSeg:(typeof te.afterSeg==="number")?te.afterSeg:-1};
   SEGQ.push(function(){ if(cfg.show_tools)_updateStreamToolCard(tool); },0);
 }
 // 把模型抄进正文的「【工具 · NAME】 {...JSON...}」块抽出来，转成折叠胶囊（复用 renderToolCapsule）。
@@ -2395,6 +2395,8 @@ function extractToolEchoBlocks(content){
 }
 // ===== 语音消息辅助：把 <voice>…</voice> 拆成独立语音条（QQ 风格），文本与语音分开显示 =====
 let _vbaudio=null;   // 当前正在播放的语音条音频
+// 显示层剥 TTS 控制标记：<#0.5#> 等停顿标记不显示（TTS 原样文本另走 ttsSpeak，不受影响）
+function stripTtsCtl(s){ return String(s||"").replace(/<#[^>]*#>/g,""); }
 // 按原始顺序切分：text=普通正文段，voice=语音段
 function buildAiItems(content){
   const re=/<voice>([\s\S]*?)<\/voice>/gi;
@@ -2402,6 +2404,7 @@ function buildAiItems(content){
   let last=0, m;
   function pushText(seg){
     seg=String(seg||"").replace(/<\/?voice\b[^>]*>/gi,"");   // 去掉残余/未闭合标签
+    seg=stripTtsCtl(seg);   // 去掉 <#x#> 停顿标记，避免显示成字面文本
     if(seg.trim()) items.push({type:"text", text:seg});
   }
   while((m=re.exec(content))!==null){
@@ -2414,7 +2417,7 @@ function buildAiItems(content){
   return items;
 }
 function voiceMsgEl(text){
-  const secs=Math.max(1, Math.round(String(text||"").length/4));
+  const secs=Math.max(1, Math.round(stripTtsCtl(String(text||"")).length/4));   // 时长按剥离控制标记后的文本估算
   const el=document.createElement("div");
   el.className="vmsg";
   el.setAttribute("role","button");
@@ -2428,7 +2431,7 @@ function voiceMsgEl(text){
 function voiceContentEl(text){
   const c=document.createElement("div");
   c.className="vmsg-content";
-  c.textContent=String(text||"");
+  c.textContent=stripTtsCtl(String(text||""));   // 只显示正文，剥掉 <#x#> 停顿等控制标记
   c.addEventListener("click",function(ev){ ev.stopPropagation(); c.classList.toggle("expand"); });
   return c;
 }
@@ -2497,7 +2500,7 @@ function renderAiContent(msgEl, bubble, content, reasoning, tools, segments){
     const bySeg={};
     tools.forEach(function(t){ const a=(typeof t.afterSeg==="number")?t.afterSeg:-1; (bySeg[a]=bySeg[a]||[]).push(t); });
     segments.forEach(function(seg,i){
-      const cleanSeg=stripCurrentTime(stripInnerTags(seg)).clean;
+      const cleanSeg=stripTtsCtl(stripCurrentTime(stripInnerTags(seg)).clean);
       const elb=document.createElement("div"); elb.className="bubble"; elb.innerHTML=(cfg.ai_md?renderMd(cleanSeg):escapeHtml(cleanSeg));
       host.insertBefore(elb, anchor.nextSibling); anchor=elb;
       const grp=bySeg[i];
@@ -2513,7 +2516,7 @@ function renderAiContent(msgEl, bubble, content, reasoning, tools, segments){
     });
     bubble.innerHTML=h;
   }else{
-    bubble.innerHTML=(content||"")?(cfg.ai_md?renderMd(content):escapeHtml(content)):"";
+    bubble.innerHTML=(typeof content==="string"&&content)?(cfg.ai_md?renderMd(stripTtsCtl(content)):escapeHtml(stripTtsCtl(content))):"";
   }
   // AI 消息若带图片（image_url），作为独立于气泡的缩略图卡片置于气泡上方
   if(Array.isArray(content)){
@@ -2677,13 +2680,32 @@ function makeMsgEl(m,idx,grpCls){
     let parts=full.split(splitRe).map(p=>p.trim()).filter(p=>p);
     if(parts.length<=1){parts=[full];}
     if(parts.length>1)d.classList.add("multi");
+    // 工具卡按 afterSeg 映射到分段下标后插入（-1/超界 → 末尾段之后）；方案2 不再在 renderAiContent 里触发
+    const _mTools=(cfg.show_tools!==false&&Array.isArray(m.tools))?m.tools.filter(function(_t){return _t&&_t.name;}):[];
+    const _cardsBySeg={};
+    _mTools.forEach(function(_t){
+      const _a=(typeof _t.afterSeg==="number")?_t.afterSeg:-1;
+      let _idx=_a;
+      if(_idx<0||_idx>=parts.length)_idx=parts.length-1;
+      (_cardsBySeg[_idx]=_cardsBySeg[_idx]||[]).push(_t);
+    });
     parts.forEach(function(p,pi){
       const host=buildUnit();
       const b=document.createElement("div");b.className="bubble";
       // 必须先挂到 host，否则 renderAiContent 里 insertBefore(pre, bubble) 因 bubble 不是
       // host 子节点而抛 NotFoundError，导致带 reasoning/tools 的 AI 消息整条不渲染。
       host.appendChild(b);
-      renderAiContent(host,b,p,(pi===0?m.reasoning:""),(pi===0?(m.tools||[]):[]),(pi===0?m.segments:null));
+      renderAiContent(host,b,p,(pi===0?m.reasoning:""),[],null);
+      // 工具卡：afterSeg 等于当前分段下标时紧跟该段插入（-1/超界 → 最后一段之后），
+      // 与流式（QQ 分段）视觉一致；不再走 renderAiContent 的"方案2"整条重排（会与每段独立气泡冲突）
+      const _grp=_cardsBySeg[pi];
+      if(_grp&&_grp.length){
+        _grp.forEach(function(_t){
+          const _tmp=document.createElement("div");_tmp.innerHTML=renderToolCapsule(_t);
+          const _card=_tmp.firstChild;_card.addEventListener("click",function(){_card.classList.toggle("open");});
+          host.appendChild(_card);
+        });
+      }
     });
   } else {
     const host=buildUnit();
@@ -3089,15 +3111,15 @@ async function request(finalMsgs, fromSend){
       const p=parsePhoneTag(lastAiText());
       // 来电的 AI 回复归入本次通话记录（不显示）
       if(msgs.length){ const la=msgs[msgs.length-1]; if(la&&(la.role==="assistant"||la.role==="ai")&&typeof la.content==="string"){ la._callB=_call.batchId; } }
-      if(p.yes){
-        callActivate(p.text);
-      } else {
+      if(p.no){
         callClose();
+      } else {
+        callActivate(p.text);
       }
     } else if(_callAfterAI){
       _callAfterAI=false;
       if(_call&&_call.open&&msgs.length){ const la=msgs[msgs.length-1]; if(la&&(la.role==="assistant"||la.role==="ai")&&typeof la.content==="string"){ la._callB=_call.batchId; } }
-      const t=lastAiText();
+      const t=stripTtsCtl(lastAiText());   // 通话播报同样剥 <#x#> 停顿标记，避免被 TTS 原样朗读（审查 2026-09-05 A4）
       if(t && typeof callSpeak==="function"){ callSpeak(t); }
     }
     // 普通聊天：AI 主动输出 <phone>…</phone> 标签 → 触发拨打电话（前端自动过滤隐藏该标签）
@@ -4614,8 +4636,8 @@ function parsePhoneTag(t){
   const m=/<\s*result\b[^>]*>([\s\S]*?)<\s*\/result\s*>/i.exec(s)||/<\s*phone\b[^>]*>([\s\S]*?)<\s*\/phone\s*>/i.exec(s);
   const val=m?String(m[1]).trim().toLowerCase():"";
   const clean=s.replace(/<\s*(result|phone)\b[^>]*>[\s\S]*?<\s*\/(result|phone)\s*>/gi,"").replace(/<\s*current_time\b[^>]*>[\s\S]*?<\s*\/current_time\s*>/gi,"").trim();
-  const yes=/^(yes|1|y|true|接|接听|好|嗯|在|听)$/.test(val);
-  const no=/^(no|0|n|false|拒|拒绝|不接|不了|别)$/.test(val);
+  const yes=/^(yes|1|y|true|ok|okay|接|接听|在|听|好|嗯|行|中|可以|当然|没问题|好的|好的呀|好的吧|好的呢|好呀|好嘞|好滴|好哒|嗯嗯|嗯好|行呀|行吧|可以的|可以呀|可以吧|当然可以|当然可以呀|没问题呀)$/i.test(val);
+  const no=/^(no|0|n|false|拒|拒绝|不接|不了|别|不要|挂断|不方便|算了|不想接|现在不方便|不用了)$/i.test(val);
   return { yes:yes, no:no, text:clean };
 }
 // 判断文本里是否含 <phone>（AI 主动请拨打电话）

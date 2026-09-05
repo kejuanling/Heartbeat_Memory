@@ -69,7 +69,11 @@ function loadConfig() {
   try {
     const data = JSON.parse(fs.readFileSync(path.join(DATA_DIR, "config.json"), "utf-8"));
     for (const k of Object.keys(DEFAULT_CONFIG)) {
-      if (data[k] !== undefined) cfg[k] = data[k];
+      if (data[k] !== undefined) {
+        // 布尔配置读取也标准化，兜底历史脏值（如 "false"/0 字符串），避免被当 true（审查 2026-09-05 A2）
+        if (typeof DEFAULT_CONFIG[k] === "boolean") cfg[k] = data[k] === true || data[k] === "true" || data[k] === 1 || data[k] === "1";
+        else cfg[k] = data[k];
+      }
     }
   } catch (err) { /* 配置文件缺失时使用默认 */ }
   return cfg;
