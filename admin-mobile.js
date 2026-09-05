@@ -932,9 +932,7 @@ function toast(msg){
       document.getElementById('mw-cross-enabled').checked=c.cross_inject_enabled!==false;
       document.getElementById('mw-cross-diary').checked=c.cross_inject_diary!==false;
       document.getElementById('mw-cross-memory').checked=c.cross_inject_memory!==false;
-      document.getElementById('mw-cross-starred').checked=c.cross_inject_starred!==false;
        document.getElementById('mw-cross-days').value=c.cross_inject_diary_count!=null?c.cross_inject_diary_count:3;
-       document.getElementById('mw-cross-startopk').value=c.cross_inject_starred_topk!=null?c.cross_inject_starred_topk:10;
     }catch(e){ if(msg)msg.textContent='读取记忆池参数失败: '+e.message; }
     if(msg)msg.textContent='';
   }
@@ -961,9 +959,7 @@ function toast(msg){
     up2.cross_inject_enabled=document.getElementById('mw-cross-enabled').checked;
     up2.cross_inject_diary=document.getElementById('mw-cross-diary').checked;
     up2.cross_inject_memory=document.getElementById('mw-cross-memory').checked;
-    up2.cross_inject_starred=document.getElementById('mw-cross-starred').checked;
      up2.cross_inject_diary_count=Number(document.getElementById('mw-cross-days').value)||3;
-     up2.cross_inject_starred_topk=Number(document.getElementById('mw-cross-startopk').value)||10;
     try{
       const r=await fetch(ADMIN_API+'/memory-pool/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(up2)});
       const d=await r.json();

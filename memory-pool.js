@@ -24,7 +24,8 @@ let flushTimer = null;
 let warmTimer = null;
 let dirty = false;
 
-const CATEGORIES = ["关于她", "关于我们", "锚点", "信号", "对话摘要", "心动时刻"];
+// ⑥ 对话碎片：置顶/标星保留的对话关键碎片（2026-09-05 由「心动时刻」改名，用户改为手动置顶管理）
+const CATEGORIES = ["关于她", "关于我们", "锚点", "信号", "对话摘要", "对话碎片"];
 
 // 去重阈值：同类目相似度 >= 视为同一条
 const DEFAULT_DEDUP_THRESHOLD = 0.78;
@@ -48,13 +49,11 @@ const CONFIG = {
   retrieval_top_k: 5,
   // 多次检索自动置顶：检索次数达到该阈值即固定为置顶（相关记忆块稳定带上它）
   auto_pin_retrieval_count: 5,
-  // 跨窗口注入（日记 / 置顶记忆 / 记忆碎片）
+  // 跨窗口注入（日记 / 置顶记忆）；「记忆碎片（标星内容）」注入已于 2026-09-05 移除，改为记忆池「对话碎片」置顶管理
   cross_inject_enabled: true,
   cross_inject_diary: true,
   cross_inject_memory: true,
-  cross_inject_starred: true,
   cross_inject_diary_count: 3,
-  cross_inject_starred_topk: 10,
   // 压缩摘要再解析入库（LLM）：总开关 + 温暖风格
   reparse_enabled: true,
   reparse_warm: false,

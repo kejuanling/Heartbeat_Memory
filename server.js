@@ -1567,7 +1567,7 @@ require("./routes/chat")(app, {
 // Chat Completions
 // ========================
 // ========================
-// 跨窗口自动注入：日记 + 高重要级记忆 + 标星内容（注入标题显示为「记忆碎片」，本质仍标星）
+// 跨窗口自动注入：日记 + 高重要级记忆（标星「记忆碎片」注入已于 2026-09-05 移除，改为记忆池「对话碎片」置顶）
 // ========================
 // 会话创建时刻：取该会话时间线第一条消息的时间（首条消息 ≈ 会话创建时刻）。
 // 用于日记跨窗口注入的边界：只注入"创建日期之前"的日记。
@@ -1614,75 +1614,8 @@ function recentDiaryTextBefore(sessionId, count, createdIso) {
   return out.join("\n\n");
 }
 
-// ── 记忆碎片（标星内容）注入 ────────
-// 用途:开新会话/跨窗口时，把标星消息(记忆碎片)注入为上下文消息(不进系统提示)。
-// 排序&数量:按标星时间正序取前 N 条(读取 memory_pool_config.json 的
-//   cross_inject_starred_topk,默认50)。时间早的在前,铺开最近一段连贯历史。
-// 互补:本函数=窗口注入取较早连贯片段; MCP 工具 moments_list=随时拉取最新记忆碎片。
-// 批注 2026-08-31:由"取最新N条再重排"改回"正序取前N"，最新内容交给 moments_list 工具。
-
-function starredContextText(limit, createdIso) {
-  // 标星注入的角色标签：AI 用【谢】、用户用【涵】(取 AI_DISPLAY_NAME / USER_DISPLAY_NAME,默认 谢/涵)
-  const AI_DISPLAY_NAME = String(readEnvValue("AI_DISPLAY_NAME") || "谢");
-  const USER_DISPLAY_NAME = String(readEnvValue("USER_DISPLAY_NAME") || "涵");
-  let marks = {};
-  try { marks = contextReplacements.loadMarks ? contextReplacements.loadMarks() : {}; } catch (e) { marks = {}; }
-  const keys = Object.keys(marks || {});
-  if (!keys.length) return "";
-  let items = [];
-  const seenKeys = new Set();
-  // 时间锚点：优先原消息时间(entry.time)，其次标星时间(markedAt)，都没有=存量无时间记录
-  function itemTs(entry, m) {
-    if (entry && entry.time) return entry.time;
-    if (entry && entry.markedAt) return entry.markedAt;
-    if (m && m.time) return m.time;
-    return "";
-  }
-  // 第一遍：优先用标星时存的原文 marks[key].content —— 与已标星列表 listMarked 口径一致。
-  // 时间线/替换池查不到的历史标星也能注入，避免“近期新标不在标星内容段”。
-  keys.forEach(function (key) {
-    const entry = marks[key];
-    if (!entry || typeof entry.content !== "string" || !entry.content) return;
-    if (seenKeys.has(key)) return;
-    seenKeys.add(key);
-    const role = (entry.role === "user") ? USER_DISPLAY_NAME : AI_DISPLAY_NAME;
-    items.push({ text: "【" + role + "】 " + entry.content, ts: itemTs(entry, null) });
-  });
-  // 第二遍：兜底扫替换记录 matched，补早期没存原文的存量标星（按 key 去重）
-  let replItems = [];
-  try { replItems = (contextReplacements.loadItems ? contextReplacements.loadItems() : []) || []; } catch (e) { replItems = []; }
-  for (const it of replItems) {
-    const matched = Array.isArray(it.matched) ? it.matched : [];
-    for (const m of matched) {
-      if (!m || m.role === "system") continue;
-      let k = null;
-      try { k = contextReplacements.contentKey ? contextReplacements.contentKey(m) : null; } catch (e) {}
-      if (k && marks[k] && !seenKeys.has(k)) {
-        seenKeys.add(k);
-        const role = m.role === "user" ? USER_DISPLAY_NAME : AI_DISPLAY_NAME;
-        const c = typeof m.content === "string" ? m.content : "";
-        if (c) items.push({ text: "【" + role + "】 " + c, ts: itemTs(marks[k], m) });
-      }
-    }
-  }
-  // 批注 2026-09-04：与日记对齐——只注入"本会话创建时间之前"的标星，之后的只在当前会话（原文仍保留在时间线）；
-  // 存量标星无时间字段时保守保留（不丢重要记忆）。createdIso 为空则不过滤（全量）。
-  if (createdIso) {
-    items = items.filter(function (x) { return !x.ts || x.ts < createdIso; });
-  }
-  if (!items.length) return "";
-  const n = Number(limit) || 10;
-  items.sort(function (a, b) {
-    const ta = a.ts || "";
-    const tb = b.ts || "";
-    if (ta === tb) return 0;
-    if (!ta) return 1;      // 无时间放最后
-    if (!tb) return -1;
-    return ta < tb ? -1 : 1;  // 升序：时间早的在前（按时间线顺序铺开）
-  });
-  // 取"创建时间之前最近 n 条"（升序末尾），与近期日记口径一致
-  return items.slice(-n).map(function (x) { return x.text; }).join("\n\n");
-}
+// ── 记忆碎片（标星内容）跨窗口注入已移除（2026-09-05）──
+// 用户改为在记忆池「对话碎片」分类手动置顶管理，标星内容不再自动注入新会话。
 
 // ========================
 // 跨窗口记忆快照（每会话固定）
@@ -1709,18 +1642,6 @@ function crossFingerprint(cfg) {
     if (cfg.cross_inject_memory !== false) {
       const pinned = memoryPool.list({ active: true, pinned: true });
       parts.push("mem:" + pinned.map(function (m) { return m.id + ":" + String(m.content || "").length; }).join(","));
-    }
-  } catch (e) {}
-  try {
-    if (cfg.cross_inject_starred !== false) {
-      let marks = {};
-      try { marks = contextReplacements.loadMarks ? contextReplacements.loadMarks() : {}; } catch (e) { marks = {}; }
-      const keys = Object.keys(marks || {}).sort();
-      // 指纹纳入每条标星内容的轻量摘要（长度+前 8 位 hash）：单条标星正文变化也触发重建（审查 2026-09-05 B3）
-      parts.push("star:" + keys.length + ":" + keys.map(function (k) {
-        const c = String((marks[k] && marks[k].content) || "");
-        return k + "@" + c.length + ":" + crypto.createHash("md5").update(c).digest("hex").slice(0, 8);
-      }).join(","));
     }
   } catch (e) {}
   try {
@@ -1786,10 +1707,6 @@ function buildCrossMemorySnapshot(sessionId) {
     if (pinnedMems.length) {
       parts.push("## 相关记忆\n" + pinnedMems.map(function (m) { return "【" + m.category + "】" + m.content; }).join("\n"));
     }
-  }
-  if (cfg.cross_inject_starred !== false) {
-    const st = starredContextText(Number(cfg.cross_inject_starred_topk) || 10, createdIso);
-    if (st) parts.push("## 记忆碎片\n" + st);
   }
   // 日记：跨窗口注入（快照的一部分），只注入"本会话创建日期之前"的日记。
   if (cfg.cross_inject_diary !== false) {
@@ -4180,33 +4097,33 @@ app.post("/admin/context-compaction/mark", { preHandler: basicAuth }, async (req
     if (!markRes || markRes.ok === false) {
       return reply.code(400).send({ error: (markRes && markRes.error) || "标星失败" });
     }
-    // 标星自动同步到记忆池「心动时刻」分类：新增标星写入一条，取消标星时按 poolId 沉底对应记忆。
+    // 标星自动同步到记忆池「对话碎片」分类：新增标星写入一条，取消标星时按 poolId 沉底对应记忆。
     if (body.marked === true) {
-      // A1：找不到原文（content 空）时不往记忆池灌占位串，避免污染「心动时刻」（审查 2026-09-05 A1）
+      // A1：找不到原文（content 空）时不往记忆池灌占位串，避免污染「对话碎片」（审查 2026-09-05 A1）
       if (!content) {
-        console.log("[heart] 标星无原文，跳过记忆池「心动时刻」同步");
+        console.log("[heart] 标星无原文，跳过记忆池「对话碎片」同步");
       } else {
         try {
-          const poolAdd = await memoryPool.add({ content: content, category: "心动时刻", importance: 0.7, source: "star" });
+          const poolAdd = await memoryPool.add({ content: content, category: "对话碎片", importance: 0.7, source: "star" });
           if (poolAdd && poolAdd.entry && poolAdd.entry.id) {
             try { contextReplacements.setMarkPoolId(key, poolAdd.entry.id); } catch (e) { /* 记录 poolId 失败不影响标星 */ }
           }
         } catch (e) {
-          console.warn("[heart] 标星自动入「心动时刻」记忆池失败:", e.message);
+          console.warn("[heart] 标星自动入「对话碎片」记忆池失败:", e.message);
         }
       }
     } else {
-      // A3：poolId 用 setMark 前预读的值；缺失时按原文内容反查「心动时刻」沉底，避免取消标星漏沉（0905 闭环验证暴露）
+      // A3：poolId 用 setMark 前预读的值；缺失时按原文内容反查「对话碎片」沉底，避免取消标星漏沉（0905 闭环验证暴露）
       try {
         let poolId = _prevPoolId;
         if (!poolId && _prevMarkContent) {
-          const hits = (memoryPool.list ? memoryPool.list({ category: "心动时刻" }) : [])
+          const hits = (memoryPool.list ? memoryPool.list({ category: "对话碎片" }) : [])
             .filter(function (r) { return r && r.active !== false && r.content && r.content.trim() === _prevMarkContent.trim(); });
           if (hits.length) poolId = hits[0].id;
         }
         if (poolId) await memoryPool.sink(String(poolId));
       } catch (e) {
-        console.warn("[heart] 取消标星沉底「心动时刻」记忆失败:", e.message);
+        console.warn("[heart] 取消标星沉底「对话碎片」记忆失败:", e.message);
       }
     }
     reply.send({ ok: true, key: key, marked: markRes.marked !== false });
@@ -5771,8 +5688,8 @@ function consoleOwnedCfgKeys() {
     "pagination", "history_pagination", "conversation_pagination", "max_history",
     // 记忆池 / 跨窗口注入：由控制台 /config 与 /memory-pool/config 管理
     "cross_inject_enabled", "cross_inject_diary", "cross_inject_diary_count", "cross_inject_diary_days",
-    "cross_inject_memory", "cross_inject_memory_per_category", "cross_inject_push", "cross_inject_starred",
-    "cross_inject_starred_topk", "cross_inject_summary_days",
+    "cross_inject_memory", "cross_inject_memory_per_category", "cross_inject_push",
+    "cross_inject_summary_days",
     // 记忆解析 / 清理 / 去重
     "reparse_enabled", "reparse_max_chars", "reparse_max_items", "reparse_merge_max_chars",
     "reparse_system_prompt", "reparse_user_prompt", "reparse_warm",
