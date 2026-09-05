@@ -1214,9 +1214,39 @@ function appendRequestMessages(sessionId, reqMsgs) {
 // 追加特殊事件
 // ========================
 function appendSpecialEvent(content, extra, sessionId) {
-  const newEvent = appendMessage(sessionId, { role: "assistant", content, ...(extra || {}) });
-  // 特殊事件（唤醒/日记/共影/推送）落库后，appendMessage 已按 hidden 决定是否推前端刷新；
-  // 这里仅保留长度日志（特殊事件可能含推送正文，只记长度避免泄漏）。
+  let newEvent;
+  // 按事件内容自带的墙上时间戳插位（唤醒/日记/推送回显/共影首段时间），
+  // 而不是一律追加到末尾——否则事件落库晚于其后消息时会被排到错误时间位置。
+  // 容量提醒（（容量提醒）…）不带开段时间戳，解析失败回退原 appendMessage 行为。
+  const evTime = extractTimestamp(content) || extractCoRecordEventTime({ content });
+  if (evTime && !isNaN(evTime.getTime())) {
+    const evMs = evTime.getTime();
+    const timeline = loadTimeline(sessionId);
+    let insertAt = timeline.length;
+    for (let i = 0; i < timeline.length; i++) {
+      const m = timeline[i];
+      if (!m) continue;
+      const mt = extractTimestampWithMemory(m) || extractCoRecordEventTime(m);
+      if (mt && !isNaN(mt.getTime()) && mt.getTime() >= evMs) { insertAt = i; break; }
+    }
+    const prev = insertAt > 0 ? timeline[insertAt - 1] : null;
+    const next = insertAt < timeline.length ? timeline[insertAt] : null;
+    let pos;
+    if (prev && next) pos = (Number(prev.position || 0) + Number(next.position || 0)) / 2;
+    else if (prev) pos = Number(prev.position || 0) + 0.5;
+    else if (next) pos = Math.max(0, Number(next.position || 0) - 0.5);
+    else pos = 1;
+    const msg = { time: evTime.toISOString(), role: "assistant", content, ...(extra || {}), position: pos, id: crypto.randomUUID ? crypto.randomUUID() : (String(Date.now()) + '-' + Math.random().toString(36).slice(2)) };
+    timeline.splice(insertAt, 0, msg);
+    saveTimeline(timeline, sessionId);
+    newEvent = msg;
+  } else {
+    newEvent = appendMessage(sessionId, { role: "assistant", content, ...(extra || {}) });
+  }
+  // 插位分支已手动触发保存，此处需按 hidden 决定是否推前端刷新；
+  // appendMessage 分支已在其内部处理过 sseNotify，不再重复。
+  if (evTime && !(newEvent && newEvent.hidden)) sseNotify(sessionId);
+  // 特殊事件（唤醒/日记/共影/推送）落库后只保留长度日志（可能含推送正文，避免泄漏）。
   console.log(`\n已记录特殊事件 (session ${sessionId || "default"}, position ${newEvent.position}, chars ${normalizeContentToText(content).length})\n`);
 }
 
