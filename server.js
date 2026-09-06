@@ -797,6 +797,12 @@ function extractTimestampWithMemory(msg) {
     if (!isNaN(d.getTime())) return d;
   }
   const text = normalizeContentToText(msg.content);
+  // 特殊事件：优先取内容【开头】的墙上时间（事件发生时间），
+  // 避免末尾「，且设定了主动唤醒时间：…」被误当成消息末尾的时间缀，导致事件被排到上下文最底部。
+  if (typeof isSpecialEvent === "function" && isSpecialEvent(msg)) {
+    const fromContent = extractTimestamp(text);
+    if (fromContent) return fromContent;
+  }
   const fromTag = extractCurrentTimeTagLabel(text);
   if (fromTag) return fromTag;
   const fromTrailing = extractTrailingTimestampLabel(text);
