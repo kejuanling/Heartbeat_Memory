@@ -490,6 +490,9 @@ function retrieve(query, opts) {
 const embedClient = require("./utils/embed-client");
 const VECTOR_FILE = path.join(DATA_DIR, "memory_pool_vectors.json");
 let vectorCache = null;
+const VECTOR_WARM_BATCH_SIZE = 4;
+const VECTOR_WARM_PAUSE_MS = 5000;
+let vectorWarmPromise = null;
 
 function vecMap() {
   if (!vectorCache) {
@@ -513,28 +516,50 @@ function invalidateVector(id) {
   if (m[id]) { delete m[id]; saveVecMap(); }
 }
 
-// 保证一组条目的向量就绪（缺失/内容变更的批量补算）；返回 false = 语义不可用
-async function ensureVectors(rows) {
+function missingVectors(rows) {
   const m = vecMap();
-  const missing = rows.filter(function (r) {
+  return rows.filter(function (r) {
     const c = m[r.id];
     return !c || c.h !== entryHash(r) || !Array.isArray(c.v) || c.v.length === 0;
   });
-  if (!missing.length) return true;
-  const vecs = await embedClient.embedBatch(missing.map(function (r) { return r.category + "：" + r.content; }));
-  if (!vecs) return false;
-  missing.forEach(function (r, i) {
-    if (vecs[i] && vecs[i].length) m[r.id] = { h: entryHash(r), v: vecs[i] };
-  });
-  saveVecMap();
-  return true;
 }
 
-// 后台预热：把全部 active 条目嵌入（增量，算过的跳过）
+function delay(ms) {
+  return new Promise(function (resolve) { setTimeout(resolve, ms); });
+}
+
+// 检索与写入主链路不能为补向量等待。缺失时安排后台增量补算，并让调用方走字面回退。
+async function ensureVectors(rows) {
+  const missing = missingVectors(rows);
+  if (!missing.length) return true;
+  warmVectors().catch(function () {});
+  return false;
+}
+
+// 后台预热：每次最多 4 条、每批立即落盘。服务重启或超时时保留已完成批次，
+// 下一个定时周期/检索触发会从缓存断点继续，绝不把整池塞进一个请求。
 async function warmVectors() {
-  if (embedClient.fused()) return;
-  const rows = load().filter(r => r.active !== false);
-  await ensureVectors(rows);
+  if (READONLY || embedClient.fused()) return false;
+  if (vectorWarmPromise) return vectorWarmPromise;
+  vectorWarmPromise = (async function () {
+    let completed = 0;
+    while (!embedClient.fused()) {
+      const rows = load().filter(function (r) { return r.active !== false; });
+      const batch = missingVectors(rows).slice(0, VECTOR_WARM_BATCH_SIZE);
+      if (!batch.length) return completed > 0;
+      const vecs = await embedClient.embedBatch(batch.map(function (r) { return r.category + "：" + r.content; }), false, 12000);
+      if (!vecs || vecs.length !== batch.length) return false;
+      const m = vecMap();
+      batch.forEach(function (r, i) {
+        if (vecs[i] && vecs[i].length) m[r.id] = { h: entryHash(r), v: vecs[i] };
+      });
+      saveVecMap();
+      completed += batch.length;
+      await delay(VECTOR_WARM_PAUSE_MS);
+    }
+    return false;
+  })().finally(function () { vectorWarmPromise = null; });
+  return vectorWarmPromise;
 }
 
 function dotProduct(a, b) {
@@ -582,6 +607,41 @@ async function retrieveHybrid(query, opts) {
   }
   return picked.map(p => {
     const r = p.r;
+    return {
+      id: r.id,
+      content: r.content,
+      category: r.category,
+      importance: r.importance,
+      pinned: r.pinned === true,
+      created_at: r.created_at,
+      updated_at: r.updated_at
+    };
+  });
+}
+
+
+// 呼吸：浮现最近沉淀的记忆（未沉底，优先置顶 > 重要级 > 最近更新）。用于 memory_search 的 breath 开关。
+function breath(opts) {
+  opts = opts || {};
+  const limit = Math.max(1, Math.min(Number(opts.limit) || 3, 5));
+  const category = opts.category || undefined;
+  const rows = load().filter(function (r) {
+    if (r.active === false) return false;
+    if (category && String(r.category || "") !== String(category)) return false;
+    return true;
+  });
+  rows.sort(function (a, b) {
+    const pinA = a.pinned === true ? 1 : 0;
+    const pinB = b.pinned === true ? 1 : 0;
+    if (pinA !== pinB) return pinB - pinA;
+    const impA = Number(a.importance) || 0;
+    const impB = Number(b.importance) || 0;
+    if (impA !== impB) return impB - impA;
+    const upA = String(a.updated_at || "");
+    const upB = String(b.updated_at || "");
+    return upA < upB ? 1 : (upA > upB ? -1 : 0);
+  });
+  return rows.slice(0, limit).map(function (r) {
     return {
       id: r.id,
       content: r.content,
@@ -1077,7 +1137,7 @@ module.exports = {
   init, shutdown, flush,
   CATEGORIES,
   list, stats, get, add, update, remove, sink, revive,
-  retrieve, retrieveHybrid, warmVectors, ingestSummary, parseCategoryBlocks, reparseSummaryViaLLM, buildReparsePrompt,
+  retrieve, retrieveHybrid, breath, warmVectors, ingestSummary, parseCategoryBlocks, reparseSummaryViaLLM, buildReparsePrompt,
   contentSimilarity, tokensOf, decayFactor, scoreOf,
   buildCleanPrompt, cleanPool,
   setConfig, getConfig, poolKeywords

@@ -2693,7 +2693,11 @@ app.get("/internal/memory-pool/retrieve", async (req, reply) => {
     const q = String(req.query.q || "").trim();
     const topK = Number(req.query.limit) || 5;
     const category = String(req.query.category || "").trim();
-    const items = await memoryPool.retrieveHybrid(q, { topK, category: category || undefined });
+    const breath = req.query.breath === "1" || req.query.breath === "true";
+    // breath 模式：无 q 时只浮现最近沉淀的记忆（未沉底，优先置顶/重要级/最近更新）
+    const items = (breath && !q)
+      ? memoryPool.breath({ limit: topK, category: category || undefined })
+      : await memoryPool.retrieveHybrid(q, { topK, category: category || undefined });
     reply.send({ ok: true, total: items.length, items });
   } catch (err) {
     console.error("[GET /internal/memory-pool/retrieve] error:", err.message);
