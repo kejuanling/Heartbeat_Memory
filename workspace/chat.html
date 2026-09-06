@@ -899,21 +899,27 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 /* 压缩页头部工具条 + 配置提示（对齐 admin 压缩 tab 结构） */
 .cc-cfg-tip{margin-top:14px;padding:10px 12px;font-size:11px;color:var(--ink3);text-align:center;background:rgba(200,144,152,.04);border-radius:10px;border:1px dashed rgba(200,144,152,.18)}
 .session-item{
-  display:flex;flex-direction:column;gap:3px;padding:11px 12px;margin:4px 0;border-radius:12px;
-  cursor:pointer;transition:background .15s;border:1px solid transparent;
+  display:flex;flex-direction:column;gap:2px;padding:10px 12px;margin:5px 0;border-radius:14px;
+  cursor:pointer;transition:background .15s,border-color .15s,box-shadow .15s;border:1px solid transparent;
+  position:relative;background:rgba(255,255,255,.55);box-shadow:0 1px 2px rgba(90,74,58,.05);
 }
-.session-item:hover{background:rgba(255,255,255,.65)}
-.session-item.active{background:var(--accent-soft);border-color:rgba(200,144,152,.3)}
-.session-item .s-name{font-size:14px;font-weight:600;color:var(--ink);display:flex;align-items:center;gap:6px}
-.session-item .s-name .s-badge{font-size:10px;color:#fff;background:var(--accent);border-radius:8px;padding:1px 7px;flex-shrink:0}
-.session-item .s-meta .s-badge.pin{font-size:10px;color:#fff;background:var(--accent);border-radius:8px;padding:1px 6px;margin-right:4px}
-.session-item .s-meta .s-badge.lock{font-size:10px;color:#fff;background:#4a9a6b;border-radius:8px;padding:1px 6px;margin-right:4px}
-.session-item .s-meta .s-badge.tp{font-size:10px;color:#fff;background:#7b5bd6;border-radius:8px;padding:1px 6px;margin-right:4px}
-.session-item .s-name .s-del{margin-left:auto;border:none;background:none;color:var(--ink3);font-size:15px;cursor:pointer;padding:2px 6px}
+.session-item:hover{background:rgba(255,255,255,.82)}
+.session-item.active{background:var(--accent-soft);border-color:rgba(200,144,152,.32);box-shadow:0 2px 8px rgba(200,144,152,.14)}
+.session-item .s-name{font-size:14px;font-weight:600;color:var(--ink);display:flex;align-items:center;gap:5px;min-width:0}
+.session-item .s-title{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.session-item .s-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;display:inline-block;margin-right:5px}
+.session-item .s-dot.lock{background:#a5715a}
+.session-item .s-dot.tp{background:#7d8fa0}
+.session-item .s-name .s-del{border:none;background:none;color:var(--ink3);cursor:pointer;padding:3px 4px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center}
 .session-item .s-name .s-del:hover{color:#d88383}
-.session-item .s-meta{font-size:11px;color:var(--ink3)}
-.session-item .s-ops{display:flex;gap:6px;margin-top:3px}
-.session-item .s-op{border:1px solid rgba(200,144,152,.3);background:none;border-radius:8px;padding:3px 8px;font-size:11px;color:var(--accent-deep);cursor:pointer}
+.session-item .s-name .s-icon{display:inline-flex;align-items:center;justify-content:center;border:none;background:none;color:var(--ink3);cursor:pointer;padding:3px;border-radius:6px;flex-shrink:0;transition:all .12s}
+.session-item .s-name .s-icon:hover{color:var(--accent-deep);background:rgba(200,144,152,.12)}
+.session-item .s-name .s-icon.pin.on{color:var(--accent)}
+.session-item .s-op.on{color:#7d8fa0;border-color:rgba(125,143,160,.5);background:rgba(125,143,160,.1)}
+.session-item .s-meta{font-size:11px;color:var(--ink3);white-space:nowrap;display:inline-flex;align-items:center;margin-right:2px}
+.session-item .s-ops{display:flex;align-items:center;gap:8px;margin-top:4px}
+.session-item .s-op{border:1px solid rgba(200,144,152,.22);background:none;border-radius:8px;padding:2px 8px;font-size:11px;color:var(--accent-deep);cursor:pointer;transition:background .12s}
+.session-item .s-op:hover{background:rgba(200,144,152,.08)}
 .session-item .s-check{width:18px;height:18px;border-radius:50%;border:1.5px solid rgba(200,144,152,.45);display:inline-flex;align-items:center;justify-content:center;font-size:11px;color:#fff;flex-shrink:0;transition:all .12s}
 .session-item .s-check.on{background:var(--accent-deep);border-color:var(--accent-deep)}
 .session-item.merging .s-name .s-del{display:none}
@@ -5182,18 +5188,21 @@ function renderSessionList(){
     if(!name)name=s.name||(s.id==="default"?"主会话":s.id);
     const pinned=isPinned(s.id);
     const locked=isLocked(s.id);
-    const meta=(locked?'<span class="s-badge lock">锁定</span>':'')+(pinned?'<span class="s-badge pin">置顶</span>':'')+(thirdPartySid===s.id?'<span class="s-badge tp">第三方</span>':'')+escapeHtml((s.real!=null?(""+s.real+" 条"):"")+(s.last_time?(" · "+fmtTime(new Date(s.last_time))):""));
+    const meta=(locked?'<span class="s-dot lock" title="锁定唤醒"></span>':'')+(thirdPartySid===s.id?'<span class="s-dot tp" title="第三方专用"></span>':'')+escapeHtml((s.real!=null?(""+s.real+" 条"):"")+(s.last_time?(" · "+fmtTime(new Date(s.last_time))):""));
     const checkHtml=merging?('<span class="s-check'+(mergeSel.has(s.id)?' on':'')+'">'+(mergeSel.has(s.id)?'✓':'')+'</span>'):'';
-    item.innerHTML='<div class="s-name">'+checkHtml+escapeHtml(name)+'<button class="s-del" data-id="'+escapeHtml(s.id)+'" title="删除"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button></div>'+
-      '<div class="s-meta">'+meta+'</div>'+
-      '<div class="s-ops"><button class="s-op" data-op="pin" data-id="'+escapeHtml(s.id)+'">'+(pinned?"取消置顶":"置顶")+'</button><button class="s-op" data-op="cc" data-id="'+escapeHtml(s.id)+'">压缩</button><button class="s-op" data-op="export" data-id="'+escapeHtml(s.id)+'">导出</button><button class="s-op" data-op="rename" data-id="'+escapeHtml(s.id)+'">改名</button><button class="s-op" data-op="thirdparty" data-id="'+escapeHtml(s.id)+'">'+(thirdPartySid===s.id?"取消第三方":"设为第三方")+'</button></div>';
+    item.innerHTML='<div class="s-name">'+checkHtml+'<button class="s-icon pin'+(pinned?' on':'')+'" data-op="pin" data-id="'+escapeHtml(s.id)+'" title="'+(pinned?"取消置顶":"置顶")+'"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/></svg></button>'+'<span class="s-title" title="'+escapeHtml(name)+'">'+escapeHtml(name)+'</span><button class="s-icon ren" data-op="rename" data-id="'+escapeHtml(s.id)+'" title="改名"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/><path d="m15 5 4 4"/></svg></button>'+'<button class="s-del" data-id="'+escapeHtml(s.id)+'" title="删除"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button></div>'+
+      '<div class="s-ops"><span class="s-meta">'+meta+'</span><button class="s-op" data-op="cc" data-id="'+escapeHtml(s.id)+'">压缩</button><button class="s-op" data-op="export" data-id="'+escapeHtml(s.id)+'">导出</button><button class="s-op'+(thirdPartySid===s.id?' on':'')+'" data-op="thirdparty" data-id="'+escapeHtml(s.id)+'">第三方</button></div>';
     item.querySelector(".s-name > .s-del").addEventListener("click",e=>{e.stopPropagation();if(merging){toggleMergeSel(s.id);}else{deleteSession(s.id);}});
-    item.querySelectorAll(".s-op").forEach(btn=>btn.addEventListener("click",e=>{
+    item.querySelectorAll(".s-name .s-icon").forEach(btn=>btn.addEventListener("click",e=>{
       e.stopPropagation();
       const op=btn.dataset.op,id=btn.dataset.id;
       if(op==="pin")togglePinSession(id);
-      if(op==="export")exportSession(id);
       if(op==="rename")renameSession(id);
+    }));
+    item.querySelectorAll(".s-op").forEach(btn=>btn.addEventListener("click",e=>{
+      e.stopPropagation();
+      const op=btn.dataset.op,id=btn.dataset.id;
+      if(op==="export")exportSession(id);
       if(op==="cc")openSessionCc(id);
       if(op==="thirdparty")setThirdPartySession(id);
     }));
@@ -5314,10 +5323,10 @@ function updateSessionItem(id){
   if(!item){ renderSessionList(); return; }
   let pinnedArr=[]; try{ pinnedArr=JSON.parse(localStorage.getItem("han_pinned_sessions")||"[]"); }catch(e){}
   const pinned=pinnedArr.indexOf(id)>=0;
-  const btn=item.querySelector('.s-op[data-op="pin"]'); if(btn) btn.textContent=pinned?"取消置顶":"置顶";
+  const pinBtn=item.querySelector('.s-name .s-icon.pin'); if(pinBtn) pinBtn.classList.toggle('on', pinned);
   const s=(typeof sessionList!=="undefined"&&sessionList)?sessionList.find(function(x){return x.id===id;}):null;
   const isLock=(typeof wakeLocked!=="undefined"&&wakeLocked)?wakeLocked.indexOf(id)>=0:false;
-  const meta=(isLock?'<span class="s-badge lock">锁定</span>':'')+(pinned?'<span class="s-badge pin">置顶</span>':'')+escapeHtml((s&&s.real!=null?(""+s.real+" 条"):"")+(s&&s.last_time?(" · "+fmtTime(new Date(s.last_time))):""));
+  const meta=(isLock?'<span class="s-dot lock" title="锁定唤醒"></span>':'')+escapeHtml((s&&s.real!=null?(""+s.real+" 条"):"")+(s&&s.last_time?(" · "+fmtTime(new Date(s.last_time))):""));
   const me=item.querySelector(".s-meta"); if(me) me.innerHTML=meta;
   function pinState(sidv){ let arr=[]; try{ arr=JSON.parse(localStorage.getItem("han_pinned_sessions")||"[]"); }catch(e){} return arr.indexOf(sidv)>=0; }
   function lastOf(kind){
