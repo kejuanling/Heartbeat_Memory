@@ -406,6 +406,38 @@ module.exports = function registerChatRoutes(app, deps) {
     }
   });
 
+  // 第三方专用会话：读/写「不带 session_id 的第三方客户端(如 Kelivo)」落地到哪个会话。
+  // 前端在会话列表里把某个会话设为「第三方专用」，存到 data/config.json 的 third_party_session_id。
+  // 读：GET /v1/sessions/third-party → 返回当前第三方专用会话 id（可能为空）。
+  // 写：POST /v1/sessions/third-party body:{session_id} → 设置/清空（传空串清空，回退 default 行为）。
+  app.get('/v1/sessions/third-party', async (req, reply) => {
+    try {
+      const sid = String(memoryEngine.getConfig().third_party_session_id || '').trim();
+      reply.send({ ok: true, session_id: sid || null });
+    } catch (err) {
+      console.error('[GET /v1/sessions/third-party] error:', err.message);
+      reply.code(500).send({ error: err.message });
+    }
+  });
+  app.post('/v1/sessions/third-party', async (req, reply) => {
+    try {
+      const body = (req.body && typeof req.body === 'object') ? req.body : {};
+      const sid = String(body.session_id || '').trim();
+      // 允许清空：传空串即回退 default 行为
+      if (!sid) {
+        await memoryEngine.updateConfig({ third_party_session_id: '' });
+        return reply.send({ ok: true, session_id: '' });
+      }
+      const safe = sid.replace(/[^A-Za-z0-9_-]/g, '');
+      if (safe !== sid) return reply.code(400).send({ error: '非法会话ID' });
+      await memoryEngine.updateConfig({ third_party_session_id: safe });
+      reply.send({ ok: true, session_id: safe });
+    } catch (err) {
+      console.error('[POST /v1/sessions/third-party] error:', err.message);
+      reply.code(500).send({ error: err.message });
+    }
+  });
+
   // 只读返回完整时间线（供自建聊天前端首次拉取历史；剥离内部 position 字段，保留 role/content/time）
   app.get('/v1/history', async (req, reply) => {
     try {
@@ -781,12 +813,19 @@ app.post("/v1/chat/completions", async (req, reply) => {
     const kelivoMessages = body.messages || [];
 
     // 多会话：识别当前请求来自哪个会话
-    const sessionId = String(body.session_id || req.headers["x-session-id"] || "").trim();
+    let sessionId = String(body.session_id || req.headers["x-session-id"] || "").trim();
+    // 第三方客户端(Kelivo 等)通常不带 session_id：若配置了「第三方专用会话」，
+    // 则落到该会话，避免混入主会话 default；未配置才回退空(==default)。
+    if (!sessionId) {
+      const tpSid = String(memoryEngine.getConfig().third_party_session_id || "").trim();
+      if (tpSid) sessionId = tpSid;
+    }
     // 让压缩/替换按当前会话时间线工作（onResponse 钩子复位）
     contextReplacements.setActiveSession(sessionId || null);
     req.__ctxWasSet = true;
-    // 客户端来源标记：只有真正的客户端聊天请求（带这个标记）才允许写时间线，
-    // 避免旁路/探活/测试/内部调用随时覆盖历史（本次事故根因）
+    // 客户端来源标记：自建前端(chat.html)带 x-client=dylan-chat；第三方客户端(如 Kelivo)不带。
+    // 时间线已改为追加式增量写、不再全量覆盖，故放开「必须带 x-client 才写」的门槛：
+    // 只要请求通过鉴权且携带真实消息就写时间线，第三方不带该头也能正常写入、供自建前端看到。
     const isClientChat = (req.headers["x-client"] || "").trim() === "dylan-chat";
 
     // ========================
@@ -827,14 +866,15 @@ app.post("/v1/chat/completions", async (req, reply) => {
     const oldTimeline = loadTimeline(sessionId);
 
     const finalTimeline = buildTimeline(kelivoMessages, sessionId);
-    // 防误伤：仅当"这是客户端聊天请求"且"携带真实消息"时才写时间线，
-    // 否则一律跳过，防止一次异常请求把完整历史冲成空壳
-    if (isClientChat && (kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0)) {
+    // 防误伤：携带真实消息(或首次建线)才写时间线。时间线已是追加式增量写、不再全量覆盖历史，
+    // 故放宽原先「必须 x-client=dylan-chat 才写」的门槛——第三方客户端(如 Kelivo)不带该头
+    // 且已带上真实消息，也能正常写入，供自建前端(chat.html)看到。
+    if (kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0) {
       // 方案二增量：落盘改为以盘上为基同步差量（新消息补齐/人设同步/重生成清尾），
       // 不再拿请求全量重建覆盖；finalTimeline 仅服务后续事件注入与时间映射。通知由同步函数按需发出。
       appendRequestMessages(sessionId, kelivoMessages);
     } else {
-      console.log("[timeline] 跳过时间线保存 (isClientChat=" + isClientChat + ", 真实消息=" + kelivoMessages.some(isRealMessageForTimeline) + ")");
+      console.log("[timeline] 跳过时间线保存 (真实消息=" + kelivoMessages.some(isRealMessageForTimeline) + ")");
     }
 
     // Kelivo 发图时 content 常是数组。默认原样透传给视觉模型；
@@ -1253,12 +1293,12 @@ app.post("/v1/chat/completions", async (req, reply) => {
             finalResponseText = JSON.stringify(parsed);
           }
           // 方案二增量：回复只追加一条；盘尾已有同内容回复（重试/重发）则跳过，不重复写
-          if (isClientChat && (kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0)) {
+          if ((kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0)) {
             if (!tailHasReply(sessionId, cleanText)) {
               appendMessages(sessionId, [{ role: "assistant", content: cleanText }]);
             }
           } else {
-            console.log("[timeline] 跳过回复落盘 (非流式, isClientChat=" + isClientChat + ")");
+            console.log("[timeline] 跳过回复落盘 (非流式)");
           }
           // 非流式同样写幂等缓存：同 client_msg_id 的重发直接回放，不重复调上游/重复写时间线
           if (cleanText && body && body.client_msg_id) {
@@ -1384,12 +1424,12 @@ app.post("/v1/chat/completions", async (req, reply) => {
         });
         // 方案二增量：回复只追加一条（富字段 reasoning/tokens 一并落，跨设备刷新不丢）；
         // 盘尾已有同内容回复（重试/重发）则跳过，不重复写
-        if (isClientChat && (kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0)) {
+        if ((kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0)) {
           if (!tailHasReply(sessionId, cleanFull)) {
             appendMessages(sessionId, [{ role: "assistant", content: cleanFull, reasoning: aiThinking || "", tokens: aiUsage || null }]);
           }
         } else {
-          console.log("[timeline] 跳过回复落盘 (流式, isClientChat=" + isClientChat + ")");
+          console.log("[timeline] 跳过回复落盘 (流式)");
         }
         // 缓存本次已生成的回复，供同 client_msg_id 的重复请求直接回放。
         if (cleanFull && body && body.client_msg_id) {

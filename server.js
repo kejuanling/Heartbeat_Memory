@@ -5658,7 +5658,7 @@ const RUN_CONFIG_WHITELIST = new Set([
   "event_inject_types", "vision_models", "keep_recent_image_turns",
   "memory_retrieval_enabled", "retrieval_top_k", "keyword_search_enabled",
   "memory_relevance_threshold", "memory_item_cooldown_minutes",
-  "context_injection_types",
+  "context_injection_types", "third_party_session_id",
   "wake_top_k", "wake_total_limit", "wake_random_count", "wake_relevance_threshold",
   "memory_retrieval_wake_enabled", "wake_history_max_messages"
 ]);
@@ -5684,7 +5684,8 @@ const RUN_CONFIG_TYPES = {
   wake_random_count: "number",
   wake_relevance_threshold: "number",
   memory_retrieval_wake_enabled: "boolean",
-  wake_history_max_messages: "number"
+  wake_history_max_messages: "number",
+  third_party_session_id: "string"
 };
 
 app.get("/admin/config", { preHandler: basicAuth }, async (req, reply) => {

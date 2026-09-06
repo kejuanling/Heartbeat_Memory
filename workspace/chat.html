@@ -754,7 +754,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 
 /* 工具胶囊（API 工具调用痕迹） */
 .tool-trace{
-  width:100%;margin-bottom:8px;border-left:3px solid rgba(92,134,166,.35);
+  width:100%;max-width:min(84%,640px);margin-bottom:8px;border-left:3px solid rgba(92,134,166,.35);
   padding:7px 12px;border-radius:0 8px 8px 0;
   background:rgba(92,134,166,.07);font-size:12.5px;color:var(--ink2);
   line-height:1.5;cursor:pointer;user-select:none;-webkit-user-select:none;
@@ -908,6 +908,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .session-item .s-name .s-badge{font-size:10px;color:#fff;background:var(--accent);border-radius:8px;padding:1px 7px;flex-shrink:0}
 .session-item .s-meta .s-badge.pin{font-size:10px;color:#fff;background:var(--accent);border-radius:8px;padding:1px 6px;margin-right:4px}
 .session-item .s-meta .s-badge.lock{font-size:10px;color:#fff;background:#4a9a6b;border-radius:8px;padding:1px 6px;margin-right:4px}
+.session-item .s-meta .s-badge.tp{font-size:10px;color:#fff;background:#7b5bd6;border-radius:8px;padding:1px 6px;margin-right:4px}
 .session-item .s-name .s-del{margin-left:auto;border:none;background:none;color:var(--ink3);font-size:15px;cursor:pointer;padding:2px 6px}
 .session-item .s-name .s-del:hover{color:#d88383}
 .session-item .s-meta{font-size:11px;color:var(--ink3)}
@@ -1747,6 +1748,7 @@ let selectMode=false, selectSet=new Set(), actIdx=-1;
 let currentSession="default";
 let sessionList=[];
 let wakeLocked=[];   // 锁定唤醒会话集合（服务器端同步）
+let thirdPartySid=null;   // 当前「第三方专用会话」id（不带 session_id 的第三方客户端落地的会话）
 
 function loadCfg(){
   try{
@@ -5142,6 +5144,11 @@ async function loadSessions(){
     const j2=await r2.json();
     if(j2&&Array.isArray(j2.sessions)){wakeLocked=j2.sessions;renderSessionList();}
   }catch(e){console.warn("loadSessions wake-locked fail:",e.message);}
+  try{
+    const r3=await fetch("/v1/sessions/third-party",{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
+    const j3=await r3.json();
+    if(j3&&j3.ok){thirdPartySid=j3.session_id||null;renderSessionList();}
+  }catch(e){console.warn("loadSessions third-party fail:",e.message);}
 }
 function renderSessionList(){
   const el=document.getElementById("sessionList");
@@ -5175,11 +5182,11 @@ function renderSessionList(){
     if(!name)name=s.name||(s.id==="default"?"主会话":s.id);
     const pinned=isPinned(s.id);
     const locked=isLocked(s.id);
-    const meta=(locked?'<span class="s-badge lock">锁定</span>':'')+(pinned?'<span class="s-badge pin">置顶</span>':'')+escapeHtml((s.real!=null?(""+s.real+" 条"):"")+(s.last_time?(" · "+fmtTime(new Date(s.last_time))):""));
+    const meta=(locked?'<span class="s-badge lock">锁定</span>':'')+(pinned?'<span class="s-badge pin">置顶</span>':'')+(thirdPartySid===s.id?'<span class="s-badge tp">第三方</span>':'')+escapeHtml((s.real!=null?(""+s.real+" 条"):"")+(s.last_time?(" · "+fmtTime(new Date(s.last_time))):""));
     const checkHtml=merging?('<span class="s-check'+(mergeSel.has(s.id)?' on':'')+'">'+(mergeSel.has(s.id)?'✓':'')+'</span>'):'';
     item.innerHTML='<div class="s-name">'+checkHtml+escapeHtml(name)+'<button class="s-del" data-id="'+escapeHtml(s.id)+'" title="删除"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button></div>'+
       '<div class="s-meta">'+meta+'</div>'+
-      '<div class="s-ops"><button class="s-op" data-op="pin" data-id="'+escapeHtml(s.id)+'">'+(pinned?"取消置顶":"置顶")+'</button><button class="s-op" data-op="cc" data-id="'+escapeHtml(s.id)+'">压缩</button><button class="s-op" data-op="export" data-id="'+escapeHtml(s.id)+'">导出</button><button class="s-op" data-op="rename" data-id="'+escapeHtml(s.id)+'">改名</button></div>';
+      '<div class="s-ops"><button class="s-op" data-op="pin" data-id="'+escapeHtml(s.id)+'">'+(pinned?"取消置顶":"置顶")+'</button><button class="s-op" data-op="cc" data-id="'+escapeHtml(s.id)+'">压缩</button><button class="s-op" data-op="export" data-id="'+escapeHtml(s.id)+'">导出</button><button class="s-op" data-op="rename" data-id="'+escapeHtml(s.id)+'">改名</button><button class="s-op" data-op="thirdparty" data-id="'+escapeHtml(s.id)+'">'+(thirdPartySid===s.id?"取消第三方":"设为第三方")+'</button></div>';
     item.querySelector(".s-name > .s-del").addEventListener("click",e=>{e.stopPropagation();if(merging){toggleMergeSel(s.id);}else{deleteSession(s.id);}});
     item.querySelectorAll(".s-op").forEach(btn=>btn.addEventListener("click",e=>{
       e.stopPropagation();
@@ -5188,11 +5195,29 @@ function renderSessionList(){
       if(op==="export")exportSession(id);
       if(op==="rename")renameSession(id);
       if(op==="cc")openSessionCc(id);
+      if(op==="thirdparty")setThirdPartySession(id);
     }));
     item.addEventListener("click",()=>{ if(merging){ toggleMergeSel(s.id); } else { switchSession(s.id); } });
     el.appendChild(item);
   });
   updateMergeBar();
+}
+// ===== 第三方专用会话 =====
+// 设置/取消某个会话为「第三方专用」：不带 session_id 的第三方客户端(如 Kelivo)
+// 连网关时，对话落到这个会话，自建前端(chat.html)能看到。存到后端 data/config.json。
+async function setThirdPartySession(id){
+  if(id==="default"){ showToast("主会话不能设为第三方专用"); return; }
+  const isCur = (thirdPartySid===id);
+  const action = isCur ? "取消" : "设为";
+  if(!confirm("确定将「"+escapeHtml(sessionDisplayName(id))+"」"+action+"为第三方专用会话？\n\n设为后：不带 session_id 的第三方客户端(如 Kelivo)发来的对话都会汇聚到这个会话，不会混进主会话。"))return;
+  try{
+    const r=await fetch("/v1/sessions/third-party",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({session_id:isCur?"":id})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){ showToast(j.error||"设置失败"); return; }
+    thirdPartySid=j.session_id||null;
+    renderSessionList();
+    showToast(isCur?"已取消第三方专用":"已设为第三方专用会话");
+  }catch(e){ showToast("设置失败:"+(e&&e.message||"")); }
 }
 // ===== 会话合并（原会话保留，多选后合成新会话）=====
 let mergeMode=false, mergeSel=new Set();
