@@ -5239,7 +5239,8 @@ function openSessMenu(sid, anchorEl){
   el.innerHTML='<button class="sess-menu-item" data-op="cc">压缩</button>'
     +'<button class="sess-menu-item" data-op="export">导出</button>'
     +'<button class="sess-menu-item'+(tpOn?' on':'')+'" data-op="thirdparty">第三方</button>'
-    +'<button class="sess-menu-item" data-op="persona">人设</button>';
+    +'<button class="sess-menu-item" data-op="persona">人设</button>'
+    +'<button class="sess-menu-item" data-op="cross">跨窗口</button>';
   Array.prototype.forEach.call(el.querySelectorAll(".sess-menu-item"),function(btn){
     btn.addEventListener("click",function(e){
       e.stopPropagation();
@@ -5249,6 +5250,7 @@ function openSessMenu(sid, anchorEl){
       else if(op==="export")exportSession(sid);
       else if(op==="thirdparty")setThirdPartySession(sid);
       else if(op==="persona")openSessionPersona(sid);
+      else if(op==="cross")openSessionCrossInject(sid);
     });
   });
   el.classList.remove("hidden");
@@ -5276,6 +5278,34 @@ function openSessionPersona(sid){
       showToast(v?("已为「"+nm+"」单独设置人设"):"已恢复为跟随全局人设");
     },
     "应用");
+}
+// 给【单个会话】单独开关「跨窗口注入」：是否注入其它会话的置顶相关记忆 / 近期日记（跟随全局/开启/关闭）
+async function openSessionCrossInject(sid){
+  const nm=sessionDisplayName(sid)||(sid==="default"?"主会话":sid);
+  let cur="";   // ""=跟随全局, "1"=开启, "0"=关闭
+  try{
+    const r=await fetch("/v1/sessions/"+encodeURIComponent(sid)+"/cross-inject",{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
+    const j=await r.json();
+    if(j&&typeof j.cross_inject_enabled==="boolean") cur=j.cross_inject_enabled?"1":"0";
+  }catch(e){}
+  const opts='<option value="">跟随全局</option><option value="1"'+(cur==="1"?" selected":"")+'>开启</option><option value="0"'+(cur==="0"?" selected":"")+'>关闭</option>';
+  openEditModal("跨窗口 · "+nm,
+    '<div class="field"><label>本会话是否注入跨窗口内容</label><select class="np-sel" id="xj-cross">'+opts+'</select>'
+    +'<div class="np-tip">跨窗口内容 = 其它会话的置顶相关记忆 + 近期日记。「跟随全局」则按设置页跨窗口注入总开关生效。</div></div>',
+    function(){
+      const v=(document.getElementById("xj-cross")||{}).value||"";
+      const enabled = v==="1"?true:(v==="0"?false:null);
+      saveSessionCrossInject(sid, enabled, v==="");
+    },
+    "应用");
+}
+async function saveSessionCrossInject(sid, enabled, followGlobal){
+  try{
+    const r=await fetch("/v1/sessions/"+encodeURIComponent(sid)+"/cross-inject",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({enabled:enabled})});
+    const j=await r.json();
+    if(!r.ok){ showToast(j.error||"保存失败"); return; }
+    showToast(followGlobal?"已恢复为跟随全局":(enabled?"已开启本会话跨窗口注入":"已关闭本会话跨窗口注入"));
+  }catch(e){ showToast("保存失败:"+(e&&e.message||"")); }
 }
 // ===== 第三方专用会话 =====
 // 设置/取消某个会话为「第三方专用」：不带 session_id 的第三方客户端(如 Kelivo)
