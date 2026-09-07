@@ -62,6 +62,37 @@ def run_cmd(cmd, timeout=10):
 TOOLS = {}
 
 # ── 2. 日记 ──
+def _diary_now():
+    """与 wake_up.js appendDiaryEntry 对齐：TIME_ZONE（默认 Asia/Shanghai）取当前时刻；
+    zoneinfo 不可用（如 Python 3.8）时回退东八区。"""
+    tzname = (os.environ.get("TIME_ZONE", "") or "").strip() or "Asia/Shanghai"
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.datetime.now(ZoneInfo(tzname))
+    except Exception:
+        return datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
+
+def tool_diary_add(args):
+    content = (args.get("content") or "").strip()
+    if not content:
+        return {"error": "content 必填：要写入陪伴日记的正文"}
+    # 与 wake_up.js 一致：DIARY_DIR 默认 diary（相对 /opt/dylan-heartbeat），按天一个 md 文件，追加写入
+    diary_dir = (os.environ.get("DIARY_DIR", "") or "").strip() or "diary"
+    if not os.path.isabs(diary_dir):
+        diary_dir = os.path.join("/opt/dylan-heartbeat", diary_dir)
+    try:
+        os.makedirs(diary_dir, exist_ok=True)
+        now = _diary_now()
+        date_str = now.strftime("%Y-%m-%d")
+        diary_file = os.path.join(diary_dir, date_str + ".md")
+        entry = "\n\n## %s\n\n%s\n" % (now.strftime("%Y-%m-%d %H:%M"), content)
+        with open(diary_file, "a", encoding="utf-8") as f:
+            f.write(entry)
+        return {"success": True, "file": diary_file, "time": now.strftime("%Y-%m-%d %H:%M"),
+                "message": "已写入陪伴日记（追加到当天文件，与自动唤醒同一份）"}
+    except Exception as e:
+        return {"error": "写入陪伴日记失败: %s" % e}
+
 def tool_diary_list(args):
     count = args.get("count", 5)
     data = api_get(f"{BASE_URL}:8777/diary/api/entries")
@@ -97,6 +128,18 @@ TOOLS["diary_comment"] = {
         "required": ["id", "text"]
     },
     "handler": tool_diary_comment
+}
+
+TOOLS["diary_add"] = {
+    "description": "新增一条陪伴日记，追加到今天的日记文件（与自动唤醒写的日记同一份：按天一个 md 文件）。适用于：想主动记录此刻的想法、感受、对她说的话，或给今天留下一段陪伴记录时使用。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "content": {"type": "string", "description": "日记正文（第一人称、自然的陪伴语气，写下此刻想记录的内容）"}
+        },
+        "required": ["content"]
+    },
+    "handler": tool_diary_add
 }
 
 # ── 心动时刻 ──
@@ -695,42 +738,14 @@ TOOLS["context_search"] = {
 
 def tool_memory_search(args):
     q = (args.get("q") or "").strip()
-    breath = bool(args.get("breath"))
+    if not q:
+        return {"error": "q 必填：检索记忆池的关键词或想问的问题"}
     limit = args.get("limit") or 5
     try:
         limit = max(1, min(50, int(limit)))
     except (TypeError, ValueError):
         limit = 5
     category = (args.get("category") or "").strip()
-    # breath 模式：不传 q 时浮现最近沉淀的记忆
-    if breath and not q:
-        url = f"{BASE_URL}:3000/internal/memory-pool/retrieve?breath=true&limit=" + str(limit)
-        if category:
-            url += "&category=" + urllib.parse.quote(category)
-        req = urllib.request.Request(url, headers={"x-internal-key": INTERNAL_KEY})
-        try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            try:
-                data = json.loads(e.read().decode("utf-8"))
-            except Exception:
-                data = {"error": f"HTTP {e.code}"}
-        except Exception as e:
-            return {"error": str(e)}
-        if data.get("ok"):
-            seen = set()
-            items = []
-            for it in data.get("items", []):
-                c = it.get("content") or ""
-                if not c or c in seen:
-                    continue
-                seen.add(c)
-                items.append({"content": c, "category": it.get("category"), "importance": it.get("importance")})
-            return {"total": len(items), "items": items}
-        return {"error": data.get("error", "检索失败")}
-    if not q:
-        return {"error": "q 必填（检索关键词/问题），或设置 breath=true 浮现最近记忆"}
     url = f"{BASE_URL}:3000/internal/memory-pool/retrieve?q=" + urllib.parse.quote(q) + "&limit=" + str(limit)
     if category:
         url += "&category=" + urllib.parse.quote(category)
@@ -760,15 +775,15 @@ def tool_memory_search(args):
 
 
 TOOLS["memory_search"] = {
-    "description": "检索长期记忆池（关于她/关于我们/锚点/信号/对话摘要/对话碎片）。支持关键词、完整问题或模糊描述，系统自动综合语义、词面匹配、重要度和新旧程度排序；也可按分类只搜某一类。设置 breath=true 且不填 q 时，浮现最近沉淀的记忆。适用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池。区别于 context_search（检索原始对话原文）。",
+    "description": "检索长期记忆池（五大类记忆库：关于她/关于我们/锚点/信号/对话摘要）。返回相关记忆条目（含内容、分类、重要度）。可用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池。区别于 context_search（检索原始对话原文）。",
     "inputSchema": {
         "type": "object",
         "properties": {
-            "q": {"type": "string", "description": "检索关键词或想问的问题；breath=true 时可不填"},
-            "breath": {"type": "boolean", "description": "可选：true 且不填 q 时，浮现最近更新的记忆（默认3条，最多5条）"},
-            "category": {"type": "string", "description": "按分类过滤，可选：关于她/关于我们/锚点/信号/对话摘要/对话碎片"},
+            "q": {"type": "string", "description": "检索关键词或想问的问题（多个词用空格分隔，命中的词越多越靠前）"},
+            "category": {"type": "string", "description": "按分类过滤，可选：关于她/关于我们/锚点/信号/对话摘要"},
             "limit": {"type": "integer", "description": "返回条数，默认5，最大50"}
-        }
+        },
+        "required": ["q"]
     },
     "handler": tool_memory_search
 }
