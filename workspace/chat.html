@@ -3724,7 +3724,7 @@ async function saveSettingsAll(){
 let promptBackups=[];
 const LS_SESSION_PROMPTS="han_session_prompts";
 function getSessionPromptMap(){ try{ return JSON.parse(localStorage.getItem(LS_SESSION_PROMPTS)||"{}")||{}; }catch(e){ return {}; } }
-function setSessionPrompt(sid,backupId){ const m=getSessionPromptMap(); if(backupId) m[sid]=backupId; else delete m[sid]; try{ localStorage.setItem(LS_SESSION_PROMPTS,JSON.stringify(m)); }catch(e){} }
+function setSessionPrompt(sid,backupId){ const m=getSessionPromptMap(); if(backupId) m[sid]=backupId; else delete m[sid]; try{ localStorage.setItem(LS_SESSION_PROMPTS,JSON.stringify(m)); }catch(e){} pushSessionPrompts(); }
 function resolveSessionSystemPrompt(){
   const bid=currentSession&&getSessionPromptMap()[currentSession];
   if(bid){ const b=promptBackups.find(function(x){return x.id===bid;}); if(b&&typeof b.content==="string"&&b.content.trim()) return b.content.trim(); }
@@ -5642,6 +5642,26 @@ async function pullSessionNames(){
     pushSessionNames();   // 双向收敛：本地独有项也推回服务器
   }catch(e){}
 }
+// 会话级人设（提示词备份）选择跨设备同步（存到服务器 data/session-prompts.json）
+async function pushSessionPrompts(){
+  try{
+    let map={}; try{ map=JSON.parse(localStorage.getItem(LS_SESSION_PROMPTS)||"{}"); }catch(e){ map={}; }
+    const r=await fetch("/heartbeat/admin/session-prompts",{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":getCookie("admin_csrf")},body:JSON.stringify({prompts:map}),credentials:"include"});
+    return r.ok;
+  }catch(e){ return false; }
+}
+async function pullSessionPrompts(){
+  try{
+    const r=await fetch("/heartbeat/admin/session-prompts",{headers:{"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include"});
+    if(!r.ok) return;
+    const j=await r.json();
+    const serverPrompts=(j&&j.prompts)||{};
+    let map={}; try{ map=JSON.parse(localStorage.getItem(LS_SESSION_PROMPTS)||"{}"); }catch(e){ map={}; }
+    for(const k of Object.keys(serverPrompts)){ if(typeof serverPrompts[k]==="string") map[k]=serverPrompts[k]; }
+    try{ localStorage.setItem(LS_SESSION_PROMPTS,JSON.stringify(map)); }catch(e){}
+    pushSessionPrompts();   // 双向收敛：本地独有项也推回服务器
+  }catch(e){}
+}
 // 会话置顶跨设备同步（存到服务器 data/session-pins.json）
 async function pushSessionPins(){
   try{
@@ -6055,8 +6075,9 @@ async function initChat(){
       renderSessionList();   // loadSessions 渲染列表时 active 还是旧值，这里补一次
     }
   }
-  pullSessionNames();   // 拉取跨设备改名映射
+  pullSessionNames();    // 拉取跨设备改名映射
   pullSessionPins();    // 拉取跨设备会话置顶
+  pullSessionPrompts(); // 拉取跨设备会话级人设选择
   pullSessionParents(); // 拉取跨设备分支父级
   pullStarredKeysFromServer();   // 标星 UI 状态从管理台标记列表对齐（异步，渲染后生效）
   const localMsgs=loadMsgs();               // 本地缓存：保留思考链/工具/token 等完整数据

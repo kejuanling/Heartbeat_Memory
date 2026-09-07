@@ -5803,6 +5803,27 @@ app.put("/admin/session-names", { preHandler: basicAuth }, async (req, reply) =>
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
+// 会话级人设（提示词备份）选择跨设备同步（存 data/session-prompts.json）
+const SESSION_PROMPTS_FILE = path.join(__dirname, "data", "session-prompts.json");
+app.get("/admin/session-prompts", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    let prompts = {};
+    try { if (fs.existsSync(SESSION_PROMPTS_FILE)) prompts = JSON.parse(fs.readFileSync(SESSION_PROMPTS_FILE, "utf-8")) || {}; } catch (e) {}
+    reply.send({ ok: true, prompts });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+app.put("/admin/session-prompts", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const body = (req.body && typeof req.body === "object") ? req.body : {};
+    const prompts = (body.prompts && typeof body.prompts === "object") ? body.prompts : {};
+    fs.ensureDirSync(path.dirname(SESSION_PROMPTS_FILE));
+    const clean = {};
+    for (const k of Object.keys(prompts)) { if (typeof prompts[k] === "string") clean[k] = prompts[k]; }
+    fs.writeFileSync(SESSION_PROMPTS_FILE, JSON.stringify(clean, null, 2), "utf-8");
+    reply.send({ ok: true, saved: true, count: Object.keys(clean).length });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
 // 会话置顶跨设备同步（存 data/session-pins.json）
 const SESSION_PINS_FILE = path.join(__dirname, "data", "session-pins.json");
 app.get("/admin/session-pins", { preHandler: basicAuth }, async (req, reply) => {
