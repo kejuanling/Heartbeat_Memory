@@ -1627,9 +1627,19 @@ require("./routes/chat")(app, {
 // ========================
 // 跨窗口自动注入：日记 + 高重要级记忆（标星「记忆碎片」注入已于 2026-09-05 移除，改为记忆池「对话碎片」置顶）
 // ========================
-// 会话创建时刻：取该会话时间线第一条消息的时间（首条消息 ≈ 会话创建时刻）。
-// 用于日记跨窗口注入的边界：只注入"创建日期之前"的日记。
+// 会话创建时刻：优先取该会话时间线文件的创建时间(birthtime) —— 「新建时间线文件」即会话建立时刻。
+// 用于日记跨窗口注入的边界：只注入"创建日期当天及之前"的日记。
+// 对导入会话尤其关键：导入的旧对话会让「首条消息时间」远早于会话真正建立的时间，
+// 导致跨窗口日记注入把最新日记全部滤掉；改用文件创建时间后，导入会话也能注入到最新日记。
 function sessionCreatedAtOf(sessionId) {
+  try {
+    const f = path.join(__dirname, timelineFileFor(sessionId || "default"));
+    const st = fs.statSync(f);
+    if (st && Number.isFinite(st.birthtimeMs) && st.birthtimeMs > 0) {
+      return new Date(st.birthtimeMs).toISOString();
+    }
+  } catch (e) {}
+  // 兜底：文件不存在，或所在文件系统不提供 birthtime 时，回退到时间线首条消息时间。
   try {
     const tl = loadTimeline(sessionId || "default");
     for (const m of tl) {
@@ -1686,7 +1696,7 @@ function recentDiaryTextBefore(sessionId, count, createdIso) {
 // ========================
 const CROSS_SNAPSHOT_DIR = path.join(__dirname, "data");
 const SESSION_CFG_DIR = path.join(__dirname, "data", "session_cfg");   // 会话级配置（如跨窗口注入覆盖）；无文件=跟随全局
-const CROSS_SNAPSHOT_VERSION = 7;  // 升版本：日记注入边界从"<创建日期"放宽为"<=创建日期(含当天)"，旧快照自动重建
+const CROSS_SNAPSHOT_VERSION = 8;  // 升版本：会话创建时刻改为「时间线文件创建时间(birthtime)」，导入会话也能注入最新日记；旧快照自动重建
 function crossSnapshotFile(sessionId) {
   // 与 timelineFileFor 用同一套会话名规则（safeSessionToken）：保证同一会话的时间线与快照归属一致
   const token = safeSessionToken(sessionId || "default");
