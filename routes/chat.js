@@ -150,6 +150,9 @@ module.exports = function registerChatRoutes(app, deps) {
     extractCoRecordEventTime,
     classifySpecialEvent,
     resolveActiveProvider,
+    resolveSessionProvider,
+    sessionModelProviderOverride,
+    saveSessionModelProviderOverride,
     readEnvValue,
     UPSTREAM_TIMEOUT_MS,
     handleMcpRequest,
@@ -702,6 +705,33 @@ module.exports = function registerChatRoutes(app, deps) {
     }
   });
 
+  // 会话级模型供应商覆盖：本会话单独用哪个 AI 供应商（不存在/停用则回退全局）。
+  // 仅影响该会话的转发目标（api_url/api_key/model），不触碰管理台全局配置。
+  app.get('/v1/sessions/:id/model-provider', async (req, reply) => {
+    try {
+      const sessionId = String(req.params.id || '').trim();
+      const override = deps.sessionModelProviderOverride(sessionId);
+      reply.send({ session_id: sessionId, model_provider_id: override, follow_global: override === null });
+    } catch (err) {
+      console.error('[GET /v1/sessions/:id/model-provider] error:', err.message);
+      reply.code(500).send({ error: err.message });
+    }
+  });
+  app.post('/v1/sessions/:id/model-provider', async (req, reply) => {
+    try {
+      const sessionId = String(req.params.id || '').trim();
+      const body = (req.body && typeof req.body === 'object') ? req.body : {};
+      let val = null;
+      if (typeof body.model_provider_id === 'string' && body.model_provider_id.trim()) val = body.model_provider_id.trim();
+      // 其余（undefined/null/''）→ null 跟随全局
+      const saved = deps.saveSessionModelProviderOverride(sessionId, val);
+      reply.send({ ok: true, session_id: sessionId, model_provider_id: val, saved: saved });
+    } catch (err) {
+      console.error('[POST /v1/sessions/:id/model-provider] error:', err.message);
+      reply.code(500).send({ error: err.message });
+    }
+  });
+
   // 实时事件流（SSE）：聊天页用 EventSource 订阅本会话，收到 history_update 后拉一次历史。
   app.get('/v1/events', async (req, reply) => {
     const sessionId = String(req.query.session_id || req.headers['x-session-id'] || '').trim() || 'default';
@@ -1112,7 +1142,10 @@ app.post("/v1/chat/completions", async (req, reply) => {
 
     // (trim 逻辑在下方最近窗口处执行，当前用户请求的图片始终保留)
 
-    const prov = resolveActiveProvider();
+    const prov = resolveSessionProvider(sessionId);
+    // 会话级模型供应商：仅当会话显式指定了供应商时，才把该供应商配置的模型名应用到本次请求，
+    // 避免默认（跟随全局）会话的转发模型被意外改动；供应商未配置 model 时沿用客户端传入的 body.model。
+    if (deps.sessionModelProviderOverride(sessionId) && prov && prov.model) body.model = prov.model;
     const targetApiUrl = (prov && (prov.api_url || prov.base_url)) || readEnvValue("TARGET_API_URL");
     const targetApiKey = (prov && prov.api_key) || readEnvValue("TARGET_API_KEY");
     if (!targetApiUrl || !targetApiKey) {

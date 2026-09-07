@@ -5240,7 +5240,8 @@ function openSessMenu(sid, anchorEl){
     +'<button class="sess-menu-item" data-op="export">导出</button>'
     +'<button class="sess-menu-item'+(tpOn?' on':'')+'" data-op="thirdparty">第三方</button>'
     +'<button class="sess-menu-item" data-op="persona">人设</button>'
-    +'<button class="sess-menu-item" data-op="cross">跨窗口</button>';
+    +'<button class="sess-menu-item" data-op="cross">跨窗口</button>'
+    +'<button class="sess-menu-item" data-op="provider">模型</button>';
   Array.prototype.forEach.call(el.querySelectorAll(".sess-menu-item"),function(btn){
     btn.addEventListener("click",function(e){
       e.stopPropagation();
@@ -5251,6 +5252,7 @@ function openSessMenu(sid, anchorEl){
       else if(op==="thirdparty")setThirdPartySession(sid);
       else if(op==="persona")openSessionPersona(sid);
       else if(op==="cross")openSessionCrossInject(sid);
+      else if(op==="provider")openSessionProvider(sid);
     });
   });
   el.classList.remove("hidden");
@@ -5307,6 +5309,50 @@ async function saveSessionCrossInject(sid, enabled, followGlobal){
     showToast(followGlobal?"已恢复为跟随全局":(enabled?"已开启本会话跨窗口注入":"已关闭本会话跨窗口注入"));
   }catch(e){ showToast("保存失败:"+(e&&e.message||"")); }
 }
+// 给【单个会话】单独指定模型供应商：从当前已配置的 AI 供应商里选（默认=跟随全局），
+// 写入 data/session_cfg/<session>.json 的 model_provider_id，发送时该会话优先用此供应商。
+async function openSessionProvider(sid){
+  const nm=sessionDisplayName(sid)||(sid==="default"?"主会话":sid);
+  let cur="";
+  try{
+    const r=await fetch("/v1/sessions/"+encodeURIComponent(sid)+"/model-provider",{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
+    const j=await r.json();
+    if(j&&typeof j.model_provider_id==="string"&&j.model_provider_id) cur=j.model_provider_id;
+  }catch(e){}
+  // 拉取可用供应商列表（与设置页同口径：已启用且有接口+密钥）
+  let providers=[];
+  try{
+    const r2=await fetch("/heartbeat/admin/ai-providers",{headers: mcpAuthHeaders(), credentials:"include"});
+    const j2=await r2.json();
+    if(j2&&Array.isArray(j2.providers)) providers=j2.providers.filter(function(p){ return p.enabled!==false && (p.api_url||p.base_url) && p.api_key; });
+  }catch(e){}
+  let opts='<option value="">默认（跟随全局）</option>';
+  if(providers.length){
+    opts+=providers.map(function(p){
+      const desc=(p.model?p.model:(p.api_url||"").slice(0,40));
+      return '<option value="'+escapeHtml(p.id)+'"'+(cur===p.id?' selected':'')+'>'+escapeHtml(p.name||"未命名")+' · '+escapeHtml(desc)+'</option>';
+    }).join('');
+  }else{
+    opts+='<option value="" disabled>暂无可用供应商（先去设置里添加并启用）</option>';
+  }
+  openEditModal("模型 · "+nm,
+    '<div class="field"><label>本会话使用的模型供应商</label><select class="np-sel" id="sp-provider">'+opts+'</select>'
+    +'<div class="np-tip">选定后，这个会话的请求会改走该供应商（接口/密钥/模型）。「默认」用全局当前启用的供应商；所选供应商被删除或停用时会自动回退全局，不影响其它会话。</div></div>',
+    function(){
+      const v=(document.getElementById("sp-provider")||{}).value||"";
+      return saveSessionProvider(sid, v, nm);
+    },
+    "应用");
+}
+async function saveSessionProvider(sid, providerId, nm){
+  try{
+    const r=await fetch("/v1/sessions/"+encodeURIComponent(sid)+"/model-provider",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({model_provider_id:providerId||null})});
+    const j=await r.json();
+    if(!r.ok){ showToast(j.error||"保存失败"); return false; }
+    showToast(providerId?("已为「"+nm+"」单独指定供应商"):("「"+nm+"」已恢复为跟随全局"));
+  }catch(e){ showToast("保存失败:"+(e&&e.message||"")); return false; }
+}
+
 // ===== 第三方专用会话 =====
 // 设置/取消某个会话为「第三方专用」：不带 session_id 的第三方客户端(如 Kelivo)
 // 连网关时，对话落到这个会话，自建前端(chat.html)能看到。存到后端 data/config.json。

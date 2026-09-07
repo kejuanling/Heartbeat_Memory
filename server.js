@@ -101,6 +101,16 @@ function resolveActiveProvider() {
   const ps = loadAiProviders();
   return ps.find(function (p) { return p.enabled !== false && (p.api_url || p.base_url) && p.api_key; }) || null;
 }
+// 按会话取当前应使用的供应商：会话有覆盖且该供应商仍可用则用覆盖，否则回退全局。
+function resolveSessionProvider(sessionId) {
+  const pid = sessionModelProviderOverride(sessionId);
+  if (pid) {
+    const ps = loadAiProviders();
+    const hit = ps.find(function (p) { return p.id === pid && p.enabled !== false && (p.api_url || p.base_url) && p.api_key; });
+    if (hit) return hit;
+  }
+  return resolveActiveProvider();
+}
 const {
   getDatePartsInTimeZone,
   formatDateTimeInTimeZone,
@@ -1584,6 +1594,9 @@ require("./routes/chat")(app, {
   extractCoRecordEventTime,
   classifySpecialEvent,
   resolveActiveProvider,
+  resolveSessionProvider,
+  sessionModelProviderOverride,
+  saveSessionModelProviderOverride,
   readEnvValue,
   UPSTREAM_TIMEOUT_MS,
   handleMcpRequest,
@@ -1712,6 +1725,29 @@ function saveSessionCrossInjectOverride(sessionId, enabled) {
   fs.writeJsonSync(file, o);
   return o;
 }
+// 会话级模型供应商覆盖：返回该会话指定的供应商 id，null=跟随全局。
+function sessionModelProviderOverride(sessionId) {
+  const token = safeSessionToken(sessionId || "default");
+  const file = path.join(SESSION_CFG_DIR, token + ".json");
+  try {
+    if (fs.existsSync(file)) {
+      const o = fs.readJsonSync(file);
+      if (o && typeof o.model_provider_id === "string" && o.model_provider_id) return o.model_provider_id;
+    }
+  } catch (e) { console.warn("[session-cfg] 读取模型供应商覆盖失败:", e.message); }
+  return null;
+}
+function saveSessionModelProviderOverride(sessionId, providerId) {
+  const token = safeSessionToken(sessionId || "default");
+  const file = path.join(SESSION_CFG_DIR, token + ".json");
+  let o = {};
+  try { if (fs.existsSync(file)) o = fs.readJsonSync(file) || {}; } catch (e) { o = {}; }
+  if (providerId === null || providerId === undefined || providerId === "") delete o.model_provider_id;
+  else o.model_provider_id = String(providerId);
+  fs.ensureDirSync(SESSION_CFG_DIR);
+  fs.writeJsonSync(file, o);
+  return o;
+}
 function buildCrossMemorySnapshot(sessionId) {
   const cfg = memoryPool.getConfig();
   // 会话级覆盖：本会话显式关闭 → 不注入；显式开启 → 继续，但要遵从全局总开关（全局关=全关）
@@ -1769,7 +1805,7 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
   if (!MCP_ENABLED()) return false;
   const clients = getMcpClients();
   if (!clients || clients.length === 0) return false;
-  const prov = resolveActiveProvider();
+  const prov = resolveSessionProvider(sessionId);
   const targetApiUrl = (prov && (prov.api_url || prov.base_url)) || readEnvValue("TARGET_API_URL");
   const targetApiKey = (prov && prov.api_key) || readEnvValue("TARGET_API_KEY");
   if (!targetApiUrl || !targetApiKey) return false;
