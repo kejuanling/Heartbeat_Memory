@@ -645,12 +645,13 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .theme-save .ts-row input[type="text"]{flex:1;min-width:0;border:1px solid rgba(200,144,152,.25);border-radius:var(--radius-sm);padding:9px 11px;font-size:13px;color:var(--ink);outline:none;background:#fff;font-family:inherit}
 .theme-save .ts-row input[type="text"]:focus{border-color:var(--accent)}
 .theme-save .ts-btn{flex:none;min-width:64px;padding:9px 16px;white-space:nowrap}
-.saved-themes{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
-.saved-theme{display:flex;align-items:center;gap:7px;padding:7px 12px;border:1px solid rgba(200,144,152,.18);border-radius:999px;cursor:pointer;font-size:13px;color:var(--ink);background:rgba(200,144,152,.05);transition:all .15s}
-.saved-theme:hover{background:var(--accent-soft);border-color:var(--accent)}
-.saved-theme:active{background:var(--accent-soft)}
-.saved-theme .st-swatch{width:16px;height:16px;border-radius:50%;flex-shrink:0;border:1px solid rgba(0,0,0,.08);box-shadow:inset 0 0 0 1px rgba(0,0,0,.04)}
-.saved-theme .st-del{margin-left:2px;width:18px;height:18px;border:none;background:none;color:var(--ink3);font-size:15px;line-height:1;cursor:pointer;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s}
+.saved-themes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:2px}
+.saved-theme{display:flex;align-items:center;gap:7px;padding:8px 11px;min-width:0;border:1px solid rgba(200,144,152,.2);border-radius:999px;cursor:pointer;font-size:13px;color:var(--ink);background:rgba(200,144,152,.05);transition:all .16s}
+.saved-theme:hover{background:var(--accent-soft);border-color:var(--accent);box-shadow:0 2px 10px rgba(200,144,152,.16)}
+.saved-theme:active{background:var(--accent-soft);transform:scale(.98)}
+.saved-theme .st-swatch{width:15px;height:15px;border-radius:50%;flex-shrink:0;border:1px solid rgba(0,0,0,.08);box-shadow:inset 0 0 0 1px rgba(0,0,0,.04)}
+.saved-theme .st-n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.saved-theme .st-del{margin-left:2px;width:19px;height:19px;border:none;background:none;color:var(--ink3);font-size:14px;line-height:1;cursor:pointer;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s}
 .saved-theme .st-del:hover{color:#c97070;background:rgba(216,131,131,.14)}
 /* 提示词备份（AI 设置内）：与保存主题同风格，列表纵向排布 */
 .pb-row{display:flex;align-items:center;gap:8px}
@@ -658,7 +659,12 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .pb-row input[type="text"]:focus{border-color:var(--accent)}
 .pb-btn{flex:none;min-width:64px;padding:9px 14px;white-space:nowrap;border:1px solid rgba(200,144,152,.25);border-radius:var(--radius-sm);background:var(--accent-soft);color:var(--ink);font-size:13px;cursor:pointer;font-family:inherit}
 .pb-btn:active{background:var(--accent)}
-.pb-list{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.pb-list{display:flex;flex-direction:column;gap:6px;margin-top:8px;max-height:210px;overflow-y:auto;padding-right:2px}
+.pb-list::-webkit-scrollbar{width:6px;height:6px}
+.pb-list::-webkit-scrollbar-track{background:transparent}
+.pb-list::-webkit-scrollbar-thumb{background:rgba(200,144,152,.45);border-radius:999px}
+.pb-list::-webkit-scrollbar-thumb:hover{background:rgba(200,144,152,.8)}
+.pb-btn.slim{min-width:52px;padding:9px 10px}
 .pb-item{display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid rgba(200,144,152,.18);border-radius:10px;background:rgba(200,144,152,.05);font-size:13px;color:var(--ink)}
 .pb-item .pb-name{flex:1;min-width:0;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pb-item .pb-name:hover{color:var(--accent)}
@@ -1540,7 +1546,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
             </div>
             <div class="field">
               <label>提示词备份<span class="tag">点名称=设为全局默认</span></label>
-              <div class="pb-row"><input type="text" id="pbNameInput" placeholder="备份名称…" maxlength="30" autocomplete="off"><button type="button" class="pb-btn" id="pbSaveBtn">存为备份</button></div>
+              <div class="pb-row"><input type="text" id="pbNameInput" placeholder="备份名称…" maxlength="30" autocomplete="off"><button type="button" class="pb-btn" id="pbSaveBtn">保存</button><button type="button" class="pb-btn slim" id="pbExportBtn" title="导出 prompt-backups.json">导出</button></div>
               <div id="pbList" class="pb-list"><div class="pb-empty">暂无备份</div></div>
             </div>
             <div class="field">
@@ -1679,7 +1685,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
             <div class="theme-preview" id="themePreview"><span class="pa">助手消息</span><span class="pu">我的消息</span></div>
             <div class="set-sec-label">保存主题</div>
             <div class="theme-save">
-              <div class="ts-row"><input type="text" id="themeNameInput" placeholder="主题名（留空自动命名）"><button type="button" class="mcp-btn primary ts-btn" id="saveThemeBtn">保存</button></div>
+              <div class="ts-row"><input type="text" id="themeNameInput" placeholder="主题名（新增主题时必填，留空则仅保存修改）"><button type="button" class="mcp-btn primary ts-btn" id="saveThemeBtn">保存</button></div>
               <div id="savedThemes" class="saved-themes"></div>
             </div>
           </div></div>
@@ -3835,9 +3841,28 @@ function savePromptBackupFromInput(){
     renderPromptBackups();
   });
 }
+function exportPromptBackupsJson(){
+  const doExport=function(backups){
+    if(!Array.isArray(backups)) backups=[];
+    if(!backups.length){ showToast("暂无可导出的提示词备份"); return; }
+    const blob=new Blob([JSON.stringify(backups,null,2)],{type:"application/json"});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download="prompt-backups.json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+    showToast("已导出 prompt-backups.json（"+backups.length+" 条）");
+  };
+  fetch("/v1/prompt-backups",{headers:{"Authorization":"Bearer "+api_key},credentials:"include"})
+    .then(function(r){return r.json();})
+    .then(function(j){ doExport(j&&Array.isArray(j.backups)?j.backups:promptBackups); })
+    .catch(function(){ doExport(promptBackups); });
+}
 (function(){
   const b=document.getElementById("pbSaveBtn");
   if(b) b.addEventListener("click",savePromptBackupFromInput);
+  const e=document.getElementById("pbExportBtn");
+  if(e) e.addEventListener("click",exportPromptBackupsJson);
 })();
 loadPromptBackups();
 
@@ -3976,24 +4001,32 @@ async function loadThemesFromServer(){
   }catch(e){}
 }
 async function saveCustomTheme(){
-  const name=(document.getElementById("themeNameInput")&&document.getElementById("themeNameInput").value||"").trim();
-  const th=themeInputs(); th.name=name||("主题 "+(loadSavedThemes().length+1));
+  const nmEl=document.getElementById("themeNameInput");
+  const name=(nmEl&&nmEl.value||"").trim();
+  const th=themeInputs(); th.name=name;
   // 背景图还是本地 dataURL 时先转存服务器，否则主题存进 localStorage 很容易撑爆配额
   if(/^data:image\//.test(th.bg_image||"")){
     try{ th.bg_image=await uploadImageToServer(th.bg_image); }
     catch(e){ showToast("背景图未能转存服务器（"+(e.message||"")+"）"); }
   }
-  let arr=loadSavedThemes().filter(function(t){ return t.name!==th.name; });
-  arr.push(th); if(arr.length>20) arr=arr.slice(-20);
-  let savedLocal=true;
-  try{ localStorage.setItem(LS_THEMES, JSON.stringify(arr)); }catch(e){ savedLocal=false; }
-  if(document.getElementById("themeNameInput"))document.getElementById("themeNameInput").value="";
-  syncThemesToServer(); renderSavedThemes(savedLocal?null:arr);
-  showToast(savedLocal?"主题已保存":"本机存储空间不足，主题仅同步到云端，换设备可恢复");
-  // 保存主题即作为当前生效主题，并同步上云（否则刷新被云端旧 cfg 覆盖、背景被改回）
-  try{ applyCustomTheme(th); }catch(e){ saveCfg(); applyTheme(); pushSettingsToCloud(); }
+  if(name){
+    // 输入名称：新增主题胶囊 + 应用 + 云同步
+    let arr=loadSavedThemes().filter(function(t){ return t.name!==th.name; });
+    arr.push(th); if(arr.length>20) arr=arr.slice(-20);
+    let savedLocal=true;
+    try{ localStorage.setItem(LS_THEMES, JSON.stringify(arr)); }catch(e){ savedLocal=false; }
+    syncThemesToServer(); renderSavedThemes(savedLocal?null:arr);
+    showToast(savedLocal?"主题已保存":"本机存储空间不足，主题仅同步到云端，换设备可恢复");
+    // 保存主题即作为当前生效主题，并同步上云（否则刷新被云端旧 cfg 覆盖、背景被改回）
+    try{ applyCustomTheme(th); }catch(e){ saveCfg(); applyTheme(); pushSettingsToCloud(); }
+  } else {
+    // 名称留空：不新增主题胶囊，只把当前参数作为生效主题保存并云同步
+    showToast("主题名为空，仅保存当前主题参数并同步（未新增主题）");
+    try{ applyCustomTheme(th,true); }catch(e){ saveCfg(); applyTheme(); pushSettingsToCloud(); }
+  }
+  if(nmEl) nmEl.value="";
 }
-function applyCustomTheme(t){
+function applyCustomTheme(t,silent){
   if(!t) return;
   cfg.bg_image=t.bg_image||""; cfg.bg_color=t.bg_color||"";
   cfg.user_bubble=t.user_bubble||"#d9a3a8"; cfg.ai_bubble=t.ai_bubble||"#fffdf9";
@@ -4011,7 +4044,7 @@ function applyCustomTheme(t){
   if(userAvatarInput)userAvatarInput.value=cfg.user_avatar||""; if(aiAvatarInput)aiAvatarInput.value=cfg.ai_avatar||"";
   if(chatEl)chatEl.setAttribute("data-layout",cfg.bubble_style||"qq");
   renderPicks(); renderThemeValues(); applyTheme(); applyHeader(); saveCfg();
-  showToast("已切换到「"+(t.name||"主题")+"」");
+  if(!silent) showToast("已切换到「"+(t.name||"主题")+"」");
   // 关键：应用生效主题后立即上云，否则刷新时云端旧 cfg 权威覆盖，背景会被改回（应用主题必须同步持久化）
   pushSettingsToCloud().then(function(ok){ if(ok===false) showToast("云端同步失败，请重新登录后再试"); });
 }
