@@ -2976,6 +2976,7 @@ function buildMessages(list){
     let c=m.content;
     if(Array.isArray(c))c=c.map(x=>x.type==="image_url"?{type:"image_url",image_url:{url:x.image_url.url}}:{type:"text",text:(x.text||"")});
     const base={role:m.role,content:c};
+    if(m.id)base.id=m.id;   // 带稳定 id：服务端落盘去重能按 id 判存在，防重复追加；转发上游时 sanitizedMessages 会剥掉 id，不影响模型
     if(m.role==="assistant"){
       if(cfg.send_thinking&&m.reasoning){base.reasoning_content=m.reasoning;}
       // T-0923：历史 assistant 若带过工具（tools 富字段），拼回 content 给上游模型看（位置对、不膨胀），
