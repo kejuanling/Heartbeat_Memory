@@ -3352,7 +3352,7 @@ async function toggleStarMsg(){
     const j=await r.json().catch(function(){return {};});
     if(j&&j.ok===false){ showToast("标星失败: "+(j.error||"")); return; }
     setStarMsgLocal(m,want);
-    showToast(want?"已标星（会注入跨窗口记忆）":"已取消标星");
+    showToast(want?"已标星（防止被摘要覆盖）":"已取消标星");
     closeAct();
   }catch(e){ showToast("标星失败:"+e.message); }
 }
