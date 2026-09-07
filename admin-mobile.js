@@ -4152,7 +4152,7 @@ async function deletePinned(id){
   function populateMemPoolCatOptions(){
     const sel=document.getElementById('mempool-cat');
     const ed=document.getElementById('mempool-edit-cat');
-    const cats=['关于她','关于我们','锚点','信号','对话摘要'];
+    const cats=['关于她','关于我们','锚点','信号','对话摘要','对话碎片'];
     if(sel){ sel.innerHTML='<option value="">全部分类</option>'+cats.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join(''); }
     if(ed){ ed.innerHTML=cats.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join(''); }
   }
