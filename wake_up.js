@@ -36,6 +36,27 @@ const tagParser = require("./tag-parser");
 // 旧压缩器已统一进「上下文替换」，唤醒侧不再使用
 // const contextCompactor = require("./context-compactor");
 const contextReplacements = require("./context-replacements");
+const { McpServerClient, loadConfig } = require("./mcp-client");
+const mcpLoop = require("./mcp-tool-loop");
+
+// 唤醒侧只注入「工具集合」（本地记忆/日记工具，127.0.0.1:8771），
+// 从 mcp-servers.json 里按名称/端口挑出该 server，避免把 search.parallel / 网易云等带进唤醒。
+let _wakeMcpClients = null;
+function getWakeMcpClients() {
+  if (_wakeMcpClients) return _wakeMcpClients;
+  try {
+    const servers = loadConfig(path.join(__dirname, "mcp-servers.json"));
+    const target = servers.filter(s => {
+      const key = (s.name || "") + " " + (s.url || "");
+      return /工具集合/.test(key) || /127\.0\.0\.1:8771/.test(key);
+    });
+    _wakeMcpClients = target.map(c => new McpServerClient(c));
+  } catch (e) {
+    console.warn("[wake-up] 加载工具集合配置失败:", e.message);
+    _wakeMcpClients = [];
+  }
+  return _wakeMcpClients;
+}
 let memoryReady = false;
 memoryEngine.init().then(() => {
   memoryReady = true;
@@ -1063,48 +1084,81 @@ ${historyText}`
     return;
   }
 
-  // 上游请求超时保护，避免模型挂起导致唤醒/心跳循环停摆
-  const wakeController = new AbortController();
-  const wakeTimer = setTimeout(() => wakeController.abort(), WAKE_UPSTREAM_TIMEOUT_MS);
-  let response;
-  try {
-    response = await fetch(process.env.TARGET_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.TARGET_API_KEY}`
-      },
-      body: JSON.stringify({
+  // === 工具注入（2026-09-08）===
+  // 唤醒时也注入「工具集合」（本地记忆/日记工具，127.0.0.1:8771），
+  // 让模型在唤醒时能主动记日记、查记忆。优先走 runWithTools 工具循环；
+  // 任何失败/无结果则回退到无工具直连，保证唤醒始终可用。
+  let rawAiTextFull = "";
+  const wakeClients = getWakeMcpClients();
+  let wakeMcpOk = false;
+  if (wakeClients && wakeClients.length > 0) {
+    try {
+      const mcpRes = await mcpLoop.runWithTools({
+        upstreamUrl: process.env.TARGET_API_URL,
+        upstreamKey: process.env.TARGET_API_KEY,
         model: process.env.MODEL_NAME,
         messages: wakeMessages,
+        serverClients: wakeClients,
         temperature: 0.8,
-        top_p: 0.95,
-        stream: false
-      }),
-      signal: wakeController.signal
-    });
-  } catch (e) {
-    clearTimeout(wakeTimer);
-    throw e;
+        top_p: 0.95
+      });
+      if (mcpRes && typeof mcpRes.text === "string") {
+        const t = normalizeContentToText(mcpRes.text).trim();
+        if (t) {
+          rawAiTextFull = t;
+          wakeMcpOk = true;
+          console.log(`[wake-up] 工具循环完成：调用工具 ${(mcpRes.toolHistory || []).length} 个，正文 ${t.length} 字`);
+        }
+      }
+    } catch (e) {
+      console.warn("[wake-up] 工具循环失败，回退无工具直连:", e.message);
+    }
   }
 
-  let responseText;
-  try {
-    responseText = await response.text();
-  } finally {
-    clearTimeout(wakeTimer);
-  }
-  let data;
-  try {
-    data = JSON.parse(responseText);
-  } catch {
-    throw new Error(`模型返回的不是 JSON（HTTP ${response.status}）：${responseText.slice(0, 300)}`);
-  }
-  if (!response.ok) {
-    throw new Error(`模型请求失败（HTTP ${response.status}）：${responseText.slice(0, 300)}`);
-  }
+  if (!wakeMcpOk) {
+    // --- 无工具直连（原逻辑，作为兜底）---
+    const wakeController = new AbortController();
+    const wakeTimer = setTimeout(() => wakeController.abort(), WAKE_UPSTREAM_TIMEOUT_MS);
+    let response;
+    try {
+      response = await fetch(process.env.TARGET_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.TARGET_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: process.env.MODEL_NAME,
+          messages: wakeMessages,
+          temperature: 0.8,
+          top_p: 0.95,
+          stream: false
+        }),
+        signal: wakeController.signal
+      });
+    } catch (e) {
+      clearTimeout(wakeTimer);
+      throw e;
+    }
 
-  const rawAiTextFull = normalizeContentToText(data.choices?.[0]?.message?.content).trim();
+    let responseText;
+    try {
+      responseText = await response.text();
+    } finally {
+      clearTimeout(wakeTimer);
+    }
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      throw new Error(`模型返回的不是 JSON（HTTP ${response.status}）：${responseText.slice(0, 300)}`);
+    }
+    if (!response.ok) {
+      throw new Error(`模型请求失败（HTTP ${response.status}）：${responseText.slice(0, 300)}`);
+    }
+
+    rawAiTextFull = normalizeContentToText(data.choices?.[0]?.message?.content).trim();
+  }
 
   // <wake> 标签：AI 可设置下次主动唤醒时间（日期时间或分钟）；标签不进入推送正文和时间线
   const wakeTagMatch = rawAiTextFull.match(/<wake>([\s\S]*?)<\/wake>/i);

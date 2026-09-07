@@ -45,6 +45,7 @@ async function runWithTools({
   top_p,
   max_tokens,
   maxToolRounds = DEFAULT_MAX_TOOL_ROUNDS,
+  maxToolsPerRound = 5,
   fetchFn = fetch,
   resume = null,
   onEvent = null
@@ -53,7 +54,7 @@ async function runWithTools({
   const routes = await loadTools(serverClients);
   const allRoutes = routes || [];
   const openaiTools = toOpenAITools(allRoutes);
-  const toolCtx = { serverClients, routes, upstreamUrl, upstreamKey, model };
+  const toolCtx = { serverClients, routes, upstreamUrl, upstreamKey, model, maxToolsPerRound };
 
   let working = messages.slice();
   let totalUsage = null;
@@ -178,7 +179,10 @@ async function runWithTools({
 // 前端据此渲染"执行中→已完成/失败"状态卡；index 用于配对 start/end。老调用不传则跳过（兼容）。
 async function executeToolCalls(toolCalls, working, toolHistory, ctx, onEvent, nextIndex, afterSeg) {
   const { serverClients, routes, upstreamUrl, upstreamKey, model } = ctx;
-  for (const tc of toolCalls) {
+  const maxPerRound = ctx.maxToolsPerRound || 5;
+  for (let _i = 0; _i < toolCalls.length; _i++) {
+    const tc = toolCalls[_i];
+    const _isOverLimit = _i >= (ctx.maxToolsPerRound || 5);
     const fn = tc.function || {};
     const name = fn.name || "";
     const args = _parseArgs(fn.arguments);
@@ -188,7 +192,9 @@ async function executeToolCalls(toolCalls, working, toolHistory, ctx, onEvent, n
     let error = null;
     try {
       if (typeof onEvent === "function") onEvent({ type: "tool_start", index, id, name, args, afterSeg: (typeof afterSeg === "number") ? afterSeg : -1 });
-      {
+      if (_isOverLimit) {
+        result = { markdown: JSON.stringify({ type: "tool_skipped", error: "max_tools_per_round", message: `单轮工具调用数超过上限 ${ctx.maxToolsPerRound || 5}，该工具未执行。`, tool: name }) };
+      } else {
         result = await callToolByExposedName(serverClients, routes, name, args);
       }
     } catch (e) {
@@ -209,7 +215,7 @@ async function executeToolCalls(toolCalls, working, toolHistory, ctx, onEvent, n
       error,
       afterSeg: (typeof afterSeg === "number") ? afterSeg : -1   // 方案2刷新：该工具位于第 afterSeg 段正文之后（-1=最前）
     });
-    if (typeof onEvent === "function") onEvent({ type: "tool_end", index, id, name, args, result: resTrunc, error, ok: !error, afterSeg: (typeof afterSeg === "number") ? afterSeg : -1 });
+    if (typeof onEvent === "function") onEvent({ type: "tool_end", index, id, name, args, result: resTrunc, error, ok: !error && !_isOverLimit, afterSeg: (typeof afterSeg === "number") ? afterSeg : -1 });
   }
 }
 
