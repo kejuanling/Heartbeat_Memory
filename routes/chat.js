@@ -1325,7 +1325,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
         const aiThinking = extractAssistantThinking(aiMessage);
         if (aiContent) {
           // 解析 <wake> 闹钟标签并写入调度（标签随后被剥离，不显示给用户）
-          parseWakeTagAndSchedule(aiContent);
+          parseWakeTagAndSchedule(aiContent, sessionId);
           parseQuietTagAndSchedule(aiContent);
           // 提取并存储记忆，同时拿到清洗后的文本
           const cleanText = await tagParser.extractAndStore(aiContent);
@@ -1457,7 +1457,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
       }
       if (aiFullContent) {
         // 解析 <wake> 闹钟标签并写入调度（标签随后被剥离，不显示给用户）
-        parseWakeTagAndSchedule(aiFullContent);
+        parseWakeTagAndSchedule(aiFullContent, sessionId);
         parseQuietTagAndSchedule(aiFullContent);
         // 提取并存储记忆，并拿到清洗后的文本
         const cleanFull = await tagParser.extractAndStore(aiFullContent).catch(err => {

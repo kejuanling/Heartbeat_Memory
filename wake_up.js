@@ -57,6 +57,7 @@ const {
 const TIMELINE_PATH = path.join(__dirname, "enhanced_messages.json");
 const WAKE_SCHEDULE_PATH = path.join(__dirname, "data", "wake_schedule.json");
 const WAKE_LOCKED_PATH = path.join(__dirname, "data", "wake-locked.json");
+const SESSION_NAMES_PATH = path.join(__dirname, "data", "session-names.json");
 let timedWakeTimer = null;
 const PORT = Number(process.env.PORT) || 3000;
 const GATEWAY_BASE_URL = (process.env.GATEWAY_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
@@ -536,22 +537,96 @@ function isUserActiveAnywhereSince(schedule) {
   return false;
 }
 // <wake> 标签：AI 在唤醒时设置「下一次主动唤醒时间」（分钟，1~1440）：到点前定时检查跳过，到点主动唤醒一次
+// v2：调度文件为多会话 per-session 槽位，结构 { version:2, sessions: { <sid>: { next_wake_at, updated_at } } }
 function readWakeScheduleRaw() {
   try {
     if (!fs.existsSync(WAKE_SCHEDULE_PATH)) return null;
     const data = JSON.parse(fs.readFileSync(WAKE_SCHEDULE_PATH, "utf-8"));
-    return data && data.next_wake_at ? data : null;
+    return (data && typeof data === "object") ? data : null;
   } catch (err) {
     console.warn("[wake-up] 读取定时唤醒失败:", err.message);
     return null;
   }
 }
 
-function readWakeSchedule() {
+// v2 per-session：取某个会话的调度条目（无则 null）。兼容旧单条格式（无 sessions 结构时归到 default）。
+function readWakeScheduleFor(sessionId) {
+  const sid = String(sessionId || "default").trim() || "default";
+  const raw = readWakeScheduleRaw();
+  if (!raw) return null;
+  if (!raw.sessions) {
+    if (sid !== "default") return null;
+    return (raw.next_wake_at ? { next_wake_at: raw.next_wake_at, updated_at: raw.updated_at, session: "default" } : null);
+  }
+  const entry = (raw.sessions && typeof raw.sessions === "object") ? raw.sessions[sid] : null;
+  return (entry && entry.next_wake_at) ? { ...entry, session: sid } : null;
+}
+
+// v2：写入 schedule 对象（原子）
+function writeWakeScheduleRaw(data) {
+  fs.mkdirSync(path.dirname(WAKE_SCHEDULE_PATH), { recursive: true });
+  const tmp = WAKE_SCHEDULE_PATH + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
+  fs.renameSync(tmp, WAKE_SCHEDULE_PATH);
+}
+
+// v2：所有会话调度里最近一个未来时间点（用于挂内存定时器）；无 → null
+function nextWakeFromAnySession() {
+  const raw = readWakeScheduleRaw();
+  if (!raw) return null;
+  const sessions = raw.sessions || {};
+  let best = null;
+  for (const sid of Object.keys(sessions)) {
+    const e = sessions[sid];
+    if (!e || !e.next_wake_at) continue;
+    const t = new Date(e.next_wake_at);
+    if (isNaN(t.getTime())) continue;
+    if (!best || t.getTime() < best.getTime()) best = t;
+  }
+  return best;
+}
+
+// v2：删除所有已过期（<= now）或无效的会话调度条，写回文件；返回是否有改动
+function pruneExpiredSchedules() {
   const data = readWakeScheduleRaw();
-  if (!data) return null;
-  const t = new Date(data.next_wake_at);
-  return isNaN(t.getTime()) ? null : t;
+  if (!data || !data.sessions) return false;
+  const now = Date.now();
+  let changed = false;
+  for (const sid of Object.keys(data.sessions)) {
+    const e = data.sessions[sid];
+    const t = e && e.next_wake_at ? new Date(e.next_wake_at) : null;
+    if (!e || !e.next_wake_at || isNaN(t.getTime()) || t.getTime() <= now) {
+      delete data.sessions[sid];
+      changed = true;
+    }
+  }
+  if (changed) writeWakeScheduleRaw(data);
+  return changed;
+}
+
+// v2 按会话作废判定：该会话设定闹钟(updated_at)之后，该会话内是否又出现用户消息
+function isUserActiveSinceFor(entry, sessionId) {
+  if (!entry || !entry.updated_at) return false;
+  const setTime = new Date(entry.updated_at);
+  if (isNaN(setTime.getTime())) return false;
+  const sid = String(sessionId || "default").trim() || "default";
+  const tl = getTimelineBySessionId(sid);
+  if (!tl) return false;
+  const lastUserTime = getLastUserTime(tl.messages);
+  return !!(lastUserTime && lastUserTime.getTime() > setTime.getTime());
+}
+
+// 会话显示名（用于推送标注来源）：读 data/session-names.json，找不到返回空串
+function getSessionDisplayName(sessionId) {
+  const sid = String(sessionId || "default").trim() || "default";
+  try {
+    if (fs.existsSync(SESSION_NAMES_PATH)) {
+      const names = JSON.parse(fs.readFileSync(SESSION_NAMES_PATH, "utf-8"));
+      const n = names && names[sid];
+      if (typeof n === "string" && n.trim()) return n.trim();
+    }
+  } catch (e) {}
+  return "";
 }
 
 // 设定之后用户是否已主动找过 AI（任一会话时间线里出现更新的用户消息）：是则定时作废
@@ -561,22 +636,47 @@ function isUserActiveSince(schedule) {
 }
 
 function saveWakeSchedule(nextWakeAtIso, sessionId) {
+  const sid = String(sessionId || "default").trim() || "default";
+  let data = {};
+  try { const cur = readWakeScheduleRaw(); if (cur) data = cur; } catch {}
+  if (!data || typeof data !== "object") data = {};
+  const sessions = (data.sessions && typeof data.sessions === "object") ? data.sessions : {};
+  sessions[sid] = { next_wake_at: nextWakeAtIso, updated_at: new Date().toISOString() };
+  data.version = 2;
+  data.sessions = sessions;
   fs.mkdirSync(path.dirname(WAKE_SCHEDULE_PATH), { recursive: true });
   const tmp = WAKE_SCHEDULE_PATH + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify({ next_wake_at: nextWakeAtIso, updated_at: new Date().toISOString(), session: sessionId || null }, null, 2), "utf-8");
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
   fs.renameSync(tmp, WAKE_SCHEDULE_PATH);
 }
-// 清理定时唤醒：取消内存定时器 + 删除记录（触发后 / 已过期 / 作废时调用）
-function clearWakeSchedule() {
-  if (timedWakeTimer) {
-    clearTimeout(timedWakeTimer);
-    timedWakeTimer = null;
+// 清理定时唤醒（v2 按会话）：传入 sessionId 清该会话槽位并重挂内存定时器；
+// 不传（或空）则清空全部会话调度并取消内存定时器（触发后 / 已过期 / 作废时调用）
+function clearWakeSchedule(sessionId) {
+  if (sessionId === undefined || sessionId === null || String(sessionId).trim() === "") {
+    try {
+      if (fs.existsSync(WAKE_SCHEDULE_PATH)) writeWakeScheduleRaw({ version: 2, sessions: {} });
+    } catch (err) {
+      console.warn("[wake-up] 清理全部定时唤醒失败:", err.message);
+    }
+    if (timedWakeTimer) { clearTimeout(timedWakeTimer); timedWakeTimer = null; }
+    return;
   }
+  const sid = String(sessionId).trim() || "default";
+  let changed = false;
   try {
-    if (fs.existsSync(WAKE_SCHEDULE_PATH)) fs.unlinkSync(WAKE_SCHEDULE_PATH);
+    const data = readWakeScheduleRaw();
+    if (data && data.sessions && data.sessions[sid]) {
+      delete data.sessions[sid];
+      writeWakeScheduleRaw(data);
+      changed = true;
+    } else if (data && !data.sessions && sid === "default" && data.next_wake_at) {
+      writeWakeScheduleRaw({ version: 2, sessions: {} });
+      changed = true;
+    }
   } catch (err) {
     console.warn("[wake-up] 清理定时唤醒失败:", err.message);
   }
+  if (changed) armTimedWake();
 }
 
 // 装载定时唤醒：从文件读取时间，在内存里挂一个到点触发的定时器（进程重启后由 startAfterInit 重新装载）
@@ -586,31 +686,24 @@ function armTimedWake() {
     timedWakeTimer = null;
   }
   let nextWakeAt = null;
-  try { nextWakeAt = readWakeSchedule(); } catch (err) { /* 读取失败按无定时处理 */ }
+  try { nextWakeAt = nextWakeFromAnySession(); } catch (err) { /* 读取失败按无定时处理 */ }
   if (!nextWakeAt) return;
   const delayMs = nextWakeAt.getTime() - Date.now();
   if (delayMs <= 0) {
-    // 已过期（例如进程重启错过了到点时刻）：清理，恢复正常检查节奏
-    try { clearWakeSchedule(); } catch (err) { /* 忽略 */ }
+    // 已过期（例如进程重启错过了到点时刻）：清理已过期调度，恢复正常检查节奏
+    try { pruneExpiredSchedules(); } catch (err) { /* 忽略 */ }
+    if (timedWakeTimer) { clearTimeout(timedWakeTimer); timedWakeTimer = null; }
     return;
   }
   timedWakeTimer = setTimeout(runTimedWake, delayMs);
   console.log(`[wake-up] 已设定定时唤醒：${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}（${Math.round(delayMs / 60000)} 分钟后）`);
 }
 
-// 定时唤醒到点：若设定后用户已主动找过 AI 则作废；否则清理记录后执行一次唤醒流程（是否发推送仍由 AI 自行决定）
+// 定时唤醒到点：清理已到点/过期调度（各会话作废判定由 runWakeForTarget 按会话处理），
+// 然后执行一次唤醒流程（是否发推送仍由 AI 自行决定）
 async function runTimedWake() {
   timedWakeTimer = null;
-  try {
-    if (isUserActiveSince(readWakeScheduleRaw())) {
-      console.log("\n===== 定时唤醒作废 =====\n设定后用户已主动找过 AI，本次定时唤醒取消\n");
-      try { clearWakeSchedule(); } catch (err) { /* 忽略 */ }
-      return;
-    }
-  } catch (voidErr) {
-    console.warn("[wake-up] 检查定时是否作废失败（按到点执行）:", voidErr.message);
-  }
-  try { clearWakeSchedule(); } catch (err) { /* 忽略 */ }
+  try { pruneExpiredSchedules(); } catch (voidErr) { console.warn("[wake-up] 清理过期定时失败:", voidErr.message); }
   console.log("\n===== 定时唤醒到点 =====\n");
   await runWakeUp();
 }
@@ -779,12 +872,13 @@ async function runWakeUpInner() {
   // 无锁定（全局单会话）时在此全局判定；有锁定时 schedule 归属各会话，由 runWakeForTarget 各自检查。
   const locked = readWakeLockedSessions();
   if (!locked.length) {
+    // 无锁定：只可能作用于主会话(default)的调度，按 default 处理（保留防御性）
     try {
-      const schedule = readWakeScheduleRaw();
+      const schedule = readWakeScheduleFor("default");
       if (schedule) {
-        if (isUserActiveSince(schedule)) {
+        if (isUserActiveSinceFor(schedule, "default")) {
           console.log("\n用户已主动找过 AI，定时唤醒作废，恢复正常唤醒节奏\n");
-          try { clearWakeSchedule(); } catch (voidErr) {
+          try { clearWakeSchedule("default"); } catch (voidErr) {
             console.warn("[wake-up] 清理作废定时失败:", voidErr.message);
           }
         } else {
@@ -793,7 +887,7 @@ async function runWakeUpInner() {
             console.log(`\n下一次主动唤醒时间未到（${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}），本次跳过唤醒\n`);
             return;
           }
-          try { clearWakeSchedule(); } catch (expireErr) {
+          try { clearWakeSchedule("default"); } catch (expireErr) {
             console.warn("[wake-up] 清理过期唤醒时间失败:", expireErr.message);
           }
         }
@@ -826,20 +920,21 @@ async function runWakeForTarget(target) {
   const now = new Date();
   const diffMinutes = Math.floor((now - lastMessageTime) / 1000 / 60);
 
-  // 会话级「下一次主动唤醒时间」：AI 在某个会话设定后，只跳过该会话的唤醒（不影响其他锁定会话）；
-  // 无 session 的旧格式视为全局，仍对所有会话生效
+  // 会话级「下一次主动唤醒时间」：严格按会话隔离。AI 在该会话设定后，只跳过该会话的唤醒（不影响其他锁定会话）。
   try {
-    const schedule = readWakeScheduleRaw();
-    if (schedule && (!schedule.session || schedule.session === wakeSessionId)) {
-      if (isUserActiveSince(schedule)) {
-        try { clearWakeSchedule(); } catch (voidErr) { console.warn("[wake-up] 清理作废定时失败:", voidErr.message); }
+    const schedule = readWakeScheduleFor(wakeSessionId);
+    if (schedule) {
+      if (isUserActiveSinceFor(schedule, wakeSessionId)) {
+        // 设定之后用户在该会话主动找过 AI → 定时作废，本次按正常节奏判断
+        try { clearWakeSchedule(wakeSessionId); } catch (voidErr) { console.warn("[wake-up] 清理作废定时失败:", voidErr.message); }
       } else {
         const nextWakeAt = new Date(schedule.next_wake_at);
         if (!isNaN(nextWakeAt.getTime()) && nextWakeAt.getTime() > Date.now()) {
           console.log(`[wake-up] 会话 ${wakeSessionId} 的下一次主动唤醒时间未到（${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}），跳过该会话唤醒`);
           return;
         }
-        try { clearWakeSchedule(); } catch (expireErr) { console.warn("[wake-up] 清理过期唤醒时间失败:", expireErr.message); }
+        // 已到点 → 清除该会话定时，让本次唤醒正常进行
+        try { clearWakeSchedule(wakeSessionId); } catch (expireErr) { console.warn("[wake-up] 清理过期定时唤醒失败:", expireErr.message); }
       }
     }
   } catch (scheduleErr) {
@@ -1109,6 +1204,9 @@ ${historyText}`
       // 若标题为空或以数字开头，加个前缀，可自行修改
       let safeTitle = title || "来自伴侣";
       if (/^\d/.test(safeTitle)) safeTitle = "来自伴侣｜" + safeTitle;
+      // 会话标识：锁定多个会话时，推送标题明确标注来源会话，避免混淆
+      const sessName = getSessionDisplayName(wakeSessionId);
+      if (sessName) safeTitle = `[${sessName}] ${safeTitle}`;
 
       const pushResult = await sendPushNotification({ title: safeTitle, body: safeBody });
       if (!pushResult.ok) {
@@ -1117,7 +1215,7 @@ ${historyText}`
       } else {
         const pushAt = getLocalTimeString();
         eventContent = `（${pushAt} 刚刚给${process.env.USER_DISPLAY_NAME || "用户"}发了${pushResult.providerLabel}推送：${safeTitle}｜${safeBody}）`;
-        pushMeta = { at: pushAt, user: process.env.USER_DISPLAY_NAME || "用户", channel: pushResult.providerLabel, title: safeTitle, body: safeBody };
+        pushMeta = { at: pushAt, user: process.env.USER_DISPLAY_NAME || "用户", channel: pushResult.providerLabel, title: safeTitle, body: safeBody, session: wakeSessionId, session_name: sessName };
       }
     }
   }

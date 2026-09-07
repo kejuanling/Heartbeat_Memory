@@ -388,17 +388,24 @@ function summarizeMessagesForLog(messages = []) {
 // 上游（如 DeepSeek）会把 <memory>/<pin> 拆成 <、memory、> 等多个 SSE 事件，
 // 字节层找不到完整标签，必须在 content 文本层做带缓冲的过滤。
 // ========================
-// 与 wake-up 进程共用同一份 wake_schedule.json：原子写入，wake-up 轮询感知后重新挂定时器
-function saveWakeSchedule(nextWakeAtIso) {
+// 与 wake-up 进程共用同一份 wake_schedule.json（v2 多会话 per-session 槽位）：原子写入，wake-up 轮询感知后重新挂定时器
+function saveWakeSchedule(nextWakeAtIso, sessionId) {
+  const sid = String(sessionId || "default").trim() || "default";
   fs.ensureDirSync(path.dirname(WAKE_SCHEDULE_PATH));
+  let data = {};
+  try { const cur = JSON.parse(fs.readFileSync(WAKE_SCHEDULE_PATH, "utf-8")); if (cur && typeof cur === "object") data = cur; } catch {}
+  const sessions = (data.sessions && typeof data.sessions === "object") ? data.sessions : {};
+  sessions[sid] = { next_wake_at: nextWakeAtIso, updated_at: new Date().toISOString() };
+  data.version = 2;
+  data.sessions = sessions;
   const tmp = WAKE_SCHEDULE_PATH + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify({ next_wake_at: nextWakeAtIso, updated_at: new Date().toISOString() }, null, 2), "utf-8");
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
   fs.renameSync(tmp, WAKE_SCHEDULE_PATH);
 }
 
 // 对话侧 <wake> 闹钟标签：AI 在对话里设置闹钟（日期时间或分钟）；标签不显示给用户。
 // 返回剥离标签后的文本；同时把闹钟写入 wake_schedule.json（wake-up 进程轮询感知后挂定时器）。
-function parseWakeTagAndSchedule(text) {
+function parseWakeTagAndSchedule(text, sessionId) {
   const cleaned = String(text || "").replace(/<wake>[\s\S]*?<\/wake>/gi, "").trim();
   const m = String(text || "").match(/<wake>([\s\S]*?)<\/wake>/i);
   if (!m) return cleaned;
@@ -413,8 +420,8 @@ function parseWakeTagAndSchedule(text) {
     return cleaned;
   }
   try {
-    saveWakeSchedule(nextWakeAt.toISOString());
-    console.log(`[wake] 对话设置闹钟：${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}（${nextWakeAt.toISOString()}）`);
+    saveWakeSchedule(nextWakeAt.toISOString(), sessionId);
+    console.log(`[wake] 对话设置闹钟：${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}（${nextWakeAt.toISOString()}，会话 ${sessionId || "default"}）`);
   } catch (err) {
     console.warn("[wake] 保存闹钟失败:", err.message);
   }
@@ -2062,7 +2069,9 @@ app.post("/internal/wake-event", async (req, reply) => {
           push_channel: String(push_meta.channel || "Bark"),
           push_title: String(push_meta.title || "").trim(),
           push_body: String(push_meta.body || "").trim(),
-          push_tail: String(push_meta.tail || "")
+          push_tail: String(push_meta.tail || ""),
+          push_session: String(push_meta.session || ""),
+          push_session_name: String(push_meta.session_name || "")
         }, evSession);
       } else {
         appendSpecialEvent(event, null, evSession);
