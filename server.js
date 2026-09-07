@@ -1597,6 +1597,8 @@ require("./routes/chat")(app, {
   resolveSessionProvider,
   sessionModelProviderOverride,
   saveSessionModelProviderOverride,
+  sessionModelNameOverride,
+  saveSessionModelNameOverride,
   readEnvValue,
   UPSTREAM_TIMEOUT_MS,
   handleMcpRequest,
@@ -1744,6 +1746,28 @@ function saveSessionModelProviderOverride(sessionId, providerId) {
   try { if (fs.existsSync(file)) o = fs.readJsonSync(file) || {}; } catch (e) { o = {}; }
   if (providerId === null || providerId === undefined || providerId === "") delete o.model_provider_id;
   else o.model_provider_id = String(providerId);
+  fs.ensureDirSync(SESSION_CFG_DIR);
+  fs.writeJsonSync(file, o);
+  return o;
+}
+function sessionModelNameOverride(sessionId) {
+  const token = safeSessionToken(sessionId || "default");
+  const file = path.join(SESSION_CFG_DIR, token + ".json");
+  try {
+    if (fs.existsSync(file)) {
+      const o = fs.readJsonSync(file);
+      if (o && typeof o.model_name === "string" && o.model_name) return o.model_name;
+    }
+  } catch (e) { /* ignore */ }
+  return null;
+}
+function saveSessionModelNameOverride(sessionId, modelName) {
+  const token = safeSessionToken(sessionId || "default");
+  const file = path.join(SESSION_CFG_DIR, token + ".json");
+  let o = {};
+  try { if (fs.existsSync(file)) o = fs.readJsonSync(file) || {}; } catch (e) { o = {}; }
+  if (modelName === null || modelName === undefined || modelName === "") delete o.model_name;
+  else o.model_name = String(modelName);
   fs.ensureDirSync(SESSION_CFG_DIR);
   fs.writeJsonSync(file, o);
   return o;
@@ -3382,7 +3406,13 @@ app.put("/admin/ai-providers", { preHandler: mcpManageAuth }, async (req, reply)
       const o = { id: String(p.id || ""), name: String(p.name || ""), enabled: p.enabled !== false };
       if (p.api_url || p.base_url) o.api_url = String(p.api_url || p.base_url);
       if (p.api_key) o.api_key = String(p.api_key);
-      if (p.model) o.model = String(p.model);
+      let _models = [];
+      if (Array.isArray(p.models)) _models = p.models.map(function(s){ return String(s).trim(); }).filter(Boolean);
+      else if (p.model) _models = [String(p.model).trim()].filter(Boolean);
+      if (_models.length) o.models = _models;
+      if (p.model) o.model = String(p.model).trim();
+      else if (_models.length) o.model = _models[0];
+      else o.model = "";
       return o;
     }).filter(function (p) { return p.name && p.api_url; });
     saveAiProviders(clean);

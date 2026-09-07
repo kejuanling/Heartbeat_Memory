@@ -1413,7 +1413,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
         <div class="mcp-row"><label>名称</label><input type="text" id="provName" placeholder="如 DeepSeek 官方"></div>
         <div class="mcp-row"><label>API 链接</label><input type="text" id="provUrl" placeholder="https://…/v1/chat/completions"></div>
         <div class="mcp-row"><label>API Key</label><input type="password" id="provKey" placeholder="sk-…"></div>
-        <div class="mcp-row"><label>模型<span class="tag">可选</span></label><input type="text" id="provModel" placeholder="deepseek-v4-flash-vision-exp"></div>
+        <div class="mcp-row"><label>模型<span class="tag">可选 · 每行一个</span></label><textarea id="provModel" rows="3" placeholder="deepseek-v4-flash-vision-exp"></textarea><button type="button" class="mcp-btn" id="provModelFetchBtn" style="margin-top:8px">自动获取模型</button></div>
         <div class="mcp-btns"><button type="button" class="mcp-btn primary" id="provSaveBtn">保存</button><button type="button" class="mcp-btn" id="provCancelBtn">取消</button></div>
         <div id="provMsg" class="mcp-msg"></div>
       </div>
@@ -1939,6 +1939,7 @@ const provKey=document.getElementById("provKey");
 const provModel=document.getElementById("provModel");
 const provSaveBtn=document.getElementById("provSaveBtn");
 const provCancelBtn=document.getElementById("provCancelBtn");
+const provModelFetchBtn=document.getElementById("provModelFetchBtn");
 const provMsg=document.getElementById("provMsg");
 // ---- 语音供应商编辑表单元素 ----
 const vpList=document.getElementById("vpList");
@@ -4323,7 +4324,8 @@ function renderProviders(){
   provList.innerHTML=_providers.map(function(p,i){
     const st=p.enabled!==false?('<span class="mcp-st on">启用</span>'):('<span class="mcp-st off">停用</span>');
     const sw='<label class="mcp-sw"><input type="checkbox" data-sw="'+i+'" '+(p.enabled!==false?'checked':'')+'><i></i></label>';
-    const desc=(p.model?escapeHtml(p.model):'默认模型')+' · '+escapeHtml((p.api_url||'').slice(0,46));
+    const mm=((p.models&&p.models.length>1)?(p.models.length+'个模型 · '+escapeHtml(p.models[0])):(p.model?escapeHtml(p.model):'默认模型'));
+    const desc=mm+' · '+escapeHtml((p.api_url||'').slice(0,46));
     return '<div class="mcp-item"><div class="mi"><div class="mn">'+escapeHtml(p.name)+' '+st+'</div><div class="ms">'+desc+'</div></div><div class="mo">'+sw+'<button data-i="'+i+'" data-act="edit">编辑</button><button data-i="'+i+'" data-act="del">删除</button></div></div>';
   }).join("");
   provList.querySelectorAll('.mo button').forEach(function(b){
@@ -4347,7 +4349,7 @@ function openProvForm(i){
   provName.value = p? (p.name||"") : "";
   provUrl.value = p? (p.api_url||"") : "";
   provKey.value = p? (p.api_key||"") : "";
-  provModel.value = p? (p.model||"") : "";
+  provModel.value = p? ((p.models&&p.models.length? p.models.join("\n") : (p.model||""))) : "";
   provForm.style.display="block"; if(mcpForm)mcpForm.style.display="none";
   if(vpForm)vpForm.style.display="none";
   if(mcpTabs) mcpTabs.style.display="none";
@@ -4362,7 +4364,8 @@ async function saveProviders(){
   const name=provName.value.trim(); if(!name){ provMsg.textContent="请填名称"; return; }
   const url=provUrl.value.trim(); if(!url){ provMsg.textContent="请填 API 链接"; return; }
   const body={ providers: _providers.map(function(p){ return { id:p.id, name:p.name, api_url:p.api_url, api_key:p.api_key||"", model:p.model||"", enabled:p.enabled!==false }; }) };
-  const params={ name:name, api_url:url, api_key:provKey.value.trim(), model:provModel.value.trim(), enabled:provEnabled.checked };
+  const rawModels=provModel.value.split(/[\n,;]+/).map(function(s){return s.trim();}).filter(Boolean);
+  const params={ name:name, api_url:url, api_key:provKey.value.trim(), model:(rawModels[0]||""), models:rawModels, enabled:provEnabled.checked };
   const ei=window.__provEditingIndex;
   if(ei!=null && _providers[ei]){ body.providers[ei]=Object.assign({},body.providers[ei],params); }
   else { body.providers.push(Object.assign({ id:"p_"+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36) },params)); }
@@ -4385,6 +4388,33 @@ async function deleteProv(i){
 if(provAddBtn) provAddBtn.addEventListener("click",function(){ openProvForm(null); });
 if(provCancelBtn) provCancelBtn.addEventListener("click",closeProvForm);
 if(provSaveBtn) provSaveBtn.addEventListener("click",saveProviders);
+function modelsEndpointFrom(base){
+  let u=String(base||"").replace(/\/+$/,"");
+  u=u.replace(/\/chat\/completions$/i,"");
+  if(/\/v[0-9]+$/i.test(u)) return u+"/models";
+  return u+"/v1/models";
+}
+async function fetchProviderModels(){
+  const url=provUrl.value.trim(); if(!url){ provMsg.textContent="请先填 API 链接"; return; }
+  const key=provKey.value.trim(); if(!key){ provMsg.textContent="请先填 API Key"; return; }
+  provModelFetchBtn.disabled=true; provModelFetchBtn.textContent="获取中…";
+  try{
+    const r=await fetch(modelsEndpointFrom(url),{headers:{"Authorization":"Bearer "+key}});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    const j=await r.json();
+    let ids=[];
+    if(j&&Array.isArray(j.data)) ids=j.data.map(function(m){ return (m&&m.id)||""; }).filter(Boolean);
+    else if(j&&Array.isArray(j.models)) ids=j.models.map(function(m){ return (m&&(m.id||m.model||m.name))||""; }).filter(Boolean);
+    if(!ids.length){ provMsg.textContent="没解析到模型（该供应商可能不支持 /models）"; return; }
+    provModel.value=ids.join("\n");
+    provMsg.textContent="已获取 "+ids.length+" 个模型";
+  }catch(e){
+    provMsg.textContent="自动获取失败：请手动填写（"+e.message+"）";
+  }finally{
+    provModelFetchBtn.disabled=false; provModelFetchBtn.textContent="自动获取模型";
+  }
+}
+if(provModelFetchBtn) provModelFetchBtn.addEventListener("click",fetchProviderModels);
 
 /* ================= 语音服务（TTS 朗读 / 通话） ================= */
 function adminPath(p){ return '/heartbeat/admin'+p; }
@@ -5313,11 +5343,12 @@ async function saveSessionCrossInject(sid, enabled, followGlobal){
 // 写入 data/session_cfg/<session>.json 的 model_provider_id，发送时该会话优先用此供应商。
 async function openSessionProvider(sid){
   const nm=sessionDisplayName(sid)||(sid==="default"?"主会话":sid);
-  let cur="";
+  let cur="", curModel="";
   try{
     const r=await fetch("/v1/sessions/"+encodeURIComponent(sid)+"/model-provider",{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
     const j=await r.json();
     if(j&&typeof j.model_provider_id==="string"&&j.model_provider_id) cur=j.model_provider_id;
+    if(j&&typeof j.model_name==="string"&&j.model_name) curModel=j.model_name;
   }catch(e){}
   // 拉取可用供应商列表（与设置页同口径：已启用且有接口+密钥）
   let providers=[];
@@ -5329,24 +5360,40 @@ async function openSessionProvider(sid){
   let opts='<option value="">默认（跟随全局）</option>';
   if(providers.length){
     opts+=providers.map(function(p){
-      const desc=(p.model?p.model:(p.api_url||"").slice(0,40));
-      return '<option value="'+escapeHtml(p.id)+'"'+(cur===p.id?' selected':'')+'>'+escapeHtml(p.name||"未命名")+' · '+escapeHtml(desc)+'</option>';
+      return '<option value="'+escapeHtml(p.id)+'"'+(cur===p.id?' selected':'')+'>'+escapeHtml(p.name||"未命名")+'</option>';
     }).join('');
   }else{
     opts+='<option value="" disabled>暂无可用供应商（先去设置里添加并启用）</option>';
   }
+  const modelOptsFor=function(pid){
+    if(!pid) return '<option value="">（跟随供应商默认）</option>';
+    const p=providers.filter(function(x){return x.id===pid;})[0];
+    if(!p) return '<option value="">（跟随供应商默认）</option>';
+    const list=(Array.isArray(p.models)&&p.models.length)? p.models : (p.model?[p.model]:[]);
+    if(!list.length) return '<option value="">（跟随供应商默认）</option>';
+    return '<option value="">（跟随供应商默认）</option>'+list.map(function(m){ return '<option value="'+escapeHtml(m)+'"'+(curModel===m?' selected':'')+'>'+escapeHtml(m)+'</option>'; }).join('');
+  };
   openEditModal("模型 · "+nm,
-    '<div class="field"><label>本会话使用的模型供应商</label><select class="np-sel" id="sp-provider">'+opts+'</select>'
-    +'<div class="np-tip">选定后，这个会话的请求会改走该供应商（接口/密钥/模型）。「默认」用全局当前启用的供应商；所选供应商被删除或停用时会自动回退全局，不影响其它会话。</div></div>',
+    '<div class="field"><label>本会话使用的模型供应商</label><select class="np-sel" id="sp-provider">'+opts+'</select></div>'
+    +'<div class="field"><label>模型</label><select class="np-sel" id="sp-model">'+modelOptsFor(cur)+'</select></div>'
+    +'<div class="np-tip">选定后，这个会话的请求会改走该供应商（接口/密钥/模型）。「默认」用全局当前启用的供应商；所选供应商被删除或停用时会自动回退全局，不影响其它会话。</div>',
     function(){
       const v=(document.getElementById("sp-provider")||{}).value||"";
-      return saveSessionProvider(sid, v, nm);
+      const m=(document.getElementById("sp-model")||{}).value||"";
+      return saveSessionProvider(sid, v, m, nm);
     },
     "应用");
+  const spSel=document.getElementById("sp-provider");
+  const spModel=document.getElementById("sp-model");
+  if(spSel){
+    spSel.addEventListener("change",function(){
+      if(spModel) spModel.innerHTML=modelOptsFor(spSel.value);
+    });
+  }
 }
-async function saveSessionProvider(sid, providerId, nm){
+async function saveSessionProvider(sid, providerId, modelName, nm){
   try{
-    const r=await fetch("/v1/sessions/"+encodeURIComponent(sid)+"/model-provider",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({model_provider_id:providerId||null})});
+    const r=await fetch("/v1/sessions/"+encodeURIComponent(sid)+"/model-provider",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({model_provider_id:providerId||null, model_name:modelName||null})});
     const j=await r.json();
     if(!r.ok){ showToast(j.error||"保存失败"); return false; }
     showToast(providerId?("已为「"+nm+"」单独指定供应商"):("「"+nm+"」已恢复为跟随全局"));

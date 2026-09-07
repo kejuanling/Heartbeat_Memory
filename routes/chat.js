@@ -711,7 +711,8 @@ module.exports = function registerChatRoutes(app, deps) {
     try {
       const sessionId = String(req.params.id || '').trim();
       const override = deps.sessionModelProviderOverride(sessionId);
-      reply.send({ session_id: sessionId, model_provider_id: override, follow_global: override === null });
+      const modelName = deps.sessionModelNameOverride(sessionId);
+      reply.send({ session_id: sessionId, model_provider_id: override, model_name: modelName, follow_global: override === null });
     } catch (err) {
       console.error('[GET /v1/sessions/:id/model-provider] error:', err.message);
       reply.code(500).send({ error: err.message });
@@ -725,7 +726,10 @@ module.exports = function registerChatRoutes(app, deps) {
       if (typeof body.model_provider_id === 'string' && body.model_provider_id.trim()) val = body.model_provider_id.trim();
       // 其余（undefined/null/''）→ null 跟随全局
       const saved = deps.saveSessionModelProviderOverride(sessionId, val);
-      reply.send({ ok: true, session_id: sessionId, model_provider_id: val, saved: saved });
+      let modelName = null;
+      if (typeof body.model_name === 'string' && body.model_name.trim()) modelName = body.model_name.trim();
+      const savedModel = deps.saveSessionModelNameOverride(sessionId, modelName);
+      reply.send({ ok: true, session_id: sessionId, model_provider_id: val, model_name: modelName, saved: saved });
     } catch (err) {
       console.error('[POST /v1/sessions/:id/model-provider] error:', err.message);
       reply.code(500).send({ error: err.message });
@@ -1145,7 +1149,12 @@ app.post("/v1/chat/completions", async (req, reply) => {
     const prov = resolveSessionProvider(sessionId);
     // 会话级模型供应商：仅当会话显式指定了供应商时，才把该供应商配置的模型名应用到本次请求，
     // 避免默认（跟随全局）会话的转发模型被意外改动；供应商未配置 model 时沿用客户端传入的 body.model。
-    if (deps.sessionModelProviderOverride(sessionId) && prov && prov.model) body.model = prov.model;
+    const _sessModel = deps.sessionModelNameOverride(sessionId);
+    if (_sessModel && prov && (!Array.isArray(prov.models) || prov.models.length === 0 || prov.models.indexOf(_sessModel) >= 0)) {
+      body.model = _sessModel;
+    } else if (deps.sessionModelProviderOverride(sessionId) && prov && prov.model) {
+      body.model = prov.model;
+    }
     const targetApiUrl = (prov && (prov.api_url || prov.base_url)) || readEnvValue("TARGET_API_URL");
     const targetApiKey = (prov && prov.api_key) || readEnvValue("TARGET_API_KEY");
     if (!targetApiUrl || !targetApiKey) {
