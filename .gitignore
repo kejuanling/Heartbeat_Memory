@@ -21,3 +21,70 @@ memories.json
 
 # 运维数据归档
 backups/
+
+# === 2026-09-07 追加：敏感凭据 / 数据 / 日志 / 系统目录，禁止入库 ===
+# 敏感凭据（明文密钥）
+chat-settings.json
+ai-providers.json
+mcp-servers.json
+voice-config.json
+yun-mcp-v2/config.json
+ssh_mcp_server.py
+workspace/email_server.py
+.env.example
+.git-credentials
+.ombre_dashboard_password
+
+# 系统/用户目录
+.bash_history
+.bash_logout
+.bash_profile
+.bashrc
+.cshrc
+.tcshrc
+.viminfo
+.gitconfig
+.lesshst
+.pydistutils.cfg
+.ssh/
+.pm2/
+.npm/
+.docker/
+.config/
+.cache/
+.local/
+.pip/
+
+# 日志与运行时产物
+*.log
+__pycache__/
+*.pyc
+*.pid
+
+# 会话数据与备份（含隐私）
+enhanced_messages_s_*.json
+backup_*.json
+*.precletool-*
+all_memory.txt
+workspace/server_directory_report.html
+workspace/daily-涵/data.json
+workspace/daily-涵/memory-contents.json
+workspace/daily-涵/memory-data.json
+workspace/mcp-tools/tools_history.json
+workspace/mcp-tools/tools_server.py.tmp2
+
+# 独立子系统/第三方目录（非主仓库内容）
+bark_tasks/
+embed-server/
+phone-report-api/
+spicy-monopoly/
+like-repo/
+static-pages/
+zzf-mcp/
+mcp_env/
+archive/
+workspace/_archive/
+workspace/memories/
+workspace/monthly/
+workspace/system/
+workspace/decision-trail/
