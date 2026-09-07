@@ -1630,10 +1630,9 @@ function sessionCreatedAtOf(sessionId) {
   return null;
 }
 
-// 日记跨窗口注入（批注 2026-09-04）：只注入"本会话创建日期之前"的日记，
-// 按日期升序（旧在前新在后）取最近 count 篇；创建日期当天及之后的日记
-// 一律不进跨窗口块——它们在各自会话的时间线里按时间插位（appendSpecialEvent）。
-// 边界口径：日记文件名与 cutoff 都用 TIME_ZONE 本地日期（YYYY-MM-DD，严格小于）。
+// 日记跨窗口注入（批注 2026-09-04，2026-09-07 放宽）：只注入"本会话创建日期当天及之前"的日记，
+// 按日期升序（旧在前新在后）取最近 count 篇；2026-09-07 起含当天。
+// 边界口径：日记文件名与 cutoff 都用 TIME_ZONE 本地日期（YYYY-MM-DD，小于等于当天）。
 function recentDiaryTextBefore(sessionId, count, createdIso) {
   const diaryDir = path.join(__dirname, "diary");
   let files = [];
@@ -1650,7 +1649,7 @@ function recentDiaryTextBefore(sessionId, count, createdIso) {
   } catch (e) {}
   if (!cutoff) return "";
   // 只留 日记日期 < 会话创建日期
-  const before = files.filter(function (f) { return f.slice(0, 10) < cutoff; });
+  const before = files.filter(function (f) { return f.slice(0, 10) <= cutoff; });
   if (!before.length) return "";
   const picked = before.slice(-Math.max(1, Number(count) || 3));
   const out = [];
@@ -1673,11 +1672,12 @@ function recentDiaryTextBefore(sessionId, count, createdIso) {
 // 2026-08-29 批注：相关记忆改为「只固定置顶记忆(手动+多次检索自动置顶)」，去掉按分类抽高重要级，
 // 话题相关交给 surface_memory 按需召回。加了 version 以让旧快照(旧格式)在下次请求时自动重建。
 // 2026-09-04 批注：近期日记只注入"本会话创建日期之前"的日记（快照存 created_at 固化边界），
-// 创建日期当天及之后的日记按时间线特殊事件插入（见 appendSpecialEvent）。
+// 2026-09-07 批注：按用户要求放宽为"创建日期当天及之前"（当天日记也注入跨窗口快照）。
+// 当天日记在"写日记会话的时间线特殊事件"与"新会话跨窗口快照"两条路径都可能出现，属预期：二者所在会话不同。
 // ========================
 const CROSS_SNAPSHOT_DIR = path.join(__dirname, "data");
 const SESSION_CFG_DIR = path.join(__dirname, "data", "session_cfg");   // 会话级配置（如跨窗口注入覆盖）；无文件=跟随全局
-const CROSS_SNAPSHOT_VERSION = 6;  // 升版本：标星(记忆碎片)对齐日记——只注入会话创建时间之前 + 补原消息时间字段，旧快照自动重建
+const CROSS_SNAPSHOT_VERSION = 7;  // 升版本：日记注入边界从"<创建日期"放宽为"<=创建日期(含当天)"，旧快照自动重建
 function crossSnapshotFile(sessionId) {
   // 与 timelineFileFor 用同一套会话名规则（safeSessionToken）：保证同一会话的时间线与快照归属一致
   const token = safeSessionToken(sessionId || "default");
