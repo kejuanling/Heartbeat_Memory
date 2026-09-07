@@ -920,6 +920,13 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .session-item .s-ops{display:flex;align-items:center;gap:8px;margin-top:4px}
 .session-item .s-op{border:1px solid rgba(200,144,152,.22);background:none;border-radius:8px;padding:2px 8px;font-size:11px;color:var(--accent-deep);cursor:pointer;transition:background .12s}
 .session-item .s-op:hover{background:rgba(200,144,152,.08)}
+.session-item .s-more{margin-left:auto;border:none;background:none;color:var(--ink3);cursor:pointer;padding:3px 6px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;transition:all .12s}
+.session-item .s-more:hover{color:var(--accent-deep);background:rgba(200,144,152,.10)}
+.sess-menu{position:fixed;z-index:999;min-width:104px;background:#fff;border:1px solid rgba(200,144,152,.22);border-radius:10px;box-shadow:0 8px 22px rgba(90,74,58,.14);padding:4px;display:flex;flex-direction:column}
+.sess-menu.hidden{display:none}
+.sess-menu-item{border:none;background:none;text-align:left;padding:7px 12px;font-size:12px;color:var(--ink);border-radius:7px;cursor:pointer;display:flex;align-items:center;gap:7px;transition:background .12s,color .12s;white-space:nowrap}
+.sess-menu-item:hover{background:rgba(200,144,152,.10);color:var(--accent-deep)}
+.sess-menu-item.on{color:#7d8fa0}
 .session-item .s-check{width:18px;height:18px;border-radius:50%;border:1.5px solid rgba(200,144,152,.45);display:inline-flex;align-items:center;justify-content:center;font-size:11px;color:#fff;flex-shrink:0;transition:all .12s}
 .session-item .s-check.on{background:var(--accent-deep);border-color:var(--accent-deep)}
 .session-item.merging .s-name .s-del{display:none}
@@ -5191,7 +5198,7 @@ function renderSessionList(){
     const meta=(locked?'<span class="s-dot lock" title="锁定唤醒"></span>':'')+(thirdPartySid===s.id?'<span class="s-dot tp" title="第三方专用"></span>':'')+escapeHtml((s.real!=null?(""+s.real+" 条"):"")+(s.last_time?(" · "+fmtTime(new Date(s.last_time))):""));
     const checkHtml=merging?('<span class="s-check'+(mergeSel.has(s.id)?' on':'')+'">'+(mergeSel.has(s.id)?'✓':'')+'</span>'):'';
     item.innerHTML='<div class="s-name">'+checkHtml+'<button class="s-icon pin'+(pinned?' on':'')+'" data-op="pin" data-id="'+escapeHtml(s.id)+'" title="'+(pinned?"取消置顶":"置顶")+'"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/></svg></button>'+'<span class="s-title" title="'+escapeHtml(name)+'">'+escapeHtml(name)+'</span><button class="s-icon ren" data-op="rename" data-id="'+escapeHtml(s.id)+'" title="改名"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/><path d="m15 5 4 4"/></svg></button>'+'<button class="s-del" data-id="'+escapeHtml(s.id)+'" title="删除"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button></div>'+
-      '<div class="s-ops"><span class="s-meta">'+meta+'</span><button class="s-op" data-op="cc" data-id="'+escapeHtml(s.id)+'">压缩</button><button class="s-op" data-op="export" data-id="'+escapeHtml(s.id)+'">导出</button><button class="s-op'+(thirdPartySid===s.id?' on':'')+'" data-op="thirdparty" data-id="'+escapeHtml(s.id)+'">第三方</button></div>';
+      '<div class="s-ops"><span class="s-meta">'+meta+'</span><button class="s-more" title="更多操作" aria-label="更多操作"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button></div>';
     item.querySelector(".s-name > .s-del").addEventListener("click",e=>{e.stopPropagation();if(merging){toggleMergeSel(s.id);}else{deleteSession(s.id);}});
     item.querySelectorAll(".s-name .s-icon").forEach(btn=>btn.addEventListener("click",e=>{
       e.stopPropagation();
@@ -5199,17 +5206,76 @@ function renderSessionList(){
       if(op==="pin")togglePinSession(id);
       if(op==="rename")renameSession(id);
     }));
-    item.querySelectorAll(".s-op").forEach(btn=>btn.addEventListener("click",e=>{
+    item.querySelector(".s-more").addEventListener("click",e=>{
       e.stopPropagation();
-      const op=btn.dataset.op,id=btn.dataset.id;
-      if(op==="export")exportSession(id);
-      if(op==="cc")openSessionCc(id);
-      if(op==="thirdparty")setThirdPartySession(id);
-    }));
+      openSessMenu(s.id, e.currentTarget);
+    });
     item.addEventListener("click",()=>{ if(merging){ toggleMergeSel(s.id); } else { switchSession(s.id); } });
     el.appendChild(item);
   });
   updateMergeBar();
+}
+
+// ===== 会话「…」菜单（压缩/导出/第三方/人设 收进三个点） =====
+let _sessMenuEl=null;
+function ensureSessMenu(){
+  if(_sessMenuEl) return _sessMenuEl;
+  _sessMenuEl=document.createElement("div");
+  _sessMenuEl.className="sess-menu hidden";
+  document.body.appendChild(_sessMenuEl);
+  document.addEventListener("click",function(e){
+    if(!_sessMenuEl||_sessMenuEl.classList.contains("hidden"))return;
+    if(_sessMenuEl.contains(e.target))return;
+    if(e.target&&e.target.closest&&e.target.closest(".s-more"))return;
+    closeSessMenu();
+  });
+  document.addEventListener("scroll",function(){ closeSessMenu(); },true);
+  return _sessMenuEl;
+}
+function closeSessMenu(){ if(_sessMenuEl) _sessMenuEl.classList.add("hidden"); }
+function openSessMenu(sid, anchorEl){
+  const el=ensureSessMenu();
+  const tpOn=(thirdPartySid===sid);
+  el.innerHTML='<button class="sess-menu-item" data-op="cc">压缩</button>'
+    +'<button class="sess-menu-item" data-op="export">导出</button>'
+    +'<button class="sess-menu-item'+(tpOn?' on':'')+'" data-op="thirdparty">第三方</button>'
+    +'<button class="sess-menu-item" data-op="persona">人设</button>';
+  Array.prototype.forEach.call(el.querySelectorAll(".sess-menu-item"),function(btn){
+    btn.addEventListener("click",function(e){
+      e.stopPropagation();
+      const op=btn.getAttribute("data-op");
+      closeSessMenu();
+      if(op==="cc")openSessionCc(sid);
+      else if(op==="export")exportSession(sid);
+      else if(op==="thirdparty")setThirdPartySession(sid);
+      else if(op==="persona")openSessionPersona(sid);
+    });
+  });
+  el.classList.remove("hidden");
+  const r=anchorEl.getBoundingClientRect();
+  const mw=el.offsetWidth, mh=el.offsetHeight;
+  let left=Math.max(8,Math.min(r.right-mw, window.innerWidth-mw-8));
+  let top=r.bottom+6;
+  if(top+mh>window.innerHeight-8) top=r.top-mh-6;
+  el.style.left=left+"px"; el.style.top=top+"px";
+}
+// 给【单个会话】单独设人设：从提示词备份里选（默认=跟随全局），写入 han_session_prompts 会话级映射，优先级高于全局人设
+function openSessionPersona(sid){
+  const nm=sessionDisplayName(sid)||(sid==="default"?"主会话":sid);
+  const curMap=getSessionPromptMap();
+  const cur=curMap[sid]||"";
+  const opts='<option value="">默认（跟随全局人设）</option>'+promptBackups.map(function(b){
+    return '<option value="'+escapeHtml(b.id)+'"'+(cur===b.id?' selected':'')+'>'+escapeHtml(b.name||'未命名')+'</option>';
+  }).join('');
+  openEditModal("人设 · "+nm,
+    '<div class="field"><label>本会话使用的人设</label><select class="np-sel" id="sp-persona">'+opts+'</select>'
+    +'<div class="np-tip">选择的人设仅对这个会话生效，优先级高于全局人设；「默认」跟随全局人设。</div></div>',
+    function(){
+      const v=(document.getElementById("sp-persona")||{}).value||"";
+      setSessionPrompt(sid, v);
+      showToast(v?("已为「"+nm+"」单独设置人设"):"已恢复为跟随全局人设");
+    },
+    "应用");
 }
 // ===== 第三方专用会话 =====
 // 设置/取消某个会话为「第三方专用」：不带 session_id 的第三方客户端(如 Kelivo)
