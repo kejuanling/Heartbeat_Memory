@@ -352,6 +352,7 @@ header.hd-custom .hd-mid{align-items:flex-start}
 }
 .msg.selected .check{opacity:1;transform:scale(1);background:var(--accent);border-color:var(--accent)}
 .msg.selected .bubble{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.msg.user.selected .bubble{box-shadow:0 0 0 1px #c99680,0 0 0 3px rgba(201,150,128,.22)}
 @media(min-width:600px){.msg .check{left:-26px}}
 
 /* 打字光标 */
@@ -1327,6 +1328,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
   <span class="st" id="selCount">已选 0 条</span>
   <button class="sbtn" id="selAll">全选</button>
   <button class="sbtn" id="selCancel">取消</button>
+  <button class="sbtn" id="selExport">导出</button>
   <button class="sbtn del" id="selDel">删除</button>
 </div>
 
@@ -1854,6 +1856,7 @@ const selCount=document.getElementById("selCount");
 const selAll=document.getElementById("selAll");
 const selCancel=document.getElementById("selCancel");
 const selDel=document.getElementById("selDel");
+const selExport=document.getElementById("selExport");
 const actMask=document.getElementById("actMask");
 const actSheet=document.getElementById("actSheet");
 const actTitle=document.getElementById("actTitle");
@@ -3530,6 +3533,37 @@ selAll.addEventListener("click",()=>{
     if(!isNaN(v))el.classList.toggle("selected",selectSet.has(v));
   });
 });
+selExport.addEventListener("click",exportSelectedMessages);
+
+/* 多选导出：把选中的消息按对话文本导出（头部行用完整日期，可与「导入」的纯文本解析格式兼容再导入） */
+function exportSelectedMessages(){
+  if(!selectSet.size){ showToast("请先选择要导出的消息"); return; }
+  const aiName=cfg.ai_name||"谢意行";
+  const uname=cfg.user_name||"我";
+  const lines=[];
+  lines.push(sessionDisplayName()||"已选对话");
+  const idxs=[...selectSet].sort(function(a,b){return a-b;});
+  idxs.forEach(function(i){
+    const m=msgs[i]; if(!m)return;
+    const isAI=(m.role==="assistant"||m.role==="ai");
+    const name=isAI?aiName:uname;
+    const d=(m.time)?new Date(m.time):new Date();
+    const head=pad(d.getFullYear())+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())+" "+pad(d.getHours())+":"+pad(d.getMinutes());
+    lines.push("---");
+    lines.push(head+" · "+name);
+    lines.push(String(msgText(m)==null?"":msgText(m)));
+  });
+  const txt=lines.join("\n");
+  const nm=sessionDisplayName()||"已选对话";
+  const blob=new Blob([txt],{type:"text/plain;charset=utf-8"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=nm+"-选中"+selectSet.size+"条.txt";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast("已导出 "+selectSet.size+" 条对话");
+}
+
 selDel.addEventListener("click",()=>{
   if(!selectSet.size){showToast("请先选择");return;}
   const deleted=selectSet.size;
