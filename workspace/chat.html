@@ -5920,6 +5920,7 @@ async function importSession(file){
     currentSession=newId;
     applyHeader();
     msgs=items;saveMsgs();
+    syncTimelineLocal();  // 导入即落盘：带导入消息的 time 一次性写进服务器时间线，建好会话文件（后续发消息走追加，不再整份重建）
     renderAll();
     closeDrawer();
     // 记录名字

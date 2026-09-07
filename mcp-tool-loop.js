@@ -14,7 +14,6 @@
 "use strict";
 
 const { loadTools, toOpenAITools, callToolByExposedName } = require("./mcp-service");
-const memoryPool = require("./memory-pool");
 
 const DEFAULT_MAX_TOOL_ROUNDS = 6;
 const MAX_REASONING_CHARS = 4000; // 思考链最多保留字符数，避免过长
@@ -23,174 +22,6 @@ const UPSTREAM_TIMEOUT_MS = Number(process.env.UPSTREAM_TIMEOUT_MS) || 180000;
 // 单条工具结果写进时间线的截断上限：防止超大结果（读文件/长网页）把 enhanced_messages.json 撑爆
 const MAX_TOOL_RESULT_CHARS = 30000;
 
-// ========================
-// 内置（native）记忆浮现工具：surface_memory
-// 与 MCP 服务器工具一起注入 openaiTools；执行时在本地分流到 memory-pool.retrieve，
-// 不发送到 MCP 服务器（记忆池是服务端全局共享，无独立 MCP server）。
-// ========================
-const SURFACE_MEMORY_NAME = "surface_memory";
-const MEMORY_RECALL_NAME = "memory_recall";
-const SURFACE_CATEGORIES = ["关于她", "关于我们", "锚点", "信号", "对话摘要", "心动时刻"];
-
-const NATIVE_TOOLS = [
-  {
-    exposedName: SURFACE_MEMORY_NAME,
-    serverName: "native",
-    tool: {
-      name: SURFACE_MEMORY_NAME,
-      description:
-        "从长期记忆池按需检索与当前话题相关的记忆。当你想回忆之前聊过或记过的、关于她/关于我们/锚点/信号/对话摘要/心动时刻的内容时调用；传入你要聊或正在聊的话题/关键词（query），返回最相关的记忆条目。若当前上下文缺少某段相关过往记忆，可用它补上。",
-      inputSchema: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "要检索的话题/关键词（必填）" },
-          top_k: { type: "number", description: "最多返回的条数，默认 5，上限 20", minimum: 1, maximum: 20 },
-          category: { type: "string", description: "可选：只检索某个分类（关于她/关于我们/锚点/信号/对话摘要/心动时刻）" }
-        },
-        required: ["query"]
-      }
-    }
-  },
-  {
-    exposedName: MEMORY_RECALL_NAME,
-    serverName: "native",
-    tool: {
-      name: MEMORY_RECALL_NAME,
-      description:
-        "按【语义/含义】从长期记忆池检索相关记忆。与 surface_memory（按关键词词面匹配）不同：当你觉得词面命中不好、或想按一段意思/问题找记忆（即便用词不同）时用它。传入你想找的问题或记忆的大意，系统会用语义模型从记忆池里挑出最相关的条目返回。若当前上下文缺某段相关过往记忆，可用它补上。",
-      inputSchema: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "想找的记忆/问题（必填），描述含义而非精确字词" },
-          top_k: { type: "number", description: "最多返回的条数，默认 5，上限 20", minimum: 1, maximum: 20 },
-          category: { type: "string", description: "可选：只检索某个分类（关于她/关于我们/锚点/信号/对话摘要/心动时刻）" }
-        },
-        required: ["query"]
-      }
-    }
-  }
-];
-
-async function callSurfaceMemory(args) {
-  try {
-    const query = String((args && args.query) || "").trim();
-    if (!query) {
-      return {
-        markdown: JSON.stringify({
-          type: "tool_error",
-          error: "invalid_query",
-          message: "surface_memory 需要 query（要检索的话题/关键词）。"
-        })
-      };
-    }
-    const topK = Math.max(1, Math.min(20, Number((args && args.top_k) || 5) || 5));
-    const category = (args && args.category && SURFACE_CATEGORIES.includes(String(args.category)))
-      ? String(args.category)
-      : undefined;
-    const mems = memoryPool.retrieve(query, { topK: topK, category: category });
-    if (!Array.isArray(mems) || mems.length === 0) {
-      return { markdown: "未检索到相关记忆。" };
-    }
-    const lines = mems.map(function (m) {
-      return "【" + (m.category || "其他") + "】" + (m.content || "") + (m.pinned ? "（置顶）" : "");
-    });
-    return { markdown: "检索到 " + mems.length + " 条相关记忆：\n" + lines.join("\n") };
-  } catch (e) {
-    return {
-      markdown: JSON.stringify({
-        type: "tool_error",
-        error: "surface_memory_error",
-        message: e.message || String(e)
-      })
-    };
-  }
-}
-
-// 语义记忆召回：词面预筛候选 (~40) -> 上游免费模型按语义挑相关 -> 只返回挑中
-async function callMemoryRecall(args, ctx) {
-  try {
-    const query = String((args && args.query) || "").trim();
-    if (!query) {
-      return {
-        markdown: JSON.stringify({
-          type: "tool_error",
-          error: "invalid_query",
-          message: "memory_recall 需要 query（想找的记忆/问题）。"
-        })
-      };
-    }
-    const topK = Math.max(1, Math.min(20, Number((args && args.top_k) || 5) || 5));
-    const category = (args && args.category && SURFACE_CATEGORIES.includes(String(args.category)))
-      ? String(args.category)
-      : undefined;
-    // 1. 词面预筛：拿全部 active 记忆，按词面相似度取前 ~40 做候选
-    const rows = memoryPool.list({ active: true, category: category || undefined });
-    const qt = memoryPool.tokensOf(query);
-    const scored = rows.map(function (r) {
-      const sim = qt.size ? memoryPool.contentSimilarity((r.content || "") + " " + (r.category || ""), query) : 0;
-      return { r, sim };
-    });
-    scored.sort(function (a, b) {
-      return (b.sim - a.sim) || ((Number(b.r.importance) || 0) - (Number(a.r.importance) || 0));
-    });
-    const cands = scored.slice(0, 40);
-    if (cands.length === 0) return { markdown: "未找到相关记忆。" };
-
-    // 2. 上游免费模型按语义挑最相关的 topK（失败/未配置则回退词面 topK）
-    const picked = await rerankMemories(query, cands, topK, ctx);
-
-    const results = [];
-    for (const p of picked) {
-      if (!p || !p.r) continue;
-      results.push("【" + (p.r.category || "其他") + "】" + (p.r.content || "") + (p.r.pinned ? "（置顶）" : ""));
-    }
-    if (results.length === 0) return { markdown: "未找到语义相关的记忆。" };
-    return { markdown: "语义检索到 " + results.length + " 条相关记忆：\n" + results.join("\n") };
-  } catch (e) {
-    return {
-      markdown: JSON.stringify({
-        type: "tool_error",
-        error: "memory_recall_error",
-        message: e.message || String(e)
-      })
-    };
-  }
-}
-
-// 用上游免费模型从候选中按语义挑 topK；返回候选对象数组
-async function rerankMemories(query, cands, topK, ctx) {
-  const upUrl = ctx && ctx.upstreamUrl;
-  const upKey = ctx && ctx.upstreamKey;
-  const model = ctx && ctx.model;
-  const fallback = cands.slice(0, topK);
-  if (!upUrl || !upKey || !model) return fallback;
-  const list = cands.map(function (c, i) {
-    return i + ": 【" + (c.r.category || "其他") + "】" + String(c.r.content || "").slice(0, 300);
-  }).join("\n");
-  const system = "你是记忆检索助手。根据用户查询，从下面候选记忆里挑出【语义上最相关、对回答最有帮助】的若干条。只返回候选编号数组（编号从 0 开始，如 [3,7,9]），按相关性从高到低，最多 " + topK + " 条。若都不相关或无法判断，返回 []。不要输出编号之外的任何内容。";
-  const user = "用户查询（按含义找记忆）：" + query + "\n候选记忆：\n" + list;
-  const controller = new AbortController();
-  const timer = setTimeout(function () { controller.abort(); }, 20000);
-  let resp;
-  try {
-    resp = await fetch(upUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: "Bearer " + upKey },
-      body: JSON.stringify({ model: model, messages: [{ role: "system", content: system }, { role: "user", content: user }], temperature: 0, max_tokens: 256 }),
-      signal: controller.signal
-    });
-  } finally { clearTimeout(timer); }
-  if (!resp.ok) return fallback;
-  const data = await resp.json().catch(function () { return null; });
-  const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-  if (!content) return fallback;
-  const arrayText = (String(content).match(/\[[^\]]*\]/g) || []).pop() || "";
-  const nums = (String(arrayText).match(/\d+/g) || []).map(Number).filter(function (n) { return n >= 0 && n < cands.length; });
-  const seen = new Set();
-  const out = [];
-  for (const n of nums) { if (!seen.has(n)) { out.push(cands[n]); seen.add(n); } }
-  return out.slice(0, topK).length ? out.slice(0, topK) : fallback;
-}
 
 /**
  * 执行带工具的多轮对话。
@@ -218,9 +49,9 @@ async function runWithTools({
   resume = null,
   onEvent = null
 }) {
-  // 1. 加载 MCP 工具，并叠加内置 native 工具（surface_memory），转成 OpenAI tools[]
+  // 1. 加载 MCP 工具，转成 OpenAI tools[]
   const routes = await loadTools(serverClients);
-  const allRoutes = NATIVE_TOOLS.concat(routes || []);
+  const allRoutes = routes || [];
   const openaiTools = toOpenAITools(allRoutes);
   const toolCtx = { serverClients, routes, upstreamUrl, upstreamKey, model };
 
@@ -303,7 +134,13 @@ async function runWithTools({
 
     // 收集本轮正文（混合轮文本保留，见 contentParts 注释）
     const ctext = String(msg.content || "").trim();
-    if (ctext) { contentParts.push(ctext); emit({ type: "text", text: ctext }); }
+    if (ctext) {
+      contentParts.push(ctext);
+      // 轮次间补一个空行分隔：保证客户端流式拼接的 full 与最终 text(contentParts.join("\n\n")) 一致，
+      // 前端 makeMsgEl/segSplitText 按空行拆段与 afterSeg 才能对得上
+      if (contentParts.length > 1) emit({ type: "text", text: "\n\n" });
+      emit({ type: "text", text: ctext });
+    }
 
     // 记录这一轮 assistant 消息（含 tool_calls 则保留）
     working.push({ role: "assistant", content: msg.content || "", tool_calls: msg.tool_calls });
@@ -313,8 +150,9 @@ async function runWithTools({
     if (!toolCalls || toolCalls.length === 0) break;
 
     // 执行每个 tool_call，并记录到 toolHistory 供前端展示（方案2：逐工具实时推 tool_start/tool_end）
-    // afterSeg：该轮正文段已 push 进 contentParts，工具位于其最后一段之后
-    await executeToolCalls(toolCalls, working, toolHistory, toolCtx, emit, () => toolSeq++, contentParts.length - 1);
+    // afterSeg：工具所在轮正文之后、按空行粒度拆出的段下标（与前端 makeMsgEl 分段一致；-1=正文为空/最前）
+    const _segCount = (txt) => String(txt || "").split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean).length;
+    await executeToolCalls(toolCalls, working, toolHistory, toolCtx, emit, () => toolSeq++, _segCount(contentParts.join("\n\n")) - 1);
   }
 
   // 最终回复 = 各轮正文拼接；兜底：轮次耗尽模型全程没说过话时占位提示，
@@ -329,7 +167,10 @@ async function runWithTools({
   // 汇总思考链（截断上限）
   const reasoning = reasoningParts.join("\n\n").slice(0, MAX_REASONING_CHARS);
 
-  return { text, rounds, usage: totalUsage, routes, reasoning, toolHistory, segments: contentParts.slice(), finalMessages: working.slice() };
+  // segments 按空行粒度拆（与前端 makeMsgEl 一致），工具 afterSeg 也以同一分段下标对齐
+  const segs = String(text || "").split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean);
+  if (!segs.length) segs.push(text || "");
+  return { text, rounds, usage: totalUsage, routes, reasoning, toolHistory, segments: segs.slice(), finalMessages: working.slice() };
 }
 
 // 执行一批 tool_call：结果写入 working（供下一轮上游请求）与 toolHistory（供前端展示）
@@ -346,12 +187,8 @@ async function executeToolCalls(toolCalls, working, toolHistory, ctx, onEvent, n
     let result;
     let error = null;
     try {
-      if (typeof onEvent === "function") onEvent({ type: "tool_start", index, id, name, args });
-      if (name === SURFACE_MEMORY_NAME) {
-        result = await callSurfaceMemory(args);
-      } else if (name === MEMORY_RECALL_NAME) {
-        result = await callMemoryRecall(args, { upstreamUrl, upstreamKey, model });
-      } else {
+      if (typeof onEvent === "function") onEvent({ type: "tool_start", index, id, name, args, afterSeg: (typeof afterSeg === "number") ? afterSeg : -1 });
+      {
         result = await callToolByExposedName(serverClients, routes, name, args);
       }
     } catch (e) {
@@ -372,7 +209,7 @@ async function executeToolCalls(toolCalls, working, toolHistory, ctx, onEvent, n
       error,
       afterSeg: (typeof afterSeg === "number") ? afterSeg : -1   // 方案2刷新：该工具位于第 afterSeg 段正文之后（-1=最前）
     });
-    if (typeof onEvent === "function") onEvent({ type: "tool_end", index, id, name, args, result: resTrunc, error, ok: !error });
+    if (typeof onEvent === "function") onEvent({ type: "tool_end", index, id, name, args, result: resTrunc, error, ok: !error, afterSeg: (typeof afterSeg === "number") ? afterSeg : -1 });
   }
 }
 
@@ -488,7 +325,7 @@ async function tryStreamPassthrough({
 }) {
   // 加载工具定义并注入 requests：让模型"有能力"调用工具，才能检测到 tool_calls。
   const routes = await loadTools(serverClients);
-  const allRoutes = NATIVE_TOOLS.concat(routes || []);
+  const allRoutes = routes || [];
   const openaiTools = toOpenAITools(allRoutes);
 
   const payload = {
@@ -641,13 +478,16 @@ async function tryStreamPassthrough({
     if (pending.length) {
       try {
         console.log("[mcp] 流式直通发现后置工具调用（先文本后工具），补执行并续写: " + pending.map(t => t.function.name).join(","));
+        const fullSegs = String(fullText || "").split(/\n\s*\n/).map(function(s){return s.trim();}).filter(Boolean);
         const r2 = await runWithTools({
           upstreamUrl, upstreamKey, model, messages, serverClients,
           temperature, top_p, max_tokens,
           resume: { assistantMsg: { role: "assistant", content: fullText, tool_calls: pending } }
         });
-        // 续写（伪流式）：思考链 → 工具记录 → 后续正文；直通阶段的 fullText 已发给客户端，不重发
-        const sse = buildSSE(r2.text || "", { model, reasoning: r2.reasoning || "", toolHistory: r2.toolHistory || [], usage: r2.usage || null });
+        // 续写（伪流式）：思考链 → 工具记录 → 后续正文；直通阶段的 fullText 已发给客户端，不重发。
+        // 直通文本若不以空行结尾则先补一个空行分隔，保证客户端流式拼接 full 与最终 text 一致（空行粒度分段）
+        const _needSep = !/[\r\n]{2,}\s*$/.test(String(fullText || ""));
+        const sse = buildSSE((_needSep ? "\n\n" : "") + (r2.text || ""), { model, reasoning: r2.reasoning || "", toolHistory: r2.toolHistory || [], usage: r2.usage || null });
         const rd = sse.getReader();
         while (true) {
           const { done, value } = await rd.read();
@@ -655,18 +495,18 @@ async function tryStreamPassthrough({
           emit(value);
         }
         try { reply.raw.end(); } catch {}
-        // 方案2刷新：直通文本作为第 0 段，续跑轮次正文段随后；工具 afterSeg 相应 +1 偏移
-        const segs = [];
-        if (fullText && String(fullText).trim()) segs.push(fullText);
-        const segBase = segs.length;
-        (r2.segments || []).forEach(function(s){ if (s && String(s).trim()) segs.push(s); });
+        // 方案2刷新：segments 按空行粒度拆（与前端 makeMsgEl 一致）；工具 afterSeg 对齐同一分段下标。
+        // r2 内部轮次工具 afterSeg 以 r2.text 为基准 → 偏移 fullSegs 段数；直通续跑工具(afterSeg=-1) → 直通文本末段之后
+        const finalText = [fullText, r2.text].filter(t => t && String(t).trim()).join("\n\n");
+        const segs = String(finalText || "").split(/\n\s*\n/).map(function(s){return s.trim();}).filter(Boolean);
+        if (!segs.length) segs.push(finalText || "");
         const th = (r2.toolHistory || []).map(function(t){
-          if (t && typeof t.afterSeg === "number" && t.afterSeg >= 0) return Object.assign({}, t, { afterSeg: t.afterSeg + segBase });
-          return t;
+          if (t && typeof t.afterSeg === "number" && t.afterSeg >= 0) return Object.assign({}, t, { afterSeg: t.afterSeg + fullSegs.length });
+          return Object.assign({}, t, { afterSeg: fullSegs.length ? fullSegs.length - 1 : -1 });
         });
         return {
           ok: true, fellBackToTools: false,
-          text: [fullText, r2.text].filter(t => t && String(t).trim()).join("\n\n"),
+          text: finalText,
           reasoning: [reasoning, r2.reasoning].filter(t => t && String(t).trim()).join("\n\n"),
           usage: r2.usage || usage,
           toolHistory: th,

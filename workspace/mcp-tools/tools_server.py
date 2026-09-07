@@ -695,14 +695,42 @@ TOOLS["context_search"] = {
 
 def tool_memory_search(args):
     q = (args.get("q") or "").strip()
-    if not q:
-        return {"error": "q 必填：检索记忆池的关键词或想问的问题"}
+    breath = bool(args.get("breath"))
     limit = args.get("limit") or 5
     try:
         limit = max(1, min(50, int(limit)))
     except (TypeError, ValueError):
         limit = 5
     category = (args.get("category") or "").strip()
+    # breath 模式：不传 q 时浮现最近沉淀的记忆
+    if breath and not q:
+        url = f"{BASE_URL}:3000/internal/memory-pool/retrieve?breath=true&limit=" + str(limit)
+        if category:
+            url += "&category=" + urllib.parse.quote(category)
+        req = urllib.request.Request(url, headers={"x-internal-key": INTERNAL_KEY})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            try:
+                data = json.loads(e.read().decode("utf-8"))
+            except Exception:
+                data = {"error": f"HTTP {e.code}"}
+        except Exception as e:
+            return {"error": str(e)}
+        if data.get("ok"):
+            seen = set()
+            items = []
+            for it in data.get("items", []):
+                c = it.get("content") or ""
+                if not c or c in seen:
+                    continue
+                seen.add(c)
+                items.append({"content": c, "category": it.get("category"), "importance": it.get("importance")})
+            return {"total": len(items), "items": items}
+        return {"error": data.get("error", "检索失败")}
+    if not q:
+        return {"error": "q 必填（检索关键词/问题），或设置 breath=true 浮现最近记忆"}
     url = f"{BASE_URL}:3000/internal/memory-pool/retrieve?q=" + urllib.parse.quote(q) + "&limit=" + str(limit)
     if category:
         url += "&category=" + urllib.parse.quote(category)
@@ -732,15 +760,15 @@ def tool_memory_search(args):
 
 
 TOOLS["memory_search"] = {
-    "description": "检索长期记忆池（五大类记忆库：关于她/关于我们/锚点/信号/对话摘要）。返回相关记忆条目（含内容、分类、重要度）。可用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池。区别于 context_search（检索原始对话原文）。",
+    "description": "检索长期记忆池（关于她/关于我们/锚点/信号/对话摘要/对话碎片）。支持关键词、完整问题或模糊描述，系统自动综合语义、词面匹配、重要度和新旧程度排序；也可按分类只搜某一类。设置 breath=true 且不填 q 时，浮现最近沉淀的记忆。适用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池。区别于 context_search（检索原始对话原文）。",
     "inputSchema": {
         "type": "object",
         "properties": {
-            "q": {"type": "string", "description": "检索关键词或想问的问题（多个词用空格分隔，命中的词越多越靠前）"},
-            "category": {"type": "string", "description": "按分类过滤，可选：关于她/关于我们/锚点/信号/对话摘要"},
+            "q": {"type": "string", "description": "检索关键词或想问的问题；breath=true 时可不填"},
+            "breath": {"type": "boolean", "description": "可选：true 且不填 q 时，浮现最近更新的记忆（默认3条，最多5条）"},
+            "category": {"type": "string", "description": "按分类过滤，可选：关于她/关于我们/锚点/信号/对话摘要/对话碎片"},
             "limit": {"type": "integer", "description": "返回条数，默认5，最大50"}
-        },
-        "required": ["q"]
+        }
     },
     "handler": tool_memory_search
 }

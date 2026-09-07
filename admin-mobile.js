@@ -924,6 +924,7 @@ function toast(msg){
       document.getElementById('mw-dedup').value=c.dedup_threshold!=null?c.dedup_threshold:0.78;
 
       document.getElementById('mw-decay-days').value=c.decay_days!=null?c.decay_days:30;
+      document.getElementById('mw-auto-pin-count').value=c.auto_pin_retrieval_count!=null?c.auto_pin_retrieval_count:5;
 
        document.getElementById('mw-reparse-warm').checked=c.reparse_warm!==false;
         document.getElementById('mw-reparse-maxchars').value=c.reparse_max_chars!=null?c.reparse_max_chars:30;
@@ -951,6 +952,7 @@ function toast(msg){
     up2.dedup_threshold=Number(document.getElementById('mw-dedup').value)||0.78;
 
     up2.decay_days=Number(document.getElementById('mw-decay-days').value)||30;
+    up2.auto_pin_retrieval_count=Math.max(2, Number(document.getElementById('mw-auto-pin-count').value)||5);
 
      up2.reparse_warm=document.getElementById('mw-reparse-warm').checked;
       up2.reparse_max_chars=Number(document.getElementById('mw-reparse-maxchars').value)||30;
