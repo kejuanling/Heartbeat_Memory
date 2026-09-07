@@ -3372,7 +3372,7 @@ function ccNumLiveCheck(input, max){
    document.querySelectorAll('.tab-item').forEach(el=>el.classList.remove('active'));
    document.getElementById('tab-'+name).classList.add('active');
    document.querySelector('.tab-item[data-tab="'+name+'"]').classList.add('active');
-  if(name==='memory'){switchMemView(AppState.memView);loadImportedList();}
+  if(name==='memory'){switchMemView(AppState.memView);}
   if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
   if(name==='prompts'){loadWakePrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadCoWakePrompt();loadCoVisionPrompt();loadReparsePrompt();loadCleanPrompt();}
   if(name==='config'){loadToolsConfig();loadServices();}
@@ -4123,20 +4123,16 @@ async function deletePinned(id){
   AppState.memView=v;
   closeCloudDrawer();
   const cloud=document.getElementById('mem-cloud-wrap');
-  const pool=document.getElementById('mem-pool-wrap');
   const mempool=document.getElementById('mem-mempool-wrap');
   if(cloud)cloud.style.display=v==='cloud'?'':'none';
-  if(pool)pool.style.display=v==='pool'?'':'none';
   if(mempool)mempool.style.display=v==='mempool'?'':'none';
   const styleBtn=function(id,active){
     const b=document.getElementById(id);
     if(b)b.classList.toggle('active',active);
   };
   styleBtn('mem-view-cloud',v==='cloud');
-  styleBtn('mem-view-pool',v==='pool');
   styleBtn('mem-view-mempool',v==='mempool');
   if(v==='cloud')loadMemCloud();
-  else if(v==='pool')loadSearchPool();
   else if(v==='mempool')initMemPoolView();
  }
    // ============ 记忆池（4 类结构化记忆） ============
@@ -4576,154 +4572,6 @@ async function deletePinned(id){
    if(d)d.classList.remove('open');
  }
  
- // ============ 导入对话（检索池） ============
- let importPreviewData=null;
- function openImportModal(){
-   importPreviewData=null;
-   document.getElementById('imp-name').value='';
-   document.getElementById('imp-content').value='';
-   document.getElementById('imp-preview').innerHTML='';
-   openModal('importModal');
- }
- function impReadFile(input){
-   const f=input.files&&input.files[0];
-   if(!f)return;
-   const reader=new FileReader();
-   reader.onload=function(e){document.getElementById('imp-content').value=e.target.result||'';};
-   reader.readAsText(f,'utf-8');
- }
- async function impPreview(){
-   const content=(document.getElementById('imp-content').value||'').trim();
-   if(!content){toast('请粘贴内容或选择文件');return}
-   const el=document.getElementById('imp-preview');
-   el.innerHTML='<div class="loading">解析中...</div>';
-   try{
-     const r=await fetch(ADMIN_API+'/imported-conversations/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:content}),credentials:'include'});
-     const j=await r.json();
-     if(!r.ok){toast(j.error||'解析失败');el.innerHTML='';return}
-     importPreviewData={name:(document.getElementById('imp-name').value||'').trim(),content:content};
-     const warnHtml=(j.warnings&&j.warnings.length)?'<div style="font-size:12px;color:#b06a4a;margin:6px 0">'+escapeHtml(j.warnings.join('<br>'))+'</div>':'';
-     el.innerHTML='<div style="font-size:13px;color:var(--text2);margin-bottom:8px">识别出 <b>'+j.count+'</b> 条消息</div>'+warnHtml+
-       (j.preview||[]).map(function(p){
-         const who=(p.role==='assistant')?'谢意行':((p.speaker||'')===''?'用户':p.speaker);
-         return '<div style="border:1px solid var(--border);border-radius:10px;padding:8px 10px;margin-bottom:6px;background:rgba(255,255,255,0.6)">'+
-           '<div style="font-size:11px;color:var(--text3)">'+escapeHtml(p.time||'')+' · '+escapeHtml(who)+'</div>'+
-           '<div style="font-size:12px;color:var(--text2);margin-top:4px;line-height:1.5">'+escapeHtml(String(p.content||'').slice(0,140))+'</div></div>';
-       }).join('');
-   }catch(e){el.innerHTML='<div class="empty">解析失败: '+escapeHtml(e.message)+'</div>'}
- }
- async function impConfirm(){
-   if(!importPreviewData){toast('请先解析预览');return}
-   try{
-     const r=await fetch(ADMIN_API+'/imported-conversations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(importPreviewData),credentials:'include'});
-     const j=await r.json();
-     if(!r.ok){toast(j.error||'导入失败');return}
-     toast('已导入 '+j.count+' 条');
-     closeModal('importModal');
-     loadImportedList();
-   }catch(e){toast('导入失败: '+e.message)}
- }
- async function loadImportedList(){
-   const el=document.getElementById('pool-records');
-   if(!el)return;
-   try{
-     const r=await fetch(ADMIN_API+'/imported-conversations');
-     const j=await r.json();
-     loadPoolStats(j);
-     const recs=j.records||[];
-     el.innerHTML=recs.length?recs.map(function(rec){
-       return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">'+
-         '<div style="min-width:0"><div style="font-size:13px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(rec.name)+'</div>'+
-         '<div class="mem-time">'+rec.count+' 条 · '+escapeHtml(rec.imported_at||'')+'</div></div>'+
-         '<button class="cc-mini-btn danger" onclick="impDelete(\''+rec.id+'\')">删除</button></div>';
-     }).join(''):'<div class="empty">还没有导入记录</div>';
-   }catch(e){el.innerHTML='<div class="empty">加载失败</div>'}
- }
-
- // ============ 检索池：统计 / 搜索导入的对话 ============
- let poolSearchTimer=null;
- async function loadSearchPool(){
-   loadImportedList();   // 内部顺带刷新统计：两个面板同源 /imported-conversations，只请求一次
-   runPoolSearch();
- }
- async function loadPoolStats(preloaded){
-   const el=document.getElementById('pool-stats');
-   if(!el)return;
-   try{
-     const j = preloaded || await (await fetch(ADMIN_API+'/imported-conversations')).json();
-     const s=j.stats||{};
-     el.innerHTML='<span>记录 <b>'+s.records+'</b> 份</span>'+
-       '<span>消息 <b>'+s.messages+'</b> 条</span>'+
-       '<span>字数 <b>'+fmtCcNum(s.chars||0)+'</b></span>'+
-       (s.duplicates?('<span style="color:var(--text3)">去重隐藏 <b>'+s.duplicates+'</b> 条</span>'):'');
-   }catch(e){el.innerHTML='<span>统计失败</span>'}
- }
- function poolSearchInput(v){
-   if(poolSearchTimer)clearTimeout(poolSearchTimer);
-   poolSearchTimer=setTimeout(function(){runPoolSearch();},300);
- }
- async function runPoolSearch(){
-   const input=document.getElementById('pool-search');
-   const el=document.getElementById('pool-results');
-   if(!el)return;
-   const q=(input?input.value:'').trim();
-   if(!q){el.innerHTML='<div class="empty">输入关键词搜索导入的对话</div>';return;}
-   el.innerHTML='<div class="loading">搜索中...</div>';
-   try{
-     const r=await fetch(ADMIN_API+'/imported-conversations/search?q='+encodeURIComponent(q)+'&limit=200');
-     const j=await r.json();
-     if(!r.ok){el.innerHTML='<div class="empty">搜索失败: '+escapeHtml(j.error||'')+'</div>';return;}
-     const ms=j.matches||[];
-     if(!ms.length){el.innerHTML='<div class="empty">没有找到匹配</div>';return;}
-     window.__poolMatches=ms;
-     el.innerHTML='<div style="font-size:12px;color:var(--text3);margin-bottom:8px">命中 '+j.total+' 条消息 · 显示前 '+ms.length+' 条 · 点 ☆ 可标星</div>'+
-       ms.map(function(m,i){
-         const who=(m.role==='assistant')?'谢意行':'用户';
-         const time=m.time?fmtCcClock(m.time):'';
-         return '<div class="cloud-res-item" style="margin-bottom:8px">'+
-           '<div class="cloud-res-meta">'+
-           '<span class="mem-tag">'+escapeHtml(m.record_name||'未命名')+'</span>'+
-           '<span style="display:inline-flex;align-items:center;gap:8px">'+
-           '<span class="cloud-res-time">'+escapeHtml(time)+' · '+who+' · 命中 '+m.hits+'</span>'+
-           '<button class="cc-msg-mark'+(m.marked?' on':'')+'" onclick="togglePoolStar('+i+')" title="'+(m.marked?'取消标星：该消息可被压缩覆盖':'标星：跨窗口注入保留原文，压缩不被覆盖')+'" aria-pressed="'+(m.marked?'true':'false')+'">'+(m.marked?'★':'☆')+'</button>'+
-           '</span>'+
-           '</div>'+
-           '<div class="cloud-res-content" id="pool-body-'+i+'">'+escapeHtml(m.preview)+'</div>'+
-           (m.preview.length>180?'<button type="button" class="cc-res-toggle" id="pool-toggle-'+i+'" onclick="togglePoolFull('+i+')">展开全文</button>':'')+
-           '</div>';
-       }).join('');
-   }catch(e){el.innerHTML='<div class="empty">搜索失败: '+e.message+'</div>'}
- }
- function togglePoolFull(i){
-   const el=document.getElementById('pool-body-'+i);
-   if(!el) return;
-   const btn=document.getElementById('pool-toggle-'+i);
-   const expanded=el.classList.toggle('expanded');
-   if(btn) btn.textContent=expanded?'收起':'展开全文';
- }
- async function togglePoolStar(i){
-   const m=(window.__poolMatches||[])[i];
-   if(!m) return;
-   const willMark=!m.marked;
-   if(willMark && !confirm('标星这条消息？标星后跨窗口注入会带上它，压缩/替换时也不会被摘要覆盖。')) return;
-   try{
-     const r=await fetch(ADMIN_API+'/context-compaction/mark',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:m.key, marked:willMark, content:m.content, role:m.role})});
-     const d=await r.json();
-     if(d.error){ toast('标星失败: '+d.error); return; }
-     toast(willMark?'已标星（跨窗口注入会带上，压缩时保留原文）':'已取消标星');
-     runPoolSearch();
-   }catch(e){ toast('标星失败: '+e.message); }
- }
- async function impDelete(id){
-   if(!confirm('删除这条导入记录？删除后将从检索池移除。'))return;
-   try{
-     const r=await fetch(ADMIN_API+'/imported-conversations/'+encodeURIComponent(id),{method:'DELETE',credentials:'include'});
-     const j=await r.json();
-     if(!r.ok){toast(j.error||'删除失败');return}
-     toast('已删除');
-     loadImportedList();
-   }catch(e){toast('删除失败: '+e.message)}
- }
  initApp();
  
  

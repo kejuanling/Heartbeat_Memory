@@ -1647,12 +1647,7 @@ const recentlyShown = new Map();
 
 function loadSearchableMessages() {
   const timeline = nonSystemMessages(loadTimeline());
-  let imported = [];
-  try {
-    const mod = require("./imported-conversations");
-    imported = mod.getMessages ? mod.getMessages() : [];
-  } catch (e) { /* 导入模块不可用时忽略 */ }
-  return { timeline: timeline, imported: imported };
+  return { timeline: timeline, imported: [] };
 }
 
 
@@ -1978,13 +1973,6 @@ async function startMsgVectorWarmup() {
       const t = _msgSearchText(mm);
       if (t) texts.add(t);
     }
-    try {
-      const mod = require("./imported-conversations");
-      for (const mm of (mod.getMessages ? mod.getMessages() : [])) {
-        const t = _msgSearchText(mm);
-        if (t) texts.add(t);
-      }
-    } catch (e) { /* 导入模块缺失则跳过 */ }
     const arr = Array.from(texts);
     let done = 0;
     const CH = 12;                  // 长文单条 100-300ms，12 条批 ~2-4s 稳在超时内
@@ -2035,22 +2023,6 @@ async function searchContextEnhanced(query, options) {
         _gidx: i
       };
     });
-    try {
-      const mod = require("./imported-conversations");
-      const imp = mod.getMessages ? mod.getMessages() : [];
-      const baseIdx = allMsgs.length;
-      for (let i = 0; i < imp.length; i++) {
-        allMsgs.push({
-          content: imp[i].content || "",
-          role: imp[i].role,
-          time: imp[i].time || null,
-          source: "imported",
-          record_id: imp[i].record_id,
-          msg_id: imp[i].msg_id,
-          _gidx: baseIdx + i
-        });
-      }
-    } catch(e) { }
   } else {
     const src = loadSearchableMessages();
     for (let i = 0; i < src.timeline.length; i++) {

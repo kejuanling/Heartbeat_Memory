@@ -183,31 +183,11 @@
    </div>
    <div id="mem-view-toggle" class="mem-tabs">
      <button type="button" class="mem-tab active" id="mem-view-cloud" onclick="switchMemView('cloud')">词云</button>
-     <button type="button" class="mem-tab" id="mem-view-pool" onclick="switchMemView('pool')">检索池</button>
      <button type="button" class="mem-tab" id="mem-view-mempool" onclick="switchMemView('mempool')">记忆池</button>
    </div>
    <div id="mem-cloud-wrap">
      <div id="mem-cloud" class="cloud-card"><div class="loading">统计中...</div></div>
      <div class="cloud-hint">词越大 = 出现越多越重要，点词查看相关对话</div>
-   </div>
-   <div id="mem-pool-wrap" style="display:none">
-     <div class="card" style="margin-bottom:12px">
-       <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
-         <span>检索池 · 导入的对话</span>
-         <span class="card-title-actions">
-           <button type="button" class="btn btn-outline" onclick="openImportModal()" style="padding:4px 10px;font-size:11px">导入对话</button>
-         </span>
-       </div>
-       <div id="pool-stats" style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text2);margin-bottom:10px"><span>统计中...</span></div>
-       <div class="search-bar">
-         <input type="text" id="pool-search" placeholder="搜索导入的对话（空格分隔多词，与 AI 检索工具同一数据源）..." oninput="poolSearchInput(this.value)">
-       </div>
-       <div id="pool-results"><div class="empty">输入关键词搜索导入的对话</div></div>
-     </div>
-     <div class="card">
-       <div class="card-title">导入记录</div>
-       <div id="pool-records"><div class="loading">加载中...</div></div>
-     </div>
    </div>
    <div id="mem-mempool-wrap" style="display:none">
       <div class="mp-head">
@@ -620,25 +600,6 @@
    </div>
  </div>
  
- <!-- Edit Memory Modal -->
- <div class="modal-overlay" id="importModal">
-   <div class="modal modal-edit-mem" style="max-width:min(94vw,680px)">
-     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-shrink:0">
-       <h3 style="margin:0;font-size:16px">导入对话（检索池）</h3>
-       <button type="button" onclick="closeModal('importModal')" style="background:rgba(0,0,0,0.04);border:none;font-size:16px;color:var(--text2);cursor:pointer;padding:6px 10px;border-radius:8px;line-height:1">&times;</button>
-     </div>
-     <label style="font-size:12px;color:var(--text3)">名称（可选）</label>
-     <input id="imp-name" type="text" placeholder="例如：7月对话备份" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:10px;margin:6px 0 10px;font-size:13px">
-     <label style="font-size:12px;color:var(--text3)">内容（粘贴或选择 .txt 文件，按 --- 分段，首行为「时间 · 说话人」）</label>
-     <textarea id="imp-content" rows="10" placeholder="粘贴导出的 txt 对话内容..." style="width:100%;box-sizing:border-box;padding:12px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,0.85);font-size:13px;line-height:1.5;color:var(--text2);resize:vertical;font-family:inherit;margin-top:6px"></textarea>
-     <input type="file" accept=".txt,text/plain" onchange="impReadFile(this)" style="margin-top:8px;font-size:12px">
-     <div style="display:flex;gap:10px;margin-top:12px">
-       <button type="button" class="btn btn-outline" onclick="impPreview()" style="flex:1">解析预览</button>
-       <button type="button" class="btn btn-primary" onclick="impConfirm()" style="flex:1;background:var(--accent)">确认导入</button>
-     </div>
-     <div id="imp-preview" style="margin-top:12px"></div>
-   </div>
- </div>
  <div class="modal-overlay" id="ccAiEditModal">
    <div class="modal modal-edit-mem" style="max-width:min(94vw,660px)">
      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-shrink:0">
@@ -751,7 +712,6 @@
    </div>
  </div>
  
- <!-- 粘贴导入弹窗 -->
  
  <script src="/admin/mobile.js"></script>
  <div class="cloud-drawer" id="cloudDrawer">
