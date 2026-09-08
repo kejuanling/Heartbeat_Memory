@@ -728,9 +728,18 @@ function armTimedWake() {
   if (!nextWakeAt) return;
   const delayMs = nextWakeAt.getTime() - Date.now();
   if (delayMs <= 0) {
-    // 已过期（例如进程重启错过了到点时刻）：清理已过期调度，恢复正常检查节奏
+    // 已过期（例如进程重启错过了到点时刻）：先捕获到点的显式 <wake> 闹钟并补触发一次唤醒，
+    // 再清理过期调度——否则显式提醒会被静默丢弃，用户设的闹钟到点毫无反应。
+    // 修复 2026-09-09：进程重启/错过后到期闹钟丢失。
+    let due = [];
+    try { due = getDueWakeSessionIds(); } catch (e) { /* 忽略 */ }
     try { pruneExpiredSchedules(); } catch (err) { /* 忽略 */ }
     if (timedWakeTimer) { clearTimeout(timedWakeTimer); timedWakeTimer = null; }
+    if (due.length) {
+      console.log(`[wake-up] 检测到已到点的闹钟（进程重启错过），补触发唤醒：${due.join(", ")}`);
+      // 异步触发，不阻塞本函数（armTimedWake 被 startAfterInit / 20s 轮询同步调用）
+      setTimeout(() => { runWakeUp(due); }, 0);
+    }
     return;
   }
   timedWakeTimer = setTimeout(runTimedWake, delayMs);
@@ -892,7 +901,7 @@ async function runWakeUp(dueSids) {
   } catch (err) {
     // 定时唤醒入口（runTimedWake）由 setTimeout 触发、无人兜底，异常会成为
     // unhandled rejection 直接杀死进程（Node 15+ 默认 throw）；统一在此记日志吃掉
-    console.error("[wake-up] 唤醒执行失败:", err && err.message ? err.message : err);
+    console.error("[wake-up] 唤醒执行失败:", err && err.stack ? err.stack : err);
   } finally {
     wakeRunning = false;
   }
