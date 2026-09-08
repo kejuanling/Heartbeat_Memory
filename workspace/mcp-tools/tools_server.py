@@ -52,8 +52,12 @@ def api_post(url, data, timeout=6):
         return {"_error": str(e)}
 
 def run_cmd(cmd, timeout=10):
+    # 安全加固（2026-09-08）：shell=True 允许 shell 语法注入，存在 RCE 风险；
+    # 改为参数化执行（shlex.split + shell=False），不再支持管道/重定向/通配符等 shell 特性。
     try:
-        r = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout)
+        import shlex
+        argv = shlex.split(cmd) if isinstance(cmd, str) else list(cmd)
+        r = subprocess.run(argv, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout)
         return {"stdout": r.stdout.strip(), "stderr": r.stderr.strip(), "rc": r.returncode}
     except Exception as e:
         return {"_error": str(e)}
