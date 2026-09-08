@@ -1255,6 +1255,26 @@ app.post("/v1/chat/completions", async (req, reply) => {
       return clean;
     });
 
+    // 2026-09-08 图片 URL 补全：前端已把消息图片转存为 /uploads/<file>（避免大 base64 撑爆 localStorage），
+    // 但上游模型（deepseek）不认相对路径，需补全为请求来源的绝对 URL（http(s)://<host>/uploads/<file>）
+    // 才可访问取图。新发与历史图一并在发模型前统一补齐。（base64 dataURL 上游直接拒绝，故走绝对 URL。）
+    try {
+      const _host = (req && (req.hostname || (req.headers && req.headers.host))) || "localhost";
+      // 本机/localhost/内网用 http；公网域名（前端经 nginx https 进入）必须 https——deepseek 不跟随 301，http 会下载失败
+      const _proto = /^(localhost|127\.|::1|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(_host) ? "http" : "https";
+      const _imgFill = (msg) => {
+        const c = msg && msg.content;
+        if (!Array.isArray(c)) return;
+        for (const part of c) {
+          if (part && part.type === "image_url" && part.image_url && typeof part.image_url.url === "string"
+              && /^\/uploads\//.test(part.image_url.url) && !/^https?:\/\//.test(part.image_url.url)) {
+            part.image_url.url = _proto + "://" + _host + part.image_url.url;
+          }
+        }
+      };
+      for (const _m of sanitizedMessages) _imgFill(_m);
+      // 历史遗留：content 可能是字符串里内嵌 data:image（极少数），这里不动——字符串型图片上游走 base64 由上游判断
+    } catch (_e) { console.warn("[chat] 图片URL补全忽略:", _e.message); }
 
     // === MCP_TOOL_LOOP_BEGIN ===
     // MCP 工具循环：启用时若为主聊天，走 MCP 分支（工具轮次非流式，最终流式回传）
