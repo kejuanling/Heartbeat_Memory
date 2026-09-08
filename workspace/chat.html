@@ -3953,7 +3953,7 @@ function applyThemePreview(){
   if(mode==="image"){
     const img=(bgImageInput&&bgImageInput.value||"").trim();
     if(img){
-      document.body.style.background='linear-gradient(160deg, rgba(253,246,237,.62), rgba(240,221,208,.62)), url("'+img+'") center / cover no-repeat fixed';
+      document.body.style.background='url("'+img+'") center / cover no-repeat fixed';
       return;
     }
     applyTheme(); return;
@@ -4113,7 +4113,7 @@ function applyTheme(){
   if(cfg.font_family)document.body.style.fontFamily=cfg.font_family;else document.body.style.fontFamily="";
   const layout=(cfg.bubble_style||"qq");
   if(cfg.bg_image){
-    document.body.style.background='linear-gradient(160deg, rgba(253,246,237,.62), rgba(240,221,208,.62)), url("'+cfg.bg_image+'") center / cover no-repeat fixed';
+    document.body.style.background='url("'+cfg.bg_image+'") center / cover no-repeat fixed';
   } else if(cfg.bg_color){
     document.body.style.background='linear-gradient(160deg, '+cfg.bg_color+' 0%, '+shade(cfg.bg_color,-12)+' 100%)';
     document.body.style.backgroundAttachment="fixed";
