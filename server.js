@@ -1693,6 +1693,9 @@ function recentDiaryTextBefore(sessionId, count, createdIso) {
 // 2026-09-04 批注：近期日记只注入"本会话创建日期之前"的日记（快照存 created_at 固化边界），
 // 2026-09-08 批注：按用户要求收紧为"严格早于创建日期"（去掉等于，当天不再注入快照）。
 // 当天日记在"写日记会话的时间线特殊事件"与"新会话跨窗口快照"两条路径都可能出现，属预期：二者所在会话不同。
+// 注：跨窗口边界以「每个新会话自身创建日期」为相对 cutoff，并非全局按今天/以后一刀切：
+// 对写日记会话 S，当天日记只进 S 自身时间线、不进 S 的跨窗口快照；
+// 但对创建日期严格晚于该日记的新会话 T，该日记对 T 属更早，仍会进 T 的跨窗口快照。
 // ========================
 const CROSS_SNAPSHOT_DIR = path.join(__dirname, "data");
 const SESSION_CFG_DIR = path.join(__dirname, "data", "session_cfg");   // 会话级配置（如跨窗口注入覆盖）；无文件=跟随全局
