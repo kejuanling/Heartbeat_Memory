@@ -157,7 +157,6 @@ module.exports = function registerChatRoutes(app, deps) {
     UPSTREAM_TIMEOUT_MS,
     handleMcpRequest,
     splitMultimodalContent,
-    trimHistoricalImages,
     extractAssistantThinking,
     parseWakeTagAndSchedule,
     parseQuietTagAndSchedule,
@@ -912,7 +911,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
     }
 
     // Kelivo 发图时 content 常是数组。默认原样透传给视觉模型；
-    // 如上游不支持图片，可设置 MULTIMODAL_MODE=text 退回文本占位。
+    // 图片默认原样透传给视觉模型（2026-09-08）
     let llmMessages = kelivoMessages
       .map(prepareMessageForLLM)
       .filter(Boolean);
@@ -1219,21 +1218,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
       console.warn("[context-replacements] 替换失败（按原样转发）:", repErr.message);
     }
 
-    // ========================
-    // 历史图片裁剪：只保留最后 N 条「带图历史消息」里的图片（N=keep_recent_image_turns），
-    // 更早消息里的图片替换为 [图片] 占位符；当前正在发送的那条消息的图片始终保留。
-    // 图片无法命中 prompt 缓存，反复重编码历史图片是慢响应主因；文本历史不受影响。
-    // ========================
-    const cfgKeepImgTurns = Number(memoryEngine.getConfig().keep_recent_image_turns);
-    // 0 表示不保留历史图片（仅当前发送那张图传入）；配置缺省时回退环境变量，再回退默认 8
-    const keepImageTurns = Number.isFinite(cfgKeepImgTurns) && cfgKeepImgTurns >= 0
-      ? cfgKeepImgTurns
-      : (Number(process.env.KEEP_RECENT_IMAGE_TURNS) || 8);
-    try {
-      trimHistoricalImages(llmMessages, keepImageTurns);
-    } catch (imgErr) {
-      console.warn("[trim-images] 历史图片裁剪失败（按原样转发）:", imgErr.message);
-    }
+    // 历史图片裁剪已移除（2026-09-08）：图片原样透传，不做任何保留窗口
 
     // 会话容量提醒：替换/裁剪后按最终发送量检测，超限塞一条隐藏提醒（AI 自己压缩）
     maybeInjectContextLimitReminder(llmMessages, sessionId, timeByKey);

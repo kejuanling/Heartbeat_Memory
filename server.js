@@ -205,10 +205,8 @@ function configuredModelName() {
 // 多模态消息处理
 // ========================
 function shouldForwardMultimodalContent() {
-  // 批注 2026-07-15：默认把 Kelivo 的图片 content 数组原样交给视觉模型；
-  // 如果上游不是多模态模型，部署者仍可显式设 MULTIMODAL_MODE=text 退回旧的 [图片] 占位模式。
-  const mode = (process.env.MULTIMODAL_MODE || "passthrough").trim().toLowerCase();
-  return !["text", "plain", "placeholder", "false", "off", "0"].includes(mode);
+  // 2026-09-08：图片始终原样透传给视觉模型，不再做任何 mode 回退限制。
+  return true;
 }
 
 function isImageContentPart(part) {
@@ -287,55 +285,6 @@ function normalizeMessageForTimeline(msg) {
   return { ...msg, content: cleaned };
 }
 
-// 历史图片裁剪：以「带图的 user 消息」为单位，发送给上游前只保留最后 keepTurns 条带图消息里的图片，
-// 更早消息中的图片统一替换为 [图片] 文本占位符，避免视觉模型反复重编码历史图片。
-// 当前正在发送的最后一条消息（数组末尾）里的图片始终保留，不计入历史窗口；keepTurns<=0 表示不保留任何历史图片。
-function trimHistoricalImages(messages, keepTurns) {
-  if (!Array.isArray(messages) || messages.length === 0) return messages;
-  const lastIdx = messages.length - 1;
-  const hasImage = function (msg) {
-    if (!msg || !Array.isArray(msg.content)) return false;
-    return msg.content.some(p => p && isImageContentPart(p));
-  };
-  // 历史带图 user 消息索引（不含当前正在发送的最后一条）
-  const imgUserIdxs = [];
-  for (let i = 0; i < lastIdx; i++) {
-    const msg = messages[i];
-    if (msg && msg.role === "user" && hasImage(msg)) imgUserIdxs.push(i);
-  }
-  const x = Number(keepTurns);
-  // 保留窗口起点：最后 x 条历史带图消息的第一条；x<=0 则连历史带图消息都不保留（只保留当前消息的图）
-  let keepStartIdx;
-  if (!Number.isFinite(x) || x <= 0) {
-    keepStartIdx = lastIdx;
-  } else if (imgUserIdxs.length <= x) {
-    return messages; // 历史带图消息都在保留窗口内，无需裁剪
-  } else {
-    keepStartIdx = imgUserIdxs[imgUserIdxs.length - x];
-  }
-  let dropped = 0;
-  const touchedMsgs = [];
-  for (let i = 0; i < keepStartIdx; i++) {
-    const msg = messages[i];
-    if (!msg || !Array.isArray(msg.content)) continue;
-    let touched = false;
-    const newParts = [];
-    for (const part of msg.content) {
-      if (part && isImageContentPart(part)) { touched = true; dropped++; continue; }
-      newParts.push(part);
-    }
-    if (touched) {
-      newParts.push({ type: "text", text: "[图片]" });
-      // 只替换本次发送数组里的消息对象（浅拷贝 + 新 content），不污染请求 body / 时间线
-      messages[i] = { ...msg, content: newParts };
-      touchedMsgs.push(i);
-    }
-  }
-  if (dropped > 0) {
-    console.log(`[trim-images] 历史图片裁剪：历史带图消息 ${imgUserIdxs.length} 条，保留最近 ${x > 0 ? x : 0} 条，替换早于窗口的图片 ${dropped} 张（涉及 ${touchedMsgs.length} 条历史消息）`);
-  }
-  return messages;
-}
 
 function prepareMessageForLLM(msg) {
   if (msg.role === "assistant" && msg.tool_calls) return msg;
@@ -949,7 +898,7 @@ function buildTimeline(kelivoMessages, sessionId) {
   const latestSP = newSystemMessages.length > 0 ? newSystemMessages[newSystemMessages.length - 1] : null;
   const oldSP = oldTimeline.find(msg => msg.role === "system");
 
-  // 存储层历史图片保留（与请求层 keep_recent_image_turns 一致）：窗口内保留真实 image_url；窗口外的更早带图消息压成 [图片] 占位，避免 JSON 无限膨胀。
+  // 时间线图片原样保留：不裁剪、不压 [图片] 占位（2026-09-08）
   const realForTimeline = kelivoMessages.filter(isRealMessageForTimeline);
   const hasAnyImagePart = function (msg) { return Array.isArray(msg && msg.content) && msg.content.some(p => p && isImageContentPart(p)); };
   // 提前算好"本批最后一条实时 user 消息"的下标：resolveMessageTime 在下面 map 时就要用它，
@@ -958,27 +907,10 @@ function buildTimeline(kelivoMessages, sessionId) {
   for (let i = realForTimeline.length - 1; i >= 0; i--) {
     if (realForTimeline[i].role === "user") { lastUserFallbackIdx = i; break; }
   }
-  // 布尔值是无效配置（Number(false)=0 会被误当成合法的"0=不保留"），与 NaN/负值一样回退默认
-  const _rawKeepTurns = (typeof memoryEngine.getConfig === 'function' && memoryEngine.getConfig()).keep_recent_image_turns;
-  let keepImgTurns = (typeof _rawKeepTurns === 'boolean') ? NaN : Number(_rawKeepTurns);
-  // 与请求层语义一致：0 = 不保留任何历史图片；只有无效/负值才回退默认 8（原 Number()||8 会把合法的 0 错变成 8）
-  if (!Number.isFinite(keepImgTurns) || keepImgTurns < 0) {
-    const envVal = Number(process.env.KEEP_RECENT_IMAGE_TURNS);
-    keepImgTurns = (Number.isFinite(envVal) && envVal >= 0) ? envVal : 8;
-  }
-  const imgMsgIdx = [];
-  realForTimeline.forEach(function (m, i) { if (hasAnyImagePart(m)) imgMsgIdx.push(i); });
-  let keepFromIdx = 0;
-  if (Number.isFinite(keepImgTurns) && keepImgTurns > 0 && imgMsgIdx.length > keepImgTurns) keepFromIdx = imgMsgIdx[imgMsgIdx.length - keepImgTurns];
-  if (keepImgTurns === 0) keepFromIdx = realForTimeline.length; // 0 = 全部压成占位，不保留任何历史图片
-  const keepImgSet = new Set();
-  for (let i = keepFromIdx; i < realForTimeline.length; i++) { if (hasAnyImagePart(realForTimeline[i])) keepImgSet.add(i); }
+  // 2026-09-08：时间线图片原样保留，不做历史裁剪/占位（keep_recent_image_turns 已移除）
   const newRealMessages = realForTimeline
-    .map(function (m, i) {
-      if (hasAnyImagePart(m)) {
-        if (keepImgSet.has(i)) return { ...m, content: m.content };       // 窗口内：保留真实 image_url
-        return { ...m, content: normalizeContentToText(m.content) };      // 窗口外：压成 [图片] 占位
-      }
+    .map(function (m) {
+      if (hasAnyImagePart(m)) return { ...m, content: m.content };      // 保留真实 image_url
       return normalizeMessageForTimeline(m);
     })
     .map(function (m, i) { return { ...m, _t: resolveMessageTime(m, i) }; });
@@ -1351,7 +1283,6 @@ const PREFERRED_ENV_ORDER = [
   "DIARY_ENABLED",
   "DIARY_DIR",
   "REQUEST_BODY_LIMIT_MB",
-  "MULTIMODAL_MODE",
   "DAY_WAKE_AFTER_MINUTES",
   "NIGHT_WAKE_AFTER_MINUTES",
   "DAY_CHECK_INTERVAL_MINUTES",
@@ -1610,7 +1541,6 @@ require("./routes/chat")(app, {
   UPSTREAM_TIMEOUT_MS,
   handleMcpRequest,
   splitMultimodalContent,
-  trimHistoricalImages,
   extractAssistantThinking,
   parseWakeTagAndSchedule,
   parseQuietTagAndSchedule,
@@ -5619,7 +5549,7 @@ app.post("/admin/vision-models", { preHandler: basicAuth }, async (req, reply) =
 const RUN_CONFIG_WHITELIST = new Set([
   "co_vision_model_id", "co_frame_interval", "co_peek_seconds",
   "screenshot_vision_model_id", "screenshot_wake_enabled",
-  "event_inject_types", "vision_models", "keep_recent_image_turns",
+  "event_inject_types", "vision_models",
   "memory_retrieval_enabled", "retrieval_top_k", "keyword_search_enabled",
   "memory_relevance_threshold", "memory_item_cooldown_minutes",
   "context_injection_types", "third_party_session_id",
@@ -5636,7 +5566,6 @@ const RUN_CONFIG_TYPES = {
   screenshot_wake_enabled: "boolean",
   event_inject_types: "array",
   vision_models: "array",
-  keep_recent_image_turns: "number",
   memory_retrieval_enabled: "boolean",
   retrieval_top_k: "number",
   keyword_search_enabled: "boolean",

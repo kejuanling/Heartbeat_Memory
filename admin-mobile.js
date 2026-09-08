@@ -836,7 +836,6 @@ function toast(msg){
  }
  
  // ============ 日志页：截图提示词 ============
- // ============ 对话发送配置（历史图片窗口） ============
   // ============ 记忆与唤醒参数 ============
   async function loadReparsePrompt(){
     const msg=document.getElementById('reparse-prompt-msg');
@@ -970,32 +969,8 @@ function toast(msg){
     if(saved){ toast('记忆与唤醒参数已保存'); if(msg)msg.textContent='已保存，下次请求/重启生效（跨窗口注入即时生效）。'; }
   }
 
- async function loadSendConfig(){
-   const el=document.getElementById('img-keep-turns');
-   if(!el)return;
-   try{
-     const r=await fetch(ADMIN_API + '/config');
-     const cfg=await r.json();
-     el.value=cfg&&cfg.keep_recent_image_turns!=null?cfg.keep_recent_image_turns:8;
-     const msg=document.getElementById('send-config-msg');
-     if(msg)msg.textContent='';
-   }catch(e){toast('读取配置失败: '+e.message)}
- }
- async function saveSendConfig(){
-   const el=document.getElementById('img-keep-turns');
-   if(!el)return;
-   const val=parseFloat(el.value);
-   const updates={};
-   if(Number.isFinite(val)&&val>=0)updates.keep_recent_image_turns=val;
-   else { toast('请输入非负整数'); return; }
-   try{
-     const r=await fetch(ADMIN_API + '/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(updates)});
-     const j=await r.json();
-     const msg=document.getElementById('send-config-msg');
-     if(j.success){toast('对话发送配置已保存'); if(msg)msg.textContent='已保存，下次请求生效';}
-     else {toast('保存失败: '+(j.error||'')); if(msg)msg.textContent='保存失败: '+(j.error||'');}
-   }catch(e){toast('网络错误: '+e.message)}
- }
+ async function loadSendConfig(){}  // 已移除（2026-09-08）
+ async function saveSendConfig(){}  // 已移除（2026-09-08）
 
  async function loadScreenshotWakePromptLog(){
    const pe=document.getElementById('log-screenshot-wake-prompt');

@@ -1558,12 +1558,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
               <div style="margin-top:10px"><label>max_tokens<span class="tag">可选</span></label><input type="number" min="1" id="maxTokInput" placeholder="留空不限制"></div>
             </div>
             <button type="button" class="mcp-btn primary" id="aiSaveBtn" style="margin-top:12px" onclick="saveSettingsAll()">保存 AI 设置</button>
-            </div></div><div class="set-panel" data-acc="memwake"><div class="set-acc-h" data-acc="memwake">记忆与唤醒参数<span class="ar">▾</span></div><div class="set-sec"><div class="set-sec-label">唤醒</div><div class="field"><label>唤醒历史最大条数</label><input type="number" id="mwWake" value="80"></div><div class="set-sec-label">记忆池</div><div class="field"><label>去重阈值</label><input type="number" step="0.05" min="0" max="1" id="mwDedup" value="0.78"></div><div class="field"><label>衰减半衰期（天）</label><input type="number" step="1" min="1" id="mwDecay" value="30"></div><div class="set-sec-label">再解析（压缩摘要 → 记忆池）</div><div class="field"><label>每条字数上限</label><input type="number" step="1" min="5" id="mwRmax" value="30"></div><div class="field"><label>每段最多条数</label><input type="number" step="1" min="1" id="mwRmaxitems" value="8"></div><div class="set-sec-label">跨窗口注入</div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">总开关</label><label class="adm-sw"><input type="checkbox" id="mwCross" checked><i></i></label></div><div class="field"><label>日记天数</label><input type="number" step="1" min="0" id="mwDays" value="3"></div><div class="field"><label>每类注入条数</label><input type="number" step="1" min="1" id="mwMempercat" value="2"></div><div class="field"><label>摘要最近天数</label><input type="number" step="1" min="1" id="mwSumdays" value="7"></div><div class="set-sec-label">压缩</div><div class="field"><label>活跃块保留上限（0=不限）</label><input type="number" step="1" min="0" id="mwCcmax" value="0"><div style="font-size:11px;color:var(--ink3);margin-top:4px">手动+AI 块合计只保留时间线上最近的 N 个进入上下文，更早的块隐藏不注入（数据不删，调大即恢复）。</div></div><div class="field" style="font-size:11px;color:var(--ink3);margin-top:4px">上下文容量上限与容量提醒开关请在「管理台 → 日志与推送」统一设置。</div><div class="mcp-msg" id="mwMsg"></div><button type="button" class="mcp-btn primary" id="mwSaveBtn">保存参数</button></div></div><div class="set-panel" data-acc="sendcfg"><div class="set-acc-h" data-acc="sendcfg">对话发送配置<span class="ar">▾</span></div><div class="set-sec"><div class="field">
-              <label>保留最近 N 条带图消息的历史图片（0=不保留，当前发送的图始终保留）</label>
-              <input type="number" id="imgKeepTurns" min="0" step="1" value="8">
-            </div>
-            <div class="mcp-msg" id="sendcfgMsg" style="margin-top:4px"></div>
-            </div></div><div class="set-panel" data-acc="password"><div class="set-acc-h" data-acc="password">修改登录密码<span class="ar">▾</span></div><div class="set-sec">
+            </div></div><div class="set-panel" data-acc="memwake"><div class="set-acc-h" data-acc="memwake">记忆与唤醒参数<span class="ar">▾</span></div><div class="set-sec"><div class="set-sec-label">唤醒</div><div class="field"><label>唤醒历史最大条数</label><input type="number" id="mwWake" value="80"></div><div class="set-sec-label">记忆池</div><div class="field"><label>去重阈值</label><input type="number" step="0.05" min="0" max="1" id="mwDedup" value="0.78"></div><div class="field"><label>衰减半衰期（天）</label><input type="number" step="1" min="1" id="mwDecay" value="30"></div><div class="set-sec-label">再解析（压缩摘要 → 记忆池）</div><div class="field"><label>每条字数上限</label><input type="number" step="1" min="5" id="mwRmax" value="30"></div><div class="field"><label>每段最多条数</label><input type="number" step="1" min="1" id="mwRmaxitems" value="8"></div><div class="set-sec-label">跨窗口注入</div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">总开关</label><label class="adm-sw"><input type="checkbox" id="mwCross" checked><i></i></label></div><div class="field"><label>日记天数</label><input type="number" step="1" min="0" id="mwDays" value="3"></div><div class="field"><label>每类注入条数</label><input type="number" step="1" min="1" id="mwMempercat" value="2"></div><div class="field"><label>摘要最近天数</label><input type="number" step="1" min="1" id="mwSumdays" value="7"></div><div class="set-sec-label">压缩</div><div class="field"><label>活跃块保留上限（0=不限）</label><input type="number" step="1" min="0" id="mwCcmax" value="0"><div style="font-size:11px;color:var(--ink3);margin-top:4px">手动+AI 块合计只保留时间线上最近的 N 个进入上下文，更早的块隐藏不注入（数据不删，调大即恢复）。</div></div><div class="field" style="font-size:11px;color:var(--ink3);margin-top:4px">上下文容量上限与容量提醒开关请在「管理台 → 日志与推送」统一设置。</div><div class="mcp-msg" id="mwMsg"></div><button type="button" class="mcp-btn primary" id="mwSaveBtn">保存参数</button></div></div><div class="set-panel" data-acc="password"><div class="set-acc-h" data-acc="password">修改登录密码<span class="ar">▾</span></div><div class="set-sec">
             <div class="field">
               <label>旧密码</label>
               <input type="password" id="pwOld" autocomplete="off">
@@ -3259,33 +3254,11 @@ function renderPreviews(){
   });
 }
 imgBtn.onclick=()=>fileInput.click();
-/* 图片压缩：手机原图 data URL 太大，会撑爆 localStorage(~5MB) 且网关难处理；这里压缩到宽 1280 内、quality .82 */
-function compressImage(dataUrl, maxW){
-  return new Promise(function(resolve){
-    try{
-      const img=new Image();
-      img.onload=function(){
-        let w=img.naturalWidth, h=img.naturalHeight;
-        const mw=maxW||1280;
-        if(w>mw){ h=Math.round(h*(mw/w)); w=mw; }
-        const c=document.createElement("canvas"); c.width=w; c.height=h;
-        c.getContext("2d").drawImage(img,0,0,w,h);
-        let out=c.toDataURL("image/jpeg",0.82);
-        // 压缩后仍过大则直接缩放为原尺寸 jpeg，保底
-        if(out.length>2000000 && w>800){ const c2=document.createElement("canvas"); const w2=800; const h2=Math.round(h*(w2/w)); c2.width=w2; c2.height=h2; c2.getContext("2d").drawImage(img,0,0,w2,h2); out=c2.toDataURL("image/jpeg",0.8); }
-        resolve(out);
-      };
-      img.onerror=function(){ resolve(dataUrl); };   // 非图片或解码失败时退回原值（如 PDF/文本）
-      img.src=dataUrl;
-    }catch(e){ resolve(dataUrl); }
-  });
-}
 fileInput.onchange=e=>{
   Array.from(e.target.files).forEach(f=>{
     const r=new FileReader();
     r.onload=async()=>{
-      let d=r.result;
-      if(/^image\//.test(f.type)) d=await compressImage(d);
+      let d=r.result;  // 2026-09-08 原样透传，不压缩
       imgData.push(d); renderPreviews();
     };
     r.readAsDataURL(f);
@@ -3866,28 +3839,11 @@ function exportPromptBackupsJson(){
 })();
 loadPromptBackups();
 
-/* ===== 对话发送配置（设置里，简洁：一个数字 + 即时保存） ===== */
-async function loadSendCfgSettings(){
-  try{
-    const r=await fetch("/heartbeat/admin/config",{headers:{ "X-CSRF-Token":getCookieV("admin_csrf") },credentials:"include"});
-    const c=await r.json().catch(function(){return {};});
-    const el=document.getElementById("imgKeepTurns");
-    if(el) el.value=(c&&c.keep_recent_image_turns!=null)?c.keep_recent_image_turns:8;
-  }catch(e){}
-}
+/* ===== 对话发送配置已移除（2026-09-08）：图片原样透传 ===== */
+async function loadSendCfgSettings(){}  // no-op 保留调用点
+
 function getCookieV(n){ try{ const m=document.cookie.match(new RegExp('(?:^|; )'+n.replace(/[.$?*|{}()[\]\\/+^]/g,'\\$&')+'=([^;]*)')); return m?decodeURIComponent(m[1]):''; }catch(e){ return ''; } }
-if(typeof imgKeepTurns!=="undefined" && document.getElementById("imgKeepTurns")){
-  document.getElementById("imgKeepTurns").addEventListener("change",async function(){
-    const val=parseFloat(this.value);
-    if(!(Number.isFinite(val)&&val>=0)){ showToast("请输入非负整数"); return; }
-    try{
-      const r=await fetch("/heartbeat/admin/config",{method:"POST",headers:{ "Content-Type":"application/json","X-CSRF-Token":getCookieV("admin_csrf") },body:JSON.stringify({keep_recent_image_turns:val}),credentials:"include"});
-      const j=await r.json().catch(function(){return {};});
-      if(j.success!==false){ showToast("对话发送配置已保存"); const m=document.getElementById("sendcfgMsg"); if(m)m.textContent="已保存，下次请求生效"; }
-      else{ const m=document.getElementById("sendcfgMsg"); if(m)m.textContent="保存失败"; }
-    }catch(e){ showToast("网络错误"); }
-  });
-}
+
 /* ===== 修改登录密码 ===== */
 if(typeof pwSaveBtn!=="undefined" && document.getElementById("pwSaveBtn")){
   document.getElementById("pwSaveBtn").addEventListener("click",async function(){
