@@ -3174,7 +3174,15 @@ async function send(){
   const timeTag=currentTimeTag();
   let userContent;
   if(imgData.length){
-    userContent=[{type:"text",text:(text?text+"\n"+timeTag:timeTag)},...imgData.map(d=>({type:"image_url",image_url:{url:d}}))];
+    // 2026-09-08 图片转存：尽量避免大 base64 撑爆 localStorage/时间线（超配额后 setItem 静默失败、前端卡顿）
+    // 每张图先调 /v1/upload-image 转 /uploads/ 短 URL，失败(如解码后>2MB)则降级保留原 base64，不阻塞发送
+    const _urls=await Promise.all(imgData.map(async function(_d){
+      try{ const _u=await uploadImageToServer(_d); if(_u&&_u.indexOf("/uploads/")===0) return _u; }catch(_e){}
+      return _d;
+    }));
+    userContent=[{type:"text",text:(text?text+"\n"+timeTag:timeTag)},..._urls.map(function(_u){return {type:"image_url",image_url:{url:_u}};})];
+    // 同步本地那条即将 push 的 user 消息为 URL 形式，前端展示即用 /uploads/（避免本地缓存还存大 base64）
+    //（msgs 的 push 在下方 3183 行，此处先把 imgData 替换掉，push 用的是 userContent）
   }else{
     userContent=(text?text+"\n"+timeTag:timeTag);
   }
