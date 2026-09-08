@@ -152,6 +152,8 @@
 - **缩进/锚点必须用整行**：`<span class="collapse-arrow">▾</span>` 这类在页面上重复出现，精确替换必须用整行做锚点，否则 count!=1 或改错位置。
 - 验证组合拳：node --check 只查语法；线上用 curl 登录后 grep 标记 + 检查 git diff --stat 只含目标文件。
 - 改 onclick/定位行为后用户说“还是跳/没变”先别动代码：admin-mobile.html 服务端每请求都从磁盘读、不用重启，用户端看到旧的十有八九是浏览器缓存。先让用户 Ctrl+Shift+R（Mac Cmd+Shift+R）强刷再测，确认后再改。本次“原文搜索点结果自动跳转”就是：先只堵标星、用户反馈仍跳（缓存+未强刷），最后直接整块去掉 onclick 定位才符合预期。
+- 大前端单文件（chat.html ~450KB）改多处用 python heredoc + 整段精确替换最稳：每处 `assert c==1` 再 `s.replace`，全部通过才写盘（任一 count!=1 会中断不落盘），改后跑 `python -c` 数关键标记 + `git diff --stat` 兜底。避免 read_file 分段读大文件受限、更不能整文件 write_file 覆盖。
+- CSS 同名类选择器可存在多段定义（如 `.saved-themes`/`.saved-theme` 在 3.10 主题与 AI 提示词章节各有定义），后者覆盖前者；改前先 `search_text` 列出全部同名定义，用注释确认哪段对当前控件生效，否则改错段、页面看不出效果。同一控件两次改需求时，改一次就一起带上参数变化（圆角/两列/省略），少来回。
 
 
 ### 3.11 凭据与安全

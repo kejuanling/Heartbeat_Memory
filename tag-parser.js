@@ -25,7 +25,7 @@ function parseKeyValueBlock(raw, keys) {
   const parts = trimmed.split(re);
   const out = {};
   for (const part of parts) {
-    const m = part.match(/^\s*(title|content|type|importance|reason)\s*[:=]\s*(.*)$/i);
+    const m = part.match(/^\s*(title|content|type|importance|reason|pinned)\s*[:=]\s*(.*)$/i);
     if (!m) continue;
     const key = m[1].toLowerCase();
     let val = m[2].trim().replace(/^["']|["']$/g, "");
@@ -106,20 +106,21 @@ async function extractAndStore(text) {
   for (const match of memoryMatches) {
     const raw = (match[1] || "").trim();
     if (!raw) continue;
-    let body = raw, category = "", importance = null;
+    let body = raw, category = "", importance = null, pinned = false;
     const metaMatch = raw.match(/^\s*\{[\s\S]*?\}\s*([\s\S]*)$/);
     if (metaMatch && /^\s*\{/.test(raw)) {
       const head = raw.slice(0, raw.indexOf("}") + 1);
-      const kv = parseKeyValueBlock(head, ["category", "importance", "type"]);
+      const kv = parseKeyValueBlock(head, ["category", "importance", "type", "pinned"]);
       if (kv.category) category = String(kv.category).trim();
       if (kv.importance != null && isFinite(kv.importance)) importance = Number(kv.importance);
+      if (kv.pinned) pinned = (String(kv.pinned) === "true" || String(kv.pinned) === "1");
       body = metaMatch[1].trim();
     }
     if (!body) continue;
     promises.push(
       Promise.resolve().then(function () {
         const memoryPool = require("./memory-pool");
-        return memoryPool.ingestSummary(body, { source: "memory_tag", directCategory: category, directImportance: importance });
+        return memoryPool.ingestSummary(body, { source: "memory_tag", directCategory: category, directImportance: importance, directPinned: pinned });
       }).then(function (r) {
         if (r && (r.added || r.merged)) {
           console.log("[tag-parser] <memory> 已入记忆池:", body.slice(0, 50), "added=", r.added, "merged=", r.merged);

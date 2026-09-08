@@ -1,6 +1,6 @@
 {
   "server": "小世界MCP工具集",
-  "generated_at": "2026-09-08 03:32:31",
+  "generated_at": "2026-09-08 18:54:45",
   "tools": [
     {
       "name": "context_replace",
@@ -206,7 +206,7 @@
     },
     {
       "name": "memory_add",
-      "description": "新增一条长期记忆到记忆池。适用于：对话里发现关于她的稳定特征、相处规律、重要原话，或她在对话里明确说“记住”之类的话时，把这条信息写入记忆池。支持分类（关于她/关于我们/锚点/信号/对话摘要/心动时刻）与重要级（0~1）。会自动与已有记忆做相似去重合并。",
+      "description": "新增一条长期记忆到记忆池。适用于：对话里发现关于她的稳定特征、相处规律、重要原话，或她在对话里明确说“记住”之类的话时，把这条信息写入记忆池。支持分类（关于她/关于我们/锚点/信号/对话摘要/心动时刻）与重要级（0~1）。会自动与已有记忆做相似去重合并。 可设 pin=true 让这条记忆直接置顶（之后每次对话作为「相关记忆」注入）。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -221,6 +221,10 @@
           "importance": {
             "type": "number",
             "description": "重要级 0~1，默认 0.5"
+          },
+          "pin": {
+            "type": "boolean",
+            "description": "true 时直接把这条记忆置顶：会随每次对话注入「相关记忆」，默认 false"
           }
         },
         "required": [
@@ -242,6 +246,10 @@
           "importance": {
             "type": "number",
             "description": "重要级 0~1，默认 0.5"
+          },
+          "pin": {
+            "type": "boolean",
+            "description": "true 时直接把这条记忆置顶：会随每次对话注入「相关记忆」，默认 false"
           }
         },
         "required": [

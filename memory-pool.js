@@ -238,12 +238,15 @@ async function add(entry) {
     // 完全相同（同分类+同内容）→ 已存在，幂等跳过所有副作用，不重复入库也不提权
     if (entryHash(e) === entryHash(dup)) {
       // findDuplicate/findSemanticDuplicate 内部 mutate 的相似度上浮仅内存，这里按需持久化（避免重启即丢）
+      const upgradedPin = e.pinned && !dup.pinned;
+      if (upgradedPin) dup.pinned = true;
       const simChanged = dup._simChanged === true;
       delete dup._simChanged;
-      if (simChanged) { dirty = true; flush(); }
+      if (simChanged || upgradedPin) { dirty = true; flush(); }
       return { entry: dup, dup: true, already: true };
     }
     // 文本/语义近似但不同 → 合并：保留更高重要级，轻微上浮；不新增重复条目
+    if (e.pinned || dup.pinned) dup.pinned = true;
     const merged = mergeEntries(dup, e);
     dup.importance = merged.importance;
     dup.content = merged.content;
@@ -800,12 +803,14 @@ async function ingestSummary(summaryText, opts) {
   const blockId = opts.block_id || null;
   // 直接分类/重要级：memory 标签里写了 {category,importance} 时，跳过 LLM 再解析，直接入库。
   const directCategory = opts.directCategory ? String(opts.directCategory).trim() : "";
+  const directPinned = opts.directPinned === true;
   if (directCategory && directCategory !== "" && CATEGORIES.includes(directCategory)) {
     const importance = (opts.directImportance != null && isFinite(opts.directImportance)) ? Number(opts.directImportance) : null;
     const r = await add({
       content: String(summaryText || "").trim(),
       category: directCategory,
       importance: importance != null ? importance : 0.5,
+      pinned: directPinned,
       source
     });
     return { ok: true, added: r.dup ? 0 : 1, merged: (r.dup && !r.already) ? 1 : 0, already: r.already ? 1 : 0, failed: 0, fallback: false };
@@ -832,6 +837,7 @@ async function ingestSummary(summaryText, opts) {
       content: m.content,
       category: m.category,
       importance: m.importance,
+      pinned: directPinned,
       source,
       block_id: attachBlock
     });

@@ -803,6 +803,8 @@ def tool_memory_add(args):
             data["importance"] = max(0.0, min(1.0, float(importance)))
         except (TypeError, ValueError):
             return {"error": "importance 必须是 0~1 的数字"}
+    if args.get("pin"):
+        data["pinned"] = True
     url = f"{BASE_URL}:3000/internal/memory-pool/add"
     req = urllib.request.Request(url,
         data=json.dumps(data).encode("utf-8"),
@@ -839,7 +841,8 @@ TOOLS["memory_add"] = {
         "properties": {
             "content": {"type": "string", "description": "记忆正文（要长期记住的信息，写清结论/原话，避免模糊）"},
             "category": {"type": "string", "description": "分类，可选：关于她/关于我们/锚点/信号/对话摘要（默认关于她）"},
-            "importance": {"type": "number", "description": "重要级 0~1，默认 0.5"}
+            "importance": {"type": "number", "description": "重要级 0~1，默认 0.5"},
+            "pin": {"type": "boolean", "description": "true 时直接把这条记忆置顶：会随每次对话注入「相关记忆」，默认 false"}
         },
         "required": ["content"]
     },

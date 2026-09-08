@@ -2793,7 +2793,7 @@ app.post("/internal/memory-pool/add", async (req, reply) => {
     const b = req.body || {};
     const content = String(b.content || "").trim();
     if (!content) return reply.code(400).send({ error: "content 必填" });
-    const r = await memoryPool.add({ content, category: b.category, importance: b.importance, source: "mcp" });
+    const r = await memoryPool.add({ content, category: b.category, importance: b.importance, pinned: b.pinned, source: "mcp" });
     reply.send({ success: true, dup: r.dup, entry: r.entry });
   } catch (err) {
     console.error("[POST /internal/memory-pool/add] error:", err.message);
