@@ -151,6 +151,7 @@ module.exports = function registerChatRoutes(app, deps) {
     classifySpecialEvent,
     resolveActiveProvider,
     resolveSessionProvider,
+    resolveChatModel,
     sessionModelProviderOverride,
     saveSessionModelProviderOverride,
     readEnvValue,
@@ -1145,15 +1146,9 @@ app.post("/v1/chat/completions", async (req, reply) => {
 
     // (trim 逻辑在下方最近窗口处执行，当前用户请求的图片始终保留)
 
-    const prov = resolveSessionProvider(sessionId);
-    // 会话级模型供应商：仅当会话显式指定了供应商时，才把该供应商配置的模型名应用到本次请求，
-    // 避免默认（跟随全局）会话的转发模型被意外改动；供应商未配置 model 时沿用客户端传入的 body.model。
-    const _sessModel = deps.sessionModelNameOverride(sessionId);
-    if (_sessModel && prov && (!Array.isArray(prov.models) || prov.models.length === 0 || prov.models.indexOf(_sessModel) >= 0)) {
-      body.model = _sessModel;
-    } else if (deps.sessionModelProviderOverride(sessionId) && prov && prov.model) {
-      body.model = prov.model;
-    }
+    // 统一模型解析（2026-09-08）：会话级设置 → 全局默认供应商 → env 兜底，与 MCP 路径同一口径
+    const { provider: prov, model: resolvedModel } = deps.resolveChatModel(sessionId, body.model);
+    if (resolvedModel) body.model = resolvedModel;
     const targetApiUrl = (prov && (prov.api_url || prov.base_url)) || readEnvValue("TARGET_API_URL");
     const targetApiKey = (prov && prov.api_key) || readEnvValue("TARGET_API_KEY");
     if (!targetApiUrl || !targetApiKey) {

@@ -96,9 +96,11 @@ function loadAiProviders() {
 function saveAiProviders(list) {
   writeJsonFileAtomic(AI_PROVIDERS_CONFIG, { providers: list || [] });
 }
-// 取已启用的第一个供应商（未配置则回退 TARGET_API_*）
+// 取「标记为默认」或第一个已启用的供应商（未配置则回退 TARGET_API_*）
 function resolveActiveProvider() {
   const ps = loadAiProviders();
+  const def = ps.find(function (p) { return p.is_default === true && p.enabled !== false && (p.api_url || p.base_url) && p.api_key; });
+  if (def) return def;
   return ps.find(function (p) { return p.enabled !== false && (p.api_url || p.base_url) && p.api_key; }) || null;
 }
 // 按会话取当前应使用的供应商：会话有覆盖且该供应商仍可用则用覆盖，否则回退全局。
@@ -110,6 +112,45 @@ function resolveSessionProvider(sessionId) {
     if (hit) return hit;
   }
   return resolveActiveProvider();
+}
+// 统一聊天模型解析（2026-09-08）：会话级设置(供应商+模型) → 全局默认供应商 → env 兜底。
+// 直通路径与 MCP 工具循环共用同一口径；模型名必须属于供应商模型列表，不在则回退供应商默认并告警。
+function resolveChatModel(sessionId, bodyModel) {
+  const sessPid = sessionModelProviderOverride(sessionId);
+  const sessModel = sessionModelNameOverride(sessionId);
+  const providers = loadAiProviders();
+  const usable = function (p) { return p && p.enabled !== false && (p.api_url || p.base_url) && p.api_key; };
+  const modelsOf = function (p) {
+    if (Array.isArray(p.models) && p.models.length) return p.models;
+    if (p.model) return [p.model];
+    return [];
+  };
+  // L1 会话级显式设置
+  if (sessPid) {
+    const hit = providers.find(function (p) { return p.id === sessPid && usable(p); });
+    if (hit) {
+      const list = modelsOf(hit);
+      if (sessModel && list.length && list.indexOf(sessModel) < 0) {
+        console.warn("[resolveChatModel] 会话指定模型不在该供应商列表，回退供应商默认: " + sessModel);
+      } else if (sessModel) {
+        return { provider: hit, model: sessModel };
+      }
+      return { provider: hit, model: hit.model || list[0] || sessModel || bodyModel || "" };
+    }
+    console.warn("[resolveChatModel] 会话指定供应商不可用，回退全局默认: " + sessPid);
+  }
+  // L2 全局默认供应商
+  const active = resolveActiveProvider();
+  if (active) {
+    const list = modelsOf(active);
+    const bm = bodyModel && (!list.length || list.indexOf(bodyModel) >= 0) ? bodyModel : "";
+    if (bodyModel && list.length && list.indexOf(bodyModel) < 0) {
+      console.warn("[resolveChatModel] 请求模型不在默认供应商列表，回退供应商默认: " + bodyModel);
+    }
+    return { provider: active, model: bm || active.model || list[0] || "" };
+  }
+  // L3 env 兜底
+  return { provider: null, model: bodyModel || readEnvValue("MODEL_NAME") || "" };
 }
 const {
   getDatePartsInTimeZone,
@@ -1533,6 +1574,7 @@ require("./routes/chat")(app, {
   classifySpecialEvent,
   resolveActiveProvider,
   resolveSessionProvider,
+  resolveChatModel,
   sessionModelProviderOverride,
   saveSessionModelProviderOverride,
   sessionModelNameOverride,
@@ -1779,12 +1821,11 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
   if (!MCP_ENABLED()) return false;
   const clients = getMcpClients();
   if (!clients || clients.length === 0) return false;
-  const prov = resolveSessionProvider(sessionId);
+  // 统一模型解析（2026-09-08）：与直通路径同口径，会话级设置 → 全局默认 → env 兜底
+  const { provider: prov, model } = resolveChatModel(sessionId, body.model);
   const targetApiUrl = (prov && (prov.api_url || prov.base_url)) || readEnvValue("TARGET_API_URL");
   const targetApiKey = (prov && prov.api_key) || readEnvValue("TARGET_API_KEY");
   if (!targetApiUrl || !targetApiKey) return false;
-
-  const model = (prov && prov.model) || body.model || readEnvValue("MODEL_NAME");
 
   // === 流式直通快速路径（普通聊天提速）===
   // 多数用户提问并不会触发工具调用，此前却一律走 runWithTools 非流式等完整生成（首字 30s+）。
@@ -3358,6 +3399,7 @@ app.put("/admin/ai-providers", { preHandler: mcpManageAuth }, async (req, reply)
       const o = { id: String(p.id || ""), name: String(p.name || ""), enabled: p.enabled !== false };
       if (p.api_url || p.base_url) o.api_url = String(p.api_url || p.base_url);
       if (p.api_key) o.api_key = String(p.api_key);
+      if (p.is_default === true || p.is_default === "true") o.is_default = true;
       let _models = [];
       if (Array.isArray(p.models)) _models = p.models.map(function(s){ return String(s).trim(); }).filter(Boolean);
       else if (p.model) _models = [String(p.model).trim()].filter(Boolean);
