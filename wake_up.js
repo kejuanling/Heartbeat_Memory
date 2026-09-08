@@ -607,6 +607,23 @@ function nextWakeFromAnySession() {
   return best;
 }
 
+// 已到点（next_wake_at <= now）的显式 <wake> 闹钟会话 id 列表（v2 per-session）。
+// 用于 runTimedWake 清理调度前捕获（否则被 pruneExpiredSchedules 删除后无法定位），
+// 以及 runWakeUpInner 在周期检查路径下兜底自算。
+function getDueWakeSessionIds() {
+  const raw = readWakeScheduleRaw();
+  if (!raw) return [];
+  const sessions = raw.sessions || {};
+  const now = Date.now();
+  const out = [];
+  for (const sid of Object.keys(sessions)) {
+    const e = sessions[sid];
+    const t = e && e.next_wake_at ? new Date(e.next_wake_at) : null;
+    if (t && !isNaN(t.getTime()) && t.getTime() <= now) out.push(sid);
+  }
+  return out;
+}
+
 // v2：删除所有已过期（<= now）或无效的会话调度条，写回文件；返回是否有改动
 function pruneExpiredSchedules() {
   const data = readWakeScheduleRaw();
@@ -724,9 +741,11 @@ function armTimedWake() {
 // 然后执行一次唤醒流程（是否发推送仍由 AI 自行决定）
 async function runTimedWake() {
   timedWakeTimer = null;
+  // 显式 <wake> 闹钟：清理前先捕获已到点的会话，否则被 pruneExpiredSchedules 删掉后无法定位
+  const dueSids = getDueWakeSessionIds();
   try { pruneExpiredSchedules(); } catch (voidErr) { console.warn("[wake-up] 清理过期定时失败:", voidErr.message); }
   console.log("\n===== 定时唤醒到点 =====\n");
-  await runWakeUp();
+  await runWakeUp(dueSids);
 }
 
 function getNow() {
@@ -862,14 +881,14 @@ ${phoneContext ? `\n${phoneContext}\n` : ""}
 }
 
 let wakeRunning = false;
-async function runWakeUp() {
+async function runWakeUp(dueSids) {
   if (wakeRunning) {
     console.log("[wake-up] 上一次唤醒仍在进行，本次跳过");
     return;
   }
   wakeRunning = true;
   try {
-    await runWakeUpInner();
+    await runWakeUpInner(dueSids);
   } catch (err) {
     // 定时唤醒入口（runTimedWake）由 setTimeout 触发、无人兜底，异常会成为
     // unhandled rejection 直接杀死进程（Node 15+ 默认 throw）；统一在此记日志吃掉
@@ -879,21 +898,45 @@ async function runWakeUp() {
   }
 }
 
-async function runWakeUpInner() {
+async function runWakeUpInner(dueSids) {
   console.log("\n==========================");
   console.log("开始自动唤醒");
   console.log("==========================\n");
 
   // 多会话：锁定集合中每个会话各自独立计时、独立推送、写回各自会话；无锁定则不唤醒（关闭唤醒）。
   const targets = collectWakeTargets();
+
+  // 显式 <wake> 闹钟（用户在对话里让 AI 设的提醒）不受「锁定唤醒」影响：无论该会话是否被锁定、
+  // 也无论是否锁定了任何会话，只要到现在点就必须被处理。定时路径下 runTimedWake 清理前已捕获 dueSids；
+  // 周期检查路径（scheduleNextCheck）无清理，这里再兜底自行捕获一次。
+  const dueSet = new Set();
+  if (Array.isArray(dueSids)) { for (const sid of dueSids) dueSet.add(sid); }
+  for (const sid of getDueWakeSessionIds()) { dueSet.add(sid); }
+  if (dueSet.size) {
+    const sessionByTarget = new Map();
+    for (const t of targets) sessionByTarget.set(t.sessionId || "default", t);
+    for (const sid of dueSet) {
+      const known = sessionByTarget.get(sid);
+      if (known) { known.explicitWake = true; continue; }
+      const tl = getTimelineBySessionId(sid);
+      if (tl && Array.isArray(tl.messages) && tl.messages.length) {
+        console.log("[wake-up] 显式闹钟已到点，唤醒会话（未锁定）: " + sid + "（共 " + tl.messages.length + " 条）");
+        targets.push({ sessionId: sid, messages: tl.messages, explicitWake: true });
+        sessionByTarget.set(sid, targets[targets.length - 1]);
+      } else {
+        console.warn("[wake-up] 显式闹钟会话不存在/已删，跳过: " + sid);
+      }
+    }
+  }
+
   if (!targets.length) { console.log("[wake-up] 无唤醒目标（未锁定/锁定的会话已删），本次跳过"); return; }
 
   // AI 设置的「下一次主动唤醒时间」：设定后用户一旦主动找过 AI 则定时作废；
   // 未到点之前定时检查跳过（不影响对话）；已过期则清理。
-  // 无锁定（全局单会话）时在此全局判定；有锁定时 schedule 归属各会话，由 runWakeForTarget 各自检查。
+  // 无锁定（全局单会话，仅旧式 default 槽位）时在此全局判定；有锁定时 schedule 归属各会话，由 runWakeForTarget 各自检查。
   const locked = readWakeLockedSessions();
   if (!locked.length) {
-    // 无锁定：只可能作用于主会话(default)的调度，按 default 处理（保留防御性）
+    // 无锁定：只可能作用于主会话(default)的调度，按 default 处理（保留防御性；不阻塞上面已并入的显式闹钟目标）
     try {
       const schedule = readWakeScheduleFor("default");
       if (schedule) {
@@ -905,11 +948,15 @@ async function runWakeUpInner() {
         } else {
           const nextWakeAt = new Date(schedule.next_wake_at);
           if (!isNaN(nextWakeAt.getTime()) && nextWakeAt.getTime() > Date.now()) {
-            console.log(`\n下一次主动唤醒时间未到（${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}），本次跳过唤醒\n`);
-            return;
-          }
-          try { clearWakeSchedule("default"); } catch (expireErr) {
-            console.warn("[wake-up] 清理过期唤醒时间失败:", expireErr.message);
+            // 旧式 default 调度未到点：仅当没有其它唤醒目标时才整体跳过
+            if (targets.length === 0) {
+              console.log(`\n下一次主动唤醒时间未到（${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}），本次跳过唤醒\n`);
+              return;
+            }
+          } else {
+            try { clearWakeSchedule("default"); } catch (expireErr) {
+              console.warn("[wake-up] 清理过期唤醒时间失败:", expireErr.message);
+            }
           }
         }
       }
@@ -941,12 +988,16 @@ async function runWakeForTarget(target) {
   const now = new Date();
   const diffMinutes = Math.floor((now - lastMessageTime) / 1000 / 60);
 
+  // 显式 <wake> 闹钟：用户明确要求在此时点被提醒，跳过常规沉默判定，保证「永远生效」。
+  // 设定之后用户在该会话又主动找过 AI → 定时作废，此时不强行提醒（交回正常节奏）。
+  let explicitWake = !!target.explicitWake;
   // 会话级「下一次主动唤醒时间」：严格按会话隔离。AI 在该会话设定后，只跳过该会话的唤醒（不影响其他锁定会话）。
   try {
     const schedule = readWakeScheduleFor(wakeSessionId);
     if (schedule) {
       if (isUserActiveSinceFor(schedule, wakeSessionId)) {
         // 设定之后用户在该会话主动找过 AI → 定时作废，本次按正常节奏判断
+        explicitWake = false;
         try { clearWakeSchedule(wakeSessionId); } catch (voidErr) { console.warn("[wake-up] 清理作废定时失败:", voidErr.message); }
       } else {
         const nextWakeAt = new Date(schedule.next_wake_at);
@@ -955,6 +1006,7 @@ async function runWakeForTarget(target) {
           return;
         }
         // 已到点 → 清除该会话定时，让本次唤醒正常进行
+        explicitWake = true;
         try { clearWakeSchedule(wakeSessionId); } catch (expireErr) { console.warn("[wake-up] 清理过期定时唤醒失败:", expireErr.message); }
       }
     }
@@ -962,7 +1014,7 @@ async function runWakeForTarget(target) {
     console.warn("[wake-up] 检查会话级下次唤醒时间失败（忽略）:", scheduleErr.message);
   }
 
-  if (!shouldWake(lastMessageTime)) {
+  if (!explicitWake && !shouldWake(lastMessageTime)) {
     console.log("\n暂不需要唤醒\n");
     return;
   }
