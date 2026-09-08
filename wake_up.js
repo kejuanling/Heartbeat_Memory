@@ -1190,7 +1190,7 @@ ${historyText}`
   }
   const rawAiText = rawAiTextFull.replace(/<wake>[\s\S]*?<\/wake>/gi, "").trim();
   console.log("\nWake Result Summary:\n");
-  console.log(JSON.stringify({ wake_mcp: wakeMcpOk, choices: (data && Array.isArray(data.choices)) ? data.choices.length : 0, ai_text_chars: rawAiText.length }));
+  console.log(JSON.stringify({ wake_mcp: wakeMcpOk, ai_text_chars: rawAiText.length }));
 
   const diaryResult = extractDiaryFromResponse(rawAiText);
   const diarySaved = appendDiaryEntry(diaryResult.diaryContent);
