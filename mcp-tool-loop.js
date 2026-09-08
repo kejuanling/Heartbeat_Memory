@@ -236,6 +236,146 @@ function _truncateResult(text, max = 800) {
   return s.length > max ? s.slice(0, max) + "…" : s;
 }
 
+// 安全地统计「按空行分段的段数」（与前端 makeMsgEl / runWithTools 的 _segCount 口径一致）
+function _countSegs(txt) {
+  return String(txt || "").split(/\n\s*\n/).map(function (s) { return s.trim(); }).filter(Boolean).length;
+}
+
+/**
+ * 流式工具循环（2026-09-09，修复「用工具慢 + 工具卡堆末尾」）：
+ * 全程以 stream:true 请求上游，正文/思考链增量实时回传，工具参数在某轮齐了就就地执行
+ * （onEvent 推 tool_start/tool_end，前端据此内联渲染工具卡），再把工具结果喂回上游继续流式补正文。
+ * 与 runWithTools 同返回结构；调用方可在抛错时回退 runWithTools（失败兜底）。
+ * 关键：不再整轮非流式等待，正文秒出；工具卡按真实到达顺序内联。
+ */
+async function streamToolLoop({
+  upstreamUrl,
+  upstreamKey,
+  model,
+  messages,
+  serverClients,
+  temperature,
+  top_p,
+  max_tokens,
+  maxToolRounds = DEFAULT_MAX_TOOL_ROUNDS,
+  onEvent = null,
+  fetchFn = fetch
+}) {
+  const routes = await loadTools(serverClients);
+  const openaiTools = toOpenAITools(routes || []);
+  let working = messages.slice();
+  let totalUsage = null;
+  let rounds = 0;
+  const reasoningParts = [];
+  const toolHistory = [];
+  const contentParts = [];
+  let toolSeq = 0;
+  const emit = (evt) => { try { if (typeof onEvent === "function") onEvent(evt); } catch (e) {} };
+
+  for (let round = 0; round < maxToolRounds + 1; round++) {
+    rounds = round;
+    const body = { model, messages: working, stream: true, temperature, top_p, max_tokens };
+    if (round < maxToolRounds && openaiTools.length > 0) { body.tools = openaiTools; body.tool_choice = "auto"; }
+    else if (openaiTools.length > 0) { body.tools = openaiTools; body.tool_choice = "none"; }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+    let resp;
+    try {
+      resp = await fetchFn(upstreamUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${upstreamKey}` },
+        body: JSON.stringify(body),
+        signal: controller.signal
+      });
+    } finally { clearTimeout(timer); }
+    if (!resp.ok) { const t = await resp.text().catch(() => ""); throw new Error(`上游请求失败 HTTP ${resp.status}: ${t.slice(0, 300)}`); }
+    if (!resp.body) throw new Error("上游无响应体");
+
+    // 流式读取：正文/思考链实时 emit；tool_calls 分片聚合成整轮工具
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buf = "";
+    let roundContent = "";
+    let roundReasoning = "";
+    let firstContentOfRound = true;
+    let seenContent = false;
+    const toolCallAcc = [];
+    const accToolCall = (tcs) => {
+      for (const tc of (tcs || [])) {
+        if (!tc) continue;
+        const idx = typeof tc.index === "number" ? tc.index : 0;
+        let slot = toolCallAcc[idx]; if (!slot) slot = toolCallAcc[idx] = { id: "", name: "", args: "" };
+        if (tc.id) slot.id = tc.id;
+        if (tc.function && tc.function.name) slot.name += tc.function.name;
+        if (typeof tc.function.arguments === "string") slot.args += tc.function.arguments;
+      }
+    };
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
+        const trimmed = line.endsWith("\r") ? line.slice(0, -1) : line;
+        if (!trimmed.startsWith("data:")) continue;
+        const payload = trimmed.slice(5).replace(/^\s+/, "");
+        if (!payload || payload === "[DONE]") continue;
+        let evt; try { evt = JSON.parse(payload); } catch { continue; }
+        const choice = evt && evt.choices && evt.choices[0]; if (!choice) continue;
+        const delta = choice.delta || {};
+        if (typeof delta.reasoning_content === "string" && delta.reasoning_content.length) {
+          roundReasoning += delta.reasoning_content;
+          emit({ type: "reasoning", text: delta.reasoning_content });
+        }
+        if (typeof delta.content === "string" && delta.content.length) {
+          // 跨轮补空行分隔，保证前端流式拼接 full 与最终 text(contentParts.join("\n\n")) 一致（空行粒度分段）
+          if (firstContentOfRound && contentParts.length > 0) emit({ type: "text", text: "\n\n" });
+          firstContentOfRound = false; seenContent = true;
+          roundContent += delta.content;
+          emit({ type: "text", text: delta.content });
+        }
+        if (Array.isArray(delta.tool_calls) && delta.tool_calls.length) accToolCall(delta.tool_calls);
+        if (evt.usage) totalUsage = evt.usage;
+      }
+    }
+    if (roundReasoning) reasoningParts.push(roundReasoning);
+    if (seenContent) contentParts.push(roundContent);
+
+    const toolCalls = toolCallAcc.filter(s => s && s.name).map(function (s, i) {
+      return { id: s.id || ("call_" + Date.now() + "_" + i), type: "function", function: { name: s.name, arguments: s.args || "{}" } };
+    });
+    working.push({ role: "assistant", content: roundContent || "", tool_calls: toolCalls.length ? toolCalls : undefined });
+    if (!toolCalls.length) break;
+
+    // afterSeg：该轮工具位于「已流式正文」的最后一段之后（-1 在刷新重建时会被归到末尾，故钳到 >=0）
+    const afterSeg = Math.max(0, _countSegs(contentParts.join("\n\n")) - 1);
+    for (let i = 0; i < toolCalls.length; i++) {
+      const tc = toolCalls[i];
+      const fn = tc.function || {}; const name = fn.name || "";
+      const args = _parseArgs(fn.arguments);
+      const index = toolSeq++; const id = tc.id;
+      emit({ type: "tool_start", index, id, name, args, afterSeg });
+      let result, error = null;
+      try { result = await callToolByExposedName(serverClients, routes, name, args); }
+      catch (e) { error = e.message || String(e); result = { markdown: JSON.stringify({ type: "tool_error", error: "mcp_service_error", message: error }) }; }
+      const resTrunc = _truncateResult(result.markdown || "", error ? 0 : 20000);
+      working.push({ role: "tool", tool_call_id: id, content: _truncateResult(result.markdown || "", MAX_TOOL_RESULT_CHARS) });
+      toolHistory.push({ name, args, result: resTrunc, error, afterSeg });
+      emit({ type: "tool_end", index, id, name, args, result: resTrunc, error, ok: !error });
+    }
+  }
+
+  let text = contentParts.join("\n\n").trim();
+  if (!text) text = "（工具调用轮次已达上限，模型未给出最终回复，请重试或简化请求）";
+  const reasoning = reasoningParts.join("\n\n").slice(0, MAX_REASONING_CHARS);
+  const segs = String(text || "").split(/\n\s*\n/).map(function (s) { return s.trim(); }).filter(Boolean);
+  if (!segs.length) segs.push(text || "");
+  return { text, rounds, usage: totalUsage, routes, reasoning, toolHistory, segments: segs.slice(), finalMessages: working.slice() };
+}
+
+
 /**
  * 把最终文本 + 思考链 + 工具记录转成 OpenAI 兼容 SSE 流。
  * 事件顺序：思考链 → 工具记录(tool_trace) → 正文 content → 结束。
@@ -400,9 +540,9 @@ async function tryStreamPassthrough({
     if (decided || sawToolCall) break;
   }
 
-  // 发现工具调用：尚未写 header，交给 runWithTools 接管
+  // 发现工具调用：尚未写 header，交给流式工具循环接管（streamToolLoop，正文/工具均流式）
   if (sawToolCall) {
-    console.log("[mcp] 流式直通检测到工具调用，回退 runWithTools");
+    console.log("[mcp] 流式直通检测到工具调用，回退流式工具循环");
     return { ok: true, fellBackToTools: true };
   }
 
@@ -534,6 +674,7 @@ async function tryStreamPassthrough({
 
 module.exports = {
   runWithTools,
+  streamToolLoop,
   buildSSE,
   tryStreamPassthrough,
   DEFAULT_MAX_TOOL_ROUNDS

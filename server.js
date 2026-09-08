@@ -1926,14 +1926,31 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
 
   let r = directResult;
   if (!r) {
-    r = await mcp.runWithTools({
-      upstreamUrl: targetApiUrl,
-      upstreamKey: targetApiKey,
-      model,
-      messages: messages || body.messages || [],
-      serverClients: clients,
-      onEvent: (body.stream === true) ? onEvent : null
-    });
+    // 2026-09-09 工具路径改流式：优先走 streamToolLoop（全程 stream:true，正文/思考链实时回传，
+    // 工具就地执行并继续流式），避免「检测到工具就整轮非流式等待」导致的慢。失败则回退 runWithTools（非流式兜底）。
+    try {
+      r = await mcp.streamToolLoop({
+        upstreamUrl: targetApiUrl,
+        upstreamKey: targetApiKey,
+        model,
+        messages: messages || body.messages || [],
+        serverClients: clients,
+        temperature: body.temperature,
+        top_p: body.top_p,
+        max_tokens: body.max_tokens,
+        onEvent: (body.stream === true) ? onEvent : null
+      });
+    } catch (toolLoopErr) {
+      console.warn("[mcp] 流式工具循环失败，回退 runWithTools (非流式):", toolLoopErr.message);
+      r = await mcp.runWithTools({
+        upstreamUrl: targetApiUrl,
+        upstreamKey: targetApiKey,
+        model,
+        messages: messages || body.messages || [],
+        serverClients: clients,
+        onEvent: (body.stream === true) ? onEvent : null
+      });
+    }
   }
 
   // 工具循环跑完后，把「完整消息序列」捕获进 lastLLMMessages，
