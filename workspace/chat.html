@@ -5334,9 +5334,11 @@ function closeSessMenu(){ if(_sessMenuEl) _sessMenuEl.classList.add("hidden"); }
 function openSessMenu(sid, anchorEl){
   const el=ensureSessMenu();
   const tpOn=(thirdPartySid===sid);
+  const lockOn=(wakeLocked||[]).indexOf(sid)>=0;
   el.innerHTML='<button class="sess-menu-item" data-op="cc">压缩</button>'
     +'<button class="sess-menu-item" data-op="export">导出</button>'
     +'<button class="sess-menu-item'+(tpOn?' on':'')+'" data-op="thirdparty">第三方</button>'
+    +'<button class="sess-menu-item'+(lockOn?' on':'')+'" data-op="lock">锁定唤醒'+(lockOn?' ✓':'')+'</button>'
     +'<button class="sess-menu-item" data-op="persona">人设</button>'
     +'<button class="sess-menu-item" data-op="cross">跨窗口</button>'
     +'<button class="sess-menu-item" data-op="provider">模型</button>';
@@ -5351,6 +5353,7 @@ function openSessMenu(sid, anchorEl){
       else if(op==="persona")openSessionPersona(sid);
       else if(op==="cross")openSessionCrossInject(sid);
       else if(op==="provider")openSessionProvider(sid);
+      else if(op==="lock")toggleWakeLockSession(sid);
     });
   });
   el.classList.remove("hidden");
@@ -5538,36 +5541,42 @@ async function doMergeSessions(){
   }catch(e){ showToast("合并失败:"+(e.message||"")); }
 }
 
-// 置顶/取消置顶会话（本地），置顶的排在列表最前；置顶时可选同时锁定唤醒
+// 置顶/取消置顶会话（本地），置顶的排在列表最前；与唤醒锁定完全独立（锁定在「…」菜单）
 function togglePinSession(id){
   let pinnedArr=[];
   try{ pinnedArr=JSON.parse(localStorage.getItem("han_pinned_sessions")||"[]"); }catch(e){ pinnedArr=[]; }
   const i=pinnedArr.indexOf(id);
   if(i>=0){
-    // 取消置顶：一并解除该会话的唤醒锁定
     pinnedArr.splice(i,1);
     try{ localStorage.setItem("han_pinned_sessions",JSON.stringify(pinnedArr)); }catch(e){}
-    const wIdx=wakeLocked.indexOf(id);
-    if(wIdx>=0){ wakeLocked.splice(wIdx,1); pushWakeLocked(); showToast("已取消置顶，并解除唤醒锁定"); }
-    else{ showToast("已取消置顶"); }
+    showToast("已取消置顶");
     updateSessionItem(id);
     pushSessionPins();   // 跨设备同步置顶
     return;
   }
-  // 置顶：确认是否同时锁定唤醒（确定=置顶+锁定；取消=仅置顶）
-  const alsoLock=confirm("置顶该会话，并同时锁定唤醒（自动联系只对它进行）？\n\n确定 = 置顶 + 锁定唤醒\n取消 = 仅置顶");
   pinnedArr.unshift(id);
   try{ localStorage.setItem("han_pinned_sessions",JSON.stringify(pinnedArr)); }catch(e){}
-  if(alsoLock){
-    if(wakeLocked.indexOf(id)<0) wakeLocked.push(id);
-    pushWakeLocked();
-    showToast("已置顶，并锁定唤醒");
-  } else {
-    showToast("已置顶");
-  }
+  showToast("已置顶");
   updateSessionItem(id);
   pushSessionPins();   // 跨设备同步置顶
 }
+
+// 锁定/解锁唤醒（会话独立）：自动唤醒只对锁定的会话进行，与置顶无关
+function toggleWakeLockSession(id){
+  if(!wakeLocked) wakeLocked=[];
+  const idx=wakeLocked.indexOf(id);
+  if(idx>=0){
+    wakeLocked.splice(idx,1);
+    pushWakeLocked();
+    showToast("已解除唤醒锁定");
+  } else {
+    wakeLocked.push(id);
+    pushWakeLocked();
+    showToast("已锁定唤醒（自动联系只对这个会话进行）");
+  }
+  updateSessionItem(id);
+}
+
 
 function updateSessionItem(id){
   const el=document.getElementById("sessionList"); if(!el) return;
