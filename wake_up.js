@@ -1027,7 +1027,9 @@ async function runWakeForTarget(target) {
 
   // 批注 2026-08-26：唤醒历史过长会稀释末尾唤醒规则的权重（长叙事惯性压过尾部指令）；
   // 裁剪为最近 N 条（管理台「记忆与唤醒参数」可调 wake_history_max_messages，默认见 memory-engine DEFAULT_CONFIG）。
-  const wakeHistoryMax = Number(memoryEngine.getConfig().wake_history_max_messages) || 100;
+  // 配置 0 = 不裁剪（与管理台提示一致）；仅当配置缺失(null/undefined)时兜底默认 100
+  const _whRaw = memoryEngine.getConfig().wake_history_max_messages;
+  const wakeHistoryMax = _whRaw == null ? 100 : (Number(_whRaw) || 0);
   if (wakeHistoryMax > 0 && historyMsgs.length > wakeHistoryMax) {
     const trimmedCount = historyMsgs.length - wakeHistoryMax;
     historyMsgs = historyMsgs.slice(-wakeHistoryMax);
