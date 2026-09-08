@@ -927,10 +927,10 @@ app.post("/v1/chat/completions", async (req, reply) => {
 
     // ========================
     // 消息扣住（免打扰）：扣住时段内新用户消息待处理，不转发给模型。
-    // 设计口径：免打扰只服务主陪伴会话（isMainChat）——<quiet> 调度文件本身是全局一份，
-    // 其他会话不受扣住影响、照常对话；释放流程（唤醒/总结/推送）也只针对主会话。
+    // 设计口径：<quiet> 调度按会话隔离——扣住的是「AI 写入该标签的会话」自己的消息，
+    // 其他会话不受影响；释放流程也只针对该会话。
     // ========================
-    if (isMainChat && isQuietActive()) {
+    if (isQuietActive(sessionId)) {
       const trailing = collectTrailingUnansweredUserMessages(kelivoMessages);
       if (trailing.length > 0) {
         const newest = normalizeContentToText(trailing[trailing.length - 1].content) || "";
@@ -938,7 +938,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
         if (urgent) {
           console.log("[quiet] 检测到紧急关键词，本次放行");
         } else {
-          const addedHeld = holdNewUserMessages(trailing);
+          const addedHeld = holdNewUserMessages(trailing, sessionId);
           console.log(`[quiet] 扣住 ${addedHeld} 条新用户消息，本次不转发给模型`);
           return buildQuietHeldReply(reply);
         }
@@ -1323,7 +1323,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
         if (aiContent) {
           // 解析 <wake> 闹钟标签并写入调度（标签随后被剥离，不显示给用户）
           parseWakeTagAndSchedule(aiContent, sessionId);
-          parseQuietTagAndSchedule(aiContent);
+          parseQuietTagAndSchedule(aiContent, sessionId);
           // 提取并存储记忆，同时拿到清洗后的文本
           const cleanText = await tagParser.extractAndStore(aiContent);
           // 用清洗后的文本替换 JSON 中的 content
@@ -1456,7 +1456,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
       if (aiFullContent) {
         // 解析 <wake> 闹钟标签并写入调度（标签随后被剥离，不显示给用户）
         parseWakeTagAndSchedule(aiFullContent, sessionId);
-        parseQuietTagAndSchedule(aiFullContent);
+        parseQuietTagAndSchedule(aiFullContent, sessionId);
         // 提取并存储记忆，并拿到清洗后的文本
         const cleanFull = await tagParser.extractAndStore(aiFullContent).catch(err => {
           console.warn("[memory] 流式标签解析失败:", err.message);
