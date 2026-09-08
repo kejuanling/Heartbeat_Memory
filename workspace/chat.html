@@ -592,6 +592,9 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .mcp-btn{flex:1;border:none;border-radius:9px;padding:9px;font-size:13px;cursor:pointer;background:rgba(200,144,152,.14);color:var(--accent-deep)}
 .mcp-btn.primary{background:var(--accent-grad);color:#fff;font-weight:600}
 .mcp-btn.danger{background:rgba(216,131,131,.16);color:#c97070}
+.mcp-btn.bg-mode-btn.on{background:var(--accent-grad);color:#fff;font-weight:600}
+.theme-field.off{opacity:.42;pointer-events:none}
+.theme-field.off label,.theme-field.off .theme-row{opacity:.6}
 .data-actions{display:flex;gap:8px;margin:6px 0}
 .data-tip{font-size:11.5px;color:var(--ink3);line-height:1.6;margin-top:4px}
 .mcp-msg{font-size:11.5px;color:var(--ink3);margin-top:6px;min-height:4px}
@@ -1621,12 +1624,16 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
                 </div>
               </div></div><div class="set-panel" data-acc="theme"><div class="set-acc-h" data-acc="theme">主题<span class="ar">▾</span></div><div class="set-sec">
             <div class="set-sec-label">背景</div>
-            <div class="theme-field">
+            <div class="bg-mode-switch" style="display:flex;gap:8px;margin:2px 0 10px">
+              <button type="button" class="mcp-btn bg-mode-btn" id="bgModeColorBtn" data-bg="color" style="flex:1">纯色背景</button>
+              <button type="button" class="mcp-btn bg-mode-btn" id="bgModeImageBtn" data-bg="image" style="flex:1">图片背景</button>
+            </div>
+            <div class="theme-field" id="bgImageField">
               <label>背景图片<span class="tag">URL / 上传</span></label>
               <div class="theme-row"><input type="text" id="bgImageInput" placeholder="图片 URL（留空用默认背景）" style="flex:1"><button type="button" class="mcp-btn" id="bgImageUploadBtn" style="padding:8px 10px;flex-shrink:0">上传</button></div>
               <input type="file" id="bgImageFile" accept="image/*" style="display:none">
             </div>
-            <div class="theme-field">
+            <div class="theme-field" id="bgColorField">
               <label>背景颜色</label>
               <div class="theme-row"><input type="color" id="bgColorInput" value="#f4f1ee"><span class="v" id="bgColorVal">默认浅色</span></div>
             </div>
@@ -1830,6 +1837,7 @@ function applySettingsToUI(){
   if(typeof userAvatarInput!=="undefined" && userAvatarInput) userAvatarInput.value=cfg.user_avatar||"";
   if(typeof aiAvatarInput!=="undefined" && aiAvatarInput) aiAvatarInput.value=cfg.ai_avatar||"";
   if(typeof bubbleDelimInput!=="undefined" && bubbleDelimInput) bubbleDelimInput.value=cfg.bubble_delim;
+  syncBgModeUI(deriveBgMode());
   // 云端设置拉取后 api_key 已就绪，顺带刷新提示词备份列表（渲染「默认使用中」标记要用最新全局人设）
   loadPromptBackups();
 }
@@ -3707,7 +3715,8 @@ function populateSettings(){
   thAiNameInput.value=cfg.ai_name||"谢意行";
   aiAvatarInput.value=cfg.ai_avatar||"";
   bubbleDelimInput.value=cfg.bubble_delim;
-  renderPicks();renderThemeValues();applyThemePreview();
+  syncBgModeUI(deriveBgMode());
+  renderPicks();
 }
 async function saveSettingsAll(){
   const k=keyInput.value.trim();
@@ -3718,8 +3727,9 @@ async function saveSettingsAll(){
   cfg.temperature=tempInput.value!==""?Number(tempInput.value):null;
   cfg.top_p=topPInput.value!==""?Number(topPInput.value):null;
   cfg.max_tokens=maxTokInput.value!==""?Number(maxTokInput.value):null;
-  cfg.bg_image=bgImageInput.value.trim()||"";
-  cfg.bg_color=bgColorInput.value||"";
+  cfg.bg_mode=deriveBgMode();
+  if(cfg.bg_mode==="image"){ cfg.bg_image=bgImageInput.value.trim()||""; cfg.bg_color=""; }
+  else { cfg.bg_color=bgColorInput.value||""; cfg.bg_image=""; }
   cfg.user_bubble=userBubbleColor.value||"#d9a3a8";
   cfg.ai_bubble=aiBubbleColor.value||"#fffdf9";
   cfg.bubble_opacity=Number(bubbleOpacity.value)/100;
@@ -3882,14 +3892,43 @@ if(typeof pwSaveBtn!=="undefined" && document.getElementById("pwSaveBtn")){
 
 
 /* ===== 主题：实时预览 + 应用 ===== */
+// 背景二选一（纯色 / 图片）：deriveBgMode 兼容旧数据——没设过模式时按 bg_image 推导，老用户有图则自动进图片模式
+function deriveBgMode(){
+  if(cfg.bg_mode==="image"||cfg.bg_mode==="color") return cfg.bg_mode;
+  return cfg.bg_image?"image":"color";
+}
+// 同步背景模式到 UI（开关选中态 + 另一方置灰）。只做显示层互斥 + 固化 cfg.bg_mode，不改 bg_image/bg_color（由采集/应用负责）
+function syncBgModeUI(mode){
+  const m=(mode==="image")?"image":"color";
+  cfg.bg_mode=m;
+  const imgField=document.getElementById("bgImageField");
+  const colField=document.getElementById("bgColorField");
+  const cBtn=document.getElementById("bgModeColorBtn");
+  const iBtn=document.getElementById("bgModeImageBtn");
+  if(cBtn)cBtn.classList.toggle("on",m==="color");
+  if(iBtn)iBtn.classList.toggle("on",m==="image");
+  if(imgField)imgField.classList.toggle("off",m==="color");
+  if(colField)colField.classList.toggle("off",m==="image");
+  // 显示层互斥：选纯色则清空图片框并回显已存颜色；选图片则回显已存图、颜色框回默认色
+  if(m==="color"){
+    if(bgImageInput)bgImageInput.value="";
+    try{ if(bgColorInput)bgColorInput.value=cfg.bg_color||"#f4f1ee"; }catch(e){}
+  } else {
+    if(bgImageInput)bgImageInput.value=cfg.bg_image||"";
+    try{ if(bgColorInput)bgColorInput.value="#f4f1ee"; }catch(e){}
+  }
+  renderThemeValues();
+  applyThemePreview();
+}
+function setBgMode(mode){ syncBgModeUI(mode); }
 function renderThemeValues(){
   bubbleOpacityVal.textContent=bubbleOpacity.value+"%";
   bubbleBlurVal.textContent=bubbleBlur.value+"px";
   bubbleRadiusVal.textContent=bubbleRadius.value+"px";
   if(fontSizeVal)fontSizeVal.textContent=fontSizeInput.value+"px";
-  const hasImg=(bgImageInput.value.trim()!=="");
+  const mode=deriveBgMode();
   const hasColor=(bgColorInput.value!=="" && bgColorInput.value!=="#f4f1ee");
-  bgColorVal.textContent=(!hasImg&&!hasColor)?"默认渐变":(hasImg?"自定义图片":"已自定义");
+  bgColorVal.textContent=mode==="image"?"图片背景":(hasColor?"已自定义":"默认浅色");
 }
 function hexToRgba(hex,a){
   try{
@@ -3909,14 +3948,16 @@ function applyThemePreview(){
   root.setProperty("--bubble-opacity",String(Number(bubbleOpacity.value)/100));
   root.setProperty("--bubble-blur",bubbleBlur.value+"px");
   root.setProperty("--radius",bubbleRadius.value+"px");
-  // 背景即时预览：输入值与已存 cfg 不同才套用，否则回到已存背景（含清空图后还原）
-  const img=(bgImageInput&&bgImageInput.value||"").trim();
-  const cfgImg=cfg.bg_image||"";
-  if(img&&img!==cfgImg){
-    document.body.style.background='linear-gradient(160deg, rgba(253,246,237,.62), rgba(240,221,208,.62)), url("'+img+'") center / cover no-repeat fixed';
-    return;
+  // 背景即时预览（背景颜色/背景图片二选一）
+  const mode=deriveBgMode();
+  if(mode==="image"){
+    const img=(bgImageInput&&bgImageInput.value||"").trim();
+    if(img){
+      document.body.style.background='linear-gradient(160deg, rgba(253,246,237,.62), rgba(240,221,208,.62)), url("'+img+'") center / cover no-repeat fixed';
+      return;
+    }
+    applyTheme(); return;
   }
-  if(!img&&cfgImg){ applyTheme(); return; }
   const col=(bgColorInput&&bgColorInput.value)||"";
   const savedCol=cfg.bg_color||"";
   if(col&&col!=="#f4f1ee"&&col!==savedCol){
@@ -3937,9 +3978,10 @@ async function uploadImageToServer(dataUrl){
 }
 function themeInputs(){
   const or=function(v,d){ return (v!==null&&v!==undefined&&v!=="")?v:d; };
+  const _bgm=deriveBgMode();
   return {
-    bg_image: or(bgImageInput&&bgImageInput.value, cfg.bg_image||""),
-    bg_color: or(bgColorInput&&bgColorInput.value, cfg.bg_color||""),
+    bg_image: (_bgm==="image") ? or(bgImageInput&&bgImageInput.value, cfg.bg_image||"") : "",
+    bg_color: (_bgm==="color") ? or(bgColorInput&&bgColorInput.value, cfg.bg_color||"") : "",
     user_bubble: or(userBubbleColor&&userBubbleColor.value, cfg.user_bubble||"#d9a3a8"),
     ai_bubble: or(aiBubbleColor&&aiBubbleColor.value, cfg.ai_bubble||"#fffdf9"),
     bubble_opacity: (bubbleOpacity&&bubbleOpacity.value!=="")?Number(bubbleOpacity.value)/100 : (cfg.bubble_opacity!=null?cfg.bubble_opacity:1),
@@ -4016,6 +4058,7 @@ function applyCustomTheme(t,silent){
   if(fontSizeInput)fontSizeInput.value=cfg.font_size; if(fontFamilyInput)fontFamilyInput.value=cfg.font_family;
   if(userAvatarInput)userAvatarInput.value=cfg.user_avatar||""; if(aiAvatarInput)aiAvatarInput.value=cfg.ai_avatar||"";
   if(chatEl)chatEl.setAttribute("data-layout",cfg.bubble_style||"qq");
+  syncBgModeUI(deriveBgMode());
   renderPicks(); renderThemeValues(); applyTheme(); applyHeader(); saveCfg();
   if(!silent) showToast("已切换到「"+(t.name||"主题")+"」");
   // 关键：应用生效主题后立即上云，否则刷新时云端旧 cfg 权威覆盖，背景会被改回（应用主题必须同步持久化）
@@ -4110,6 +4153,10 @@ function applyLayout(style){
 [bubbleOpacity,bubbleBlur,bubbleRadius,userBubbleColor,aiBubbleColor,bgColorInput,bgImageInput,userFontColorInput,aiFontColorInput,fontSizeInput,fontFamilyInput].forEach(function(el){
   el.addEventListener("input",function(){renderThemeValues();applyThemePreview();});
 });
+const bgModeColorBtn=document.getElementById("bgModeColorBtn");
+const bgModeImageBtn=document.getElementById("bgModeImageBtn");
+if(bgModeColorBtn)bgModeColorBtn.addEventListener("click",function(){setBgMode("color");});
+if(bgModeImageBtn)bgModeImageBtn.addEventListener("click",function(){setBgMode("image");});
 bgImageUploadBtn.addEventListener("click",function(){bgImageFile.click();});
 bgImageFile.addEventListener("change",function(){
   const f=bgImageFile.files[0];if(!f)return;
