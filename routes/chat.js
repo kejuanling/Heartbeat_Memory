@@ -10,6 +10,7 @@ const memoryEngine = require('../memory-engine');
 const tagParser = require('../tag-parser');
 const contextReplacements = require('../context-replacements');
 const contextCompactor = require('../context-compactor');
+const { imageAbsUrl } = require('./imgurl');
 const { formatDateTimeInTimeZone } = require('../time_utils');
 const { parsePushEcho, parseWakeEcho } = require('../utils/push');
 
@@ -1255,20 +1256,16 @@ app.post("/v1/chat/completions", async (req, reply) => {
       return clean;
     });
 
-    // 2026-09-08 图片 URL 补全：前端已把消息图片转存为 /uploads/<file>（避免大 base64 撑爆 localStorage），
-    // 但上游模型（deepseek）不认相对路径，需补全为请求来源的绝对 URL（http(s)://<host>/uploads/<file>）
-    // 才可访问取图。新发与历史图一并在发模型前统一补齐。（base64 dataURL 上游直接拒绝，故走绝对 URL。）
+    // 2026-09-08 图片 URL 统一补全：前端把消息图片转存为 /uploads/<file>（避免大 base64 撑爆 localStorage），
+    // 上游 deepseek 只认 https:// 绝对 URL（相对路径/base64/http 均被拒），故发模型前经 imageAbsUrl
+    // 统一补齐请求来源的 http(s)://<host> 前缀（公网强制 https；已是绝对/dataURL 的自动保留）。
     try {
-      const _host = (req && (req.hostname || (req.headers && req.headers.host))) || "localhost";
-      // 本机/localhost/内网用 http；公网域名（前端经 nginx https 进入）必须 https——deepseek 不跟随 301，http 会下载失败
-      const _proto = /^(localhost|127\.|::1|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(_host) ? "http" : "https";
       const _imgFill = (msg) => {
         const c = msg && msg.content;
         if (!Array.isArray(c)) return;
         for (const part of c) {
-          if (part && part.type === "image_url" && part.image_url && typeof part.image_url.url === "string"
-              && /^\/uploads\//.test(part.image_url.url) && !/^https?:\/\//.test(part.image_url.url)) {
-            part.image_url.url = _proto + "://" + _host + part.image_url.url;
+          if (part && part.type === "image_url" && part.image_url && typeof part.image_url.url === "string") {
+            part.image_url.url = imageAbsUrl(req, part.image_url.url);
           }
         }
       };

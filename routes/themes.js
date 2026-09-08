@@ -7,6 +7,7 @@
 const path = require('path');
 const fsp = require('fs-extra');
 const crypto = require('crypto');
+const { imageAbsUrl } = require('./imgurl');
 
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024; // 解码后上限（前端本地校验 1.5MB，留余量）
 const MIME_EXT = {
@@ -36,7 +37,7 @@ module.exports = function registerThemeRoutes(app, deps) {
     await fsp.ensureDir(uploadsDir);
     const name = 'img-' + Date.now().toString(36) + '-' + crypto.randomBytes(4).toString('hex') + '.' + MIME_EXT[m[1]];
     await fsp.writeFile(path.join(uploadsDir, name), buf);
-    reply.send({ ok: true, url: '/uploads/' + name });
+    reply.send({ ok: true, url: imageAbsUrl(req, '/uploads/' + name) });
   });
 
   app.get('/uploads/:file', async (req, reply) => {
