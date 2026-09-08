@@ -1331,10 +1331,11 @@ app.post("/v1/chat/completions", async (req, reply) => {
             parsed.choices[0].message.content = cleanText;
             finalResponseText = JSON.stringify(parsed);
           }
-          // 方案二增量：回复只追加一条；盘尾已有同内容回复（重试/重发）则跳过，不重复写
+          // 方案二增量：回复只追加一条；盘尾已有同内容回复（重试/重发）则跳过，不重复写。
+          // 存储用原始含标签文本（<wake>/<memory> 等是上下文一部分，模型可见、前端显示时剥、编辑框可见）。
           if ((kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0)) {
-            if (!tailHasReply(sessionId, cleanText)) {
-              appendMessages(sessionId, [{ role: "assistant", content: cleanText }]);
+            if (!tailHasReply(sessionId, aiContent)) {
+              appendMessages(sessionId, [{ role: "assistant", content: aiContent }]);
             }
           } else {
             console.log("[timeline] 跳过回复落盘 (非流式)");
@@ -1463,10 +1464,11 @@ app.post("/v1/chat/completions", async (req, reply) => {
           return aiFullContent;
         });
         // 方案二增量：回复只追加一条（富字段 reasoning/tokens 一并落，跨设备刷新不丢）；
-        // 盘尾已有同内容回复（重试/重发）则跳过，不重复写
+        // 盘尾已有同内容回复（重试/重发）则跳过，不重复写。
+        // 存储用原始含标签文本（模型可见、前端显示时剥、编辑框可见）。
         if ((kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0)) {
-          if (!tailHasReply(sessionId, cleanFull)) {
-            appendMessages(sessionId, [{ role: "assistant", content: cleanFull, reasoning: aiThinking || "", tokens: aiUsage || null }]);
+          if (!tailHasReply(sessionId, aiFullContent)) {
+            appendMessages(sessionId, [{ role: "assistant", content: aiFullContent, reasoning: aiThinking || "", tokens: aiUsage || null }]);
           }
         } else {
           console.log("[timeline] 跳过回复落盘 (流式)");
