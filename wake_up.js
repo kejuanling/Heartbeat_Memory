@@ -1361,7 +1361,8 @@ ${historyText}`
           method: "POST",
           headers: internalHeaders(),
           body: JSON.stringify({
-            content: rawAiText,
+            // 存储原始含标签文本（保留 <wake> 作为上下文一部分）；diary/记忆提取仍用 rawAiText（不带 <wake>）
+            content: rawAiTextFull,
             event: eventContent,
             diary: diaryResult.diaryContent || "",
             push_meta: pushMeta,

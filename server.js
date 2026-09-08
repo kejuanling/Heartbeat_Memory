@@ -2113,9 +2113,11 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
       }
       // 富字段一并落时间线：reasoning/tools/tokens，跨设备刷新不再丢（前端 /v1/history 读取这些字段）。
       // 盘尾已有同内容回复（重试/重复写回）则跳过，不重复追写。
-      if (!tailHasReply(sessionId, aiClean)) {
+      // 存储用原始文本但去工具回声：保留 <wake>/<memory> 等标签作为上下文一部分；下发/回放仍用 aiClean。
+      const storedText = stripToolEchoBlocks(r.text || aiClean);
+      if (!tailHasReply(sessionId, storedText)) {
         toAppend.push({
-          role: "assistant", content: aiClean, reasoning: r.reasoning || "", tools: r.toolHistory || [], tokens: r.usage || null,
+          role: "assistant", content: storedText, reasoning: r.reasoning || "", tools: r.toolHistory || [], tokens: r.usage || null,
           segments: (r.toolHistory && r.toolHistory.length) ? (r.segments || []).map(function(s){ return stripToolEchoBlocks(tagParser.stripTags(s)); }) : undefined   // 方案2刷新：正文段结构（已剥标签/工具回声），供前端交错插工具卡
         });
       }
@@ -2211,7 +2213,8 @@ app.post("/internal/wake-event", async (req, reply) => {
       }
     }
     if (content) {
-      // 先解析记忆标签，存储清洗后的文本，避免 <memory> 原始标签进入上下文/事件
+      // 解析记忆标签仅用于入库副作用（记忆/钉选），存储仍保留原始含标签文本作为上下文一部分；
+      // 气泡显示由前端 stripInnerTags 剥掉。不再用 cleaned 覆盖 stored。
       const trimmedContent = String(content).trim();
       // [NO_ACTION] 是"未发送推送"的静默标记：AI 决定不主动联系用户。
       // 不应把带 [NO_ACTION] 前缀的原文写入时间线（否则前端会把它当成普通 AI 消息显示成气泡），
@@ -2221,8 +2224,7 @@ app.post("/internal/wake-event", async (req, reply) => {
       } else {
         let stored = stripDiaryBlocks(trimmedContent);
         try {
-          const cleaned = await tagParser.extractAndStore(content);
-          if (cleaned) stored = stripDiaryBlocks(cleaned);
+          await tagParser.extractAndStore(content);
         } catch (e) {
           console.warn("[wake-event] 标签解析失败:", e.message);
         }
