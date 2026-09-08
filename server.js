@@ -707,11 +707,36 @@ function createContentTagFilter() {
 // ========================
 // 读取 timeline
 // ========================
+// 时间线读缓存：按 mtime/size 指纹失效。返回的永远是深拷贝（structuredClone），
+// 调用方（appendMessages/appendRequestMessages/历史接口等）原地增删改的是克隆，
+// 绝不污染缓存里的共享数组，避免跨请求/跨异步共享可变引用导致串扰。
+// 任何 saveTimeline 都会改动文件 mtime/size → 指纹变化 → 下次自动重读，无需显式失效。
+const _timelineCache = new Map(); // sessionId -> { fp, data }
+const _TIMELINE_CACHE_MAX = 60;
+function timelineFingerprint(file) {
+  try {
+    const st = fs.statSync(file);
+    return st.size + ":" + st.mtimeMs;
+  } catch (e) { return ""; }
+}
+function cloneTimeline(data) {
+  try { return structuredClone(data); } catch (e) { return JSON.parse(JSON.stringify(data)); }
+}
 function loadTimeline(sessionId) {
   const file = timelineFileFor(sessionId);
   if (!fs.existsSync(file)) return [];
+  const fp = timelineFingerprint(file);
+  const hit = _timelineCache.get(sessionId);
+  if (hit && hit.fp === fp) return cloneTimeline(hit.data);
   try {
-    return fs.readJsonSync(file);
+    const data = fs.readJsonSync(file);
+    _timelineCache.set(sessionId, { fp, data });
+    if (_timelineCache.size > _TIMELINE_CACHE_MAX) {
+      // 防长期运行膨胀：超上限清掉最旧的一条
+      const firstKey = _timelineCache.keys().next().value;
+      if (firstKey !== undefined) _timelineCache.delete(firstKey);
+    }
+    return cloneTimeline(data);
   } catch (err) {
     // 文件损坏时先备份再按空时间线处理，避免被下一次保存静默覆盖
     try {
@@ -1888,9 +1913,13 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         const clean = tagParser.stripTags(evt.text);
         for (let i = 0; i < clean.length; i += 60) streamDelta({ reasoning_content: clean.slice(i, i + 60) });
       } else if (evt.type === "tool_start") {
-        streamDelta({ tool_start: { index: evt.index, id: evt.id, name: evt.name, args: evt.args } });
+        const p = { index: evt.index, id: evt.id, name: evt.name, args: evt.args };
+        if (typeof evt.afterSeg === "number") p.afterSeg = evt.afterSeg;   // 2026-09-08：对齐前端工具卡按正文段交错
+        streamDelta({ tool_start: p });
       } else if (evt.type === "tool_end") {
-        streamDelta({ tool_end: { index: evt.index, id: evt.id, name: evt.name, args: evt.args, result: evt.result, error: evt.error, ok: evt.ok } });
+        const p = { index: evt.index, id: evt.id, name: evt.name, args: evt.args, result: evt.result, error: evt.error, ok: evt.ok };
+        if (typeof evt.afterSeg === "number") p.afterSeg = evt.afterSeg;
+        streamDelta({ tool_end: p });
       }
     } catch (e) {}
   };

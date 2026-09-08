@@ -3177,7 +3177,10 @@ async function send(){
     // 2026-09-08 图片转存：尽量避免大 base64 撑爆 localStorage/时间线（超配额后 setItem 静默失败、前端卡顿）
     // 每张图先调 /v1/upload-image 转 /uploads/ 短 URL，失败(如解码后>2MB)则降级保留原 base64，不阻塞发送
     const _urls=await Promise.all(imgData.map(async function(_d){
-      try{ const _u=await uploadImageToServer(_d); if(_u&&_u.indexOf("/uploads/")===0) return _u; }catch(_e){}
+      // 2026-09-08：/v1/upload-image 现返回 https://<host>/uploads/<file> 绝对地址（也可能回 /uploads/ 相对），
+      // 两种都接受；被拒的 dataURL/base64 一律不回退。此前只认 /uploads/ 前缀，遇到绝对地址会误判并回退 base64，
+      // 又把大图塞回 localStorage/时间线（0908-03 修过的问题复发）。
+      try{ const _u=await uploadImageToServer(_d); if(_u&&/^(https?:\/\/|\/uploads\/)/.test(_u)) return _u; }catch(_e){}
       return _d;
     }));
     userContent=[{type:"text",text:(text?text+"\n"+timeTag:timeTag)},..._urls.map(function(_u){return {type:"image_url",image_url:{url:_u}};})];

@@ -1368,7 +1368,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
     });
 
     const reader = response.body.getReader();
-    const streamChunks = [];
+    // 2026-09-08：不再累积上游原始字节数组（长回复会双份内存），改为流内累积解码后的 SSE 全文，供流结束提取 AI 回复/记忆标签。
+    let fullRawSse = "";
     try {
     // Streaming tag filter: 上游会把 <memory>/<pin> 拆成 <、memory、> 等多个事件，
     // 字节层匹配不到完整标签，必须在 content 文本层过滤后再重组 SSE 事件。
@@ -1382,9 +1383,9 @@ app.post("/v1/chat/completions", async (req, reply) => {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      streamChunks.push(value);
-
-      sseBuffer += sseDecoder.decode(value, { stream: true });
+      const decodedChunk = sseDecoder.decode(value, { stream: true });
+      sseBuffer += decodedChunk;
+      fullRawSse += decodedChunk;
       let nl;
       while ((nl = sseBuffer.indexOf("\n")) !== -1) {
         const rawLine = sseBuffer.slice(0, nl);
@@ -1432,7 +1433,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
 
     // 流结束后解析 AI 回复
     try {
-      const fullText = Buffer.concat(streamChunks).toString("utf-8");
+      const fullText = fullRawSse;
       // 从 SSE 中提取完整的 AI 回复文本
       let aiFullContent = "";
       let aiThinking = "";
