@@ -305,7 +305,7 @@ function isTextFilePart(fileObj) {
 }
 // 从 /uploads/<file> URL 读取本地文件正文（同步，只读前 maxLen+1 字节，超长截断）。失败返回 null。
 function readUploadedFileContent(fileObj, maxLen) {
-  maxLen = maxLen || 4000;
+  maxLen = maxLen || 10000;
   const f = fileObj && typeof fileObj === "object" ? fileObj : {};
   const url = String(f.url || "");
   const m = url.match(/\/uploads\/([^/?#]+)/);
