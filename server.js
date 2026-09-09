@@ -2312,7 +2312,7 @@ function diaryDirectoryPath() {
   return path.isAbsolute(configured) ? configured : path.join(process.cwd(), configured);
 }
 
-function readDiaryEntries(limit = 20) {
+function readDiaryEntries(limit) {
   const dir = diaryDirectoryPath();
   try {
     if (!fs.existsSync(dir)) return [];
@@ -2321,7 +2321,7 @@ function readDiaryEntries(limit = 20) {
     return fs.readdirSync(dir)
       .filter(name => /^[^/\\]+\.md$/i.test(name))
       .sort((a, b) => b.localeCompare(a))
-      .slice(0, limit)
+      .slice(0, limit ? limit : Infinity)
       .map(name => {
         const filePath = path.join(dir, name);
         const stat = fs.statSync(filePath);
@@ -4787,7 +4787,7 @@ app.post("/admin/context-compaction/generate", { preHandler: basicAuth }, async 
 // 环境变量获取
 app.get("/admin/env", { preHandler: basicAuth }, async (req, reply) => {
   try {
-    const diaryEntries = readDiaryEntries(20);
+    const diaryEntries = readDiaryEntries();
     const diaryHiddenSet = readDiaryHiddenSet();
     const diaryData = diaryEntries.map(e => ({ name: e.name, time: formatDateTimeInTimeZone(new Date(e.updated_at), TIME_ZONE), content: e.content, hidden: diaryHiddenSet.has(e.name) }));
     reply.send({
