@@ -279,6 +279,63 @@ function filePartSummary(part) {
   return "[文件]";
 }
 
+
+// ========================
+// 文件内容注入（2026-09-10 方案A）：文本类文件把正文读进模型上下文，
+// 让 AI 真正"看到"文件内容；非文本或读取失败降级为元信息摘要。
+// 仅 LLM 转发链路使用；时间线/日志仍走 filePartSummary 纯摘要，防 localStorage 膨胀。
+// ========================
+const UPLOADS_DIR = path.join(__dirname, "data", "uploads");
+const TEXT_FILE_EXTS = new Set([
+  "txt", "md", "markdown", "csv", "json", "log", "py", "js", "mjs", "ts", "tsx", "jsx",
+  "html", "htm", "css", "xml", "yaml", "yml", "ini", "conf", "cfg", "sh", "bash", "zsh",
+  "java", "c", "h", "cpp", "hpp", "go", "rs", "sql", "toml", "env", "properties", "rst",
+  "tex", "vue", "svelte", "dockerfile", "gradle", "lock"
+]);
+function isTextFilePart(fileObj) {
+  const f = fileObj && typeof fileObj === "object" ? fileObj : {};
+  const m = String(f.name || "").match(/\.([a-zA-Z0-9]{1,12})$/);
+  const ext = m ? m[1].toLowerCase() : "";
+  if (TEXT_FILE_EXTS.has(ext)) return true;
+  const mt = String(f.mime || "").toLowerCase();
+  return mt.startsWith("text/") ||
+    mt === "application/json" || mt === "application/xml" ||
+    mt === "application/javascript" || mt === "application/x-javascript" ||
+    mt === "application/yaml" || mt === "application/x-yaml";
+}
+// 从 /uploads/<file> URL 读取本地文件正文（同步，只读前 maxLen+1 字节，超长截断）。失败返回 null。
+function readUploadedFileContent(fileObj, maxLen) {
+  maxLen = maxLen || 4000;
+  const f = fileObj && typeof fileObj === "object" ? fileObj : {};
+  const url = String(f.url || "");
+  const m = url.match(/\/uploads\/([^/?#]+)/);
+  if (!m) return null;
+  let name;
+  try { name = decodeURIComponent(m[1]); } catch (e) { name = m[1]; }
+  const fp = path.join(UPLOADS_DIR, path.basename(name));
+  try {
+    const fd = fs.openSync(fp, "r");
+    let s = "";
+    try {
+      const buf = Buffer.alloc(maxLen + 1);
+      const n = fs.readSync(fd, buf, 0, maxLen + 1, 0);
+      if (n > 0) s = buf.toString("utf8", 0, n);
+    } finally { fs.closeSync(fd); }
+    if (s.length > maxLen) s = s.slice(0, maxLen) + "\n…(内容过长已截断)";
+    return s;
+  } catch (e) { return null; }
+}
+// 文件 part -> LLM 文本：文本类注入正文，否则保持元信息摘要。
+function filePartTextForLLM(part) {
+  const summary = filePartSummary(part);
+  const f = part && typeof part === "object" && part.file ? part.file : null;
+  if (!f) return summary;
+  if (!isTextFilePart(f)) return summary;
+  const content = readUploadedFileContent(f);
+  if (content === null || !content.trim()) return summary;
+  return summary + "\n【文件内容】\n" + content;
+}
+
 function getTextFromContentPart(part) {
   if (typeof part === "string") return part;
   if (!part || typeof part !== "object") return "";
@@ -354,9 +411,11 @@ function prepareMessageForLLM(msg) {
 
   if (Array.isArray(msg.content) && shouldForwardMultimodalContent()) {
     // 2026-09-10：文件 part 上游模型不解析（可能拒收未知结构），转文本摘要；图片 part 原样透传。
+    // 2026-09-10 方案A：文本类文件把正文读进上下文（readUploadedFileContent），AI 真正可见文件内容；
+    // 非文本或读取失败仍降级为元信息摘要；图片 part 原样透传。
     if (!msg.content.some(isFileContentPart)) return msg;
     return { ...msg, content: msg.content.map(function (p) {
-      if (isFileContentPart(p)) return { type: "text", text: filePartSummary(p) };
+      if (isFileContentPart(p)) return { type: "text", text: filePartTextForLLM(p) };
       return p;
     }) };
   }
