@@ -1051,8 +1051,32 @@ function toast(msg){
    if(!entries.length){el.innerHTML='<div class="empty">暂无日记</div>';return}
    el.innerHTML=entries.map(e=>{
      const name=e.name||'';
-     return '<div class="diary-item"><div class="diary-head"><span>'+escapeHtml(name)+'</span><span style="display:flex;align-items:center;gap:8px"><em>'+escapeHtml(e.time)+'</em><button class="diary-edit-btn" onclick="openDiaryEditor(\''+escJsStr(name)+'\')">编辑</button></span></div></div>'
+     const hidden=e.hidden===true;
+     return '<div class="diary-item'+(hidden?' diary-is-hidden':'')+'"><div class="diary-head"><span>'+escapeHtml(name)+(hidden?'<em class="diary-hidden-tag">已隐藏</em>':'')+'</span><span style="display:flex;align-items:center;gap:8px"><em>'+escapeHtml(e.time)+'</em><button class="diary-hide-btn" onclick="toggleDiaryHidden(\''+escJsStr(name)+'\')">'+(hidden?'显示':'隐藏')+'</button><button class="diary-edit-btn" onclick="openDiaryEditor(\''+escJsStr(name)+'\')">编辑</button></span></div></div>'
    }).join('');
+ }
+
+ async function toggleDiaryHidden(name){
+   const entries=AppState.INITIAL_DATA.diary||[];
+   const entry=entries.find(e=>e.name===name);
+   const toHidden=!(entry&&entry.hidden===true);
+   if(toHidden&&!confirm('隐藏 '+name+' ？\n隐藏后：不参与新会话的跨窗口日记注入、不占注入份数（顺位补足）。\n日记文件与时间线记录保留，可随时点「显示」恢复。'))return;
+   try{
+     const r=await fetch(ADMIN_API+'/diary/hide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,hidden:toHidden})});
+     const j=await r.json();
+     if(j.success){
+       toast(toHidden?'已隐藏，不再参与跨窗口注入':'已恢复，重新参与跨窗口注入');
+       try{
+         const dr=await fetch(ADMIN_API+'/env');
+         if(dr.ok){const d=await dr.json();AppState.INITIAL_DATA=d;}
+       }catch(e){}
+       renderDiary();
+     }else{
+       toast('操作失败: '+j.error);
+     }
+   }catch(e){
+     toast('网络错误: '+e.message);
+   }
  }
  
  function openDiaryEditor(name){

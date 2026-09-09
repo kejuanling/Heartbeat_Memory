@@ -1743,9 +1743,28 @@ function sessionCreatedAtOf(sessionId) {
   return null;
 }
 
+// ── 日记隐藏清单（2026-09-09）：管理台「日记阅览」可逐篇隐藏 ──
+// 作用范围仅「跨窗口注入」(recentDiaryTextBefore)：隐藏篇不参与注入、也不占注入份数（顺位前移补足 count 篇）。
+// 不影响：写日记会话时间线里的「自动写了日记」特殊事件（仍按时间线进上下文）、日记文件本身仍可查看/编辑。
+const DIARY_HIDDEN_FILE = path.join(__dirname, "data", "diary_hidden.json");
+function readDiaryHiddenSet() {
+  try {
+    const arr = fs.readJsonSync(DIARY_HIDDEN_FILE);
+    if (Array.isArray(arr)) return new Set(arr.filter(function (x) { return typeof x === "string" && x; }));
+  } catch (e) {}
+  return new Set();
+}
+function writeDiaryHiddenSet(set) {
+  try {
+    fs.ensureDirSync(path.dirname(DIARY_HIDDEN_FILE));
+    fs.writeJsonSync(DIARY_HIDDEN_FILE, Array.from(set).sort());
+  } catch (e) { console.warn("[diary] 写隐藏清单失败:", e.message); }
+}
+
 // 日记跨窗口注入（批注 2026-09-04，2026-09-08 收紧）：只注入"本会话创建日期之前"（严格早于）的日记，
 // 按日期升序（旧在前新在后）取最近 count 篇；2026-09-08 起仅严格早于（不含当天）。
 // 边界口径：日记文件名与 cutoff 都用 TIME_ZONE 本地日期（YYYY-MM-DD，严格小于当天）。
+// 2026-09-09 增：管理台隐藏的日记先剔除再取最近 count 篇（隐藏篇不注入、不占份数）。
 function recentDiaryTextBefore(sessionId, count, createdIso) {
   const diaryDir = path.join(__dirname, "diary");
   let files = [];
@@ -1761,8 +1780,9 @@ function recentDiaryTextBefore(sessionId, count, createdIso) {
     }
   } catch (e) {}
   if (!cutoff) return "";
-  // 只留 日记日期 < 会话创建日期
-  const before = files.filter(function (f) { return f.slice(0, 10) < cutoff; });
+  // 只留 日记日期 < 会话创建日期，且未被隐藏（隐藏篇不注入也不占份数，顺位前移）
+  const hiddenDiary = readDiaryHiddenSet();
+  const before = files.filter(function (f) { return f.slice(0, 10) < cutoff && !hiddenDiary.has(f); });
   if (!before.length) return "";
   const picked = before.slice(-Math.max(1, Number(count) || 3));
   const out = [];
@@ -1813,7 +1833,8 @@ function crossFingerprint(cfg) {
     if (cfg.cross_inject_diary !== false) {
       let dm = 0;
       try { dm = fs.statSync(path.join(__dirname, "diary")).mtimeMs; } catch (e) {}
-      parts.push("diary:" + dm);
+      // 2026-09-09：隐藏清单变化（隐藏/取消隐藏）也要触发快照重建，否则旧快照里的日记内容不会更新
+      parts.push("diary:" + dm + "|hidden:" + Array.from(readDiaryHiddenSet()).sort().join(","));
     }
   } catch (e) {}
   return crypto.createHash("md5").update(parts.join("|")).digest("hex");
@@ -4767,7 +4788,8 @@ app.post("/admin/context-compaction/generate", { preHandler: basicAuth }, async 
 app.get("/admin/env", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const diaryEntries = readDiaryEntries(20);
-    const diaryData = diaryEntries.map(e => ({ name: e.name, time: formatDateTimeInTimeZone(new Date(e.updated_at), TIME_ZONE), content: e.content }));
+    const diaryHiddenSet = readDiaryHiddenSet();
+    const diaryData = diaryEntries.map(e => ({ name: e.name, time: formatDateTimeInTimeZone(new Date(e.updated_at), TIME_ZONE), content: e.content, hidden: diaryHiddenSet.has(e.name) }));
     reply.send({
       uptime: Math.floor(process.uptime()),
       wakeStatus: wakeUpLastHeartbeat ? "在线（上次心跳: " + formatDateTimeInTimeZone(new Date(wakeUpLastHeartbeat), TIME_ZONE) + "）" : "离线或未启动",
@@ -4881,9 +4903,40 @@ app.post("/admin/diary/delete", { preHandler: basicAuth }, async (req, reply) =>
     }
     fs.removeSync(filePath);
     const removedEvents = removeDiarySpecialEvents(fileName);
+    // 文件删了，隐藏清单里的条目一并清掉，避免残留死条目
+    const hiddenSet = readDiaryHiddenSet();
+    if (hiddenSet.has(fileName)) { hiddenSet.delete(fileName); writeDiaryHiddenSet(hiddenSet); }
     reply.send({ success: true, file: fileName, removedEvents });
   } catch (err) {
     console.error("[diary] 删除日记失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 隐藏/取消隐藏日记（2026-09-09）：只影响「跨窗口注入」——隐藏篇不参与新会话注入、不占注入份数。
+// 不影响：时间线「自动写了日记」特殊事件、日记文件本身（仍可查看/编辑）。隐藏清单变化会触发快照指纹重建。
+app.post("/admin/diary/hide", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const { name, hidden } = req.body || {};
+    const fileName = String(name || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}\.md$/i.test(fileName)) {
+      return reply.code(400).send({ error: "日记文件名格式不正确（应为 YYYY-MM-DD.md）" });
+    }
+    const dir = diaryDirectoryPath();
+    const filePath = path.join(dir, fileName);
+    if (path.dirname(path.resolve(filePath)) !== path.resolve(dir)) {
+      return reply.code(400).send({ error: "非法日记路径" });
+    }
+    if (!fs.existsSync(filePath)) {
+      return reply.code(404).send({ error: "日记文件不存在：" + fileName });
+    }
+    const wantHidden = hidden !== false;
+    const set = readDiaryHiddenSet();
+    if (wantHidden) set.add(fileName); else set.delete(fileName);
+    writeDiaryHiddenSet(set);
+    reply.send({ success: true, file: fileName, hidden: wantHidden });
+  } catch (err) {
+    console.error("[diary] 切换日记隐藏失败:", err);
     reply.code(500).send({ error: err.message });
   }
 });
