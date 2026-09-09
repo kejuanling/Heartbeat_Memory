@@ -37,6 +37,24 @@
   --bubble-ai:#fffdf9;
   --bubble-opacity:1;
   --bubble-blur:0px;
+  /* 胶囊颜色（思考/工具：边框/背景/文字，主题面板可调），默认沿用当前效果 */
+  --cap-think-border:#c89098;
+  --cap-think-bg:#f1ebe9;
+  --cap-think-text:#c89098;
+  --cap-tool-border:#5a86a6;
+  --cap-tool-bg:#e7ecf3;
+  --cap-tool-text:#5a86a6;
+  /* 窗口级可调（主题面板可调，默认沿用当前效果） */
+  --hd-title:#b07a6a;
+  --inputbar-bg:rgba(255,255,255,.72);
+  --inputbar-border:rgba(200,144,152,.2);
+  --input-text:#5a4a3a;
+  --send-bg:linear-gradient(135deg,#d6a2ad,#c98696);
+  --send-icon:#ffffff;
+  --avatar-bg:linear-gradient(135deg,#d6a2ad,#c98696);
+  --icon-btn-bg:rgba(200,144,152,.1);
+  --icon-btn-color:#b07a6a;
+  --bubble-shadow:rgba(181,131,122,.10);
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{height:100%}
@@ -61,12 +79,12 @@ header{
   position:relative;z-index:2;
   padding:calc(env(safe-area-inset-top) + 12px) 18px 12px;
   display:flex;align-items:center;gap:12px;
-  background:linear-gradient(180deg,rgba(255,255,255,.85),rgba(255,255,255,0));
+  background:var(--hd-bar,linear-gradient(180deg,rgba(255,255,255,.85),rgba(255,255,255,0)));
   backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
 }
 .avatar{
   width:40px;height:40px;border-radius:50%;flex-shrink:0;
-  background:var(--accent-grad);
+  background:var(--avatar-bg,var(--accent-grad));
   display:flex;align-items:center;justify-content:center;
   color:#fff;font-size:19px;font-family:"Noto Serif SC",serif;
   box-shadow:0 4px 12px rgba(176,122,106,.28);
@@ -78,7 +96,7 @@ header{
   background:#9fd6a8;border:2px solid #fffdf9;
 }
 .hd-mid{flex:1;min-width:0}
-.hd-name{font-size:16px;font-weight:600;letter-spacing:1px;color:var(--accent-deep);font-family:"Noto Serif SC",serif}
+.hd-name{font-size:16px;font-weight:600;letter-spacing:1px;color:var(--hd-title,var(--accent-deep));font-family:"Noto Serif SC",serif}
 .hd-sub{font-size:11px;color:var(--ink3);letter-spacing:1.5px;margin-top:2px}
 /* 顶部栏按聊天布局(模板)差异化 —— 仅调整名称位置/头像与名称，保留左侧会话按钮与右侧菜单按钮 */
 .hd-mid{display:flex;flex-direction:column}
@@ -168,7 +186,7 @@ header.hd-custom .hd-mid{align-items:flex-start}
 .msg .bubble{
   padding:11px 14px;border-radius:var(--radius);
   font-size:var(--bubble-font-size,15px);line-height:1.72;word-break:break-word;
-  box-shadow:0 3px 14px rgba(181,131,122,.10);
+  box-shadow:0 3px 14px var(--bubble-shadow,rgba(181,131,122,.10));
   max-width:84%;width:fit-content;
   white-space:pre-wrap;overflow-wrap:break-word;
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;position:relative;
@@ -188,7 +206,7 @@ header.hd-custom .hd-mid{align-items:flex-start}
 }
 /* ---- 聊天布局切换：QQ / 微信 / 短信 / 自定义 ---- */
 /* 布局级：QQ=微信=短信 用一体尾巴（颜色跟主题联动）；自定义=纯 CSS 无尾。 */
-#chat .msg{margin-bottom:0}
+#chat .msg{margin-bottom:12px}
 /* 通用：侧边头像结构（自定义也用一个干净的位置） */
 #chat[data-layout] .mrow{display:flex;align-items:flex-start;gap:7px;width:100%;max-width:100%}
 #chat[data-layout] .msg.ai .mrow{flex-direction:row}
@@ -208,7 +226,9 @@ header.hd-custom .hd-mid{align-items:flex-start}
 #chat[data-layout] .msg.user .mrow .mcol{align-items:flex-end}
 #chat[data-layout] .mcol .mnm{font-size:10.5px;color:var(--ink2);margin:0 3px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #chat[data-layout] .msg.user .mcol .mnm{color:rgba(255,255,255,.75)}
-#chat[data-layout] .msg .mrow+.mrow{margin-top:6px}
+#chat[data-layout] .msg .mrow+.mrow{margin-top:10px}
+/* 兜底：多气泡/自定义主题下给分段气泡也留出间距，避免黏连 */
+.msg .mcol .bubble+.bubble{margin-top:8px}
 #chat[data-layout] .msg .meta{margin-top:2px}
 #chat[data-layout] .msg .bubble{position:relative}
 /* === QQ：蓝色气泡、头像贴侧边（圆形）、无尾巴（靠近头像那角圆角收口） === */
@@ -227,11 +247,11 @@ header.hd-custom .hd-mid{align-items:flex-start}
 #chat[data-layout="wx"] .msg.user .bubble::after{right:-6px;border-left:6px solid var(--bubble-user1)}
 #chat[data-layout="wx"] .mrow .mav{width:40px;height:40px;border-radius:6px}
 /* === 短信：无消息头像、右绿/左灰、无尾巴、露一角收小 === */
-#chat[data-layout="sms"] .msg{gap:0}
+#chat[data-layout="sms"] .msg{gap:8px}
 #chat[data-layout="sms"] .msg .mhead{display:none}
 #chat[data-layout="sms"] .msg .mav{display:none!important}
 #chat[data-layout="sms"] .msg .mnm{display:none!important}
-#chat[data-layout="sms"] .msg .bubble+.bubble{margin-top:6px}
+#chat[data-layout="sms"] .msg .bubble+.bubble{margin-top:0}
 #chat[data-layout="sms"] .msg .bubble{border-radius:20px;box-shadow:none;border:none}
 #chat[data-layout="sms"] .msg.ai .bubble{background:var(--bubble-ai);color:var(--ai-font-color,var(--ink));border-bottom-left-radius:6px}
 #chat[data-layout="sms"] .msg.user .bubble{background:var(--bubble-user1);color:var(--user-font-color,#fff);border-bottom-right-radius:6px}
@@ -250,7 +270,7 @@ header.hd-custom .hd-mid{align-items:flex-start}
   padding:8px 14px;margin:2px 0;border-radius:16px;
   background:var(--bubble-ai);border:1px solid rgba(200,144,152,.16);
   color:var(--ai-font-color,var(--ink));
-  box-shadow:0 3px 14px rgba(181,131,122,.10);
+  box-shadow:0 3px 14px var(--bubble-shadow,rgba(181,131,122,.10));
   cursor:default;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;
   transition:background .2s,transform .12s;
 }
@@ -304,6 +324,25 @@ header.hd-custom .hd-mid{align-items:flex-start}
   border-radius:10px;display:block;cursor:zoom-in;
   box-shadow:0 1px 4px rgba(0,0,0,.18);
 }
+/* 2026-09-10 气泡内文件卡片 */
+.bubble-files{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 4px;max-width:320px}
+.msg.user .bubble-files{justify-content:flex-end;margin-left:auto}
+.msg.ai .bubble-files{justify-content:flex-start}
+.file-card{
+  display:flex;align-items:center;gap:8px;padding:8px 10px;min-width:200px;max-width:280px;
+  border-radius:var(--radius-sm);border:1px solid rgba(200,144,152,.25);background:rgba(255,255,255,.7);
+  color:inherit;text-decoration:none;cursor:pointer;
+}
+.file-card:hover{border-color:var(--accent)}
+.file-card .fc-ico{
+  flex:0 0 auto;min-width:32px;height:32px;line-height:32px;text-align:center;
+  border-radius:8px;background:var(--accent-faint);color:var(--accent-deep);
+  font-size:12px;font-weight:700;padding:0 5px;box-sizing:border-box;
+}
+.file-card .fc-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.file-card .fc-name{font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.file-card .fc-meta{font-size:11px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.file-card .fc-dl{flex:0 0 auto;color:var(--accent-deep);display:flex;align-items:center}
 /* 图片放大弹窗：固定遮罩 + 白色容器盒子，点遮罩或右上角 x 关闭 */
 #imgLightbox{
   position:fixed;inset:0;background:rgba(20,14,14,.62);z-index:99999;
@@ -372,21 +411,21 @@ footer{
 }
 .inputbar{
   display:flex;align-items:center;gap:8px;
-  background:rgba(255,255,255,.72);
-  border:1px solid rgba(200,144,152,.2);
+  background:var(--inputbar-bg);
+  border:1px solid var(--inputbar-border);
   border-radius:24px;padding:7px 8px 7px 14px;
   box-shadow:0 4px 16px rgba(181,131,122,.10);
 }
-.inputbar:focus-within{border-color:rgba(200,144,152,.4)}
+.inputbar:focus-within{border-color:var(--inputbar-border)}
 #input{
   flex:1;min-width:0;border:none;outline:none;background:transparent;
-  font-size:15px;line-height:1.5;color:var(--ink);
+  font-size:15px;line-height:1.5;color:var(--input-text,var(--ink));
   resize:none;max-height:120px;font-family:inherit;
 }
 #input::placeholder{color:var(--ink3)}
 .icon-btn{
   width:34px;height:34px;border:none;border-radius:50%;flex-shrink:0;
-  background:rgba(200,144,152,.1);color:var(--accent-deep);
+  background:var(--icon-btn-bg);color:var(--icon-btn-color);
   font-size:16px;cursor:pointer;
   display:flex;align-items:center;justify-content:center;
   transition:all .2s;
@@ -406,8 +445,8 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 @keyframes vmRec{0%,100%{box-shadow:0 0 0 0 rgba(214,69,69,.5)}50%{box-shadow:0 0 0 7px rgba(214,69,69,0)}}
 #send{
   width:36px;height:36px;border:none;border-radius:50%;flex-shrink:0;
-  background:var(--accent-grad);
-  color:#fff;font-size:15px;cursor:pointer;
+  background:var(--send-bg,var(--accent-grad));
+  color:var(--send-icon,#fff);font-size:15px;cursor:pointer;
   display:flex;align-items:center;justify-content:center;
   box-shadow:0 3px 10px rgba(200,144,152,.35);
   transition:all .2s;
@@ -426,6 +465,19 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
   position:absolute;top:2px;right:2px;width:18px;height:18px;border:none;
   border-radius:50%;background:rgba(0,0,0,.5);color:#fff;font-size:11px;cursor:pointer;
 }
+/* 2026-09-10 文件预览卡片（+ 号选非图片文件） */
+.preview-file{
+  position:relative;width:150px;height:60px;border-radius:var(--radius-sm);
+  border:1px solid rgba(200,144,152,.25);background:#fff;
+  display:flex;align-items:center;gap:6px;padding:0 8px;box-sizing:border-box;
+}
+.preview-file .pf-ico{
+  flex:0 0 auto;min-width:28px;height:28px;line-height:28px;text-align:center;
+  border-radius:6px;background:var(--accent-faint);color:var(--accent-deep);
+  font-size:11px;font-weight:700;padding:0 4px;box-sizing:border-box;
+}
+.preview-file .pf-name{flex:1;font-size:12px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.preview-file .rm{position:absolute;top:2px;right:2px;width:18px;height:18px;border:none;border-radius:50%;background:rgba(0,0,0,.5);color:#fff;font-size:11px;cursor:pointer}
 #fileInput{display:none}
 
 /* ============ 多选工具栏 ============ */
@@ -654,6 +706,9 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .saved-theme:active{background:var(--accent-soft);transform:scale(.98)}
 .saved-theme .st-swatch{width:15px;height:15px;border-radius:50%;flex-shrink:0;border:1px solid rgba(0,0,0,.08);box-shadow:inset 0 0 0 1px rgba(0,0,0,.04)}
 .saved-theme .st-n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.saved-theme.cur{border-color:var(--accent);background:var(--accent-soft)}
+.saved-theme.cur .st-n{font-weight:600;color:var(--accent-deep)}
+.saved-theme .st-cur{flex:none;font-size:10px;color:var(--accent-deep);border:1px solid var(--accent);border-radius:999px;padding:1px 7px;background:rgba(200,144,152,.08)}
 .saved-theme .st-del{margin-left:2px;width:19px;height:19px;border:none;background:none;color:var(--ink3);font-size:14px;line-height:1;cursor:pointer;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s}
 .saved-theme .st-del:hover{color:#c97070;background:rgba(216,131,131,.14)}
 /* 提示词备份（AI 设置内）：与保存主题同风格，列表纵向排布 */
@@ -746,12 +801,12 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 
 /* 思考过程（可折叠） */
 .rw{
-  width:100%;margin-bottom:8px;border-left:3px solid var(--accent-soft);
+  width:100%;margin-bottom:8px;border-left:3px solid var(--cap-think-border);
   padding:6px 10px;border-radius:0 8px 8px 0;
-  background:rgba(200,144,152,.06);font-size:12.5px;color:var(--ink2);
+  background:var(--cap-think-bg);font-size:12.5px;color:var(--ink2);
   line-height:1.7;cursor:pointer;user-select:none;-webkit-user-select:none;
 }
-.rw .rw-h{font-size:11px;color:var(--accent);letter-spacing:1px;display:flex;align-items:center;gap:6px}
+.rw .rw-h{font-size:11px;color:var(--cap-think-text);letter-spacing:1px;display:flex;align-items:center;gap:6px}
 .rw .rw-c{display:none;margin-top:6px;white-space:pre-wrap;font-size:12px}
 .rw.open .rw-c{display:block}
 .rw .rw-a{font-size:10px;color:var(--ink3);margin-left:auto;transition:transform .2s}
@@ -764,15 +819,15 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 
 /* 工具胶囊（API 工具调用痕迹） */
 .tool-trace{
-  width:100%;max-width:min(84%,640px);margin-bottom:8px;border-left:3px solid rgba(92,134,166,.35);
+  width:100%;max-width:min(84%,640px);margin-bottom:8px;border-left:3px solid var(--cap-tool-border);
   padding:7px 12px;border-radius:0 8px 8px 0;
-  background:rgba(92,134,166,.07);font-size:12.5px;color:var(--ink2);
+  background:var(--cap-tool-bg);font-size:12.5px;color:var(--ink2);
   line-height:1.5;cursor:pointer;user-select:none;-webkit-user-select:none;
 }
-.tool-trace .tt-h{font-size:11px;color:#5a86a6;letter-spacing:.3px;display:flex;align-items:center;gap:7px;flex-wrap:nowrap;min-width:0}
+.tool-trace .tt-h{font-size:11px;color:var(--cap-tool-text);letter-spacing:.3px;display:flex;align-items:center;gap:7px;flex-wrap:nowrap;min-width:0}
 .tool-trace .tt-h>*{flex-shrink:0}
 .tool-trace .tt-icon{font-size:12px;display:inline-flex}
-.tool-trace .tt-name{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:#4a7a9c;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tool-trace .tt-name{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:var(--cap-tool-text);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tool-trace .tt-a{font-size:10px;color:var(--ink3);margin-left:auto;transition:transform .2s}
 .tool-trace.open .tt-a{transform:rotate(180deg)}
 .tool-trace .tt-body{display:none;margin-top:6px;font-size:12px}
@@ -911,9 +966,9 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .session-item{
   display:flex;flex-direction:column;gap:2px;padding:10px 12px;margin:5px 0;border-radius:14px;
   cursor:pointer;transition:background .15s,border-color .15s,box-shadow .15s;border:1px solid transparent;
-  position:relative;background:rgba(255,255,255,.55);box-shadow:0 1px 2px rgba(90,74,58,.05);
+  position:relative;background:var(--chrome-item,rgba(255,255,255,.55));box-shadow:0 1px 2px rgba(90,74,58,.05);
 }
-.session-item:hover{background:rgba(255,255,255,.82)}
+.session-item:hover{background:var(--chrome-item-hover,rgba(255,255,255,.82))}
 .session-item.active{background:var(--accent-soft);border-color:rgba(200,144,152,.32);box-shadow:0 2px 8px rgba(200,144,152,.14)}
 .session-item .s-name{font-size:14px;font-weight:600;color:var(--ink);display:flex;align-items:center;gap:5px;min-width:0}
 .session-item .s-title{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
@@ -1107,7 +1162,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .adm-imp{width:60px;height:5px;border-radius:3px;background:rgba(200,144,152,.2);overflow:hidden;flex-shrink:0}
 .adm-imp i{display:block;height:100%;background:var(--accent-grad)}
 /* 会话搜索 */
-.session-search{display:flex;align-items:center;gap:6px;margin:0 14px 8px;padding:8px 10px;border:1px solid rgba(200,144,152,.25);border-radius:10px;background:rgba(255,255,255,.7)}
+.session-search{display:flex;align-items:center;gap:6px;margin:0 14px 8px;padding:8px 10px;border:1px solid rgba(200,144,152,.25);border-radius:10px;background:var(--chrome-item,rgba(255,255,255,.7))}
 .session-search input{flex:1;min-width:0;border:none;outline:none;background:transparent;font-size:13px;color:var(--ink);font-family:inherit}
 .session-search .si{color:var(--ink3);font-size:14px;flex-shrink:0}
 .session-search .mode-toggle{font-size:11px;color:var(--ink3);cursor:pointer;padding:2px 6px;border-radius:6px;background:rgba(200,144,152,.1);flex-shrink:0;user-select:none}
@@ -1593,21 +1648,12 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
               <div class="pick" id="pickOthers">
                 <button data-k="show_token" class="on">token</button>
                 <button data-k="show_tools" class="on">工具痕迹</button>
-                <button data-k="show_avatar" class="on">头像</button>
-                <button data-k="show_name" class="on">名称</button>
                 <button data-k="show_time">消息时间</button>
               </div>
               <div class="set-sec-label">发送方式</div>
               <div class="pick" id="pickMode">
                 <button data-m="stream" class="on">流式</button>
                 <button data-m="nonstream">非流式</button>
-              </div>
-              <div class="set-sec-label">聊天布局</div>
-              <div class="pick" id="pickBstyle">
-                <button data-bs="qq" class="on">QQ</button>
-                <button data-bs="wx">微信</button>
-                <button data-bs="sms">短信</button>
-                <button data-bs="custom">自定义</button>
               </div>
               <div class="field" style="margin-top:10px">
                 <label>气泡分隔符<span class="tag">AI 回复拆多个气泡</span></label>
@@ -1623,6 +1669,17 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
                   <button data-k="code_wrap" class="on">代码块换行</button>
                 </div>
               </div></div><div class="set-panel" data-acc="theme"><div class="set-acc-h" data-acc="theme">主题<span class="ar">▾</span></div><div class="set-sec">
+            <div class="set-sec-label">布局与显示</div>
+            <div class="pick" id="pickThemeShow">
+              <button data-k="show_avatar" class="on">显示头像</button>
+              <button data-k="show_name" class="on">显示名称</button>
+            </div>
+            <div class="pick" id="pickBstyle">
+              <button data-bs="qq" class="on">QQ</button>
+              <button data-bs="wx">微信</button>
+              <button data-bs="sms">短信</button>
+              <button data-bs="custom">自定义</button>
+            </div>
             <div class="set-sec-label">背景</div>
             <div class="bg-mode-switch" style="display:flex;gap:8px;margin:2px 0 10px">
               <button type="button" class="mcp-btn bg-mode-btn" id="bgModeColorBtn" data-bg="color" style="flex:1">纯色背景</button>
@@ -1658,6 +1715,13 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
               <label>圆角<span class="tag">px</span></label>
               <div class="theme-row"><input type="range" id="bubbleRadius" min="0" max="30" value="18" step="1"><span class="v" id="bubbleRadiusVal">18px</span></div>
             </div>
+            <div class="set-sec-label">胶囊</div>
+            <div class="theme-field"><label>思考边框</label><div class="theme-row"><input type="color" id="thinkCapBorder" value="#c89098"></div></div>
+            <div class="theme-field"><label>思考背景</label><div class="theme-row"><input type="color" id="thinkCapBg" value="#f1ebe9"></div></div>
+            <div class="theme-field"><label>思考文字</label><div class="theme-row"><input type="color" id="thinkCapText" value="#c89098"></div></div>
+            <div class="theme-field"><label>工具边框</label><div class="theme-row"><input type="color" id="toolCapBorder" value="#5a86a6"></div></div>
+            <div class="theme-field"><label>工具背景</label><div class="theme-row"><input type="color" id="toolCapBg" value="#e7ecf3"></div></div>
+            <div class="theme-field"><label>工具文字</label><div class="theme-row"><input type="color" id="toolCapText" value="#5a86a6"></div></div>
             <div class="set-sec-label">文字</div>
             <div class="theme-field">
               <label>我的文字颜色</label>
@@ -1690,10 +1754,32 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
                 <option value="sans-serif">无衬线 sans-serif</option>
               </select></div>
             </div>
+            <div class="set-sec-label">窗口</div>
+            <div class="theme-field"><label>主强调色<span class="tag">带动整片界面</span></label><div class="theme-row"><input type="color" id="accentColorInput" value="#c89098"></div></div>
+            <div class="theme-field"><label>界面底色<span class="tag">抽屉/列表/卡片</span></label><div class="theme-row"><input type="color" id="chromeBgInput" value="#ffffff"></div></div>
+            <div class="theme-field"><label>页面主文字</label><div class="theme-row"><input type="color" id="pageTextInput" value="#5a4a3a"></div></div>
+            <div class="theme-field"><label>次要文字</label><div class="theme-row"><input type="color" id="pageText2Input" value="#a08a7a"></div></div>
+            <div class="theme-field"><label>弱文字</label><div class="theme-row"><input type="color" id="pageText3Input" value="#cfc0b6"></div></div>
+            <div class="theme-field"><label>顶部标题</label><div class="theme-row"><input type="color" id="headerTitleInput" value="#b07a6a"></div></div>
+            <div class="theme-field"><label>输入框背景</label><div class="theme-row"><input type="color" id="inputbarBgInput" value="#ffffff"></div></div>
+            <div class="theme-field"><label>输入框边框</label><div class="theme-row"><input type="color" id="inputbarBorderInput" value="#ddbdc4"></div></div>
+            <div class="theme-field"><label>输入框文字</label><div class="theme-row"><input type="color" id="inputTextInput" value="#5a4a3a"></div></div>
+            <div class="theme-field"><label>发送键背景</label><div class="theme-row"><input type="color" id="sendBtnInput" value="#c98696"></div></div>
+            <div class="theme-field"><label>发送键图标</label><div class="theme-row"><input type="color" id="sendIconInput" value="#ffffff"></div></div>
+            <div class="theme-field"><label>头像背景</label><div class="theme-row"><input type="color" id="avatarBgInput" value="#d6a2ad"></div></div>
+            <div class="theme-field"><label>图标按钮底色</label><div class="theme-row"><input type="color" id="iconBtnBgInput" value="#f2e3e5"></div></div>
+            <div class="theme-field"><label>图标按钮颜色</label><div class="theme-row"><input type="color" id="iconBtnColorInput" value="#b07a6a"></div></div>
+            <div class="theme-field"><label>气泡阴影</label><div class="theme-row"><input type="color" id="bubbleShadowInput" value="#b58382"></div></div>
             <div class="theme-preview" id="themePreview"><span class="pa">助手消息</span><span class="pu">我的消息</span></div>
             <div class="set-sec-label">保存主题</div>
             <div class="theme-save">
               <div class="ts-row"><input type="text" id="themeNameInput" placeholder="主题名（新增主题时必填，留空则仅保存修改）"><button type="button" class="mcp-btn primary ts-btn" id="saveThemeBtn">保存</button></div>
+              <div class="ts-row"><button type="button" class="mcp-btn ts-btn" id="exportThemeBtn">导出当前</button><button type="button" class="mcp-btn ts-btn" id="importThemeBtn">一键导入</button></div>
+              <div id="themeImportBox" style="display:none;flex-direction:column;gap:8px">
+                <textarea id="themeImportArea" placeholder="粘贴主题码，点「导入并应用」一次套用全部颜色…" style="min-height:66px;font-size:12px;line-height:1.5" rows="2"></textarea>
+                <div class="ts-row" style="flex:none"><button type="button" class="mcp-btn primary ts-btn" id="themeImportGo" style="flex:1">导入并应用</button><button type="button" class="mcp-btn ts-btn" id="themeImportCancel">取消</button></div>
+                <div class="data-tip">导出当前=把当前生效主题生成一串主题码；一键导入=粘贴主题码即套用全部颜色（含胶囊色/背景）。<span id="themeCount" style="color:var(--accent)"></span></div>
+              </div>
               <div id="savedThemes" class="saved-themes"></div>
             </div>
           </div></div>
@@ -1754,6 +1840,29 @@ const DEFAULT_CFG={
   ai_font_color:"#5a4a3a",
   font_family:"",
   font_size:15,
+  // 胶囊颜色（思考/工具：边框/背景/文字，主题面板可调）
+  think_cap_border:"#c89098",
+  think_cap_bg:"#f1ebe9",
+  think_cap_text:"#c89098",
+  tool_cap_border:"#5a86a6",
+  tool_cap_bg:"#e7ecf3",
+  tool_cap_text:"#5a86a6",
+  // 窗口级可调（主题面板可调；空=沿用当前效果）
+  accent_color:"",
+  chrome_bg:"",
+  page_text:"",
+  page_text2:"",
+  page_text3:"",
+  header_title:"",
+  inputbar_bg:"",
+  inputbar_border:"",
+  input_text:"",
+  send_btn:"",
+  send_icon:"",
+  avatar_bg:"",
+  icon_btn_bg:"",
+  icon_btn_color:"",
+  bubble_shadow:"",
   // 头像与名称
   user_name:"我",       // 我的消息显示名
   user_avatar:"",        // 我的头像（1 个字/emoji，空则取名称首字）
@@ -1831,6 +1940,13 @@ function applySettingsToUI(){
   if(typeof bubbleRadius!=="undefined" && bubbleRadius) bubbleRadius.value=cfg.bubble_radius!=null?cfg.bubble_radius:18;
   if(typeof userFontColorInput!=="undefined" && userFontColorInput) userFontColorInput.value=cfg.user_font_color||"#ffffff";
   if(typeof aiFontColorInput!=="undefined" && aiFontColorInput) aiFontColorInput.value=cfg.ai_font_color||"#5a4a3a";
+  if(typeof thinkCapBorder!=="undefined" && thinkCapBorder) thinkCapBorder.value=cfg.think_cap_border||"#c89098";
+  if(typeof thinkCapBg!=="undefined" && thinkCapBg) thinkCapBg.value=cfg.think_cap_bg||"#f1ebe9";
+  if(typeof thinkCapText!=="undefined" && thinkCapText) thinkCapText.value=cfg.think_cap_text||"#c89098";
+  if(typeof toolCapBorder!=="undefined" && toolCapBorder) toolCapBorder.value=cfg.tool_cap_border||"#5a86a6";
+  if(typeof toolCapBg!=="undefined" && toolCapBg) toolCapBg.value=cfg.tool_cap_bg||"#e7ecf3";
+  if(typeof toolCapText!=="undefined" && toolCapText) toolCapText.value=cfg.tool_cap_text||"#5a86a6";
+  if(typeof populateWindowInputs==="function") populateWindowInputs(cfg);
   if(typeof fontFamilyInput!=="undefined" && fontFamilyInput) fontFamilyInput.value=cfg.font_family||"";
   if(typeof fontSizeInput!=="undefined" && fontSizeInput) fontSizeInput.value=cfg.font_size||15;
   if(typeof userNameInput!=="undefined" && userNameInput) userNameInput.value=cfg.user_name||"我";
@@ -1889,6 +2005,7 @@ const hdSub=document.getElementById("hdSub");
 const hdAvatar=document.getElementById("hdAvatar");
 const pickThinking=document.getElementById("pickThinking");
 const pickOthers=document.getElementById("pickOthers");
+const pickThemeShow=document.getElementById("pickThemeShow");
 const pickBstyle=document.getElementById("pickBstyle");
 const pickRender=document.getElementById("pickRender");
 const pickMode=document.getElementById("pickMode");
@@ -1924,6 +2041,98 @@ const bubbleRadius=document.getElementById("bubbleRadius");
 const bubbleRadiusVal=document.getElementById("bubbleRadiusVal");
 const fontSizeVal=document.getElementById("fontSizeVal");
 const themePreview=document.getElementById("themePreview");
+const thinkCapBorder=document.getElementById("thinkCapBorder");
+const thinkCapBg=document.getElementById("thinkCapBg");
+const thinkCapText=document.getElementById("thinkCapText");
+const toolCapBorder=document.getElementById("toolCapBorder");
+const toolCapBg=document.getElementById("toolCapBg");
+const toolCapText=document.getElementById("toolCapText");
+const themeImportBox=document.getElementById("themeImportBox");
+const themeImportArea=document.getElementById("themeImportArea");
+const themeCountEl=document.getElementById("themeCount");
+const exportThemeBtn=document.getElementById("exportThemeBtn");
+const importThemeBtn=document.getElementById("importThemeBtn");
+const themeImportGo=document.getElementById("themeImportGo");
+const themeImportCancel=document.getElementById("themeImportCancel");
+const pageTextInput=document.getElementById("pageTextInput");
+const accentColorInput=document.getElementById("accentColorInput");
+const chromeBgInput=document.getElementById("chromeBgInput");
+const pageText2Input=document.getElementById("pageText2Input");
+const pageText3Input=document.getElementById("pageText3Input");
+const headerTitleInput=document.getElementById("headerTitleInput");
+const inputbarBgInput=document.getElementById("inputbarBgInput");
+const inputbarBorderInput=document.getElementById("inputbarBorderInput");
+const inputTextInput=document.getElementById("inputTextInput");
+const sendBtnInput=document.getElementById("sendBtnInput");
+const sendIconInput=document.getElementById("sendIconInput");
+const avatarBgInput=document.getElementById("avatarBgInput");
+const iconBtnBgInput=document.getElementById("iconBtnBgInput");
+const iconBtnColorInput=document.getElementById("iconBtnColorInput");
+const bubbleShadowInput=document.getElementById("bubbleShadowInput");
+// 窗口级默认代表色：用户没改→存空（沿用 :root 当前效果）；改了才覆盖
+const WIN_DEFAULTS={
+  accent_color:"#c89098",
+  chrome_bg:"#ffffff",
+  page_text:"#5a4a3a", page_text2:"#a08a7a", page_text3:"#cfc0b6",
+  header_title:"#b07a6a",
+  inputbar_bg:"#ffffff", inputbar_border:"#ddbdc4", input_text:"#5a4a3a",
+  send_btn:"#c98696", send_icon:"#ffffff",
+  avatar_bg:"#d6a2ad",
+  icon_btn_bg:"#f2e3e5", icon_btn_color:"#b07a6a",
+  bubble_shadow:"#b58382"
+};
+// 窗口色采集：用户改动（≠默认代表色）才返回实色，否则 ''（沿用 :root 当前效果）
+function winVal(input,key){
+  if(!input) return "";
+  const v=String(input.value||"").trim();
+  const rep=WIN_DEFAULTS[key];
+  if(!v) return "";
+  if(rep && v.toLowerCase()===rep.toLowerCase()) return "";
+  return v;
+}
+// 应用窗口色到 CSS 变量：s 为 {page_text,...}（空串=还原默认）
+function setWindowVars(root,s){
+  const set=function(n,v){ if(v) root.setProperty(n,v); else root.removeProperty(n); };
+  // 强调色：派生整族（深/浅/软/渐变），带动顶部按钮/时间分隔/语音条/会话列表/设置面板/登录页等全部强调色界面
+  if(s.accent_color){
+    const c=s.accent_color;
+    set("--accent",c); set("--accent-deep",shade(c,-16)); set("--accent-soft",hexToRgba(c,0.22)); set("--accent-faint",hexToRgba(c,0.12));
+    set("--accent-grad","linear-gradient(135deg,"+shade(c,16)+","+shade(c,-4)+")");
+  } else {
+    set("--accent",""); set("--accent-deep",""); set("--accent-soft",""); set("--accent-faint",""); set("--accent-grad","");
+  }
+  // 界面底色：驱动抽屉/会话列表/顶部栏/卡片/登录页等非强调色的白/米底色，深色主题不再刺眼
+  if(s.chrome_bg){
+    const c=s.chrome_bg;
+    set("--bg1",c); set("--card-solid",c); set("--card",hexToRgba(c,0.6));
+    set("--chrome-item",hexToRgba(c,0.72)); set("--chrome-item-hover",hexToRgba(c,0.92));
+    set("--hd-bar","linear-gradient(180deg,"+hexToRgba(c,0.9)+",rgba(0,0,0,0))");
+  } else {
+    ["--bg1","--card-solid","--card","--chrome-item","--chrome-item-hover","--hd-bar"].forEach(function(v){root.removeProperty(v);});
+  }
+  set("--ink",s.page_text); set("--ink2",s.page_text2); set("--ink3",s.page_text3);
+  set("--hd-title",s.header_title);
+  set("--inputbar-bg",s.inputbar_bg); set("--inputbar-border",s.inputbar_border); set("--input-text",s.input_text);
+  if(s.send_btn) root.setProperty("--send-bg","linear-gradient(135deg,"+shade(s.send_btn,22)+","+s.send_btn+")"); else root.removeProperty("--send-bg");
+  set("--send-icon",s.send_icon);
+  if(s.avatar_bg) root.setProperty("--avatar-bg","linear-gradient(135deg,"+shade(s.avatar_bg,14)+","+s.avatar_bg+")"); else root.removeProperty("--avatar-bg");
+  set("--icon-btn-bg",s.icon_btn_bg); set("--icon-btn-color",s.icon_btn_color);
+  if(s.bubble_shadow) root.setProperty("--bubble-shadow",hexToRgba(s.bubble_shadow,0.12)); else root.removeProperty("--bubble-shadow");
+}
+// 回填窗口色控件：src 为空/该键为空时用 WIN_DEFAULTS 默认代表色
+function populateWindowInputs(src){
+  const s=src||{};
+  const set=function(input,key,def){ if(input) input.value=s[key]||WIN_DEFAULTS[key]||def; };
+  set(pageTextInput,'page_text','#5a4a3a'); set(pageText2Input,'page_text2','#a08a7a'); set(pageText3Input,'page_text3','#cfc0b6');
+  set(accentColorInput,'accent_color','#c89098');
+  set(chromeBgInput,'chrome_bg','#ffffff');
+  set(headerTitleInput,'header_title','#b07a6a');
+  set(inputbarBgInput,'inputbar_bg','#ffffff'); set(inputbarBorderInput,'inputbar_border','#ddbdc4'); set(inputTextInput,'input_text','#5a4a3a');
+  set(sendBtnInput,'send_btn','#c98696'); set(sendIconInput,'send_icon','#ffffff');
+  set(avatarBgInput,'avatar_bg','#d6a2ad');
+  set(iconBtnBgInput,'icon_btn_bg','#f2e3e5'); set(iconBtnColorInput,'icon_btn_color','#b07a6a');
+  set(bubbleShadowInput,'bubble_shadow','#b58382');
+}
 /* ---- MCP 服务器管理 ---- */
 const mcpList=document.getElementById("mcpList");
 const mcpAddBtn=document.getElementById("mcpAddBtn");
@@ -2001,6 +2210,7 @@ const editSave=document.getElementById("editSave");
 const editCancel=document.getElementById("editCancel");
 let editIdx=-1;
 let imgData=[];
+let fileData=[];
 
 /* ================= 存储 ================= */
 function loadMsgs(){
@@ -2311,6 +2521,11 @@ function msgImages(m){
   if(Array.isArray(m.content))return m.content.filter(x=>x.type==="image_url").map(x=>x.image_url.url);
   return [];
 }
+// 消息里的文件卡片数据（2026-09-10，与 msgImages 对称；AI 侧在 renderAiContent 内联处理）
+function msgFiles(m){
+  if(Array.isArray(m.content))return m.content.filter(x=>x.type==="file"&&x.file).map(x=>x.file);
+  return [];
+}
 // 消息标星 key：与服务端 contentKey 同口径（sha256(role+\0+正文) 前32位），
 // 用于读取/更新管理台标记列表（标星 → 跨窗口记忆注入）。用异步 crypto.subtle。
 async function msgStarKeyBackend(m){
@@ -2560,6 +2775,12 @@ function renderAiContent(msgEl, bubble, content, reasoning, tools, segments){
       _imgs.forEach(function(x){ const img=document.createElement("img"); img.src=x.image_url.url; img.alt=""; img.onerror=function(){this.style.display="none";}; wrap.appendChild(img); });
       msgEl.insertBefore(wrap, bubble);
     }
+    const _files=content.filter(function(x){ return x&&x.type==="file"&&x.file&&x.file.url; });
+    if(_files.length){
+      const wrap=document.createElement("div");wrap.className="bubble-files";
+      _files.forEach(function(x){ wrap.appendChild(fileCardEl(x.file)); });
+      msgEl.insertBefore(wrap, bubble);
+    }
   }
   // 思考过程：作为气泡外单独的块（不放进气泡），置于气泡上方独立一行
   // （工具痕迹不再顶部堆叠，统一走正文章节的穿插胶囊，避免与正文内工具胶囊重复）
@@ -2585,6 +2806,24 @@ function renderAiContent(msgEl, bubble, content, reasoning, tools, segments){
 function chips(html){
   return html.replace(/\[图片\]/g,'<span class="chip"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg> 图片</span>')
              .replace(/\[文件\]/g,'<span class="chip"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5l-8.5 8.5a5 5 0 0 1-7-7L14 5.5a3.5 3.5 0 0 1 5 5l-8.5 8.5"/></svg> 文件</span>');
+}
+// 2026-09-10 文件卡片：消息气泡内展示（点击新窗口打开/下载）
+function fileCardEl(fd){
+  const a=document.createElement("a");
+  a.className="file-card";
+  a.href=fd.url||"#"; a.target="_blank"; a.rel="noopener";
+  const name=String(fd.name||"文件");
+  const meta=[];
+  if(fd.mime)meta.push(fd.mime);
+  if(fd.size)meta.push(fmtFileSize(fd.size));
+  a.innerHTML='<span class="fc-ico">'+escapeHtml(extBadge(name))+'</span><span class="fc-info"><span class="fc-name">'+escapeHtml(name)+'</span><span class="fc-meta">'+escapeHtml(meta.join(" · "))+'</span></span><span class="fc-dl"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>';
+  return a;
+}
+function fmtFileSize(n){
+  n=Number(n)||0;
+  if(n>=1048576)return (n/1048576).toFixed(1)+"MB";
+  if(n>=1024)return Math.round(n/1024)+"KB";
+  return n+"B";
 }
 function msgTime(m){
   // 优先消息带的时间戳，其次 content 里的 current_time
@@ -2750,6 +2989,12 @@ function makeMsgEl(m,idx,grpCls){
     if(_um.length){
       const wrap=document.createElement("div");wrap.className="bubble-imgs";
       _um.forEach(im=>{const img=document.createElement("img");img.src=im;img.alt="";img.onerror=function(){this.style.display="none";};wrap.appendChild(img);});
+      host.appendChild(wrap);
+    }
+    const _uf=msgFiles(m);
+    if(_uf.length){
+      const wrap=document.createElement("div");wrap.className="bubble-files";
+      _uf.forEach(fd=>{ wrap.appendChild(fileCardEl(fd)); });
       host.appendChild(wrap);
     }
     host.appendChild(bubble);
@@ -3169,7 +3414,7 @@ async function send(){
   if(sending)return false;
   // 先占位再走 fetchHistory 异步窗口：否则快速连点/回车会在 sending 置位前双双入列
   sending=true;setSendState(true);
-  if(!text&&!imgData.length){ sending=false;setSendState(false); return false; }
+  if(!text&&!imgData.length&&!fileData.length){ sending=false;setSendState(false); return false; }
   if(!api_key){ sending=false;setSendState(false); showToast("请先到 ☰ 菜单→设置→连接 填访问口令(GATEWAY_API_KEY)"); return false; }
   if(!msgs.length){
     msgs=loadMsgs();
@@ -3181,26 +3426,41 @@ async function send(){
   // 注入 current_time 标签（网关做时间/唤醒/特殊事件依赖；放到内容末尾，不在开头）
   const timeTag=currentTimeTag();
   let userContent;
+  const _parts=[{type:"text",text:(text?text+"\n"+timeTag:timeTag)}];
   if(imgData.length){
     // 2026-09-08 图片转存：尽量避免大 base64 撑爆 localStorage/时间线（超配额后 setItem 静默失败、前端卡顿）
     // 每张图先调 /v1/upload-image 转 /uploads/ 短 URL，失败(如解码后>2MB)则降级保留原 base64，不阻塞发送
+    // 2026-09-09：失败不再回退成原始 base64（DeepSeek 拒收、且会撑爆 localStorage/时间线），跳过该图并提示。
+    // 2026-09-10：图片+文件统一拼 parts；纯文本时仍输出字符串保持兼容。
+    let _fail=0;
     const _urls=await Promise.all(imgData.map(async function(_d){
-      // 2026-09-08：/v1/upload-image 现返回 https://<host>/uploads/<file> 绝对地址（也可能回 /uploads/ 相对），
-      // 两种都接受；被拒的 dataURL/base64 一律不回退。此前只认 /uploads/ 前缀，遇到绝对地址会误判并回退 base64，
-      // 又把大图塞回 localStorage/时间线（0908-03 修过的问题复发）。
+      // /v1/upload-image 返回 https://<host>/uploads/<file> 绝对地址（也可能回 /uploads/ 相对），两种都接受。
       try{ const _u=await uploadImageToServer(_d); if(_u&&/^(https?:\/\/|\/uploads\/)/.test(_u)) return _u; }catch(_e){}
-      return _d;
+      _fail++; return null;
     }));
-    userContent=[{type:"text",text:(text?text+"\n"+timeTag:timeTag)},..._urls.map(function(_u){return {type:"image_url",image_url:{url:_u}};})];
+    _urls.filter(Boolean).forEach(function(_u){ _parts.push({type:"image_url",image_url:{url:_u}}); });
+    if(_fail && typeof showToast==="function") showToast("有 "+_fail+" 张图片上传失败，已跳过");
     // 同步本地那条即将 push 的 user 消息为 URL 形式，前端展示即用 /uploads/（避免本地缓存还存大 base64）
     //（msgs 的 push 在下方 3183 行，此处先把 imgData 替换掉，push 用的是 userContent）
-  }else{
-    userContent=(text?text+"\n"+timeTag:timeTag);
   }
+  if(fileData.length){
+    // 2026-09-10 文件转存：/v1/upload-file 返回 {ok,name,url,size,mime}；失败跳过该文件并提示。
+    let _ffail=0;
+    const _files=await Promise.all(fileData.map(async function(fd){
+      try{
+        const _u=await uploadFileToServer(fd.dataUrl, fd.name, fd.mime);
+        if(_u&&_u.url&&/^(https?:\/\/|\/uploads\/)/.test(_u.url)) return {name:_u.name||fd.name,url:_u.url,size:(_u.size||fd.size||0),mime:(_u.mime||fd.mime||"")};
+      }catch(_e){}
+      _ffail++; return null;
+    }));
+    _files.filter(Boolean).forEach(function(f){ _parts.push({type:"file",file:f}); });
+    if(_ffail && typeof showToast==="function") showToast("有 "+_ffail+" 个文件上传失败，已跳过");
+  }
+  userContent=(_parts.length===1)?_parts[0].text:_parts;
   // 新消息赋稳定 id：用户连发两句完全相同的话会有不同 id，服务端按 id 防重不会并成一条（同句都保留）
   const _newMid=(typeof crypto!=="undefined"&&crypto.randomUUID)?crypto.randomUUID():(Date.now()+"-"+Math.random().toString(36).slice(2));
   msgs.push({id:_newMid,role:"user",content:userContent,time:new Date().toISOString(), _callB:(_call&&_call.open)?_call.batchId:undefined});
-  inputEl.value="";inputEl.style.height="auto";imgData=[];renderPreviews();
+  inputEl.value="";inputEl.style.height="auto";imgData=[];fileData=[];renderPreviews();
   updateSelBar();
   renderAll();scrollBottom();     // 先立即显示用户消息，再进入 AI 加载/流式
   request(msgs,true);
@@ -3277,16 +3537,84 @@ function renderPreviews(){
     rm.onclick=()=>{imgData.splice(i,1);renderPreviews();};
     p.appendChild(ig);p.appendChild(rm);previews.appendChild(p);
   });
+  // 2026-09-10 文件卡片预览（+ 号选择非图片文件时出现在预览区）
+  fileData.forEach((fd,i)=>{
+    const p=document.createElement("div");p.className="preview-file";
+    const ic=document.createElement("span");ic.className="pf-ico";ic.textContent=extBadge(fd.name);
+    const nm=document.createElement("span");nm.className="pf-name";nm.textContent=fd.name;nm.title=fd.name;
+    const rm=document.createElement("button");rm.className="rm";rm.textContent="×";
+    rm.onclick=()=>{fileData.splice(i,1);renderPreviews();};
+    p.appendChild(ic);p.appendChild(nm);p.appendChild(rm);previews.appendChild(p);
+  });
+}
+// 扩展名徽标（预览/气泡文件图标用），图片类返回“图”
+function extBadge(name){
+  const m=/\.([a-zA-Z0-9]{1,8})$/.exec(String(name||""));
+  const e=m?m[1].toUpperCase():"?";
+  if(/^(PNG|JPG|JPEG|WEBP|GIF)$/.test(e))return "图";
+  return e.length>5?e.slice(0,4)+"…":e;
 }
 imgBtn.onclick=()=>fileInput.click();
+// 图片按需压缩（2026-09-09）：canvas 等比缩放 + JPEG 重编码。大图(长边>1024 或 >1.4MB)压小，
+// 既提速（上传/DeepSeek 处理更快），又保证 ≤ 服务端 2MB 上限——避免上传失败回退成 base64 被 DeepSeek 拒收。
+// 小图透传不动（不做有损重编码，保画质）。
+function compressImage(dataUrl, origBytes){
+  return new Promise(function(resolve){
+    var MAX=1024, LIMIT=1.4*1024*1024;
+    var src=new Image();
+    src.onload=function(){
+      try{
+        var w=src.naturalWidth||src.width, h=src.naturalHeight||src.height;
+        var longest=Math.max(w,h);
+        if(longest<=MAX && origBytes<=LIMIT){ resolve(dataUrl); return; }  // 小图透传
+        var scale=(longest>MAX)?(MAX/longest):1;
+        var cw=Math.max(1,Math.round(w*scale)), ch=Math.max(1,Math.round(h*scale));
+        var c=document.createElement("canvas"); c.width=cw; c.height=ch;
+        var ctx=c.getContext("2d");
+        ctx.fillStyle="#fff"; ctx.fillRect(0,0,cw,ch);   // JPEG 无透明，铺白底避免黑底
+        ctx.drawImage(src,0,0,cw,ch);
+        var out=c.toDataURL("image/jpeg",0.85);
+        if(_dataUrlBytes(out)>1.9*1024*1024){            // 兜底：仍超重则再降一档
+          var s2=(longest>640)?640/longest:1;
+          var cw2=Math.max(1,Math.round(w*s2)), ch2=Math.max(1,Math.round(h*s2));
+          var c2=document.createElement("canvas"); c2.width=cw2; c2.height=ch2;
+          var x2=c2.getContext("2d"); x2.fillStyle="#fff"; x2.fillRect(0,0,cw2,ch2); x2.drawImage(src,0,0,cw2,ch2);
+          out=c2.toDataURL("image/jpeg",0.6);
+        }
+        resolve(out);
+      }catch(e){ resolve(dataUrl); }
+    };
+    src.onerror=function(){ resolve(dataUrl); };
+    src.src=dataUrl;
+  });
+}
+// dataURL 解码后字节数估算（base64 长度，去尾部 padding，乘 3/4）
+function _dataUrlBytes(u){
+  var i=u.indexOf(","); if(i<0) return 0;
+  var b64=u.slice(i+1), pad=(b64.endsWith("==")?2:(b64.endsWith("=")?1:0));
+  return Math.ceil((b64.length-pad)*3/4);
+}
 fileInput.onchange=e=>{
   Array.from(e.target.files).forEach(f=>{
-    const r=new FileReader();
-    r.onload=async()=>{
-      let d=r.result;  // 2026-09-08 原样透传，不压缩
-      imgData.push(d); renderPreviews();
-    };
-    r.readAsDataURL(f);
+    // 2026-09-10 分流：图片走原有压缩/转存链路；其它类型作为文件（≤10MB，与 /v1/upload-file 同口径）
+    if(f.type&&f.type.startsWith("image/")){
+      const r=new FileReader();
+      r.onload=async()=>{
+        const d=r.result;
+        // GIF 动图透传不压（避免丢帧）；其余按需压缩
+        const c=(f.type==="image/gif")?(d):(await compressImage(d, f.size||0));
+        imgData.push(c); renderPreviews();
+      };
+      r.readAsDataURL(f);
+    }else{
+      if(f.size>10*1024*1024){ if(typeof showToast==="function")showToast("文件过大，上限10MB："+f.name); return; }
+      const r=new FileReader();
+      r.onload=()=>{
+        fileData.push({name:f.name,size:f.size,mime:(f.type||"application/octet-stream"),dataUrl:r.result});
+        renderPreviews();
+      };
+      r.readAsDataURL(f);
+    }
   });
   fileInput.value="";
 };
@@ -3653,6 +3981,9 @@ function renderPicks(){
     const k=b.dataset.k;
     b.classList.toggle("on",!!cfg[k]);
   });
+  if(pickThemeShow)pickThemeShow.querySelectorAll("button").forEach(b=>{
+    b.classList.toggle("on",!!cfg[b.dataset.k]);
+  });
   if(pickRender)pickRender.querySelectorAll("button").forEach(b=>{
     b.classList.toggle("on",!!cfg[b.dataset.k]);
   });
@@ -3710,6 +4041,13 @@ function populateSettings(){
   aiFontColorInput.value=cfg.ai_font_color||"#5a4a3a";
   fontSizeInput.value=cfg.font_size!=null?cfg.font_size:15;
   fontFamilyInput.value=cfg.font_family||"";
+  thinkCapBorder.value=cfg.think_cap_border||"#c89098";
+  thinkCapBg.value=cfg.think_cap_bg||"#f1ebe9";
+  thinkCapText.value=cfg.think_cap_text||"#c89098";
+  toolCapBorder.value=cfg.tool_cap_border||"#5a86a6";
+  toolCapBg.value=cfg.tool_cap_bg||"#e7ecf3";
+  toolCapText.value=cfg.tool_cap_text||"#5a86a6";
+  populateWindowInputs(cfg);
   userNameInput.value=cfg.user_name||"我";
   userAvatarInput.value=cfg.user_avatar||"";
   thAiNameInput.value=cfg.ai_name||"谢意行";
@@ -3739,6 +4077,27 @@ async function saveSettingsAll(){
   cfg.ai_font_color=aiFontColorInput.value||"#5a4a3a";
   cfg.font_size=Number(fontSizeInput.value)||15;
   cfg.font_family=fontFamilyInput.value||"";
+  cfg.think_cap_border=thinkCapBorder.value||"#c89098";
+  cfg.think_cap_bg=thinkCapBg.value||"#f1ebe9";
+  cfg.think_cap_text=thinkCapText.value||"#c89098";
+  cfg.tool_cap_border=toolCapBorder.value||"#5a86a6";
+  cfg.tool_cap_bg=toolCapBg.value||"#e7ecf3";
+  cfg.tool_cap_text=toolCapText.value||"#5a86a6";
+  cfg.page_text=winVal(pageTextInput,'page_text');
+  cfg.accent_color=winVal(accentColorInput,'accent_color');
+  cfg.chrome_bg=winVal(chromeBgInput,'chrome_bg');
+  cfg.page_text2=winVal(pageText2Input,'page_text2');
+  cfg.page_text3=winVal(pageText3Input,'page_text3');
+  cfg.header_title=winVal(headerTitleInput,'header_title');
+  cfg.inputbar_bg=winVal(inputbarBgInput,'inputbar_bg');
+  cfg.inputbar_border=winVal(inputbarBorderInput,'inputbar_border');
+  cfg.input_text=winVal(inputTextInput,'input_text');
+  cfg.send_btn=winVal(sendBtnInput,'send_btn');
+  cfg.send_icon=winVal(sendIconInput,'send_icon');
+  cfg.avatar_bg=winVal(avatarBgInput,'avatar_bg');
+  cfg.icon_btn_bg=winVal(iconBtnBgInput,'icon_btn_bg');
+  cfg.icon_btn_color=winVal(iconBtnColorInput,'icon_btn_color');
+  cfg.bubble_shadow=winVal(bubbleShadowInput,'bubble_shadow');
   cfg.bubble_delim=bubbleDelimInput.value.trim();
   cfg.user_name=userNameInput.value.trim()||"我";
   cfg.user_avatar=userAvatarInput.value.trim()||"";
@@ -3939,6 +4298,14 @@ function hexToRgba(hex,a){
     return "rgba("+r+","+g+","+b+","+Math.max(0,Math.min(1,a))+")";
   }catch(e){return hex||"";}
 }
+function setCapsuleVars(root, v){
+  root.setProperty("--cap-think-border", v.think_cap_border);
+  root.setProperty("--cap-think-bg", v.think_cap_bg);
+  root.setProperty("--cap-think-text", v.think_cap_text);
+  root.setProperty("--cap-tool-border", v.tool_cap_border);
+  root.setProperty("--cap-tool-bg", v.tool_cap_bg);
+  root.setProperty("--cap-tool-text", v.tool_cap_text);
+}
 function applyThemePreview(){
   const root=document.documentElement.style;
   const op=Number(bubbleOpacity.value)/100;
@@ -3948,6 +4315,25 @@ function applyThemePreview(){
   root.setProperty("--bubble-opacity",String(Number(bubbleOpacity.value)/100));
   root.setProperty("--bubble-blur",bubbleBlur.value+"px");
   root.setProperty("--radius",bubbleRadius.value+"px");
+  setCapsuleVars(root,{
+    think_cap_border:(thinkCapBorder&&thinkCapBorder.value)||cfg.think_cap_border||"#c89098",
+    think_cap_bg:(thinkCapBg&&thinkCapBg.value)||cfg.think_cap_bg||"#f1ebe9",
+    think_cap_text:(thinkCapText&&thinkCapText.value)||cfg.think_cap_text||"#c89098",
+    tool_cap_border:(toolCapBorder&&toolCapBorder.value)||cfg.tool_cap_border||"#5a86a6",
+    tool_cap_bg:(toolCapBg&&toolCapBg.value)||cfg.tool_cap_bg||"#e7ecf3",
+    tool_cap_text:(toolCapText&&toolCapText.value)||cfg.tool_cap_text||"#5a86a6"
+  });
+  setWindowVars(root,{
+    accent_color:winVal(accentColorInput,'accent_color')||cfg.accent_color,
+    chrome_bg:winVal(chromeBgInput,'chrome_bg')||cfg.chrome_bg,
+    page_text:winVal(pageTextInput,'page_text')||cfg.page_text, page_text2:winVal(pageText2Input,'page_text2')||cfg.page_text2, page_text3:winVal(pageText3Input,'page_text3')||cfg.page_text3,
+    header_title:winVal(headerTitleInput,'header_title')||cfg.header_title,
+    inputbar_bg:winVal(inputbarBgInput,'inputbar_bg')||cfg.inputbar_bg, inputbar_border:winVal(inputbarBorderInput,'inputbar_border')||cfg.inputbar_border, input_text:winVal(inputTextInput,'input_text')||cfg.input_text,
+    send_btn:winVal(sendBtnInput,'send_btn')||cfg.send_btn, send_icon:winVal(sendIconInput,'send_icon')||cfg.send_icon,
+    avatar_bg:winVal(avatarBgInput,'avatar_bg')||cfg.avatar_bg,
+    icon_btn_bg:winVal(iconBtnBgInput,'icon_btn_bg')||cfg.icon_btn_bg, icon_btn_color:winVal(iconBtnColorInput,'icon_btn_color')||cfg.icon_btn_color,
+    bubble_shadow:winVal(bubbleShadowInput,'bubble_shadow')||cfg.bubble_shadow
+  });
   // 背景即时预览（背景颜色/背景图片二选一）
   const mode=deriveBgMode();
   if(mode==="image"){
@@ -3976,10 +4362,19 @@ async function uploadImageToServer(dataUrl){
   if(r.ok&&j&&j.ok&&j.url)return j.url;
   throw new Error((j&&j.error)||("HTTP "+r.status));
 }
+// 2026-09-10 通用文件转存：base64 交给 /v1/upload-file（≤10MB），返回 {ok,name,url,size,mime}
+async function uploadFileToServer(dataUrl,name,mime){
+  const b64=String(dataUrl||"").split(",").pop()||"";
+  const r=await fetch("/v1/upload-file",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({name:name||"file",mime:mime||"application/octet-stream",data:b64})});
+  const j=await r.json().catch(function(){return {};});
+  if(r.ok&&j&&j.ok&&j.url)return j;
+  throw new Error((j&&j.error)||("HTTP "+r.status));
+}
 function themeInputs(){
   const or=function(v,d){ return (v!==null&&v!==undefined&&v!=="")?v:d; };
   const _bgm=deriveBgMode();
   return {
+    bg_mode:_bgm,
     bg_image: (_bgm==="image") ? or(bgImageInput&&bgImageInput.value, cfg.bg_image||"") : "",
     bg_color: (_bgm==="color") ? or(bgColorInput&&bgColorInput.value, cfg.bg_color||"") : "",
     user_bubble: or(userBubbleColor&&userBubbleColor.value, cfg.user_bubble||"#d9a3a8"),
@@ -3993,13 +4388,37 @@ function themeInputs(){
     font_family: or(fontFamilyInput&&fontFamilyInput.value, cfg.font_family||""),
     user_avatar: or(userAvatarInput&&userAvatarInput.value, cfg.user_avatar||""),
     ai_avatar: or(aiAvatarInput&&aiAvatarInput.value, cfg.ai_avatar||""),
-    bubble_style: (chatEl&&chatEl.getAttribute("data-layout"))||cfg.bubble_style||"qq"
+    bubble_style: (chatEl&&chatEl.getAttribute("data-layout"))||cfg.bubble_style||"qq",
+    show_avatar: cfg.show_avatar!==false,
+    show_name: cfg.show_name!==false,
+    think_cap_border: or(thinkCapBorder&&thinkCapBorder.value, cfg.think_cap_border||"#c89098"),
+    think_cap_bg: or(thinkCapBg&&thinkCapBg.value, cfg.think_cap_bg||"#f1ebe9"),
+    think_cap_text: or(thinkCapText&&thinkCapText.value, cfg.think_cap_text||"#c89098"),
+    tool_cap_border: or(toolCapBorder&&toolCapBorder.value, cfg.tool_cap_border||"#5a86a6"),
+    tool_cap_bg: or(toolCapBg&&toolCapBg.value, cfg.tool_cap_bg||"#e7ecf3"),
+    tool_cap_text: or(toolCapText&&toolCapText.value, cfg.tool_cap_text||"#5a86a6"),
+    /**** 窗口级可调（''=沿用当前效果，用户改动才存） ****/
+    accent_color: winVal(accentColorInput,'accent_color'),
+    chrome_bg: winVal(chromeBgInput,'chrome_bg'),
+    page_text: winVal(pageTextInput,'page_text'),
+    page_text2: winVal(pageText2Input,'page_text2'),
+    page_text3: winVal(pageText3Input,'page_text3'),
+    header_title: winVal(headerTitleInput,'header_title'),
+    inputbar_bg: winVal(inputbarBgInput,'inputbar_bg'),
+    inputbar_border: winVal(inputbarBorderInput,'inputbar_border'),
+    input_text: winVal(inputTextInput,'input_text'),
+    send_btn: winVal(sendBtnInput,'send_btn'),
+    send_icon: winVal(sendIconInput,'send_icon'),
+    avatar_bg: winVal(avatarBgInput,'avatar_bg'),
+    icon_btn_bg: winVal(iconBtnBgInput,'icon_btn_bg'),
+    icon_btn_color: winVal(iconBtnColorInput,'icon_btn_color'),
+    bubble_shadow: winVal(bubbleShadowInput,'bubble_shadow')
   };
 }
 function loadSavedThemes(){ try{ const a=JSON.parse(localStorage.getItem(LS_THEMES)||"[]"); return Array.isArray(a)?a:[]; }catch(e){ return []; } }
 function syncThemesToServer(replace){
   const arr=loadSavedThemes();
-  fetch("/v1/themes",{method:"PUT",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({themes:arr,replace:!!replace})}).then(function(r){
+  fetch("/v1/themes",{method:"PUT",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({themes:arr,current:(cfg&&cfg.current_theme_name)||"",replace:!!replace})}).then(function(r){
     if(!r.ok) showToast("主题云端同步失败（"+r.status+"），仅存本机");
   }).catch(function(){ showToast("主题云端同步失败：网关未连接，仅存本机"); });
 }
@@ -4008,7 +4427,8 @@ async function loadThemesFromServer(){
     const r=await fetch("/v1/themes",{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
     const j=await r.json();
     const arr=Array.isArray(j&&j.themes)?j.themes:[];
-    if(!arr.length){ return; } // 服务器为空：绝不覆盖本地（防刷新丢主题）
+    if(typeof j.current==="string") cfg.current_theme_name=j.current||"";
+    if(!arr.length){ if(themeCountEl)themeCountEl.textContent="（已存 0 / 100）"; return; } // 服务器为空：绝不覆盖本地（防刷新丢主题）
     // 主题在服务端是全量镜像（增/删/改都会整表 PUT）：拉取时以服务器为准直接替换本地，
     // 避免"服务器已删的主题本地永远删不掉、又被下一次 PUT 推回去"的僵尸循环
     try{ localStorage.setItem(LS_THEMES,JSON.stringify(arr)); }catch(e){}
@@ -4027,35 +4447,50 @@ async function saveCustomTheme(){
   if(name){
     // 输入名称：新增主题胶囊 + 应用 + 云同步
     let arr=loadSavedThemes().filter(function(t){ return t.name!==th.name; });
-    arr.push(th); if(arr.length>20) arr=arr.slice(-20);
+    arr.push(th); if(arr.length>100) arr=arr.slice(-100);
     let savedLocal=true;
     try{ localStorage.setItem(LS_THEMES, JSON.stringify(arr)); }catch(e){ savedLocal=false; }
+    // 先应用（设好 current_theme_name 标记），再云同步 + 重渲染，保证云端 current 与列表「当前」徽标一致
+    try{ applyCustomTheme(th); }catch(e){ saveCfg(); applyTheme(); pushSettingsToCloud(); }
     syncThemesToServer(); renderSavedThemes(savedLocal?null:arr);
     showToast(savedLocal?"主题已保存":"本机存储空间不足，主题仅同步到云端，换设备可恢复");
-    // 保存主题即作为当前生效主题，并同步上云（否则刷新被云端旧 cfg 覆盖、背景被改回）
-    try{ applyCustomTheme(th); }catch(e){ saveCfg(); applyTheme(); pushSettingsToCloud(); }
   } else {
     // 名称留空：不新增主题胶囊，只把当前参数作为生效主题保存并云同步
-    showToast("主题名为空，仅保存当前主题参数并同步（未新增主题）");
+    showToast("没填主题名：只保存当前参数、不新增主题。想新增请填个主题名再点保存");
     try{ applyCustomTheme(th,true); }catch(e){ saveCfg(); applyTheme(); pushSettingsToCloud(); }
   }
   if(nmEl) nmEl.value="";
 }
 function applyCustomTheme(t,silent){
   if(!t) return;
+  if(t.bg_mode==="image"||t.bg_mode==="color") cfg.bg_mode=t.bg_mode;
   cfg.bg_image=t.bg_image||""; cfg.bg_color=t.bg_color||"";
   cfg.user_bubble=t.user_bubble||"#d9a3a8"; cfg.ai_bubble=t.ai_bubble||"#fffdf9";
   cfg.bubble_opacity=t.bubble_opacity!=null?t.bubble_opacity:1; cfg.bubble_blur=t.bubble_blur!=null?t.bubble_blur:0; cfg.bubble_radius=t.bubble_radius!=null?t.bubble_radius:18;
   cfg.user_font_color=t.user_font_color||"#ffffff"; cfg.ai_font_color=t.ai_font_color||"#5a4a3a";
   cfg.font_size=t.font_size!=null?t.font_size:15; cfg.font_family=t.font_family||"";
+  cfg.think_cap_border=t.think_cap_border||"#c89098"; cfg.think_cap_bg=t.think_cap_bg||"#f1ebe9"; cfg.think_cap_text=t.think_cap_text||"#c89098";
+  cfg.tool_cap_border=t.tool_cap_border||"#5a86a6"; cfg.tool_cap_bg=t.tool_cap_bg||"#e7ecf3"; cfg.tool_cap_text=t.tool_cap_text||"#5a86a6";
+  if(t.accent_color!==undefined) cfg.accent_color=t.accent_color||"";
+  if(t.chrome_bg!==undefined) cfg.chrome_bg=t.chrome_bg||"";
+  if(t.page_text!==undefined) cfg.page_text=t.page_text||""; if(t.page_text2!==undefined) cfg.page_text2=t.page_text2||""; if(t.page_text3!==undefined) cfg.page_text3=t.page_text3||"";
+  if(t.header_title!==undefined) cfg.header_title=t.header_title||""; if(t.inputbar_bg!==undefined) cfg.inputbar_bg=t.inputbar_bg||""; if(t.inputbar_border!==undefined) cfg.inputbar_border=t.inputbar_border||""; if(t.input_text!==undefined) cfg.input_text=t.input_text||"";
+  if(t.send_btn!==undefined) cfg.send_btn=t.send_btn||""; if(t.send_icon!==undefined) cfg.send_icon=t.send_icon||""; if(t.avatar_bg!==undefined) cfg.avatar_bg=t.avatar_bg||"";
+  if(t.icon_btn_bg!==undefined) cfg.icon_btn_bg=t.icon_btn_bg||""; if(t.icon_btn_color!==undefined) cfg.icon_btn_color=t.icon_btn_color||""; if(t.bubble_shadow!==undefined) cfg.bubble_shadow=t.bubble_shadow||"";
   if(t.user_avatar!==undefined)cfg.user_avatar=t.user_avatar||"";
   if(t.ai_avatar!==undefined)cfg.ai_avatar=t.ai_avatar||"";
   if(t.bubble_style)cfg.bubble_style=t.bubble_style;
+  if(t.show_avatar!==undefined)cfg.show_avatar=!!t.show_avatar;
+  if(t.show_name!==undefined)cfg.show_name=!!t.show_name;
+  cfg.current_theme_name=(t&&t.name)?String(t.name):"";
   if(bgImageInput)bgImageInput.value=cfg.bg_image||""; if(bgColorInput)bgColorInput.value=cfg.bg_color||"#f4f1ee";
   if(userBubbleColor)userBubbleColor.value=cfg.user_bubble; if(aiBubbleColor)aiBubbleColor.value=cfg.ai_bubble;
   if(bubbleOpacity)bubbleOpacity.value=Math.round((cfg.bubble_opacity!=null?cfg.bubble_opacity:1)*100); if(bubbleBlur)bubbleBlur.value=cfg.bubble_blur; if(bubbleRadius)bubbleRadius.value=cfg.bubble_radius;
   if(userFontColorInput)userFontColorInput.value=cfg.user_font_color; if(aiFontColorInput)aiFontColorInput.value=cfg.ai_font_color;
   if(fontSizeInput)fontSizeInput.value=cfg.font_size; if(fontFamilyInput)fontFamilyInput.value=cfg.font_family;
+  if(thinkCapBorder)thinkCapBorder.value=cfg.think_cap_border; if(thinkCapBg)thinkCapBg.value=cfg.think_cap_bg; if(thinkCapText)thinkCapText.value=cfg.think_cap_text;
+  if(toolCapBorder)toolCapBorder.value=cfg.tool_cap_border; if(toolCapBg)toolCapBg.value=cfg.tool_cap_bg; if(toolCapText)toolCapText.value=cfg.tool_cap_text;
+  populateWindowInputs(cfg);
   if(userAvatarInput)userAvatarInput.value=cfg.user_avatar||""; if(aiAvatarInput)aiAvatarInput.value=cfg.ai_avatar||"";
   if(chatEl)chatEl.setAttribute("data-layout",cfg.bubble_style||"qq");
   syncBgModeUI(deriveBgMode());
@@ -4072,8 +4507,10 @@ function themeSwatch(t){
 function renderSavedThemes(srcArr){
   const el=document.getElementById("savedThemes"); if(!el) return;
   const arr=Array.isArray(srcArr)?srcArr:loadSavedThemes();
-  if(!arr.length){ el.innerHTML='<div class="data-tip">还没有保存的主题，点「保存」存一个。</div>'; return; }
-  el.innerHTML=arr.map(function(t,i){ return '<div class="saved-theme" data-i="'+i+'">'+themeSwatch(t)+'<span class="st-n">'+escapeHtml(t.name)+'</span><button type="button" class="st-del" title="删除主题">×</button></div>'; }).join("");
+  if(themeCountEl) themeCountEl.textContent="（已存 "+arr.length+" / 100）";
+  if(!arr.length){ el.innerHTML='<div class="data-tip">还没有保存的主题，点「保存」存一个；或用「一键导入」粘主题码。</div>'; return; }
+  const curName=(cfg&&cfg.current_theme_name)||"";
+  el.innerHTML=arr.map(function(t,i){ const isCur=!!(curName&&t.name===curName); return '<div class="saved-theme'+(isCur?' cur':'')+'" data-i="'+i+'">'+themeSwatch(t)+'<span class="st-n">'+escapeHtml(t.name)+'</span>'+(isCur?'<span class="st-cur">当前</span>':'')+'<button type="button" class="st-del" title="删除主题">×</button></div>'; }).join("");
   el.querySelectorAll(".saved-theme").forEach(function(e){
     e.addEventListener("click",function(ev){
       if(ev.target&&ev.target.classList&&ev.target.classList.contains("st-del")) return;
@@ -4091,6 +4528,88 @@ function renderSavedThemes(srcArr){
   });
 }
 (function(){ const b=document.getElementById("saveThemeBtn"); if(b) b.addEventListener("click",saveCustomTheme); renderSavedThemes(); loadThemesFromServer(); })();
+
+/* ===== 主题 导出/一键导入 ===== */
+function themeToCode(t){
+  try{ return "TH1."+btoa(unescape(encodeURIComponent(JSON.stringify(t)))); }catch(e){ return ""; }
+}
+function themeFromCode(code){
+  try{
+    let s=String(code||"").replace(/^\s+|\s+$/g,"");
+    if(s.indexOf("TH1.")===0) s=s.slice(4);
+    if(!s) return null;
+    let text="";
+    try{ text=decodeURIComponent(escape(atob(s))); }catch(e){ text=s; }
+    const obj=JSON.parse(text);
+    return (obj && typeof obj==="object") ? obj : null;
+  }catch(e){ return null; }
+}
+function currentThemeObject(){
+  return {
+    bg_mode:deriveBgMode(),
+    bg_image:cfg.bg_image||"",
+    bg_color:cfg.bg_color||"",
+    user_bubble:cfg.user_bubble||"#d9a3a8",
+    ai_bubble:cfg.ai_bubble||"#fffdf9",
+    bubble_opacity:cfg.bubble_opacity!=null?cfg.bubble_opacity:1,
+    bubble_blur:cfg.bubble_blur!=null?cfg.bubble_blur:0,
+    bubble_radius:cfg.bubble_radius!=null?cfg.bubble_radius:18,
+    user_font_color:cfg.user_font_color||"#ffffff",
+    ai_font_color:cfg.ai_font_color||"#5a4a3a",
+    font_size:cfg.font_size!=null?cfg.font_size:15,
+    font_family:cfg.font_family||"",
+    think_cap_border:cfg.think_cap_border||"#c89098",
+    think_cap_bg:cfg.think_cap_bg||"#f1ebe9",
+    think_cap_text:cfg.think_cap_text||"#c89098",
+    tool_cap_border:cfg.tool_cap_border||"#5a86a6",
+    tool_cap_bg:cfg.tool_cap_bg||"#e7ecf3",
+    tool_cap_text:cfg.tool_cap_text||"#5a86a6",
+    page_text:cfg.page_text||"", page_text2:cfg.page_text2||"", page_text3:cfg.page_text3||"",
+    accent_color:cfg.accent_color||"",
+    chrome_bg:cfg.chrome_bg||"",
+    header_title:cfg.header_title||"",
+    inputbar_bg:cfg.inputbar_bg||"", inputbar_border:cfg.inputbar_border||"", input_text:cfg.input_text||"",
+    send_btn:cfg.send_btn||"", send_icon:cfg.send_icon||"",
+    avatar_bg:cfg.avatar_bg||"",
+    icon_btn_bg:cfg.icon_btn_bg||"", icon_btn_color:cfg.icon_btn_color||"",
+    bubble_shadow:cfg.bubble_shadow||"",
+    bubble_style:cfg.bubble_style||"qq",
+    show_avatar:cfg.show_avatar!==false,
+    show_name:cfg.show_name!==false
+  };
+}
+function doExportTheme(){
+  const code=themeToCode(currentThemeObject());
+  if(!code){ showToast("导出失败"); return; }
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(code).then(function(){ showToast("当前主题码已复制，去别处粘贴即可导入"); }).catch(function(){ showToast("复制失败，主题码已弹出可手动复制"); window.prompt("复制主题码（分享给别的设备）",code); });
+  } else {
+    showToast("主题码已弹出，可手动复制"); window.prompt("复制主题码（分享给别的设备）",code);
+  }
+}
+function doImportTheme(){
+  const code=(themeImportArea&&themeImportArea.value||"").trim();
+  if(!code){ showToast("请先粘贴主题码再点导入"); return; }
+  const obj=themeFromCode(code);
+  if(!obj){ showToast("主题码无法解析，请检查是否复制完整"); return; }
+  obj.name=(obj.name&&String(obj.name).trim())||("导入-"+new Date().toLocaleTimeString().slice(0,5));
+  try{ applyCustomTheme(obj); }catch(e){ saveCfg(); applyTheme(); pushSettingsToCloud(); }
+  // 同时放进已存主题列表，方便之后一键切回
+  let arr=loadSavedThemes().filter(function(t){ return t.name!==obj.name; });
+  arr.push(obj); if(arr.length>100) arr=arr.slice(-100);
+  try{ localStorage.setItem(LS_THEMES,JSON.stringify(arr)); }catch(e){}
+  syncThemesToServer(); renderSavedThemes();
+  if(themeImportBox) themeImportBox.style.display="none";
+  if(themeImportArea) themeImportArea.value="";
+  showToast("已导入并应用「"+(obj.name||"主题")+"」");
+}
+if(exportThemeBtn) exportThemeBtn.addEventListener("click",doExportTheme);
+if(importThemeBtn) importThemeBtn.addEventListener("click",function(){
+  if(themeImportBox) themeImportBox.style.display=(themeImportBox.style.display==="none"||themeImportBox.style.display==="")?"flex":"none";
+  if(themeImportArea) themeImportArea.focus();
+});
+if(themeImportCancel) themeImportCancel.addEventListener("click",function(){ if(themeImportBox) themeImportBox.style.display="none"; });
+if(themeImportGo) themeImportGo.addEventListener("click",doImportTheme);
 function shade(hex,p){
   try{let c=hex.replace("#","");if(c.length===3)c=c.split("").map(x=>x+x).join("");let n=parseInt(c,16);let r=Math.max(0,Math.min(255,(n>>16)+p)),g=Math.max(0,Math.min(255,((n>>8)&255)+p)),b=Math.max(0,Math.min(255,(n&255)+p));return "#"+(r.toString(16).padStart(2,"0"))+(g.toString(16).padStart(2,"0"))+(b.toString(16).padStart(2,"0"));}catch(e){return hex;}
 }
@@ -4110,6 +4629,15 @@ function applyTheme(){
   root.setProperty("--user-font-color",cfg.user_font_color||"#ffffff");
   root.setProperty("--ai-font-color",cfg.ai_font_color||"#5a4a3a");
   root.setProperty("--bubble-font-size",(cfg.font_size!=null?cfg.font_size:15)+"px");
+  setCapsuleVars(root,{
+    think_cap_border:cfg.think_cap_border||"#c89098",
+    think_cap_bg:cfg.think_cap_bg||"#f1ebe9",
+    think_cap_text:cfg.think_cap_text||"#c89098",
+    tool_cap_border:cfg.tool_cap_border||"#5a86a6",
+    tool_cap_bg:cfg.tool_cap_bg||"#e7ecf3",
+    tool_cap_text:cfg.tool_cap_text||"#5a86a6"
+  });
+  setWindowVars(root,cfg);
   if(cfg.font_family)document.body.style.fontFamily=cfg.font_family;else document.body.style.fontFamily="";
   const layout=(cfg.bubble_style||"qq");
   if(cfg.bg_image){
@@ -4150,7 +4678,7 @@ function applyLayout(style){
   renderPicks();
   applyHeader();   // 切换模板时同步更新顶部栏名称位置/头像
 }
-[bubbleOpacity,bubbleBlur,bubbleRadius,userBubbleColor,aiBubbleColor,bgColorInput,bgImageInput,userFontColorInput,aiFontColorInput,fontSizeInput,fontFamilyInput].forEach(function(el){
+[bubbleOpacity,bubbleBlur,bubbleRadius,userBubbleColor,aiBubbleColor,bgColorInput,bgImageInput,userFontColorInput,aiFontColorInput,fontSizeInput,fontFamilyInput,thinkCapBorder,thinkCapBg,thinkCapText,toolCapBorder,toolCapBg,toolCapText,accentColorInput,chromeBgInput,pageTextInput,pageText2Input,pageText3Input,headerTitleInput,inputbarBgInput,inputbarBorderInput,inputTextInput,sendBtnInput,sendIconInput,avatarBgInput,iconBtnBgInput,iconBtnColorInput,bubbleShadowInput].forEach(function(el){
   el.addEventListener("input",function(){renderThemeValues();applyThemePreview();});
 });
 const bgModeColorBtn=document.getElementById("bgModeColorBtn");
@@ -4188,6 +4716,7 @@ document.querySelectorAll(".set-acc-h").forEach(function(h){
       if(tab==='conn'||tab==='mcp'){ loadMcpServers(); }
       if(tab==='conn'||tab==='prov'){ loadProviders(); }
       if(tab==='sendcfg'){ loadSendCfgSettings(); }
+      if(tab==='theme'){ loadThemesFromServer(); }   // 每次打开主题分组，从服务器拉最新主题列表（自愈旧缓存）
     }
   });
 });
@@ -4202,6 +4731,11 @@ if(pickOthers)pickOthers.addEventListener("click",e=>{
   const b=e.target.closest("button");if(!b)return;
   if(b.dataset.k in cfg){cfg[b.dataset.k]=!cfg[b.dataset.k];}
   saveCfg();renderPicks();renderAll();
+});
+if(pickThemeShow)pickThemeShow.addEventListener("click",e=>{
+  const b=e.target.closest("button");if(!b)return;
+  if(b.dataset.k in cfg){cfg[b.dataset.k]=!cfg[b.dataset.k];}
+  saveCfg();renderPicks();applyHeader();renderAll();
 });
 pickRender.addEventListener("click",e=>{
   const b=e.target.closest("button");if(!b)return;

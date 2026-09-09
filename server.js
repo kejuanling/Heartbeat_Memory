@@ -264,6 +264,21 @@ function isFileContentPart(part) {
   return type.includes("file");
 }
 
+// 文件 part → 文本摘要：LLM/时间线/日志共用（LLM 不解析 file 结构，只感知"用户发了文件"）
+function filePartSummary(part) {
+  const f = (part && typeof part === "object" && part.file) || null;
+  if (f && typeof f === "object") {
+    const name = String(f.name || "文件").trim() || "文件";
+    const mime = String(f.mime || "").trim();
+    const size = typeof f.size === "number" && f.size > 0 ? f.size : 0;
+    let s = "[文件] " + name;
+    if (mime) s += "（" + mime + "）";
+    if (size) s += "，" + (size >= 1048576 ? (size / 1048576).toFixed(1) + "MB" : size >= 1024 ? Math.round(size / 1024) + "KB" : size + "B");
+    return s;
+  }
+  return "[文件]";
+}
+
 function getTextFromContentPart(part) {
   if (typeof part === "string") return part;
   if (!part || typeof part !== "object") return "";
@@ -301,7 +316,7 @@ function normalizeContentToText(content) {
         const text = getTextFromContentPart(part).trim();
         if (text) return text;
         if (isImageContentPart(part)) return "[图片]";
-        if (isFileContentPart(part)) return "[文件]";
+        if (isFileContentPart(part)) return filePartSummary(part);
         return "";
       })
       .filter(Boolean);
@@ -309,7 +324,7 @@ function normalizeContentToText(content) {
   }
 
   if (isImageContentPart(content)) return "[图片]";
-  if (isFileContentPart(content)) return "[文件]";
+  if (isFileContentPart(content)) return filePartSummary(content);
   return "[非文本内容]";
 }
 
@@ -337,7 +352,14 @@ function prepareMessageForLLM(msg) {
   }
   if (typeof msg.content === "string") return msg;
 
-  if (Array.isArray(msg.content) && shouldForwardMultimodalContent()) return msg;
+  if (Array.isArray(msg.content) && shouldForwardMultimodalContent()) {
+    // 2026-09-10：文件 part 上游模型不解析（可能拒收未知结构），转文本摘要；图片 part 原样透传。
+    if (!msg.content.some(isFileContentPart)) return msg;
+    return { ...msg, content: msg.content.map(function (p) {
+      if (isFileContentPart(p)) return { type: "text", text: filePartSummary(p) };
+      return p;
+    }) };
+  }
 
   const textContent = normalizeContentToText(msg.content);
   if (!textContent) return null;
