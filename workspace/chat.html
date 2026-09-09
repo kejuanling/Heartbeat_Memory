@@ -3237,7 +3237,7 @@ function buildMessages(list){
   if(sp && typeof sp==="string" && sp.trim())out.push({role:"system",content:sp});
   list.forEach(m=>{
     let c=m.content;
-    if(Array.isArray(c))c=c.map(x=>x.type==="image_url"?{type:"image_url",image_url:{url:x.image_url.url}}:{type:"text",text:(x.text||"")});
+    if(Array.isArray(c))c=c.map(x=>x.type==="image_url"?{type:"image_url",image_url:{url:x.image_url.url}}:x.type==="file"?{type:"file",file:x.file}:{type:"text",text:(x.text||"")});
     const base={role:m.role,content:c};
     if(m.id)base.id=m.id;   // 带稳定 id：服务端落盘去重能按 id 判存在，防重复追加；转发上游时 sanitizedMessages 会剥掉 id，不影响模型
     if(m.role==="assistant"){
