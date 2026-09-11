@@ -2994,10 +2994,20 @@ app.get("/internal/memory-pool/retrieve", async (req, reply) => {
     const topK = Number(req.query.limit) || 5;
     const category = String(req.query.category || "").trim();
     const breath = req.query.breath === "1" || req.query.breath === "true";
-    // breath 模式：无 q 时只浮现最近沉淀的记忆（未沉底，优先置顶/重要级/最近更新）
-    const items = (breath && !q)
-      ? memoryPool.breath({ limit: topK, category: category || undefined })
-      : await memoryPool.retrieveHybrid(q, { topK, category: category || undefined });
+    // 特殊分类：「最近」=按更新时间倒序列最新（浏览式，忽略关键词、不计数）；「已置顶」=只在置顶里（带 q 按相关性搜，无 q 按时间列）
+    let items;
+    if (category === "最近") {
+      items = memoryPool.recent({ topK });
+    } else if (category === "已置顶") {
+      items = q
+        ? await memoryPool.retrieveHybrid(q, { topK, pinnedOnly: true })
+        : memoryPool.recent({ topK, pinnedOnly: true });
+    } else if (breath && !q) {
+      // breath 模式：无 q 时只浮现最近沉淀的记忆（未沉底，优先置顶/重要级/最近更新）
+      items = memoryPool.breath({ limit: topK, category: category || undefined });
+    } else {
+      items = await memoryPool.retrieveHybrid(q, { topK, category: category || undefined });
+    }
     reply.send({ ok: true, total: items.length, items });
   } catch (err) {
     console.error("[GET /internal/memory-pool/retrieve] error:", err.message);
@@ -3235,6 +3245,11 @@ app.get("/admin/memory-pool/config", { preHandler: basicAuth }, async (req, repl
 
 app.post("/admin/memory-pool/config", { preHandler: basicAuth }, async (req, reply) => {
   try { reply.send(memoryPool.setConfig(req.body || {})); } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+// 一键清空全部记忆的检索计数（管理台按钮）：计数归零、置顶状态不动
+app.post("/admin/memory-pool/clear-retrieval", { preHandler: basicAuth }, async (req, reply) => {
+  try { reply.send({ ok: true, ...memoryPool.clearRetrievalStats() }); } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
 app.get("/admin/memory-pool/clean/prompt", { preHandler: basicAuth }, async (req, reply) => {

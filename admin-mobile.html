@@ -93,6 +93,7 @@
           <label class="cc-cfg-field">去重阈值<input type="number" id="mw-dedup" min="0" max="1" step="0.05"></label>
           <label class="cc-cfg-field">衰减半衰期(天)<input type="number" id="mw-decay-days" min="1" step="1"></label>
           <label class="cc-cfg-field">自动置顶检索次数<input type="number" id="mw-auto-pin-count" min="2" step="1"></label>
+          <div class="cc-cfg-btns"><button type="button" class="cc-btn secondary" onclick="clearRetrievalStats()">一键清空检索次数（不影响已置顶）</button><span id="mw-clear-retrieval-msg" class="cc-cfg-msg"></span></div>
           <div class="cc-cfg-group-title">再解析（压缩摘要 → 记忆池）</div>
           <label class="cc-cfg-field cc-cfg-check">再解析·温暖风格<span class="cc-sw"><input type="checkbox" id="mw-reparse-warm"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
           <label class="cc-cfg-field">再解析·每条字数上限<input type="number" id="mw-reparse-maxchars" min="5" step="1"></label>

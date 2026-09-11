@@ -975,8 +975,6 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .session-item .s-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;display:inline-block;margin-right:5px}
 .session-item .s-dot.lock{background:#a5715a}
 .session-item .s-dot.tp{background:#7d8fa0}
-.session-item .s-name .s-del{border:none;background:none;color:var(--ink3);cursor:pointer;padding:3px 4px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center}
-.session-item .s-name .s-del:hover{color:#d88383}
 .session-item .s-name .s-icon{display:inline-flex;align-items:center;justify-content:center;border:none;background:none;color:var(--ink3);cursor:pointer;padding:3px;border-radius:6px;flex-shrink:0;transition:all .12s}
 .session-item .s-name .s-icon:hover{color:var(--accent-deep);background:rgba(200,144,152,.12)}
 .session-item .s-name .s-icon.pin.on{color:var(--accent)}
@@ -992,9 +990,10 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .sess-menu-item{border:none;background:none;text-align:left;padding:7px 12px;font-size:12px;color:var(--ink);border-radius:7px;cursor:pointer;display:flex;align-items:center;gap:7px;transition:background .12s,color .12s;white-space:nowrap}
 .sess-menu-item:hover{background:rgba(200,144,152,.10);color:var(--accent-deep)}
 .sess-menu-item.on{color:#7d8fa0}
+.sess-menu-item.danger{color:#c2554f}
+.sess-menu-item.danger:hover{background:rgba(194,85,79,.10);color:#a83e38}
 .session-item .s-check{width:18px;height:18px;border-radius:50%;border:1.5px solid rgba(200,144,152,.45);display:inline-flex;align-items:center;justify-content:center;font-size:11px;color:#fff;flex-shrink:0;transition:all .12s}
 .session-item .s-check.on{background:var(--accent-deep);border-color:var(--accent-deep)}
-.session-item.merging .s-name .s-del{display:none}
 .drawer-btn.merge-armed{background:var(--accent-deep)!important;color:#fff!important}
 
 
@@ -5891,9 +5890,9 @@ function renderSessionList(){
     const locked=isLocked(s.id);
     const meta=(locked?'<span class="s-dot lock" title="锁定唤醒"></span>':'')+(thirdPartySid===s.id?'<span class="s-dot tp" title="第三方专用"></span>':'')+escapeHtml((s.real!=null?(""+s.real+" 条"):"")+(s.last_time?(" · "+fmtTime(new Date(s.last_time))):""));
     const checkHtml=merging?('<span class="s-check'+(mergeSel.has(s.id)?' on':'')+'">'+(mergeSel.has(s.id)?'✓':'')+'</span>'):'';
-    item.innerHTML='<div class="s-name">'+checkHtml+'<button class="s-icon pin'+(pinned?' on':'')+'" data-op="pin" data-id="'+escapeHtml(s.id)+'" title="'+(pinned?"取消置顶":"置顶")+'"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/></svg></button>'+'<span class="s-title" title="'+escapeHtml(name)+'">'+escapeHtml(name)+'</span><button class="s-icon ren" data-op="rename" data-id="'+escapeHtml(s.id)+'" title="改名"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/><path d="m15 5 4 4"/></svg></button>'+'<button class="s-del" data-id="'+escapeHtml(s.id)+'" title="删除"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button></div>'+
+    item.innerHTML='<div class="s-name">'+checkHtml+'<button class="s-icon pin'+(pinned?' on':'')+'" data-op="pin" data-id="'+escapeHtml(s.id)+'" title="'+(pinned?"取消置顶":"置顶")+'"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/></svg></button>'+'<span class="s-title" title="'+escapeHtml(name)+'">'+escapeHtml(name)+'</span><button class="s-icon ren" data-op="rename" data-id="'+escapeHtml(s.id)+'" title="改名"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/><path d="m15 5 4 4"/></svg></button></div>'+
       '<div class="s-ops"><span class="s-meta">'+meta+'</span><button class="s-more" title="更多操作" aria-label="更多操作"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button></div>';
-    item.querySelector(".s-name > .s-del").addEventListener("click",e=>{e.stopPropagation();if(merging){toggleMergeSel(s.id);}else{deleteSession(s.id);}});
+    // 删除入口已收进「…」菜单（防误触），行内不再放常驻删除按钮
     item.querySelectorAll(".s-name .s-icon").forEach(btn=>btn.addEventListener("click",e=>{
       e.stopPropagation();
       const op=btn.dataset.op,id=btn.dataset.id;
@@ -5937,7 +5936,8 @@ function openSessMenu(sid, anchorEl){
     +'<button class="sess-menu-item'+(lockOn?' on':'')+'" data-op="lock">锁定唤醒'+(lockOn?' ✓':'')+'</button>'
     +'<button class="sess-menu-item" data-op="persona">人设</button>'
     +'<button class="sess-menu-item" data-op="cross">跨窗口</button>'
-    +'<button class="sess-menu-item" data-op="provider">模型</button>';
+    +'<button class="sess-menu-item" data-op="provider">模型</button>'
+    +'<button class="sess-menu-item danger" data-op="del">删除会话</button>';
   Array.prototype.forEach.call(el.querySelectorAll(".sess-menu-item"),function(btn){
     btn.addEventListener("click",function(e){
       e.stopPropagation();
@@ -5950,6 +5950,7 @@ function openSessMenu(sid, anchorEl){
       else if(op==="cross")openSessionCrossInject(sid);
       else if(op==="provider")openSessionProvider(sid);
       else if(op==="lock")toggleWakeLockSession(sid);
+      else if(op==="del")deleteSession(sid);
     });
   });
   el.classList.remove("hidden");

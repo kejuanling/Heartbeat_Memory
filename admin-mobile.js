@@ -968,6 +968,18 @@ function toast(msg){
     }catch(e){ saved=false; if(msg)msg.textContent='记忆池参数保存失败: '+e.message; }
     if(saved){ toast('记忆与唤醒参数已保存'); if(msg)msg.textContent='已保存，下次请求/重启生效（跨窗口注入即时生效）。'; }
   }
+  async function clearRetrievalStats(){
+    if(!confirm('确定清空所有记忆的检索次数？\n计数归零后要重新检索满「自动置顶检索次数」才会自动置顶；已置顶的记忆保持不变。'))return;
+    const msg=document.getElementById('mw-clear-retrieval-msg');
+    if(msg)msg.textContent='清空中...';
+    try{
+      const r=await fetch(ADMIN_API+'/memory-pool/clear-retrieval',{method:'POST'});
+      const d=await r.json();
+      if(d.error){ if(msg)msg.textContent='清空失败: '+d.error; toast('清空失败: '+d.error); return; }
+      if(msg)msg.textContent='已清空 '+d.cleared+' 条';
+      toast('已清空 '+d.cleared+' 条记忆的检索次数');
+    }catch(e){ if(msg)msg.textContent='网络错误: '+e.message; toast('网络错误: '+e.message); }
+  }
 
  async function loadSendConfig(){}  // 已移除（2026-09-08）
  async function saveSendConfig(){}  // 已移除（2026-09-08）

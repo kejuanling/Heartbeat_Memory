@@ -444,7 +444,7 @@ function supersedeBlock(blockId) {
 function retrieve(query, opts) {
   opts = opts || {};
   const topK = Math.max(1, Number(opts.topK) || Number(CONFIG.retrieval_top_k) || 5);
-  const rows = load().filter(r => r.active !== false && (!opts.category || String(r.category || "") === String(opts.category)));
+  const rows = load().filter(r => r.active !== false && (!opts.pinnedOnly || r.pinned === true) && (!opts.category || String(r.category || "") === String(opts.category)));
   const qt = tokensOf(query);
   let scored = rows.map(r => {
     const sim = query && qt.size ? contentSimilarity(r.content + " " + (r.category || ""), query) : 0;
@@ -579,7 +579,7 @@ async function retrieveHybrid(query, opts) {
   const q = String(query || "").trim();
   // 空查询直接返回空：否则 top-K 全部被计数+可能触发自动置顶，多次空查询测试会污染置顶
   if (!q) return [];
-  const rows = load().filter(r => r.active !== false && (!opts.category || String(r.category || "") === String(opts.category)));
+  const rows = load().filter(r => r.active !== false && (!opts.pinnedOnly || r.pinned === true) && (!opts.category || String(r.category || "") === String(opts.category)));
   if (!rows.length) return [];
   if (embedClient.fused()) return retrieve(query, opts);
   const ready = await ensureVectors(rows);
@@ -655,6 +655,39 @@ function breath(opts) {
       updated_at: r.updated_at
     };
   });
+}
+
+// 最近列表：按更新时间倒序直接取 N 条（memory_search 的「最近」分类用）。
+// 不做相关性打分、不计检索数——浏览式查看不能给记忆刷检索数，否则会把最近记忆顶成置顶污染注入。
+function recent(opts) {
+  opts = opts || {};
+  const topK = Math.max(1, Number(opts.topK) || Number(CONFIG.retrieval_top_k) || 5);
+  const rows = load().filter(r => r.active !== false && (!opts.pinnedOnly || r.pinned === true));
+  rows.sort((a, b) => {
+    const ua = String(a.updated_at || ""), ub = String(b.updated_at || "");
+    return ua < ub ? 1 : (ua > ub ? -1 : 0);
+  });
+  return rows.slice(0, topK).map(r => ({
+    id: r.id,
+    content: r.content,
+    category: r.category,
+    importance: r.importance,
+    pinned: r.pinned === true,
+    created_at: r.created_at,
+    updated_at: r.updated_at
+  }));
+}
+
+// 一键清空全部记忆的检索计数（管理台按钮用）：计数归零、清掉最近检索时间；置顶状态不动。
+function clearRetrievalStats() {
+  const rows = load();
+  let n = 0;
+  for (const r of rows) {
+    if (Number(r.retrieval_count) > 0) { r.retrieval_count = 0; n++; }
+    if (r.last_retrieved_at) delete r.last_retrieved_at;
+  }
+  if (n) dirty = true;
+  return { cleared: n };
 }
 
 // ---------------- 压缩摘要 → 记忆池 ----------------
@@ -1143,7 +1176,7 @@ module.exports = {
   init, shutdown, flush,
   CATEGORIES,
   list, stats, get, add, update, remove, sink, revive,
-  retrieve, retrieveHybrid, breath, warmVectors, ingestSummary, parseCategoryBlocks, reparseSummaryViaLLM, buildReparsePrompt,
+  retrieve, retrieveHybrid, breath, recent, clearRetrievalStats, warmVectors, ingestSummary, parseCategoryBlocks, reparseSummaryViaLLM, buildReparsePrompt,
   contentSimilarity, tokensOf, decayFactor, scoreOf,
   buildCleanPrompt, cleanPool,
   setConfig, getConfig, poolKeywords
