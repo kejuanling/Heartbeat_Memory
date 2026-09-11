@@ -1714,22 +1714,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
               <label>圆角<span class="tag">px</span></label>
               <div class="theme-row"><input type="range" id="bubbleRadius" min="0" max="30" value="18" step="1"><span class="v" id="bubbleRadiusVal">18px</span></div>
             </div>
-            <div class="set-sec-label">胶囊</div>
-            <div class="theme-field"><label>思考边框</label><div class="theme-row"><input type="color" id="thinkCapBorder" value="#c89098"></div></div>
-            <div class="theme-field"><label>思考背景</label><div class="theme-row"><input type="color" id="thinkCapBg" value="#f1ebe9"></div></div>
-            <div class="theme-field"><label>思考文字</label><div class="theme-row"><input type="color" id="thinkCapText" value="#c89098"></div></div>
-            <div class="theme-field"><label>工具边框</label><div class="theme-row"><input type="color" id="toolCapBorder" value="#5a86a6"></div></div>
-            <div class="theme-field"><label>工具背景</label><div class="theme-row"><input type="color" id="toolCapBg" value="#e7ecf3"></div></div>
-            <div class="theme-field"><label>工具文字</label><div class="theme-row"><input type="color" id="toolCapText" value="#5a86a6"></div></div>
             <div class="set-sec-label">文字</div>
-            <div class="theme-field">
-              <label>我的文字颜色</label>
-              <div class="theme-row"><input type="color" id="userFontColorInput" value="#ffffff"></div>
-            </div>
-            <div class="theme-field">
-              <label>助手文字颜色</label>
-              <div class="theme-row"><input type="color" id="aiFontColorInput" value="#5a4a3a"></div>
-            </div>
             <div class="theme-field">
               <label>字号<span class="tag">px</span></label>
               <div class="theme-row"><input type="range" id="fontSizeInput" min="12" max="20" value="15" step="1"><span class="v" id="fontSizeVal">15px</span></div>
@@ -1753,22 +1738,8 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
                 <option value="sans-serif">无衬线 sans-serif</option>
               </select></div>
             </div>
-            <div class="set-sec-label">窗口</div>
-            <div class="theme-field"><label>主强调色<span class="tag">带动整片界面</span></label><div class="theme-row"><input type="color" id="accentColorInput" value="#c89098"></div></div>
-            <div class="theme-field"><label>界面底色<span class="tag">抽屉/列表/卡片</span></label><div class="theme-row"><input type="color" id="chromeBgInput" value="#ffffff"></div></div>
-            <div class="theme-field"><label>页面主文字</label><div class="theme-row"><input type="color" id="pageTextInput" value="#5a4a3a"></div></div>
-            <div class="theme-field"><label>次要文字</label><div class="theme-row"><input type="color" id="pageText2Input" value="#a08a7a"></div></div>
-            <div class="theme-field"><label>弱文字</label><div class="theme-row"><input type="color" id="pageText3Input" value="#cfc0b6"></div></div>
-            <div class="theme-field"><label>顶部标题</label><div class="theme-row"><input type="color" id="headerTitleInput" value="#b07a6a"></div></div>
-            <div class="theme-field"><label>输入框背景</label><div class="theme-row"><input type="color" id="inputbarBgInput" value="#ffffff"></div></div>
-            <div class="theme-field"><label>输入框边框</label><div class="theme-row"><input type="color" id="inputbarBorderInput" value="#ddbdc4"></div></div>
-            <div class="theme-field"><label>输入框文字</label><div class="theme-row"><input type="color" id="inputTextInput" value="#5a4a3a"></div></div>
-            <div class="theme-field"><label>发送键背景</label><div class="theme-row"><input type="color" id="sendBtnInput" value="#c98696"></div></div>
-            <div class="theme-field"><label>发送键图标</label><div class="theme-row"><input type="color" id="sendIconInput" value="#ffffff"></div></div>
-            <div class="theme-field"><label>头像背景</label><div class="theme-row"><input type="color" id="avatarBgInput" value="#d6a2ad"></div></div>
-            <div class="theme-field"><label>图标按钮底色</label><div class="theme-row"><input type="color" id="iconBtnBgInput" value="#f2e3e5"></div></div>
-            <div class="theme-field"><label>图标按钮颜色</label><div class="theme-row"><input type="color" id="iconBtnColorInput" value="#b07a6a"></div></div>
-            <div class="theme-field"><label>气泡阴影</label><div class="theme-row"><input type="color" id="bubbleShadowInput" value="#b58382"></div></div>
+            <!-- 窗口级 14 色 / 胶囊 6 色 / 文字 2 色的调色控件已移除（2026-09-11，只留背景+气泡手调）：
+                 颜色数据字段全部保留，由「主题」整体切换驱动；applyCustomTheme/applyTheme 逻辑不变 -->
             <div class="theme-preview" id="themePreview"><span class="pa">助手消息</span><span class="pu">我的消息</span></div>
             <div class="set-sec-label">保存主题</div>
             <div class="theme-save">
@@ -4036,16 +4007,8 @@ function populateSettings(){
   bubbleOpacity.value=Math.round((cfg.bubble_opacity!=null?cfg.bubble_opacity:1)*100);
   bubbleBlur.value=cfg.bubble_blur!=null?cfg.bubble_blur:0;
   bubbleRadius.value=cfg.bubble_radius!=null?cfg.bubble_radius:18;
-  userFontColorInput.value=cfg.user_font_color||"#ffffff";
-  aiFontColorInput.value=cfg.ai_font_color||"#5a4a3a";
   fontSizeInput.value=cfg.font_size!=null?cfg.font_size:15;
   fontFamilyInput.value=cfg.font_family||"";
-  thinkCapBorder.value=cfg.think_cap_border||"#c89098";
-  thinkCapBg.value=cfg.think_cap_bg||"#f1ebe9";
-  thinkCapText.value=cfg.think_cap_text||"#c89098";
-  toolCapBorder.value=cfg.tool_cap_border||"#5a86a6";
-  toolCapBg.value=cfg.tool_cap_bg||"#e7ecf3";
-  toolCapText.value=cfg.tool_cap_text||"#5a86a6";
   populateWindowInputs(cfg);
   userNameInput.value=cfg.user_name||"我";
   userAvatarInput.value=cfg.user_avatar||"";
@@ -4072,31 +4035,10 @@ async function saveSettingsAll(){
   cfg.bubble_opacity=Number(bubbleOpacity.value)/100;
   cfg.bubble_blur=Number(bubbleBlur.value);
   cfg.bubble_radius=Number(bubbleRadius.value);
-  cfg.user_font_color=userFontColorInput.value||"#ffffff";
-  cfg.ai_font_color=aiFontColorInput.value||"#5a4a3a";
+  // 胶囊6色/文字2色/窗口14色的调色控件已移除（2026-09-11）：这些值完全由「主题」整体切换管理，
+  // 保存时不再从（已不存在的）输入框读取，避免把整窗颜色重置回默认。
   cfg.font_size=Number(fontSizeInput.value)||15;
   cfg.font_family=fontFamilyInput.value||"";
-  cfg.think_cap_border=thinkCapBorder.value||"#c89098";
-  cfg.think_cap_bg=thinkCapBg.value||"#f1ebe9";
-  cfg.think_cap_text=thinkCapText.value||"#c89098";
-  cfg.tool_cap_border=toolCapBorder.value||"#5a86a6";
-  cfg.tool_cap_bg=toolCapBg.value||"#e7ecf3";
-  cfg.tool_cap_text=toolCapText.value||"#5a86a6";
-  cfg.page_text=winVal(pageTextInput,'page_text');
-  cfg.accent_color=winVal(accentColorInput,'accent_color');
-  cfg.chrome_bg=winVal(chromeBgInput,'chrome_bg');
-  cfg.page_text2=winVal(pageText2Input,'page_text2');
-  cfg.page_text3=winVal(pageText3Input,'page_text3');
-  cfg.header_title=winVal(headerTitleInput,'header_title');
-  cfg.inputbar_bg=winVal(inputbarBgInput,'inputbar_bg');
-  cfg.inputbar_border=winVal(inputbarBorderInput,'inputbar_border');
-  cfg.input_text=winVal(inputTextInput,'input_text');
-  cfg.send_btn=winVal(sendBtnInput,'send_btn');
-  cfg.send_icon=winVal(sendIconInput,'send_icon');
-  cfg.avatar_bg=winVal(avatarBgInput,'avatar_bg');
-  cfg.icon_btn_bg=winVal(iconBtnBgInput,'icon_btn_bg');
-  cfg.icon_btn_color=winVal(iconBtnColorInput,'icon_btn_color');
-  cfg.bubble_shadow=winVal(bubbleShadowInput,'bubble_shadow');
   cfg.bubble_delim=bubbleDelimInput.value.trim();
   cfg.user_name=userNameInput.value.trim()||"我";
   cfg.user_avatar=userAvatarInput.value.trim()||"";
@@ -4395,22 +4337,17 @@ function themeInputs(){
     tool_cap_border: or(toolCapBorder&&toolCapBorder.value, cfg.tool_cap_border||"#5a86a6"),
     tool_cap_bg: or(toolCapBg&&toolCapBg.value, cfg.tool_cap_bg||"#e7ecf3"),
     tool_cap_text: or(toolCapText&&toolCapText.value, cfg.tool_cap_text||"#5a86a6"),
-    /**** 窗口级可调（''=沿用当前效果，用户改动才存） ****/
-    accent_color: winVal(accentColorInput,'accent_color'),
-    chrome_bg: winVal(chromeBgInput,'chrome_bg'),
-    page_text: winVal(pageTextInput,'page_text'),
-    page_text2: winVal(pageText2Input,'page_text2'),
-    page_text3: winVal(pageText3Input,'page_text3'),
-    header_title: winVal(headerTitleInput,'header_title'),
-    inputbar_bg: winVal(inputbarBgInput,'inputbar_bg'),
-    inputbar_border: winVal(inputbarBorderInput,'inputbar_border'),
-    input_text: winVal(inputTextInput,'input_text'),
-    send_btn: winVal(sendBtnInput,'send_btn'),
-    send_icon: winVal(sendIconInput,'send_icon'),
-    avatar_bg: winVal(avatarBgInput,'avatar_bg'),
-    icon_btn_bg: winVal(iconBtnBgInput,'icon_btn_bg'),
-    icon_btn_color: winVal(iconBtnColorInput,'icon_btn_color'),
-    bubble_shadow: winVal(bubbleShadowInput,'bubble_shadow')
+    /**** 窗口级：调色控件已移除（2026-09-11），随当前生效 cfg 整体保存 ****/
+    accent_color: cfg.accent_color||"",
+    chrome_bg: cfg.chrome_bg||"",
+    page_text: cfg.page_text||"",
+    page_text2: cfg.page_text2||"", page_text3: cfg.page_text3||"",
+    header_title: cfg.header_title||"",
+    inputbar_bg: cfg.inputbar_bg||"", inputbar_border: cfg.inputbar_border||"", input_text: cfg.input_text||"",
+    send_btn: cfg.send_btn||"", send_icon: cfg.send_icon||"",
+    avatar_bg: cfg.avatar_bg||"",
+    icon_btn_bg: cfg.icon_btn_bg||"", icon_btn_color: cfg.icon_btn_color||"",
+    bubble_shadow: cfg.bubble_shadow||""
   };
 }
 function loadSavedThemes(){ try{ const a=JSON.parse(localStorage.getItem(LS_THEMES)||"[]"); return Array.isArray(a)?a:[]; }catch(e){ return []; } }
