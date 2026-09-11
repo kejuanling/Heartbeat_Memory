@@ -4224,8 +4224,7 @@ function exportPromptBackupsJson(){
 })();
 loadPromptBackups();
 
-/* ===== 对话发送配置已移除（2026-09-08）：图片原样透传 ===== */
-async function loadSendCfgSettings(){}  // no-op 保留调用点
+/* ===== 对话发送配置已移除（2026-09-08）：图片原样透传；残留空壳与调用点已于 2026-09-11 清理 ===== */
 
 function getCookieV(n){ try{ const m=document.cookie.match(new RegExp('(?:^|; )'+n.replace(/[.$?*|{}()[\]\\/+^]/g,'\\$&')+'=([^;]*)')); return m?decodeURIComponent(m[1]):''; }catch(e){ return ''; } }
 
@@ -4714,7 +4713,6 @@ document.querySelectorAll(".set-acc-h").forEach(function(h){
       panel.classList.add("open");
       if(tab==='conn'||tab==='mcp'){ loadMcpServers(); }
       if(tab==='conn'||tab==='prov'){ loadProviders(); }
-      if(tab==='sendcfg'){ loadSendCfgSettings(); }
       if(tab==='theme'){ loadThemesFromServer(); }   // 每次打开主题分组，从服务器拉最新主题列表（自愈旧缓存）
     }
   });
@@ -5674,15 +5672,14 @@ function initSettingsDrawer(){
     btn.addEventListener("click",openSettingsDrawer);
     sessPanel.appendChild(btn);
   }
-  // 4) 分类 + 子页
+  // 4) 分类 + 子页（方案A 2026-09-11：按用途重排，高频在前）
   var CATS=[
-    {key:"general", name:"通用",      accs:["conn","behav","render","sendcfg","password","data"], icon:'<path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.12-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.12 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.01A1.7 1.7 0 0 0 9.03 4.1V4a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.12z"/>'},
-    {key:"mcp",     name:"MCP 管理",  accs:["mcp"],  icon:'<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4L15 12l-3-3z"/>'},
-    {key:"prov",    name:"AI 供应商", accs:["prov"], icon:'<path d="M12 2l3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/>'},
-    {key:"voice",   name:"语音服务",  accs:["voice"],icon:'<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>'},
-    {key:"ai",      name:"AI 设置",   accs:["ai"],   icon:'<path d="M12 2a7 7 0 0 1 7 7c0 2-1 3-1 5 0 2 1 2 1 4H5c0-2 1-2 1-4 0-2-1-3-1-5a7 7 0 0 1 7-7z"/>'},
-    {key:"memory", name:"记忆与唤醒", accs:["memwake"], icon:'<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>'},
-    {key:"theme",   name:"主题设置",  accs:["theme"],icon:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/>'}
+    {key:"chat",       name:"对话与 AI",  accs:["ai","behav","prov"],     icon:'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'},
+    {key:"appearance", name:"外观与主题", accs:["theme","render"],        icon:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/>'},
+    {key:"memwake",    name:"记忆与唤醒", accs:["memwake"],               icon:'<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>'},
+    {key:"voice",      name:"语音服务",   accs:["voice"],                 icon:'<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>'},
+    {key:"mcp",        name:"MCP 管理",   accs:["mcp"],                   icon:'<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4L15 12l-3-3z"/>'},
+    {key:"account",    name:"账号与数据", accs:["conn","password","data"],icon:'<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'}
   ];
   body.innerHTML="";
   var home=document.createElement("div");
@@ -5726,11 +5723,9 @@ function settingsShowPage(key){
   __settingsPage=page;
   // 懒加载（原由手风琴打开触发，现改到子页打开时）
   if(key==="mcp"){ if(typeof loadMcpServers==="function") loadMcpServers(); }
-  if(key==="prov"){ if(typeof loadProviders==="function") loadProviders(); }
-  if(key==="general"){ if(typeof loadSendCfgSettings==="function") loadSendCfgSettings(); }
-  if(key==="memory"){ if(typeof loadMemWakeSettings==="function") loadMemWakeSettings(); }
-  // 保存按钮只在「通用」页显示（它是通用页的保存按钮）
-  var ssb=document.getElementById("settingsSaveBtn"); if(ssb) ssb.style.display=(key==="general")?"":"none";
+  if(key==="chat"){ if(typeof loadProviders==="function") loadProviders(); }   // AI 供应商面板已并入「对话与 AI」
+  // 底部保存按钮：只在含「由 saveSettingsAll 统一保存」输入框的页显示（对话与AI / 外观与主题 / 账号与数据）
+  var ssb=document.getElementById("settingsSaveBtn"); if(ssb) ssb.style.display=(key==="chat"||key==="appearance"||key==="account")?"":"none";
 }
 function settingsBackHome(){
   var body=document.getElementById("settingsBody"); if(!body) return;
@@ -5911,6 +5906,7 @@ function renderSessionList(){
 
 // ===== 会话「…」菜单（压缩/导出/第三方/人设 收进三个点） =====
 let _sessMenuEl=null;
+let _sessMenuSeq=0;   // 每次打开递增：异步补勾回来时对不上号就丢弃，防止勾到另一个会话的菜单
 function ensureSessMenu(){
   if(_sessMenuEl) return _sessMenuEl;
   _sessMenuEl=document.createElement("div");
@@ -5960,6 +5956,24 @@ function openSessMenu(sid, anchorEl){
   let top=r.bottom+6;
   if(top+mh>window.innerHeight-8) top=r.top-mh-6;
   el.style.left=left+"px"; el.style.top=top+"px";
+  // 异步补勾（参考「锁定唤醒 ✓」）：跨窗口=实际生效（显式开启，或跟随全局且全局开关开着）；模型=单独指定过供应商
+  const seq=++_sessMenuSeq;
+  const alive=function(){ return seq===_sessMenuSeq && _sessMenuEl && !_sessMenuEl.classList.contains("hidden"); };
+  const markIf=function(sel,txt){ const b=el.querySelector(sel); if(b && b.textContent.indexOf("✓")<0) b.textContent=txt+" ✓"; };
+  fetch("/v1/sessions/"+encodeURIComponent(sid)+"/cross-inject",{headers:{"Authorization":"Bearer "+api_key},credentials:"include"})
+    .then(function(r){ return r.ok?r.json():null; })
+    .then(function(j){
+      if(!j||!alive())return;
+      const g=document.getElementById("mwCross");
+      const eff=(j.cross_inject_enabled===true)||(j.follow_global===true&&(!g||g.checked));
+      if(eff)markIf('[data-op="cross"]',"跨窗口");
+    }).catch(function(){});
+  fetch("/v1/sessions/"+encodeURIComponent(sid)+"/model-provider",{headers:{"Authorization":"Bearer "+api_key},credentials:"include"})
+    .then(function(r){ return r.ok?r.json():null; })
+    .then(function(j){
+      if(!j||!alive())return;
+      if(j.model_provider_id)markIf('[data-op="provider"]',"模型");
+    }).catch(function(){});
 }
 // 给【单个会话】单独设人设：从提示词备份里选（默认=跟随全局），写入 han_session_prompts 会话级映射，优先级高于全局人设
 function openSessionPersona(sid){
