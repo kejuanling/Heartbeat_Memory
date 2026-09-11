@@ -2176,6 +2176,14 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
   // 提取 <memory>/<pin>/<wake>/<quiet> 标签：存记忆池并剥离，避免标签显示给用户
   let aiClean = (r && r.text) || "";
   if (aiClean) {
+    // 对话侧 <wake>/<quiet> 调度必须用剥离前的原始文本解析；此前 MCP 分支只剥标签不落调度，
+    // 对话内闹钟/免打扰静默失效（2026-09-11 修复），与非 MCP 路径（routes/chat.js）同口径。
+    try {
+      parseWakeTagAndSchedule(aiClean, sessionId);
+      parseQuietTagAndSchedule(aiClean, sessionId);
+    } catch (e) {
+      console.warn("[mcp] 闹钟/免打扰调度解析失败:", e.message);
+    }
     try {
       const cleaned = await tagParser.extractAndStore(aiClean);
       if (typeof cleaned === "string" && cleaned) aiClean = cleaned;
