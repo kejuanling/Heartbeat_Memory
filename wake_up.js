@@ -80,6 +80,9 @@ const WAKE_SCHEDULE_PATH = path.join(__dirname, "data", "wake_schedule.json");
 const WAKE_LOCKED_PATH = path.join(__dirname, "data", "wake-locked.json");
 const SESSION_NAMES_PATH = path.join(__dirname, "data", "session-names.json");
 let timedWakeTimer = null;
+// 到点判定的统一宽限窗：setTimeout 的毫秒延时会被向零截断，定时器可能比闹钟时刻早 <=1ms 触发，
+// 若「捕获」与「过期清理」严格用 next_wake_at <= now 判定，提前触发会两手空空、随后槽位被当过期删掉，闹钟静默蒸发
+const WAKE_DUE_GRACE_MS = 2000;
 const PORT = Number(process.env.PORT) || 3000;
 const GATEWAY_BASE_URL = (process.env.GATEWAY_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
 const GATEWAY_URL = `${GATEWAY_BASE_URL}/internal/wake-event`;
@@ -607,9 +610,11 @@ function nextWakeFromAnySession() {
   return best;
 }
 
-// 已到点（next_wake_at <= now）的显式 <wake> 闹钟会话 id 列表（v2 per-session）。
+// 已到点（next_wake_at <= now + 宽限窗）的显式 <wake> 闹钟会话 id 列表（v2 per-session）。
 // 用于 runTimedWake 清理调度前捕获（否则被 pruneExpiredSchedules 删除后无法定位），
 // 以及 runWakeUpInner 在周期检查路径下兜底自算。
+// 宽限窗必须与 pruneExpiredSchedules 一致：定时器可能提前 <=1ms 触发，此刻槽位还差几毫秒才算过期，
+// 捕获若不带宽限就会空手而归，紧随其后的清理会把槽位删掉。
 function getDueWakeSessionIds() {
   const raw = readWakeScheduleRaw();
   if (!raw) return [];
@@ -619,12 +624,12 @@ function getDueWakeSessionIds() {
   for (const sid of Object.keys(sessions)) {
     const e = sessions[sid];
     const t = e && e.next_wake_at ? new Date(e.next_wake_at) : null;
-    if (t && !isNaN(t.getTime()) && t.getTime() <= now) out.push(sid);
+    if (t && !isNaN(t.getTime()) && t.getTime() <= now + WAKE_DUE_GRACE_MS) out.push(sid);
   }
   return out;
 }
 
-// v2：删除所有已过期（<= now）或无效的会话调度条，写回文件；返回是否有改动
+// v2：删除所有已过期（<= now + 宽限窗，与 getDueWakeSessionIds 同一口径）或无效的会话调度条，写回文件；返回是否有改动
 function pruneExpiredSchedules() {
   const data = readWakeScheduleRaw();
   if (!data || !data.sessions) return false;
@@ -633,7 +638,7 @@ function pruneExpiredSchedules() {
   for (const sid of Object.keys(data.sessions)) {
     const e = data.sessions[sid];
     const t = e && e.next_wake_at ? new Date(e.next_wake_at) : null;
-    if (!e || !e.next_wake_at || isNaN(t.getTime()) || t.getTime() <= now) {
+    if (!e || !e.next_wake_at || isNaN(t.getTime()) || t.getTime() <= now + WAKE_DUE_GRACE_MS) {
       delete data.sessions[sid];
       changed = true;
     }
@@ -742,19 +747,25 @@ function armTimedWake() {
     }
     return;
   }
-  timedWakeTimer = setTimeout(runTimedWake, delayMs);
+  // Math.ceil：setTimeout 会把小数毫秒向零截断，不取整会让定时器比闹钟时刻早触发 <=1ms
+  timedWakeTimer = setTimeout(runTimedWake, Math.max(1, Math.ceil(delayMs)));
   console.log(`[wake-up] 已设定定时唤醒：${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}（${Math.round(delayMs / 60000)} 分钟后）`);
 }
 
-// 定时唤醒到点：清理已到点/过期调度（各会话作废判定由 runWakeForTarget 按会话处理），
-// 然后执行一次唤醒流程（是否发推送仍由 AI 自行决定）
+// 定时唤醒到点：先捕获已到点会话（带宽限窗），唤醒完成后再清理过期调度并重挂剩余定时器。
+// 清理放在 runWakeUp 之后：若 runWakeUp 因互斥被跳过，槽位留在盘上，末尾 armTimedWake 的
+// 过期分支会补触发，闹钟不会丢（此前清理在前 + 互斥跳过会静默吞掉闹钟）。
 async function runTimedWake() {
   timedWakeTimer = null;
-  // 显式 <wake> 闹钟：清理前先捕获已到点的会话，否则被 pruneExpiredSchedules 删掉后无法定位
   const dueSids = getDueWakeSessionIds();
-  try { pruneExpiredSchedules(); } catch (voidErr) { console.warn("[wake-up] 清理过期定时失败:", voidErr.message); }
   console.log("\n===== 定时唤醒到点 =====\n");
   await runWakeUp(dueSids);
+  // 仅当本次唤醒真的执行过（未被互斥跳过）才清理：跳过时槽位留在盘上，
+  // 末尾 armTimedWake 的过期分支会补触发；否则槽位被删、闹钟静默丢失
+  if (!wakeRunning) {
+    try { pruneExpiredSchedules(); } catch (voidErr) { console.warn("[wake-up] 清理过期定时失败:", voidErr.message); }
+  }
+  try { armTimedWake(); } catch (rearErr) { /* 重挂剩余未来槽位失败时由 20s 轮询兜底 */ }
 }
 
 function getNow() {
@@ -900,8 +911,12 @@ async function runWakeUp(dueSids) {
     await runWakeUpInner(dueSids);
   } catch (err) {
     // 定时唤醒入口（runTimedWake）由 setTimeout 触发、无人兜底，异常会成为
-    // unhandled rejection 直接杀死进程（Node 15+ 默认 throw）；统一在此记日志吃掉
-    console.error("[wake-up] 唤醒执行失败:", err && err.stack ? err.stack : err);
+    // unhandled rejection 直接杀死进程（Node 15+ 默认 throw）；统一在此记日志吃掉。
+    // 非 Error 抛出物（字符串等）没有堆栈，补记捕获点调用栈便于定位来源（如 "data is not defined"）
+    const detail = (err && err.stack)
+      ? err.stack
+      : String(err) + "\n[非 Error 抛出物，以下是捕获点调用栈]\n" + new Error("trace").stack;
+    console.error("[wake-up] 唤醒执行失败:", detail);
   } finally {
     wakeRunning = false;
   }
@@ -956,7 +971,7 @@ async function runWakeUpInner(dueSids) {
           }
         } else {
           const nextWakeAt = new Date(schedule.next_wake_at);
-          if (!isNaN(nextWakeAt.getTime()) && nextWakeAt.getTime() > Date.now()) {
+          if (!isNaN(nextWakeAt.getTime()) && nextWakeAt.getTime() > Date.now() + WAKE_DUE_GRACE_MS) {
             // 旧式 default 调度未到点：仅当没有其它唤醒目标时才整体跳过
             if (targets.length === 0) {
               console.log(`\n下一次主动唤醒时间未到（${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}），本次跳过唤醒\n`);
@@ -1010,7 +1025,8 @@ async function runWakeForTarget(target) {
         try { clearWakeSchedule(wakeSessionId); } catch (voidErr) { console.warn("[wake-up] 清理作废定时失败:", voidErr.message); }
       } else {
         const nextWakeAt = new Date(schedule.next_wake_at);
-        if (!isNaN(nextWakeAt.getTime()) && nextWakeAt.getTime() > Date.now()) {
+        // 同一口径带宽限窗：定时器提前 <=1ms 触发时，槽位在毫秒级仍"未到点"，不能因此跳过本次唤醒
+        if (!isNaN(nextWakeAt.getTime()) && nextWakeAt.getTime() > Date.now() + WAKE_DUE_GRACE_MS) {
           console.log(`[wake-up] 会话 ${wakeSessionId} 的下一次主动唤醒时间未到（${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}），跳过该会话唤醒`);
           return;
         }
