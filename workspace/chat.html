@@ -4613,7 +4613,7 @@ function applyLayout(style){
   renderPicks();
   applyHeader();   // 切换模板时同步更新顶部栏名称位置/头像
 }
-[bubbleOpacity,bubbleBlur,bubbleRadius,userBubbleColor,aiBubbleColor,bgColorInput,bgImageInput,userFontColorInput,aiFontColorInput,fontSizeInput,fontFamilyInput,thinkCapBorder,thinkCapBg,thinkCapText,toolCapBorder,toolCapBg,toolCapText,accentColorInput,chromeBgInput,pageTextInput,pageText2Input,pageText3Input,headerTitleInput,inputbarBgInput,inputbarBorderInput,inputTextInput,sendBtnInput,sendIconInput,avatarBgInput,iconBtnBgInput,iconBtnColorInput,bubbleShadowInput].forEach(function(el){
+[bubbleOpacity,bubbleBlur,bubbleRadius,userBubbleColor,aiBubbleColor,bgColorInput,bgImageInput,userFontColorInput,aiFontColorInput,fontSizeInput,fontFamilyInput,thinkCapBorder,thinkCapBg,thinkCapText,toolCapBorder,toolCapBg,toolCapText,accentColorInput,chromeBgInput,pageTextInput,pageText2Input,pageText3Input,headerTitleInput,inputbarBgInput,inputbarBorderInput,inputTextInput,sendBtnInput,sendIconInput,avatarBgInput,iconBtnBgInput,iconBtnColorInput,bubbleShadowInput].filter(Boolean).forEach(function(el){
   el.addEventListener("input",function(){renderThemeValues();applyThemePreview();});
 });
 const bgModeColorBtn=document.getElementById("bgModeColorBtn");
