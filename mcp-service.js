@@ -54,7 +54,12 @@ async function loadTools(serverClients) {
       // 只注入名单内的工具，其余丢弃（防止外部服务器塞一堆没用的工具给模型）
       const allowRaw = client.config && client.config.allowTools;
       const allow = Array.isArray(allowRaw) ? allowRaw.map((n) => String(n)) : null;
-      const visible = allow ? tools.filter((t) => allow.indexOf(t.name) >= 0) : tools;
+      // 工具级黑名单（聊天端工具查看页的每工具开关）：blockTools 里的工具不注入模型；
+      // 与 allowTools 叠加（先白后黑），新工具不在黑名单即默认可用
+      const blockRaw = client.config && client.config.blockTools;
+      const block = Array.isArray(blockRaw) ? blockRaw.map((n) => String(n)) : null;
+      let visible = allow ? tools.filter((t) => allow.indexOf(t.name) >= 0) : tools;
+      if (block) visible = visible.filter((t) => block.indexOf(t.name) < 0);
       if (allow && visible.length === 0 && tools.length > 0) {
         console.warn(`[mcp] 服务器 ${client.name} 的 allowTools 白名单未匹配任何工具（服务器共 ${tools.length} 个工具），请检查工具名拼写`);
       }

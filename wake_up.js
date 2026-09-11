@@ -39,8 +39,9 @@ const contextReplacements = require("./context-replacements");
 const { McpServerClient, loadConfig } = require("./mcp-client");
 const mcpLoop = require("./mcp-tool-loop");
 
-// 唤醒侧只注入「工具集合」（本地记忆/日记工具，127.0.0.1:8771），
-// 从 mcp-servers.json 里按名称/端口挑出该 server，避免把 search.parallel / 网易云等带进唤醒。
+// 唤醒侧注入白名单服务器：「工具集合」（本地记忆/日记工具，127.0.0.1:8771）+「花园」+「邮箱」，
+// 从 mcp-servers.json 里按名称/端口挑出，避免把 search.parallel / 网易云等带进唤醒；
+// loadConfig 已滤掉 enabled:false，聊天端停用即唤醒侧同步停用。
 let _wakeMcpClients = null;
 function getWakeMcpClients() {
   if (_wakeMcpClients) return _wakeMcpClients;
@@ -48,7 +49,9 @@ function getWakeMcpClients() {
     const servers = loadConfig(path.join(__dirname, "mcp-servers.json"));
     const target = servers.filter(s => {
       const key = (s.name || "") + " " + (s.url || "");
-      return /工具集合/.test(key) || /127\.0\.0\.1:8771/.test(key);
+      return /工具集合/.test(key) || /127\.0\.0\.1:8771/.test(key)
+        || /花园/.test(key) || /galatea\.abysslumina\.com/.test(key)
+        || /邮箱/.test(key) || /127\.0\.0\.1:5000\b/.test(key);
     });
     _wakeMcpClients = target.map(c => new McpServerClient(c));
   } catch (e) {

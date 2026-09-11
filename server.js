@@ -3593,6 +3593,8 @@ app.get("/admin/mcp/servers", { preHandler: mcpManageAuth }, async (req, reply) 
       const base = { id: s.id, name: s.name, type: s.type, url: s.url, command: s.command, args: s.args || [], headers: s.headers || {}, enabled: s.enabled !== false };
       // 工具白名单原样带回前端，避免管理台保存时丢失（PUT 端会保留该字段）
       if (Array.isArray(s.allowTools)) base.allowTools = s.allowTools.map(String);
+      // 工具级黑名单（聊天端工具查看页的每工具开关）同样带回，避免保存时丢失
+      if (Array.isArray(s.blockTools)) base.blockTools = s.blockTools.map(String);
       if (s.enabled === false) return Object.assign(base, { connected: false, tools: [], toolCount: 0, note: "已停用" });
       try {
         const probe = await mcpProbeServer(s);
@@ -3612,10 +3614,15 @@ app.get("/admin/mcp/servers", { preHandler: mcpManageAuth }, async (req, reply) 
           }).filter(function (t) { return t.name; });
           return Object.assign(base, probe, { tools: enriched, toolCount: enriched.length, managedTools: true });
         }
-        // 白名单内工具才注入模型，管理台展示保持一致（看不到被滤掉的工具）
-        if (Array.isArray(base.allowTools) && Array.isArray(probe.tools)) {
-          probe.tools = probe.tools.filter((t) => base.allowTools.indexOf(t && t.name) >= 0);
-          probe.toolCount = probe.tools.length;
+        // 工具全部返回、逐个标 enabled（聊天端工具查看页按此渲染开关）：
+        // allowTools 白名单外的 / blockTools 黑名单内的工具注入侧会被滤掉，这里标 enabled:false
+        if (Array.isArray(probe.tools)) {
+          const allow = Array.isArray(base.allowTools) ? base.allowTools : null;
+          const block = Array.isArray(base.blockTools) ? base.blockTools : null;
+          probe.tools = probe.tools.map((t) => Object.assign({}, t, {
+            enabled: (!allow || allow.indexOf(t && t.name) >= 0) && (!block || block.indexOf(t && t.name) < 0)
+          }));
+          probe.toolCount = probe.tools.filter((t) => t.enabled !== false).length;
         }
         return Object.assign(base, probe);
       } catch (e) {
@@ -3642,6 +3649,8 @@ app.put("/admin/mcp/servers", { preHandler: mcpManageAuth }, async (req, reply) 
       if (s.headers && typeof s.headers === "object") o.headers = s.headers;
       // 工具白名单：透传保留（mcp-service.loadTools 据此过滤注入给模型的工具）
       if (Array.isArray(s.allowTools)) o.allowTools = s.allowTools.map(String);
+      // 工具级黑名单：透传保留（每工具开关，关闭的工具不注入模型）
+      if (Array.isArray(s.blockTools)) o.blockTools = s.blockTools.map(String);
       return o;
     }).filter(function (s) { return s.id && s.name; });
     writeJsonFileAtomic(MCP_SERVERS_CONFIG, { servers: clean });
