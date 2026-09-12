@@ -719,13 +719,13 @@ def tool_context_search(args):
             if not c or c in seen:
                 continue
             seen.add(c)
-            matches.append({"content": c, "time": m.get("time"), "role": m.get("role")})
+            matches.append({"session": m.get("session"), "msg_id": m.get("msg_id"), "content": c, "time": m.get("time"), "role": m.get("role")})
         return {"total": len(matches), "matches": matches}
     return {"error": data.get("error", "检索失败")}
 
 
 TOOLS["context_search"] = {
-    "description": "语义检索所有会话的原始上下文和导入对话（含已被压缩区域的原文）。默认跨所有会话、语义模式，用描述性语句也能搜到相关内容；返回相关消息段落及时间、角色，相邻命中自动合并，相同内容只保留一条。可用于：回忆旧对话细节、找某段聊过的内容、确认要替换的范围。注意：仅当前会话模式下最近5分钟内容不返回。",
+    "description": "语义检索所有会话的原始上下文和导入对话（含已被压缩区域的原文）。默认跨所有会话、语义模式，用描述性语句也能搜到相关内容；返回相关消息段落及所属会话(session)、消息编号(msg_id)、时间、角色，相邻命中自动合并，相同内容只保留一条。可用于：回忆旧对话细节、找某段聊过的内容、确认要替换的范围；拿到 msg_id 后可用 context_star 给该原文标星。注意：仅当前会话模式下最近5分钟内容不返回。",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -766,7 +766,8 @@ def tool_memory_search(args):
     except Exception as e:
         return {"error": str(e)}
     if data.get("ok"):
-        # 只留 AI 要读的内容/分类/重要度；时间戳类字段无用（updated_at 每次检索都会被刷成当前时间，纯噪声），并防内容重复
+        # 内容/分类/重要度给 AI 读；id+pinned 一并透传（id 供 memory_pin 按 id 置顶，pinned 供模型知道哪条已置顶）；
+        # 时间戳类字段无用（updated_at 每次检索都会被刷成当前时间，纯噪声），并防内容重复
         seen = set()
         items = []
         for it in data.get("items", []):
@@ -774,13 +775,13 @@ def tool_memory_search(args):
             if not c or c in seen:
                 continue
             seen.add(c)
-            items.append({"content": c, "category": it.get("category"), "importance": it.get("importance")})
+            items.append({"id": it.get("id"), "content": c, "category": it.get("category"), "importance": it.get("importance"), "pinned": bool(it.get("pinned"))})
         return {"total": len(items), "items": items}
     return {"error": data.get("error", "检索失败")}
 
 
 TOOLS["memory_search"] = {
-    "description": "检索长期记忆池（关于她/关于我们/锚点/信号/对话摘要/对话碎片）。支持关键词、完整问题或模糊描述，系统自动综合语义、词面匹配、重要度和新旧程度排序；也可按分类只搜某一类。category 填「最近」=按更新时间倒序列出最新记忆（忽略关键词）；填「已置顶」=只看置顶记忆（带 q 则在置顶内按相关性搜）。设置 breath=true 且不填 q 时，浮现最近沉淀的记忆。适用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池、翻最近记了什么、查看所有置顶。区别于 context_search（检索原始对话原文）。",
+    "description": "检索长期记忆池（关于她/关于我们/锚点/信号/对话摘要/对话碎片）。支持关键词、完整问题或模糊描述，系统自动综合语义、词面匹配、重要度和新旧程度排序；也可按分类只搜某一类。返回每条记忆的唯一 id（可用 memory_pin 按 id 置顶/取消置顶）。category 填「最近」=按更新时间倒序列出最新记忆（忽略关键词）；填「已置顶」=只看置顶记忆（带 q 则在置顶内按相关性搜）。设置 breath=true 且不填 q 时，浮现最近沉淀的记忆。适用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池、翻最近记了什么、查看所有置顶。区别于 context_search（检索原始对话原文）。",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -852,6 +853,122 @@ TOOLS["memory_add"] = {
         "required": ["content"]
     },
     "handler": tool_memory_add
+}
+
+
+def tool_context_star(args):
+    session = (args.get("session") or "").strip()
+    if not session:
+        return {"error": "session 必填：会话 id（context_search 返回的 session 字段）"}
+    raw_ids = args.get("msg_ids")
+    if not isinstance(raw_ids, list):
+        return {"error": "msg_ids 必填：要标星的消息编号列表（context_search 返回的 msg_id）"}
+    msg_ids = []
+    for x in raw_ids:
+        s = str(x or "").strip()
+        if s:
+            msg_ids.append(s)
+    if not msg_ids:
+        return {"error": "msg_ids 里没有有效编号"}
+    marked = args.get("marked")
+    if marked is None:
+        marked = True
+    data = {"session": session, "msg_ids": msg_ids, "marked": bool(marked)}
+    url = f"{BASE_URL}:3000/internal/context-mark"
+    req = urllib.request.Request(url,
+        data=json.dumps(data).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-internal-key": INTERNAL_KEY},
+        method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            out = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            out = json.loads(e.read().decode("utf-8"))
+        except Exception:
+            out = {"error": f"HTTP {e.code}"}
+    except Exception as e:
+        return {"error": str(e)}
+    if out.get("ok"):
+        n = len(out.get("starred") or [])
+        if marked:
+            msg = f"已标星 {n} 条原文：会长期保留在上下文中，不参与压缩/替换"
+        else:
+            msg = f"已取消 {n} 条原文的标星"
+        result = {"success": True, "marked": bool(marked), "message": msg}
+        if out.get("starred"):
+            result["starred"] = out.get("starred")
+        if out.get("missing"):
+            result["missing"] = out.get("missing")
+            result["message"] += f"；另有 {len(out.get('missing'))} 条编号未找到对应消息"
+        if out.get("failed"):
+            result["failed"] = out.get("failed")
+        return result
+    return {"error": out.get("error", "标星失败")}
+
+
+TOOLS["context_star"] = {
+    "description": "给聊天原文标星（或取消标星）。标星后的原文会长期保留在 AI 上下文中、不参与压缩替换（与用户手动标星同等待遇），但不会写入记忆池。用法：先用 context_search 搜到原文（结果每条带 session 和 msg_id），再把同一 session 下的 msg_id 传给本工具，可一次传多条。注意：msg_id 必须搭配其所属 session 使用，跨会话的原文要分别调用；标星按「角色+原文内容」识别，同一段原文即使出现在别处也会一起被标星/取消。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "session": {"type": "string", "description": "会话 id（context_search 返回的 session 字段）"},
+            "msg_ids": {"type": "array", "items": {"type": "string"}, "description": "要标星的消息编号列表（context_search 返回的 msg_id），可一次传多条"},
+            "marked": {"type": "boolean", "description": "true=标星（默认），false=取消标星"}
+        },
+        "required": ["session", "msg_ids"]
+    },
+    "handler": tool_context_star
+}
+
+
+def tool_memory_pin(args):
+    mid = (args.get("id") or "").strip()
+    if not mid:
+        return {"error": "id 必填：记忆 id（memory_search 返回的 id 字段，mp_ 开头）"}
+    pinned = args.get("pinned")
+    if pinned is None:
+        pinned = True
+    data = {"id": mid, "pinned": bool(pinned)}
+    url = f"{BASE_URL}:3000/internal/memory-pool/pin"
+    req = urllib.request.Request(url,
+        data=json.dumps(data).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-internal-key": INTERNAL_KEY},
+        method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            out = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            out = json.loads(e.read().decode("utf-8"))
+        except Exception:
+            out = {"error": f"HTTP {e.code}"}
+    except Exception as e:
+        return {"error": str(e)}
+    if out.get("success"):
+        entry = out.get("entry") or {}
+        is_pinned = bool(entry.get("pinned"))
+        return {
+            "success": True,
+            "id": entry.get("id"),
+            "pinned": is_pinned,
+            "content": (entry.get("content") or "")[:80],
+            "message": "已置顶：这条记忆会固定注入每次对话的「相关记忆」区" if is_pinned else "已取消置顶"
+        }
+    return {"error": out.get("error", "操作失败")}
+
+
+TOOLS["memory_pin"] = {
+    "description": "置顶或取消置顶一条记忆池记忆。先用 memory_search 找到记忆（结果每条带 id），再把 id 传给本工具。置顶后的记忆固定注入每次对话的「相关记忆」区，不再依赖检索命中。适用于：她明确说「这个要一直记住」、要把某条记忆升级为长期固定记住、或取消某条不再需要固定注入的置顶。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string", "description": "记忆 id（memory_search 返回的 id 字段，mp_ 开头）"},
+            "pinned": {"type": "boolean", "description": "true=置顶（默认），false=取消置顶"}
+        },
+        "required": ["id"]
+    },
+    "handler": tool_memory_pin
 }
 
 

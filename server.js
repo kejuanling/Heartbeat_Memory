@@ -2994,6 +2994,32 @@ app.get("/internal/context-search", async (req, reply) => {
   }
 });
 
+// 按 消息id 给聊天原文标星/取消：MCP 工具 context_star 用（x-internal-key 鉴权）
+// AI 标星只做「原文保留在上下文」（与用户标星共用 marks 存储、同样不参与压缩/替换），
+// 但不同步写记忆池——标星与对话碎片分开（看板 I5 方向）；取消标星直接删 key，无沉底逻辑。
+app.post("/internal/context-mark", async (req, reply) => {
+  try {
+    const b = req.body || {};
+    const session = String(b.session || "").trim();
+    const marked = b.marked === undefined ? true : !!b.marked;
+    const r = contextReplacements.findMessagesByIds(session, b.msg_ids);
+    if (!r.found.length) {
+      return reply.code(404).send({ ok: false, error: "这些 msg_id 都没找到对应消息（确认 session 与 msg_id 来自同一次 context_search）", missing: r.missing });
+    }
+    const starred = [];
+    const failed = [];
+    for (const m of r.found) {
+      const res = contextReplacements.setMark(m.key, marked, { content: m.content, role: m.role, msg_time: m.time });
+      if (res && res.ok) starred.push({ msg_id: m.msg_id, role: m.role, time: m.time });
+      else failed.push({ msg_id: m.msg_id, error: (res && res.error) || "标星失败" });
+    }
+    reply.send({ ok: true, starred, failed, missing: r.missing });
+  } catch (err) {
+    console.error("[POST /internal/context-mark] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
 // 记忆池检索：MCP 工具 memory_search 用（x-internal-key 鉴权）
 // retrieveHybrid = 语义余弦(bge-small-zh) + 字面 + 重要级混合；embed-server 不可用自动降级纯字面
 app.get("/internal/memory-pool/retrieve", async (req, reply) => {
@@ -3033,6 +3059,22 @@ app.post("/internal/memory-pool/add", async (req, reply) => {
     reply.send({ success: true, dup: r.dup, entry: r.entry });
   } catch (err) {
     console.error("[POST /internal/memory-pool/add] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 记忆池按 id 置顶/取消置顶：MCP 工具 memory_pin 用（x-internal-key 鉴权）
+app.post("/internal/memory-pool/pin", async (req, reply) => {
+  try {
+    const b = req.body || {};
+    const id = String(b.id || "").trim();
+    if (!id) return reply.code(400).send({ error: "id 必填：记忆 id（memory_search 返回）" });
+    const pinned = b.pinned === undefined ? true : !!b.pinned;
+    const entry = memoryPool.update(id, { pinned });
+    if (!entry) return reply.code(404).send({ error: "找不到这条记忆：id=" + id });
+    reply.send({ success: true, entry });
+  } catch (err) {
+    console.error("[POST /internal/memory-pool/pin] error:", err.message);
     reply.code(500).send({ error: err.message });
   }
 });

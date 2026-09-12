@@ -1314,6 +1314,36 @@ function getMarkPoolId(key) {
   return (marks[key] && marks[key].poolId) || null;
 }
 
+// 按 会话id+消息id 批量取消息（AI 标星 context_star 用）：
+// 返回 found=[{msg_id,key,content,role,time}]（key=contentKey，可直接进 setMark）、missing=没找到的编号。
+// sessionId 传 "current"/空 = 当前会话。
+function findMessagesByIds(sessionId, msgIds) {
+  const ids = (Array.isArray(msgIds) ? msgIds : []).map(function(x) { return String(x || "").trim(); }).filter(Boolean);
+  const found = [];
+  const missing = [];
+  if (ids.length === 0) return { found: found, missing: missing };
+  let timeline = null;
+  try {
+    const sid = (!sessionId || sessionId === "current") ? undefined : sessionId;
+    timeline = loadTimeline(sid);
+  } catch (e) { timeline = null; }
+  const byId = new Map();
+  (Array.isArray(timeline) ? timeline : []).forEach(function(m) {
+    if (!m || m.role === "system" || m.deleted === true) return;
+    if (m.id) byId.set(String(m.id), m);
+  });
+  ids.forEach(function(mid) {
+    const m = byId.get(mid);
+    if (!m) { missing.push(mid); return; }
+    let c = null;
+    let key = null;
+    try { c = contentToText(m); key = c ? contentKey(m) : null; } catch (e) { c = null; }
+    if (!c || !key) { missing.push(mid); return; }
+    found.push({ msg_id: mid, key: key, content: c, role: m.role || "", time: m.time || "" });
+  });
+  return { found: found, missing: missing };
+}
+
 // 未发生替换时统一留痕：让每次请求都有记录，便于了解哪些请求没触发上下文替换
 function logNoReplace(count, source) {
   try {
@@ -2017,12 +2047,13 @@ async function searchContextEnhanced(query, options) {
   if (allSessions) {
     allMsgs = loadAllSessionTimelines().map(function(m, i) {
       return {
-        content: m.content || "",
+        content: contentToText(m),
         role: m.role,
         time: m.time || null,
         source: "timeline",
         session: m._session,
         sidx: m._sidx,
+        msg_id: m.id,
         _gidx: i
       };
     });
@@ -2030,19 +2061,20 @@ async function searchContextEnhanced(query, options) {
     const src = loadSearchableMessages();
     for (let i = 0; i < src.timeline.length; i++) {
       allMsgs.push({
-        content: src.timeline[i].content || "",
+        content: contentToText(src.timeline[i]),
         role: src.timeline[i].role,
         time: src.timeline[i].time || null,
         source: "timeline",
         session: "current",
         sidx: i,
+        msg_id: src.timeline[i].id,
         _gidx: i
       });
     }
     const baseIdx = allMsgs.length;
     for (let i = 0; i < src.imported.length; i++) {
       allMsgs.push({
-        content: src.imported[i].content || "",
+        content: contentToText(src.imported[i]),
         role: src.imported[i].role,
         time: src.imported[i].time || null,
         source: "imported",
@@ -2162,6 +2194,7 @@ async function searchContextEnhanced(query, options) {
     };
     if (rep.source === "timeline") {
       out.session = rep.session;
+      out.msg_id = rep.msg_id;
       out.start_index = rep.sidx;
       out.end_index = g[g.length-1].sidx;
     } else if (rep.source === "imported") {
@@ -2528,6 +2561,7 @@ module.exports = {
   updateMark,
   setMarkPoolId,
   getMarkPoolId,
+  findMessagesByIds,
   findContentByKey,
   contentKey,
   // 特殊事件结构化识别与注入窗口过滤（供 context-compactor / server 复用同一口径）

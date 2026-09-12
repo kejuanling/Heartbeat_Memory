@@ -274,7 +274,11 @@ function update(id, patch) {
   if (patch.content !== undefined) it.content = String(patch.content).trim();
   if (patch.category !== undefined && CATEGORIES.includes(patch.category)) it.category = patch.category;
   if (patch.importance !== undefined) it.importance = Math.max(0, Math.min(1, Number(patch.importance) || 0));
-  if (patch.pinned !== undefined) it.pinned = !!patch.pinned;
+  if (patch.pinned !== undefined) {
+    it.pinned = !!patch.pinned;
+    if (it.pinned) it.pinned_at = nowIso();
+    else delete it.pinned_at;
+  }
   if (patch.active !== undefined) it.active = !!patch.active;
   it.updated_at = nowIso();
   if (patch.content !== undefined || patch.category !== undefined) invalidateVector(id);
