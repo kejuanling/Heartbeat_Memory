@@ -210,7 +210,7 @@ function isSpecialEvent(msg) {
   if (!msg || msg.role !== "assistant") return false;
   const c = String(msg.content || "").replace(/\s+/g, " ").trim();
   if (!c) return false;
-  const structuredStart = /^（\s*(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|刚刚|自动唤醒|自动写了日记|记忆浮现|时间标记|摘要|共影|截图|记忆碎片|容量提醒)/.test(c);
+  const structuredStart = /^（\s*(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|刚刚|自动唤醒|醒来写了日记|自动写了日记|记忆浮现|时间标记|摘要|共影|截图|记忆碎片|容量提醒)/.test(c);
   if (!structuredStart) return false;
   return (
     c.indexOf("刚刚给宝宝发了 Bark") !== -1 ||
@@ -219,6 +219,7 @@ function isSpecialEvent(msg) {
     c.indexOf("自动唤醒：本次未发送推送") !== -1 ||
     (/刚刚给[^：]*发了/.test(c) && c.indexOf("推送") !== -1) ||
     (/刚刚给宝宝发了/.test(c) && c.indexOf("推送") !== -1) ||
+    c.indexOf("醒来写了日记") !== -1 ||
     c.indexOf("自动写了日记") !== -1 ||
     c.indexOf("记忆浮现）") !== -1 ||
     c.indexOf("时间标记") !== -1 ||
@@ -236,10 +237,12 @@ function isMemoryFlash(msg) {
   return isSpecialEvent(msg) && String(msg.content || "").indexOf("记忆浮现") !== -1;
 }
 
-// 日记特殊事件：AI 唤醒时自动写的日记，永远不参与压缩，单独保留在上下文
+// 日记特殊事件：AI 唤醒/后台自主时写的日记，永远不参与压缩，单独保留在上下文
+// 事件名 2026-09-12 起「醒来写了日记」，旧数据兼容「自动写了日记」
 function isDiaryEvent(msg) {
   if (!msg || msg.role !== "assistant") return false;
-  return isSpecialEvent(msg) && String(msg.content || "").indexOf("自动写了日记") !== -1;
+  const c = String(msg.content || "");
+  return isSpecialEvent(msg) && (c.indexOf("醒来写了日记") !== -1 || c.indexOf("自动写了日记") !== -1);
 }
 
 // 记忆碎片特殊事件：跨窗口带走的标星正文，永不压缩
@@ -255,7 +258,7 @@ function classifySpecialEvent(msg) {
   const out = [];
   if (/自动唤醒|本次未发送/.test(c)) out.push("wake");
   else if (/发了 Bark|推送/.test(c)) out.push("push");
-  if (c.indexOf("自动写了日记") !== -1) out.push("diary");
+  if (c.indexOf("醒来写了日记") !== -1 || c.indexOf("自动写了日记") !== -1) out.push("diary");
   if (c.indexOf("记忆浮现）") !== -1) out.push("memory");
   if (c.indexOf("时间标记") !== -1) out.push("time");
   if (c.indexOf("摘要）") !== -1) out.push("summary");

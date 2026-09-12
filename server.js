@@ -1050,7 +1050,7 @@ function classifySpecialEvent(msg) {
   const out = [];
   if (/自动唤醒|本次未发送/.test(c)) out.push("wake");
   else if (/发了 Bark|推送/.test(c)) out.push("push");
-  if (c.includes("自动写了日记")) out.push("diary");
+  if (c.includes("醒来写了日记") || c.includes("自动写了日记")) out.push("diary");
   if (c.includes("记忆浮现）")) out.push("memory");
   if (c.includes("时间标记")) out.push("time");
   if (c.includes("摘要）")) out.push("summary");
@@ -1826,7 +1826,7 @@ function sessionCreatedAtOf(sessionId) {
 
 // ── 日记隐藏清单（2026-09-09）：管理台「日记阅览」可逐篇隐藏 ──
 // 作用范围仅「跨窗口注入」(recentDiaryTextBefore)：隐藏篇不参与注入、也不占注入份数（顺位前移补足 count 篇）。
-// 不影响：写日记会话时间线里的「自动写了日记」特殊事件（仍按时间线进上下文）、日记文件本身仍可查看/编辑。
+// 不影响：写日记会话时间线里的「醒来写了日记」特殊事件（2026-09-12 前旧事件为「自动写了日记」，识别两种兼容）（仍按时间线进上下文）、日记文件本身仍可查看/编辑。
 const DIARY_HIDDEN_FILE = path.join(__dirname, "data", "diary_hidden.json");
 function readDiaryHiddenSet() {
   try {
@@ -2297,7 +2297,7 @@ app.post("/internal/wake-event", async (req, reply) => {
     const isPushEcho = !!(push_meta && event && isPushEchoContent(event));
     if (!content && !event && !diary) return reply.code(400).send({ error: "content or event is required" });
     if (diary) {
-      appendSpecialEvent(`（${formatDateTimeInTimeZone(new Date(), TIME_ZONE)} 自动写了日记：${String(diary).trim()}）`, null, evSession);
+      appendSpecialEvent(`（${formatDateTimeInTimeZone(new Date(), TIME_ZONE)} 醒来写了日记：${String(diary).trim()}）`, null, evSession);
     }
     if (event) {
       if (push_meta && isPushEchoContent(event)) {
@@ -2424,7 +2424,7 @@ function readDiaryEntries(limit) {
 
 // ========================
 // 管理台：修改日记（文件 + 时间线特殊事件同步）
-// 编辑日记文件后，把时间线里同日的「自动写了日记」特殊事件一并更新，
+// 编辑日记文件后，把时间线里同日的「醒来写了日记」特殊事件一并更新（旧事件「自动写了日记」同样匹配），
 // 保证注入 LLM 上下文的内容与日记文件一致。
 // ========================
 function syncDiarySpecialEvents(fileName, newContent) {
@@ -2436,8 +2436,8 @@ function syncDiarySpecialEvents(fileName, newContent) {
   const next = timeline.map(msg => {
     if (!msg || msg.role !== "assistant" || typeof msg.content !== "string") return msg;
     const text = msg.content;
-    if (!text.includes("自动写了日记")) return msg;
-    const head = text.match(/^（\s*(\d{4}-\d{2}-\d{2})(?:\s+(\d{1,2}:\d{2}))?\s*自动写了日记[:：]?\s*/);
+    if (!/醒来写了日记|自动写了日记/.test(text)) return msg;
+    const head = text.match(/^（\s*(\d{4}-\d{2}-\d{2})(?:\s+(\d{1,2}:\d{2}))?\s*(?:醒来写了日记|自动写了日记)[:：]?\s*/);
     if (!head || head[1] !== dateKey) return msg;
     // 优先按「## 日期 时间」标题把对应条目摘出来；匹配不到就用整篇新内容
     let diaryText = String(newContent || "").trim();
@@ -2449,7 +2449,7 @@ function syncDiarySpecialEvents(fileName, newContent) {
     }
     updated++;
     const timeLabel = head[2] ? `${head[1]} ${head[2]}` : head[1];
-    return { ...msg, content: `（${timeLabel} 自动写了日记：${diaryText}）` };
+    return { ...msg, content: `（${timeLabel} 醒来写了日记：${diaryText}）` };
   });
   if (updated > 0) {
     saveTimeline(next);
@@ -2458,7 +2458,7 @@ function syncDiarySpecialEvents(fileName, newContent) {
   return updated;
 }
 
-// 删除日记时同步移除时间线里同日的「自动写了日记」特殊事件
+// 删除日记时同步移除时间线里同日的「醒来写了日记」特殊事件（旧事件「自动写了日记」同样匹配）
 function removeDiarySpecialEvents(fileName) {
   const dateMatch = String(fileName || "").match(/^(\d{4}-\d{2}-\d{2})\.md$/i);
   if (!dateMatch) return 0;
@@ -2468,8 +2468,8 @@ function removeDiarySpecialEvents(fileName) {
   const next = timeline.filter(msg => {
     if (!msg || msg.role !== "assistant" || typeof msg.content !== "string") return true;
     const text = msg.content;
-    if (!text.includes("自动写了日记")) return true;
-    const head = text.match(/^（\s*(\d{4}-\d{2}-\d{2})(?:\s+\d{1,2}:\d{2})?\s*自动写了日记[:：]?\s*/);
+    if (!/醒来写了日记|自动写了日记/.test(text)) return true;
+    const head = text.match(/^（\s*(\d{4}-\d{2}-\d{2})(?:\s+\d{1,2}:\d{2})?\s*(?:醒来写了日记|自动写了日记)[:：]?\s*/);
     return !(head && head[1] === dateKey);
   });
   const removed = before - next.length;
@@ -4969,7 +4969,7 @@ app.get("/admin/env", { preHandler: basicAuth }, async (req, reply) => {
 });
 
 
-// 修改日记：更新文件内容，并同步时间线里对应的「自动写了日记」特殊事件
+// 修改日记：更新文件内容，并同步时间线里对应的「醒来写了日记」特殊事件
 app.post("/admin/diary/update", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const { name, content } = req.body || {};
@@ -4998,7 +4998,7 @@ app.post("/admin/diary/update", { preHandler: basicAuth }, async (req, reply) =>
   }
 });
 
-// 删除日记：删除文件，并同步移除时间线里对应的「自动写了日记」特殊事件
+// 删除日记：删除文件，并同步移除时间线里对应的「醒来写了日记」特殊事件
 app.post("/admin/diary/delete", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const { name } = req.body || {};
@@ -5027,7 +5027,7 @@ app.post("/admin/diary/delete", { preHandler: basicAuth }, async (req, reply) =>
 });
 
 // 隐藏/取消隐藏日记（2026-09-09）：只影响「跨窗口注入」——隐藏篇不参与新会话注入、不占注入份数。
-// 不影响：时间线「自动写了日记」特殊事件、日记文件本身（仍可查看/编辑）。隐藏清单变化会触发快照指纹重建。
+// 不影响：时间线「醒来写了日记」特殊事件、日记文件本身（仍可查看/编辑）。隐藏清单变化会触发快照指纹重建。
 app.post("/admin/diary/hide", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const { name, hidden } = req.body || {};

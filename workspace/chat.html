@@ -2850,13 +2850,13 @@ function msgTime(m){
 // 给时间线里的特殊事件分类，用于区分渲染样式：
 //  - "push"  ：自动唤醒并推送了内容，用消息气泡样式
 //  - "silent"：自动唤醒但未推送（本次未发送推送），用居中日期/时间样式
-//  - "diary" ：自动写了日记，保持原样
+//  - "diary" ：醒来写了日记（旧数据「自动写了日记」兼容），保持原样
 // 特殊事件都以「（时间 」开头的惯例格式，用 /^（/ 限定避免误伤普通对话。
 function classifyTimelineEvent(msg){
   if(!msg||typeof msg.content!=="string")return null;
   const c=msg.content.trim();
   if(c.indexOf("（")!==0)return null;
-  if(/自动写了日记/.test(c))return "diary";
+  if(/醒来写了日记|自动写了日记/.test(c))return "diary";
   if(/自动唤醒/.test(c)&&/未发送推送|未推送|本次未发送/.test(c))return "silent";
   if(!c.includes("本次未发送")&&/刚刚给.{1,24}发了.{1,24}?推送：/.test(c))return "push";
   return null;
