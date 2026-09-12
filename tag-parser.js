@@ -5,7 +5,7 @@ const memoryEngine = require("./memory-engine");
 const PIN_TAG_RE = /<\s*pin\b[^>]*>([\s\S]*?)<\s*\/pin\s*>/gi;
 const MEMORY_TAG_RE = /<\s*memory\b[^>]*>([\s\S]*?)<\s*\/memory\s*>/gi;
 
-// 剥离所有 <memory>/<pin> 标签（含属性写法、未闭合标签），供流式过滤/时间线匹配复用
+// 剥离所有 <memory>/<pin>/<star> 标签（含属性写法、未闭合标签），供流式过滤/时间线匹配复用
 function stripTags(text) {
   return String(text || "")
     .replace(/<\s*memory\b[^>]*>([\s\S]*?)<\s*\/memory\s*>/gi, "")
@@ -13,8 +13,9 @@ function stripTags(text) {
     .replace(/<\s*wake\b[^>]*>([\s\S]*?)<\s*\/wake\s*>/gi, "")
     .replace(/<\s*quiet\b[^>]*>([\s\S]*?)<\s*\/quiet\s*>/gi, "")
     .replace(/<\s*compacted\b[^>]*>([\s\S]*?)<\s*\/compacted\s*>/gi, "")
-    .replace(/<\s*(?:memory|pin|wake|quiet|compacted)\b[^>]*>/gi, "")
-    .replace(/<\s*(?:memory|pin|wake|quiet|compacted)\b[^>]*$/gi, "");
+    .replace(/<\s*star\b[^>]*>(?:\s*<\s*\/star\s*>)?/gi, "")
+    .replace(/<\s*(?:memory|pin|wake|quiet|compacted|star)\b[^>]*>/gi, "")
+    .replace(/<\s*(?:memory|pin|wake|quiet|compacted|star)\b[^>]*$/gi, "");
 }
 
 // 宽松解析 {key:value,...}：值可不带引号，值里含逗号也能正确处理；
@@ -130,6 +131,24 @@ async function extractAndStore(text) {
         return r;
       }).catch(function (err) {
         console.warn("[tag-parser] <memory> 入库失败:", err.message);
+      })
+    );
+  }
+
+  // --- <star> 轻量辅助：AI 觉得这条回复重要 → 自标星（原文保留在上下文、不参与压缩，不入记忆池；
+  //     与用户手动标星 / context_star 工具共用同一套 marks 存储）。注意：唤醒路径本函数会被执行两次
+  //     （wake_up 传剥过 <wake> 的文本、网关传原文），前者的 key 与落盘原文不一致会留一条不命中的幽灵
+  //     marks 条目——无害，真正生效的是网关侧那次；setMark 幂等，重复写只是刷新 markedAt。 ---
+  if (/<\s*star\b/i.test(text)) {
+    promises.push(
+      Promise.resolve().then(function () {
+        const cr = require("./context-replacements");
+        const key = cr.contentKey({ role: "assistant", content: text });
+        const r = cr.setMark(key, true, { content: text, role: "assistant", msg_time: new Date().toISOString() });
+        if (r && r.ok) console.log("[tag-parser] <star> 已标星本条回复 key=", key);
+        return r;
+      }).catch(function (err) {
+        console.warn("[tag-parser] <star> 标星失败:", err.message);
       })
     );
   }

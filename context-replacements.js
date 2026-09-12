@@ -379,6 +379,7 @@ function normalizedCompareKey(msg) {
     .replace(/<memory>[\s\S]*?<\/memory>/gi, "")
     .replace(/<pin>[\s\S]*?<\/pin>/gi, "")
     .replace(/<current_time>[\s\S]*?<\/current_time>/gi, "")
+    .replace(/<star\b[^>]*>(?:\s*<\/star\s*>)?/gi, "")
     .replace(/\s+/g, " ")
     .trim();
   return role + "\u0000" + stripped;

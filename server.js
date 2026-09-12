@@ -820,6 +820,8 @@ function createContentTagFilter() {
     if (/^<p(?:i)?$/.test(tail)) return true;                  // <p <pi
     if (/^<w(?:a(?:k)?)?$/.test(tail)) return true;            // <w <wa <wak
     if (/^<c(?:o(?:m(?:p(?:a(?:c(?:t)?)?)?)?)?)?$/.test(tail)) return true; // <c <co <com <comp ... <compacte
+    if (/^<star(\s[^>]*)?\/?>/.test(tail)) return true;        // <star> <star/> <star 属性（完整或接近完整）
+    if (/^<s(?:t(?:a(?:r)?)?)?$/.test(tail)) return true;      // <s <st <sta <star
     if (tail === "<") return true;
     return false;
   }
@@ -828,7 +830,7 @@ function createContentTagFilter() {
   function findOpenIndex(str) {
     const lower = str.toLowerCase();
     const candidates = [];
-    const re = /<(?=[mpwqc])/g;
+    const re = /<(?=[mpwqcs])/g;
     let m;
     while ((m = re.exec(lower)) !== null) {
       candidates.push(m.index);
@@ -849,7 +851,7 @@ function createContentTagFilter() {
       buf += delta;
       for (;;) {
         if (inTag) {
-          const closeRe = tagType === "memory" ? /<\/memory>/i : tagType === "pin" ? /<\/pin>/i : tagType === "quiet" ? /<\/quiet>/i : tagType === "compacted" ? /<\/compacted>/i : /<\/wake>/i;
+          const closeRe = tagType === "memory" ? /<\/memory>/i : tagType === "pin" ? /<\/pin>/i : tagType === "quiet" ? /<\/quiet>/i : tagType === "compacted" ? /<\/compacted>/i : tagType === "star" ? /<\/star\s*>/i : /<\/wake>/i;
           const m = closeRe.exec(buf);
           if (m) {
             buf = buf.slice(m.index + m[0].length);
@@ -865,10 +867,16 @@ function createContentTagFilter() {
         if (open !== -1) {
           if (open > 0) emit(buf.slice(0, open));
           buf = buf.slice(open);
-          if (/^<(memory|pin|wake|quiet|compacted)(\s[^>]*)?>/.test(buf.toLowerCase())) {
+          const lowerBuf = buf.toLowerCase();
+          // <star> 是空标签：自闭合 <star/> 直接吞掉并继续输出后续正文；成对 <star></star> 才进 inTag 等闭合
+          const starSelf = lowerBuf.match(/^<star\b[^>]*\/>/);
+          if (starSelf) {
+            buf = buf.slice(starSelf[0].length);
+            continue;
+          }
+          if (/^<(memory|pin|wake|quiet|compacted|star)(\s[^>]*)?>/.test(lowerBuf)) {
             inTag = true;
-            const lowerBuf = buf.toLowerCase();
-            tagType = lowerBuf.startsWith("<pin") ? "pin" : lowerBuf.startsWith("<wake") ? "wake" : lowerBuf.startsWith("<quiet") ? "quiet" : lowerBuf.startsWith("<compacted") ? "compacted" : "memory";
+            tagType = lowerBuf.startsWith("<pin") ? "pin" : lowerBuf.startsWith("<wake") ? "wake" : lowerBuf.startsWith("<quiet") ? "quiet" : lowerBuf.startsWith("<compacted") ? "compacted" : lowerBuf.startsWith("<star") ? "star" : "memory";
           }
           return;
         }
@@ -4037,6 +4045,7 @@ function nKeyOfMsg(m) {
     .replace(/<memory>[\s\S]*?<\/memory>/gi, "")
     .replace(/<pin>[\s\S]*?<\/pin>/gi, "")
     .replace(/<current_time>[\s\S]*?<\/current_time>/gi, "")
+    .replace(/<star\b[^>]*>(?:\s*<\/star\s*>)?/gi, "")
     .replace(/\s+/g, " ")
     .trim();
   return String((m && m.role) || "") + "\u0000" + stripped;
