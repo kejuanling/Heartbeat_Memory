@@ -2279,12 +2279,18 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
       const syncRes = appendRequestMessages(sessionId, reqMsgs);
       // 保留工具调用记录：写成一条带标记的 assistant 消息入时间线，
       // 让模型跨轮能"记住"工具结果（大小交给上下文压缩兜底）；前端渲染时跳过这条。
+      // 每条带 调用时间+状态（成功/失败/无返回内容），空返回显式写明不省略；
+      // routes/chat.js 发送前会把本条解析还原成 role=tool 消息组（格式改动两处需同步）。
       const toAppend = [];
       if (r.toolHistory && r.toolHistory.length) {
         const toolNote = r.toolHistory.map(function (t) {
-          const head = "【工具 · " + (t.name || "") + "】";
-          const body = t.error ? ("[出错] " + t.error) : (t.result ? String(t.result) : "");
-          return head + (body ? (" " + body) : "");
+          const resBody = String(t.result || "").trim();
+          const tstat = t.error ? "失败" : (resBody ? "成功" : "无返回内容");
+          const head = "【工具 · " + (t.name || "") + " · " + (t.time || "未知") + " · " + tstat + "】";
+          const body = t.error
+            ? ("[出错] " + t.error + ((resBody && resBody !== "…") ? ("\n" + resBody) : ""))
+            : (resBody ? resBody : "（工具无返回内容）");
+          return head + "\n" + body;
         }).join("\n");
         toAppend.push({ role: "assistant", content: "【工具调用记录】\n" + toolNote });
       }

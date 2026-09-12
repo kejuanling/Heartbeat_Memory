@@ -112,6 +112,77 @@ const sessionMetaCache = new Map();
 // 前端仅 180ms 防抖，连续击键会连续触发 /v1/search；items 收集 + TF-IDF 建索引都按指纹复用
 const searchIndexCache = { fp: null, index: null };
 
+// ---- 工具调用记录 → role=tool 消息组（发送模型前的内存转换，不落盘）----
+// 历史里的工具结果此前以 assistant 文本「【工具调用记录】…」回灌，模型分不清是工具返回还是自己说过的话。
+// 发送前把这条还原成主流格式：assistant(tool_calls) + 若干 role=tool 消息，内容带来源标头
+// （工具名+调用时间+状态+结果），与 mcp-tool-loop.js / server.js 落盘格式同口径（改动需三处同步）。
+const TOOL_NOTE_HEAD_RE = /^【工具 · (.+?)(?: · (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}))?(?: · (成功|失败|无返回内容))?】\s?/;
+
+// 解析「【工具调用记录】」文本为条目数组 [{name,time,status,body}]；兼容旧格式（无时间/状态段）
+function parseToolNoteEntries(text) {
+  const lines = String(text || "").split("\n");
+  const entries = [];
+  let cur = null;
+  for (let i = 1; i < lines.length; i++) {   // 首行是「【工具调用记录】」总头，跳过
+    const mm = lines[i].match(TOOL_NOTE_HEAD_RE);
+    if (mm) {
+      cur = { name: mm[1].trim(), time: mm[2] || "", status: mm[3] || "", body: lines[i].slice(mm[0].length) };
+      entries.push(cur);
+    } else if (cur) {
+      cur.body += "\n" + lines[i];
+    }
+  }
+  for (const e of entries) {
+    e.body = String(e.body || "").trim();
+    if (!e.status) {   // 旧格式兜底：从正文推状态
+      if (/^\[出错\]/.test(e.body)) e.status = "失败";
+      else if (e.body === "（工具无返回内容）") e.status = "无返回内容";
+      else e.status = e.body ? "成功" : "无返回内容";
+    }
+  }
+  return entries;
+}
+
+// 条目 → role=tool 消息内容（标头格式与 mcp-tool-loop.js buildToolResultContent 一致）
+function toolEntryToContent(e) {
+  const lines = [
+    "[工具调用结果]",
+    "工具：" + (e.name || "unknown"),
+    "调用时间：" + (e.time || "未知（历史记录未含时间）"),
+    "状态：" + (e.status === "无返回内容" ? "成功但无返回内容" : e.status)
+  ];
+  if (e.status === "失败") lines.push("错误信息：" + (e.body.replace(/^\[出错\]\s*/, "") || "未知错误"));
+  else if (e.body) { lines.push("----"); lines.push(e.body); }
+  return lines.join("\n");
+}
+
+// 逐条扫描：assistant 的「【工具调用记录】」消息 → 合成 assistant(tool_calls) + role=tool 组。
+// 解析不出条目则原样保留（兜底不丢内容）。仅在发送前转换，时间线/前端/压缩均不受影响。
+function convertToolNotesToToolRole(msgs) {
+  if (!Array.isArray(msgs)) return msgs;
+  const out = [];
+  let converted = 0;
+  for (const m of msgs) {
+    const isNote = m && m.role === "assistant" && typeof m.content === "string" && m.content.startsWith("【工具调用记录】");
+    if (!isNote) { out.push(m); continue; }
+    const entries = parseToolNoteEntries(m.content);
+    if (!entries.length) { out.push(m); continue; }
+    const toolCalls = [];
+    const toolMsgs = [];
+    const baseId = "call_hist_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
+    entries.forEach((e, k) => {
+      const id = baseId + "_" + k;
+      toolCalls.push({ id, type: "function", function: { name: e.name || "unknown", arguments: "{}" } });
+      toolMsgs.push({ role: "tool", tool_call_id: id, content: toolEntryToContent(e) });
+    });
+    out.push({ role: "assistant", content: "", tool_calls: toolCalls });
+    for (const tm of toolMsgs) out.push(tm);
+    converted++;
+  }
+  if (converted) console.log("[tool-note] 已将 " + converted + " 条工具调用记录转换为 role=tool 消息组");
+  return out;
+}
+
 module.exports = function registerChatRoutes(app, deps) {
   const {
     baseDir,
@@ -1223,6 +1294,11 @@ app.post("/v1/chat/completions", async (req, reply) => {
 
     // 上下文压缩已统一进「上下文替换」：早期对话块摘要与 AI 记忆现在都是同一种替换记录，
     // 由 contextReplacements.applyReplacements 统一生效，旧压缩器发送路径已停用。
+
+    // 工具调用记录回灌转换：把历史里 assistant 形态的「【工具调用记录】」还原成
+    // role=tool 消息组（带工具名/调用时间/状态标头），模型明确知道来源，不混入普通对话流。
+    // 必须在 applyReplacements 之后（压缩块匹配仍按 assistant 文本形态），转发前生效。
+    llmMessages = convertToolNotesToToolRole(llmMessages);
 
 
     // 请求模型

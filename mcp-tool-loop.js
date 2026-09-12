@@ -199,6 +199,7 @@ async function executeToolCalls(toolCalls, working, toolHistory, ctx, onEvent, n
     _injectSessionArg(name, args, ctx.sessionId);
     const index = (typeof nextIndex === "function") ? nextIndex() : toolHistory.length;
     const id = tc.id || ("call_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7));
+    const toolTime = _toolCallTime();   // 调用时间=执行起点，进模型上下文与 toolHistory 同一份
     let result;
     let error = null;
     try {
@@ -216,12 +217,14 @@ async function executeToolCalls(toolCalls, working, toolHistory, ctx, onEvent, n
     working.push({
       role: "tool",
       tool_call_id: id,
+      // 来源标记：工具名+调用时间+状态（成功/失败/空返回显式），模型不必靠内容特征猜；
       // 截断超大工具结果：时间线/后续轮次上下文都不需要完整大结果，30k 字符足够模型引用
-      content: _truncateResult(result.markdown || "", MAX_TOOL_RESULT_CHARS)
+      content: buildToolResultContent({ name, time: toolTime, error: error || (_isOverLimit ? `单轮工具调用数超过上限 ${ctx.maxToolsPerRound || 5}，该工具未执行。` : null), markdown: _truncateResult(result.markdown || "", MAX_TOOL_RESULT_CHARS) })
     });
     toolHistory.push({
       name,
       args,
+      time: toolTime,
       result: resTrunc,
       error,
       afterSeg: (typeof afterSeg === "number") ? afterSeg : -1   // 方案2刷新：该工具位于第 afterSeg 段正文之后（-1=最前）
@@ -245,6 +248,32 @@ function _truncateResult(text, max = 800) {
   const s = String(text ?? "").trim();
   if (!s) return "";
   return s.length > max ? s.slice(0, max) + "…" : s;
+}
+
+// 工具调用时间（Asia/Shanghai，精确到秒）；调用时间取执行起点，跨轮回灌时随 toolHistory 落盘复用。
+// 用 UTC 取值器读 +8 偏移后的时刻，宿主机时区不影响结果
+function _toolCallTime(d = new Date()) {
+  const loc = new Date(d.getTime() + 8 * 3600 * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return loc.getUTCFullYear() + "-" + p(loc.getUTCMonth() + 1) + "-" + p(loc.getUTCDate()) + " " +
+    p(loc.getUTCHours()) + ":" + p(loc.getUTCMinutes()) + ":" + p(loc.getUTCSeconds());
+}
+
+// 工具结果进模型上下文的统一标头（与 routes/chat.js 跨轮回灌转换保持同一格式，两处改要同步）：
+// 让模型明确知道「这是工具 X 在时间 T 返回的」，不靠内容特征猜；
+// 失败/空返回显式标注，绝不静默省略或给空字符串。
+function buildToolResultContent({ name, time, error, markdown }) {
+  const body = String(markdown ?? "").trim();
+  const status = error ? "失败" : (body ? "成功" : "成功但无返回内容");
+  const lines = [
+    "[工具调用结果]",
+    "工具：" + (name || "unknown"),
+    "调用时间：" + (time || _toolCallTime()),
+    "状态：" + status
+  ];
+  if (error) lines.push("错误信息：" + error);
+  if (body) { lines.push("----"); lines.push(body); }
+  return lines.join("\n");
 }
 
 // 安全地统计「按空行分段的段数」（与前端 makeMsgEl / runWithTools 的 _segCount 口径一致）
@@ -369,13 +398,15 @@ async function streamToolLoop({
       const args = _parseArgs(fn.arguments);
       _injectSessionArg(name, args, sessionId);
       const index = toolSeq++; const id = tc.id;
+      const toolTime = _toolCallTime();   // 调用时间=执行起点
       emit({ type: "tool_start", index, id, name, args, afterSeg });
       let result, error = null;
       try { result = await callToolByExposedName(serverClients, routes, name, args); }
       catch (e) { error = e.message || String(e); result = { markdown: JSON.stringify({ type: "tool_error", error: "mcp_service_error", message: error }) }; }
       const resTrunc = _truncateResult(result.markdown || "", error ? 0 : 20000);
-      working.push({ role: "tool", tool_call_id: id, content: _truncateResult(result.markdown || "", MAX_TOOL_RESULT_CHARS) });
-      toolHistory.push({ name, args, result: resTrunc, error, afterSeg });
+      // 来源标记：与 executeToolCalls 同一格式（工具名+调用时间+状态+结果，空/失败显式）
+      working.push({ role: "tool", tool_call_id: id, content: buildToolResultContent({ name, time: toolTime, error, markdown: _truncateResult(result.markdown || "", MAX_TOOL_RESULT_CHARS) }) });
+      toolHistory.push({ name, args, time: toolTime, result: resTrunc, error, afterSeg });
       emit({ type: "tool_end", index, id, name, args, result: resTrunc, error, ok: !error });
     }
   }
@@ -692,5 +723,7 @@ module.exports = {
   streamToolLoop,
   buildSSE,
   tryStreamPassthrough,
-  DEFAULT_MAX_TOOL_ROUNDS
+  DEFAULT_MAX_TOOL_ROUNDS,
+  _toolCallTime,
+  buildToolResultContent
 };
