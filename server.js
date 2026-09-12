@@ -2367,7 +2367,7 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
 // ========================
 app.post("/internal/wake-event", async (req, reply) => {
   try {
-    const { content, event, diary, push_meta, session_id } = req.body;
+    const { content, event, diary, push_meta, session_id, tools } = req.body;
     // 批注 2026-08-29：多会话。唤醒侧(wake_up.js)现在会携带 session_id，把唤醒事件写到
     // 对应会话语，而不是永远堆在主会话。未携带时回退主会话（100% 兼容旧行为）。
     const evSession = typeof session_id === "string" && session_id.trim() ? String(session_id).trim() : null;
@@ -2412,7 +2412,9 @@ app.post("/internal/wake-event", async (req, reply) => {
           console.warn("[wake-event] 标签解析失败:", e.message);
         }
         if (stored && !isPushEcho) {
-          appendSpecialEvent(stored, null, evSession);
+          // 唤醒侧工具卡（0913-03）：tools 随消息落时间线，前端复用聊天侧工具卡渲染
+          const wakeTools = Array.isArray(tools) ? tools.filter(function(t){ return t && t.name; }) : [];
+          appendSpecialEvent(stored, wakeTools.length ? { tools: wakeTools } : null, evSession);
         } else if (isPushEcho) {
           console.log(`[wake-event] 推送正文已含于回显，跳过正文单独落库 (chars=${stored.length})`);
         }

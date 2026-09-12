@@ -1370,17 +1370,6 @@ ${historyText}`
     }
   }
 
-  if (wakeToolHistory.length > 0 && eventContent) {
-    // 唤醒侧工具链摘要：与聊天侧工具卡同一信息基因，追加到唤醒事件尾部（时间线可见）
-    const seq = [];
-    for (const h of wakeToolHistory) {
-      const last = seq[seq.length - 1];
-      if (last && last.name === h.name && last.fail === !!h.error) last.n++;
-      else seq.push({ name: h.name, n: 1, fail: !!h.error });
-    }
-    eventContent += `（工具：${seq.map(x => x.name + "×" + x.n + (x.fail ? "（含失败）" : "")).join("、")}）`;
-  }
-
   if (wakeScheduleNote && eventContent) {
     eventContent += wakeScheduleNote;
   }
@@ -1410,7 +1399,8 @@ ${historyText}`
             event: eventContent,
             diary: diaryResult.diaryContent || "",
             push_meta: pushMeta,
-            session_id: wakeSessionId
+            session_id: wakeSessionId,
+            tools: wakeToolHistory.length ? wakeToolHistory : undefined
           }),
           signal: ctl.signal
         });

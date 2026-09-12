@@ -76,6 +76,22 @@
   --title-font:"Noto Serif SC",serif;
   --call-bg:linear-gradient(165deg,#fdf4f0 0%,#fbeaec 45%,#f6dde4 100%);
 }
+/* ===== 主题风格模式（body[data-style]，随主题整体切换；classic=无覆盖） ===== */
+/* 暗夜玻璃：大光斑 + 发光描边 + 深色磨砂 */
+body[data-style="glass"]::before{
+  background:
+    radial-gradient(circle at 16% 10%, rgba(110,168,255,.18), transparent 44%),
+    radial-gradient(circle at 84% 76%, rgba(150,110,255,.15), transparent 48%),
+    radial-gradient(circle at 60% 30%, rgba(64,220,190,.08), transparent 40%);
+}
+body[data-style="glass"] .msg .bubble{
+  border:1px solid rgba(255,255,255,.13);
+  box-shadow:0 10px 30px rgba(0,0,0,.38), inset 0 1px 0 rgba(255,255,255,.08);
+}
+body[data-style="glass"] header{border-bottom:1px solid rgba(255,255,255,.06)}
+body[data-style="glass"] .inputbar{box-shadow:0 8px 26px rgba(0,0,0,.35);backdrop-filter:blur(var(--glass,14px));-webkit-backdrop-filter:blur(var(--glass,14px))}
+body[data-style="glass"] header .hd-name{text-shadow:0 0 18px rgba(140,180,255,.35)}
+
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{height:100%}
 body{
@@ -1776,9 +1792,9 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
               <div class="ts-row"><input type="text" id="themeNameInput" placeholder="主题名（新增主题时必填，留空则仅保存修改）"><button type="button" class="mcp-btn primary ts-btn" id="saveThemeBtn">保存</button></div>
               <div class="ts-row"><button type="button" class="mcp-btn ts-btn" id="exportThemeBtn">导出当前</button><button type="button" class="mcp-btn ts-btn" id="importThemeBtn">一键导入</button></div>
               <div id="themeImportBox" style="display:none;flex-direction:column;gap:8px">
-                <textarea id="themeImportArea" placeholder="粘贴主题码，点「导入并应用」一次套用全部颜色…" style="min-height:66px;font-size:12px;line-height:1.5" rows="2"></textarea>
-                <div class="ts-row" style="flex:none"><button type="button" class="mcp-btn primary ts-btn" id="themeImportGo" style="flex:1">导入并应用</button><button type="button" class="mcp-btn ts-btn" id="themeImportCancel">取消</button></div>
-                <div class="data-tip">导出当前=把当前生效主题生成一串主题码；一键导入=粘贴主题码即套用全部颜色（含胶囊色/背景）。<span id="themeCount" style="color:var(--accent)"></span></div>
+                <textarea id="themeImportArea" placeholder="粘贴主题码 / 明文 JSON / 逐行「字段名: 值」，自动识别…" style="min-height:66px;font-size:12px;line-height:1.5" rows="2"></textarea>
+                <div class="ts-row" style="flex:none"><button type="button" class="mcp-btn primary ts-btn" id="themeImportGo" style="flex:1">导入并应用</button><button type="button" class="mcp-btn ts-btn" id="themeImportTpl">复制模板</button><button type="button" class="mcp-btn ts-btn" id="themeImportCancel">取消</button></div>
+                <div class="data-tip">导入支持三种格式自动识别：主题码 / 明文 JSON / 逐行「字段名: 值」，解析成功即套用并存入主题列表。想要新主题？点「复制模板」拿字段模板，发给外部 AI 让它照格式生成后粘回来。<span id="themeCount" style="color:var(--accent)"></span></div>
               </div>
               <div id="savedThemes" class="saved-themes"></div>
             </div>
@@ -2058,6 +2074,7 @@ const exportThemeBtn=document.getElementById("exportThemeBtn");
 const importThemeBtn=document.getElementById("importThemeBtn");
 const themeImportGo=document.getElementById("themeImportGo");
 const themeImportCancel=document.getElementById("themeImportCancel");
+const themeImportTpl=document.getElementById("themeImportTpl");
 const pageTextInput=document.getElementById("pageTextInput");
 const accentColorInput=document.getElementById("accentColorInput");
 const chromeBgInput=document.getElementById("chromeBgInput");
@@ -4461,6 +4478,7 @@ function themeInputs(){
     ai_font_color: or(aiFontColorInput&&aiFontColorInput.value, cfg.ai_font_color||"#5a4a3a"),
     font_size: (fontSizeInput&&fontSizeInput.value!=="")?Number(fontSizeInput.value) : (cfg.font_size!=null?cfg.font_size:15),
     font_family: or(fontFamilyInput&&fontFamilyInput.value, cfg.font_family||""),
+    style_mode: cfg.style_mode||"",
     user_avatar: or(userAvatarInput&&userAvatarInput.value, cfg.user_avatar||""),
     ai_avatar: or(aiAvatarInput&&aiAvatarInput.value, cfg.ai_avatar||""),
     bubble_style: (chatEl&&chatEl.getAttribute("data-layout"))||cfg.bubble_style||"qq",
@@ -4553,6 +4571,7 @@ function applyCustomTheme(t,silent){
   if(t.user_avatar!==undefined)cfg.user_avatar=t.user_avatar||"";
   if(t.ai_avatar!==undefined)cfg.ai_avatar=t.ai_avatar||"";
   if(t.bubble_style)cfg.bubble_style=t.bubble_style;
+  cfg.style_mode=(typeof t.style_mode==="string")?t.style_mode:"";
   if(t.show_avatar!==undefined)cfg.show_avatar=!!t.show_avatar;
   if(t.show_name!==undefined)cfg.show_name=!!t.show_name;
   cfg.current_theme_name=(t&&t.name)?String(t.name):"";
@@ -4566,6 +4585,7 @@ function applyCustomTheme(t,silent){
   populateWindowInputs(cfg);
   if(userAvatarInput)userAvatarInput.value=cfg.user_avatar||""; if(aiAvatarInput)aiAvatarInput.value=cfg.ai_avatar||"";
   if(chatEl)chatEl.setAttribute("data-layout",cfg.bubble_style||"qq");
+  document.body.setAttribute("data-style",cfg.style_mode||"classic");
   syncBgModeUI(deriveBgMode());
   renderPicks(); renderThemeValues(); applyTheme(); applyHeader(); saveCfg();
   if(!silent) showToast("已切换到「"+(t.name||"主题")+"」");
@@ -4634,6 +4654,7 @@ function currentThemeObject(){
     ai_font_color:cfg.ai_font_color||"#5a4a3a",
     font_size:cfg.font_size!=null?cfg.font_size:15,
     font_family:cfg.font_family||"",
+    style_mode:cfg.style_mode||"",
     think_cap_border:cfg.think_cap_border||"#c89098",
     think_cap_bg:cfg.think_cap_bg||"#f1ebe9",
     think_cap_text:cfg.think_cap_text||"#c89098",
@@ -4656,6 +4677,44 @@ function currentThemeObject(){
   UI_STYLE_KEYS.forEach(function(k){ o[k]=cfg[k]!=null?cfg[k]:""; });
   return o;
 }
+/* 0913-03 导入升级：主题码 / 明文 JSON / 逐行「字段名: 值」三种格式自动识别 */
+const THEME_FIELDS=["name","style_mode","bg_mode","bg_image","bg_color","user_bubble","ai_bubble","bubble_opacity","bubble_blur","bubble_radius","user_font_color","ai_font_color","font_size","font_family","think_cap_border","think_cap_bg","think_cap_text","tool_cap_border","tool_cap_bg","tool_cap_text","page_text","page_text2","page_text3","accent_color","chrome_bg","header_title","inputbar_bg","inputbar_border","input_text","send_btn","send_icon","avatar_bg","icon_btn_bg","icon_btn_color","bubble_shadow","ui_line","ui_shadow","ui_mask","ui_ok","ui_warn","ui_bad","ui_info","ui_field","ui_menu","ui_code_bg","ui_code_ink","ui_glass","ui_panel_alpha","ui_panel_radius","ui_title_font"];
+const THEME_VAR_ALIAS={"bubble-user":"user_bubble","bubble-ai":"ai_bubble","accent":"accent_color","accent-color":"accent_color","radius":"bubble_radius","glass":"ui_glass","title-font":"ui_title_font","panel-radius":"ui_panel_radius","hd-title":"header_title","inputbar-bg":"inputbar_bg","inputbar-border":"inputbar_border","input-text":"input_text","send-bg":"send_btn","send-icon":"send_icon","avatar-bg":"avatar_bg","icon-btn-bg":"icon_btn_bg","icon-btn-color":"icon_btn_color","code-bg":"ui_code_bg","code-ink":"ui_code_ink","field-bg":"ui_field","menu-bg":"ui_menu","page-text":"page_text","page-text2":"page_text2","page-text3":"page_text3"};
+const THEME_NUM_FIELDS=["bubble_opacity","bubble_blur","bubble_radius","font_size","ui_glass","ui_panel_radius","ui_panel_alpha"];
+const THEME_FIELD_TEMPLATE=JSON.stringify({name:"我的新主题",bg_color:"#f4f1ee",user_bubble:"#d9a3a8",ai_bubble:"#fffdf9",user_font_color:"#ffffff",ai_font_color:"#5a4a3a",bubble_radius:18,bubble_opacity:1,bubble_blur:0,accent_color:"#c89098",chrome_bg:"#ffffff",page_text:"#5a4a3a",page_text2:"#a08a7a",page_text3:"#b09a8a",header_title:"#b07a6a",inputbar_bg:"#ffffff",inputbar_border:"#ddbdc4",input_text:"#5a4a3a",send_btn:"#c98696",send_icon:"#ffffff",avatar_bg:"#d6a2ad",icon_btn_bg:"#f2e3e5",icon_btn_color:"#b07a6a",bubble_shadow:"#b58382",think_cap_border:"#c89098",think_cap_bg:"#f1ebe9",think_cap_text:"#c89098",tool_cap_border:"#5a86a6",tool_cap_bg:"#e7ecf3",tool_cap_text:"#5a86a6"},null,2);
+function parseThemeAny(code){
+  let s=String(code||"").trim();
+  if(!s) return null;
+  if(s.indexOf("TH1.")===0) return themeFromCode(s);
+  s=s.replace(/^```[a-zA-Z]*\s*/,"").replace(/```\s*$/,"").trim();
+  if(/^\{/.test(s)){
+    try{
+      const o=JSON.parse(s);
+      const t=Array.isArray(o)?(o.length&&typeof o[o.length-1]==="object"?o[o.length-1]:null):o;
+      if(t&&!Array.isArray(t)&&THEME_FIELDS.some(function(k){return k in t;})) return t;
+    }catch(e){}
+    return null;
+  }
+  const o={}; let hits=0;
+  s.split(/\r?\n/).forEach(function(line){
+    const m=/^\s*-{0,2}([A-Za-z][\w-]*)\s*[:=]\s*(.+?)\s*;?\s*$/.exec(line);
+    if(!m) return;
+    const raw=m[1];
+    let f=null;
+    if(THEME_FIELDS.indexOf(raw)>=0) f=raw;
+    else { const dash=raw.toLowerCase().replace(/_/g,"-"); f=THEME_VAR_ALIAS[dash]||null; }
+    if(!f) return;
+    const v=m[2].trim().replace(/^["']+|["']+$/g,"");
+    if(THEME_NUM_FIELDS.indexOf(f)>=0){
+      let n=Number(String(v).replace(/px$/i,"").replace(/%$/,""));
+      if(!Number.isFinite(n)) return;
+      if(f==="bubble_opacity"&&n>1) n=n/100;
+      o[f]=n; hits++; return;
+    }
+    o[f]=v; hits++;
+  });
+  return hits?o:null;
+}
 function doExportTheme(){
   const code=themeToCode(currentThemeObject());
   if(!code){ showToast("导出失败"); return; }
@@ -4668,8 +4727,8 @@ function doExportTheme(){
 function doImportTheme(){
   const code=(themeImportArea&&themeImportArea.value||"").trim();
   if(!code){ showToast("请先粘贴主题码再点导入"); return; }
-  const obj=themeFromCode(code);
-  if(!obj){ showToast("主题码无法解析，请检查是否复制完整"); return; }
+  const obj=parseThemeAny(code);
+  if(!obj){ showToast("无法解析：支持主题码 / 明文 JSON / 逐行「字段名: 值」，可点「复制模板」参考"); return; }
   obj.name=(obj.name&&String(obj.name).trim())||("导入-"+new Date().toLocaleTimeString().slice(0,5));
   try{ applyCustomTheme(obj); }catch(e){ saveCfg(); applyTheme(); pushSettingsToCloud(); }
   // 同时放进已存主题列表，方便之后一键切回
@@ -4687,6 +4746,11 @@ if(importThemeBtn) importThemeBtn.addEventListener("click",function(){
   if(themeImportArea) themeImportArea.focus();
 });
 if(themeImportCancel) themeImportCancel.addEventListener("click",function(){ if(themeImportBox) themeImportBox.style.display="none"; });
+if(themeImportTpl) themeImportTpl.addEventListener("click",function(){
+  const txt=THEME_FIELD_TEMPLATE;
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(function(){ showToast("字段模板已复制，发给外部 AI 照这个格式出主题"); }).catch(function(){ window.prompt("复制字段模板",txt); }); }
+  else window.prompt("复制字段模板",txt);
+});
 if(themeImportGo) themeImportGo.addEventListener("click",doImportTheme);
 function shade(hex,p){
   try{let c=hex.replace("#","");if(c.length===3)c=c.split("").map(x=>x+x).join("");let n=parseInt(c,16);let r=Math.max(0,Math.min(255,(n>>16)+p)),g=Math.max(0,Math.min(255,((n>>8)&255)+p)),b=Math.max(0,Math.min(255,(n&255)+p));return "#"+(r.toString(16).padStart(2,"0"))+(g.toString(16).padStart(2,"0"))+(b.toString(16).padStart(2,"0"));}catch(e){return hex;}
@@ -4703,6 +4767,7 @@ function applyTheme(){
   root.setProperty("--radius",rad+"px");
   root.setProperty("--radius-sm",Math.round(rad*0.66)+"px");
   if(chatEl)chatEl.setAttribute("data-layout",cfg.bubble_style||"qq");
+  document.body.setAttribute("data-style",cfg.style_mode||"classic");
   // 字体颜色（双方） / 字号 / 字体族
   root.setProperty("--user-font-color",cfg.user_font_color||"#ffffff");
   root.setProperty("--ai-font-color",cfg.ai_font_color||"#5a4a3a");
