@@ -39,6 +39,7 @@
    </div>
 
    <div class="card"><div class="card-title">日记阅览</div><div id="diary-list"></div></div>
+   <div class="card"><div class="card-title">留纸一览</div><div style="font-size:11px;color:var(--text3);margin:-4px 0 8px">AI 写的故事/梦/随手创作，只落盘保存、不注入对话上下文</div><div id="papers-list"></div></div>
    <button type="button" class="btn btn-primary" onclick="restartService()" style="margin-top:4px;background:#c89098">重启服务</button>
 
 </div>
@@ -195,7 +196,8 @@
         <div class="mp-actions">
           <button type="button" class="mp-btn primary" onclick="openMemPoolAdd()">＋ 新增记忆</button>
           <button type="button" class="mp-btn" onclick="tidyMemPool()">整理记忆池</button>
-          <button type="button" class="mp-btn" onclick="exportMemPool()">导出</button>
+          <button type="button" class="mp-btn" onclick="openMemPoolExport()">导出</button>
+          <button type="button" class="mp-btn" onclick="openMemPoolImport()">导入清洗</button>
         </div>
         <div id="mempool-clean-msg" style="width:100%;font-size:11px;color:var(--text3);min-height:16px;margin-top:2px"></div>
       </div>
@@ -647,6 +649,39 @@
       </div>
     </div>
   </div>
+    <div class="modal-overlay" id="mempoolImportModal">
+    <div class="modal" style="max-width:min(94vw,720px)">
+      <div class="mp-modal-head">
+        <h3>导入清洗结果</h3>
+        <button type="button" class="mp-modal-x" onclick="closeModal('mempoolImportModal')">&times;</button>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">粘贴或上传清洗产出的变更 JSON（数组，每条 {id, op:"update"/"delete"/"merge", category?, importance?, content?, into?}）。先「预览校验」看统计，再「确认导入」；应用前服务器自动全量备份，条目 id 不变，标星关联不受影响。</div>
+      <input type="file" id="mempool-import-file" accept=".json,.txt" onchange="memPoolImportFile(this)" style="font-size:12px;margin-bottom:8px">
+      <textarea id="mempool-import-text" rows="10" placeholder='[{"id":"mp_xxxxxxxx","op":"update","category":"认账","importance":0.8}]' style="width:100%;font-size:12px;font-family:monospace"></textarea>
+      <div id="mempool-import-result" style="font-size:12px;color:var(--text2);min-height:18px;margin:8px 0"></div>
+      <div class="mp-modal-actions">
+        <button type="button" class="mp-btn" onclick="closeModal('mempoolImportModal')">关闭</button>
+        <button type="button" class="mp-btn" onclick="previewMemPoolImport()">预览校验</button>
+        <button type="button" class="mp-btn primary" id="mempool-import-apply" onclick="applyMemPoolImport()" style="display:none">确认导入</button>
+      </div>
+    </div>
+  </div>
+    <div class="modal-overlay" id="mempoolExportModal">
+    <div class="modal" style="max-width:min(94vw,420px)">
+      <div class="mp-modal-head">
+        <h3>导出记忆池</h3>
+        <button type="button" class="mp-modal-x" onclick="closeModal('mempoolExportModal')">&times;</button>
+      </div>
+      <div class="mp-modal-fields">
+        <label>类别<select id="mempool-export-cat"></select></label>
+      </div>
+      <div style="font-size:11px;color:var(--text3)">导出 JSON（含 id/分类/重要级/来源/内容全字段，可直接用于清洗），只含活跃条目。</div>
+      <div class="mp-modal-actions">
+        <button type="button" class="mp-btn" onclick="closeModal('mempoolExportModal')">取消</button>
+        <button type="button" class="mp-btn primary" onclick="doExportMemPool()">导出</button>
+      </div>
+    </div>
+  </div>
 <div class="modal-overlay" id="pushEditModal">
     <div class="modal modal-edit-mem" style="max-width:min(94vw,680px)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-shrink:0">
@@ -673,6 +708,22 @@
      <div style="display:flex;gap:10px;margin-top:12px">
        <button type="button" class="btn btn-primary" id="mark-save-btn" onclick="saveMarkEdit()" style="flex:1;background:var(--accent)">保存</button>
        <button type="button" class="btn btn-outline" onclick="closeModal('markEditModal')" style="flex:1">取消</button>
+     </div>
+   </div>
+ </div>
+
+<!-- 留纸：全文查看弹窗 -->
+ <div class="modal-overlay" id="paperViewModal">
+   <div class="modal modal-edit-mem" style="max-width:min(94vw,780px)">
+     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-shrink:0">
+       <h3 style="margin:0;font-size:18px" id="paper-view-title">留纸</h3>
+       <button type="button" onclick="closeModal('paperViewModal')" style="background:rgba(0,0,0,0.04);border:none;font-size:16px;color:var(--text2);cursor:pointer;padding:6px 10px;border-radius:8px;line-height:1">&times;</button>
+     </div>
+     <div id="paper-view-meta" style="font-size:12px;color:var(--text3);margin-bottom:10px;flex-shrink:0"></div>
+     <div id="paper-view-content" style="flex:1;min-height:0;overflow:auto;padding:12px;border-radius:8px;background:rgba(0,0,0,0.02);font-size:13px;line-height:1.6;color:var(--text2);white-space:pre-wrap;word-break:break-word"></div>
+     <div class="modal-actions" style="display:flex;gap:10px;margin-top:16px;flex-shrink:0">
+       <button type="button" class="btn btn-outline" onclick="deletePaperFromView()" style="flex:1;padding:9px 14px;font-size:13px;border-radius:10px">删除这张纸</button>
+       <button type="button" class="btn btn-primary" onclick="closeModal('paperViewModal')" style="flex:1;padding:9px 14px;font-size:13px;border-radius:10px">关闭</button>
      </div>
    </div>
  </div>

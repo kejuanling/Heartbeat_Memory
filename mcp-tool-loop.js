@@ -22,6 +22,15 @@ const UPSTREAM_TIMEOUT_MS = Number(process.env.UPSTREAM_TIMEOUT_MS) || 180000;
 // 单条工具结果写进时间线的截断上限：防止超大结果（读文件/长网页）把 enhanced_messages.json 撑爆
 const MAX_TOOL_RESULT_CHARS = 30000;
 
+// 会话级工具（2026-09-12）：执行时由服务端把当前聊天会话 id 强制注入参数 session_id（覆盖模型给的值，
+// 模型伪造无效）。工具端（tools_server.py）据此把日记/留纸写到对应会话目录。
+const SESSION_SCOPED_TOOLS = new Set(["diary_add", "leave_paper"]);
+function _injectSessionArg(name, args, sessionId) {
+  if (sessionId && SESSION_SCOPED_TOOLS.has(name) && args && typeof args === "object" && !Array.isArray(args)) {
+    args.session_id = String(sessionId);
+  }
+}
+
 
 /**
  * 执行带工具的多轮对话。
@@ -48,13 +57,14 @@ async function runWithTools({
   maxToolsPerRound = 5,
   fetchFn = fetch,
   resume = null,
-  onEvent = null
+  onEvent = null,
+  sessionId = null
 }) {
   // 1. 加载 MCP 工具，转成 OpenAI tools[]
   const routes = await loadTools(serverClients);
   const allRoutes = routes || [];
   const openaiTools = toOpenAITools(allRoutes);
-  const toolCtx = { serverClients, routes, upstreamUrl, upstreamKey, model, maxToolsPerRound };
+  const toolCtx = { serverClients, routes, upstreamUrl, upstreamKey, model, maxToolsPerRound, sessionId };
 
   let working = messages.slice();
   let totalUsage = null;
@@ -186,6 +196,7 @@ async function executeToolCalls(toolCalls, working, toolHistory, ctx, onEvent, n
     const fn = tc.function || {};
     const name = fn.name || "";
     const args = _parseArgs(fn.arguments);
+    _injectSessionArg(name, args, ctx.sessionId);
     const index = (typeof nextIndex === "function") ? nextIndex() : toolHistory.length;
     const id = tc.id || ("call_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7));
     let result;
@@ -259,7 +270,8 @@ async function streamToolLoop({
   max_tokens,
   maxToolRounds = DEFAULT_MAX_TOOL_ROUNDS,
   onEvent = null,
-  fetchFn = fetch
+  fetchFn = fetch,
+  sessionId = null
 }) {
   const routes = await loadTools(serverClients);
   const openaiTools = toOpenAITools(routes || []);
@@ -355,6 +367,7 @@ async function streamToolLoop({
       const tc = toolCalls[i];
       const fn = tc.function || {}; const name = fn.name || "";
       const args = _parseArgs(fn.arguments);
+      _injectSessionArg(name, args, sessionId);
       const index = toolSeq++; const id = tc.id;
       emit({ type: "tool_start", index, id, name, args, afterSeg });
       let result, error = null;
@@ -467,7 +480,8 @@ async function tryStreamPassthrough({
   reply,
   temperature,
   top_p,
-  max_tokens
+  max_tokens,
+  sessionId = null
 }) {
   // 加载工具定义并注入 requests：让模型"有能力"调用工具，才能检测到 tool_calls。
   const routes = await loadTools(serverClients);
@@ -628,7 +642,8 @@ async function tryStreamPassthrough({
         const r2 = await runWithTools({
           upstreamUrl, upstreamKey, model, messages, serverClients,
           temperature, top_p, max_tokens,
-          resume: { assistantMsg: { role: "assistant", content: fullText, tool_calls: pending } }
+          resume: { assistantMsg: { role: "assistant", content: fullText, tool_calls: pending } },
+          sessionId
         });
         // 续写（伪流式）：思考链 → 工具记录 → 后续正文；直通阶段的 fullText 已发给客户端，不重发。
         // 直通文本若不以空行结尾则先补一个空行分隔，保证客户端流式拼接 full 与最终 text 一致（空行粒度分段）

@@ -811,13 +811,14 @@ function createContentTagFilter() {
   let inTag = false;
   let tagType = ""; // "memory" | "pin" | "wake" | "quiet" | "compacted"
 
-  // 判断 tail（从某个 "<" 开始的小写文本）是否可能是 memory/pin/wake/compacted 开标签
+  // 判断 tail（从某个 "<" 开始的小写文本）是否可能是 memory/pin/wake/compacted/paper 开标签
   function isPotentialOpen(tail) {
-    if (/^<(memory|pin|wake|quiet|compacted)(\s[^>]*)?>/.test(tail)) return true; // 完整开标签（可带属性）
-    if (/^<(memory|pin|wake|quiet|compacted)\s[^>]*$/.test(tail)) return true;     // 属性写法进行中
-    if (/^<(memory|pin|wake|quiet|compacted)$/.test(tail)) return true;            // 恰好 <memory / <pin / <wake / <quiet / <compacted
+    if (/^<(memory|pin|wake|quiet|compacted|paper)(\s[^>]*)?>/.test(tail)) return true; // 完整开标签（可带属性）
+    if (/^<(memory|pin|wake|quiet|compacted|paper)\s[^>]*$/.test(tail)) return true;     // 属性写法进行中
+    if (/^<(memory|pin|wake|quiet|compacted|paper)$/.test(tail)) return true;            // 恰好 <memory / <pin / <wake / <quiet / <compacted / <paper
     if (/^<m(?:e(?:m(?:o(?:r)?)?)?)?$/.test(tail)) return true; // <m <me <mem <memo <memor
     if (/^<p(?:i)?$/.test(tail)) return true;                  // <p <pi
+    if (/^<p(?:a(?:p(?:e(?:r)?)?)?)?$/.test(tail)) return true; // <p <pa <pap <pape <paper
     if (/^<w(?:a(?:k)?)?$/.test(tail)) return true;            // <w <wa <wak
     if (/^<c(?:o(?:m(?:p(?:a(?:c(?:t)?)?)?)?)?)?$/.test(tail)) return true; // <c <co <com <comp ... <compacte
     if (/^<star(\s[^>]*)?\/?>/.test(tail)) return true;        // <star> <star/> <star 属性（完整或接近完整）
@@ -851,7 +852,7 @@ function createContentTagFilter() {
       buf += delta;
       for (;;) {
         if (inTag) {
-          const closeRe = tagType === "memory" ? /<\/memory>/i : tagType === "pin" ? /<\/pin>/i : tagType === "quiet" ? /<\/quiet>/i : tagType === "compacted" ? /<\/compacted>/i : tagType === "star" ? /<\/star\s*>/i : /<\/wake>/i;
+          const closeRe = tagType === "memory" ? /<\/memory>/i : tagType === "pin" ? /<\/pin>/i : tagType === "quiet" ? /<\/quiet>/i : tagType === "compacted" ? /<\/compacted>/i : tagType === "star" ? /<\/star\s*>/i : tagType === "paper" ? /<\/paper\s*>/i : /<\/wake>/i;
           const m = closeRe.exec(buf);
           if (m) {
             buf = buf.slice(m.index + m[0].length);
@@ -868,15 +869,20 @@ function createContentTagFilter() {
           if (open > 0) emit(buf.slice(0, open));
           buf = buf.slice(open);
           const lowerBuf = buf.toLowerCase();
-          // <star> 是空标签：自闭合 <star/> 直接吞掉并继续输出后续正文；成对 <star></star> 才进 inTag 等闭合
+          // <star>/<paper> 是轻量记号：自闭合 <star/>/<paper .../> 直接吞掉并继续输出后续正文；成对写法才进 inTag 等闭合
           const starSelf = lowerBuf.match(/^<star\b[^>]*\/>/);
           if (starSelf) {
             buf = buf.slice(starSelf[0].length);
             continue;
           }
-          if (/^<(memory|pin|wake|quiet|compacted|star)(\s[^>]*)?>/.test(lowerBuf)) {
+          const paperSelf = lowerBuf.match(/^<paper\b[^>]*\/>/);
+          if (paperSelf) {
+            buf = buf.slice(paperSelf[0].length);
+            continue;
+          }
+          if (/^<(memory|pin|wake|quiet|compacted|star|paper)(\s[^>]*)?>/.test(lowerBuf)) {
             inTag = true;
-            tagType = lowerBuf.startsWith("<pin") ? "pin" : lowerBuf.startsWith("<wake") ? "wake" : lowerBuf.startsWith("<quiet") ? "quiet" : lowerBuf.startsWith("<compacted") ? "compacted" : lowerBuf.startsWith("<star") ? "star" : "memory";
+            tagType = lowerBuf.startsWith("<pin") ? "pin" : lowerBuf.startsWith("<wake") ? "wake" : lowerBuf.startsWith("<quiet") ? "quiet" : lowerBuf.startsWith("<compacted") ? "compacted" : lowerBuf.startsWith("<star") ? "star" : lowerBuf.startsWith("<paper") ? "paper" : "memory";
           }
           return;
         }
@@ -1850,16 +1856,54 @@ function writeDiaryHiddenSet(set) {
   } catch (e) { console.warn("[diary] 写隐藏清单失败:", e.message); }
 }
 
+// ── 日记按会话分开保存（2026-09-12）──
+// 新日记写到 diary/<会话目录>/YYYY-MM-DD.md（目录名与 safeSessionToken 同一套规则）；
+// diary 根目录的日期文件 = 共享层（旧日记 + 拿不到会话时的兜底）。注入读取仍不分会话：全目录合并候选。
+// 只认安全字符的子目录，防止把任意目录当会话扫进来。
+function diarySessionDirs() {
+  const root = path.join(__dirname, "diary");
+  let out = [];
+  try {
+    out = fs.readdirSync(root, { withFileTypes: true })
+      .filter(d => d.isDirectory() && /^[A-Za-z0-9_-]{1,64}$/.test(d.name))
+      .map(d => d.name);
+  } catch (e) {}
+  return out;
+}
+// 校验管理台传入的日记相对路径：只允许「日期.md」或「会话目录/日期.md」，返回标准化信息；非法返回 null
+function resolveDiaryRelPath(relPath) {
+  const s = String(relPath || "").trim().replace(/\\/g, "/");
+  const m = s.match(/^(?:([A-Za-z0-9_-]{1,64})\/)?(\d{4}-\d{2}-\d{2})\.md$/i);
+  if (!m) return null;
+  const root = path.resolve(__dirname, "diary");
+  const full = path.resolve(root, m[1] ? m[1] + path.sep + m[2] + ".md" : m[2] + ".md");
+  if (full !== root && !full.startsWith(root + path.sep)) return null;
+  return { rel: (m[1] ? m[1] + "/" : "") + m[2] + ".md", session: m[1] || null, fileName: m[2] + ".md", full };
+}
+
 // 日记跨窗口注入（批注 2026-09-04，2026-09-08 收紧）：只注入"本会话创建日期之前"（严格早于）的日记，
 // 按日期升序（旧在前新在后）取最近 count 篇；2026-09-08 起仅严格早于（不含当天）。
 // 边界口径：日记文件名与 cutoff 都用 TIME_ZONE 本地日期（YYYY-MM-DD，严格小于当天）。
 // 2026-09-09 增：管理台隐藏的日记先剔除再取最近 count 篇（隐藏篇不注入、不占份数）。
+// 2026-09-12 增：日记按会话分开保存后，候选 = 共享层（diary 根）+ 所有会话目录合并，仍不分会话、按日期统一排；
+// 同一天既有共享残留又有会话文件时内容合并为一篇（注入份按"天"计，与旧口径一篇一天一致）。
+// 隐藏清单兼容：旧 key（纯文件名）只命中共享层；新 key（完整相对路径）精确命中所在文件。
 function recentDiaryTextBefore(sessionId, count, createdIso) {
   const diaryDir = path.join(__dirname, "diary");
-  let files = [];
-  try { files = fs.readdirSync(diaryDir).filter(function (f) { return /^\d{4}-\d{2}-\d{2}\.md$/.test(f); }); } catch (e) { return ""; }
+  let files = [];   // { rel, date }
+  const scanDir = (relBase) => {
+    try {
+      const abs = relBase ? path.join(diaryDir, relBase) : diaryDir;
+      for (const f of fs.readdirSync(abs)) {
+        if (!/^\d{4}-\d{2}-\d{2}\.md$/.test(f)) continue;
+        files.push({ rel: relBase ? relBase + "/" + f : f, date: f.slice(0, 10) });
+      }
+    } catch (e) {}
+  };
+  scanDir("");
+  for (const s of diarySessionDirs()) scanDir(s);
   if (!files.length) return "";
-  files.sort(); // 升序：旧在前新在后
+  files.sort((a, b) => (a.date === b.date ? (a.rel < b.rel ? -1 : 1) : (a.date < b.date ? -1 : 1))); // 升序：旧在前新在后
   let cutoff = "";
   try {
     const d = new Date(createdIso);
@@ -1871,15 +1915,20 @@ function recentDiaryTextBefore(sessionId, count, createdIso) {
   if (!cutoff) return "";
   // 只留 日记日期 < 会话创建日期，且未被隐藏（隐藏篇不注入也不占份数，顺位前移）
   const hiddenDiary = readDiaryHiddenSet();
-  const before = files.filter(function (f) { return f.slice(0, 10) < cutoff && !hiddenDiary.has(f); });
+  const before = files.filter(f => f.date < cutoff && !hiddenDiary.has(f.rel) && !(f.rel === f.date + ".md" && hiddenDiary.has(f.date + ".md")));
   if (!before.length) return "";
-  const picked = before.slice(-Math.max(1, Number(count) || 3));
+  const pickedDates = Array.from(new Set(before.map(f => f.date))).slice(-Math.max(1, Number(count) || 3));
   const out = [];
-  for (const f of picked) {
-    try {
-      const t = fs.readFileSync(path.join(diaryDir, f), "utf-8").trim();
-      if (t) out.push("### " + f.replace(/\.md$/, "") + "\n" + t);
-    } catch (e) {}
+  for (const d of pickedDates) {
+    const parts = [];
+    for (const f of before) {
+      if (f.date !== d) continue;
+      try {
+        const t = fs.readFileSync(path.join(diaryDir, f.rel), "utf-8").trim();
+        if (t) parts.push(t);
+      } catch (e) {}
+    }
+    if (parts.length) out.push("### " + d + "\n" + parts.join("\n\n"));
   }
   return out.join("\n\n");
 }
@@ -1920,10 +1969,23 @@ function crossFingerprint(cfg) {
   } catch (e) {}
   try {
     if (cfg.cross_inject_diary !== false) {
-      let dm = 0;
-      try { dm = fs.statSync(path.join(__dirname, "diary")).mtimeMs; } catch (e) {}
+      // 2026-09-12：日记按会话分目录保存，指纹改为扫描「共享层 + 各会话目录」全部日记文件的
+      // 相对路径 + mtime（文件级，比目录 mtime 可靠：追加写不更新目录 mtime），任一变化即重建快照。
+      const marks = [];
+      const scanDir = (relBase) => {
+        try {
+          const abs = relBase ? path.join(__dirname, "diary", relBase) : path.join(__dirname, "diary");
+          for (const f of fs.readdirSync(abs)) {
+            if (!/^\d{4}-\d{2}-\d{2}\.md$/.test(f)) continue;
+            try { marks.push((relBase ? relBase + "/" : "") + f + ":" + fs.statSync(path.join(abs, f)).mtimeMs); } catch (e) {}
+          }
+        } catch (e) {}
+      };
+      scanDir("");
+      for (const s of diarySessionDirs()) scanDir(s);
+      marks.sort();
       // 2026-09-09：隐藏清单变化（隐藏/取消隐藏）也要触发快照重建，否则旧快照里的日记内容不会更新
-      parts.push("diary:" + dm + "|hidden:" + Array.from(readDiaryHiddenSet()).sort().join(","));
+      parts.push("diary:" + marks.join(",") + "|hidden:" + Array.from(readDiaryHiddenSet()).sort().join(","));
     }
   } catch (e) {}
   return crypto.createHash("md5").update(parts.join("|")).digest("hex");
@@ -2078,7 +2140,8 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         reply,
         temperature: body.temperature,
         top_p: body.top_p,
-        max_tokens: body.max_tokens
+        max_tokens: body.max_tokens,
+        sessionId
       });
       if (pass && pass.ok && !pass.fellBackToTools) {
         // T-0922：直通可能带后置工具续跑（先文本后工具），toolHistory 有值时随收尾写时间线/前端工具胶囊
@@ -2145,7 +2208,8 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         temperature: body.temperature,
         top_p: body.top_p,
         max_tokens: body.max_tokens,
-        onEvent: (body.stream === true) ? onEvent : null
+        onEvent: (body.stream === true) ? onEvent : null,
+        sessionId
       });
     } catch (toolLoopErr) {
       console.warn("[mcp] 流式工具循环失败，回退 runWithTools (非流式):", toolLoopErr.message);
@@ -2155,7 +2219,8 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         model,
         messages: messages || body.messages || [],
         serverClients: clients,
-        onEvent: (body.stream === true) ? onEvent : null
+        onEvent: (body.stream === true) ? onEvent : null,
+        sessionId
       });
     }
   }
@@ -2193,7 +2258,7 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
       console.warn("[mcp] 闹钟/免打扰调度解析失败:", e.message);
     }
     try {
-      const cleaned = await tagParser.extractAndStore(aiClean);
+      const cleaned = await tagParser.extractAndStore(aiClean, { sessionId });
       if (typeof cleaned === "string" && cleaned) aiClean = cleaned;
     } catch (e) {
       console.warn("[mcp] 标签解析失败:", e.message);
@@ -2336,7 +2401,7 @@ app.post("/internal/wake-event", async (req, reply) => {
       } else {
         let stored = stripDiaryBlocks(trimmedContent);
         try {
-          await tagParser.extractAndStore(content);
+          await tagParser.extractAndStore(content, { sessionId: evSession });
         } catch (e) {
           console.warn("[wake-event] 标签解析失败:", e.message);
         }
@@ -2411,23 +2476,28 @@ function diaryDirectoryPath() {
 
 function readDiaryEntries(limit) {
   const dir = diaryDirectoryPath();
-  try {
-    if (!fs.existsSync(dir)) return [];
-    // 批注 2026-07-15：管理页只读展示 wake-up 生成的本地日记；
-    // 只读取 DIARY_DIR 下的 .md 文件，避免把任意路径内容暴露到 admin 页面。
-    return fs.readdirSync(dir)
-      .filter(name => /^[^/\\]+\.md$/i.test(name))
-      .sort((a, b) => b.localeCompare(a))
-      .slice(0, limit ? limit : Infinity)
-      .map(name => {
-        const filePath = path.join(dir, name);
+  // 2026-09-12：日记按会话分目录保存，管理台一览改为扫「共享层 + 各会话目录」，
+  // 每条带 relPath（相对 diary/ 的完整路径，管理台编辑/删除/隐藏的操作键）与 session（null=共享层）。
+  const out = [];
+  const scan = (relBase) => {
+    const abs = relBase ? path.join(dir, relBase) : dir;
+    let names = [];
+    try { names = fs.readdirSync(abs); } catch (e) { return; }
+    // 只读取 .md 日记文件，避免把任意路径内容暴露到 admin 页面
+    for (const name of names.filter(n => /^\d{4}-\d{2}-\d{2}\.md$/i.test(n))) {
+      const filePath = path.join(abs, name);
+      try {
         const stat = fs.statSync(filePath);
+        if (!stat.isFile()) continue;
         const content = fs.readFileSync(filePath, "utf-8").slice(0, 24000);
-        return { name, updated_at: stat.mtime.toISOString(), content };
-      });
-  } catch (err) {
-    return [{ name: "读取日记失败", updated_at: new Date().toISOString(), content: err.message || String(err) }];
-  }
+        out.push({ name, relPath: relBase ? relBase + "/" + name : name, session: relBase || null, updated_at: stat.mtime.toISOString(), content });
+      } catch (e) {}
+    }
+  };
+  scan("");
+  for (const s of diarySessionDirs()) scan(s);
+  out.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  return limit ? out.slice(0, limit) : out;
 }
 
 // ========================
@@ -2435,11 +2505,13 @@ function readDiaryEntries(limit) {
 // 编辑日记文件后，把时间线里同日的「醒来写了日记」特殊事件一并更新（旧事件「自动写了日记」同样匹配），
 // 保证注入 LLM 上下文的内容与日记文件一致。
 // ========================
-function syncDiarySpecialEvents(fileName, newContent) {
+// sessionId：日记所属会话目录名（2026-09-12 起日记分会话保存，编辑会话日记只同步该会话的时间线）；
+// 传 null/undefined = 共享层日记，沿用旧行为同步默认会话时间线。
+function syncDiarySpecialEvents(fileName, newContent, sessionId) {
   const dateMatch = String(fileName || "").match(/^(\d{4}-\d{2}-\d{2})\.md$/i);
   if (!dateMatch) return 0;
   const dateKey = dateMatch[1];
-  const timeline = loadTimeline();
+  const timeline = loadTimeline(sessionId || undefined);
   let updated = 0;
   const next = timeline.map(msg => {
     if (!msg || msg.role !== "assistant" || typeof msg.content !== "string") return msg;
@@ -2466,12 +2538,13 @@ function syncDiarySpecialEvents(fileName, newContent) {
   return updated;
 }
 
-// 删除日记时同步移除时间线里同日的「醒来写了日记」特殊事件（旧事件「自动写了日记」同样匹配）
-function removeDiarySpecialEvents(fileName) {
+// 删除日记时同步移除时间线里同日的「醒来写了日记」特殊事件（旧事件「自动写了日记」同样匹配）；
+// sessionId 语义同 syncDiarySpecialEvents：会话日记只动该会话，共享日记沿用旧行为。
+function removeDiarySpecialEvents(fileName, sessionId) {
   const dateMatch = String(fileName || "").match(/^(\d{4}-\d{2}-\d{2})\.md$/i);
   if (!dateMatch) return 0;
   const dateKey = dateMatch[1];
-  const timeline = loadTimeline();
+  const timeline = loadTimeline(sessionId || undefined);
   const before = timeline.length;
   const next = timeline.filter(msg => {
     if (!msg || msg.role !== "assistant" || typeof msg.content !== "string") return true;
@@ -4920,7 +4993,14 @@ app.get("/admin/env", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const diaryEntries = readDiaryEntries();
     const diaryHiddenSet = readDiaryHiddenSet();
-    const diaryData = diaryEntries.map(e => ({ name: e.name, time: formatDateTimeInTimeZone(new Date(e.updated_at), TIME_ZONE), content: e.content, hidden: diaryHiddenSet.has(e.name) }));
+    // 2026-09-12：日记按会话分目录保存，每条带 relPath（操作键）与 session（null=共享层）；
+    // 隐藏判定：新 key 精确匹配相对路径，旧 key（纯文件名）只对共享层文件生效（与旧单层行为一致）
+    const diaryData = diaryEntries.map(e => ({
+      name: e.name, relPath: e.relPath, session: e.session,
+      time: formatDateTimeInTimeZone(new Date(e.updated_at), TIME_ZONE),
+      content: e.content,
+      hidden: diaryHiddenSet.has(e.relPath) || (!e.session && diaryHiddenSet.has(e.name))
+    }));
     reply.send({
       uptime: Math.floor(process.uptime()),
       wakeStatus: wakeUpLastHeartbeat ? "在线（上次心跳: " + formatDateTimeInTimeZone(new Date(wakeUpLastHeartbeat), TIME_ZONE) + "）" : "离线或未启动",
@@ -4988,28 +5068,24 @@ app.get("/admin/env", { preHandler: basicAuth }, async (req, reply) => {
 
 
 // 修改日记：更新文件内容，并同步时间线里对应的「醒来写了日记」特殊事件
+// 2026-09-12：name 支持会话日记相对路径（<会话目录>/日期.md），编辑会话日记只同步该会话的时间线
 app.post("/admin/diary/update", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const { name, content } = req.body || {};
-    const fileName = String(name || "").trim();
+    const r = resolveDiaryRelPath(name);
+    if (!r) {
+      return reply.code(400).send({ error: "日记路径格式不正确（应为 YYYY-MM-DD.md 或 会话目录/YYYY-MM-DD.md）" });
+    }
     const newContent = String(content === undefined ? "" : content);
-    if (!/^\d{4}-\d{2}-\d{2}\.md$/i.test(fileName)) {
-      return reply.code(400).send({ error: "日记文件名格式不正确（应为 YYYY-MM-DD.md）" });
+    if (!fs.existsSync(r.full)) {
+      return reply.code(404).send({ error: "日记文件不存在：" + r.rel });
     }
-    const dir = diaryDirectoryPath();
-    const filePath = path.join(dir, fileName);
-    if (path.dirname(path.resolve(filePath)) !== path.resolve(dir)) {
-      return reply.code(400).send({ error: "非法日记路径" });
+    if (!fs.statSync(r.full).isFile()) {
+      return reply.code(400).send({ error: "目标不是普通文件：" + r.rel });
     }
-    if (!fs.existsSync(filePath)) {
-      return reply.code(404).send({ error: "日记文件不存在：" + fileName });
-    }
-    if (!fs.statSync(filePath).isFile()) {
-      return reply.code(400).send({ error: "目标不是普通文件：" + fileName });
-    }
-    atomicWriteFileSync(filePath, newContent);
-    const syncedEvents = syncDiarySpecialEvents(fileName, newContent);
-    reply.send({ success: true, file: fileName, syncedEvents, chars: newContent.length });
+    atomicWriteFileSync(r.full, newContent);
+    const syncedEvents = syncDiarySpecialEvents(r.fileName, newContent, r.session);
+    reply.send({ success: true, file: r.rel, syncedEvents, chars: newContent.length });
   } catch (err) {
     console.error("[diary] 修改日记失败:", err);
     reply.code(500).send({ error: err.message });
@@ -5020,24 +5096,22 @@ app.post("/admin/diary/update", { preHandler: basicAuth }, async (req, reply) =>
 app.post("/admin/diary/delete", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const { name } = req.body || {};
-    const fileName = String(name || "").trim();
-    if (!/^\d{4}-\d{2}-\d{2}\.md$/i.test(fileName)) {
-      return reply.code(400).send({ error: "日记文件名格式不正确（应为 YYYY-MM-DD.md）" });
+    const r = resolveDiaryRelPath(name);
+    if (!r) {
+      return reply.code(400).send({ error: "日记路径格式不正确（应为 YYYY-MM-DD.md 或 会话目录/YYYY-MM-DD.md）" });
     }
-    const dir = diaryDirectoryPath();
-    const filePath = path.join(dir, fileName);
-    if (path.dirname(path.resolve(filePath)) !== path.resolve(dir)) {
-      return reply.code(400).send({ error: "非法日记路径" });
+    if (!fs.existsSync(r.full)) {
+      return reply.code(404).send({ error: "日记文件不存在：" + r.rel });
     }
-    if (!fs.existsSync(filePath)) {
-      return reply.code(404).send({ error: "日记文件不存在：" + fileName });
-    }
-    fs.removeSync(filePath);
-    const removedEvents = removeDiarySpecialEvents(fileName);
+    fs.removeSync(r.full);
+    const removedEvents = removeDiarySpecialEvents(r.fileName, r.session);
     // 文件删了，隐藏清单里的条目一并清掉，避免残留死条目
     const hiddenSet = readDiaryHiddenSet();
-    if (hiddenSet.has(fileName)) { hiddenSet.delete(fileName); writeDiaryHiddenSet(hiddenSet); }
-    reply.send({ success: true, file: fileName, removedEvents });
+    let hiddenDirty = false;
+    if (hiddenSet.has(r.rel)) { hiddenSet.delete(r.rel); hiddenDirty = true; }
+    if (!r.session && hiddenSet.has(r.fileName)) { hiddenSet.delete(r.fileName); hiddenDirty = true; }
+    if (hiddenDirty) writeDiaryHiddenSet(hiddenSet);
+    reply.send({ success: true, file: r.rel, removedEvents });
   } catch (err) {
     console.error("[diary] 删除日记失败:", err);
     reply.code(500).send({ error: err.message });
@@ -5046,32 +5120,57 @@ app.post("/admin/diary/delete", { preHandler: basicAuth }, async (req, reply) =>
 
 // 隐藏/取消隐藏日记（2026-09-09）：只影响「跨窗口注入」——隐藏篇不参与新会话注入、不占注入份数。
 // 不影响：时间线「醒来写了日记」特殊事件、日记文件本身（仍可查看/编辑）。隐藏清单变化会触发快照指纹重建。
+// 2026-09-12：name 支持会话日记相对路径，隐藏 key 记完整相对路径（精确到文件）
 app.post("/admin/diary/hide", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const { name, hidden } = req.body || {};
-    const fileName = String(name || "").trim();
-    if (!/^\d{4}-\d{2}-\d{2}\.md$/i.test(fileName)) {
-      return reply.code(400).send({ error: "日记文件名格式不正确（应为 YYYY-MM-DD.md）" });
+    const r = resolveDiaryRelPath(name);
+    if (!r) {
+      return reply.code(400).send({ error: "日记路径格式不正确（应为 YYYY-MM-DD.md 或 会话目录/YYYY-MM-DD.md）" });
     }
-    const dir = diaryDirectoryPath();
-    const filePath = path.join(dir, fileName);
-    if (path.dirname(path.resolve(filePath)) !== path.resolve(dir)) {
-      return reply.code(400).send({ error: "非法日记路径" });
-    }
-    if (!fs.existsSync(filePath)) {
-      return reply.code(404).send({ error: "日记文件不存在：" + fileName });
+    if (!fs.existsSync(r.full)) {
+      return reply.code(404).send({ error: "日记文件不存在：" + r.rel });
     }
     const wantHidden = hidden !== false;
     const set = readDiaryHiddenSet();
-    if (wantHidden) set.add(fileName); else set.delete(fileName);
+    if (wantHidden) set.add(r.rel); else set.delete(r.rel);
     writeDiaryHiddenSet(set);
-    reply.send({ success: true, file: fileName, hidden: wantHidden });
+    reply.send({ success: true, file: r.rel, hidden: wantHidden });
   } catch (err) {
     console.error("[diary] 切换日记隐藏失败:", err);
     reply.code(500).send({ error: err.message });
   }
 });
 
+
+// ── 留纸一览（2026-09-12）：AI 留的纸（故事/梦/随手创作）只落盘不注入上下文，这里供管理台查看/删除 ──
+app.get("/admin/papers", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const papers = require("./papers");
+    const entries = papers.listPapers();
+    const data = entries.map(e => ({
+      name: e.name, relPath: e.relPath, session: e.session, title: e.title, time: e.time,
+      content: e.content
+    }));
+    reply.send({ papers: data });
+  } catch (err) {
+    console.error("[papers] 留纸列表失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+app.post("/admin/papers/delete", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const papers = require("./papers");
+    const { name } = req.body || {};
+    const r = papers.deletePaper(name);
+    if (!r.ok) return reply.code(400).send({ error: r.error });
+    reply.send({ success: true, file: r.file });
+  } catch (err) {
+    console.error("[papers] 删除留纸失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
 
 // 移动端管理页面
 app.get("/admin/mobile", { preHandler: mobileAuth }, async (req, reply) => {

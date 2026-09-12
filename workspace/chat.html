@@ -804,7 +804,13 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .bubble pre:not(.code-wrap){white-space:pre;overflow-x:auto}
 .bubble .code-fold{margin:8px 0}
 .bubble .code-fold summary{display:block;cursor:pointer;padding:7px 12px;background:var(--code-bg,#fbf6f0);border:1px solid var(--line);border-bottom:none;border-radius:var(--radius-sm) var(--radius-sm) 0 0;font-size:12px;color:var(--ink2);user-select:none;-webkit-user-select:none}
-.bubble .code-fold summary+pre{margin:0;border-radius:0 0 var(--radius-sm) var(--radius-sm)}
+.bubble .code-fold .code-block{margin:0}
+.bubble .code-fold .code-block pre{margin:0;border-radius:0 0 var(--radius-sm) var(--radius-sm)}
+.bubble .code-block{position:relative;margin:8px 0}
+.bubble .code-block pre{margin:0}
+.bubble .code-copy-btn{position:absolute;top:6px;right:6px;z-index:2;padding:3px 10px;font-size:11px;line-height:1.5;color:var(--ink2);background:var(--code-bg,#fbf6f0);border:1px solid var(--line);border-radius:8px;cursor:pointer;opacity:.85;user-select:none;-webkit-user-select:none}
+.bubble .code-copy-btn:active{opacity:1}
+.bubble .code-copy-btn.ok{color:#2e7d32;border-color:#7fc28c}
 .bubble code{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
 .bubble :not(pre)>code{background:var(--accent-faint);padding:1.5px 5px;border-radius:5px;font-size:13.5px;color:var(--code-ink,#a86064)}
 .bubble pre code{background:none;padding:0;font-size:12.5px;color:var(--code-ink,#7a5a52)}
@@ -1675,6 +1681,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
                 <button data-m="stream" class="on">流式</button>
                 <button data-m="nonstream">非流式</button>
               </div>
+              <div class="field"><label>附件大小上限 (MB，1~30)<span class="tag">图片/文件通用</span></label><input type="number" id="uploadMaxMb" step="0.5" min="1" max="30" value="2"><div style="font-size:11px;color:var(--ink3);margin-top:4px">聊天窗口发图片/PDF/文本等附件的转存上限，保存后即生效。</div></div>
               <div class="field" style="margin-top:10px">
                 <label>气泡分隔符<span class="tag">AI 回复拆多个气泡</span></label>
                 <input type="text" id="bubbleDelimInput" placeholder="空行">
@@ -2013,6 +2020,7 @@ const bubbleDelimInput=document.getElementById("bubbleDelimInput");
 const userFontColorInput=document.getElementById("userFontColorInput");
 const aiFontColorInput=document.getElementById("aiFontColorInput");
 const fontSizeInput=document.getElementById("fontSizeInput");
+const uploadMaxMbInput=document.getElementById("uploadMaxMb");
 const fontFamilyInput=document.getElementById("fontFamilyInput");
 const userNameInput=document.getElementById("userNameInput");
 const userAvatarInput=document.getElementById("userAvatarInput");
@@ -2370,7 +2378,7 @@ function syncTimelineLocal(ops){
 }
 
 /* ================= markdown ================= */
-function stripInnerTags(t){return String(t||"").replace(/<\s*memory\b[^>]*>[\s\S]*?<\s*\/memory\s*>/gi,"").replace(/<\s*pin\b[^>]*>[\s\S]*?<\s*\/pin\s*>/gi,"").replace(/<\s*wake\b[^>]*>[\s\S]*?<\s*\/wake\s*>/gi,"").replace(/<\s*quiet\b[^>]*>[\s\S]*?<\s*\/quiet\s*>/gi,"").replace(/<\s*phone\b[^>]*>[\s\S]*?<\s*\/phone\s*>/gi,"").replace(/<\s*result\b[^>]*>[\s\S]*?<\s*\/result\s*>/gi,"").replace(/<\s*call_id\b[^>]*>[\s\S]*?<\s*\/call_id\s*>/gi,"").replace(/<\s*star\b[^>]*>(?:\s*<\s*\/star\s*>)?/gi,"");}
+function stripInnerTags(t){return String(t||"").replace(/<\s*memory\b[^>]*>[\s\S]*?<\s*\/memory\s*>/gi,"").replace(/<\s*pin\b[^>]*>[\s\S]*?<\s*\/pin\s*>/gi,"").replace(/<\s*wake\b[^>]*>[\s\S]*?<\s*\/wake\s*>/gi,"").replace(/<\s*quiet\b[^>]*>[\s\S]*?<\s*\/quiet\s*>/gi,"").replace(/<\s*phone\b[^>]*>[\s\S]*?<\s*\/phone\s*>/gi,"").replace(/<\s*result\b[^>]*>[\s\S]*?<\s*\/result\s*>/gi,"").replace(/<\s*call_id\b[^>]*>[\s\S]*?<\s*\/call_id\s*>/gi,"").replace(/<\s*star\b[^>]*>(?:\s*<\s*\/star\s*>)?/gi,"").replace(/<\s*paper\b[^>]*>(?:[\s\S]*?<\s*\/paper\s*>)?/gi,"");}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 function inlineMd(s){
   s=escapeHtml(s);
@@ -2398,10 +2406,11 @@ function renderMd(text){
         flushBuf();
         const code=escapeHtml(lines.slice(i+1,j).join("\n").replace(/\n$/,""));
         const wrap=cfg.code_wrap?' class="code-wrap"':'';
+        const copyBtn='<button type="button" class="code-copy-btn" aria-label="复制代码">复制</button>';
         if(cfg.fold_code){
-          html+='<details class="code-fold"><summary>代码块</summary><pre'+wrap+'><code>'+code+'</code></pre></details>';
+          html+='<details class="code-fold"><summary>代码块</summary><div class="code-block">'+copyBtn+'<pre'+wrap+'><code>'+code+'</code></pre></div></details>';
         }else{
-          html+='<pre'+wrap+'><code>'+code+'</code></pre>';
+          html+='<div class="code-block">'+copyBtn+'<pre'+wrap+'><code>'+code+'</code></pre></div>';
         }
         i=j+1;
         continue;
@@ -3612,9 +3621,38 @@ function _dataUrlBytes(u){
   var b64=u.slice(i+1), pad=(b64.endsWith("==")?2:(b64.endsWith("=")?1:0));
   return Math.ceil((b64.length-pad)*3/4);
 }
+/* ================= 代码块复制（事件委托，重渲染后按钮依然可用） ================= */
+(function(){
+  function fallbackCopy(t,done){
+    const ta=document.createElement("textarea");
+    ta.value=t; ta.style.position="fixed"; ta.style.opacity="0";
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    try{ if(document.execCommand("copy")) done(); }catch(e){}
+    document.body.removeChild(ta);
+  }
+  document.addEventListener("click",function(e){
+    const btn=e.target&&e.target.closest?e.target.closest(".code-copy-btn"):null;
+    if(!btn)return;
+    const block=btn.parentNode;
+    const pre=block&&block.querySelector?block.querySelector("pre"):null;
+    if(!pre)return;
+    const txt=pre.innerText||pre.textContent||"";
+    if(!txt)return;
+    const done=function(){
+      btn.classList.add("ok"); btn.textContent="已复制";
+      setTimeout(function(){ btn.classList.remove("ok"); btn.textContent="复制"; },1400);
+    };
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(txt).then(done).catch(function(){ fallbackCopy(txt,done); });
+    }else fallbackCopy(txt,done);
+  });
+})();
+
 fileInput.onchange=e=>{
+  // 附件大小预校验：上限走设置项（设置→显示与行为→附件大小上限），与后端转存接口同口径
+  const _maxMb=(Number(cfg.upload_max_mb)>0)?Number(cfg.upload_max_mb):2;
   Array.from(e.target.files).forEach(f=>{
-    // 2026-09-10 分流：图片走原有压缩/转存链路；其它类型作为文件（≤10MB，与 /v1/upload-file 同口径）
+    // 2026-09-10 分流：图片走原有压缩/转存链路；其它类型作为文件（与 /v1/upload-file 同口径）
     if(f.type&&f.type.startsWith("image/")){
       const r=new FileReader();
       r.onload=async()=>{
@@ -3625,7 +3663,7 @@ fileInput.onchange=e=>{
       };
       r.readAsDataURL(f);
     }else{
-      if(f.size>10*1024*1024){ if(typeof showToast==="function")showToast("文件过大，上限10MB："+f.name); return; }
+      if(f.size>_maxMb*1024*1024){ if(typeof showToast==="function")showToast("「"+f.name+"」超过附件上限 "+_maxMb+"MB，未添加"); return; }
       const r=new FileReader();
       r.onload=()=>{
         fileData.push({name:f.name,size:f.size,mime:(f.type||"application/octet-stream"),dataUrl:r.result});
@@ -4076,6 +4114,7 @@ function populateSettings(){
   bubbleRadius.value=cfg.bubble_radius!=null?cfg.bubble_radius:18;
   fontSizeInput.value=cfg.font_size!=null?cfg.font_size:15;
   fontFamilyInput.value=cfg.font_family||"";
+  if(uploadMaxMbInput)uploadMaxMbInput.value=cfg.upload_max_mb!=null?cfg.upload_max_mb:2;
   populateWindowInputs(cfg);
   userNameInput.value=cfg.user_name||"我";
   userAvatarInput.value=cfg.user_avatar||"";
@@ -4106,6 +4145,7 @@ async function saveSettingsAll(){
   // 保存时不再从（已不存在的）输入框读取，避免把整窗颜色重置回默认。
   cfg.font_size=Number(fontSizeInput.value)||15;
   cfg.font_family=fontFamilyInput.value||"";
+  cfg.upload_max_mb=(function(){const v=Number(uploadMaxMbInput&&uploadMaxMbInput.value);return (Number.isFinite(v)&&v>=1)?Math.min(30,v):2;})();
   cfg.bubble_delim=bubbleDelimInput.value.trim();
   cfg.user_name=userNameInput.value.trim()||"我";
   cfg.user_avatar=userAvatarInput.value.trim()||"";
@@ -7092,7 +7132,8 @@ var CARDS = [
 
   { group:'log', id:'reqctx',    n:'当前请求上下文', d:'只读查看实际发送内容', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 8 7 8"/></svg>' },
   { group:'log', id:'cross',      n:'跨窗口注入', d:'新窗口注入预览', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' },
-  { group:'log', id:'repllog',    n:'替换记录',   d:'每次请求的压缩/替换记录', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>' }
+  { group:'log', id:'repllog',    n:'替换记录',   d:'每次请求的压缩/替换记录', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>' },
+  { group:'log', id:'adminjump',  n:'管理台',     d:'打开完整管理台 · 新窗口', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>' }
 ];
 var CARD_GROUPS = [
   { key:'sys', n:'系统配置' },
@@ -7110,7 +7151,11 @@ function buildMenu(){
     if(!items.length) return;
     html += '<li><button class="mnav-group mg-collapsed" data-group="'+g.key+'" title="点击展开/收起"><span>'+esc(g.n)+'</span><span class="mg-meta"><span class="mg-count">'+items.length+'</span><span class="mg-arrow">▾</span></span></button></li>';
     html += items.map(function(c){
-      return '<li class="adm-rowli mg-item" data-group="'+g.key+'" style="display:none"><button class="mnav-btn" data-adm="'+c.id+'"><span class="mi">'+c.i+'</span><span><span class="mt">'+esc(c.n)+'</span><div class="md">'+esc(c.d)+'</div></span><span class="mrow">▾</span></button>'
+      // 跳转特例：管理台项不展开内嵌卡片，点击直接新窗口打开管理台
+      if(c.id==='adminjump'){
+        return '<li class="adm-rowli mg-item" data-group="'+c.group+'" style="display:none"><button class="mnav-btn" data-adminjump="1"><span class="mi">'+c.i+'</span><span><span class="mt">'+esc(c.n)+'</span><div class="md">'+esc(c.d)+'</div></span><span class="mrow">↗</span></button></li>';
+      }
+      return '<li class="adm-rowli mg-item" data-group="'+c.group+'" style="display:none"><button class="mnav-btn" data-adm="'+c.id+'"><span class="mi">'+c.i+'</span><span><span class="mt">'+esc(c.n)+'</span><div class="md">'+esc(c.d)+'</div></span><span class="mrow">▾</span></button>'
         +'<div class="adm-card-b" id="adm-body-'+c.id+'"><div class="adm-load">加载中…</div></div></li>';
     }).join('');
   });
@@ -7119,6 +7164,9 @@ function buildMenu(){
   marker.parentNode.removeChild(marker);
   Array.prototype.forEach.call(document.querySelectorAll('[data-adm]'), function(b){
     b.addEventListener('click', function(){ toggleCard(b.getAttribute('data-adm')); });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-adminjump]'), function(b){
+    b.addEventListener('click', function(){ window.open('/heartbeat/admin/mobile', '_blank'); });
   });
   Array.prototype.forEach.call(document.querySelectorAll('.mnav-group'), function(gb){
     gb.addEventListener('click', function(){ toggleMenuGroup(gb.getAttribute('data-group')); });

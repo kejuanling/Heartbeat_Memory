@@ -243,6 +243,76 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    loadMemoryWakeConfig();
    renderDiary();
    initAdminSessionSelector();
+   // 日记分组标题需要会话名：异步加载后补渲染一次（不阻塞首屏）
+   loadDiarySessionNames().then(()=>renderDiary()).catch(()=>{});
+   loadPapers();
+ }
+
+ // ---------- 留纸一览（2026-09-12）：AI 留的纸（故事/梦/创作），只读+删除 ----------
+ let viewingPaperPath = null;
+ async function loadPapers(){
+   try{
+     const r=await fetch(ADMIN_API+'/papers');
+     if(!r.ok){return;}
+     const j=await r.json();
+     AppState._papers=j.papers||[];
+     renderPapers(AppState._papers);
+   }catch(e){}
+ }
+ function renderPapers(list){
+   const el=document.getElementById('papers-list');
+   if(!el)return;
+   if(!list.length){el.innerHTML='<div class="empty">还没有留过纸</div>';return}
+   const groups=new Map();const order=[];
+   for(const e of list){
+     const k=e.session||'__shared__';
+     if(!groups.has(k)){groups.set(k,[]);order.push(k);}
+     groups.get(k).push(e);
+   }
+   order.sort((a,b)=>{if(a==='__shared__')return -1;if(b==='__shared__')return 1;return a<b?-1:1;});
+   el.innerHTML=order.map(k=>{
+     const g=groups.get(k);
+     const label=k==='__shared__'?'共享（未归属窗口）':((ADM_SESSION_NAMES[k]?ADM_SESSION_NAMES[k]+' · ':'')+'窗口 '+k);
+     return '<div style="margin:12px 0 6px;font-size:12px;font-weight:600;color:var(--text2);display:flex;align-items:center;gap:6px">'+escapeHtml(label)+'<em style="font-style:normal;font-weight:400;opacity:.7">'+g.length+' 张</em></div>'+g.map(e=>{
+       const key=e.relPath||'';
+       const title=e.title||String(e.content||'').replace(/^#.*\n/,'').replace(/^（[^）]*）\s*/,'').slice(0,40)||'(无标题)';
+       return '<div class="diary-item"><div class="diary-head"><span style="cursor:pointer" onclick="viewPaper(\''+escJsStr(key)+'\')">'+escapeHtml(title)+'</span><span style="display:flex;align-items:center;gap:8px"><em>'+escapeHtml(e.time||'')+'</em><button class="diary-hide-btn" onclick="deletePaper(\''+escJsStr(key)+'\')">删除</button></span></div></div>';
+     }).join('');
+   }).join('');
+ }
+ function paperFromList(relPath){
+   return (AppState._papers||[]).find(e=>e.relPath===relPath);
+ }
+ async function viewPaper(relPath){
+   try{
+     const r=await fetch(ADMIN_API+'/papers');
+     const j=await r.json();
+     AppState._papers=j.papers||[];
+     const e=paperFromList(relPath);
+     if(!e){toast('找不到这张纸');return;}
+     viewingPaperPath=relPath;
+     document.getElementById('paper-view-title').textContent=e.title||'留纸';
+     document.getElementById('paper-view-meta').textContent=(e.time||'')+(e.session?(' · 窗口 '+e.session):'');
+     document.getElementById('paper-view-content').textContent=e.content||'';
+     openModal('paperViewModal');
+   }catch(e){toast('加载失败: '+e.message);}
+ }
+ async function deletePaper(relPath){
+   if(!confirm('删除这张纸（'+relPath+'）？删除后不可恢复。'))return;
+   try{
+     const r=await fetch(ADMIN_API+'/papers/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:relPath})});
+     const j=await r.json();
+     if(j.success){
+       toast('已删除');
+       closeModal('paperViewModal');
+       loadPapers();
+     }else{
+       toast('删除失败: '+j.error);
+     }
+   }catch(e){toast('网络错误: '+e.message);}
+ }
+ async function deletePaperFromView(){
+   if(viewingPaperPath) await deletePaper(viewingPaperPath);
  }
  
   // ---------- 摘要生成日志（悬浮球 + 弹窗，可拖动） ----------
@@ -1057,24 +1127,46 @@ function toast(msg){
  }
  
  let editingDiaryName = null;
+ // 2026-09-12 日记按会话分开保存：分组渲染需要会话名（token→名称），异步加载后补渲染一次
+ const ADM_SESSION_NAMES = {};
+ async function loadDiarySessionNames(){
+   try{
+     const r=await fetch('/v1/sessions',{credentials:'include'});
+     const j=await r.json();
+     for(const s of ((j&&j.sessions)||[])){ if(s&&s.id) ADM_SESSION_NAMES[s.id]=s.name||''; }
+   }catch(e){}
+ }
  function renderDiary(){
    const entries=AppState.INITIAL_DATA.diary||[];
    const el=document.getElementById('diary-list');
    if(!entries.length){el.innerHTML='<div class="empty">暂无日记</div>';return}
-   el.innerHTML=entries.map(e=>{
-     const name=e.name||'';
+   const itemHtml=(e)=>{
+     const key=e.relPath||e.name||'';
+     const label=e.name||'';
      const hidden=e.hidden===true;
-     return '<div class="diary-item'+(hidden?' diary-is-hidden':'')+'"><div class="diary-head"><span>'+escapeHtml(name)+(hidden?'<em class="diary-hidden-tag">已隐藏</em>':'')+'</span><span style="display:flex;align-items:center;gap:8px"><em>'+escapeHtml(e.time)+'</em><button class="diary-hide-btn" onclick="toggleDiaryHidden(\''+escJsStr(name)+'\')">'+(hidden?'显示':'隐藏')+'</button><button class="diary-edit-btn" onclick="openDiaryEditor(\''+escJsStr(name)+'\')">编辑</button></span></div></div>'
+     return '<div class="diary-item'+(hidden?' diary-is-hidden':'')+'"><div class="diary-head"><span>'+escapeHtml(label)+(hidden?'<em class="diary-hidden-tag">已隐藏</em>':'')+'</span><span style="display:flex;align-items:center;gap:8px"><em>'+escapeHtml(e.time)+'</em><button class="diary-hide-btn" onclick="toggleDiaryHidden(\''+escJsStr(key)+'\')">'+(hidden?'显示':'隐藏')+'</button><button class="diary-edit-btn" onclick="openDiaryEditor(\''+escJsStr(key)+'\')">编辑</button></span></div></div>'
+   };
+   const groups=new Map();const order=[];
+   for(const e of entries){
+     const k=e.session||'__shared__';
+     if(!groups.has(k)){groups.set(k,[]);order.push(k);}
+     groups.get(k).push(e);
+   }
+   order.sort((a,b)=>{if(a==='__shared__')return -1;if(b==='__shared__')return 1;return a<b?-1:1;});
+   el.innerHTML=order.map(k=>{
+     const list=groups.get(k);
+     const label=k==='__shared__'?'共享历史（旧日记 / 未归属）':((ADM_SESSION_NAMES[k]?ADM_SESSION_NAMES[k]+' · ':'')+'窗口 '+k);
+     return '<div style="margin:14px 0 6px;font-size:12px;font-weight:600;color:var(--text2);display:flex;align-items:center;gap:6px">'+escapeHtml(label)+'<em style="font-style:normal;font-weight:400;opacity:.7">'+list.length+' 篇</em></div>'+list.map(itemHtml).join('');
    }).join('');
  }
 
- async function toggleDiaryHidden(name){
+ async function toggleDiaryHidden(relPath){
    const entries=AppState.INITIAL_DATA.diary||[];
-   const entry=entries.find(e=>e.name===name);
+   const entry=entries.find(e=>(e.relPath||e.name)===relPath);
    const toHidden=!(entry&&entry.hidden===true);
-   if(toHidden&&!confirm('隐藏 '+name+' ？\n隐藏后：不参与新会话的跨窗口日记注入、不占注入份数（顺位补足）。\n日记文件与时间线记录保留，可随时点「显示」恢复。'))return;
+   if(toHidden&&!confirm('隐藏 '+relPath+' ？\n隐藏后：不参与新会话的跨窗口日记注入、不占注入份数（顺位补足）。\n日记文件与时间线记录保留，可随时点「显示」恢复。'))return;
    try{
-     const r=await fetch(ADMIN_API+'/diary/hide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,hidden:toHidden})});
+     const r=await fetch(ADMIN_API+'/diary/hide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:relPath,hidden:toHidden})});
      const j=await r.json();
      if(j.success){
        toast(toHidden?'已隐藏，不再参与跨窗口注入':'已恢复，重新参与跨窗口注入');
@@ -1091,11 +1183,11 @@ function toast(msg){
    }
  }
  
- function openDiaryEditor(name){
-   editingDiaryName=name;
+ function openDiaryEditor(relPath){
+   editingDiaryName=relPath;
    const entries=AppState.INITIAL_DATA.diary||[];
-   const entry=entries.find(e=>e.name===name);
-   document.getElementById('diary-edit-name').textContent=name;
+   const entry=entries.find(e=>(e.relPath||e.name)===relPath);
+   document.getElementById('diary-edit-name').textContent=relPath;
    document.getElementById('diary-edit-content').value=entry?entry.content:'';
    openModal('diaryEditModal');
  }
@@ -4146,8 +4238,10 @@ async function deletePinned(id){
   if(v==='cloud')loadMemCloud();
   else if(v==='mempool')initMemPoolView();
  }
-   // ============ 记忆池（4 类结构化记忆） ============
-  const MP_CAT_COLORS={关于她:'#2980b9',关于我们:'#8e44ad',锚点:'#c0392b',信号:'#f39c12',对话摘要:'#7f8c8d'};
+   // ============ 记忆池（五类结构化记忆，2026-09-12 五类改造） ============
+  // 五类：关于她/认账/拓本（AI 写入）、压缩摘要（压缩替换入池）、对话碎片（用户侧）；
+  // 旧四类（关于我们/锚点/信号/对话摘要）为存量只读兼容，清洗导入完成后消失，统一暗灰显示
+  const MP_CAT_COLORS={关于她:'#2980b9',认账:'#c0392b',拓本:'#8e44ad',压缩摘要:'#7f8c8d',对话碎片:'#f39c12',关于我们:'#95a5a6',锚点:'#95a5a6',信号:'#95a5a6',对话摘要:'#95a5a6'};
   function mpCatColor(c){ return MP_CAT_COLORS[c]||'#7f8c8d'; }
 
   function initMemPoolView(){
@@ -4159,8 +4253,11 @@ async function deletePinned(id){
   function populateMemPoolCatOptions(){
     const sel=document.getElementById('mempool-cat');
     const ed=document.getElementById('mempool-edit-cat');
-    const cats=['关于她','关于我们','锚点','信号','对话摘要','对话碎片'];
-    if(sel){ sel.innerHTML='<option value="">全部分类</option>'+cats.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join(''); }
+    const cats=['关于她','认账','拓本','压缩摘要','对话碎片'];
+    // 筛选下拉带旧四类（存量只读兼容，清洗导入完成后自然为空）
+    const legacy=['关于我们','锚点','信号','对话摘要'];
+    if(sel){ sel.innerHTML='<option value="">全部分类</option>'+cats.concat(legacy).map(function(c){return '<option value="'+c+'">'+c+(legacy.indexOf(c)>=0?'（旧）':'')+'</option>';}).join(''); }
+    // 编辑下拉只放新五类：编辑旧类条目时必须顺手归到新类
     if(ed){ ed.innerHTML=cats.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join(''); }
   }
   function mempoolSearchInput(v){
@@ -4248,34 +4345,117 @@ async function deletePinned(id){
     });
     el.innerHTML=html;
   }
+  // 点「导出」先选类别（全部 / 新五类 / 旧四类），再按所选导出活跃条目
+  function openMemPoolExport(){
+    const sel=document.getElementById('mempool-export-cat');
+    if(sel){
+      const cats=['关于她','认账','拓本','压缩摘要','对话碎片'];
+      const legacy=['关于我们','锚点','信号','对话摘要'];
+      const exists=function(c){ return !window.__memPoolData || !window.__memPoolData.stats || (window.__memPoolData.stats.byCategory[c]||0)>0; };
+      sel.innerHTML='<option value="">全部活跃记忆</option>'
+        +cats.concat(legacy).map(function(c){ return '<option value="'+c+'">'+c+(legacy.indexOf(c)>=0?'（旧）':'')+(exists(c)?'':' · 空')+'</option>'; }).join('');
+      sel.value='';
+    }
+    openModal('mempoolExportModal');
+  }
   async function exportMemPool(){
+    const cat=document.getElementById('mempool-export-cat')?document.getElementById('mempool-export-cat').value:'';
     const msg=document.getElementById('mempool-clean-msg');
-    if(msg) msg.textContent='正在导出全部活跃记忆…';
+    const catLabel=cat||'全部';
+    if(msg) msg.textContent='正在导出'+catLabel+'（JSON）…';
     try{
       const r=await fetch(ADMIN_API + '/memory-pool');
       const d=await r.json();
       const all=d.items||[];
-      const items=all.filter(function(x){return x.active!==false;});
-      if(!items.length){ toast('没有可导出的活跃记忆'); if(msg) msg.textContent=''; return; }
-      let txt='记忆池导出 · 全部活跃记忆\n';
-      txt+='导出时间: '+new Date().toLocaleString('zh-CN')+'\n';
-      txt+='共 '+items.length+' 条\n';
-      txt+='========================================\n\n';
-      items.forEach(function(it, idx){
-        const cat=it.category||'其他';
-        const imp=Math.round((Number(it.importance)||0)*100);
-        txt+='【'+(idx+1)+'】['+cat+'] 重要 '+imp+'%\n';
-        txt+=(it.content||'')+'\n\n';
+      const rows=all.filter(function(x){return x.active!==false && (!cat || x.category===cat);});
+      if(!rows.length){ toast('该类别下没有可导出的活跃记忆'); if(msg) msg.textContent=''; return; }
+      // 结构对齐清洗流程：note 字段说明 + items[{n,id,category,importance,source,active,pinned,content}]
+      const items=rows.map(function(e,i){
+        return { n:i+1, id:e.id, category:e.category, importance:Math.round((Number(e.importance)||0.5)*100)/100,
+          source:e.source||'manual', active:e.active!==false, pinned:e.pinned===true, content:e.content||'' };
       });
-      const blob=new Blob([txt], {type:'text/plain;charset=utf-8'});
+      const out={ note:'记忆池导出（'+new Date().toLocaleString('zh-CN')+'，范围：'+catLabel+' 活跃条目，沉底不含）。字段：n 序号 / id 条目唯一 id / category 当前分类 / importance 重要级 / source 写入来源 / active false=已沉底 / pinned 是否置顶 / content 内容。清洗产出变更清单：[{id,op:"update"/"delete"/"merge",category?,importance?,content?,into?}]，到「导入清洗」预览后应用。',
+        range:catLabel, count:items.length, items:items };
+      const blob=new Blob([JSON.stringify(out,null,1)], {type:'application/json;charset=utf-8'});
       const url=URL.createObjectURL(blob);
       const a=document.createElement('a');
-      a.href=url;
-      a.download='记忆池_活跃_'+items.length+'条_'+new Date().toISOString().slice(0,10)+'.txt';
-      document.body.appendChild(a); a.click();
+      a.download='记忆池_'+catLabel+'_'+items.length+'条_'+new Date().toISOString().slice(0,10)+'.json';
+      document.body.appendChild(a); a.href=url; a.click();
       setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 60);
-      if(msg) msg.textContent='已导出 '+items.length+' 条活跃记忆';
+      closeModal('mempoolExportModal');
+      if(msg) msg.textContent='已导出 '+catLabel+' '+items.length+' 条（JSON）';
     }catch(e){ toast('导出失败: '+e.message); if(msg) msg.textContent='导出失败: '+e.message; }
+  }
+  // ---- 清洗结果导入：粘贴/上传清洗产出的变更 JSON → 预览统计 → 确认应用（后端自动备份） ----
+  function openMemPoolImport(){
+    const ta=document.getElementById('mempool-import-text');
+    if(ta) ta.value='';
+    const fi=document.getElementById('mempool-import-file');
+    if(fi) fi.value='';
+    const st=document.getElementById('mempool-import-result');
+    if(st) st.textContent='';
+    const btn=document.getElementById('mempool-import-apply');
+    if(btn) btn.style.display='none';
+    openModal('mempoolImportModal');
+  }
+  function memPoolImportFile(input){
+    const f=input.files && input.files[0];
+    if(!f) return;
+    const reader=new FileReader();
+    reader.onload=function(){ const ta=document.getElementById('mempool-import-text'); if(ta) ta.value=String(reader.result||''); };
+    reader.readAsText(f, 'utf-8');
+  }
+  function memPoolParseChanges(){
+    const ta=document.getElementById('mempool-import-text');
+    const raw=ta?ta.value.trim():'';
+    if(!raw){ toast('先粘贴或上传清洗结果 JSON'); return null; }
+    try{
+      let parsed=JSON.parse(raw);
+      if(parsed && !Array.isArray(parsed) && Array.isArray(parsed.changes)) parsed=parsed.changes;
+      if(!Array.isArray(parsed)) throw new Error('顶层必须是数组（或 {changes:[...]}）');
+      return parsed;
+    }catch(e){ toast('JSON 解析失败: '+e.message); return null; }
+  }
+  async function previewMemPoolImport(){
+    const changes=memPoolParseChanges();
+    if(!changes) return;
+    const st=document.getElementById('mempool-import-result');
+    if(st) st.textContent='校验中…';
+    try{
+      const r=await apiRequest('POST', ADMIN_API + '/memory-pool/import', {changes:changes, preview:true}, {busy:null});
+      if(!r.ok) return;
+      const d=r.data||{};
+      if(d.error){ if(st) st.textContent='校验失败: '+d.error; return; }
+      const errs=d.errors||[];
+      let txt='校验完成：可应用 '+d.total+' 条（改 '+d.update+' / 删 '+d.delete+' / 并 '+d.merge+'）';
+      if(errs.length) txt+='；有问题 '+errs.length+' 条将被跳过（如 '+errs.slice(0,2).map(function(e){return (e.id||'')+' '+e.error;}).join('；')+'）';
+      if(st) st.textContent=txt;
+      const btn=document.getElementById('mempool-import-apply');
+      if(btn) btn.style.display=(d.total>0)?'':'none';
+      window.__memPoolImportChanges=changes;
+    }catch(e){ if(st) st.textContent='预览失败: '+e.message; }
+  }
+  async function applyMemPoolImport(){
+    const changes=window.__memPoolImportChanges;
+    if(!changes || !changes.length){ toast('先预览再确认'); return; }
+    const st=document.getElementById('mempool-import-result');
+    if(st) st.textContent='导入中…';
+    try{
+      const r=await apiRequest('POST', ADMIN_API + '/memory-pool/import', {changes:changes, preview:false}, {busy:document.getElementById('mempool-import-apply')});
+      if(!r.ok) return;
+      const d=r.data||{};
+      if(d.error){ if(st) st.textContent='导入失败: '+d.error; return; }
+      let txt='导入完成：改 '+d.updated+' / 删 '+d.deleted+' / 并 '+d.merged+' / 无变化 '+d.unchanged;
+      if(d.backup) txt+='（已自动备份）';
+      const errs=d.errors||[];
+      if(errs.length) txt+='；跳过 '+errs.length+' 条';
+      if(st) st.textContent=txt;
+      toast('清洗结果已导入');
+      window.__memPoolImportChanges=null;
+      const btn=document.getElementById('mempool-import-apply');
+      if(btn) btn.style.display='none';
+      loadMemPool();
+    }catch(e){ if(st) st.textContent='导入失败: '+e.message; }
   }
   function toggleMemPoolSunk(){
     window.__memShowSunk=!window.__memShowSunk;
@@ -4306,7 +4486,12 @@ async function deletePinned(id){
     AppState.memPoolEditId=id;
     populateMemPoolCatOptions();
     const ed=document.getElementById('mempool-edit-cat');
-    if(ed)ed.value=it.category||'关于她';
+    if(ed){
+      // 编辑下拉只有新五类：旧类条目（关于我们/锚点/信号/对话摘要）回落到「关于她」，保存时顺手归入新类
+      const has=[].some.call(ed.options,function(o){return o.value===it.category;});
+      ed.value=has?(it.category||'关于她'):'关于她';
+      if(!has) toast('「'+it.category+'」是旧分类，保存时会归入新分类，可先在下拉里选对');
+    }
     const ii=document.getElementById('mempool-edit-imp');
     if(ii)ii.value=(Number(it.importance)||0.5)+'';
     const ce=document.getElementById('mempool-edit-content');

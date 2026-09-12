@@ -4,8 +4,11 @@ const memoryEngine = require("./memory-engine");
 
 const PIN_TAG_RE = /<\s*pin\b[^>]*>([\s\S]*?)<\s*\/pin\s*>/gi;
 const MEMORY_TAG_RE = /<\s*memory\b[^>]*>([\s\S]*?)<\s*\/memory\s*>/gi;
+// 留纸轻量记号（2026-09-12）：<paper/>、<paper title="标题"/> 或成对 <paper title=".."></paper>（内部内容忽略）。
+// 写记号 = 把整条回复落成一张纸（只写不注入上下文）；一条回复写多个也只落一张。
+const PAPER_TAG_RE = /<\s*paper\b[^>]*>(?:[\s\S]*?<\s*\/paper\s*>)?/gi;
 
-// 剥离所有 <memory>/<pin>/<star> 标签（含属性写法、未闭合标签），供流式过滤/时间线匹配复用
+// 剥离所有 <memory>/<pin>/<star>/<paper> 标签（含属性写法、未闭合标签），供流式过滤/时间线匹配复用
 function stripTags(text) {
   return String(text || "")
     .replace(/<\s*memory\b[^>]*>([\s\S]*?)<\s*\/memory\s*>/gi, "")
@@ -14,8 +17,9 @@ function stripTags(text) {
     .replace(/<\s*quiet\b[^>]*>([\s\S]*?)<\s*\/quiet\s*>/gi, "")
     .replace(/<\s*compacted\b[^>]*>([\s\S]*?)<\s*\/compacted\s*>/gi, "")
     .replace(/<\s*star\b[^>]*>(?:\s*<\s*\/star\s*>)?/gi, "")
-    .replace(/<\s*(?:memory|pin|wake|quiet|compacted|star)\b[^>]*>/gi, "")
-    .replace(/<\s*(?:memory|pin|wake|quiet|compacted|star)\b[^>]*$/gi, "");
+    .replace(/<\s*paper\b[^>]*>(?:[\s\S]*?<\s*\/paper\s*>)?/gi, "")
+    .replace(/<\s*(?:memory|pin|wake|quiet|compacted|star|paper)\b[^>]*>/gi, "")
+    .replace(/<\s*(?:memory|pin|wake|quiet|compacted|star|paper)\b[^>]*$/gi, "");
 }
 
 // 宽松解析 {key:value,...}：值可不带引号，值里含逗号也能正确处理；
@@ -66,10 +70,32 @@ function parsePinContent(raw) {
   return null;
 }
 
-async function extractAndStore(text) {
+async function extractAndStore(text, ctx) {
   if (!text) return text;
 
   const promises = [];
+
+  // --- <paper> 留纸轻量辅助（2026-09-12）：AI 写故事/梦/随手创作 → 落一张纸（只写、不注入上下文）。
+  //     记号不包裹内容：整条回复（剥净所有标签后的正文全文）就是纸的内容；一条回复多个记号只落一张。
+  //     ctx.sessionId 由各收尾路径传入，决定纸落到哪个会话目录；缺省落 _shared。 ---
+  if (/<\s*paper\b/i.test(text)) {
+    promises.push(
+      Promise.resolve().then(function () {
+        const papers = require("./papers");
+        let title = "";
+        const pm = text.match(/<\s*paper\b[^>]*?title\s*=\s*("([^"]*)"|'([^']*)'|([^\s>/]+))[^>]*>/i);
+        if (pm) title = (pm[2] || pm[3] || pm[4] || "").trim();
+        const body = stripTags(text).trim();
+        if (!body) return null;
+        const r = papers.savePaper({ sessionId: ctx && ctx.sessionId, content: body, title, source: "paper_tag" });
+        if (r && r.ok) console.log("[tag-parser] <paper> 已留纸:", r.relPath, title ? ("标题=" + title) : "");
+        else console.warn("[tag-parser] <paper> 留纸失败:", (r && r.error) || "unknown");
+        return r;
+      }).catch(function (err) {
+        console.warn("[tag-parser] <paper> 留纸异常:", err.message);
+      })
+    );
+  }
 
   // --- <memory> 轻量辅助：AI 顺手写的重要记忆 → 记忆池（自动去重，非必需） ---
   const pinMatches = text.matchAll(PIN_TAG_RE);
@@ -101,8 +127,10 @@ async function extractAndStore(text) {
   }
 
   // --- <memory> 轻量辅助：AI 顺手写的重要记忆 → 记忆池（自动去重，非必需） ---
-  // 支持在标签内写 {category:"关于她", importance:0.8} 指定分类/重要级，如
-  //   <memory>{category:"关于我们",importance:0.9}她喜欢在看电影时牵手</memory>
+  // 只允许前三类（关于她/认账/拓本），标签内开头写 {category:"认账", importance:0.8} 指定分类/重要级，如
+  //   <memory>{category:"认账",importance:0.9}她情绪低落时先抱住她，别急着讲道理</memory>
+  //   <memory>{category:"拓本",importance:0.85}涵（9-12）："因为是你。"</memory>
+  // 写了别的分类（压缩摘要/对话碎片/旧类名）一律视为没写，交给 LLM 从前三类里判
   const memoryMatches = text.matchAll(MEMORY_TAG_RE);
   for (const match of memoryMatches) {
     const raw = (match[1] || "").trim();

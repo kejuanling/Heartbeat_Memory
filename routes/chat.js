@@ -1330,7 +1330,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
           parseWakeTagAndSchedule(aiContent, sessionId);
           parseQuietTagAndSchedule(aiContent, sessionId);
           // 提取并存储记忆，同时拿到清洗后的文本
-          const cleanText = await tagParser.extractAndStore(aiContent);
+          const cleanText = await tagParser.extractAndStore(aiContent, { sessionId });
           // 用清洗后的文本替换 JSON 中的 content
           if (cleanText !== aiContent) {
             parsed.choices[0].message.content = cleanText;
@@ -1464,7 +1464,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
         parseWakeTagAndSchedule(aiFullContent, sessionId);
         parseQuietTagAndSchedule(aiFullContent, sessionId);
         // 提取并存储记忆，并拿到清洗后的文本
-        const cleanFull = await tagParser.extractAndStore(aiFullContent).catch(err => {
+        const cleanFull = await tagParser.extractAndStore(aiFullContent, { sessionId }).catch(err => {
           console.warn("[memory] 流式标签解析失败:", err.message);
           return aiFullContent;
         });

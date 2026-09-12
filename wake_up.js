@@ -1,6 +1,7 @@
 require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 // 推送记录直接落在时间线（enhanced_messages.json），由管理台「推送管理」页对接，不再单独维护日志文件。
 
 
@@ -161,7 +162,15 @@ function stripInternalTags(text) {
   return tagParser.stripTags(text).replace(/^\s+|\s+$/g, "");
 }
 
-function appendDiaryEntry(content) {
+// 日记按会话分开保存（2026-09-12）：唤醒写的日记落到 diary/<会话目录>/日期.md，不再全系统共用一份。
+// 会话目录命名与 gateway 的 safeSessionToken 同一套规则，保证两侧写的是同一个目录。
+function diarySessionToken(sessionId) {
+  if (!sessionId || sessionId === "default") return "default";
+  const safe = String(sessionId).replace(/[^A-Za-z0-9_-]/g, "");
+  return safe || ("h" + crypto.createHash("md5").update(String(sessionId)).digest("hex").slice(0, 12));
+}
+
+function appendDiaryEntry(content, sessionId) {
   if (!readBooleanEnv("DIARY_ENABLED", true)) {
     console.log("[diary] DIARY_ENABLED=false，跳过保存。请在 .env 中设置 DIARY_ENABLED=true");
     return false;
@@ -174,16 +183,18 @@ function appendDiaryEntry(content) {
   }
 
   try {
+    const token = diarySessionToken(sessionId);
+    const targetDir = token ? path.join(DIARY_DIR_PATH, token) : DIARY_DIR_PATH;
     // Ensure the diary directory exists
-    if (!fs.existsSync(DIARY_DIR_PATH)) {
-      fs.mkdirSync(DIARY_DIR_PATH, { recursive: true });
-      console.log("[diary] 创建日记目录:", DIARY_DIR_PATH);
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+      console.log("[diary] 创建日记目录:", targetDir);
     }
-    
-    const diaryFile = path.join(DIARY_DIR_PATH, `${getDiaryDateString()}.md`);
+
+    const diaryFile = path.join(targetDir, `${getDiaryDateString()}.md`);
     const entry = `\n\n## ${getDiaryTimeString()}\n\n${cleanContent}\n`;
     fs.appendFileSync(diaryFile, entry, "utf-8");
-    console.log(`[diary] 已保存日记：${diaryFile} (${cleanContent.length} 字符)`);
+    console.log(`[diary] 已保存日记（会话 ${token || "共享"}）：${diaryFile} (${cleanContent.length} 字符)`);
     return true;
   } catch (err) {
     console.error("[diary] 保存日记失败:", err.message);
@@ -1273,7 +1284,7 @@ ${historyText}`
   console.log(JSON.stringify({ wake_mcp: wakeMcpOk, ai_text_chars: rawAiText.length }));
 
   const diaryResult = extractDiaryFromResponse(rawAiText);
-  const diarySaved = appendDiaryEntry(diaryResult.diaryContent);
+  const diarySaved = appendDiaryEntry(diaryResult.diaryContent, wakeSessionId);
   const aiText = diaryResult.remainingText;
 
   let eventContent;
@@ -1364,7 +1375,7 @@ ${historyText}`
   if (rawAiText) {
     // 提取 <memory> 和 <pin> 标签（唤醒时也允许 AI 写记忆和钉选）
     try {
-      await tagParser.extractAndStore(rawAiText);
+      await tagParser.extractAndStore(rawAiText, { sessionId: wakeSessionId });
       console.log("[tag-parser] 唤醒时标签解析完成");
     } catch (tagErr) {
       console.warn("[tag-parser] 唤醒时标签解析失败:", tagErr.message);

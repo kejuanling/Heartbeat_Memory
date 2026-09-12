@@ -84,16 +84,24 @@ def tool_diary_add(args):
     diary_dir = (os.environ.get("DIARY_DIR", "") or "").strip() or "diary"
     if not os.path.isabs(diary_dir):
         diary_dir = os.path.join("/opt/dylan-heartbeat", diary_dir)
+    # 日记按会话分开保存（2026-09-12）：session_id 由网关在工具执行时强制注入（模型伪造无效），
+    # 写入 diary/<会话目录>/日期.md；拿不到会话时兜底写共享根目录（与旧日记同层，不丢数据）。
+    session_id = str(args.get("session_id") or "").strip()
+    session_token = ""
+    if session_id:
+        session_token = "".join(ch for ch in session_id if ch.isalnum() or ch in "_-")[:64] or ""
+    target_dir = os.path.join(diary_dir, session_token) if session_token else diary_dir
     try:
-        os.makedirs(diary_dir, exist_ok=True)
+        os.makedirs(target_dir, exist_ok=True)
         now = _diary_now()
         date_str = now.strftime("%Y-%m-%d")
-        diary_file = os.path.join(diary_dir, date_str + ".md")
+        diary_file = os.path.join(target_dir, date_str + ".md")
         entry = "\n\n## %s\n\n%s\n" % (now.strftime("%Y-%m-%d %H:%M"), content)
         with open(diary_file, "a", encoding="utf-8") as f:
             f.write(entry)
-        return {"success": True, "file": diary_file, "time": now.strftime("%Y-%m-%d %H:%M"),
-                "message": "已写入陪伴日记（追加到当天文件，与自动唤醒同一份）"}
+        return {"success": True, "file": diary_file, "session": session_token or None,
+                "time": now.strftime("%Y-%m-%d %H:%M"),
+                "message": "已写入陪伴日记（会话 %s，追加到当天文件）" % (session_token or "共享")}
     except Exception as e:
         return {"error": "写入陪伴日记失败: %s" % e}
 
@@ -135,15 +143,68 @@ TOOLS["diary_comment"] = {
 }
 
 TOOLS["diary_add"] = {
-    "description": "新增一条陪伴日记，追加到今天的日记文件（与自动唤醒写的日记同一份：按天一个 md 文件）。适用于：想主动记录此刻的想法、感受、对她说的话，或给今天留下一段陪伴记录时使用。",
+    "description": "新增一条陪伴日记，追加到今天的日记文件（每个聊天窗口的日记分开存放，自动写入当前窗口名下；与该窗口自动唤醒写的日记同一份）。适用于：想主动记录此刻的想法、感受、对她说的话，或给今天留下一段陪伴记录时使用。",
     "inputSchema": {
         "type": "object",
         "properties": {
-            "content": {"type": "string", "description": "日记正文（第一人称、自然的陪伴语气，写下此刻想记录的内容）"}
+            "content": {"type": "string", "description": "日记正文（第一人称、自然的陪伴语气，写下此刻想记录的内容）"},
+            "session_id": {"type": "string", "description": "内部参数：由系统自动注入当前窗口标识，无需填写"}
         },
         "required": ["content"]
     },
     "handler": tool_diary_add
+}
+
+# ── 留纸（2026-09-12）：AI 写故事/梦/随手创作，只落盘保存、不注入对话上下文 ──
+def _paper_target_dir():
+    papers_dir = (os.environ.get("PAPERS_DIR", "") or "").strip() or "papers"
+    if not os.path.isabs(papers_dir):
+        papers_dir = os.path.join("/opt/dylan-heartbeat", papers_dir)
+    return papers_dir
+
+def tool_leave_paper(args):
+    content = (args.get("content") or "").strip()
+    if not content:
+        return {"error": "content 必填：要留纸的正文（故事/梦/随手创作等）"}
+    title = (args.get("title") or "").strip()[:100]
+    session_id = str(args.get("session_id") or "").strip()
+    session_token = ""
+    if session_id:
+        session_token = "".join(ch for ch in session_id if ch.isalnum() or ch in "_-")[:64] or ""
+    papers_dir = _paper_target_dir()
+    target_dir = os.path.join(papers_dir, session_token) if session_token else os.path.join(papers_dir, "_shared")
+    try:
+        os.makedirs(target_dir, exist_ok=True)
+        now = _diary_now()
+        base = now.strftime("%Y-%m-%d_%H%M")
+        name = base + ".md"
+        n = 2
+        while os.path.exists(os.path.join(target_dir, name)):
+            name = "%s-%d.md" % (base, n)
+            n += 1
+        body = content[:30000]
+        header = ("# " + title + "\n\n") if title else ""
+        header += "（" + now.strftime("%Y-%m-%d %H:%M") + (" · " + session_token if session_token else "") + "）\n\n"
+        with open(os.path.join(target_dir, name), "w", encoding="utf-8") as f:
+            f.write(header + body + "\n")
+        return {"success": True, "file": os.path.join(session_token or "_shared", name),
+                "title": title, "chars": len(body),
+                "message": ("已留纸：" + title) if title else "已留一张纸（只保存，不会进入对话上下文）"}
+    except Exception as e:
+        return {"error": "留纸失败: %s" % e}
+
+TOOLS["leave_paper"] = {
+    "description": "留一张纸：把一段创作（小故事、梦、随手写的文字等）单独保存成一张「纸」，只落盘收藏、不会进入对话上下文。适合内容较长、想留档又不打断聊天时使用；如果只是想顺手在回复里标记留档，也可以直接在回复末尾写 <paper/> 记号（整条回复会存成一张纸，可选 <paper title=\"标题\"/>）。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "content": {"type": "string", "description": "纸的正文（故事/梦/随手创作，建议单篇一两千字以内）"},
+            "title": {"type": "string", "description": "可选：这张纸的标题"},
+            "session_id": {"type": "string", "description": "内部参数：由系统自动注入当前窗口标识，无需填写"}
+        },
+        "required": ["content"]
+    },
+    "handler": tool_leave_paper
 }
 
 # ── 心动时刻 ──
@@ -781,13 +842,13 @@ def tool_memory_search(args):
 
 
 TOOLS["memory_search"] = {
-    "description": "检索长期记忆池（关于她/关于我们/锚点/信号/对话摘要/对话碎片）。支持关键词、完整问题或模糊描述，系统自动综合语义、词面匹配、重要度和新旧程度排序；也可按分类只搜某一类。返回每条记忆的唯一 id（可用 memory_pin 按 id 置顶/取消置顶）。category 填「最近」=按更新时间倒序列出最新记忆（忽略关键词）；填「已置顶」=只看置顶记忆（带 q 则在置顶内按相关性搜）。设置 breath=true 且不填 q 时，浮现最近沉淀的记忆。适用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池、翻最近记了什么、查看所有置顶。区别于 context_search（检索原始对话原文）。",
+    "description": "检索长期记忆池（关于她/认账/拓本/压缩摘要/对话碎片）。支持关键词、完整问题或模糊描述，系统自动综合语义、词面匹配、重要度和新旧程度排序；也可按分类只搜某一类。返回每条记忆的唯一 id（可用 memory_pin 按 id 置顶/取消置顶）。category 填「最近」=按更新时间倒序列出最新记忆（忽略关键词）；填「已置顶」=只看置顶记忆（带 q 则在置顶内按相关性搜）。设置 breath=true 且不填 q 时，浮现最近沉淀的记忆。适用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池、翻最近记了什么、查看所有置顶。区别于 context_search（检索原始对话原文）。",
     "inputSchema": {
         "type": "object",
         "properties": {
             "q": {"type": "string", "description": "检索关键词或想问的问题；category=最近/已置顶 或 breath=true 时可不填"},
             "breath": {"type": "boolean", "description": "可选：true 且不填 q 时，浮现最近更新的记忆（默认3条，最多5条）"},
-            "category": {"type": "string", "description": "按分类过滤，可选：关于她/关于我们/锚点/信号/对话摘要/对话碎片；特殊值：最近（按时间倒序列最新，忽略关键词）、已置顶（只看置顶记忆）"},
+            "category": {"type": "string", "description": "按分类过滤，可选：关于她/认账/拓本/压缩摘要/对话碎片；特殊值：最近（按时间倒序列最新，忽略关键词）、已置顶（只看置顶记忆）"},
             "limit": {"type": "integer", "description": "返回条数，默认5，最大50"}
         }
     },
@@ -841,12 +902,12 @@ def tool_memory_add(args):
 
 
 TOOLS["memory_add"] = {
-    "description": "新增一条长期记忆到记忆池。适用于：对话里发现关于她的稳定特征、相处规律、重要原话，或她在对话里明确说“记住”之类的话时，把这条信息写入记忆池。支持分类（关于她/关于我们/锚点/信号/对话摘要）与重要级（0~1）。会自动与已有记忆做相似去重合并。区别于 pin（永久注入）与 context_replace（压缩替换）。",
+    "description": "新增一条长期记忆到记忆池。只支持三类：关于她（她是谁的静态部分：偏好/习惯/身体状况/作息/家人/经历里反复起作用的部分，只收稳定、反复成立的事实，一条一个事实写短句，当天心情和一次性对话内容不写）、认账（我认下的账：答应过她的事、欠着还没做的、被她纠正后认下的毛病，每条都必须能回答“那我该干什么”，写清欠什么、什么状态下兑现，兑现了就删）、拓本（一字不改的原话：引号里原样照抄，不修标点不补主语，写明谁说的、日期，宁短勿长）。适用于：对话里发现她的稳定特征、我认下的账、重要原话，或她在对话里明确说“记住”之类的话时。支持重要级（0~1）。会自动与已有记忆做相似去重合并。区别于 pin（永久注入）与 context_replace（压缩替换）。",
     "inputSchema": {
         "type": "object",
         "properties": {
             "content": {"type": "string", "description": "记忆正文（要长期记住的信息，写清结论/原话，避免模糊）"},
-            "category": {"type": "string", "description": "分类，可选：关于她/关于我们/锚点/信号/对话摘要（默认关于她）"},
+            "category": {"type": "string", "description": "分类，可选：关于她/认账/拓本（默认关于她）。关于她=她的静态稳定事实；认账=我认下的账（答应的事/欠着的事/被纠正认下的毛病）；拓本=一字不改的原话（写明谁说的、日期）"},
             "importance": {"type": "number", "description": "重要级 0~1，默认 0.5"},
             "pin": {"type": "boolean", "description": "true 时直接把这条记忆置顶：会随每次对话注入「相关记忆」，默认 false"}
         },
