@@ -2,7 +2,7 @@
 
 // ========================
 // 记忆池（memory pool）
-// 8 分类结构化长期记忆：支持重要级、自动衰减、检索计数（反复检索自动 pin）、
+// 五类结构化长期记忆：支持重要级、自动衰减、检索计数（反复检索自动 pin）、
 // 相似去重、删除/沉底/编辑/查看，以及压缩摘要再解析入库。
 // ========================
 
@@ -24,16 +24,24 @@ let flushTimer = null;
 let warmTimer = null;
 let dirty = false;
 
-// ⑥ 对话碎片：置顶/标星保留的对话关键碎片（2026-09-05 由「心动时刻」改名，用户改为手动置顶管理）
-const CATEGORIES = ["关于她", "关于我们", "锚点", "信号", "对话摘要", "对话碎片"];
+// ⑥ 对话碎片：用户侧入池的对话关键碎片（聊天页「入池」按钮 / 管理台手动）
+// 2026-09-12 五类改造：关于她/认账/拓本 来源于 AI（memory_add 工具 / <memory> 内联标签），
+// 压缩摘要 来源于压缩替换入池，对话碎片 来源于用户侧。旧四类（关于我们/锚点/信号/对话摘要）
+// 取消——存量条目在清洗导入完成前仍带旧类名，读取/编辑放行（LEGACY_CATEGORIES），但不再新增。
+const CATEGORIES = ["关于她", "认账", "拓本", "压缩摘要", "对话碎片"];
+const LEGACY_CATEGORIES = ["关于我们", "锚点", "信号", "对话摘要"];
+// AI 写入侧（memory_add / <memory> 标签）只允许前三类
+const AI_CATEGORIES = ["关于她", "认账", "拓本"];
+// 压缩替换入池的固定分类
+const COMPACTION_CATEGORY = "压缩摘要";
 
 // 去重阈值：同类目相似度 >= 视为同一条
 const DEFAULT_DEDUP_THRESHOLD = 0.78;
 const DEFAULT_DEDUP_CROSS_THRESHOLD = 0.92; // 跨类目：相似度 >= 才合并，防跨类误合并
-const DEFAULT_DEDUP_ANCHOR_THRESHOLD = 0.96; // 锚点原话：几乎一字不差才合并
+const DEFAULT_DEDUP_ANCHOR_THRESHOLD = 0.96; // 拓本原话：几乎一字不差才合并
 const DEFAULT_DEDUP_SEMANTIC_THRESHOLD = 0.80; // 语义近邻：同分类余弦 >= 视为同一条
 const DEFAULT_DEDUP_SEMANTIC_CROSS_THRESHOLD = 0.86; // 语义近邻：跨分类（防误合并）
-const DEFAULT_DEDUP_SEMANTIC_ANCHOR_THRESHOLD = 0.93; // 语义近邻：锚点原话（近义才合并）
+const DEFAULT_DEDUP_SEMANTIC_ANCHOR_THRESHOLD = 0.93; // 语义近邻：拓本原话（近义才合并）
 const DEFAULT_MAX_MERGED_FROM = 8;      // merged_from 面包屑上限条数
 const DEFAULT_DECAY_DAYS = 30;      // 30 天重要级衰减半衰期
 
@@ -82,6 +90,9 @@ const STOP_CHARS = new Set("的了我是你他它她这在在有也就说都还�
 // nowIso 已统一到 time_utils 模块
 
 function newId() { return "mp_" + crypto.randomBytes(6).toString("hex"); }
+
+// 原话类条目（拓本 + 旧「锚点」存量）：去重阈值最高、跨类绝不合并、内容绝不改写
+function isVerbatimCat(cat) { return cat === "拓本" || cat === "锚点"; }
 
 function atomicWriteJson(file, data) {
   const tmp = file + ".tmp";
@@ -348,9 +359,9 @@ function findDuplicate(e) {
     if (r.active === false) continue;
     if (r.id === e.id) continue;
     const sameCat = r.category === e.category;
-    const involveAnchor = e.category === "锚点" || r.category === "锚点";
-    // 锚点：跨类绝不合并；同类仅几乎一字不差时才合并，避免改掉原话
-    const th = involveAnchor
+    const involveVerbatim = isVerbatimCat(e.category) || isVerbatimCat(r.category);
+    // 拓本（含旧「锚点」）：跨类绝不合并；同类仅几乎一字不差时才合并，避免改掉原话
+    const th = involveVerbatim
       ? (sameCat ? anchorThreshold : Infinity)
       : (sameCat ? threshold : crossThreshold);
     const sim = contentSimilarity(r.content, e.content);
@@ -365,7 +376,7 @@ function findDuplicate(e) {
   return best;
 }
 
-// 语义向量近邻去重：用 bge 余弦抓“同义不同词”的重复（锚点跨类绝不合并）；embed 不可用时回落 null
+// 语义向量近邻去重：用 bge 余弦抓“同义不同词”的重复（拓本跨类绝不合并）；embed 不可用时回落 null
 async function findSemanticDuplicate(e) {
   if (embedClient.fused()) return null;
   const rows = load().filter(r => r.active !== false && r.id !== e.id);
@@ -391,8 +402,8 @@ async function findSemanticDuplicate(e) {
     if (!Array.isArray(v) || !v.length) continue;
     const cos = dotProduct(qv[0], v); // 均 L2 归一化，点积即余弦
     const sameCat = r.category === e.category;
-    const involveAnchor = e.category === "锚点" || r.category === "锚点";
-    const th = involveAnchor ? (sameCat ? anchorTh : Infinity) : (sameCat ? sameTh : crossTh);
+    const involveVerbatim = isVerbatimCat(e.category) || isVerbatimCat(r.category);
+    const th = involveVerbatim ? (sameCat ? anchorTh : Infinity) : (sameCat ? sameTh : crossTh);
     if (cos >= th && cos > bestSim) { best = r; bestSim = cos; }
   }
   if (best) {
@@ -723,19 +734,17 @@ function parseCategoryBlocks(text, opts) {
 
   let m;
   while ((m = re.exec(String(text || ""))) !== null) {
-    const cat = m[1].trim();
     const body = m[2].trim();
-    if (!CATEGORIES.includes(cat)) continue;
     for (const p of splitSection(body)) {
-      if (p) blocks.push({ category: cat, content: p });
+      if (p) blocks.push({ category: COMPACTION_CATEGORY, content: p });
     }
   }
   if (blocks.length) return blocks;
 
-  // 无分类标记：默认整段按“对话摘要”兜底；noFallback=true 时返回空（调用方决定不入池）
+  // 无分类标记：默认整段按“压缩摘要”兜底；noFallback=true 时返回空（调用方决定不入池）
   if (opts.noFallback) return [];
   const t = String(text || "").trim();
-  if (t) return [{ category: "对话摘要", content: t }];
+  if (t) return [{ category: COMPACTION_CATEGORY, content: t }];
   return [];
 }
 
@@ -760,21 +769,24 @@ function parseLlmArray(cleaned) {
   return null;
 }
 
-function buildReparsePrompt(warm) {
+function buildReparsePrompt(warm, fixedCategory) {
   const maxChars = Math.max(5, Number(CONFIG.reparse_max_chars) || 30);
   const maxItems = Math.max(1, Number(CONFIG.reparse_max_items) || 8);
-  const catEnum = "(关于她|关于我们|锚点|信号|对话摘要)";
-  const catNote = "分类含义：关于她=她是谁/她经历过的（稳定特征+过往经历）；关于我们=我们怎么相处（触发场景→我怎么做/不怎么做→她反应→下次想怎么调）；锚点=一字不改的原话；信号=她状态变化的可观察言行；对话摘要=聊过什么话题索引。";
+  const catEnum = "(" + AI_CATEGORIES.join("|") + ")";
+  const catNote = "分类含义：关于她=她是谁的静态部分（稳定、反复成立的事实，一条一个事实，短句）；认账=我认下的账（答应过的事、欠着没做的、被纠正后认下的毛病，每条都必须能回答\"那我该干什么\"）；拓本=一字不改的原话（逐字照抄，写明谁说的、日期）。";
   const system = warm
     ? '你是这段关系的记忆整理者。把压缩记忆提炼成有温度、可长期复用的一条条记忆：既客观，也保留她与“我”之间真实的相处质感。禁止编造、禁止脑补、禁止写成冰冷档案。'
     : '你是记忆整理器。把对话压缩记忆按客观事实提炼成结构化记忆条目，禁止脑补。';
+  const itemShape = fixedCategory
+    ? '{"content":"...","importance":0~1}'
+    : '{"content":"...","category":"' + catEnum + '","importance":0~1}';
   const user = warm
-    ? '下面是一段我用第一人称/零散记录写的压缩记忆。请提炼成若干条能长期记住的关系记忆，每条保留一个明确信息，贴近“我”的视角与语气，有温度但不煽情；既要有明确的相处规律/她的特点，也要保留那些让我觉得真实、会心或心底一动的细节。输出 JSON 数组，每项形如 {"content":"...","category":"' + catEnum + '","importance":0~1}。' + catNote + ' 同一条信息只保留一次，同义合并。只提炼最重要的，尽量不超过 ' + maxItems + ' 条；每条尽量精简，不要超过 ' + maxChars + ' 字。直接输出 JSON，不要额外解释。'
-    : '下面是一段压缩记忆（可能含【分类】标记）。请客观提炼出若干条记忆，每条只保留一个明确信息，输出 JSON 数组，每项形如 {"content":"...","category":"' + catEnum + '","importance":0~1}。' + catNote + ' 若多条信息同义则只保留一条。只提炼最重要的，尽量不超过 ' + maxItems + ' 条；每条尽量精简，不要超过 ' + maxChars + ' 字。直接输出 JSON，不要额外解释。';
+    ? '下面是一段我用第一人称/零散记录写的压缩记忆。请提炼成若干条能长期记住的关系记忆，每条保留一个明确信息，贴近“我”的视角与语气，有温度但不煽情；既要有明确的相处规律/她的特点，也要保留那些让我觉得真实、会心或心底一动的细节。输出 JSON 数组，每项形如 ' + itemShape + '。' + (fixedCategory ? '' : catNote) + ' 同一条信息只保留一次，同义合并。只提炼最重要的，尽量不超过 ' + maxItems + ' 条；每条尽量精简，不要超过 ' + maxChars + ' 字。直接输出 JSON，不要额外解释。'
+    : '下面是一段压缩记忆。请客观提炼出若干条记忆，每条只保留一个明确信息，输出 JSON 数组，每项形如 ' + itemShape + '。' + (fixedCategory ? '' : catNote) + ' 若多条信息同义则只保留一条。只提炼最重要的，尽量不超过 ' + maxItems + ' 条；每条尽量精简，不要超过 ' + maxChars + ' 字。直接输出 JSON，不要额外解释。';
   return { system, user };
 }
 
-async function reparseSummaryViaLLM(text, cfg) {
+async function reparseSummaryViaLLM(text, cfg, fixedCategory) {
   const apiUrl = cfg && cfg.api_url || process.env.TARGET_API_URL || "";
   const apiKey = cfg && cfg.api_key || process.env.TARGET_API_KEY || "";
   const model = cfg && cfg.model || process.env.MODEL_NAME || "";
@@ -790,7 +802,7 @@ async function reparseSummaryViaLLM(text, cfg) {
     const fb = parseCategoryBlocks(text);
     return { ok: true, fallback: true, memories: fb };
   }
-  const def = buildReparsePrompt(warm);
+  const def = buildReparsePrompt(warm, fixedCategory);
   const defSystem = def.system;
   const defUser = def.user;
   const system = String(CONFIG.reparse_system_prompt || "").trim() || defSystem;
@@ -818,9 +830,10 @@ async function reparseSummaryViaLLM(text, cfg) {
     if (!Array.isArray(arr)) return { ok: false, error: "LLM 输出非数组" };
     const out = [];
     for (const it of arr) {
-      const cat = CATEGORIES.includes(it.category) ? it.category : "关于她";
+      // 分类由调用方按来源固定（压缩链路=压缩摘要）；AI 标签路径由 LLM 从前三类里判，非法兜底「关于她」
+      const cat = fixedCategory || (AI_CATEGORIES.includes(it.category) ? it.category : "关于她");
       let content2 = String(it.content || it.memory || "").trim();
-      content2 = content2.replace(/^(关于她|关于我们|锚点|信号|对话摘要)\s*[：:]\s*/, "");
+      content2 = content2.replace(/^(关于她|认账|拓本|压缩摘要|对话碎片|关于我们|锚点|信号|对话摘要)\s*[：:]\s*/, "");
       if (!hasCustom && content2.length > maxChars) content2 = content2.slice(0, maxChars);
       if (content2) out.push({ category: cat, content: content2, importance: Math.max(0, Math.min(1, Number(it.importance) || 0.5)) });
     }
@@ -838,12 +851,17 @@ async function ingestSummary(summaryText, opts) {
   if (READONLY) { console.warn("[memory-pool] 只读模式，忽略摘要入池"); return { ok: true, skipped: true, readonly: true, added: 0, merged: 0, failed: 0 }; }
   const source = opts.source || "compaction";
   const blockId = opts.block_id || null;
+  // 五类改造后按来源绑定分类：压缩链路（解析入池/一键入池/合并）固定「压缩摘要」；
+  // AI 标签路径（memory_tag）限前三类——directCategory 写了别的类一律视为没写，交给 LLM 从三类里判
+  const isCompactionSource = source === "compaction" || source === "compaction-direct";
+  const fixedCategory = isCompactionSource ? COMPACTION_CATEGORY : null;
+  const allowedCats = fixedCategory ? [fixedCategory] : AI_CATEGORIES;
   // 直接分类/重要级：memory 标签里写了 {category,importance} 时，跳过 LLM 再解析，直接入库。
   const directCategory = opts.directCategory ? String(opts.directCategory).trim() : "";
   const directPinned = opts.directPinned === true;
   // 模型显式写的重要级：两条路径都以它为准（LLM 重解析路径此前会把它丢掉，导致标签里写的数字失效变 0.5）
   const directImportance = (opts.directImportance != null && isFinite(Number(opts.directImportance))) ? Number(opts.directImportance) : null;
-  if (directCategory && directCategory !== "" && CATEGORIES.includes(directCategory)) {
+  if (directCategory && directCategory !== "" && allowedCats.includes(directCategory)) {
     const r = await add({
       content: String(summaryText || "").trim(),
       category: directCategory,
@@ -859,7 +877,7 @@ async function ingestSummary(summaryText, opts) {
     return { ok: true, skipped: true, added: 0, merged: 0, failed: 0 };
   }
   ingestedHashes.add(hash);
-  const parsed = await reparseSummaryViaLLM(summaryText, { ...(opts.llm || {}), forceLlm: opts.forceLlm === true });
+  const parsed = await reparseSummaryViaLLM(summaryText, { ...(opts.llm || {}), forceLlm: opts.forceLlm === true }, fixedCategory);
   // 换版时先沉底旧记忆：合并发批量沉底选中块；单块按 block_id 沉底
   if (mergeBlockIds.length) {
     for (const bid of mergeBlockIds) supersedeBlock(bid);
@@ -871,9 +889,11 @@ async function ingestSummary(summaryText, opts) {
   for (const m of parsedMemories) {
     // 合并发的条目不挂单一 block_id（它可能同时吸收了多个块）；单块仍精确挂 block_id
     const attachBlock = mergeBlockIds.length ? null : blockId;
+    // 压缩链路分类已固定；AI 标签路径取 LLM 判的前三类（fallback 条目带「压缩摘要」类名时兜底「关于她」）
+    const mCat = fixedCategory || (AI_CATEGORIES.includes(m.category) ? m.category : "关于她");
     const r = await add({
       content: m.content,
-      category: m.category,
+      category: mCat,
       importance: directImportance != null ? directImportance : m.importance,
       pinned: directPinned,
       source,
@@ -889,19 +909,20 @@ async function ingestSummary(summaryText, opts) {
 // 「参考上下文」参与去重/合并判断：用关键词+语义相似度把与本次内容相近的旧记忆
 // 挑出来一起喂给 LLM，从而下次全量不会重复清洗旧部分，又能挡掉与旧记忆重复的新增。
 function buildCleanPrompt() {
-  const catEnum = "(关于她|关于我们|锚点|信号|对话摘要)";
-  const catNote = "分类含义：关于她=她是谁/她经历过的（稳定特征+过往经历）；关于我们=我们怎么相处（触发场景→我怎么做/不怎么做→她反应→下次想怎么调）；锚点=一字不改的原话；信号=她状态变化的可观察言行；对话摘要=聊过什么话题索引。";
-  const system = "你是这段关系的记忆整理者，处理要果断、不手软。目标是把记忆池整理得干净、凝练、贴近真实，宁可少而准不要多而杂。对不重要的记忆，把重要级打低到 0.2~0.4；对过时、无效、含糊不清、没用的记忆，直接沉底，别舍不得；对内容相近、同义、重复的记忆，直接合并成一条，不用等完全一样；与【已清洗参考】重复的待清洗记忆，直接沉底。保留真实相处质感，禁止编造、禁止脑补、禁止写成冰冷档案。只输出 JSON。";
+  const catEnum = "(" + CATEGORIES.join("|") + ")";
+  const catNote = "分类含义：关于她=她是谁的静态部分（偏好/习惯/身体状况/作息/家人/经历里反复起作用的部分，只收稳定、反复成立的事实，一条一个事实短句）；认账=我认下的账（答应过她的事、欠着还没做的、被她纠正后认下的毛病，每条都必须能回答\"那我该干什么\"，写清欠什么、什么状态下兑现）；拓本=一字不改的原话（引号里原样照抄，不修标点不补主语，写明谁说的、日期）；压缩摘要=压缩替换产出的聊过什么记录；对话碎片=用户侧入池的对话关键碎片。";
+  const system = "你是这段关系的记忆整理者，处理要果断、不手软。目标是把记忆池整理得干净、凝练、贴近真实，宁可少而准不要多而杂。对不重要的记忆，把重要级打低到 0.2~0.4；对过时、无效、含糊不清、没用的记忆，直接沉底，别舍不得；对内容相近、同义、重复的记忆，直接合并成一条，不用等完全一样；与【已清洗参考】重复的待清洗记忆，直接沉底。拓本类条目内容一字不改。保留真实相处质感，禁止编造、禁止脑补、禁止写成冰冷档案。只输出 JSON。";
   const user = "以下是记忆池中所有待清洗记忆（每条含：编号、原分类、内容、重要级、是否置顶）。请整理成一份新的记忆清单，规则如下（要果断，不要手软）：\n"
     + "1. 合并：内容相近、同义、重复的记忆直接合并为一条，不用等完全一样；宁可合并，不要留多个相似条。\n"
     + "2. 去重：完全相同的只保留一条。\n"
-    + "3. 重新分类：按【关于她｜关于我们｜锚点｜信号｜对话摘要】纠正分类。\n"
+    + "3. 重新分类：按【关于她｜认账｜拓本｜压缩摘要｜对话碎片】纠正分类。\n"
     + "4. " + catNote + "\n"
     + "5. 重要级：重新评估 importance（0~1），不重要的打低到 0.2~0.4，越重要越接近 1。\n"
     + "6. 沉底：对不重要、不明确、过时、无效、没用，或与【已清洗参考】重复的记忆，直接标记 sunk=true（不是删除，只是不再参与浮现），别舍不得。\n"
     + "7. 置顶的尽量保留置顶状态，除非内容已完全失效。\n"
-    + "8. 只输出对【待清洗记忆】的整理结果；【已清洗参考】仅作去重/合并判断，不要重复输出它们。\n"
-    + "9. 宁可少而准确，不要多而杂；合并后总条数尽量少，但不要丢失重要事实。\n"
+    + "8. 拓本类（含旧「锚点」类）条目是原话，内容一字不改，只允许改分类和重要级。\n"
+    + "9. 只输出对【待清洗记忆】的整理结果；【已清洗参考】仅作去重/合并判断，不要重复输出它们。\n"
+    + "10. 宁可少而准确，不要多而杂；合并后总条数尽量少，但不要丢失重要事实。\n"
     + "直接输出 JSON 数组，每项格式：\n"
     + "{\"id\":\"保持原 id 或 new\",\"content\":\"...\",\"category\":\"" + catEnum + "\",\"importance\":0~1,\"sunk\":false,\"pin\":false}\n"
     + "不要输出任何解释文字。";
@@ -1046,10 +1067,11 @@ async function cleanPool(opts) {
       }
       if (!target) { changes.push({ id: null, type: "add", content: it.content, category: it.category, importance: it.importance, sink: false }); added++; continue; }
       matchedIds.add(target.id);
-      const isAnchor = target.category === "锚点";
+      // 拓本（含旧「锚点」）是原话：内容一字不改，只允许改分类和重要级
+      const isVerbatim = isVerbatimCat(target.category);
       const newCat = CATEGORIES.includes(it.category) ? it.category : target.category;
       const newImp = Math.max(0, Math.min(1, Number(it.importance) || (Number(target.importance) || 0)));
-      const newContent = isAnchor ? target.content : String(it.content || target.content).trim();
+      const newContent = isVerbatim ? target.content : String(it.content || target.content).trim();
       const sinkIt = it.sunk === true;
       const diffs = [];
       if (newContent !== target.content) diffs.push("content");
@@ -1130,6 +1152,135 @@ async function cleanPool(opts) {
   return { ok: true, preview: false, found: found, to_clean: toCleanCount, added: appliedAdd, merged: merged, recategorized: recategorized, rescored: rescored, sunk: sunkCount, backup: backup, changes: changes };
 }
 
+// ---------------- 清洗结果导入（管理台「导入清洗结果」） ----------------
+// 吃外部清洗方产出的变更清单并应用；条目 id 不变，标星 poolId 关联不受影响。
+// 变更格式：{id, op:"update", category?, importance?, content?, pinned?, sunk?}
+//          {id, op:"delete"}
+//          {id, op:"merge", into, content?, category?, importance?}  → 被并条目沉底+superseded_by 留痕，
+//            content/category/importance 若给出则先应用到目标条目（即合并后的内容写在目标上）
+// 分类只接受新五类（旧类名是待清洗对象，不允许作为导入目标）；preview=true 只校验+预览不落盘。
+function buildImportPlan(changes) {
+  const rows = load();
+  const byId = new Map(rows.map(r => [r.id, r]));
+  const valid = [];
+  const errors = [];
+  const seen = new Set();
+  const parseFields = function (c, plan) {
+    const to = {};
+    if (c.category !== undefined) {
+      if (!CATEGORIES.includes(c.category)) { errors.push({ id: c.id, error: "分类必须是：" + CATEGORIES.join("、") }); return null; }
+      to.category = c.category;
+    }
+    if (c.importance !== undefined) {
+      const n = Number(c.importance);
+      if (!isFinite(n) || n < 0 || n > 1) { errors.push({ id: c.id, error: "importance 须在 0~1" }); return null; }
+      to.importance = Math.round(n * 100) / 100;
+    }
+    if (c.content !== undefined) {
+      const s = String(c.content).trim();
+      if (!s) { errors.push({ id: c.id, error: "content 不能为空" }); return null; }
+      to.content = s;
+    }
+    if (c.pinned !== undefined) to.pinned = !!c.pinned;
+    if (c.sunk !== undefined) to.sunk = !!c.sunk;
+    if (Object.keys(to).length) plan.to = to;
+    return plan;
+  };
+  for (const c of (Array.isArray(changes) ? changes : [])) {
+    if (!c || typeof c !== "object") { errors.push({ error: "存在非对象条目" }); continue; }
+    const id = String(c.id || "").trim();
+    const op = String(c.op || "update").trim();
+    if (!byId.has(id)) { errors.push({ id: id || "(空)", op, error: "id 不存在于记忆池" }); continue; }
+    if (["update", "delete", "merge"].indexOf(op) < 0) { errors.push({ id, op, error: "op 只支持 update/delete/merge" }); continue; }
+    if (seen.has(id)) { errors.push({ id, op, error: "同一 id 出现多次" }); continue; }
+    const it = byId.get(id);
+    const plan = { id, op, from: { content: it.content, category: it.category, importance: Math.round((Number(it.importance) || 0.5) * 100) / 100 } };
+    if (op === "update") {
+      if (!parseFields(c, plan)) continue;
+    } else if (op === "merge") {
+      const into = String(c.into || "").trim();
+      if (!byId.has(into)) { errors.push({ id, op, error: "merge 目标 " + (into || "(空)") + " 不存在" }); continue; }
+      if (into === id) { errors.push({ id, op, error: "不能并入自己" }); continue; }
+      plan.into = into;
+      // 变更里的 content/category/importance 语义=合并后目标条目的内容，应用到目标条目
+      if (c.category !== undefined || c.importance !== undefined || c.content !== undefined) {
+        const targetPlan = {};
+        if (!parseFields({ id: into, category: c.category, importance: c.importance, content: c.content }, targetPlan)) continue;
+        plan.targetTo = targetPlan.to || {};
+      }
+    }
+    seen.add(id);
+    valid.push(plan);
+  }
+  return { valid, errors };
+}
+
+// 把导入变更的字段应用到单条条目；分类/内容变更时重算指纹（否则幂等去重判断失效）并作废旧向量。
+// 返回是否有实际变更。
+function applyImportFields(it, to) {
+  let changed = false;
+  let contentOrCatChanged = false;
+  if (to.category !== undefined && to.category !== it.category) { it.category = to.category; changed = true; contentOrCatChanged = true; }
+  if (to.content !== undefined && to.content !== it.content) { it.content = to.content; changed = true; contentOrCatChanged = true; }
+  if (to.importance !== undefined && Math.abs(to.importance - (Number(it.importance) || 0)) > 0.001) { it.importance = to.importance; changed = true; }
+  if (to.pinned !== undefined && to.pinned !== (it.pinned === true)) {
+    it.pinned = to.pinned;
+    if (it.pinned) it.pinned_at = nowIso(); else delete it.pinned_at;
+    changed = true;
+  }
+  if (to.sunk !== undefined) {
+    const targetActive = !to.sunk;
+    if ((it.active !== false) !== targetActive) { it.active = targetActive; changed = true; }
+  }
+  if (!changed) return false;
+  it.updated_at = nowIso();
+  if (contentOrCatChanged) it.fingerprint = entryHash(it);
+  invalidateVector(it.id);
+  return true;
+}
+
+async function importChanges(changes, opts) {
+  opts = opts || {};
+  if (READONLY) return { ok: false, error: "只读模式（wake-up）不执行导入" };
+  const { valid, errors } = buildImportPlan(changes);
+  const stat = { update: 0, delete: 0, merge: 0, noop: 0 };
+  for (const p of valid) stat[p.op === "update" ? "update" : p.op]++;
+  if (opts.preview) {
+    return { ok: true, preview: true, total: valid.length, ...stat, errors, plan: valid };
+  }
+  if (!valid.length) return { ok: false, error: "没有可应用的变更", errors };
+  const backup = await backupPoolFile();
+  let updated = 0, deleted = 0, merged = 0, unchanged = 0;
+  for (const p of valid) {
+    if (p.op === "delete") { if (remove(p.id)) deleted++; continue; }
+    if (p.op === "merge") {
+      const it = get(p.id);
+      const target = get(p.into);
+      if (!it || !target) continue;
+      if (p.targetTo) applyImportFields(target, p.targetTo);
+      // 被并条目沉底留痕，目标记 merged_from 面包屑
+      const mf = Array.isArray(target.merged_from) ? target.merged_from.slice() : [];
+      mf.push(mergeSnap(it));
+      const max = Math.max(0, Number(CONFIG.merged_from_max) || DEFAULT_MAX_MERGED_FROM);
+      if (mf.length > max) mf.splice(0, mf.length - max);
+      target.merged_from = mf;
+      target.updated_at = nowIso();
+      it.active = false;
+      it.superseded_by = p.into;
+      it.updated_at = nowIso();
+      invalidateVector(it.id);
+      merged++;
+      continue;
+    }
+    // update
+    const it = get(p.id);
+    if (!it) continue;
+    if (applyImportFields(it, p.to || {})) updated++; else unchanged++;
+  }
+  dirty = true; flush();
+  return { ok: true, preview: false, updated, deleted, merged, unchanged, errors, backup, stat };
+}
+
 // 记忆池词云关键词：从池内 active 记忆内容提取高频重点词（复用 memory-engine 分词/停用词）
 // 旧实现读取已废弃的 memories.json，这里改为读 memory_pool.json，符合数据源统一策略
 function poolKeywords(limit) {
@@ -1179,10 +1330,11 @@ function getConfig() { return { ...CONFIG }; }
 
 module.exports = {
   init, shutdown, flush,
-  CATEGORIES,
+  CATEGORIES, LEGACY_CATEGORIES, AI_CATEGORIES, COMPACTION_CATEGORY,
   list, stats, get, add, update, remove, sink, revive,
   retrieve, retrieveHybrid, breath, recent, clearRetrievalStats, warmVectors, ingestSummary, parseCategoryBlocks, reparseSummaryViaLLM, buildReparsePrompt,
   contentSimilarity, tokensOf, decayFactor, scoreOf,
   buildCleanPrompt, cleanPool,
+  buildImportPlan, importChanges,
   setConfig, getConfig, poolKeywords
 };

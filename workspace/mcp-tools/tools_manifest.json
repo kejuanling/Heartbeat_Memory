@@ -1,6 +1,6 @@
 {
   "server": "小世界MCP工具集",
-  "generated_at": "2026-09-11 16:59:38",
+  "generated_at": "2026-09-12 22:52:56",
   "tools": [
     {
       "name": "context_replace",
@@ -58,7 +58,7 @@
     },
     {
       "name": "context_search",
-      "description": "检索原始上下文对话内容。关键词按空格分词，部分命中也会返回，命中越多越靠前。",
+      "description": "检索原始上下文对话内容。关键词按空格分词，部分命中也会返回，命中越多越靠前。返回每条命中的所属会话(session)与消息编号(msg_id)，可用 context_star 按 msg_id 给该原文标星。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -83,7 +83,7 @@
           "q"
         ]
       },
-      "defaultDescription": "语义检索所有会话的原始上下文和导入对话（含已被压缩区域的原文）。默认跨所有会话、语义模式，用描述性语句也能搜到相关内容；返回相关消息段落及时间、角色，相邻命中自动合并，相同内容只保留一条。可用于：回忆旧对话细节、找某段聊过的内容、确认要替换的范围。注意：仅当前会话模式下最近5分钟内容不返回。",
+      "defaultDescription": "语义检索所有会话的原始上下文和导入对话（含已被压缩区域的原文）。默认跨所有会话、语义模式，用描述性语句也能搜到相关内容；返回相关消息段落及所属会话(session)、消息编号(msg_id)、时间、角色，相邻命中自动合并，相同内容只保留一条。可用于：回忆旧对话细节、找某段聊过的内容、确认要替换的范围；拿到 msg_id 后可用 context_star 给该原文标星。注意：仅当前会话模式下最近5分钟内容不返回。",
       "defaultInputSchema": {
         "type": "object",
         "properties": {
@@ -111,27 +111,89 @@
       "enabled": true
     },
     {
+      "name": "context_star",
+      "description": "给聊天原文标星或取消标星。先用 context_search 搜到原文（结果带 session 和 msg_id），再调用本工具；标星后的原文长期保留在上下文中、不参与压缩替换，但不会写入记忆池。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session": {
+            "type": "string",
+            "description": "会话 id（context_search 返回的 session 字段）"
+          },
+          "msg_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "要标星的消息编号列表（context_search 返回的 msg_id），可一次传多条"
+          },
+          "marked": {
+            "type": "boolean",
+            "description": "true=标星（默认），false=取消标星"
+          }
+        },
+        "required": [
+          "session",
+          "msg_ids"
+        ]
+      },
+      "defaultDescription": "给聊天原文标星（或取消标星）。标星后的原文会长期保留在 AI 上下文中、不参与压缩替换（与用户手动标星同等待遇），但不会写入记忆池。用法：先用 context_search 搜到原文（结果每条带 session 和 msg_id），再把同一 session 下的 msg_id 传给本工具，可一次传多条。注意：msg_id 必须搭配其所属 session 使用，跨会话的原文要分别调用；标星按「角色+原文内容」识别，同一段原文即使出现在别处也会一起被标星/取消。",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "session": {
+            "type": "string",
+            "description": "会话 id（context_search 返回的 session 字段）"
+          },
+          "msg_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "要标星的消息编号列表（context_search 返回的 msg_id），可一次传多条"
+          },
+          "marked": {
+            "type": "boolean",
+            "description": "true=标星（默认），false=取消标星"
+          }
+        },
+        "required": [
+          "session",
+          "msg_ids"
+        ]
+      },
+      "enabled": true
+    },
+    {
       "name": "diary_add",
-      "description": "新增一条日记，追加到今天的日记文件（与自动唤醒写的日记同一份：按天一个 md 文件）。适用于：想主动记录此刻的想法、感受、对她说的话，或给今天留下一段陪伴记录时使用。",
+      "description": "新增一条陪伴日记，追加到今天的日记文件（每个聊天窗口的日记分开存放，自动写入当前窗口名下；与该窗口自动唤醒写的日记同一份）。适用于：想主动记录此刻的想法、感受、对她说的话，或给今天留下一段陪伴记录时使用。",
       "inputSchema": {
         "type": "object",
         "properties": {
           "content": {
             "type": "string",
             "description": "日记正文（第一人称、自然的陪伴语气，写下此刻想记录的内容）"
+          },
+          "session_id": {
+            "type": "string",
+            "description": "内部参数：由系统自动注入当前窗口标识，无需填写"
           }
         },
         "required": [
           "content"
         ]
       },
-      "defaultDescription": "新增一条陪伴日记，追加到今天的日记文件（与自动唤醒写的日记同一份：按天一个 md 文件）。适用于：想主动记录此刻的想法、感受、对她说的话，或给今天留下一段陪伴记录时使用。",
+      "defaultDescription": "新增一条陪伴日记，追加到今天的日记文件（每个聊天窗口的日记分开存放，自动写入当前窗口名下；与该窗口自动唤醒写的日记同一份）。适用于：想主动记录此刻的想法、感受、对她说的话，或给今天留下一段陪伴记录时使用。",
       "defaultInputSchema": {
         "type": "object",
         "properties": {
           "content": {
             "type": "string",
             "description": "日记正文（第一人称、自然的陪伴语气，写下此刻想记录的内容）"
+          },
+          "session_id": {
+            "type": "string",
+            "description": "内部参数：由系统自动注入当前窗口标识，无需填写"
           }
         },
         "required": [
@@ -205,8 +267,54 @@
       "enabled": true
     },
     {
+      "name": "leave_paper",
+      "description": "留一张纸：把一段创作（小故事、梦、随手写的文字等）单独保存成一张「纸」，只落盘收藏、不会进入对话上下文。适合内容较长、想留档又不打断聊天时使用；如果只是想顺手在回复里标记留档，也可以直接在回复末尾写 <paper/> 记号（整条回复会存成一张纸，可选 <paper title=\"标题\"/>）。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "纸的正文（故事/梦/随手创作，建议单篇一两千字以内）"
+          },
+          "title": {
+            "type": "string",
+            "description": "可选：这张纸的标题"
+          },
+          "session_id": {
+            "type": "string",
+            "description": "内部参数：由系统自动注入当前窗口标识，无需填写"
+          }
+        },
+        "required": [
+          "content"
+        ]
+      },
+      "defaultDescription": "留一张纸：把一段创作（小故事、梦、随手写的文字等）单独保存成一张「纸」，只落盘收藏、不会进入对话上下文。适合内容较长、想留档又不打断聊天时使用；如果只是想顺手在回复里标记留档，也可以直接在回复末尾写 <paper/> 记号（整条回复会存成一张纸，可选 <paper title=\"标题\"/>）。",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "纸的正文（故事/梦/随手创作，建议单篇一两千字以内）"
+          },
+          "title": {
+            "type": "string",
+            "description": "可选：这张纸的标题"
+          },
+          "session_id": {
+            "type": "string",
+            "description": "内部参数：由系统自动注入当前窗口标识，无需填写"
+          }
+        },
+        "required": [
+          "content"
+        ]
+      },
+      "enabled": true
+    },
+    {
       "name": "memory_add",
-      "description": "新增一条长期记忆到记忆池。适用于：对话里发现关于她的稳定特征、相处规律、重要原话，或她在对话里明确说“记住”之类的话时，把这条信息写入记忆池。支持分类（关于她/关于我们/锚点/信号/对话摘要/心动时刻）与重要级（0~1）。会自动与已有记忆做相似去重合并。 可设 pin=true 让这条记忆直接置顶（之后每次对话作为「相关记忆」注入）。",
+      "description": "新增一条长期记忆到记忆池。只支持三类：关于她（她是谁的静态部分：偏好/习惯/身体状况/作息/家人/经历里反复起作用的部分，只收稳定、反复成立的事实，一条一个事实写短句，当天心情和一次性对话内容不写）、认账（我认下的账：答应过她的事、欠着还没做的、被她纠正后认下的毛病，每条都必须能回答“那我该干什么”，写清欠什么、什么状态下兑现，兑现了就删）、拓本（一字不改的原话：引号里原样照抄，不修标点不补主语，写明谁说的、日期，宁短勿长）。适用于：对话里发现她的稳定特征、我认下的账、重要原话，或她在对话里明确说“记住”之类的话时。支持重要级（0~1）。会自动与已有记忆做相似去重合并。 可设 pin=true 让这条记忆直接置顶（之后每次对话作为「相关记忆」注入）。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -216,7 +324,7 @@
           },
           "category": {
             "type": "string",
-            "description": "分类，可选：关于她/关于我们/锚点/信号/对话摘要/心动时刻（默认关于她）"
+            "description": "分类，可选：关于她/认账/拓本（默认关于她）。关于她=她的静态稳定事实；认账=我认下的账（答应的事/欠着的事/被纠正认下的毛病）；拓本=一字不改的原话（写明谁说的、日期）"
           },
           "importance": {
             "type": "number",
@@ -231,7 +339,7 @@
           "content"
         ]
       },
-      "defaultDescription": "新增一条长期记忆到记忆池。适用于：对话里发现关于她的稳定特征、相处规律、重要原话，或她在对话里明确说“记住”之类的话时，把这条信息写入记忆池。支持分类（关于她/关于我们/锚点/信号/对话摘要）与重要级（0~1）。会自动与已有记忆做相似去重合并。区别于 pin（永久注入）与 context_replace（压缩替换）。",
+      "defaultDescription": "新增一条长期记忆到记忆池。只支持三类：关于她（她是谁的静态部分：偏好/习惯/身体状况/作息/家人/经历里反复起作用的部分，只收稳定、反复成立的事实，一条一个事实写短句，当天心情和一次性对话内容不写）、认账（我认下的账：答应过她的事、欠着还没做的、被她纠正后认下的毛病，每条都必须能回答“那我该干什么”，写清欠什么、什么状态下兑现，兑现了就删）、拓本（一字不改的原话：引号里原样照抄，不修标点不补主语，写明谁说的、日期，宁短勿长）。适用于：对话里发现她的稳定特征、我认下的账、重要原话，或她在对话里明确说“记住”之类的话时。支持重要级（0~1）。会自动与已有记忆做相似去重合并。区别于 pin（永久注入）与 context_replace（压缩替换）。",
       "defaultInputSchema": {
         "type": "object",
         "properties": {
@@ -241,7 +349,7 @@
           },
           "category": {
             "type": "string",
-            "description": "分类，可选：关于她/关于我们/锚点/信号/对话摘要（默认关于她）"
+            "description": "分类，可选：关于她/认账/拓本（默认关于她）。关于她=她的静态稳定事实；认账=我认下的账（答应的事/欠着的事/被纠正认下的毛病）；拓本=一字不改的原话（写明谁说的、日期）"
           },
           "importance": {
             "type": "number",
@@ -259,8 +367,46 @@
       "enabled": true
     },
     {
+      "name": "memory_pin",
+      "description": "置顶或取消置顶一条记忆池记忆。先用 memory_search 找到记忆拿到 id，再调用本工具；置顶后该记忆固定注入每次对话的「相关记忆」区。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "记忆 id（memory_search 返回的 id 字段，mp_ 开头）"
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "true=置顶（默认），false=取消置顶"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "defaultDescription": "置顶或取消置顶一条记忆池记忆。先用 memory_search 找到记忆（结果每条带 id），再把 id 传给本工具。置顶后的记忆固定注入每次对话的「相关记忆」区，不再依赖检索命中。适用于：她明确说「这个要一直记住」、要把某条记忆升级为长期固定记住、或取消某条不再需要固定注入的置顶。",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "记忆 id（memory_search 返回的 id 字段，mp_ 开头）"
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "true=置顶（默认），false=取消置顶"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "enabled": true
+    },
+    {
       "name": "memory_search",
-      "description": "检索长期记忆池（关于她/关于我们/锚点/信号/对话摘要/对话碎片）。支持关键词、完整问题或模糊描述，系统自动综合语义、词面匹配、重要度和新旧程度排序；也可按分类只搜某一类。category 填「最近」=按更新时间倒序列出最新记忆（忽略关键词）；填「已置顶」=只看置顶记忆（带 q 则在置顶内按相关性搜）。设置 breath=true 且不填 q 时，浮现最近沉淀的记忆。适用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池、翻最近记了什么、查看所有置顶。区别于 context_search（检索原始对话原文）。",
+      "description": "检索长期记忆池（关于她/认账/拓本/压缩摘要/对话碎片）。支持关键词、完整问题或模糊描述，系统自动综合语义、词面匹配、重要度和新旧程度排序；也可按分类只搜某一类。返回每条记忆的唯一 id（可用 memory_pin 按 id 置顶/取消置顶）。category 填「最近」=按更新时间倒序列出最新记忆（忽略关键词）；填「已置顶」=只看置顶记忆（带 q 则在置顶内按相关性搜）。设置 breath=true 且不填 q 时，浮现最近沉淀的记忆。适用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池、翻最近记了什么、查看所有置顶。区别于 context_search（检索原始对话原文）。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -274,7 +420,7 @@
           },
           "category": {
             "type": "string",
-            "description": "按分类过滤，可选：关于她/关于我们/锚点/信号/对话摘要/对话碎片；特殊值：最近（按时间倒序列最新，忽略关键词）、已置顶（只看置顶记忆）"
+            "description": "按分类过滤，可选：关于她/认账/拓本/压缩摘要/对话碎片；特殊值：最近（按时间倒序列最新，忽略关键词）、已置顶（只看置顶记忆）"
           },
           "limit": {
             "type": "integer",
@@ -282,7 +428,7 @@
           }
         }
       },
-      "defaultDescription": "检索长期记忆池（关于她/关于我们/锚点/信号/对话摘要/对话碎片）。支持关键词、完整问题或模糊描述，系统自动综合语义、词面匹配、重要度和新旧程度排序；也可按分类只搜某一类。category 填「最近」=按更新时间倒序列出最新记忆（忽略关键词）；填「已置顶」=只看置顶记忆（带 q 则在置顶内按相关性搜）。设置 breath=true 且不填 q 时，浮现最近沉淀的记忆。适用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池、翻最近记了什么、查看所有置顶。区别于 context_search（检索原始对话原文）。",
+      "defaultDescription": "检索长期记忆池（关于她/认账/拓本/压缩摘要/对话碎片）。支持关键词、完整问题或模糊描述，系统自动综合语义、词面匹配、重要度和新旧程度排序；也可按分类只搜某一类。返回每条记忆的唯一 id（可用 memory_pin 按 id 置顶/取消置顶）。category 填「最近」=按更新时间倒序列出最新记忆（忽略关键词）；填「已置顶」=只看置顶记忆（带 q 则在置顶内按相关性搜）。设置 breath=true 且不填 q 时，浮现最近沉淀的记忆。适用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池、翻最近记了什么、查看所有置顶。区别于 context_search（检索原始对话原文）。",
       "defaultInputSchema": {
         "type": "object",
         "properties": {
@@ -296,7 +442,7 @@
           },
           "category": {
             "type": "string",
-            "description": "按分类过滤，可选：关于她/关于我们/锚点/信号/对话摘要/对话碎片；特殊值：最近（按时间倒序列最新，忽略关键词）、已置顶（只看置顶记忆）"
+            "description": "按分类过滤，可选：关于她/认账/拓本/压缩摘要/对话碎片；特殊值：最近（按时间倒序列最新，忽略关键词）、已置顶（只看置顶记忆）"
           },
           "limit": {
             "type": "integer",
@@ -583,6 +729,38 @@
       "defaultInputSchema": {
         "type": "object",
         "properties": {}
+      },
+      "enabled": true
+    },
+    {
+      "name": "view_paper",
+      "description": "翻看自己留过的纸（leave_paper/<paper> 写的收藏）。不带参数调用=列出本窗口最近 10 张（序号+时间+标题/开头）；带 sn=序号 调用=看那一张的全文。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sn": {
+            "type": "integer",
+            "description": "可选：要看的第几张（列表返回的 sn）"
+          },
+          "session_id": {
+            "type": "string",
+            "description": "内部参数：由系统自动注入当前窗口标识，无需填写"
+          }
+        }
+      },
+      "defaultDescription": "翻看自己留过的纸（leave_paper/<paper> 写的收藏）。不带参数调用=列出本窗口最近 10 张（序号+时间+标题/开头）；带 sn=序号 调用=看那一张的全文。",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "sn": {
+            "type": "integer",
+            "description": "可选：要看的第几张（列表返回的 sn）"
+          },
+          "session_id": {
+            "type": "string",
+            "description": "内部参数：由系统自动注入当前窗口标识，无需填写"
+          }
+        }
       },
       "enabled": true
     }

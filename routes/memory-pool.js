@@ -60,4 +60,16 @@ module.exports = function registerMemoryPoolRoutes(app, { basicAuth }) {
       reply.send({ success: true, entry: r });
     } catch (err) { reply.code(500).send({ error: err.message }); }
   });
+
+  // 清洗结果导入：preview=true 只校验+预览统计；确认后 preview=false 应用（应用前自动全量备份）
+  app.post('/admin/memory-pool/import', { preHandler: basicAuth }, async (req, reply) => {
+    try {
+      const b = req.body || {};
+      const changes = Array.isArray(b.changes) ? b.changes : [];
+      if (!changes.length) return reply.code(400).send({ error: 'changes 必填：清洗结果变更数组' });
+      const r = await memoryPool.importChanges(changes, { preview: b.preview === true });
+      if (!r.ok && !r.preview) return reply.code(400).send(r);
+      reply.send(r);
+    } catch (err) { reply.code(500).send({ error: err.message }); }
+  });
 };
