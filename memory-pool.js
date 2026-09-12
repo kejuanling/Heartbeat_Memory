@@ -841,12 +841,13 @@ async function ingestSummary(summaryText, opts) {
   // 直接分类/重要级：memory 标签里写了 {category,importance} 时，跳过 LLM 再解析，直接入库。
   const directCategory = opts.directCategory ? String(opts.directCategory).trim() : "";
   const directPinned = opts.directPinned === true;
+  // 模型显式写的重要级：两条路径都以它为准（LLM 重解析路径此前会把它丢掉，导致标签里写的数字失效变 0.5）
+  const directImportance = (opts.directImportance != null && isFinite(Number(opts.directImportance))) ? Number(opts.directImportance) : null;
   if (directCategory && directCategory !== "" && CATEGORIES.includes(directCategory)) {
-    const importance = (opts.directImportance != null && isFinite(opts.directImportance)) ? Number(opts.directImportance) : null;
     const r = await add({
       content: String(summaryText || "").trim(),
       category: directCategory,
-      importance: importance != null ? importance : 0.5,
+      importance: directImportance != null ? directImportance : 0.5,
       pinned: directPinned,
       source
     });
@@ -873,7 +874,7 @@ async function ingestSummary(summaryText, opts) {
     const r = await add({
       content: m.content,
       category: m.category,
-      importance: m.importance,
+      importance: directImportance != null ? directImportance : m.importance,
       pinned: directPinned,
       source,
       block_id: attachBlock

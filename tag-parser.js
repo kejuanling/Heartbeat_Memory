@@ -25,7 +25,7 @@ function parseKeyValueBlock(raw, keys) {
   const parts = trimmed.split(re);
   const out = {};
   for (const part of parts) {
-    const m = part.match(/^\s*(title|content|type|importance|reason|pinned)\s*[:=]\s*(.*)$/i);
+    const m = part.match(/^\s*(title|content|type|category|importance|reason|pinned)\s*[:=]\s*(.*)$/i);
     if (!m) continue;
     const key = m[1].toLowerCase();
     let val = m[2].trim().replace(/^["']|["']$/g, "");
