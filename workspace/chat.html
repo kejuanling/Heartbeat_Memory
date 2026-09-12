@@ -834,8 +834,8 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 }
 .rw .rw-h{font-size:11px;color:var(--cap-think-text);letter-spacing:1px;display:flex;align-items:center;gap:6px}
 .rw .rw-c{display:none;margin-top:6px;white-space:pre-wrap;font-size:12px}
-/* 展开后限高滚动窗口：长思考不再无限撑高气泡（2026-09-12） */
-.rw.open .rw-c{display:block;max-height:min(65vh,340px);overflow-y:auto;-webkit-overflow-scrolling:touch;padding-right:4px}
+/* 展开后限高滚动窗口：长思考不再无限撑高气泡（2026-09-12，用户定值 280px） */
+.rw.open .rw-c{display:block;max-height:280px;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-right:4px}
 .rw .rw-a{font-size:10px;color:var(--ink3);margin-left:auto;transition:transform .2s}
 .rw.open .rw-a{transform:rotate(180deg)}
 /* 思考过程 / 工具痕迹：气泡外的独立容器（单独成行，不塞进气泡） */
