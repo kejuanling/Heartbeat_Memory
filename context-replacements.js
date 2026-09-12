@@ -603,7 +603,8 @@ function addReplacement(options) {
     range_label: resolved.range_label,
     matched: resolved.matched.map(m => ({
       role: m.role,
-      content: typeof m.content === "string" ? m.content : ""
+      content: typeof m.content === "string" ? m.content : "",
+      id: m && m.id ? String(m.id) : undefined
     })),
     count: resolved.count,
     removed: false
@@ -788,7 +789,8 @@ function buildManualRecord(start, end, enabled) {
       range_label: rangeLabelOf(slice),
       matched: slice.map(e => ({
         role: e.msg.role,
-        content: typeof e.msg.content === "string" ? e.msg.content : contentToText(e.msg)
+        content: typeof e.msg.content === "string" ? e.msg.content : contentToText(e.msg),
+        id: e.msg && e.msg.id ? String(e.msg.id) : undefined
       })),
       count: slice.length,
       enabled: enabled === true,
@@ -938,7 +940,7 @@ function updateAiRecordRange(repId, startIdx, endIdx) {
   rec.range = { start_time: fmtWall(new Date(minT)), end_time: fmtWall(new Date(maxT)) };
   rec.range_label = rangeLabelOf(slice);
   rec.matched = slice.map(function (r) {
-    return { role: r.msg.role, content: typeof r.msg.content === 'string' ? r.msg.content : contentToText(r.msg) };
+    return { role: r.msg.role, content: typeof r.msg.content === 'string' ? r.msg.content : contentToText(r.msg), id: r.msg && r.msg.id ? String(r.msg.id) : undefined };
   });
   rec.count = slice.length;
   // 摘要拼接：当前块 + 被吸收块（按原文位置顺序）
@@ -1378,6 +1380,7 @@ function applyReplacements(messages, source) {
   // 锚点视图：请求里只有「纯对话」消息参与定位（工具/特殊事件/已替换占位全部排除）
   const srcAnchorIdx = [];
   const srcAnchorKeys = [];
+  const srcIdToAnchor = new Map(); // 消息id -> 锚点序位（id 与时间线同源，精确且不受内容编辑影响）
   out.forEach(function (m, i) {
     if (!m) return;
     if (m.role === "system") return;
@@ -1387,6 +1390,7 @@ function applyReplacements(messages, source) {
     if (!String(contentToText(m)).trim()) return;
     srcAnchorIdx.push(i);
     srcAnchorKeys.push(normalizedCompareKey(m));
+    if (m.id) srcIdToAnchor.set(String(m.id), srcAnchorIdx.length - 1);
   });
   // 性能：预构建「内容锚点键 -> 出现的索引列表」，把 indexOf/lastIndexOf 的 O(n) 扫降为 O(log n) 查表。
   // srcAnchorKeys 允许重复键，列表按索引升序；查表语义与 Array.indexOf/lastIndexOf 完全一致。
@@ -1510,56 +1514,77 @@ function applyReplacements(messages, source) {
     const startKey = normalizedCompareKey(aStart);
     const endKey = normalizedCompareKey(aEnd);
 
-    let si = anchorFirst(startKey, searchStart);
-    // 兜底：相邻块在时间线里被重复内容错位、把“搜索起点”推到本块起点之后时，仍从序列开头重新找起点，避免该块被静默跳过
-    if (si === -1) si = anchorFirst(startKey, 0);
-    if (si === -1) {
-      let firstNonSpecialTlIdx = -1;
-      for (const m of matched) {
-        if (isSpecialEvent(m)) continue;
-        const k = tlKeyToPos.get(normalizedCompareKey(m));
-        if (k !== undefined) { firstNonSpecialTlIdx = k; break; }
-      }
-      const purePos = firstNonSpecialTlIdx >= 0 ? tlPurePos.indexOf(firstNonSpecialTlIdx) : -1;
-      if (purePos >= searchStart && purePos < srcAnchorIdx.length) si = purePos;
-      else {
-        skipped.push({ id: item.id, reason: "起点锚点匹配失败" });
-        console.warn("[context-replacements] 块跳过 id=" + item.id + " 原因=起点锚点在请求中找不到");
-        return;
-      }
-    }
-
-    // 起点先验校验：内容匹配到的起点换算回时间线锚点位置，与块真实首条位置（tlPos）偏差过大 → 拒绝。
-    // 典型场景：首条是「哥哥」这类高频短语，内容匹配落到别的出现位置，区间整体错位并吞并相邻块。
-    // 阈值 30：请求视图与时间线的正常漂移实测 ≤ 约 16（跨窗口注入/事件插入所致），远小于误匹配动辄数百的偏移。
-    if (firstTlPos >= 0) {
-      const expectedAnchor = tlPurePos.indexOf(firstTlPos);
-      if (expectedAnchor >= 0 && Math.abs(si - expectedAnchor) > 30) {
-        skipped.push({ id: item.id, reason: "起点偏移过大(si=" + si + ",期望=" + expectedAnchor + ")" });
-        console.warn("[context-replacements] 块跳过 id=" + item.id + " 原因=起点锚点偏移过大 si=" + si + " 期望≈" + expectedAnchor + "（疑似高频短语误匹配）");
-        return;
+    // ID 精确匹配优先：matched 存有消息 id（浏览器/时间线同源、唯一、不受内容编辑与位置漂移影响），
+    // 请求里能按 id 查到首尾时直接定位区间，内容搜索跳过——「哥哥」等高频短语误匹配从根上消失。
+    // id 缺失（第三方客户端不带 id / 消息已删 / 旧记录未迁移）时回退内容匹配，下方三道闸全部保留。
+    let si = -1;
+    let ei = -1;
+    let idPath = false;
+    const startId = aStart && aStart.id ? String(aStart.id) : "";
+    const endId = aEnd && aEnd.id ? String(aEnd.id) : "";
+    if (startId && endId) {
+      const siById = srcIdToAnchor.get(startId);
+      const eiById = srcIdToAnchor.get(endId);
+      if (siById !== undefined && eiById !== undefined && eiById >= siById) {
+        si = siById;
+        ei = eiById;
+        idPath = true;
       }
     }
 
-    let ei = anchorFirst(endKey, si + 1);
-    if (ei === -1) ei = anchorLast(endKey);
-    if (ei === -1 || ei < si) {
-      let found = -1;
-      let tried = 0;
-      for (let k = matched.length - 2; k >= 0 && tried < 8; k--) {
-        if (isSpecialEvent(matched[k])) continue;
-        tried++;
-        const alt = normalizedCompareKey(matched[k]);
-        let ae = anchorFirst(alt, si + 1);
-        if (ae === -1) ae = anchorLast(alt);
-        if (ae >= si) { found = ae; break; }
+    if (!idPath) {
+      si = anchorFirst(startKey, searchStart);
+      // 兜底：相邻块在时间线里被重复内容错位、把“搜索起点”推到本块起点之后时，仍从序列开头重新找起点，避免该块被静默跳过
+      if (si === -1) si = anchorFirst(startKey, 0);
+      if (si === -1) {
+        let firstNonSpecialTlIdx = -1;
+        for (const m of matched) {
+          if (isSpecialEvent(m)) continue;
+          const k = tlKeyToPos.get(normalizedCompareKey(m));
+          if (k !== undefined) { firstNonSpecialTlIdx = k; break; }
+        }
+        const purePos = firstNonSpecialTlIdx >= 0 ? tlPurePos.indexOf(firstNonSpecialTlIdx) : -1;
+        if (purePos >= searchStart && purePos < srcAnchorIdx.length) si = purePos;
+        else {
+          skipped.push({ id: item.id, reason: "起点锚点匹配失败" });
+          console.warn("[context-replacements] 块跳过 id=" + item.id + " 原因=起点锚点在请求中找不到");
+          return;
+        }
       }
-      if (found === -1) {
-        skipped.push({ id: item.id, reason: "尾锚点及备选全失败" });
-        console.warn("[context-replacements] 块跳过 id=" + item.id + " 原因=尾锚点及备选在请求中找不到");
-        return;
+
+      // 起点先验校验（仅内容路径：id 路径身份即真相，无需位置先验）。内容匹配到的起点换算回时间线
+      // 锚点位置，与块真实首条位置（tlPos）偏差过大 → 拒绝。典型场景：首条是「哥哥」这类高频短语，
+      // 内容匹配落到别的出现位置，区间整体错位并吞并相邻块。
+      // 阈值 30：请求视图与时间线的正常漂移实测 ≤ 约 16（跨窗口注入/事件插入所致），远小于误匹配动辄数百的偏移。
+      if (firstTlPos >= 0) {
+        const expectedAnchor = tlPurePos.indexOf(firstTlPos);
+        if (expectedAnchor >= 0 && Math.abs(si - expectedAnchor) > 30) {
+          skipped.push({ id: item.id, reason: "起点偏移过大(si=" + si + ",期望=" + expectedAnchor + ")" });
+          console.warn("[context-replacements] 块跳过 id=" + item.id + " 原因=起点锚点偏移过大 si=" + si + " 期望≈" + expectedAnchor + "（疑似高频短语误匹配）");
+          return;
+        }
       }
-      ei = found;
+
+      ei = anchorFirst(endKey, si + 1);
+      if (ei === -1) ei = anchorLast(endKey);
+      if (ei === -1 || ei < si) {
+        let found = -1;
+        let tried = 0;
+        for (let k = matched.length - 2; k >= 0 && tried < 8; k--) {
+          if (isSpecialEvent(matched[k])) continue;
+          tried++;
+          const alt = normalizedCompareKey(matched[k]);
+          let ae = anchorFirst(alt, si + 1);
+          if (ae === -1) ae = anchorLast(alt);
+          if (ae >= si) { found = ae; break; }
+        }
+        if (found === -1) {
+          skipped.push({ id: item.id, reason: "尾锚点及备选全失败" });
+          console.warn("[context-replacements] 块跳过 id=" + item.id + " 原因=尾锚点及备选在请求中找不到");
+          return;
+        }
+        ei = found;
+      }
     }
 
     // 区间膨胀校验：匹配区间远大于块自身消息数 → 首尾锚点之一误匹配到远处重复内容，
@@ -1570,9 +1595,9 @@ function applyReplacements(messages, source) {
       return;
     }
 
-    // 块内多锚点校验（"钥匙"）：除首尾外，再从 matched 块内均匀取若干条非特殊事件消息，
-    // 要求它们都能在当前请求 srcAnchorKeys 中找到、且位置落在 [si,ei] 内，才算命中。
-    // 避免仅靠首尾（可能是"哥哥"等短通用消息）跨会话误命中整段替换。
+    // 块内多锚点校验（"钥匙"）：除首尾外，再从 matched 块内均匀取若干条非特殊事件消息校验在块区间内命中。
+    // 内容路径：10 把钥匙必须全中（防仅靠首尾短通用消息跨会话误命中），缺一即拒。
+    // id 路径：身份唯一不可能误命中，钥匙降为「缺失仅告警」——消息被编辑/客户端缺条不再误伤整块。
     const INNER_ANCHOR_COUNT = 10;
     const _innerCandidates = [];
     for (const m of matched) {
@@ -1582,14 +1607,25 @@ function applyReplacements(messages, source) {
     if (_innerCandidates.length > 2) {
       const _mid = _innerCandidates.slice(1, _innerCandidates.length - 1);
       const _take = Math.min(INNER_ANCHOR_COUNT, _mid.length);
+      let _idMiss = 0;
       for (let _s = 0; _s < _take; _s++) {
         const _idx = Math.floor(_s * _mid.length / _take);
-        const _ai = anchorFirst(normalizedCompareKey(_mid[_idx]), si);
+        const _m = _mid[_idx];
+        if (idPath) {
+          const _midId = _m && _m.id ? String(_m.id) : "";
+          const _ai = _midId ? srcIdToAnchor.get(_midId) : undefined;
+          if (_ai === undefined || _ai < si || _ai > ei) _idMiss++;
+          continue;
+        }
+        const _ai = anchorFirst(normalizedCompareKey(_m), si);
         if (_ai === -1 || _ai > ei) {
           skipped.push({ id: item.id, reason: "内部钥匙缺失 idx=" + _idx });
-          console.warn("[context-replacements] 块跳过 id=" + item.id + " 原因=内部钥匙缺失/越界 idx=" + _idx + " ai=" + _ai + " ei=" + ei + " 内容=" + String(contentToText(_mid[_idx]) || "").slice(0, 30));
+          console.warn("[context-replacements] 块跳过 id=" + item.id + " 原因=内部钥匙缺失/越界 idx=" + _idx + " ai=" + _ai + " ei=" + ei + " 内容=" + String(contentToText(_m) || "").slice(0, 30));
           return; // 块内锚点缺失/越界 -> 不命中，跳过该块
         }
+      }
+      if (idPath && _idMiss > 0) {
+        console.warn("[context-replacements] id路径内部钥匙缺失(仅告警不拒绝) id=" + item.id + " 缺失 " + _idMiss + "/" + _take);
       }
     }
 
