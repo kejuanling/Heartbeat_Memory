@@ -799,7 +799,21 @@ async function releaseHeldMessages(sessionId) {
 }
 
 // 扣住期间返回给客户端的响应：内容为空，让客户端不显示 AI 回复（此时消息只是被扣住）
-function buildQuietHeldReply(reply) {
+// 批注 2026-09-13（审查 B4）：stream 客户端按 SSE 解析，此前一律回普通 JSON 会导致
+// Kelivo 等流式客户端解析出 0 个事件而空转/报错——按请求的 stream 参数返回对应格式。
+function buildQuietHeldReply(reply, stream) {
+  if (stream === true) {
+    const chunk = {
+      id: "chatcmpl-quiet-held",
+      object: "chat.completion.chunk",
+      created: Math.floor(Date.now() / 1000),
+      model: "quiet-held",
+      choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: "stop" }]
+    };
+    return reply.code(200).header("Content-Type", "text/event-stream; charset=utf-8")
+      .header("Cache-Control", "no-cache").header("Connection", "keep-alive")
+      .send(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`);
+  }
   return reply.code(200).send({
     choices: [{ index: 0, message: { role: "assistant", content: "" }, finish_reason: "stop" }],
     usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
@@ -2734,15 +2748,40 @@ const LOGIN_PAGE_HTML = `<!doctype html>
 // ========================
 // 管理台登录接口
 // ========================
+// 批注 2026-09-13（审查 S3）：管理台登录防爆破。经两层反代后所有请求在 Node 侧同源
+// （X-Real-IP 被二跳覆盖为 127.0.0.1，见 0913-02 审查 S2），无法按来源 IP 区分，
+// 故按「账号」全局锁定：连续 5 次失败锁 15 分钟，成功登录即清零。个人系统单管理员账号，此口径够用。
+const LOGIN_MAX_FAILS = 5;
+const LOGIN_LOCK_MS = 15 * 60 * 1000;
+let loginFails = 0;
+let loginLockedUntil = 0;
+function loginLocked() { return Date.now() < loginLockedUntil; }
+function loginFail() {
+  loginFails++;
+  if (loginFails >= LOGIN_MAX_FAILS) {
+    loginLockedUntil = Date.now() + LOGIN_LOCK_MS;
+    loginFails = 0;
+    console.warn("[login] 连续失败过多，管理台登录锁定 15 分钟");
+  }
+}
+function loginOk() { loginFails = 0; loginLockedUntil = 0; }
+function loginRemainingLockMinutes() { return Math.max(1, Math.ceil((loginLockedUntil - Date.now()) / 60000)); }
+
 app.get("/admin/mobile/login", async (req, reply) => {
   reply.type("text/html").send(LOGIN_PAGE_HTML.replace("<!--ERROR-->", ""));
 });
 
 app.post("/admin/mobile/login", async (req, reply) => {
+  if (loginLocked()) {
+    await new Promise(r => setTimeout(r, 500));
+    reply.type("text/html").send(LOGIN_PAGE_HTML.replace("<!--ERROR-->", '<div class="err">失败次数过多，已锁定 ' + loginRemainingLockMinutes() + ' 分钟</div>'));
+    return;
+  }
   const body = req.body || {};
   const ok = String(body.user || "") === process.env.ADMIN_USER
     && String(body.password || "") === process.env.ADMIN_PASSWORD;
   if (ok) {
+    loginOk();
     const csrf = createCsrfToken();
     reply.header("Set-Cookie", [
       `admin_session=${createSessionToken()}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_DAYS * 24 * 3600}`,
@@ -2752,16 +2791,21 @@ app.post("/admin/mobile/login", async (req, reply) => {
     return;
   }
   await new Promise(r => setTimeout(r, 500));
+  loginFail();
   reply.type("text/html").send(LOGIN_PAGE_HTML.replace("<!--ERROR-->", '<div class="err">用户名或密码错误</div>'));
 });
 
 // 聊天前端登录：复用管理台账号密码校验（JSON 接口，供 /chat 页做密码登录用）
 app.post("/admin/chat-login", async (req, reply) => {
+  if (loginLocked()) {
+    return reply.code(429).send({ ok: false, error: "失败次数过多，已锁定 " + loginRemainingLockMinutes() + " 分钟" });
+  }
   const body = req.body || {};
   console.log("[chat-login] got user=" + JSON.stringify(String(body.user || "")) + " pwLen=" + String(body.password || "").length + " at=" + new Date().toISOString());
   const ok = String(body.user || "") === process.env.ADMIN_USER
     && String(body.password || "") === process.env.ADMIN_PASSWORD;
   if (ok) {
+    loginOk();
     // 让 /chat 页也能走管理台会话：登录成功后下发 admin_session + admin_csrf cookie，
     // chat.html 内置卡片即可直接调 /heartbeat/admin/*（cookie 认证 + CSRF 双提交）。
     const csrf = createCsrfToken();
@@ -2773,6 +2817,7 @@ app.post("/admin/chat-login", async (req, reply) => {
     return;
   }
   await new Promise(r => setTimeout(r, 500));
+  loginFail();
   console.log("[chat-login] rejected user=" + JSON.stringify(String(body.user || "") ));
   reply.code(401).send({ ok: false, error: "账号或密码错误" });
 });
@@ -2790,7 +2835,15 @@ app.post("/admin/change-password", { preHandler: basicAuth }, async (req, reply)
     if (newPw.length < 4) return reply.code(400).send({ ok: false, error: "新密码至少 4 位" });
     await writeEnvUpdates({ ADMIN_PASSWORD: newPw });
     process.env.ADMIN_PASSWORD = newPw;   // 热生效：basicAuth/chat-login 直接读取该值
-    console.log("[change-password] 登录密码已更新");
+    // 批注 2026-09-13（审查 S5）：改密成功即轮换会话密钥——所有已签发的 admin_session
+    // （HMAC 用旧密钥）立即失效，包括可能已泄漏的 token；所有设备需重新登录（预期行为）。
+    sessionSecret = crypto.randomBytes(32).toString("hex");
+    try {
+      fs.writeFileSync(SESSION_SECRET_FILE, sessionSecret, { mode: 0o600 });
+    } catch (e) {
+      console.error("[change-password] 轮换会话密钥失败:", e.message);
+    }
+    console.log("[change-password] 登录密码已更新，会话密钥已轮换（所有登录态失效）");
     reply.send({ ok: true });
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
@@ -6071,7 +6124,13 @@ app.delete("/admin/logs/screenshot-wake-prompt", { preHandler: basicAuth }, asyn
 app.get("/admin/vision-models", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
-    reply.send({ success: true, models: getVisionModels(), coId: cfg.co_vision_model_id || "", screenshotId: cfg.screenshot_vision_model_id || "" });
+    // 批注 2026-09-13（审查 S4）：api_key 不回明文，只回 api_key_set 布尔；POST 端空值按 id 保留旧值。
+    const models = getVisionModels().map(function (m) {
+      if (!m || typeof m !== "object") return m;
+      const has = !!(m.api_key && String(m.api_key).trim());
+      return Object.assign({}, m, { api_key: "", api_key_set: has });
+    });
+    reply.send({ success: true, models: models, coId: cfg.co_vision_model_id || "", screenshotId: cfg.screenshot_vision_model_id || "" });
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 app.post("/admin/vision-models", { preHandler: basicAuth }, async (req, reply) => {
@@ -6079,12 +6138,21 @@ app.post("/admin/vision-models", { preHandler: basicAuth }, async (req, reply) =
     const body = req.body || {};
     const updates = {};
     if (Array.isArray(body.models)) {
+      // 批注 2026-09-13（审查 S4）：GET 已不回明文 api_key，客户端回传空值视为「未改动」，
+      // 按 id 从旧配置恢复，避免脱敏回写抹掉真实凭据。
+      const oldModels = getVisionModels();
       updates.vision_models = body.models.map(function (m, i) {
+        const mid = String((m && m.id) || ("m" + Date.now() + "_" + i));
+        let apiKey = String((m && m.api_key) || "").trim();
+        if (!apiKey) {
+          const old = oldModels.find(function (x) { return x && String(x.id || "") === mid && x.api_key; });
+          if (old) apiKey = String(old.api_key);
+        }
         return {
-          id: String((m && m.id) || ("m" + Date.now() + "_" + i)),
+          id: mid,
           name: String((m && m.name) || ("视觉模型 " + (i + 1))).trim(),
           api_url: String((m && m.api_url) || "").trim(),
-          api_key: String((m && m.api_key) || "").trim(),
+          api_key: apiKey,
           model: String((m && m.model) || "").trim()
         };
       });

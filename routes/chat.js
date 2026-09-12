@@ -1013,7 +1013,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
         } else {
           const addedHeld = holdNewUserMessages(trailing, sessionId);
           console.log(`[quiet] 扣住 ${addedHeld} 条新用户消息，本次不转发给模型`);
-          return buildQuietHeldReply(reply);
+          // 批注 2026-09-13（审查 B4）：按请求的 stream 参数返回 SSE 或普通 JSON
+          return buildQuietHeldReply(reply, body?.stream === true);
         }
       }
     }

@@ -705,7 +705,7 @@ function toast(msg){
    if(count)count.textContent=AppState.visionModels.length+' 个';
    if(!AppState.visionModels.length){el.innerHTML='<div class="empty">还没有视觉模型，点「编辑视觉模型」添加</div>';return}
    el.innerHTML=AppState.visionModels.map(m=>{
-     const ok=!!(m.api_key&&String(m.api_key).trim());
+     const ok=!!(m.api_key_set||(m.api_key&&String(m.api_key).trim()));
      return '<div class="vm-row"><span class="vm-dot" style="background:'+(ok?'#2ecc71':'#bbb')+'"></span><span class="vm-name">'+escapeHtml(m.name||'未命名')+'</span><span class="vm-model">'+escapeHtml(m.model||'')+'</span></div>';
    }).join('');
  }
@@ -734,7 +734,7 @@ function toast(msg){
      +'<div class="vm-body">'
      +'<div class="form-group"><label>名称</label><input value="'+escapeHtml(m.name||'')+'" data-f="name"></div>'
      +'<div class="form-group"><label>API 地址</label><input value="'+escapeHtml(m.api_url||'')+'" data-f="api_url" placeholder="https://…"></div>'
-     +'<div class="form-group"><label>API Key</label><input type="password" value="'+escapeHtml(m.api_key||'')+'" data-f="api_key" placeholder="留空 = 未配置（状态灯灰）"></div>'
+     +'<div class="form-group"><label>API Key</label><input type="password" value="'+escapeHtml(m.api_key||'')+'" data-f="api_key" placeholder="留空 = 保持现有 Key（状态灯看是否已配置）"></div>'
      +'<div class="form-group"><label>模型名</label><input value="'+escapeHtml(m.model||'')+'" data-f="model" placeholder="如 glm-4v-flash"></div>'
      +'<button class="btn btn-outline vm-del" onclick="removeVisionModel(this)">删除</button>'
      +'</div>'
@@ -811,7 +811,7 @@ function toast(msg){
    fetch(ADMIN_API + '/config').then(r=>r.json()).then(cfg=>{
      if(!cfg||typeof cfg!=='object'){el.innerHTML='<div class="empty">加载失败</div>';return}
      const vm=AppState.visionModels.find(m=>m.id===cfg.co_vision_model_id);
-     const ok=!!(vm&&vm.api_key&&String(vm.api_key).trim());
+   const ok=!!(vm&&(vm.api_key_set||(vm.api_key&&String(vm.api_key).trim())));
      let rows='';
      rows+='<div class="env-row"><span class="env-key">视觉模型</span><span class="env-val">'+escapeHtml(selectedVisionModelName(cfg.co_vision_model_id))+'</span></div>';
      rows+='<div class="env-row"><span class="env-key">定时截帧间隔</span><span class="env-val">'+escapeHtml(String(cfg.co_frame_interval!=null?cfg.co_frame_interval:30))+' 秒</span></div>';
@@ -858,7 +858,7 @@ function toast(msg){
    fetch(ADMIN_API + '/config').then(r=>r.json()).then(cfg=>{
      if(!cfg||typeof cfg!=='object'){el.innerHTML='<div class="empty">加载失败</div>';return}
      const vm=AppState.visionModels.find(m=>m.id===cfg.screenshot_vision_model_id);
-     const ok=!!(vm&&vm.api_key&&String(vm.api_key).trim());
+   const ok=!!(vm&&(vm.api_key_set||(vm.api_key&&String(vm.api_key).trim())));
      const wake=!!cfg.screenshot_wake_enabled;
      const inject=!!(cfg.event_inject_types&&cfg.event_inject_types.includes&&cfg.event_inject_types.includes('screenshot'));
      let rows='';

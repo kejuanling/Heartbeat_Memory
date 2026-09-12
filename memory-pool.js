@@ -157,12 +157,29 @@ function scoreOf(entry) {
 }
 
 // ---------------- 读写 ----------------
+// 批注 2026-09-13（审查 D2）：池文件解析失败时先备份坏文件再置空，并拒绝用空池覆盖
+// 原文件——此前 catch 里静默 cache=[]，之后任意一次写操作会把全量记忆覆盖成 []。
+let corruptPoolBackup = null;
+let corruptWarned = false;
+function quarantineCorruptPoolFile(err) {
+  try {
+    if (!fs.existsSync(POOL_FILE)) return;
+    const bak = POOL_FILE + ".corrupt-" + new Date().toISOString().replace(/[:.]/g, "-");
+    fs.copySync(POOL_FILE, bak);
+    corruptPoolBackup = bak;
+    console.error("[memory-pool] memory_pool.json 解析失败（" + (err && err.message) + "），坏文件已备份到 " + bak + "；池置空运行，空池状态下拒绝写回覆盖");
+  } catch (e2) {
+    console.error("[memory-pool] 备份损坏池文件失败:", e2.message);
+    cache = [];
+  }
+}
 async function init() {
   await fs.ensureDir(DATA_DIR);
   try {
     const arr = await fs.readJson(POOL_FILE);   // 读一次，别对同一文件连读两遍
     cache = Array.isArray(arr) ? arr : [];
   } catch (e) {
+    quarantineCorruptPoolFile(e);
     cache = [];
   }
   try {
@@ -177,8 +194,10 @@ async function init() {
 function load() {
   if (cache) return cache;
   try {
-    cache = Array.isArray(fs.readJsonSync(POOL_FILE)) ? fs.readJsonSync(POOL_FILE) : [];
+    const arr = fs.readJsonSync(POOL_FILE);
+    cache = Array.isArray(arr) ? arr : [];
   } catch (e) {
+    quarantineCorruptPoolFile(e);
     cache = [];
   }
   return cache;
@@ -186,6 +205,16 @@ function load() {
 
 function flush() {
   if (!dirty || !cache) return;
+  // 批注 2026-09-13（审查 D2）：池文件此前损坏且当前仍是空池时，拒绝写回——
+  // 否则一次普通的 add/flush 就把全量记忆覆盖成 []。新写入暂存内存（dirty 保持），
+  // 人工核对备份文件并恢复数据后重启进程即可正常落盘。
+  if (corruptPoolBackup && cache.length === 0) {
+    if (!corruptWarned) {
+      corruptWarned = true;
+      console.error("[memory-pool] 池文件损坏未恢复，flush 拒绝用空池覆盖（备份: " + corruptPoolBackup + "）");
+    }
+    return;
+  }
   try {
     atomicWriteJson(POOL_FILE, cache);
     dirty = false;

@@ -1203,6 +1203,7 @@ ${historyText}`
         model: process.env.MODEL_NAME,
         messages: wakeMessages,
         serverClients: wakeClients,
+        sessionId: wakeSessionId, // 批注 2026-09-13（审查 B3）：不传会话导致 diary_add/leave_paper 落到 default，与 appendDiaryEntry 的落盘路径分裂
         temperature: 0.8,
         top_p: 0.95
       });
