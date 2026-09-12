@@ -1364,7 +1364,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
         contextReplacements.noteMcpChatSession(sessionId);
         if (await handleMcpRequest(body, reply, req, sanitizedMessages, sessionId, kelivoMessages)) return;
       } catch (mcpErr) {
-        console.warn("[mcp] 工具循环失败，回退原逻辑:", mcpErr.message);
+        console.warn("[mcp] 工具循环失败，回退原逻辑:", mcpErr.message, "| session:", sessionId, "| msgs:", Array.isArray(sanitizedMessages) ? sanitizedMessages.length : -1, "| model:", (body && body.model) || "");
       }
     }
     // === MCP_TOOL_LOOP_END ===

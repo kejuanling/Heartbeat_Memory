@@ -910,6 +910,7 @@ ${phoneContext ? `\n${phoneContext}\n` : ""}
 - 如果想联系用户，直接写你想说的话。系统会自动打包成手机推送发送。可以是一句话，也可以第一行作为标题、第二行作为正文。
 - 如果不想联系，只输出：[NO_ACTION]，可附带简短原因（10字以内）。
 - 如果你想写日记，可以额外输出 [DIARY]...[/DIARY]。只有想写时才写，不必每次都写。
+- 写前先用 diary_list 工具读本会话今天已写的日记：今天已经写过的话题不要重复写，可以接着写新段落，或写完全不同的新主题。
 - 你可以设置下一次系统主动唤醒你的时间，格式为 <wake>数值</wake>，单位为分钟。设置后这段时间内系统不会再唤醒你，时间一到会主动唤醒你一次；如果到点前她主动找过你，这个定时会自动作废。不想设置就不输出这个标签。
 `;
 }
@@ -1182,6 +1183,7 @@ ${historyText}`
   // 让模型在唤醒时能主动记日记、查记忆。优先走 runWithTools 工具循环；
   // 任何失败/无结果则回退到无工具直连，保证唤醒始终可用。
   let rawAiTextFull = "";
+  let wakeToolHistory = []; // 本次唤醒工具循环实际调用的工具（I13：摘要落时间线）
   const wakeClients = getWakeMcpClients();
   let wakeMcpOk = false;
   if (wakeClients && wakeClients.length > 0) {
@@ -1200,6 +1202,7 @@ ${historyText}`
         if (t) {
           rawAiTextFull = t;
           wakeMcpOk = true;
+          wakeToolHistory = mcpRes.toolHistory || [];
           console.log(`[wake-up] 工具循环完成：调用工具 ${(mcpRes.toolHistory || []).length} 个，正文 ${t.length} 字`);
         }
       }
@@ -1365,6 +1368,17 @@ ${historyText}`
         pushMeta = { at: pushAt, user: process.env.USER_DISPLAY_NAME || "用户", channel: pushResult.providerLabel, title: safeTitle, body: safeBody, session: wakeSessionId, session_name: sessName };
       }
     }
+  }
+
+  if (wakeToolHistory.length > 0 && eventContent) {
+    // 唤醒侧工具链摘要：与聊天侧工具卡同一信息基因，追加到唤醒事件尾部（时间线可见）
+    const seq = [];
+    for (const h of wakeToolHistory) {
+      const last = seq[seq.length - 1];
+      if (last && last.name === h.name && last.fail === !!h.error) last.n++;
+      else seq.push({ name: h.name, n: 1, fail: !!h.error });
+    }
+    eventContent += `（工具：${seq.map(x => x.name + "×" + x.n + (x.fail ? "（含失败）" : "")).join("、")}）`;
   }
 
   if (wakeScheduleNote && eventContent) {

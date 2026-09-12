@@ -3234,16 +3234,6 @@ app.delete("/internal/pin/:id", async (req, reply) => {
   }
 });
 
-// 记忆统计
-app.get("/admin/stats", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const stats = typeof memoryPool.stats === "function" ? memoryPool.stats() : { total: 0, active: 0, byType: {}, pinned: 0, sunk: 0 };
-    reply.send(stats);
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
-
 
 // 给下一个窗口自己的信：列表（管理台信封页，新的在前）
 
