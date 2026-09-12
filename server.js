@@ -3695,14 +3695,11 @@ app.put("/admin/tools", { preHandler: mcpManageAuth }, async (req, reply) => {
 });
 
 // MCP 服务器注册表管理（聊天客户端"设置→连接"或管理台调用）
-// 鉴权：GATEWAY_API_KEY（Bearer / x-gateway-api-key / x-api-key）或 admin basicAuth
+// 鉴权：管理台/聊天页会话（admin_session cookie，聊天页经 chat-login 下发）或 admin basicAuth。
+// 批注 2026-09-13（审查 S1）：不再接受 GATEWAY_API_KEY——那是下发给聊天客户端的 /v1 key，
+// 若可进管理接口，等于一个泄露的聊天 key 就能读走全部上游凭据并注册任意 MCP command（RCE 面）。
+// 聊天页登录后已持有 admin_session cookie（mcpAuthHeaders 同时带 credentials:include），功能不受影响。
 function mcpManageAuth(req, reply, done) {
-  const auth = String(req.headers.authorization || "");
-  const bearer = auth.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || "";
-  const headerKey = String(req.headers["x-gateway-api-key"] || req.headers["x-api-key"] || "").trim();
-  const configuredKey = readEnvValue("GATEWAY_API_KEY");
-  if (configuredKey && (bearer === configuredKey || headerKey === configuredKey)) return done();
-  // 也接受管理台会话 cookie（聊天页登录后即带 admin_session，可无痛读 MCP/AI供应商列表）
   if (isAuthorized(req)) return done();
   return basicAuth(req, reply, done);
 }
@@ -3751,7 +3748,20 @@ app.get("/admin/mcp/servers", { preHandler: mcpManageAuth }, async (req, reply) 
       }
     });
     const servers = await Promise.all(list);
-    reply.send({ ok: true, servers: servers, config_path: MCP_SERVERS_CONFIG });
+    // 批注 2026-09-13（审查 S1）：headers 常含 Authorization token，不回明文——
+    // 非空值置空并列入 headers_set，PUT 端空值按 id 从旧配置恢复（回传即保留）。
+    const safeServers = servers.map(function (s) {
+      if (!s || !s.headers || typeof s.headers !== "object") return s;
+      const out = Object.assign({}, s, { headers: {} });
+      const set = [];
+      for (const k of Object.keys(s.headers)) {
+        if (String(s.headers[k] || "").trim()) { out.headers[k] = ""; set.push(k); }
+        else out.headers[k] = s.headers[k];
+      }
+      if (set.length) out.headers_set = set;
+      return out;
+    });
+    reply.send({ ok: true, servers: safeServers, config_path: MCP_SERVERS_CONFIG });
   } catch (err) {
     console.error("[GET /admin/mcp/servers] error:", err.message);
     reply.code(500).send({ error: err.message });
@@ -3762,12 +3772,24 @@ app.put("/admin/mcp/servers", { preHandler: mcpManageAuth }, async (req, reply) 
   try {
     const body = req.body || {};
     const arr = Array.isArray(body.servers) ? body.servers : [];
+    // 批注 2026-09-13（审查 S1）：GET 已不回明文 headers，客户端回传的空值视为「未改动」，
+    // 按 id 从旧配置恢复非空值，避免脱敏回写把真实凭据抹掉。
+    let _oldServers = [];
+    try { _oldServers = (JSON.parse(fs.readFileSync(MCP_SERVERS_CONFIG, "utf-8")).servers) || []; } catch (e) {}
     const clean = arr.map(function (s) {
       const o = { id: String(s.id || ""), name: String(s.name || ""), type: String(s.type || "auto"), enabled: s.enabled !== false };
       if (s.url) o.url = String(s.url);
       if (s.command) o.command = String(s.command);
       if (Array.isArray(s.args)) o.args = s.args.map(String);
-      if (s.headers && typeof s.headers === "object") o.headers = s.headers;
+      if (s.headers && typeof s.headers === "object") {
+        const old = _oldServers.find(function (x) { return x && x.id === o.id; });
+        const merged = {};
+        for (const k of Object.keys(s.headers)) {
+          const v = String(s.headers[k] || "").trim();
+          merged[k] = v ? v : String((old && old.headers && old.headers[k]) || "");
+        }
+        if (Object.keys(merged).some(function (k) { return String(merged[k] || "").trim(); })) o.headers = merged;
+      }
       // 工具白名单：透传保留（mcp-service.loadTools 据此过滤注入给模型的工具）
       if (Array.isArray(s.allowTools)) o.allowTools = s.allowTools.map(String);
       // 工具级黑名单：透传保留（每工具开关，关闭的工具不注入模型）
@@ -3785,7 +3807,13 @@ app.put("/admin/mcp/servers", { preHandler: mcpManageAuth }, async (req, reply) 
 
 app.get("/admin/ai-providers", { preHandler: mcpManageAuth }, async (req, reply) => {
   try {
-    reply.send({ ok: true, providers: loadAiProviders() });
+    // 批注 2026-09-13（审查 S1）：api_key 不回明文，只回 api_key_set 布尔；PUT 端空值按 id 保留旧值。
+    const providers = loadAiProviders().map(function (p) {
+      if (!p || typeof p !== "object") return p;
+      const has = !!(p.api_key && String(p.api_key).trim());
+      return Object.assign({}, p, { api_key: "", api_key_set: has });
+    });
+    reply.send({ ok: true, providers: providers });
   } catch (err) {
     console.error("[GET /admin/ai-providers] error:", err.message);
     reply.code(500).send({ error: err.message });
@@ -3795,10 +3823,18 @@ app.get("/admin/ai-providers", { preHandler: mcpManageAuth }, async (req, reply)
 app.put("/admin/ai-providers", { preHandler: mcpManageAuth }, async (req, reply) => {
   try {
     const arr = Array.isArray(req.body && req.body.providers) ? req.body.providers : [];
+    // 批注 2026-09-13（审查 S1）：GET 已不回明文 api_key，客户端回传空值视为「未改动」，
+    // 按 id 从旧配置恢复，避免脱敏回写抹掉真实凭据（也顺带修复「编辑不改 key 即被清空」）。
+    const oldList = loadAiProviders();
     const clean = arr.map(function (p) {
       const o = { id: String(p.id || ""), name: String(p.name || ""), enabled: p.enabled !== false };
       if (p.api_url || p.base_url) o.api_url = String(p.api_url || p.base_url);
-      if (p.api_key) o.api_key = String(p.api_key);
+      if (p.api_key && String(p.api_key).trim()) {
+        o.api_key = String(p.api_key);
+      } else {
+        const old = oldList.find(function (x) { return x && x.id === o.id && x.api_key; });
+        if (old) o.api_key = String(old.api_key);
+      }
       if (p.is_default === true || p.is_default === "true") o.is_default = true;
       let _models = [];
       if (Array.isArray(p.models)) _models = p.models.map(function(s){ return String(s).trim(); }).filter(Boolean);
@@ -3871,23 +3907,45 @@ function resolveActiveVoiceProvider(cfg) {
 }
 
 app.get("/admin/voice-config", { preHandler: mcpManageAuth }, async (req, reply) => {
-  try { reply.send({ ok: true, config: loadVoiceConfig() }); }
+  try {
+    // 批注 2026-09-13（审查 S1）：api_key 不回明文，只回 api_key_set 布尔；PUT 端空值按 id 保留旧值。
+    const cfg = loadVoiceConfig();
+    if (Array.isArray(cfg.providers)) {
+      cfg.providers = cfg.providers.map(function (p) {
+        if (!p || typeof p !== "object") return p;
+        const has = !!(p.api_key && String(p.api_key).trim());
+        return Object.assign({}, p, { api_key: "", api_key_set: has });
+      });
+    }
+    if (cfg.asr_api_key) { cfg.asr_api_key_set = true; delete cfg.asr_api_key; }
+    reply.send({ ok: true, config: cfg });
+  }
   catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
 app.put("/admin/voice-config", { preHandler: mcpManageAuth }, async (req, reply) => {
   try {
     const b = req.body || {};
+    // 批注 2026-09-13（审查 S1）：GET 已不回明文 api_key，客户端回传空值视为「未改动」，
+    // 按 id 从旧配置恢复，避免脱敏回写抹掉真实凭据。
+    const prevCfg = loadVoiceConfig();
+    const prevProviders = Array.isArray(prevCfg.providers) ? prevCfg.providers : [];
     const clean = {
       enabled: b.enabled !== false,
       active_provider: String(b.active_provider || ""),
       providers: Array.isArray(b.providers) ? b.providers.map(function (p) {
+        const pid = String(p.id || "");
+        let apiKey = String(p.api_key || "").trim();
+        if (!apiKey) {
+          const old = prevProviders.find(function (x) { return x && String(x.id || "") === pid && x.api_key; });
+          if (old) apiKey = String(old.api_key);
+        }
         return {
           id: String(p.id || ("vp_" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36))),
           type: (p.type === "minimax") ? "minimax" : "doubao",
           name: String(p.name || (p.type === "minimax" ? "MiniMax" : "豆包")),
           enabled: p.enabled !== false,
-          api_key: String(p.api_key || ""),
+          api_key: apiKey,
           api_base: String(p.api_base || ""),
           resource_id: String(p.resource_id || "seed-tts-2.0"),
           asr_resource_id: String(p.asr_resource_id || "volc.seedasr.sauc.duration"),

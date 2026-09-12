@@ -2034,9 +2034,15 @@ function _msgVecScheduleSave() {
         const v = msgVecMap.get(sig);
         if (v) vecs[sig] = _f32ToB64(v);
       }
-      fs.writeFileSync(MSG_VECTOR_FILE, JSON.stringify({ ver: 1, order: msgVecOrder, vecs }));
+      // 批注 2026-09-13（审查 D1）：改临时文件+rename 原子写。此前 writeFileSync 直写
+      // 30MB+ 大文件，进程被 pm2 杀掉/掉电瞬间会截断损坏，冷启动全量重嵌；
+      // 防抖 3s→120s：向量是可再生缓存，崩溃最多丢 2 分钟增量，却把预热期的
+      // 「每 3 秒一次全量 stringify+写盘」事件循环阻塞降为偶发。
+      const tmp = MSG_VECTOR_FILE + ".tmp-" + process.pid + "-" + Date.now();
+      fs.writeFileSync(tmp, JSON.stringify({ ver: 1, order: msgVecOrder, vecs }));
+      fs.renameSync(tmp, MSG_VECTOR_FILE);
     } catch (e) { /* 写失败只影响下次冷启动 */ }
-  }, 3000);
+  }, 120000);
 }
 
 function _msgVecSet(sig, v) {

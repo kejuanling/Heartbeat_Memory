@@ -773,10 +773,11 @@ async function runTimedWake() {
   timedWakeTimer = null;
   const dueSids = getDueWakeSessionIds();
   console.log("\n===== 定时唤醒到点 =====\n");
-  await runWakeUp(dueSids);
+  const executed = await runWakeUp(dueSids);
   // 仅当本次唤醒真的执行过（未被互斥跳过）才清理：跳过时槽位留在盘上，
   // 末尾 armTimedWake 的过期分支会补触发；否则槽位被删、闹钟静默丢失
-  if (!wakeRunning) {
+  // 批注 2026-09-13（审查 B1）：改用 runWakeUp 的显式返回值，修复「跳过后守卫恒真仍清理」
+  if (executed) {
     try { pruneExpiredSchedules(); } catch (voidErr) { console.warn("[wake-up] 清理过期定时失败:", voidErr.message); }
   }
   try { armTimedWake(); } catch (rearErr) { /* 重挂剩余未来槽位失败时由 20s 轮询兜底 */ }
@@ -916,14 +917,21 @@ ${phoneContext ? `\n${phoneContext}\n` : ""}
 }
 
 let wakeRunning = false;
+// 返回值：本次是否真的执行过唤醒（未被互斥跳过）。runTimedWake 据此决定是否清理到期槽位。
+// 批注 2026-09-13（审查 B1）：此前调用方用 `!wakeRunning` 判断「是否执行过」，但本函数的
+// finally 在返回前就把 wakeRunning 复位了，守卫恒为真——被互斥跳过的调用也会清理槽位，
+// 到期闹钟被静默删除。改为显式返回 executed 布尔。
 async function runWakeUp(dueSids) {
   if (wakeRunning) {
     console.log("[wake-up] 上一次唤醒仍在进行，本次跳过");
-    return;
+    return false;
   }
   wakeRunning = true;
   try {
     await runWakeUpInner(dueSids);
+    // 执行过但中途抛错也视为「执行过」：槽位时间戳已推进/推送可能已发出，
+    // 保持与旧行为一致的清理语义，避免失败槽位被过期补触发循环重试
+    return true;
   } catch (err) {
     // 定时唤醒入口（runTimedWake）由 setTimeout 触发、无人兜底，异常会成为
     // unhandled rejection 直接杀死进程（Node 15+ 默认 throw）；统一在此记日志吃掉。
@@ -932,6 +940,7 @@ async function runWakeUp(dueSids) {
       ? err.stack
       : String(err) + "\n[非 Error 抛出物，以下是捕获点调用栈]\n" + new Error("trace").stack;
     console.error("[wake-up] 唤醒执行失败:", detail);
+    return true;
   } finally {
     wakeRunning = false;
   }
