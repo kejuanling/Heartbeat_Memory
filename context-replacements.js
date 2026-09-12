@@ -380,6 +380,7 @@ function normalizedCompareKey(msg) {
     .replace(/<pin>[\s\S]*?<\/pin>/gi, "")
     .replace(/<current_time>[\s\S]*?<\/current_time>/gi, "")
     .replace(/<star\b[^>]*>(?:\s*<\/star\s*>)?/gi, "")
+    .replace(/<\s*paper\b[^>]*>(?:[\s\S]*?<\s*\/paper\s*>)?/gi, "")
     .replace(/\s+/g, " ")
     .trim();
   return role + "\u0000" + stripped;
@@ -1450,13 +1451,25 @@ function applyReplacements(messages, source) {
     }
     tlPos.set(item.id, pos);
   });
+  // 跳过块收集：随替换日志落盘（skipped 字段）；异常跳过同时 console.warn，不再静默
+  const skipped = [];
   items = items
-    .filter(function (it) { return tlPos.has(it.id); })
+    .filter(function (it) {
+      if (!tlPos.has(it.id)) {
+        skipped.push({ id: it.id, reason: "首条锚点不在时间线" });
+        console.warn("[context-replacements] 块跳过 id=" + it.id + " 原因=首条锚点在时间线中找不到");
+        return false;
+      }
+      return true;
+    })
     .sort(function (a, b) { return tlPos.get(a.id) - tlPos.get(b.id); });
   // 活跃块上限：手动+AI 块合计只保留时间线上最近的 N 个（0=不限）。
   // 超限的最早块隐藏、摘要不注入本次上下文；块的 enabled/摘要数据不动，调大上限即恢复。
   const maxActiveBlocks = loadMaxActiveBlocks();
   if (maxActiveBlocks > 0 && items.length > maxActiveBlocks) {
+    items.slice(0, items.length - maxActiveBlocks).forEach(function (it) {
+      skipped.push({ id: it.id, reason: "活跃块上限截断(" + maxActiveBlocks + ")" });
+    });
     items = items.slice(items.length - maxActiveBlocks);
   }
   if (items.length === 0) return messages;
@@ -1465,13 +1478,20 @@ function applyReplacements(messages, source) {
   let searchStart = 0;
   items.forEach(function (item) {
     const matched = (Array.isArray(item.matched) && item.matched.length > 0) ? item.matched : null;
-    if (!matched || matched.length === 0) return;
+    if (!matched || matched.length === 0) {
+      skipped.push({ id: item.id, reason: "matched为空" });
+      console.warn("[context-replacements] 块跳过 id=" + item.id + " 原因=matched为空");
+      return;
+    }
     // 窗口隔离：块首条锚点消息在当前时间线里的实际时间早于窗口起点 → 旧窗口块，跳过
     const firstTlPos = tlPos.get(item.id);
     if (firstTlPos >= 0 && windowStartMs !== null) {
       const firstMsg = tlEntries[firstTlPos].msg;
       const t = messageTime(firstMsg);
-      if (t && t.getTime() < windowStartMs) return;
+      if (t && t.getTime() < windowStartMs) {
+        skipped.push({ id: item.id, reason: "旧窗口块" });
+        return;
+      }
     }
 
     let aStart = null;
@@ -1482,7 +1502,11 @@ function applyReplacements(messages, source) {
     for (let i = matched.length - 1; i >= 0; i--) {
       if (!isSpecialEvent(matched[i])) { aEnd = matched[i]; break; }
     }
-    if (!aStart || !aEnd) return;
+    if (!aStart || !aEnd) {
+      skipped.push({ id: item.id, reason: "无首尾锚点" });
+      console.warn("[context-replacements] 块跳过 id=" + item.id + " 原因=matched里取非特殊事件首尾失败");
+      return;
+    }
     const startKey = normalizedCompareKey(aStart);
     const endKey = normalizedCompareKey(aEnd);
 
@@ -1498,7 +1522,23 @@ function applyReplacements(messages, source) {
       }
       const purePos = firstNonSpecialTlIdx >= 0 ? tlPurePos.indexOf(firstNonSpecialTlIdx) : -1;
       if (purePos >= searchStart && purePos < srcAnchorIdx.length) si = purePos;
-      else return;
+      else {
+        skipped.push({ id: item.id, reason: "起点锚点匹配失败" });
+        console.warn("[context-replacements] 块跳过 id=" + item.id + " 原因=起点锚点在请求中找不到");
+        return;
+      }
+    }
+
+    // 起点先验校验：内容匹配到的起点换算回时间线锚点位置，与块真实首条位置（tlPos）偏差过大 → 拒绝。
+    // 典型场景：首条是「哥哥」这类高频短语，内容匹配落到别的出现位置，区间整体错位并吞并相邻块。
+    // 阈值 30：请求视图与时间线的正常漂移实测 ≤ 约 16（跨窗口注入/事件插入所致），远小于误匹配动辄数百的偏移。
+    if (firstTlPos >= 0) {
+      const expectedAnchor = tlPurePos.indexOf(firstTlPos);
+      if (expectedAnchor >= 0 && Math.abs(si - expectedAnchor) > 30) {
+        skipped.push({ id: item.id, reason: "起点偏移过大(si=" + si + ",期望=" + expectedAnchor + ")" });
+        console.warn("[context-replacements] 块跳过 id=" + item.id + " 原因=起点锚点偏移过大 si=" + si + " 期望≈" + expectedAnchor + "（疑似高频短语误匹配）");
+        return;
+      }
     }
 
     let ei = anchorFirst(endKey, si + 1);
@@ -1514,8 +1554,20 @@ function applyReplacements(messages, source) {
         if (ae === -1) ae = anchorLast(alt);
         if (ae >= si) { found = ae; break; }
       }
-      if (found === -1) return;
+      if (found === -1) {
+        skipped.push({ id: item.id, reason: "尾锚点及备选全失败" });
+        console.warn("[context-replacements] 块跳过 id=" + item.id + " 原因=尾锚点及备选在请求中找不到");
+        return;
+      }
       ei = found;
+    }
+
+    // 区间膨胀校验：匹配区间远大于块自身消息数 → 首尾锚点之一误匹配到远处重复内容，
+    // 会把相邻块的地盘整段吞进本块（重叠去重还会按创建时间丢弃被吞的邻块），直接拒绝。
+    if (matched.length > 0 && (ei - si + 1) > matched.length * 1.5 + 20) {
+      skipped.push({ id: item.id, reason: "区间膨胀(" + (ei - si + 1) + "条>块" + matched.length + "条上限)" });
+      console.warn("[context-replacements] 块跳过 id=" + item.id + " 原因=区间膨胀 ei-si+1=" + (ei - si + 1) + " 远超块消息数 " + matched.length);
+      return;
     }
 
     // 块内多锚点校验（"钥匙"）：除首尾外，再从 matched 块内均匀取若干条非特殊事件消息，
@@ -1533,7 +1585,11 @@ function applyReplacements(messages, source) {
       for (let _s = 0; _s < _take; _s++) {
         const _idx = Math.floor(_s * _mid.length / _take);
         const _ai = anchorFirst(normalizedCompareKey(_mid[_idx]), si);
-        if (_ai === -1 || _ai > ei) return; // 块内锚点缺失/越界 -> 不命中，跳过该块
+        if (_ai === -1 || _ai > ei) {
+          skipped.push({ id: item.id, reason: "内部钥匙缺失 idx=" + _idx });
+          console.warn("[context-replacements] 块跳过 id=" + item.id + " 原因=内部钥匙缺失/越界 idx=" + _idx + " ai=" + _ai + " ei=" + ei + " 内容=" + String(contentToText(_mid[_idx]) || "").slice(0, 30));
+          return; // 块内锚点缺失/越界 -> 不命中，跳过该块
+        }
       }
     }
 
@@ -1569,13 +1625,19 @@ function applyReplacements(messages, source) {
       const dupCreatedAt = String(dup.itemSer || "|").split("|")[0];
       const curNewer = String(item.created_at || "") >= dupCreatedAt;
       if (curNewer) {
+        console.warn("[context-replacements] 区间重叠接管 id=" + item.id + " 接管 " + (dup.id || "") + " 区间[" + dup.startIdx + "-" + dup.endIdx + "]，旧块摘要被覆盖");
         dup.message = curMsg;
         dup.minT = blkMin;
         dup.maxT = blkMax;
         dup.itemSer = curSer;
+        dup.id = item.id;
+      } else {
+        skipped.push({ id: item.id, reason: "区间重叠且更旧被丢弃(重叠块" + (dup.id || "?") + ")" });
+        console.warn("[context-replacements] 块跳过 id=" + item.id + " 原因=区间[" + srcStart + "-" + srcEnd + "]与 " + (dup.id || "?") + " 重叠且创建更旧，被丢弃");
       }
     } else {
       replacements.push({
+        id: item.id,
         startIdx: srcStart,
         endIdx: srcEnd,
         message: curMsg,
@@ -1657,7 +1719,8 @@ function applyReplacements(messages, source) {
       before: out.length,
       after: result.length,
       replaced: replacements.length,
-      applied: applied
+      applied: applied,
+      skipped: skipped
     });
   } catch (e) {
     console.warn("[context-replacements] 记录替换日志失败:", e.message);
