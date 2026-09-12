@@ -24,7 +24,7 @@ module.exports = function registerMemoryPoolRoutes(app, { basicAuth }) {
     try {
       const b = req.body || {};
       if (!String(b.content || '').trim()) return reply.code(400).send({ error: 'content 必填' });
-      const r = memoryPool.add({ content: b.content, category: b.category, importance: b.importance, source: 'manual' });
+      const r = await memoryPool.add({ content: b.content, category: b.category, importance: b.importance, source: 'manual' });
       reply.send({ success: true, dup: r.dup, entry: r.entry });
     } catch (err) { reply.code(500).send({ error: err.message }); }
   });

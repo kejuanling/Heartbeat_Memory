@@ -1445,6 +1445,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
   <button class="act-item" id="actRegen" style="display:none"><span class="ai-lg"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 8 7 8"/></svg></span>重新生成</button>
   <button class="act-item" id="actBranch" style="display:none"><span class="ai-lg"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12a6 6 0 0 0 12 0v-2"/><circle cx="18" cy="5" r="2"/><circle cx="6" cy="18" r="2"/><path d="M18 7v3"/></svg></span>开启分支</button>
   <button class="act-item" id="actStar" style="display:none"><span class="ai-lg"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>️</span><span id="actStarTxt">标星</span></button>
+  <button class="act-item" id="actPool" style="display:none"><span class="ai-lg"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg></span>入池</button>
   <button class="act-item" id="actMulti" style="display:none"><span class="ai-lg"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><polyline points="8 12 11 15 16 8"/></svg>️</span>多选</button>
   <button class="act-item danger" id="actDel" style="display:none"><span class="ai-lg"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></span>删除</button>
 </div>
@@ -1986,6 +1987,7 @@ const actCopy=document.getElementById("actCopy");
 const actEdit=document.getElementById("actEdit");
 const actRegen=document.getElementById("actRegen");
 const actStar=document.getElementById("actStar");
+const actPool=document.getElementById("actPool");
 const actMulti=document.getElementById("actMulti");
 const actDel=document.getElementById("actDel");
 const actBranch=document.getElementById("actBranch");
@@ -3663,6 +3665,7 @@ function openAct(idx){
   actRegen.style.display=(m.role==="ai"||m.role==="assistant")?"flex":"none";
   actBranch.style.display="flex";
   actStar.style.display="flex";
+  actPool.style.display="flex";
   const actStarTxtEl=document.getElementById("actStarTxt");
   if(actStarTxtEl) actStarTxtEl.textContent=(isStarredMsg(m))?"取消标星":"标星";
   actStar.classList.toggle("on", !!isStarredMsg(m));
@@ -3706,6 +3709,21 @@ async function toggleStarMsg(){
     showToast(want?"已标星（防止被摘要覆盖）":"已取消标星");
     closeAct();
   }catch(e){ showToast("标星失败:"+e.message); }
+}
+// 入池：把这条消息原文写入记忆池「对话碎片」分类（标星与入池已拆开，I5——标星只保留原文，存记忆手动入池）
+async function addToPoolMsg(){
+  const idx=actIdx; if(idx<0||sending)return;
+  const m=msgs[idx]; if(!m)return;
+  const content=msgText(m);
+  if(!content||!content.trim()){ showToast("这条消息没有正文，无法入池"); return; }
+  try{
+    const r=await fetch(ccBase()+"/memory-pool",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":ccGetCookie("admin_csrf")},body:JSON.stringify({content:content,category:"对话碎片",importance:0.7}),credentials:"include"});
+    if(!r.ok){ showToast("入池失败: HTTP "+r.status); return; }
+    const j=await r.json().catch(function(){return {};});
+    if(!j||!j.success){ showToast("入池失败: "+((j&&j.error)||"")); return; }
+    showToast(j.dup?"已在池中（自动去重合并）":"已入池（对话碎片）");
+    closeAct();
+  }catch(e){ showToast("入池失败:"+e.message); }
 }
 function closeAct(){actMask.classList.remove("show");actSheet.classList.remove("show");actIdx=-1;}
 actMask.addEventListener("click",closeAct);
@@ -3846,6 +3864,9 @@ actMulti.addEventListener("click",()=>{
 });
 actStar.addEventListener("click",()=>{
   toggleStarMsg();
+});
+actPool.addEventListener("click",()=>{
+  addToPoolMsg();
 });
 
 /* ================= 多选 ================= */

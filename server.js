@@ -4508,44 +4508,11 @@ app.post("/admin/context-compaction/mark", { preHandler: basicAuth }, async (req
       }
       } catch (e) { /* 查找失败不阻断标星 */ }
     }
-    // 取消标星时 setMark 会先删除该 key，须提前读取 poolId/原文供沉底反查（0905 闭环验证暴露：原实现取不到）
-    const _prevPoolId = body.marked === true ? null : contextReplacements.getMarkPoolId(key);
-    let _prevMarkContent = "";
-    if (body.marked !== true) {
-      try { const _mk = (contextReplacements.loadMarks ? contextReplacements.loadMarks() : {}); if (_mk && _mk[key] && typeof _mk[key].content === "string") _prevMarkContent = _mk[key].content; } catch (e) {}
-    }
+    // 标星与记忆池完全拆开（I5，2026-09-12）：标星只做「原文保留在上下文」，
+    // 不再自动写入记忆池；想存记忆走长按菜单「入池」或 AI 工具，池内去重兜底。
     const markRes = contextReplacements.setMark(key, body.marked === true, { content: content, role: role, msg_time: String(body.msg_time || "") });
     if (!markRes || markRes.ok === false) {
       return reply.code(400).send({ error: (markRes && markRes.error) || "标星失败" });
-    }
-    // 标星自动同步到记忆池「对话碎片」分类：新增标星写入一条，取消标星时按 poolId 沉底对应记忆。
-    if (body.marked === true) {
-      // A1：找不到原文（content 空）时不往记忆池灌占位串，避免污染「对话碎片」（审查 2026-09-05 A1）
-      if (!content) {
-        console.log("[heart] 标星无原文，跳过记忆池「对话碎片」同步");
-      } else {
-        try {
-          const poolAdd = await memoryPool.add({ content: content, category: "对话碎片", importance: 0.7, source: "star" });
-          if (poolAdd && poolAdd.entry && poolAdd.entry.id) {
-            try { contextReplacements.setMarkPoolId(key, poolAdd.entry.id); } catch (e) { /* 记录 poolId 失败不影响标星 */ }
-          }
-        } catch (e) {
-          console.warn("[heart] 标星自动入「对话碎片」记忆池失败:", e.message);
-        }
-      }
-    } else {
-      // A3：poolId 用 setMark 前预读的值；缺失时按原文内容反查「对话碎片」沉底，避免取消标星漏沉（0905 闭环验证暴露）
-      try {
-        let poolId = _prevPoolId;
-        if (!poolId && _prevMarkContent) {
-          const hits = (memoryPool.list ? memoryPool.list({ category: "对话碎片" }) : [])
-            .filter(function (r) { return r && r.active !== false && r.content && r.content.trim() === _prevMarkContent.trim(); });
-          if (hits.length) poolId = hits[0].id;
-        }
-        if (poolId) await memoryPool.sink(String(poolId));
-      } catch (e) {
-        console.warn("[heart] 取消标星沉底「对话碎片」记忆失败:", e.message);
-      }
     }
     reply.send({ ok: true, key: key, marked: markRes.marked !== false });
   } catch (err) {
