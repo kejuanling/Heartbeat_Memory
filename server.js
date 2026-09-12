@@ -5172,6 +5172,33 @@ app.post("/admin/papers/delete", { preHandler: basicAuth }, async (req, reply) =
   }
 });
 
+// 小世界门户「留纸」页 API（2026-09-12）：与站点其它门户 API 同口径公开（单人流站点，nginx SSL 层）
+app.get("/papers/api/list", async (req, reply) => {
+  try {
+    const papers = require("./papers");
+    const list = papers.listPapers().slice(0, 100).map(e => ({
+      name: e.name, relPath: e.relPath, session: e.session, title: e.title, time: e.time
+    }));
+    reply.send({ papers: list });
+  } catch (err) {
+    console.error("[papers] 门户列表失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+app.get("/papers/api/read", async (req, reply) => {
+  try {
+    const papers = require("./papers");
+    const r = papers.resolvePaperRelPath((req.query || {}).file);
+    if (!r) return reply.code(400).send({ error: "非法路径" });
+    if (!fs.existsSync(r.full)) return reply.code(404).send({ error: "纸不存在" });
+    reply.send({ file: r.rel, content: fs.readFileSync(r.full, "utf-8") });
+  } catch (err) {
+    console.error("[papers] 门户读取失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
 // 移动端管理页面
 app.get("/admin/mobile", { preHandler: mobileAuth }, async (req, reply) => {
   const fss = require("fs");

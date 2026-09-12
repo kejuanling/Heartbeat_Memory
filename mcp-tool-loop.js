@@ -24,7 +24,7 @@ const MAX_TOOL_RESULT_CHARS = 30000;
 
 // 会话级工具（2026-09-12）：执行时由服务端把当前聊天会话 id 强制注入参数 session_id（覆盖模型给的值，
 // 模型伪造无效）。工具端（tools_server.py）据此把日记/留纸写到对应会话目录。
-const SESSION_SCOPED_TOOLS = new Set(["diary_add", "leave_paper"]);
+const SESSION_SCOPED_TOOLS = new Set(["diary_add", "leave_paper", "view_paper"]);
 function _injectSessionArg(name, args, sessionId) {
   if (sessionId && SESSION_SCOPED_TOOLS.has(name) && args && typeof args === "object" && !Array.isArray(args)) {
     args.session_id = String(sessionId);

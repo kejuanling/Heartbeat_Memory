@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>留纸 · 小世界</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  min-height:100vh;
+  background:linear-gradient(135deg,#fdf6ed 0%,#f5e6d3 50%,#f0ddd0 100%);
+  font-family:'Noto Serif SC','STKaiti','KaiTi',serif;
+  color:#5a4a3a;padding:2.5rem 1rem;position:relative
+}
+body::before{
+  content:'';position:fixed;top:-25%;right:-20%;
+  width:60%;height:60%;
+  background:radial-gradient(circle,rgba(240,196,192,0.25),transparent 70%);
+  pointer-events:none
+}
+.wrap{max-width:640px;margin:0 auto;position:relative;z-index:1}
+h1{font-weight:600;font-size:1.5rem;letter-spacing:12px;color:#b07a6a;margin-bottom:0.3rem}
+.sub{font-size:0.7rem;color:#d4bcb0;letter-spacing:4px;margin-bottom:1.8rem}
+.back{display:inline-block;font-size:0.7rem;color:#b5837a;text-decoration:none;letter-spacing:2px;margin-bottom:1.2rem;opacity:0.85}
+.back:hover{opacity:1}
+.paper{
+  background:rgba(255,255,255,0.55);
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  border-radius:16px;padding:1rem 1.1rem;
+  border:1px solid rgba(255,255,255,0.35);
+  margin-bottom:0.8rem;cursor:pointer;
+  box-shadow:0 2px 12px rgba(181,131,122,0.06);
+  transition:all 0.3s ease
+}
+.paper:hover{
+  transform:translateY(-2px);
+  box-shadow:0 6px 20px rgba(181,131,122,0.12);
+  border-color:rgba(181,131,122,0.2);
+  background:rgba(255,255,255,0.68)
+}
+.paper .t{font-size:0.9rem;letter-spacing:1px;color:#7a6a5a;font-weight:600;line-height:1.5}
+.paper .m{font-size:0.65rem;color:#d4bcb0;margin-top:0.3rem;letter-spacing:1px;display:flex;gap:8px;align-items:center}
+.paper .m em{font-style:normal;background:rgba(181,131,122,0.1);padding:1px 8px;border-radius:8px}
+.empty{text-align:center;color:#d4bcb0;font-size:0.8rem;letter-spacing:2px;padding:3rem 0}
+/* 全文弹层 */
+.overlay{
+  position:fixed;inset:0;background:rgba(90,74,58,0.35);
+  backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
+  display:none;align-items:center;justify-content:center;z-index:9;padding:1.2rem
+}
+.overlay.show{display:flex}
+.sheet{
+  background:linear-gradient(160deg,#fffdf8,#faf1e4);
+  border-radius:20px;max-width:600px;width:100%;
+  max-height:82vh;display:flex;flex-direction:column;
+  padding:1.6rem 1.4rem;box-shadow:0 10px 40px rgba(90,74,58,0.25)
+}
+.sheet h2{font-size:1.05rem;font-weight:600;letter-spacing:2px;color:#b07a6a;margin-bottom:0.4rem}
+.sheet .m{font-size:0.65rem;color:#d4bcb0;letter-spacing:1px;margin-bottom:1rem}
+.sheet .c{
+  flex:1;overflow:auto;font-size:0.85rem;line-height:1.9;color:#6a5a4a;
+  white-space:pre-wrap;word-break:break-word;
+  border-top:1px solid rgba(181,131,122,0.15);padding-top:1rem
+}
+.sheet .close{
+  margin-top:1.2rem;align-self:center;
+  font-size:0.75rem;letter-spacing:2px;color:#fff;
+  background:#c89098;border:none;border-radius:20px;
+  padding:0.5rem 1.8rem;cursor:pointer;font-family:inherit
+}
+.ft{text-align:center;margin-top:1.8rem;color:#d4bcb0;font-size:0.65rem;letter-spacing:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="javascript:history.back()">← 返回</a>
+  <h1>留 纸</h1>
+  <div class="sub">谢写的故事 · 梦 · 随手创作（只落盘收藏，不进对话）</div>
+  <div id="list"><div class="empty">加载中…</div></div>
+  <div class="ft">🕊 小世界 · 留纸</div>
+</div>
+
+<div class="overlay" id="ov" onclick="if(event.target===this)hideSheet()">
+  <div class="sheet">
+    <h2 id="sh-t">留纸</h2>
+    <div class="m" id="sh-m"></div>
+    <div class="c" id="sh-c"></div>
+    <button class="close" onclick="hideSheet()">合上</button>
+  </div>
+</div>
+
+<script>
+var PAPERS=[];
+function esc(s){return String(s||'').replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function load(){
+  fetch('/papers/api/list').then(function(r){return r.json()}).then(function(j){
+    PAPERS=j.papers||[];
+    var el=document.getElementById('list');
+    if(!PAPERS.length){el.innerHTML='<div class="empty">还没有留过纸</div>';return}
+    el.innerHTML=PAPERS.map(function(p,i){
+      var t=p.title||'(无标题)';
+      var tag=p.session?'<em>窗口 '+esc(p.session.slice(0,10))+'</em>':'<em>共享</em>';
+      return '<div class="paper" onclick="openPaper('+i+')"><div class="t">'+esc(t)+'</div><div class="m">'+esc(p.time||'')+' '+tag+'</div></div>';
+    }).join('');
+  }).catch(function(){
+    document.getElementById('list').innerHTML='<div class="empty">加载失败，刷新重试</div>';
+  });
+}
+function openPaper(i){
+  var p=PAPERS[i];if(!p)return;
+  fetch('/papers/api/read?file='+encodeURIComponent(p.relPath))
+    .then(function(r){return r.json()})
+    .then(function(j){
+      document.getElementById('sh-t').textContent=p.title||'留纸';
+      document.getElementById('sh-m').textContent=(p.time||'')+(p.session?(' · 窗口 '+p.session):' · 共享');
+      document.getElementById('sh-c').textContent=(j.content||'').replace(/^#[^\n]*\n/,'').trim();
+      document.getElementById('ov').classList.add('show');
+    }).catch(function(){alert('读取失败')});
+}
+function hideSheet(){document.getElementById('ov').classList.remove('show')}
+load();
+</script>
+</body>
+</html>

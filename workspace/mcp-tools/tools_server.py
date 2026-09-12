@@ -10,7 +10,7 @@ from socketserver import ThreadingMixIn
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
-import json, urllib.request, urllib.parse, urllib.error, os, time, subprocess, threading
+import json, urllib.request, urllib.parse, urllib.error, os, re, time, subprocess, threading
 import datetime
 
 PORT = 8771
@@ -205,6 +205,80 @@ TOOLS["leave_paper"] = {
         "required": ["content"]
     },
     "handler": tool_leave_paper
+}
+
+# ── 翻看留过的纸（2026-09-12）：不带参数=列表（序号+时间+标题），带 sn=看对应那张全文 ──
+def _paper_read_title(full_path):
+    try:
+        with open(full_path, encoding="utf-8") as f:
+            lines = [l.rstrip() for l in f.read().splitlines()]
+    except Exception:
+        return "", ""
+    title = ""
+    body = lines
+    if lines and lines[0].startswith("# "):
+        title = lines[0][2:].strip()
+        body = lines[1:]
+    first = ""
+    for l in body:
+        s = l.strip()
+        if s and not s.startswith("（") and not s.startswith("#"):
+            first = s
+            break
+    return title, first[:40]
+
+def tool_view_paper(args):
+    session_id = str(args.get("session_id") or "").strip()
+    token = "".join(ch for ch in session_id if ch.isalnum() or ch in "_-")[:64]
+    papers_dir = _paper_target_dir()
+    entries = []
+    for d in [x for x in (token, "_shared") if x]:
+        p = os.path.join(papers_dir, d)
+        if not os.path.isdir(p):
+            continue
+        for name in os.listdir(p):
+            if re.match(r"^\d{4}-\d{2}-\d{2}_\d{4}(-\d+)?\.md$", name):
+                entries.append(d + "/" + name)
+    entries.sort(reverse=True)  # 时间倒序：最新的序号在前
+    if not entries:
+        return {"papers": [], "message": "还没有留过纸"}
+    if args.get("sn") in (None, ""):
+        items = []
+        for i, rel in enumerate(entries[:10], 1):
+            title, first = _paper_read_title(os.path.join(papers_dir, rel))
+            label = title or first or "(无标题)"
+            d, name = rel.split("/", 1)
+            items.append({"sn": i, "file": rel,
+                          "time": name[0:10] + " " + name[11:13] + ":" + name[13:15],
+                          "title": label,
+                          "session": "(共享)" if d == "_shared" else d})
+        return {"papers": items, "total": len(entries),
+                "message": "带 sn=序号 再调一次可看对应那张的全文" + ("" if len(entries) <= 10 else "（当前只列最近 10 张，共 %d 张）" % len(entries))}
+    try:
+        sn = int(args.get("sn"))
+    except Exception:
+        return {"error": "sn 需为列表返回的序号数字"}
+    limit = min(10, len(entries))
+    if sn < 1 or sn > limit:
+        return {"error": "序号超出范围（1~%d），请先不带参数调一次拿最新列表" % limit}
+    rel = entries[sn - 1]
+    try:
+        with open(os.path.join(papers_dir, rel), encoding="utf-8") as f:
+            content = f.read()
+    except Exception as e:
+        return {"error": "读取失败: %s" % e}
+    return {"file": rel, "content": content}
+
+TOOLS["view_paper"] = {
+    "description": "翻看自己留过的纸（leave_paper/<paper> 写的收藏）。不带参数调用=列出本窗口最近 10 张（序号+时间+标题/开头）；带 sn=序号 调用=看那一张的全文。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "sn": {"type": "integer", "description": "可选：要看的第几张（列表返回的 sn）"},
+            "session_id": {"type": "string", "description": "内部参数：由系统自动注入当前窗口标识，无需填写"}
+        }
+    },
+    "handler": tool_view_paper
 }
 
 # ── 心动时刻 ──
