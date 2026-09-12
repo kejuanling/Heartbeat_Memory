@@ -92,6 +92,43 @@ body[data-style="glass"] header{border-bottom:1px solid rgba(255,255,255,.06)}
 body[data-style="glass"] .inputbar{box-shadow:0 8px 26px rgba(0,0,0,.35);backdrop-filter:blur(var(--glass,14px));-webkit-backdrop-filter:blur(var(--glass,14px))}
 body[data-style="glass"] header .hd-name{text-shadow:0 0 18px rgba(140,180,255,.35)}
 
+/* 素白极简（zen）：苹果式留白 + 无彩黑白 + 顺滑微交互（0913-04） */
+body[data-style="zen"]{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+body[data-style="zen"]::before{display:none}
+body[data-style="zen"] .msg .bubble{
+  border:none;
+  box-shadow:0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.05);
+  transition:transform .22s cubic-bezier(.2,.8,.2,1), box-shadow .22s ease;
+}
+body[data-style="zen"] .msg.ai .bubble{border-radius:18px 18px 18px 6px}
+body[data-style="zen"] .msg.user .bubble{border-radius:18px 18px 6px 18px}
+body[data-style="zen"] .msg .bubble:active{transform:scale(.985)}
+body[data-style="zen"] .msg .meta{letter-spacing:.06em;font-variant-numeric:tabular-nums}
+body[data-style="zen"] .msg .mnm,.msg.ai .mnm{letter-spacing:.03em}
+body[data-style="zen"] header{
+  border-bottom:1px solid rgba(0,0,0,.06);
+  backdrop-filter:saturate(180%) blur(20px);
+  -webkit-backdrop-filter:saturate(180%) blur(20px);
+}
+body[data-style="zen"] header .hd-name{letter-spacing:.01em}
+body[data-style="zen"] .inputbar{
+  border-radius:22px;border:none;
+  box-shadow:0 0 0 1px rgba(0,0,0,.06), 0 2px 10px rgba(0,0,0,.04);
+  transition:box-shadow .25s ease;
+}
+body[data-style="zen"] .inputbar:focus-within{
+  box-shadow:0 0 0 2px rgba(29,29,31,.22), 0 6px 18px rgba(0,0,0,.07);
+}
+body[data-style="zen"] ::selection{background:rgba(29,29,31,.86);color:#fbfbfd}
+body[data-style="zen"] .set-panel,body[data-style="zen"] .sheet{border:1px solid rgba(0,0,0,.06);box-shadow:0 1px 3px rgba(0,0,0,.04)}
+body[data-style="zen"] .tool-trace{border-radius:10px}
+body[data-style="zen"] ::-webkit-scrollbar{width:4px;height:4px}
+body[data-style="zen"] ::-webkit-scrollbar-thumb{background:rgba(0,0,0,.14);border-radius:2px}
+body[data-style="zen"] ::-webkit-scrollbar-track{background:transparent}
+@media (prefers-reduced-motion: reduce){
+  body[data-style="zen"] .msg .bubble,body[data-style="zen"] .inputbar{transition:none}
+}
+
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{height:100%}
 body{
