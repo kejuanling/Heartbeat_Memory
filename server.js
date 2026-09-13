@@ -2101,7 +2101,9 @@ function buildCrossMemorySnapshot(sessionId) {
   if (text) {
     try {
       fs.ensureDirSync(CROSS_SNAPSHOT_DIR);
-      fs.writeJsonSync(file, { session: sessionId || "default", created_at: createdIso, captured_at: new Date().toISOString(), version: CROSS_SNAPSHOT_VERSION, fingerprint: fp, text });
+      // 2026-09-13 审查修复：改原子写——此前裸 writeJsonSync 是全仓唯一非原子写，
+      // 写盘窗口进程被杀会留下半截快照，下次读取解析失败走重建（浪费一次计算且丢 created_at 固化）
+      writeJsonFileAtomic(file, { session: sessionId || "default", created_at: createdIso, captured_at: new Date().toISOString(), version: CROSS_SNAPSHOT_VERSION, fingerprint: fp, text });
     } catch (e) { console.warn("[cross-snapshot] 写入快照失败:", e.message); }
   }
   return text;
@@ -2402,12 +2404,32 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
 // ========================
 // 内部接口：记录唤醒事件
 // ========================
+// 2026-09-13 审查修复：唤醒事件幂等去重——HTTP 重试会把同一唤醒事件/回复重复落库
+// （appendSpecialEvent 无内容查重，buildTimeline 的视图去重掩盖不了盘上累积）。
+// 进程内指纹窗口 10 分钟：同会话+同内容组合的重复请求直接跳过。
+const _wakeEventSeen = new Map();
+const WAKE_EVENT_DEDUP_MS = 10 * 60 * 1000;
+
 app.post("/internal/wake-event", async (req, reply) => {
   try {
     const { content, event, diary, push_meta, session_id, tools } = req.body;
     // 批注 2026-08-29：多会话。唤醒侧(wake_up.js)现在会携带 session_id，把唤醒事件写到
     // 对应会话语，而不是永远堆在主会话。未携带时回退主会话（100% 兼容旧行为）。
     const evSession = typeof session_id === "string" && session_id.trim() ? String(session_id).trim() : null;
+    // 幂等去重（放在 400 校验之后，保证参数非法仍报错）
+    if (content || event || diary) {
+      const dedupKey = (evSession || "default") + "\u0000" + [String(event || ""), String(diary || ""), String(content || "")].map(s => s.slice(0, 2000)).join("\u0001");
+      const seenAt = _wakeEventSeen.get(dedupKey);
+      const nowTs = Date.now();
+      if (seenAt && nowTs - seenAt < WAKE_EVENT_DEDUP_MS) {
+        console.log("[wake-event] 重复事件（重试?）跳过落库");
+        return reply.send({ success: true, dedup: true });
+      }
+      _wakeEventSeen.set(dedupKey, nowTs);
+      if (_wakeEventSeen.size > 500) {
+        for (const [k, t] of _wakeEventSeen) { if (nowTs - t > WAKE_EVENT_DEDUP_MS) _wakeEventSeen.delete(k); }
+      }
+    }
     // 推送回显判定：成功推送时 event=回显（含标题+正文全文）、content=AI 完整回复（同正文）。
     // 正文已含于回显，不再单独落库（避免上下文/时间线重复）；记忆标签解析仍照常执行。
     const isPushEcho = !!(push_meta && event && isPushEchoContent(event));

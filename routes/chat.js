@@ -475,7 +475,28 @@ module.exports = function registerChatRoutes(app, deps) {
         fsp.copySync(file, bak);
       }
       fsp.removeSync(file);
-      reply.send({ ok: true, deleted: true });
+      // 2026-09-13 审查修复：同步清理会话周边文件——此前只删时间线，跨窗口快照/会话配置/
+      // 唤醒锁定槽位永久残留，同 id 重建会话会继承旧快照固化的 created_at 导致日记注入边界漂移
+      const cleanupTargets = [
+        path.join(baseDir, 'cross_snapshot_' + safe + '.json'),
+        path.join(baseDir, 'data', 'session_cfg', safe + '.json')
+      ];
+      let cleaned = 0;
+      for (const t of cleanupTargets) {
+        try { if (fsp.existsSync(t)) { fsp.removeSync(t); cleaned++; } } catch (e) {}
+      }
+      try {
+        const wakeLockedPath = path.join(baseDir, 'data', 'wake-locked.json');
+        if (fsp.existsSync(wakeLockedPath)) {
+          const locked = fsp.readJsonSync(wakeLockedPath);
+          if (Array.isArray(locked) && locked.includes(safe)) {
+            fsp.writeJsonSync(wakeLockedPath, locked.filter(s => s !== safe));
+            cleaned++;
+          }
+        }
+      } catch (e) {}
+      console.log(`[sessions] 会话 ${safe} 已删除，周边文件清理 ${cleaned} 处`);
+      reply.send({ ok: true, deleted: true, cleaned });
     } catch (err) {
       console.error('[DELETE /v1/sessions/:id] error:', err.message);
       reply.code(500).send({ error: err.message });

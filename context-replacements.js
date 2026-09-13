@@ -1797,11 +1797,8 @@ const CONTEXT_SEARCH_DENSITY_FLOOR = 0.4;
 const CONTEXT_SEARCH_FILTER_MIN_HITS = 5;
 const CONTEXT_SEARCH_MIN_KEEP = 3;
 const CONTEXT_SEARCH_RECENT_EXCLUDE_MINUTES = 5;
-const CONTEXT_SEARCH_REPEAT_WINDOW_MINUTES = 10;
-// 导入对话没有时间线位置：用大偏移 + 序号作为位置，避免与时间线消息混排/错并
-const CONTEXT_SEARCH_IMPORTED_POS_OFFSET = 100000000;
-
-const recentlyShown = new Map();
+// 2026-09-13 死代码清理：CONTEXT_SEARCH_REPEAT_WINDOW_MINUTES / CONTEXT_SEARCH_IMPORTED_POS_OFFSET /
+// recentlyShown 已删——声明后全仓无引用（loadSearchableMessages 的 imported 恒为空数组）
 
 function loadSearchableMessages() {
   const timeline = nonSystemMessages(loadTimeline());

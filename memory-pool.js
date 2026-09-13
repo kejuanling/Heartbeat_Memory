@@ -18,6 +18,8 @@ const POOL_CONFIG_FILE = path.join(DATA_DIR, "memory_pool_config.json");
 // 只读模式（wake-up 进程）：与 memory-engine 同款守卫。记忆池是 gateway/wake-up 共享数据，
 // 双进程各自整文件覆盖写会互相回滚，只读进程必须拦截一切落盘与内存改写。
 const READONLY = process.env.MEMORY_ENGINE_READONLY === "1";
+// 2026-09-13 审查修复：记忆池旁路 LLM 调用（重解析/清理）统一超时——上游挂起不再拖住聊天回复链路
+const LLM_CALL_TIMEOUT_MS = Number(process.env.MEMORY_POOL_LLM_TIMEOUT_MS) || 60000;
 
 let cache = null;
 let flushTimer = null;
@@ -203,7 +205,22 @@ function load() {
   return cache;
 }
 
+// 2026-09-13 审查修复（性能节流）：向量文件（8.1MB）此前每次调用都全量同步重写——
+// warmVectors 每 4 条一批批批落盘，预热期约每 5s 写一次。改为 60 秒节流：
+// 节流窗口内置脏标记，由 5s flush 定时器统一落盘；shutdown 的 flush 兜底。
+let _vecDirty = false;
+let _vecLastSaveAt = 0;
+const VEC_SAVE_THROTTLE_MS = 60 * 1000;
+
 function flush() {
+  // 2026-09-13：向量缓存的节流滞留写也挂在这里（saveVecMap 60 秒窗口内的脏标记统一落盘）
+  if (_vecDirty) {
+    try {
+      fs.writeJsonSync(VECTOR_FILE, vectorCache);
+      _vecDirty = false;
+      _vecLastSaveAt = Date.now();
+    } catch (e) { console.error("[memory-pool] 向量 flush 失败:", e.message); }
+  }
   if (!dirty || !cache) return;
   // 批注 2026-09-13（审查 D2）：池文件此前损坏且当前仍是空池时，拒绝写回——
   // 否则一次普通的 add/flush 就把全量记忆覆盖成 []。新写入暂存内存（dirty 保持），
@@ -549,9 +566,15 @@ function vecMap() {
   return vectorCache;
 }
 
+// 节流状态见 flush() 上方声明（_vecDirty/_vecLastSaveAt/VEC_SAVE_THROTTLE_MS）
 function saveVecMap() {
   if (READONLY) return;
-  try { fs.writeJsonSync(VECTOR_FILE, vectorCache); } catch (e) { /* 缓存写失败只影响下次冷启动 */ }
+  if (Date.now() - _vecLastSaveAt < VEC_SAVE_THROTTLE_MS) { _vecDirty = true; return; }
+  try {
+    fs.writeJsonSync(VECTOR_FILE, vectorCache);
+    _vecDirty = false;
+    _vecLastSaveAt = Date.now();
+  } catch (e) { /* 缓存写失败只影响下次冷启动 */ }
 }
 
 function entryHash(e) {
@@ -837,21 +860,29 @@ async function reparseSummaryViaLLM(text, cfg, fixedCategory) {
   const system = String(CONFIG.reparse_system_prompt || "").trim() || defSystem;
   const user = (String(CONFIG.reparse_user_prompt || "").trim() || defUser) + "\n\n记忆文本：\n" + text;
   try {
-    const resp = await fetch(apiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
-      body: JSON.stringify({
-        model: model,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user }
-        ],
-        temperature: 0.2,
-        response_format: { type: "json_object" }
-      })
-    });
-    if (!resp.ok) return { ok: false, error: "LLM HTTP " + resp.status };
-    const data = await resp.json();
+    // 2026-09-13 审查修复：加超时——此前无 AbortController，本调用被 await 在 AI 回复链路上
+    // （tagParser.extractAndStore），上游挂起时用户回复被拖住至 undici 默认兜底（数百秒）
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), LLM_CALL_TIMEOUT_MS);
+    let resp, data;
+    try {
+      resp = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
+        body: JSON.stringify({
+          model: model,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user }
+          ],
+          temperature: 0.2,
+          response_format: { type: "json_object" }
+        }),
+        signal: controller.signal
+      });
+      if (!resp.ok) return { ok: false, error: "LLM HTTP " + resp.status };
+      data = await resp.json();
+    } finally { clearTimeout(timer); }
     const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
     if (!content) return { ok: false, error: "LLM 空响应" };
     const cleaned = String(content).replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
@@ -964,18 +995,25 @@ async function cleanPoolViaLLM(system, user) {
   const model = process.env.MODEL_NAME || "";
   if (!apiUrl || !apiKey || !model) return { ok: false, error: "LLM 未配置（TARGET_API_URL / TARGET_API_KEY / MODEL_NAME）" };
   try {
-    const resp = await fetch(apiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
-      body: JSON.stringify({
-        model: model,
-        messages: [{ role: "system", content: system }, { role: "user", content: user }],
-        temperature: Number(CONFIG.clean_temperature) || 0.2,
-        response_format: { type: "json_object" }
-      })
-    });
-    if (!resp.ok) return { ok: false, error: "LLM HTTP " + resp.status };
-    const data = await resp.json();
+    // 2026-09-13 审查修复：加超时（同 reparseSummaryViaLLM），上游挂起不再无限等待
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), LLM_CALL_TIMEOUT_MS);
+    let resp, data;
+    try {
+      resp = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
+        body: JSON.stringify({
+          model: model,
+          messages: [{ role: "system", content: system }, { role: "user", content: user }],
+          temperature: Number(CONFIG.clean_temperature) || 0.2,
+          response_format: { type: "json_object" }
+        }),
+        signal: controller.signal
+      });
+      if (!resp.ok) return { ok: false, error: "LLM HTTP " + resp.status };
+      data = await resp.json();
+    } finally { clearTimeout(timer); }
     const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
     if (!content) return { ok: false, error: "LLM 空响应" };
     const cleaned = String(content).replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();

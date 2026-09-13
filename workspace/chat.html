@@ -3553,27 +3553,16 @@ async function request(finalMsgs, fromSend){
       autoNameSessionWhenUntitled(full);
     }
   }catch(err){
-    if(err.name==="AbortError"){
-      try{if(flushStreamSegs){await flushStreamSegs();}}catch(e){}
-      if(full){syncToolSave();
+    /* 2026-09-13 死代码清理：AbortError 分支已删——中断生成功能 2026-09-08 移除后 aborter.abort() 全文件无调用，该分支不可达 */
+    try{if(flushStreamSegs){await flushStreamSegs();}}catch(e){}
+    if(full){syncToolSave();
     finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});}
-      if(currentSession===sidAtStart){
-        msgs=finalMsgs;saveMsgs();
-        if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
-        autoNameSessionWhenUntitled(full);
-      }
-      if(full)showToast("已停止生成");
-    }else{
-      try{if(flushStreamSegs){await flushStreamSegs();}}catch(e){}
-      if(full){syncToolSave();
-    finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});}
-      if(currentSession===sidAtStart){
-        msgs=finalMsgs;saveMsgs();
-        if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
-        autoNameSessionWhenUntitled(full);
-      }
-      showError(err.message);
+    if(currentSession===sidAtStart){
+      msgs=finalMsgs;saveMsgs();
+      if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
+      autoNameSessionWhenUntitled(full);
     }
+    showError(err.message);
   }finally{
     sending=false;setSendState(false);aborter=null;
     _streamActive=false; _streamAnchor=null;   // 方案2：结束流式工具卡插入模式
@@ -6278,7 +6267,7 @@ function genSessionId(){return "s_"+Date.now().toString(36)+"_"+Math.random().to
 // 打开/关闭侧边栏
 function openDrawer(){document.getElementById("sessionDrawer").classList.add("open");loadSessions();}
 function closeDrawer(){document.getElementById("sessionDrawer").classList.remove("open");}
-document.getElementById("hdAvatar").onclick=openDrawer;
+// 2026-09-13 死代码清理：hdAvatar 点击绑定已删——applyHeader() 无条件隐藏该元素，绑定在永远点不到的元素上
 document.getElementById("sessionClose").onclick=closeDrawer;
 document.getElementById("sessionBackdrop").onclick=closeDrawer;
 // 会话侧边栏：退出登录（二次确认，防止误触）
@@ -8354,12 +8343,13 @@ function syncUpdatePushMsg(oldContent, newContent){
   }
 }
 /* ---- 初始化 ---- */
-function init(){
+/* 2026-09-13 改名 initAdminCards：原名 init() 与 script1 的登录初始化 init() 同挂全局互相覆盖，纯靠加载顺序才不出错 */
+function initAdminCards(){
   buildMenu();
   if(typeof initSettingsDrawer==="function") initSettingsDrawer();
 }
-if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', init); }
-else{ init(); }
+if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', initAdminCards); }
+else{ initAdminCards(); }
 })();
 </script>
 <script>

@@ -147,7 +147,7 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
   ccMsgFetching: false,            // 是否正在拉取块消息
   ccMsgFetchDone: false,           // 块消息是否已拉取完成
   ccGapCutsOff: new Set(),         // 手动关闭（不再自动分块）的 gkey
-  ccPollTimer: null,               // 块消息轮询定时器
+  // 2026-09-13 死代码清理：ccPollTimer/stopCcPoll 已删——只有 stop 没有 start，全仓无启动方
   ccLastRenderedHtml: null,        // 最近一次渲染 HTML（重绘短路）
   ccOriginalTimer: null,           // 原文搜索防抖定时器
   ccOriginalSeq: 0,                // 原文搜索请求序号（防乱序）
@@ -239,7 +239,6 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    renderVisionModels();
    renderCoView();
    renderScreenshotStatus();
-   loadSendConfig();
    loadMemoryWakeConfig();
    renderDiary();
    initAdminSessionSelector();
@@ -1051,8 +1050,7 @@ function toast(msg){
     }catch(e){ if(msg)msg.textContent='网络错误: '+e.message; toast('网络错误: '+e.message); }
   }
 
- async function loadSendConfig(){}  // 已移除（2026-09-08）
- async function saveSendConfig(){}  // 已移除（2026-09-08）
+ // 2026-09-13 死代码清理：loadSendConfig/saveSendConfig 空壳及其唯一调用点已删（功能 2026-09-08 移除后遗留）
 
  async function loadScreenshotWakePromptLog(){
    const pe=document.getElementById('log-screenshot-wake-prompt');
@@ -3272,11 +3270,7 @@ function ccNumLiveCheck(input, max){
    AppState.ccDraft[idx]=undefined;
    renderCompaction();
  }
- 
- function stopCcPoll(){
-   if(AppState.ccPollTimer){ clearInterval(AppState.ccPollTimer); AppState.ccPollTimer=null; }
- }
- 
+
  function toggleCcExpand(cidx){
    if(AppState.ccExpanded.has(cidx)) AppState.ccExpanded.delete(cidx); else AppState.ccExpanded.add(cidx);
    renderCompaction();
@@ -3566,7 +3560,6 @@ function ccNumLiveCheck(input, max){
       closeModal('pushEditModal');
     }catch(e){ toast('网络错误: '+e.message); }
   }
-let lastPendingCount = null;
   async function loadCrossWindowInject(){
     const el=document.getElementById('cross-inject-view');
     if(!el)return;
@@ -4600,8 +4593,8 @@ async function deletePinned(id){
   }
 
 // ============ 信封：写给下一个窗口自己的信 ============
- let letterSeq=0;
- 
+ // 2026-09-13 死代码清理：letterSeq 已删（声明后从未读写）
+
  async function loadMemCloud(){
    const el=document.getElementById('mem-cloud');
    if(!el)return;

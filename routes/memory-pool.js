@@ -16,9 +16,7 @@ module.exports = function registerMemoryPoolRoutes(app, { basicAuth }) {
     } catch (err) { reply.code(500).send({ error: err.message }); }
   });
 
-  app.get('/admin/memory-pool/stats', { preHandler: basicAuth }, async (req, reply) => {
-    try { reply.send(memoryPool.stats()); } catch (err) { reply.code(500).send({ error: err.message }); }
-  });
+  // 2026-09-13 死接口清理：GET /admin/memory-pool/stats 全仓无调用方（前端用上方列表接口自带的 stats 字段），已删除
 
   app.post('/admin/memory-pool', { preHandler: basicAuth }, async (req, reply) => {
     try {

@@ -19,8 +19,7 @@ const TIMELINE_FILE = path.join(__dirname, "enhanced_messages.json");
 const COMPACTION_PROMPT_FILE = path.join(DATA_DIR, "compaction_prompt.json");
 const CTX_LIMIT_PROMPT_FILE = path.join(DATA_DIR, "ctx_limit_prompt.json");
 const MARKS_FILE = path.join(DATA_DIR, "context_compaction_marks.json");
-const CACHE_MAX_ENTRIES = 500;
-const SUMMARY_HISTORY_MAX = 2;
+// 2026-09-13 死代码清理：CACHE_MAX_ENTRIES / SUMMARY_HISTORY_MAX 已删——声明后全仓无引用
 
 const DEFAULT_CONFIG = {
   compaction_chunk_size: 100,

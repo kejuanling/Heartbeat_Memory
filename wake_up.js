@@ -964,13 +964,9 @@ async function runWakeUpInner(dueSids) {
           }
         } else {
           const nextWakeAt = new Date(schedule.next_wake_at);
-          if (!isNaN(nextWakeAt.getTime()) && nextWakeAt.getTime() > Date.now() + WAKE_DUE_GRACE_MS) {
-            // 旧式 default 调度未到点：仅当没有其它唤醒目标时才整体跳过
-            if (targets.length === 0) {
-              console.log(`\n下一次主动唤醒时间未到（${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}），本次跳过唤醒\n`);
-              return;
-            }
-          } else {
+          // 2026-09-13 死代码清理：原「targets 为空则整体跳过」分支永不可达（上方已对空 targets 提前 return），
+          // 锁定模式下未到点的旧 default 调度不应阻塞已并入的显式闹钟目标——保留原语义：未到点仅跳过过期清理
+          if (isNaN(nextWakeAt.getTime()) || nextWakeAt.getTime() <= Date.now() + WAKE_DUE_GRACE_MS) {
             try { clearWakeSchedule("default"); } catch (expireErr) {
               console.warn("[wake-up] 清理过期唤醒时间失败:", expireErr.message);
             }
