@@ -1083,9 +1083,12 @@ async function runWakeForTarget(target) {
   let historyMsgs = filterMemoryMsgs(cleanMessages.filter(msg => msg.role !== "system"))
     .filter(m => !m || m.kind !== "ctx_limit");
 
-  // 唤醒不需要工具调用链（对话侧才有）；历史内容统一为纯文本
+  // 唤醒不需要工具调用链（对话侧才有）；历史内容统一为纯文本。
+  // 「【工具调用记录】」时间线 note（大块 JSON）对唤醒无用且撑上下文，一并滤掉；
+  // 对话侧由网关转换 role=tool 回灌，唤醒侧无工具循环不做该转换（2026-09-13 用户拍板）。
   historyMsgs = historyMsgs
     .filter(m => m.role !== "tool" && !m.tool_calls && !m.tool_call_id)
+    .filter(m => !(m && typeof m.content === "string" && m.content.indexOf("【工具调用记录】") === 0))
     .map(m => (Array.isArray(m.content) ? { ...m, content: normalizeContentToText(m.content) } : m));
 
   // 批注 2026-08-19 唐山：唤醒侧兜底——历史末尾若仍是用户最新未回复消息，则剔除这些尾部 user 消息，

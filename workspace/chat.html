@@ -1244,8 +1244,6 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .session-search{display:flex;align-items:center;gap:6px;margin:0 14px 8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--chrome-item,rgba(255,255,255,.7))}
 .session-search input{flex:1;min-width:0;border:none;outline:none;background:transparent;font-size:13px;color:var(--ink);font-family:inherit}
 .session-search .si{color:var(--ink3);font-size:14px;flex-shrink:0}
-.session-search .mode-toggle{font-size:11px;color:var(--ink3);cursor:pointer;padding:2px 6px;border-radius:6px;background:var(--accent-faint);flex-shrink:0;user-select:none}
-.session-search .mode-toggle:hover{background:var(--accent-faint);color:var(--ink)}
 .sr-score{font-size:10px;color:var(--ink3);margin-left:auto;padding:1px 5px;background:var(--accent-faint);border-radius:4px}
 .session-results{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:4px 10px}
 .session-results .adm-empty{padding:14px 6px}
@@ -1436,7 +1434,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
       <button class="drawer-btn ghost" id="mergeSessionBtn" title="选择多个会话合并为一个新会话（原会话保留）">合并</button>
       <button class="drawer-btn ghost" id="mergeCancelBtn" style="display:none">取消</button>
     </div>
-    <div class="session-search"><span class="si"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg></span><input id="sessionSearch" placeholder="搜索会话内容…" autocomplete="off"><span class="mode-toggle" id="sessionSearchMode" title="点击切换搜索模式">语义</span></div>
+    <div class="session-search"><span class="si"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg></span><input id="sessionSearch" placeholder="搜索会话内容…" autocomplete="off"></div>
     <div id="sessionSearchResults" class="session-results" style="display:none"></div>
     <div id="sessionList" class="session-list"></div>
     <div class="session-logout">
@@ -3339,14 +3337,11 @@ function buildMessages(list){
     if(m.id)base.id=m.id;   // 带稳定 id：服务端落盘去重能按 id 判存在，防重复追加；转发上游时 sanitizedMessages 会剥掉 id，不影响模型
     if(m.role==="assistant"){
       if(cfg.send_thinking&&m.reasoning&&thinkIdx.has(idx)){base.reasoning_content=m.reasoning;}
-      // T-0923：历史 assistant 若带过工具（tools 富字段），拼回 content 给上游模型看（位置对、不膨胀），
-      // 同时保留 base.tools 供服务器落盘（刷新靠 m.tools 渲染胶囊）；服务端写盘会剥离这段拼段防污染时间线。
+      // 历史 assistant 带 tools 富字段时仅透传给服务器（落盘与刷新后渲染胶囊用）；
+      // 工具结果回灌模型已由网关统一转成 role=tool 消息组（0913-01），不再拼进正文——
+      // 否则同一轮工具结果在上下文里出现两份，且工具数据混在 assistant 正文里。
       if(Array.isArray(m.tools)&&m.tools.length){
         base.tools=m.tools;
-        // 参数可能很大（图片/长文本工具），截断避免请求体膨胀
-        const _argStr=function(a){const s=(typeof a==="string")?a:JSON.stringify(a==null?{}:a);return s.length>500?s.slice(0,500)+"…":s;};
-        const txt=m.tools.map(function(t){return "【工具·"+t.name+"】参数="+_argStr(t.args)+(t.error?(" [出错] "+t.error):(" 返回="+String(t.result==null?"":t.result)));}).join("\n");
-        base.content=(typeof c==="string"?c:"")+"\n\n【本回复前调用工具记录】\n"+txt;
       }
     }
     out.push(base);
@@ -6428,7 +6423,6 @@ function highlightKeyword(t,q){
   if(i<0)return escapeHtml(t);
   return escapeHtml(t.slice(0,i))+'<mark>'+escapeHtml(t.slice(i,i+q.length))+'</mark>'+escapeHtml(t.slice(i+q.length));
 }
-var _sessionSearchMode = "semantic"; // semantic | keyword
 let _searchTimer=null;
 function searchSessions(q){
   const resultsEl=document.getElementById("sessionSearchResults");
@@ -6443,17 +6437,16 @@ async function doSearchSessions(ql){
   const resultsEl=document.getElementById("sessionSearchResults");
   const listEl=document.getElementById("sessionList");
   const nm=JSON.parse(localStorage.getItem("han_session_names")||"{}");
-  const mode=_sessionSearchMode;
   let results=[];
   try{
-    const r=await fetch("/v1/search?q="+encodeURIComponent(ql)+"&mode="+encodeURIComponent(mode)+"&limit=200",{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
+    const r=await fetch("/v1/search?q="+encodeURIComponent(ql)+"&limit=200",{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
     const j=await r.json();
     results=(j&&j.results)||[];
   }catch(e){ results=[]; }
   results.forEach(function(x){ if(nm[x.sid]) x.name=nm[x.sid]; });
   const shown=results.slice(0,200);
   resultsEl.innerHTML= shown.length? shown.map(function(r){
-    const scoreLabel = mode==="semantic" && r.score ? '<span class="sr-score">'+(r.score*100).toFixed(0)+'%</span>' : '';
+    const scoreLabel = r.score ? '<span class="sr-score">'+(r.score*100).toFixed(0)+'%</span>' : '';
     return '<div class="sr-item" data-sid="'+encodeURIComponent(r.sid)+'" data-sidx="'+r.sidx+'"><div class="sr-h"><b>'+escapeHtml(r.name)+'</b><span class="adm-badge">第 '+(r.sidx+1)+' 条</span>'+scoreLabel+'</div><div class="sr-q">'+highlightKeyword(r.text,ql)+'</div></div>';
   }).join('') : '<div class="adm-empty">没有会话内容命中「'+escapeHtml(ql)+'」</div>';
   resultsEl.style.display="block";
@@ -6491,13 +6484,6 @@ async function switchSessionAndLocate(sid,idx){
 (function(){
   const se=document.getElementById("sessionSearch");
   if(se)se.addEventListener("input",function(){ searchSessions(se.value); });
-  const sm=document.getElementById("sessionSearchMode");
-  if(sm)sm.addEventListener("click",function(){
-    _sessionSearchMode = _sessionSearchMode==="semantic"?"keyword":"semantic";
-    sm.textContent = _sessionSearchMode==="semantic"?"语义":"关键词";
-    const se2=document.getElementById("sessionSearch");
-    if(se2&&se2.value) searchSessions(se2.value);
-  });
 })();
 
 // 切换会话
@@ -7378,8 +7364,11 @@ function renderDiary(body){
   admGet(BASE+'/env').then(function(d){
     var list=(d&&d.diary)||[];
     if(!list.length){ body.innerHTML='<div class="adm-empty">暂无日记</div>'; return; }
+    // 2026-09-13：完全按日记时间排（服务端已按文件名日期倒序返回）；操作键改用 relPath，
+    // 修同名文件（不同窗口同日期）按 name 匹配会打开错篇的问题
     body.innerHTML=list.map(function(e){
-      return '<div class="adm-item adm-diary" data-name="'+esc(e.name)+'"><div class="adm-item-h"><span style="font-weight:600">'+esc(e.name)+'</span><span style="color:var(--ink3)">'+esc(e.time)+'</span><span style="margin-left:auto"></span><span class="adm-diary-arrow">▸</span></div></div>';
+      var key=e.relPath||e.name;
+      return '<div class="adm-item adm-diary" data-name="'+esc(key)+'"><div class="adm-item-h"><span style="font-weight:600">'+esc(e.name)+'</span>'+(e.session?'<span style="color:var(--ink3);font-size:11px">窗口 '+esc(e.session)+'</span>':'')+'<span style="color:var(--ink3)">'+esc(e.time)+'</span><span style="margin-left:auto"></span><span class="adm-diary-arrow">▸</span></div></div>';
     }).join('');
     Array.prototype.forEach.call(body.querySelectorAll('.adm-diary'), function(it){
       it.addEventListener('click', function(){ openDiaryModal(it.getAttribute('data-name'), body); });
@@ -7395,7 +7384,7 @@ function openDiaryModal(name, body){
   document.getElementById('diaryModalContent').value='加载中…';
   dm.classList.remove('hidden');
   admGet(BASE+'/env').then(function(d){
-    var e=((d&&d.diary)||[]).find(function(x){return x.name===name;});
+    var e=((d&&d.diary)||[]).find(function(x){return (x.relPath||x.name)===name;});
     document.getElementById('diaryModalContent').value=e?(e.content||''):'';
   }).catch(function(){});
 }
@@ -7828,7 +7817,23 @@ function renderReqCtx(body){
         var color = role==='system' ? '#b7a2c9' : (role==='tool'?'#e0a960':(role==='user'?'#8fb98a':(role==='assistant'||role==='ai'?'#c9a2a2':'#c9a2a2')));
         var imgs=(msg.images&&msg.images.length)?(' ['+msg.images.length+' 图]'):'';
         var divider = role==='_divider';
-        return '<div class="adm-item'+(divider?' adm-divider':'')+'"><div class="adm-item-h"><span class="adm-cat" style="--c:'+color+'">'+esc(role)+'</span><span class="adm-tag">'+esc(toolCalls+toolLbl)+'</span><span class="adm-k" style="width:auto;min-width:0;margin-left:auto;color:var(--ink3)">#'+(i+1)+(imgs?imgs:'')+'</span></div><div class="adm-item-b">'+esc(text)+'</div></div>';
+        // 工具结果消息默认折叠成一行摘要（工具名+时间+状态），点击展开全文，避免大 JSON 刷屏
+        var bodyHtml;
+        if(role==='tool'){
+          var _tl=String(text||'').split('\n'), _sum={}, _k=0;
+          if(_tl[0]==='[工具调用结果]'){ _k=1;
+            for(;_k<_tl.length;_k++){ var _L=_tl[_k];
+              if(_L.indexOf('工具：')===0)_sum.name=_L.slice(3);
+              else if(_L.indexOf('调用时间：')===0)_sum.time=_L.slice(5);
+              else if(_L.indexOf('状态：')===0)_sum.st=_L.slice(3);
+              else break; }
+          }
+          var _summary=esc((_sum.name||'工具结果')+(_sum.time?(' · '+_sum.time):'')+(_sum.st?(' · '+_sum.st):'')+'（点击展开/收起全文）');
+          bodyHtml='<div class="adm-item-b" data-toolfull style="display:none">'+esc(text)+'</div><div class="adm-item-b" style="color:var(--ink3);cursor:pointer" onclick="var b=this.previousElementSibling;b.style.display=b.style.display===\'none\'?\'\':\'none\';">'+_summary+'</div>';
+        } else {
+          bodyHtml='<div class="adm-item-b">'+esc(text)+'</div>';
+        }
+        return '<div class="adm-item'+(divider?' adm-divider':'')+'"><div class="adm-item-h"><span class="adm-cat" style="--c:'+color+'">'+esc(role)+'</span><span class="adm-tag">'+esc(toolCalls+toolLbl)+'</span><span class="adm-k" style="width:auto;min-width:0;margin-left:auto;color:var(--ink3)">#'+(i+1)+(imgs?imgs:'')+'</span></div>'+bodyHtml+'</div>';
       }).join('')+'</div>';
   }).catch(function(e){ body.innerHTML='<div class="adm-empty">加载失败: '+esc(e.message)+'</div>'; });
 }
