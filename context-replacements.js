@@ -117,11 +117,19 @@ function writeJsonAtomic(file, data) {
   _readJsonCache.delete(file);
 }
 
+// 2026-09-13 轻量缓解（用户拍板）：备份节流——14.5MB 存档每次写都全量 copyFileSync 会卡
+// 事件循环；同文件 10 分钟内已备份过则跳过（原子写保证半截文件不会落盘，备份防的是内容
+// 写错而非写坏，10 分钟数据窗口可接受；.bak-* 轮转仍保留最近 2 份）。
+const _backupLastAt = new Map();
+const BACKUP_THROTTLE_MS = 10 * 60 * 1000;
 function backupFile(file) {
   try {
     if (!fs.existsSync(file)) return;
+    const lastAt = _backupLastAt.get(file) || 0;
+    if (Date.now() - lastAt < BACKUP_THROTTLE_MS) return;
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
     fs.copyFileSync(file, file + ".bak-" + ts);
+    _backupLastAt.set(file, Date.now());
     // 轮转：同一基础文件的 .bak-* 仅保留最近 2 份，避免每次保存全量备份导致 data/ 无限膨胀
     try {
       const dir = path.dirname(file);
@@ -425,6 +433,10 @@ function loadItems() {
   return Array.isArray(items) ? items : [];
 }
 
+// 2026-09-13 并发约束（实测核实）：本文件所有「loadItems → 改 → saveItems」调用链必须保持
+// 纯同步——同步段在事件循环内原子，天然无并发丢块；若未来任何链路中间夹了 await，
+// 必须先引入写链（参照 server.js envWriteChain 的 promise 串行化）再动手，否则会产生
+// 「后写者整份覆盖前写者」的丢失更新。
 function saveItems(items) {
   backupFile(REPLACEMENTS_FILE);
   writeJsonAtomic(REPLACEMENTS_FILE, items);
