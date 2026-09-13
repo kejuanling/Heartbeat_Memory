@@ -1140,23 +1140,14 @@ function toast(msg){
    const entries=AppState.INITIAL_DATA.diary||[];
    const el=document.getElementById('diary-list');
    if(!entries.length){el.innerHTML='<div class="empty">暂无日记</div>';return}
-   const itemHtml=(e)=>{
+   // 2026-09-13：去分组，完全按日记时间排（服务端已按文件名日期倒序平铺返回）；
+   // 同一天不同窗口各有日记时用小标注区分（有会话名显示会话名，否则显示窗口 id）
+   el.innerHTML=entries.map(e=>{
      const key=e.relPath||e.name||'';
      const label=e.name||'';
      const hidden=e.hidden===true;
-     return '<div class="diary-item'+(hidden?' diary-is-hidden':'')+'"><div class="diary-head"><span>'+escapeHtml(label)+(hidden?'<em class="diary-hidden-tag">已隐藏</em>':'')+'</span><span style="display:flex;align-items:center;gap:8px"><em>'+escapeHtml(e.time)+'</em><button class="diary-hide-btn" onclick="toggleDiaryHidden(\''+escJsStr(key)+'\')">'+(hidden?'显示':'隐藏')+'</button><button class="diary-edit-btn" onclick="openDiaryEditor(\''+escJsStr(key)+'\')">编辑</button></span></div></div>'
-   };
-   const groups=new Map();const order=[];
-   for(const e of entries){
-     const k=e.session||'__shared__';
-     if(!groups.has(k)){groups.set(k,[]);order.push(k);}
-     groups.get(k).push(e);
-   }
-   order.sort((a,b)=>{if(a==='__shared__')return -1;if(b==='__shared__')return 1;return a<b?-1:1;});
-   el.innerHTML=order.map(k=>{
-     const list=groups.get(k);
-     const label=k==='__shared__'?'共享历史（旧日记 / 未归属）':((ADM_SESSION_NAMES[k]?ADM_SESSION_NAMES[k]+' · ':'')+'窗口 '+k);
-     return '<div style="margin:14px 0 6px;font-size:12px;font-weight:600;color:var(--text2);display:flex;align-items:center;gap:6px">'+escapeHtml(label)+'<em style="font-style:normal;font-weight:400;opacity:.7">'+list.length+' 篇</em></div>'+list.map(itemHtml).join('');
+     const tag=e.session?'<em style="font-style:normal;font-size:11px;opacity:.65;margin-left:6px">'+escapeHtml(ADM_SESSION_NAMES[e.session]||('窗口 '+e.session))+'</em>':'';
+     return '<div class="diary-item'+(hidden?' diary-is-hidden':'')+'"><div class="diary-head"><span>'+escapeHtml(label)+tag+(hidden?'<em class="diary-hidden-tag">已隐藏</em>':'')+'</span><span style="display:flex;align-items:center;gap:8px"><em>'+escapeHtml(e.time)+'</em><button class="diary-hide-btn" onclick="toggleDiaryHidden(\''+escJsStr(key)+'\')">'+(hidden?'显示':'隐藏')+'</button><button class="diary-edit-btn" onclick="openDiaryEditor(\''+escJsStr(key)+'\')">编辑</button></span></div></div>'
    }).join('');
  }
 

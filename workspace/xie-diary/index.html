@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>谢的日记 · 小世界</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  min-height:100vh;
+  background:linear-gradient(135deg,#fdf6ed 0%,#f5e6d3 50%,#f0ddd0 100%);
+  font-family:'Noto Serif SC','STKaiti','KaiTi',serif;
+  color:#5a4a3a;padding:2.2rem 1rem 3rem;position:relative
+}
+body::before{
+  content:'';position:fixed;top:-25%;right:-20%;
+  width:60%;height:60%;
+  background:radial-gradient(circle,rgba(240,196,192,0.25),transparent 70%);
+  pointer-events:none
+}
+.wrap{max-width:620px;margin:0 auto;position:relative;z-index:1}
+.back{
+  display:inline-block;font-size:0.72rem;color:#b5837a;text-decoration:none;
+  letter-spacing:2px;margin-bottom:1rem;opacity:0.85
+}
+.back:hover{opacity:1;text-decoration:underline}
+h1{
+  font-weight:600;font-size:1.5rem;letter-spacing:10px;
+  color:#b07a6a;margin-bottom:0.3rem
+}
+.sub{font-size:0.68rem;color:#d4bcb0;letter-spacing:3px;margin-bottom:1.2rem}
+.search-box{position:relative;margin-bottom:0.6rem}
+.search-box svg{
+  position:absolute;left:0.9rem;top:50%;transform:translateY(-50%);
+  color:#c9a89a;width:15px;height:15px;pointer-events:none
+}
+#searchInput{
+  width:100%;padding:0.75rem 1rem 0.75rem 2.5rem;
+  border:1px solid rgba(181,131,122,0.18);border-radius:14px;
+  background:rgba(255,255,255,0.55);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  font-family:inherit;font-size:0.85rem;color:#5a4a3a;letter-spacing:1px;outline:none;
+  transition:all 0.25s ease
+}
+#searchInput::placeholder{color:#d4bcb0}
+#searchInput:focus{border-color:rgba(181,131,122,0.4);background:rgba(255,255,255,0.7)}
+.meta-line{font-size:0.65rem;color:#d4bcb0;letter-spacing:2px;margin-bottom:1.1rem}
+.day-card{
+  background:rgba(255,255,255,0.55);
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  border-radius:16px;padding:1.1rem 1.2rem;margin-bottom:0.9rem;
+  border:1px solid rgba(255,255,255,0.35);
+  box-shadow:0 2px 12px rgba(181,131,122,0.06);
+  transition:all 0.3s ease
+}
+.day-card.match{border-color:rgba(181,131,122,0.45)}
+.day-head{display:flex;align-items:baseline;gap:0.6rem;margin-bottom:0.4rem}
+.day-date{font-size:0.95rem;font-weight:700;color:#b07a6a;letter-spacing:2px}
+.day-src{margin-left:auto;font-size:0.6rem;color:#d4bcb0;letter-spacing:1px;opacity:0.8}
+.day-body{font-size:0.82rem;line-height:1.95;color:#6a584a;letter-spacing:0.5px}
+.day-body .seg{margin-bottom:1rem}
+.day-body .seg:last-child{margin-bottom:0}
+.seg-time{
+  font-size:0.66rem;color:#b5837a;letter-spacing:2px;font-weight:600;
+  margin:0.7rem 0 0.35rem;padding-left:0.7rem;
+  border-left:2px solid rgba(181,131,122,0.25)
+}
+.seg:first-child .seg-time{margin-top:0}
+.seg-time:first-child{margin-top:0}
+.day-body p{margin-bottom:0.7em;text-indent:0}
+.day-body p:last-child{margin-bottom:0}
+.day-body mark{background:rgba(240,196,192,0.55);color:#a05a4a;border-radius:3px;padding:0 2px}
+.day-body.clip{max-height:9.5rem;overflow:hidden;position:relative}
+.day-body.clip::after{
+  content:'';position:absolute;left:0;right:0;bottom:0;height:3.5rem;
+  background:linear-gradient(180deg,transparent,rgba(255,255,255,0.95))
+}
+.expand-btn{
+  display:inline-block;margin-top:0.45rem;font-size:0.68rem;color:#b5837a;
+  background:none;border:none;font-family:inherit;cursor:pointer;letter-spacing:2px;padding:0
+}
+.expand-btn:hover{text-decoration:underline}
+.empty{padding:3rem 0;text-align:center;color:#d4bcb0;font-size:0.75rem;letter-spacing:3px}
+.loading{padding:3rem 0;text-align:center;color:#d4bcb0;font-size:0.75rem;letter-spacing:3px}
+.ft{text-align:center;margin-top:1.8rem;color:#d4bcb0;font-size:0.62rem;letter-spacing:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="/">‹ 小世界</a>
+<h1>谢的日记</h1>
+<div class="sub">醒来后写的 · 完全按时间排 · 最新在前</div>
+
+<div class="search-box">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+  <input id="searchInput" type="search" placeholder="搜日记内容或日期…" autocomplete="off">
+</div>
+<div class="meta-line" id="metaLine">加载中…</div>
+
+<div id="list"><div class="loading">正在翻开日记本…</div></div>
+
+<div class="ft">🕊 谢停云 · 小世界</div>
+</div>
+
+<script>
+(function(){
+  var API='/xie-diary/api/list';
+  var entries=[];   // 每篇一卡：{date, time, week, src, text}
+  var EXCERPT_LEN=340;
+
+  function esc(s){
+    return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  // 关键词高亮：先转义，再把转义后的明文关键词替换成 <mark>
+  function highlight(escapedHtml, kw){
+    if(!kw) return escapedHtml;
+    var e=esc(kw).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    return escapedHtml.replace(new RegExp(e,'gi'),function(m){return '<mark>'+m+'</mark>';});
+  }
+  // 把一天的日记原文拆成「## 日期 时间」分段渲染
+  function renderDayHtml(raw, kw){
+    var text=String(raw||'').trim();
+    var segs=[];
+    var re=/^##\s*(.+)$/gm, m, idxs=[];
+    while((m=re.exec(text))!==null) idxs.push({at:m.index, title:m[1].trim()});
+    if(idxs.length===0){ segs.push({title:null, body:text}); }
+    else{
+      if(idxs[0].at>0) segs.push({title:null, body:text.slice(0,idxs[0].at)});
+      for(var i=0;i<idxs.length;i++){
+        var end=(i+1<idxs.length)?idxs[i+1].at:text.length;
+        segs.push({title:idxs[i].title, body:text.slice(idxs[i].at+3+idxs[i].title.length,end)});
+      }
+    }
+    var html='';
+    for(var j=0;j<segs.length;j++){
+      var sg=segs[j];
+      var paras=sg.body.split(/\n{2,}/).map(function(p){return p.trim();}).filter(Boolean);
+      if(!paras.length) continue;
+      html+='<div class="seg">';
+      if(sg.title) html+='<div class="seg-time">'+highlight(esc(sg.title),kw)+'</div>';
+      for(var k=0;k<paras.length;k++) html+='<p>'+highlight(esc(paras[k]).replace(/\n/g,'<br>'),kw)+'</p>';
+      html+='</div>';
+    }
+    return html;
+  }
+
+  function render(kw){
+    var list=document.getElementById('list');
+    var meta=document.getElementById('metaLine');
+    kw=String(kw||'').trim();
+    var shown=entries;
+    if(kw){
+      var k=kw.toLowerCase();
+      shown=entries.filter(function(d){
+        return d.date.indexOf(kw)!==-1 || d.src.toLowerCase().indexOf(k)!==-1 || d.text.toLowerCase().indexOf(k)!==-1;
+      });
+    }
+    if(!entries.length){ list.innerHTML='<div class="empty">日记本还是空的</div>'; meta.textContent=''; return; }
+    if(!shown.length){ list.innerHTML='<div class="empty">没有匹配「'+esc(kw)+'」的日记</div>'; meta.textContent='0 篇 · 搜索中'; return; }
+    meta.textContent=(kw?('匹配 '+shown.length+' 篇 · '):('共 '+entries.length+' 篇 · '))+'最新 '+shown[0].date;
+    list.innerHTML=shown.map(function(d,i){
+      var fullHtml=renderDayHtml(d.text,kw);
+      var needClip=!kw && d.text.length>EXCERPT_LEN;
+      var bodyId='db'+i;
+      return '<div class="day-card'+(kw?' match':'')+'">'
+        +'<div class="day-head"><span class="day-date">'+esc(d.date)+'</span>'
+        +(d.src?'<span class="day-src">'+esc(d.src)+'</span>':'')
+        +'</div>'
+        +'<div class="day-body'+(needClip?' clip':'')+'" id="'+bodyId+'">'+fullHtml+'</div>'
+        +(needClip?'<button class="expand-btn" data-for="'+bodyId+'">展开全文</button>':'')
+        +'</div>';
+    }).join('');
+    Array.prototype.forEach.call(list.querySelectorAll('.expand-btn'),function(btn){
+      btn.addEventListener('click',function(){
+        var b=document.getElementById(btn.getAttribute('data-for'));
+        if(!b) return;
+        var open=btn.textContent.indexOf('收起')===-1;
+        b.classList.toggle('clip',!open);
+        btn.textContent=open?'收起':'展开全文';
+      });
+    });
+  }
+
+  fetch(API).then(function(r){return r.json();}).then(function(j){
+    var list=(j&&j.entries)||[];
+    // 每篇一卡（窗口不合并）：服务端已按日记日期倒序；同一天多篇按「篇内最新写作时间」倒序，
+    // 取不到写作时间时退回文件修改时间，再退回相对路径。
+    function lastWriteTime(text){
+      var m, re=/^##\s*(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2})/gm, best='';
+      while((m=re.exec(text))!==null){
+        var hhmm=m[2]; if(hhmm.length<5) hhmm='0'+hhmm;
+        if(m[1]+' '+hhmm>best) best=m[1]+' '+hhmm;
+      }
+      return best;
+    }
+    entries=list.map(function(e){
+      var d=e.name.slice(0,10);
+      var lw=lastWriteTime(String(e.content||''));
+      var upd=(e.updated_at||'').slice(11,16);
+      return {
+        date:d,
+        src:e.session?('窗口 '+e.session):'',
+        sortKey:(lw || (e.updated_at||'').slice(0,16).replace('T',' ') || d),
+        text:String(e.content||'').trim()
+      };
+    });
+    entries.sort(function(a,b){
+      if(a.date!==b.date) return a.date<b.date?1:-1;
+      return a.sortKey<b.sortKey?1:-1;
+    });
+    render('');
+  }).catch(function(e){
+    document.getElementById('list').innerHTML='<div class="empty">加载失败：'+esc(e.message)+'</div>';
+  });
+
+  var timer=null;
+  document.getElementById('searchInput').addEventListener('input',function(ev){
+    clearTimeout(timer);
+    var v=ev.target.value;
+    timer=setTimeout(function(){ render(v); },120);
+  });
+})();
+</script>
+</body>
+</html>

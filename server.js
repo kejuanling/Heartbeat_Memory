@@ -2085,7 +2085,20 @@ function buildCrossMemorySnapshot(sessionId) {
     }
   } catch (e) { console.warn("[cross-snapshot] 读取快照失败:", e.message); }
   if (!createdIso) createdIso = new Date().toISOString();
-  // 未创建：本次抓一次并落盘
+  const text = computeCrossMemoryText(cfg, createdIso);
+  // 只有非空才落盘（有内容才固定；空则下次重试，避免把永远为空的会话锁死）
+  if (text) {
+    try {
+      fs.ensureDirSync(CROSS_SNAPSHOT_DIR);
+      fs.writeJsonSync(file, { session: sessionId || "default", created_at: createdIso, captured_at: new Date().toISOString(), version: CROSS_SNAPSHOT_VERSION, fingerprint: fp, text });
+    } catch (e) { console.warn("[cross-snapshot] 写入快照失败:", e.message); }
+  }
+  return text;
+}
+
+// 跨窗口注入正文实时计算（不读不写快照）：置顶记忆 + 截至会话创建日的近期日记。
+// 2026-09-13 增：菜单页「跨窗口注入」预览改用本函数每次实时重算，不再显示开窗口时固定的旧快照。
+function computeCrossMemoryText(cfg, createdIso) {
   const parts = [];
   if (cfg.cross_inject_memory !== false) {
     // 相关记忆：只固定「置顶」记忆（手动置顶 + 多次检索自动置顶），不限制条数。
@@ -2097,18 +2110,10 @@ function buildCrossMemorySnapshot(sessionId) {
   }
   // 日记：跨窗口注入（快照的一部分），只注入"本会话创建日期之前"的日记。
   if (cfg.cross_inject_diary !== false) {
-    const dt = recentDiaryTextBefore(sessionId, Number(cfg.cross_inject_diary_count) || 3, createdIso);
+    const dt = recentDiaryTextBefore(undefined, Number(cfg.cross_inject_diary_count) || 3, createdIso);
     if (dt) parts.push("## 近期日记\n" + dt);
   }
-  const text = parts.join("\n\n");
-  // 只有非空才落盘（有内容才固定；空则下次重试，避免把永远为空的会话锁死）
-  if (text) {
-    try {
-      fs.ensureDirSync(CROSS_SNAPSHOT_DIR);
-      fs.writeJsonSync(file, { session: sessionId || "default", created_at: createdIso, captured_at: new Date().toISOString(), version: CROSS_SNAPSHOT_VERSION, fingerprint: fp, text });
-    } catch (e) { console.warn("[cross-snapshot] 写入快照失败:", e.message); }
-  }
-  return text;
+  return parts.join("\n\n");
 }
 
 
@@ -2509,7 +2514,9 @@ function readDiaryEntries(limit) {
   };
   scan("");
   for (const s of diarySessionDirs()) scan(s);
-  out.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  // 2026-09-13：管理台/菜单页一览改「完全按日记时间排」，按文件名日期（非修改时间）倒序，
+  // 同一天多会话文件按相对路径倒序兜底；编辑旧日记不再把旧篇顶到最前。
+  out.sort((a, b) => (b.name.localeCompare(a.name)) || (String(b.relPath).localeCompare(String(a.relPath))));
   return limit ? out.slice(0, limit) : out;
 }
 
@@ -3467,10 +3474,24 @@ require("./routes/push-events")(app, { basicAuth, baseDir: __dirname });
 
 app.get("/admin/cross-window-inject", { preHandler: basicAuth }, async (req, reply) => {
   try {
-    // 与 /v1/chat/completions 实际注入保持一致：返回该会话的真实快照内容（buildCrossMemorySnapshot）
+    // 2026-09-13：预览改「每次实时重算」（computeCrossMemoryText），不再复用开窗口时落盘固定的旧快照；
+    // 边界仍用本会话创建日（优先时间线首条消息，其次旧快照固化的 created_at），与实际注入同口径，只算不落盘。
     const sid = String(req.query && req.query.session_id ? req.query.session_id : "").trim() || "default";
     let text = "";
-    try { text = buildCrossMemorySnapshot(sid); } catch (cx) { console.warn("[cross-inject] 预览失败:", cx.message); }
+    try {
+      const cfg = memoryPool.getConfig();
+      const cfgOverride = sessionCrossInjectOverride(sid);
+      if (cfgOverride !== false && cfg.cross_inject_enabled !== false) {
+        let createdIso = sessionCreatedAtOf(sid);
+        if (!createdIso) {
+          try {
+            const snapFile = crossSnapshotFile(sid);
+            if (fs.existsSync(snapFile)) createdIso = (fs.readJsonSync(snapFile) || {}).created_at;
+          } catch (e) {}
+        }
+        text = computeCrossMemoryText(cfg, createdIso);
+      }
+    } catch (cx) { console.warn("[cross-inject] 预览失败:", cx.message); }
     reply.send({ text: text, session_id: sid });
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
@@ -5295,6 +5316,23 @@ app.get("/papers/api/read", async (req, reply) => {
     reply.send({ file: r.rel, content: fs.readFileSync(r.full, "utf-8") });
   } catch (err) {
     console.error("[papers] 门户读取失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// ========================
+// 门户：谢的日记（只读，2026-09-13）
+// 数据源 = diary/ 全目录（共享层 + 各会话目录），与跨窗口注入同一扫描口径但**不做隐藏过滤、不做日期边界**：
+// 这是用户自己的阅览页，隐藏只影响注入给 AI，页面上全部显示；同一天多文件由前端按天合并展示。
+// ========================
+app.get("/xie-diary/api/list", async (req, reply) => {
+  try {
+    const entries = readDiaryEntries().map(e => ({
+      name: e.name, relPath: e.relPath, session: e.session, updated_at: e.updated_at, content: e.content
+    }));
+    reply.send({ entries });
+  } catch (err) {
+    console.error("[xie-diary] 门户列表失败:", err);
     reply.code(500).send({ error: err.message });
   }
 });
