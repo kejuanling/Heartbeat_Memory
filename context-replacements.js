@@ -1979,94 +1979,36 @@ function _tfidfSearchMessages(messages, query, limit, threshold) {
 }
 
 // ── 本地语义向量检索（embed-server，bge-small-zh-v1.5） ──
-// 消息向量缓存 data/context_msg_vectors.json：{ ver, order:[sig...], vecs:{ sig: base64(Float32Array) } }
-// sig = sha1(检索文本) 前 16 位，内容不变即可复用；上限 2 万条，超出按插入顺序淘汰。
+// sig = sha1(检索文本) 前 16 位，内容不变即可复用。
+// 批注 2026-09-13（阶段4）：缓存从 38MB JSON 全量 stringify 落盘（即使 D1 防抖+原子写，
+// 每次落盘仍阻塞事件循环）改为 node:sqlite（lib/msg-vector-store.js，零新依赖）：sig 主键
+// upsert、点积按需取行 + L1 小缓存、超 2 万条 SQL 淘汰；首次启动自动迁移旧 JSON（成功后
+// 改名 .migrated 保留，回滚=代码改回旧版+把 .migrated 改回原名）。
 // 服务不可用（熔断）/超时 → 自动回退 _tfidfSearchMessages（旧字面逻辑），主链路不受影响。
 const embedClient = require("./utils/embed-client");
-const MSG_VECTOR_FILE = path.join(DATA_DIR, "context_msg_vectors.json");
-const MSG_VECTOR_MAX = 20000;
+const msgVecStore = require("./lib/msg-vector-store");
 const MSG_VECTOR_EMBED_CAP = 32;    // 单次检索最多补算条数（长文单条 100-300ms，32 条 ~5s 内；全量靠 warmup）
-let msgVecMap = null;               // Map sig -> Float32Array（已归一化）
-let msgVecOrder = [];
-let msgVecDirty = false;
-let msgVecSaveTimer = null;
 
 function _sigOfText(t) {
   return crypto.createHash("sha1").update(String(t || "")).digest("hex").slice(0, 16);
-}
-
-function _b64ToF32(b64) {
-  const buf = Buffer.from(b64, "base64");
-  return new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 4));
-}
-
-function _f32ToB64(arr) {
-  return Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength).toString("base64");
-}
-
-function _msgVecLoad() {
-  if (msgVecMap) return msgVecMap;
-  msgVecMap = new Map();
-  try {
-    const raw = JSON.parse(fs.readFileSync(MSG_VECTOR_FILE, "utf8"));
-    const vecs = raw && raw.vecs && typeof raw.vecs === "object" ? raw.vecs : {};
-    const order = Array.isArray(raw.order) ? raw.order : Object.keys(vecs);
-    for (const sig of order) {
-      if (!vecs[sig]) continue;
-      const v = _b64ToF32(vecs[sig]);
-      if (v.length) { msgVecMap.set(sig, v); msgVecOrder.push(sig); }
-    }
-  } catch (e) { /* 无缓存文件，冷启动 */ }
-  return msgVecMap;
-}
-
-function _msgVecScheduleSave() {
-  msgVecDirty = true;
-  if (msgVecSaveTimer) return;
-  msgVecSaveTimer = setTimeout(function () {
-    msgVecSaveTimer = null;
-    if (!msgVecDirty) return;
-    msgVecDirty = false;
-    try {
-      while (msgVecOrder.length > MSG_VECTOR_MAX) msgVecMap.delete(msgVecOrder.shift());
-      const vecs = {};
-      for (const sig of msgVecOrder) {
-        const v = msgVecMap.get(sig);
-        if (v) vecs[sig] = _f32ToB64(v);
-      }
-      // 批注 2026-09-13（审查 D1）：改临时文件+rename 原子写。此前 writeFileSync 直写
-      // 30MB+ 大文件，进程被 pm2 杀掉/掉电瞬间会截断损坏，冷启动全量重嵌；
-      // 防抖 3s→120s：向量是可再生缓存，崩溃最多丢 2 分钟增量，却把预热期的
-      // 「每 3 秒一次全量 stringify+写盘」事件循环阻塞降为偶发。
-      const tmp = MSG_VECTOR_FILE + ".tmp-" + process.pid + "-" + Date.now();
-      fs.writeFileSync(tmp, JSON.stringify({ ver: 1, order: msgVecOrder, vecs }));
-      fs.renameSync(tmp, MSG_VECTOR_FILE);
-    } catch (e) { /* 写失败只影响下次冷启动 */ }
-  }, 120000);
-}
-
-function _msgVecSet(sig, v) {
-  const m = _msgVecLoad();
-  if (!m.has(sig)) msgVecOrder.push(sig);
-  else msgVecOrder = msgVecOrder.filter(function (s) { return s !== sig; }).concat([sig]);
-  m.set(sig, Float32Array.from(v));
-  _msgVecScheduleSave();
 }
 
 // 核心补算：给一组文本补缺失向量（无上限，调用方自己分批）；返回 false = embed 不可用
 // 嵌入输入统一截前 256 字符：长消息全量嵌入单条要 100-300ms 且稀释主题；前 256 字（2-3 句）主题表征足够，吞吐翻倍
 const MSG_TEXT_CLIP = 256;
 async function _ensureMsgVectorsRaw(texts, timeoutMs) {
-  const m = _msgVecLoad();
-  const missing = [];
+  const cands = [];
+  const seen = new Set();
   for (const t of texts) {
     const sig = _sigOfText(t);
-    if (!m.has(sig) && !missing.some(function (x) { return x.sig === sig; })) missing.push({ sig: sig, text: String(t).slice(0, MSG_TEXT_CLIP) });
+    if (!seen.has(sig)) { seen.add(sig); cands.push({ sig: sig, text: String(t).slice(0, MSG_TEXT_CLIP) }); }
   }
+  const known = msgVecStore.getMany(cands.map(function (x) { return x.sig; }));
+  const missing = cands.filter(function (x) { return !known.has(x.sig); });
   if (!missing.length) return true;
   const vecs = await embedClient.embedBatch(missing.map(function (x) { return x.text; }), false, timeoutMs || 15000);
   if (!vecs) return false;
-  missing.forEach(function (x, i) { if (vecs[i] && vecs[i].length) _msgVecSet(x.sig, vecs[i]); });
+  missing.forEach(function (x, i) { if (vecs[i] && vecs[i].length) msgVecStore.set(x.sig, vecs[i]); });
   return true;
 }
 
@@ -2088,7 +2030,7 @@ async function semanticSearchMessages(messages, query, limit, threshold) {
   const qv = await embedClient.embedBatch([String(query || "")], true, 8000);
   if (!qv) return _tfidfSearchMessages(messages, query, limit, 0.08);
   const q = Float32Array.from(qv[0]);
-  const m = _msgVecLoad();
+  const m = msgVecStore.getMany(items.map(function (x) { return _sigOfText(x.text); }));
   const results = [];
   for (const it of items) {
     const v = m.get(_sigOfText(it.text));
