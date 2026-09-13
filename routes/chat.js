@@ -542,13 +542,13 @@ module.exports = function registerChatRoutes(app, deps) {
       reply.code(500).send({ error: err.message });
     }
   });
-  // 跨会话全量搜索：扫描所有会话时间线，支持关键词/语义两种模式（语义=TF-IDF+bigram）。
+  // 跨会话全量搜索：扫描所有会话时间线，混合模式 = 语义分（TF-IDF+bigram 余弦）与关键词命中分五五开合成排序。
+  // 语义索引只存两字 bigram，单字/纯符号查询在语义侧必为 0 分，靠关键词腿保底（2026-09-13，替代原 semantic|keyword 二选一）。
   app.get('/v1/search', async (req, reply) => {
     try {
       const q = String(req.query.q || '').trim();
-      const mode = String(req.query.mode || 'keyword').trim() === 'semantic' ? 'semantic' : 'keyword';
       const limit = Math.min(Number(req.query.limit) || 200, 500);
-      if (!q) return reply.send({ ok: true, mode, total: 0, results: [] });
+      if (!q) return reply.send({ ok: true, mode: 'hybrid', total: 0, results: [] });
       const files = fsp.readdirSync(baseDir).filter(f => f === 'enhanced_messages.json' || /^enhanced_messages[_-][A-Za-z0-9_-]+\.json$/.test(f));
       const ql = q.toLowerCase();
       // 指纹缓存：任一时间线文件变化（mtime/size/增删）才重建 items，否则直接复用
@@ -578,22 +578,24 @@ module.exports = function registerChatRoutes(app, deps) {
         searchIndexCache.fp = fp;
         searchIndexCache.items = items;
       }
-      let results = [];
-      if (mode === 'keyword') {
-        items.forEach(it => { if (it.text.toLowerCase().includes(ql)) results.push({ sid: it.sid, sidx: it.sidx, name: it.name, text: it.text, score: 1 }); });
-        results = results.slice(0, limit);
-      } else {
-        // 指纹命中时直接复用已建索引（TF-IDF 建索引是大头，不能每次请求重跑）
-        let index = (searchIndexCache.fp === fp) ? searchIndexCache.index : null;
-        if (!index) {
-          index = buildSemIndex(items);
-          searchIndexCache.fp = fp;
-          searchIndexCache.index = index;
-        }
-        const hits = semanticSearch(index, q, 0.06);
-        results = hits.slice(0, limit).map(h => { const it = index.items[h.i]; return { sid: it.sid, sidx: it.sidx, name: it.name, text: it.text, score: h.score }; });
+      // 指纹命中时直接复用已建索引（TF-IDF 建索引是大头，不能每次请求重跑）
+      let index = (searchIndexCache.fp === fp) ? searchIndexCache.index : null;
+      if (!index) {
+        index = buildSemIndex(items);
+        searchIndexCache.fp = fp;
+        searchIndexCache.index = index;
       }
-      reply.send({ ok: true, mode, total: results.length, results });
+      const semScores = new Array(items.length).fill(0);
+      semanticSearch(index, q, 0.05).forEach(h => { semScores[h.i] = h.score; });
+      // 总分 = 语义 50% + 关键词 50%（关键词命中=1 否则 0）；任一腿有分即入结果，按总分降序
+      const results = [];
+      items.forEach((it, i) => {
+        const kw = it.text.toLowerCase().includes(ql) ? 1 : 0;
+        const score = 0.5 * semScores[i] + 0.5 * kw;
+        if (score > 0) results.push({ sid: it.sid, sidx: it.sidx, name: it.name, text: it.text, score });
+      });
+      results.sort((a, b) => b.score - a.score);
+      reply.send({ ok: true, mode: 'hybrid', total: results.length, results: results.slice(0, limit) });
     } catch (err) {
       console.error('[GET /v1/search] error:', err.message);
       reply.code(500).send({ error: err.message });
