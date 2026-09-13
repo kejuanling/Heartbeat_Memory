@@ -216,8 +216,6 @@ function timelineFileFor(sessionId) {
   if (token === "default") return TIMELINE_FILE;
   return "enhanced_messages_" + token + ".json";
 }
-// 对话侧闹钟与唤醒侧共用同一份调度文件：gateway 写入，wake-up 轮询感知后挂定时器
-const WAKE_SCHEDULE_PATH = path.join(__dirname, "data", "wake_schedule.json");
 // 批注 2026-07-17：管理页保存 .env 后要让 PM2 刷新进程环境；保留原进程名，
 // 只补 --update-env，避免用户改完推送配置却继续运行旧值。
 const DEFAULT_RESTART_COMMAND = "cd /opt/dylan-heartbeat && pm2 restart wake-up gateway --update-env 2>&1";
@@ -459,19 +457,12 @@ function summarizeMessagesForLog(messages = []) {
 // 上游（如 DeepSeek）会把 <memory>/<pin> 拆成 <、memory、> 等多个 SSE 事件，
 // 字节层找不到完整标签，必须在 content 文本层做带缓冲的过滤。
 // ========================
-// 与 wake-up 进程共用同一份 wake_schedule.json（v2 多会话 per-session 槽位）：原子写入，wake-up 轮询感知后重新挂定时器
+// 与 wake-up 进程共用同一份 wake_schedule.json（v2 多会话 per-session 槽位）：
+// 读写已收口到 lib/wake-schedule.js（跨进程文件锁 + 锁内重读合并 + 损坏拒写），
+// wake-up 轮询感知后重新挂定时器。批注 2026-09-13（审查 D3）。
+const wakeSchedule = require("./lib/wake-schedule");
 function saveWakeSchedule(nextWakeAtIso, sessionId) {
-  const sid = String(sessionId || "default").trim() || "default";
-  fs.ensureDirSync(path.dirname(WAKE_SCHEDULE_PATH));
-  let data = {};
-  try { const cur = JSON.parse(fs.readFileSync(WAKE_SCHEDULE_PATH, "utf-8")); if (cur && typeof cur === "object") data = cur; } catch {}
-  const sessions = (data.sessions && typeof data.sessions === "object") ? data.sessions : {};
-  sessions[sid] = { next_wake_at: nextWakeAtIso, updated_at: new Date().toISOString() };
-  data.version = 2;
-  data.sessions = sessions;
-  const tmp = WAKE_SCHEDULE_PATH + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
-  fs.renameSync(tmp, WAKE_SCHEDULE_PATH);
+  return wakeSchedule.saveSlot(nextWakeAtIso, sessionId);
 }
 
 // 对话侧 <wake> 闹钟标签：AI 在对话里设置闹钟（日期时间或分钟）；标签不显示给用户。

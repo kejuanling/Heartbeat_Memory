@@ -80,6 +80,8 @@ const {
 } = require("./time_utils");
 
 const TIMELINE_PATH = path.join(__dirname, "enhanced_messages.json");
+// 调度文件读写收口到共享模块（跨进程文件锁+损坏拒写，审查 D3）；WAKE_SCHEDULE_PATH 保留给只读路径使用
+const wakeSchedule = require("./lib/wake-schedule");
 const WAKE_SCHEDULE_PATH = path.join(__dirname, "data", "wake_schedule.json");
 const WAKE_LOCKED_PATH = path.join(__dirname, "data", "wake-locked.json");
 const SESSION_NAMES_PATH = path.join(__dirname, "data", "session-names.json");
@@ -600,13 +602,8 @@ function readWakeScheduleFor(sessionId) {
   return (entry && entry.next_wake_at) ? { ...entry, session: sid } : null;
 }
 
-// v2：写入 schedule 对象（原子）
-function writeWakeScheduleRaw(data) {
-  fs.mkdirSync(path.dirname(WAKE_SCHEDULE_PATH), { recursive: true });
-  const tmp = WAKE_SCHEDULE_PATH + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
-  fs.renameSync(tmp, WAKE_SCHEDULE_PATH);
-}
+// v2：写入 schedule 对象已收口到 lib/wake-schedule.js（saveSlot/clearSlot/pruneExpired，审查 D3）；
+// 本进程对调度文件只剩只读路径（readWakeScheduleRaw/轮询 mtime）。
 
 // v2：所有会话调度里最近一个未来时间点（用于挂内存定时器）；无 → null
 function nextWakeFromAnySession() {
@@ -644,21 +641,9 @@ function getDueWakeSessionIds() {
 }
 
 // v2：删除所有已过期（<= now + 宽限窗，与 getDueWakeSessionIds 同一口径）或无效的会话调度条，写回文件；返回是否有改动
+// 批注 2026-09-13（审查 D3）：收口到共享模块（跨进程锁+损坏拒写）
 function pruneExpiredSchedules() {
-  const data = readWakeScheduleRaw();
-  if (!data || !data.sessions) return false;
-  const now = Date.now();
-  let changed = false;
-  for (const sid of Object.keys(data.sessions)) {
-    const e = data.sessions[sid];
-    const t = e && e.next_wake_at ? new Date(e.next_wake_at) : null;
-    if (!e || !e.next_wake_at || isNaN(t.getTime()) || t.getTime() <= now + WAKE_DUE_GRACE_MS) {
-      delete data.sessions[sid];
-      changed = true;
-    }
-  }
-  if (changed) writeWakeScheduleRaw(data);
-  return changed;
+  return wakeSchedule.pruneExpired(WAKE_DUE_GRACE_MS);
 }
 
 // v2 按会话作废判定：该会话设定闹钟(updated_at)之后，该会话内是否又出现用户消息
@@ -693,25 +678,16 @@ function isUserActiveSince(schedule) {
 }
 
 function saveWakeSchedule(nextWakeAtIso, sessionId) {
-  const sid = String(sessionId || "default").trim() || "default";
-  let data = {};
-  try { const cur = readWakeScheduleRaw(); if (cur) data = cur; } catch {}
-  if (!data || typeof data !== "object") data = {};
-  const sessions = (data.sessions && typeof data.sessions === "object") ? data.sessions : {};
-  sessions[sid] = { next_wake_at: nextWakeAtIso, updated_at: new Date().toISOString() };
-  data.version = 2;
-  data.sessions = sessions;
-  fs.mkdirSync(path.dirname(WAKE_SCHEDULE_PATH), { recursive: true });
-  const tmp = WAKE_SCHEDULE_PATH + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
-  fs.renameSync(tmp, WAKE_SCHEDULE_PATH);
+  // 批注 2026-09-13（审查 D3）：收口到共享模块（跨进程锁+锁内重读合并+损坏拒写）
+  wakeSchedule.saveSlot(nextWakeAtIso, sessionId);
 }
 // 清理定时唤醒（v2 按会话）：传入 sessionId 清该会话槽位并重挂内存定时器；
 // 不传（或空）则清空全部会话调度并取消内存定时器（触发后 / 已过期 / 作废时调用）
 function clearWakeSchedule(sessionId) {
   if (sessionId === undefined || sessionId === null || String(sessionId).trim() === "") {
     try {
-      if (fs.existsSync(WAKE_SCHEDULE_PATH)) writeWakeScheduleRaw({ version: 2, sessions: {} });
+      // 批注 2026-09-13（审查 D3）：清空走共享模块（跨进程锁）
+      wakeSchedule.clearSlot();
     } catch (err) {
       console.warn("[wake-up] 清理全部定时唤醒失败:", err.message);
     }
@@ -721,15 +697,8 @@ function clearWakeSchedule(sessionId) {
   const sid = String(sessionId).trim() || "default";
   let changed = false;
   try {
-    const data = readWakeScheduleRaw();
-    if (data && data.sessions && data.sessions[sid]) {
-      delete data.sessions[sid];
-      writeWakeScheduleRaw(data);
-      changed = true;
-    } else if (data && !data.sessions && sid === "default" && data.next_wake_at) {
-      writeWakeScheduleRaw({ version: 2, sessions: {} });
-      changed = true;
-    }
+    // 批注 2026-09-13（审查 D3）：清槽位走共享模块（跨进程锁+损坏拒写）
+    changed = wakeSchedule.clearSlot(sid);
   } catch (err) {
     console.warn("[wake-up] 清理定时唤醒失败:", err.message);
   }
