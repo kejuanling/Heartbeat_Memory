@@ -128,6 +128,8 @@ body[data-style="zen"] ::-webkit-scrollbar-track{background:transparent}
 @media (prefers-reduced-motion: reduce){
   body[data-style="zen"] .msg .bubble,body[data-style="zen"] .inputbar{transition:none}
 }
+/* 背景图虚化（0913-11）：bg_blur>0 且图片背景时对聊天容器做背景磨砂（只虚化 body 背景，不虚化内容） */
+body[data-bgblur="1"] #chat{backdrop-filter:blur(var(--bg-blur,8px));-webkit-backdrop-filter:blur(var(--bg-blur,8px))}
 
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{height:100%}
@@ -257,17 +259,19 @@ header.hd-custom .hd-mid{align-items:flex-start}
 #editInput{min-height:340px;line-height:1.7}
 #editMask .sheet{width:100%;max-width:min(96vw,1100px);}
 .msg .bubble{
-  padding:11px 14px;border-radius:var(--radius);
-  font-size:var(--bubble-font-size,15px);line-height:1.72;word-break:break-word;
+  padding:var(--bubble-padding,11px 14px);border-radius:var(--radius);
+  font-size:var(--bubble-font-size,15px);line-height:var(--bubble-line-height,1.72);word-break:break-word;
+  font-weight:var(--bubble-font-weight,400);letter-spacing:var(--bubble-letter-spacing,0em);
   box-shadow:0 3px 14px var(--bubble-shadow,rgba(var(--shadow-rgb),.10));
-  max-width:84%;width:fit-content;
+  max-width:var(--bubble-max-width,84%);width:fit-content;
   white-space:pre-wrap;overflow-wrap:break-word;
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;position:relative;
   backdrop-filter:blur(var(--bubble-blur));-webkit-backdrop-filter:blur(var(--bubble-blur));
+  transition:background-color var(--theme-dur,0ms) ease,color var(--theme-dur,0ms) ease,border-color var(--theme-dur,0ms) ease;
 }
-.msg .bubble p{margin:0 0 8px;white-space:pre-wrap}
+.msg .bubble p{margin:0 0 var(--bubble-para-gap,8px);white-space:pre-wrap}
 .msg .bubble p:last-child{margin-bottom:0}
-.msg .bubble br{content:"";line-height:1.72}
+.msg .bubble br{content:"";line-height:var(--bubble-line-height,1.72)}
 .msg.user .bubble{
   background:var(--bubble-user1);
   color:var(--user-font-color,#fff);
@@ -279,23 +283,23 @@ header.hd-custom .hd-mid{align-items:flex-start}
 }
 /* ---- 聊天布局切换：QQ / 微信 / 短信 / 自定义 ---- */
 /* 布局级：QQ=微信=短信 用一体尾巴（颜色跟主题联动）；自定义=纯 CSS 无尾。 */
-#chat .msg{margin-bottom:12px}
+#chat .msg{margin-bottom:var(--msg-gap,12px)}
 /* 通用：侧边头像结构（自定义也用一个干净的位置） */
 #chat[data-layout] .mrow{display:flex;align-items:flex-start;gap:7px;width:100%;max-width:100%}
 #chat[data-layout] .msg.ai .mrow{flex-direction:row}
 #chat[data-layout] .msg.user .mrow{flex-direction:row-reverse}
-#chat[data-layout] .mrow .mav{width:34px;height:34px;border-radius:50%;flex-shrink:0;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--accent-grad);color:#fff;font-size:15px;font-family:var(--title-font,"Noto Serif SC",serif);box-shadow:0 1px 4px rgba(var(--shadow-rgb),.2)}
+#chat[data-layout] .mrow .mav{width:var(--avatar-size,34px);height:var(--avatar-size,34px);border-radius:var(--avatar-radius,50%);flex-shrink:0;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--accent-grad);color:#fff;font-size:15px;font-family:var(--title-font,"Noto Serif SC",serif);box-shadow:0 1px 4px rgba(var(--shadow-rgb),.2)}
 #chat[data-layout] .msg.ai .mrow .mav{background:linear-gradient(135deg,var(--accent-deep),#9d8f8a)}
-#chat[data-layout] .mrow .mav img{width:100%;height:100%;object-fit:contain;display:block;background:var(--field-bg,#fff)}
+#chat[data-layout] .mrow .mav img{width:100%;height:100%;object-fit:contain;display:block;border-radius:inherit;background:var(--field-bg,#fff)}
 /* 头像对齐气泡顶部（有名称行时下移一个名称行高；无名称时对齐顶部） */
 #chat[data-layout] .mrow .mav{margin-top:16px}
 #chat[data-layout] .mrow:not(:has(.mnm)) .mav{margin-top:0}
 #chat[data-layout] .mrow .mcol{display:flex;flex-direction:column;gap:3px;flex:1;min-width:0;max-width:100%;align-items:flex-start}
 /* 气泡自然取内容宽（短消息不竖排，长消息自动换行） */
-#chat[data-layout] .mrow .mcol .bubble{max-width:84%}
+#chat[data-layout] .mrow .mcol .bubble{max-width:var(--bubble-max-width,84%)}
 /* 气泡最大宽度(参考微信~72%): 短消息自然宽, 长消息不超容器 75% */
 /* 气泡最大宽度(参考微信~72%): 对所有布局生效(含 custom), 长消息自动换行不再撑满 */
-#chat .mrow .mcol .bubble{max-width:84%}
+#chat .mrow .mcol .bubble{max-width:var(--bubble-max-width,84%)}
 #chat[data-layout] .msg.user .mrow .mcol{align-items:flex-end}
 #chat[data-layout] .mcol .mnm{font-size:10.5px;color:var(--ink2);margin:0 3px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #chat[data-layout] .msg.user .mcol .mnm{color:rgba(255,255,255,.75)}
@@ -486,7 +490,7 @@ footer{
   display:flex;align-items:center;gap:8px;
   background:var(--inputbar-bg);
   border:1px solid var(--inputbar-border);
-  border-radius:24px;padding:7px 8px 7px 14px;
+  border-radius:var(--inputbar-radius,24px);padding:7px 8px 7px 14px;
   box-shadow:0 4px 16px rgba(var(--shadow-rgb),.10);
 }
 .inputbar:focus-within{border-color:var(--inputbar-border)}
@@ -675,10 +679,14 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .saved-theme{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;cursor:pointer;font-size:13px;color:var(--ink)}
 .saved-theme:active{background:var(--accent-soft)}
 .theme-row input[type="text"]{flex:1;width:100%;border:1px solid var(--line);border-radius:var(--radius-sm);padding:9px 11px;font-size:13px;color:var(--ink);outline:none;background:var(--field-bg,#fff);font-family:inherit}
-.theme-preview{height:44px;border-radius:var(--radius-sm);border:1px solid var(--line);position:relative;overflow:hidden;margin-top:8px;display:flex;align-items:flex-end;padding:8px;gap:6px}
-.theme-preview .pu,.theme-preview .pa{border-radius:10px;padding:5px 9px;font-size:11px}
-.theme-preview .pu{background:linear-gradient(135deg,var(--bubble-user1),var(--bubble-user2));color:#fff;margin-left:auto}
-.theme-preview .pa{background:var(--bubble-ai);color:var(--ink);border:1px solid var(--line)}
+/* 迷你对话实时预览（0913-11 升级）：随主题变量实时反映配色/圆角/排版/头像形状 */
+.theme-preview{border-radius:var(--radius-sm);border:1px solid var(--line);position:relative;overflow:hidden;margin-top:8px;padding:10px 8px;display:flex;flex-direction:column;gap:7px;background:var(--card,transparent)}
+.theme-preview .tp-row{display:flex;align-items:flex-end;gap:6px}
+.theme-preview .tp-row.user{flex-direction:row-reverse}
+.theme-preview .tp-av{width:calc(var(--avatar-size,34px)*0.62);height:calc(var(--avatar-size,34px)*0.62);border-radius:var(--avatar-radius,50%);background:var(--accent-grad);flex-shrink:0;box-shadow:0 1px 3px rgba(var(--shadow-rgb),.18)}
+.theme-preview .tp-b{border-radius:var(--radius);padding:var(--bubble-padding,11px 14px);font-size:10.5px;line-height:var(--bubble-line-height,1.72);letter-spacing:var(--bubble-letter-spacing,0);font-weight:var(--bubble-font-weight,400);max-width:72%;word-break:break-word}
+.theme-preview .tp-row.ai .tp-b{background:var(--bubble-ai);color:var(--ai-font-color,var(--ink));border:1px solid var(--line);border-radius:var(--radius) var(--radius) var(--radius) 6px}
+.theme-preview .tp-row.user .tp-b{background:linear-gradient(135deg,var(--bubble-user1),var(--bubble-user2));color:var(--user-font-color,#fff);border-radius:var(--radius) var(--radius) 6px var(--radius)}
 .mcp-block{margin-top:14px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--accent-faint);padding:12px}
 .mcp-h{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--accent-deep);margin-bottom:10px}
 .mcp-list{margin-bottom:8px}
@@ -1760,6 +1768,12 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
               <button data-bs="sms">短信</button>
               <button data-bs="custom">自定义</button>
             </div>
+            <div class="set-sec-label">风格预设<span class="tag">一键整包套用，再微调</span></div>
+            <div class="pick" id="pickStylePreset">
+              <button data-preset="classic" class="on">经典</button>
+              <button data-preset="zen">素白极简</button>
+              <button data-preset="glass">暗夜玻璃</button>
+            </div>
             <div class="set-sec-label">背景</div>
             <div class="bg-mode-switch" style="display:flex;gap:8px;margin:2px 0 10px">
               <button type="button" class="mcp-btn bg-mode-btn" id="bgModeColorBtn" data-bg="color" style="flex:1">纯色背景</button>
@@ -1795,16 +1809,54 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
               <label>圆角<span class="tag">px</span></label>
               <div class="theme-row"><input type="range" id="bubbleRadius" min="0" max="30" value="18" step="1"><span class="v" id="bubbleRadiusVal">18px</span></div>
             </div>
+            <div class="theme-field">
+              <label>气泡内边距<span class="tag">px</span></label>
+              <div class="theme-row"><input type="range" id="bubblePadInput" min="6" max="18" value="11" step="1"><span class="v" id="bubblePadVal">11px</span></div>
+            </div>
+            <div class="theme-field">
+              <label>气泡最大宽度<span class="tag">%</span></label>
+              <div class="theme-row"><input type="range" id="bubbleMaxWidthInput" min="50" max="95" value="84" step="1"><span class="v" id="bubbleMaxWidthVal">84%</span></div>
+            </div>
+            <div class="theme-field">
+              <label>消息间距<span class="tag">px</span></label>
+              <div class="theme-row"><input type="range" id="msgGapInput" min="0" max="28" value="12" step="1"><span class="v" id="msgGapVal">12px</span></div>
+            </div>
             <div class="set-sec-label">文字</div>
             <div class="theme-field">
               <label>字号<span class="tag">px</span></label>
               <div class="theme-row"><input type="range" id="fontSizeInput" min="12" max="20" value="15" step="1"><span class="v" id="fontSizeVal">15px</span></div>
+            </div>
+            <div class="theme-field">
+              <label>行高</label>
+              <div class="theme-row"><input type="range" id="lineHeightInput" min="1.4" max="2.2" value="1.72" step="0.02"><span class="v" id="lineHeightVal">1.72</span></div>
+            </div>
+            <div class="pick" id="pickFontWeight">
+              <button data-fw="300">细 300</button>
+              <button data-fw="400" class="on">常规 400</button>
+              <button data-fw="500">中 500</button>
+            </div>
+            <div class="theme-field">
+              <label>字间距<span class="tag">em</span></label>
+              <div class="theme-row"><input type="range" id="letterSpacingInput" min="0" max="0.12" value="0" step="0.01"><span class="v" id="letterSpacingVal">0em</span></div>
+            </div>
+            <div class="theme-field">
+              <label>段落间距<span class="tag">px，气泡内分段</span></label>
+              <div class="theme-row"><input type="range" id="paraGapInput" min="0" max="16" value="8" step="1"><span class="v" id="paraGapVal">8px</span></div>
             </div>
             <div class="set-sec-label">头像与名称</div>
             <div class="theme-field"><label>我的名称</label><div class="theme-row"><input type="text" id="userNameInput" placeholder="我" style="flex:1"></div></div>
             <div class="theme-field"><label>我的头像<span class="tag">字/emoji/图片</span></label><div class="theme-row"><input type="text" id="userAvatarInput" placeholder="留空用名字首字" style="flex:1"><button type="button" class="mcp-btn" id="userAvatarUp" style="padding:8px 10px;flex-shrink:0">上传</button></div></div>
             <div class="theme-field"><label>助手名称</label><div class="theme-row"><input type="text" id="thAiNameInput" placeholder="谢意行" style="flex:1"></div></div>
             <div class="theme-field"><label>助手头像<span class="tag">字/emoji/图片</span></label><div class="theme-row"><input type="text" id="aiAvatarInput" placeholder="留空用名字首字" style="flex:1"><button type="button" class="mcp-btn" id="aiAvatarUp" style="padding:8px 10px;flex-shrink:0">上传</button></div></div>
+            <div class="pick" id="pickAvatarShape">
+              <button data-sh="circle" class="on">圆形头像</button>
+              <button data-sh="squircle">圆角方</button>
+              <button data-sh="square">方形</button>
+            </div>
+            <div class="theme-field">
+              <label>头像尺寸<span class="tag">px</span></label>
+              <div class="theme-row"><input type="range" id="avatarSizeInput" min="24" max="48" value="34" step="1"><span class="v" id="avatarSizeVal">34px</span></div>
+            </div>
             <div class="set-sec-label">字体</div>
             <div class="theme-field">
               <label>字体</label>
@@ -1821,11 +1873,31 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
             </div>
             <!-- 窗口级 14 色 / 胶囊 6 色 / 文字 2 色的调色控件已移除（2026-09-11，只留背景+气泡手调）：
                  颜色数据字段全部保留，由「主题」整体切换驱动；applyCustomTheme/applyTheme 逻辑不变 -->
-            <div class="theme-preview" id="themePreview"><span class="pa">助手消息</span><span class="pu">我的消息</span></div>
+            <div class="set-sec-label">效果</div>
+            <div class="theme-field">
+              <label>输入框圆角<span class="tag">px</span></label>
+              <div class="theme-row"><input type="range" id="inputbarRadiusInput" min="8" max="30" value="24" step="1"><span class="v" id="inputbarRadiusVal">24px</span></div>
+            </div>
+            <div class="theme-field">
+              <label>全局过渡<span class="tag">ms，换主题时渐变</span></label>
+              <div class="theme-row"><input type="range" id="animTransInput" min="0" max="500" value="0" step="20"><span class="v" id="animTransVal">0ms</span></div>
+            </div>
+            <div class="theme-field">
+              <label>背景虚化<span class="tag">px，仅图片背景</span></label>
+              <div class="theme-row"><input type="range" id="bgBlurInput" min="0" max="20" value="0" step="1"><span class="v" id="bgBlurVal">0px</span></div>
+            </div>
+            <div class="theme-preview" id="themePreview">
+              <div class="tp-row ai"><span class="tp-av"></span><span class="tp-b">你好呀，今天过得怎么样？</span></div>
+              <div class="tp-row user"><span class="tp-av"></span><span class="tp-b">还不错，刚看完一本书~</span></div>
+            </div>
             <div class="set-sec-label">保存主题</div>
             <div class="theme-save">
               <div class="ts-row"><input type="text" id="themeNameInput" placeholder="主题名（新增主题时必填，留空则仅保存修改）"><button type="button" class="mcp-btn primary ts-btn" id="saveThemeBtn">保存</button></div>
-              <div class="ts-row"><button type="button" class="mcp-btn ts-btn" id="exportThemeBtn">导出当前</button><button type="button" class="mcp-btn ts-btn" id="importThemeBtn">一键导入</button></div>
+              <div class="ts-row"><button type="button" class="mcp-btn ts-btn" id="exportThemeBtn">导出当前</button><button type="button" class="mcp-btn ts-btn" id="importThemeBtn">一键导入</button><button type="button" class="mcp-btn ts-btn" id="jsonThemeBtn">JSON 高级</button></div>
+              <div id="themeJsonBox" style="display:none;flex-direction:column;gap:8px">
+                <textarea id="themeJsonArea" placeholder="当前主题的 v2 分组 JSON，可直接改后应用…" style="min-height:140px;font-size:11px;line-height:1.5;font-family:monospace" rows="4"></textarea>
+                <div class="ts-row" style="flex:none"><button type="button" class="mcp-btn primary ts-btn" id="themeJsonGo" style="flex:1">应用 JSON</button><button type="button" class="mcp-btn ts-btn" id="themeJsonCopy">复制</button><button type="button" class="mcp-btn ts-btn" id="themeJsonCancel">取消</button></div>
+              </div>
               <div id="themeImportBox" style="display:none;flex-direction:column;gap:8px">
                 <textarea id="themeImportArea" placeholder="粘贴主题码 / 明文 JSON / 逐行「字段名: 值」，自动识别…" style="min-height:66px;font-size:12px;line-height:1.5" rows="2"></textarea>
                 <div class="ts-row" style="flex:none"><button type="button" class="mcp-btn primary ts-btn" id="themeImportGo" style="flex:1">导入并应用</button><button type="button" class="mcp-btn ts-btn" id="themeImportTpl">复制模板</button><button type="button" class="mcp-btn ts-btn" id="themeImportCancel">取消</button></div>
@@ -2095,6 +2167,36 @@ const bubbleBlurVal=document.getElementById("bubbleBlurVal");
 const bubbleRadius=document.getElementById("bubbleRadius");
 const bubbleRadiusVal=document.getElementById("bubbleRadiusVal");
 const fontSizeVal=document.getElementById("fontSizeVal");
+/* v2 主题新增高感知字段控件（0913-11） */
+const lineHeightInput=document.getElementById("lineHeightInput");
+const lineHeightVal=document.getElementById("lineHeightVal");
+const letterSpacingInput=document.getElementById("letterSpacingInput");
+const letterSpacingVal=document.getElementById("letterSpacingVal");
+const paraGapInput=document.getElementById("paraGapInput");
+const paraGapVal=document.getElementById("paraGapVal");
+const msgGapInput=document.getElementById("msgGapInput");
+const msgGapVal=document.getElementById("msgGapVal");
+const bubblePadInput=document.getElementById("bubblePadInput");
+const bubblePadVal=document.getElementById("bubblePadVal");
+const bubbleMaxWidthInput=document.getElementById("bubbleMaxWidthInput");
+const bubbleMaxWidthVal=document.getElementById("bubbleMaxWidthVal");
+const avatarSizeInput=document.getElementById("avatarSizeInput");
+const avatarSizeVal=document.getElementById("avatarSizeVal");
+const inputbarRadiusInput=document.getElementById("inputbarRadiusInput");
+const inputbarRadiusVal=document.getElementById("inputbarRadiusVal");
+const animTransInput=document.getElementById("animTransInput");
+const animTransVal=document.getElementById("animTransVal");
+const bgBlurInput=document.getElementById("bgBlurInput");
+const bgBlurVal=document.getElementById("bgBlurVal");
+const pickFontWeight=document.getElementById("pickFontWeight");
+const pickAvatarShape=document.getElementById("pickAvatarShape");
+const pickStylePreset=document.getElementById("pickStylePreset");
+const jsonThemeBtn=document.getElementById("jsonThemeBtn");
+const themeJsonBox=document.getElementById("themeJsonBox");
+const themeJsonArea=document.getElementById("themeJsonArea");
+const themeJsonGo=document.getElementById("themeJsonGo");
+const themeJsonCopy=document.getElementById("themeJsonCopy");
+const themeJsonCancel=document.getElementById("themeJsonCancel");
 const themePreview=document.getElementById("themePreview");
 const thinkCapBorder=document.getElementById("thinkCapBorder");
 const thinkCapBg=document.getElementById("thinkCapBg");
@@ -4059,11 +4161,15 @@ function codeNameSnippet(txt){
   return String(txt||"").replace(/\s+/g," ").trim().slice(0,12);
 }
 function sessionDisplayName(id){
-  let nm={}; try{ nm=JSON.parse(localStorage.getItem("han_session_names")||"{}"); }catch(e){}
-  if(nm[id])return nm[id];
-  const s=(sessionList||[]).find(x=>x.id===id);
-  if(s&&s.name&&s.name!==id)return s.name==="主会话"?"主会话":s.name;
-  return "";
+  // 2026-09-13 审查修复：合并两个同名定义——原第二定义(无参版)覆盖本函数，
+  // 导致所有带参调用全部拿到「当前会话」的名字(合并会话命名/弹窗标题显示错名)。
+  // 统一口径：id 缺省 = 当前会话；本地改名映射 > 会话列表名 > 兜底。
+  var sid=id||currentSession||"default";
+  var nm={}; try{ nm=JSON.parse(localStorage.getItem("han_session_names")||"{}"); }catch(e){}
+  if(nm[sid])return nm[sid];
+  const s=(sessionList||[]).find(x=>x.id===sid);
+  if(s&&s.name&&s.name!==sid)return s.name;
+  return sid==="default" ? "主会话" : sid;
 }
 async function autoNameSessionWhenUntitled(full){
   const snip=codeNameSnippet(full);
@@ -4130,19 +4236,20 @@ function renderPicks(){
   if(pickBstyle)pickBstyle.querySelectorAll("button").forEach(b=>{
     b.classList.toggle("on",b.dataset.bs===(cfg.bubble_style||"qq"));
   });
+  if(pickFontWeight)pickFontWeight.querySelectorAll("button").forEach(b=>{
+    b.classList.toggle("on",Number(b.dataset.fw)===(cfg.font_weight!=null?Number(cfg.font_weight):400));
+  });
+  if(pickAvatarShape)pickAvatarShape.querySelectorAll("button").forEach(b=>{
+    b.classList.toggle("on",b.dataset.sh===(cfg.avatar_shape||"circle"));
+  });
+  if(pickStylePreset)pickStylePreset.querySelectorAll("button").forEach(b=>{
+    b.classList.toggle("on",(cfg.style_mode||"classic")===(b.dataset.preset==="classic"?"classic":b.dataset.preset));
+  });
   if(pickMode)pickMode.querySelectorAll("button").forEach(b=>{
     b.classList.toggle("on",b.dataset.m===(cfg.send_mode||"stream"));
   });
 }
-function sessionDisplayName(){
-  var sid=currentSession||"default";
-  // 本地改名映射优先：即使主会话(default)也尊重用户改的名字
-  try{
-    var nm=JSON.parse(localStorage.getItem("han_session_names")||"{}");
-    if(nm[sid]) return nm[sid];
-  }catch(e){}
-  return sid==="default" ? "主会话" : sid;
-}
+// sessionDisplayName 统一为上方带参定义(2026-09-13 审查合并),此处原无参重复定义已删除
 function applyHeader(){
   // 顶部显示会话名称；先设名称，再按聊天布局(模板)控制名称位置与头像/副标题是否显示
   hdName.textContent=sessionDisplayName();
@@ -4179,6 +4286,17 @@ function populateSettings(){
   bubbleRadius.value=cfg.bubble_radius!=null?cfg.bubble_radius:18;
   fontSizeInput.value=cfg.font_size!=null?cfg.font_size:15;
   fontFamilyInput.value=cfg.font_family||"";
+  // v2 新字段回填（0913-11）
+  lineHeightInput.value=cfg.line_height!=null?cfg.line_height:1.72;
+  letterSpacingInput.value=cfg.letter_spacing||0;
+  paraGapInput.value=cfg.para_gap!=null?cfg.para_gap:8;
+  msgGapInput.value=cfg.msg_gap!=null?cfg.msg_gap:12;
+  bubblePadInput.value=cfg.bubble_padding!=null?cfg.bubble_padding:11;
+  bubbleMaxWidthInput.value=cfg.bubble_max_width!=null?cfg.bubble_max_width:84;
+  avatarSizeInput.value=cfg.avatar_size!=null?cfg.avatar_size:34;
+  inputbarRadiusInput.value=cfg.inputbar_radius!=null?cfg.inputbar_radius:24;
+  animTransInput.value=cfg.anim_transition||0;
+  bgBlurInput.value=cfg.bg_blur||0;
   if(uploadMaxMbInput)uploadMaxMbInput.value=cfg.upload_max_mb!=null?cfg.upload_max_mb:2;
   if(thinkSendCountInput)thinkSendCountInput.value=cfg.send_thinking_count!=null?cfg.send_thinking_count:1;
   populateWindowInputs(cfg);
@@ -4211,6 +4329,18 @@ async function saveSettingsAll(){
   // 保存时不再从（已不存在的）输入框读取，避免把整窗颜色重置回默认。
   cfg.font_size=Number(fontSizeInput.value)||15;
   cfg.font_family=fontFamilyInput.value||"";
+  // v2 新字段采集（0913-11）
+  cfg.line_height=Number(lineHeightInput.value)||1.72;
+  cfg.font_weight=cfg.font_weight!=null?cfg.font_weight:400;
+  cfg.letter_spacing=Number(letterSpacingInput.value)||0;
+  cfg.para_gap=Number(paraGapInput.value)||0;
+  cfg.msg_gap=Number(msgGapInput.value)||0;
+  cfg.bubble_padding=Number(bubblePadInput.value)||11;
+  cfg.bubble_max_width=Number(bubbleMaxWidthInput.value)||84;
+  cfg.avatar_size=Number(avatarSizeInput.value)||34;
+  cfg.inputbar_radius=Number(inputbarRadiusInput.value)||24;
+  cfg.anim_transition=Number(animTransInput.value)||0;
+  cfg.bg_blur=Number(bgBlurInput.value)||0;
   cfg.upload_max_mb=(function(){const v=Number(uploadMaxMbInput&&uploadMaxMbInput.value);return (Number.isFinite(v)&&v>=1)?Math.min(30,v):2;})();
   cfg.send_thinking_count=(function(){const raw=thinkSendCountInput&&thinkSendCountInput.value;const v=Number(raw);if(raw===""||!Number.isFinite(v)||v<0)return 1;return Math.min(99,Math.round(v));})();
   cfg.bubble_delim=bubbleDelimInput.value.trim();
@@ -4399,6 +4529,16 @@ function renderThemeValues(){
   bubbleBlurVal.textContent=bubbleBlur.value+"px";
   bubbleRadiusVal.textContent=bubbleRadius.value+"px";
   if(fontSizeVal)fontSizeVal.textContent=fontSizeInput.value+"px";
+  if(lineHeightVal)lineHeightVal.textContent=Number(lineHeightInput.value).toFixed(2);
+  if(letterSpacingVal)letterSpacingVal.textContent=Number(letterSpacingInput.value).toFixed(2)+"em";
+  if(paraGapVal)paraGapVal.textContent=paraGapInput.value+"px";
+  if(msgGapVal)msgGapVal.textContent=msgGapInput.value+"px";
+  if(bubblePadVal)bubblePadVal.textContent=bubblePadInput.value+"px";
+  if(bubbleMaxWidthVal)bubbleMaxWidthVal.textContent=bubbleMaxWidthInput.value+"%";
+  if(avatarSizeVal)avatarSizeVal.textContent=avatarSizeInput.value+"px";
+  if(inputbarRadiusVal)inputbarRadiusVal.textContent=inputbarRadiusInput.value+"px";
+  if(animTransVal)animTransVal.textContent=animTransInput.value+"ms";
+  if(bgBlurVal)bgBlurVal.textContent=bgBlurInput.value+"px";
   const mode=deriveBgMode();
   const hasColor=(bgColorInput.value!=="" && bgColorInput.value!=="#f4f1ee");
   bgColorVal.textContent=mode==="image"?"图片背景":(hasColor?"已自定义":"默认浅色");
@@ -4422,6 +4562,189 @@ function hexToRgbStr(hex){
 }
 // 全套风格维度字段清单（主题=完整风格包：配色+字体+磨砂+圆角+描边+阴影+语义色）
 const UI_STYLE_KEYS=["ui_line","ui_shadow","ui_mask","ui_ok","ui_warn","ui_bad","ui_info","ui_field","ui_menu","ui_code_bg","ui_code_ink","ui_glass","ui_panel_alpha","ui_panel_radius","ui_title_font"];
+/* ===== v2 主题 schema（0913-11）：分组存储格式；运行时管线仍是平铺 cfg，进出场用 pack/unpack 转换 ===== */
+// 新增高感知字段（平铺键）：排版/留白/形状/效果，全部走 CSS 变量
+const THEME_EXTRA_KEYS=["line_height","font_weight","letter_spacing","para_gap","msg_gap","bubble_max_width","bubble_padding","avatar_shape","avatar_size","inputbar_radius","anim_transition","bg_blur"];
+const THEME_EXTRA_DEFAULTS={line_height:1.72,font_weight:400,letter_spacing:0,para_gap:8,msg_gap:12,bubble_max_width:84,bubble_padding:11,avatar_shape:"circle",avatar_size:34,inputbar_radius:24,anim_transition:0,bg_blur:0};
+// v2 分组 → 平铺：colors/bubbles/typography/shape/effects/layout/caps 七组展开成 cfg 平铺键
+function themeV2ToFlat(v){
+  const o={};
+  if(!v||typeof v!=="object") return o;
+  if(v.base) o.base_preset=v.base;
+  if(typeof v.style_mode==="string") o.style_mode=v.style_mode;
+  const c=v.colors||{};
+  if(c.accent) o.accent_color=c.accent;
+  if(c.accentDeep) o.header_title=c.accentDeep;
+  if(c.bg1) o.chrome_bg=c.bg1;
+  if(c.bg3) o.bg_color=c.bg3;
+  if(c.ink) o.page_text=c.ink;
+  if(c.ink2) o.page_text2=c.ink2;
+  if(c.ink3) o.page_text3=c.ink3;
+  if(c.line) o.ui_line=c.line;
+  const b=v.bubbles||{};
+  if(b.userBg) o.user_bubble=b.userBg;   if(b.userText) o.user_font_color=b.userText;
+  if(b.aiBg) o.ai_bubble=b.aiBg;         if(b.aiText) o.ai_font_color=b.aiText;
+  if(b.radius!=null) o.bubble_radius=b.radius;
+  if(b.opacity!=null) o.bubble_opacity=b.opacity;
+  if(b.blur!=null) o.bubble_blur=b.blur;
+  if(b.maxWidth!=null) o.bubble_max_width=b.maxWidth;
+  if(b.gap!=null) o.msg_gap=b.gap;
+  if(b.padding!=null) o.bubble_padding=parseInt(b.padding,10)||THEME_EXTRA_DEFAULTS.bubble_padding;
+  if(b.shadow) o.bubble_shadow=b.shadow;
+  const t=v.typography||{};
+  if(t.family) o.font_family=t.family;
+  if(t.size!=null) o.font_size=t.size;
+  if(t.lineHeight!=null) o.line_height=t.lineHeight;
+  if(t.letterSpacing!=null) o.letter_spacing=t.letterSpacing;
+  if(t.weight!=null) o.font_weight=t.weight;
+  const s=v.shape||{};
+  if(s.avatarShape) o.avatar_shape=s.avatarShape;
+  if(s.avatarSize!=null) o.avatar_size=s.avatarSize;
+  if(s.inputRadius!=null) o.inputbar_radius=s.inputRadius;
+  const e=v.effects||{};
+  if(e.glass!=null) o.ui_glass=e.glass;
+  if(e.transition!=null) o.anim_transition=e.transition;
+  if(e.bgBlur!=null) o.bg_blur=e.bgBlur;
+  const l=v.layout||{};
+  if(l.bubbleStyle) o.bubble_style=l.bubbleStyle;
+  if(l.showAvatar!=null) o.show_avatar=!!l.showAvatar;
+  if(l.showName!=null) o.show_name=!!l.showName;
+  if(v.caps){
+    const tk=v.caps.think||{}, tl=v.caps.tool||{};
+    if(tk.border) o.think_cap_border=tk.border; if(tk.bg) o.think_cap_bg=tk.bg; if(tk.text) o.think_cap_text=tk.text;
+    if(tl.border) o.tool_cap_border=tl.border; if(tl.bg) o.tool_cap_bg=tl.bg; if(tl.text) o.tool_cap_text=tl.text;
+  }
+  UI_STYLE_KEYS.forEach(function(k){ if(v[k]!=null) o[k]=v[k]; });
+  THEME_EXTRA_KEYS.forEach(function(k){ if(v[k]!=null) o[k]=v[k]; });
+  // 顶层散字段（v1 平铺残留）原样带上，迁移不丢数据
+  Object.keys(v).forEach(function(k){ if(typeof v[k]!=="object"&&o[k]===undefined) o[k]=v[k]; });
+  return o;
+}
+// 平铺 → v2 分组（导出/模板用）：只填有值的键
+function themeFlatToV2(f){
+  const g=function(k,d){ const v=f&&f[k]; return (v!=null&&v!=="")?v:(d!==undefined?d:undefined); };
+  const num=function(k){ const v=g(k); return v!=null&&Number.isFinite(Number(v))?Number(v):undefined; };
+  const o={v:2, name:g("name","未命名主题"), style_mode:g("style_mode","classic")||"classic"};
+  const c={};
+  const ac=g("accent_color"); if(ac) c.accent=ac;
+  const hd=g("header_title"); if(hd) c.accentDeep=hd;
+  const cb=g("chrome_bg"); if(cb) c.bg1=cb;
+  const bc=g("bg_color"); if(bc) c.bg3=bc;
+  const pt=g("page_text"); if(pt) c.ink=pt;
+  const pt2=g("page_text2"); if(pt2) c.ink2=pt2;
+  const pt3=g("page_text3"); if(pt3) c.ink3=pt3;
+  const ul=g("ui_line"); if(ul) c.line=ul;
+  if(Object.keys(c).length) o.colors=c;
+  const b={};
+  const ub=g("user_bubble"); if(ub) b.userBg=ub;
+  const uf=g("user_font_color"); if(uf) b.userText=uf;
+  const ab=g("ai_bubble"); if(ab) b.aiBg=ab;
+  const af=g("ai_font_color"); if(af) b.aiText=af;
+  const br=num("bubble_radius"); if(br!=null) b.radius=br;
+  const bo=num("bubble_opacity"); if(bo!=null) b.opacity=bo;
+  const bb=num("bubble_blur"); if(bb!=null) b.blur=bb;
+  const bm=num("bubble_max_width"); if(bm!=null) b.maxWidth=bm;
+  const mg=num("msg_gap"); if(mg!=null) b.gap=mg;
+  const bp=num("bubble_padding"); if(bp!=null) b.padding=bp+"px "+(bp+4)+"px";
+  const bs=g("bubble_shadow"); if(bs) b.shadow=bs;
+  if(Object.keys(b).length) o.bubbles=b;
+  const t={};
+  const ff=g("font_family"); if(ff) t.family=ff;
+  const fs=num("font_size"); if(fs!=null) t.size=fs;
+  const lh=num("line_height"); if(lh!=null) t.lineHeight=lh;
+  const ls=num("letter_spacing"); if(ls!=null) t.letterSpacing=ls;
+  const fw=num("font_weight"); if(fw!=null) t.weight=fw;
+  if(Object.keys(t).length) o.typography=t;
+  const s={};
+  const asp=g("avatar_shape"); if(asp) s.avatarShape=asp;
+  const asz=num("avatar_size"); if(asz!=null) s.avatarSize=asz;
+  const ir=num("inputbar_radius"); if(ir!=null) s.inputRadius=ir;
+  if(Object.keys(s).length) o.shape=s;
+  const e={};
+  const gl=num("ui_glass"); if(gl!=null) e.glass=gl;
+  const tr=num("anim_transition"); if(tr!=null) e.transition=tr;
+  const gb=num("bg_blur"); if(gb!=null) e.bgBlur=gb;
+  if(Object.keys(e).length) o.effects=e;
+  const l={};
+  const bstyle=g("bubble_style"); if(bstyle) l.bubbleStyle=bstyle;
+  if(f&&f.show_avatar!=null) l.showAvatar=!!f.show_avatar;
+  if(f&&f.show_name!=null) l.showName=!!f.show_name;
+  if(Object.keys(l).length) o.layout=l;
+  if(f&&(f.think_cap_border||f.think_cap_bg||f.think_cap_text||f.tool_cap_border||f.tool_cap_bg||f.tool_cap_text)){
+    o.caps={ think:{border:g("think_cap_border"),bg:g("think_cap_bg"),text:g("think_cap_text")}, tool:{border:g("tool_cap_border"),bg:g("tool_cap_bg"),text:g("tool_cap_text")} };
+  }
+  // 其余风格维度键原样保留（ui_ok/ui_warn 等 v2 不分组的直接挂顶层）
+  UI_STYLE_KEYS.forEach(function(k){ if(f&&f[k]!=null&&f[k]!==""&&o[k]===undefined) o[k]=f[k]; });
+  return o;
+}
+// 迁移入口：任意来源（v1 平铺 / v2 分组 / 残缺对象）→ 完整平铺主题对象（带默认值补齐）
+function migrateThemeObj(t){
+  let o=(t&&typeof t==="object")?t:{};
+  if(o.v===2||o.colors||o.bubbles||o.typography||o.shape||o.effects||o.caps) o=themeV2ToFlat(o);
+  const out={};
+  const or=function(v,d){ return (v!=null&&v!=="")?v:d; };
+  out.bg_mode=o.bg_mode||"color";
+  out.bg_image=o.bg_image||"";
+  out.bg_color=o.bg_color||""; // 空=不自定义背景（沿用 body 默认三段渐变），不能强补色值
+  out.user_bubble=or(o.user_bubble,"#d9a3a8");
+  out.ai_bubble=or(o.ai_bubble,"#fffdf9");
+  out.bubble_opacity=or(o.bubble_opacity,1);
+  out.bubble_blur=or(o.bubble_blur,0);
+  out.bubble_radius=or(o.bubble_radius,18);
+  out.user_font_color=or(o.user_font_color,"#ffffff");
+  out.ai_font_color=or(o.ai_font_color,"#5a4a3a");
+  out.font_size=or(o.font_size,15);
+  out.font_family=o.font_family||"";
+  out.style_mode=(typeof o.style_mode==="string")?o.style_mode:"";
+  out.bubble_style=or(o.bubble_style,"qq");
+  out.show_avatar=o.show_avatar!==false;
+  out.show_name=o.show_name!==false;
+  out.think_cap_border=or(o.think_cap_border,"#c89098");
+  out.think_cap_bg=or(o.think_cap_bg,"#f1ebe9");
+  out.think_cap_text=or(o.think_cap_text,"#c89098");
+  out.tool_cap_border=or(o.tool_cap_border,"#5a86a6");
+  out.tool_cap_bg=or(o.tool_cap_bg,"#e7ecf3");
+  out.tool_cap_text=or(o.tool_cap_text,"#5a86a6");
+  ["accent_color","chrome_bg","page_text","page_text2","page_text3","header_title","inputbar_bg","inputbar_border","input_text","send_btn","send_icon","avatar_bg","icon_btn_bg","icon_btn_color","bubble_shadow","user_avatar","ai_avatar","name"].forEach(function(k){ out[k]=o[k]!=null?o[k]:""; });
+  UI_STYLE_KEYS.forEach(function(k){ out[k]=o[k]!=null?o[k]:""; });
+  THEME_EXTRA_KEYS.forEach(function(k){ out[k]=o[k]!=null?o[k]:THEME_EXTRA_DEFAULTS[k]; });
+  return out;
+}
+/* ===== 内置风格预设（0913-11）：v2 分组定义，点胶囊整包套用；classic=现有默认不做预设 ===== */
+const THEME_PRESETS={
+  zen:{
+    v:2, name:"素白极简", style_mode:"zen",
+    colors:{ accent:"#1d1d1f", accentDeep:"#6e6e73", bg1:"#fbfbfd", bg3:"#f5f5f7", ink:"#1d1d1f", ink2:"#6e6e73", ink3:"#aeaeb2", line:"#00000014" },
+    bubbles:{ userBg:"#1d1d1f", userText:"#fbfbfd", aiBg:"#ffffff", aiText:"#1d1d1f", radius:18, opacity:1, blur:0, maxWidth:84, gap:14, padding:"12px 16px", shadow:"#000000" },
+    typography:{ size:15, lineHeight:1.7, letterSpacing:0.01, weight:400 },
+    shape:{ avatarShape:"circle", avatarSize:34, inputRadius:22 },
+    effects:{ glass:16, transition:240, bgBlur:0 },
+    layout:{ bubbleStyle:"custom", showAvatar:false, showName:false },
+    caps:{ think:{border:"#c9c9ce",bg:"#f2f2f4",text:"#6e6e73"}, tool:{border:"#c9d4e2",bg:"#eef2f7",text:"#5a6b80"} }
+  },
+  glass:{
+    v:2, name:"暗夜玻璃", style_mode:"glass",
+    colors:{ accent:"#8ab4ff", accentDeep:"#5f8fe8", bg1:"#0e1420", bg3:"#0b1018", ink:"#e8ecf4", ink2:"#9aa7bd", ink3:"#5d6a82", line:"#8ab4ff2e" },
+    bubbles:{ userBg:"#33518f", userText:"#f2f6ff", aiBg:"#1a2334", aiText:"#dfe6f2", radius:20, opacity:0.92, blur:14, maxWidth:84, gap:14, padding:"12px 16px", shadow:"#000000" },
+    typography:{ size:15, lineHeight:1.72, letterSpacing:0, weight:400 },
+    shape:{ avatarShape:"circle", avatarSize:34, inputRadius:24 },
+    effects:{ glass:18, transition:260, bgBlur:0 },
+    layout:{ bubbleStyle:"custom", showAvatar:true, showName:true },
+    caps:{ think:{border:"#5d6a82",bg:"#1a2334",text:"#9aa7bd"}, tool:{border:"#4a7ba6",bg:"#16202e",text:"#7fb3d9"} },
+    inputbar_bg:"#131a28", inputbar_border:"#2a3548", input_text:"#e8ecf4",
+    send_btn:"#33518f", send_icon:"#f2f6ff", avatar_bg:"#33518f",
+    icon_btn_bg:"#1a2334", icon_btn_color:"#9aa7bd",
+    ui_field:"#131a28", ui_menu:"#141c2b", ui_code_bg:"#101826", ui_code_ink:"#c9d6ea",
+    ui_panel_alpha:0.92, ui_title_font:""
+  }
+};
+// 预设 → 完整平铺主题对象（mergeBase=true 时未定义键沿用当前 cfg，避免把用户名/头像等个人设置冲掉）
+function presetToTheme(id){
+  const p=THEME_PRESETS[id]; if(!p) return null;
+  const flat=themeV2ToFlat(JSON.parse(JSON.stringify(p)));
+  flat.name=p.name; flat.bg_mode="color"; flat.bg_image="";
+  return migrateThemeObj(flat);
+}
 function setCapsuleVars(root, v){
   root.setProperty("--cap-think-border", v.think_cap_border);
   root.setProperty("--cap-think-bg", v.think_cap_bg);
@@ -4535,6 +4858,7 @@ function themeInputs(){
     bubble_shadow: cfg.bubble_shadow||""
   };
   UI_STYLE_KEYS.forEach(function(k){ o[k]=cfg[k]!=null?cfg[k]:""; });
+  THEME_EXTRA_KEYS.forEach(function(k){ o[k]=cfg[k]!=null?cfg[k]:THEME_EXTRA_DEFAULTS[k]; });
   return o;
 }
 function loadSavedThemes(){ try{ const a=JSON.parse(localStorage.getItem(LS_THEMES)||"[]"); return Array.isArray(a)?a:[]; }catch(e){ return []; } }
@@ -4585,6 +4909,7 @@ async function saveCustomTheme(){
 }
 function applyCustomTheme(t,silent){
   if(!t) return;
+  t=migrateThemeObj(t); // v2 分组/旧平铺/残缺对象统一迁到完整平铺，老主题不丢字段
   if(t.bg_mode==="image"||t.bg_mode==="color") cfg.bg_mode=t.bg_mode;
   cfg.bg_image=t.bg_image||""; cfg.bg_color=t.bg_color||"";
   cfg.user_bubble=t.user_bubble||"#d9a3a8"; cfg.ai_bubble=t.ai_bubble||"#fffdf9";
@@ -4600,6 +4925,7 @@ function applyCustomTheme(t,silent){
   if(t.send_btn!==undefined) cfg.send_btn=t.send_btn||""; if(t.send_icon!==undefined) cfg.send_icon=t.send_icon||""; if(t.avatar_bg!==undefined) cfg.avatar_bg=t.avatar_bg||"";
   if(t.icon_btn_bg!==undefined) cfg.icon_btn_bg=t.icon_btn_bg||""; if(t.icon_btn_color!==undefined) cfg.icon_btn_color=t.icon_btn_color||""; if(t.bubble_shadow!==undefined) cfg.bubble_shadow=t.bubble_shadow||"";
   UI_STYLE_KEYS.forEach(function(k){ cfg[k]=(t[k]!=null)?t[k]:""; });
+  THEME_EXTRA_KEYS.forEach(function(k){ cfg[k]=(t[k]!=null)?t[k]:THEME_EXTRA_DEFAULTS[k]; });
   if(t.user_avatar!==undefined)cfg.user_avatar=t.user_avatar||"";
   if(t.ai_avatar!==undefined)cfg.ai_avatar=t.ai_avatar||"";
   if(t.bubble_style)cfg.bubble_style=t.bubble_style;
@@ -4612,6 +4938,7 @@ function applyCustomTheme(t,silent){
   if(bubbleOpacity)bubbleOpacity.value=Math.round((cfg.bubble_opacity!=null?cfg.bubble_opacity:1)*100); if(bubbleBlur)bubbleBlur.value=cfg.bubble_blur; if(bubbleRadius)bubbleRadius.value=cfg.bubble_radius;
   if(userFontColorInput)userFontColorInput.value=cfg.user_font_color; if(aiFontColorInput)aiFontColorInput.value=cfg.ai_font_color;
   if(fontSizeInput)fontSizeInput.value=cfg.font_size; if(fontFamilyInput)fontFamilyInput.value=cfg.font_family;
+  if(typeof syncThemeExtraInputs==="function")syncThemeExtraInputs();
   if(thinkCapBorder)thinkCapBorder.value=cfg.think_cap_border; if(thinkCapBg)thinkCapBg.value=cfg.think_cap_bg; if(thinkCapText)thinkCapText.value=cfg.think_cap_text;
   if(toolCapBorder)toolCapBorder.value=cfg.tool_cap_border; if(toolCapBg)toolCapBg.value=cfg.tool_cap_bg; if(toolCapText)toolCapText.value=cfg.tool_cap_text;
   populateWindowInputs(cfg);
@@ -4659,17 +4986,24 @@ function renderSavedThemes(srcArr){
 
 /* ===== 主题 导出/一键导入 ===== */
 function themeToCode(t){
-  try{ return "TH1."+btoa(unescape(encodeURIComponent(JSON.stringify(t)))); }catch(e){ return ""; }
+  try{
+    // TH2：v2 分组 schema（更小、可读、分组清晰）；导入端兼容 TH1
+    const g=themeFlatToV2(t||currentThemeObject());
+    return "TH2."+btoa(unescape(encodeURIComponent(JSON.stringify(g))));
+  }catch(e){ return ""; }
 }
 function themeFromCode(code){
   try{
     let s=String(code||"").replace(/^\s+|\s+$/g,"");
+    let v2=false;
     if(s.indexOf("TH1.")===0) s=s.slice(4);
+    else if(s.indexOf("TH2.")===0){ s=s.slice(4); v2=true; }
     if(!s) return null;
     let text="";
     try{ text=decodeURIComponent(escape(atob(s))); }catch(e){ text=s; }
     const obj=JSON.parse(text);
-    return (obj && typeof obj==="object") ? obj : null;
+    if(!(obj && typeof obj==="object")) return null;
+    return v2 ? migrateThemeObj(obj) : obj;
   }catch(e){ return null; }
 }
 function currentThemeObject(){
@@ -4706,24 +5040,40 @@ function currentThemeObject(){
     show_avatar:cfg.show_avatar!==false,
     show_name:cfg.show_name!==false
   };
+  // 修复：补齐 ui_* 风格键与 v2 新字段（原循环写在 return 后是死代码，导出一直丢键）
   UI_STYLE_KEYS.forEach(function(k){ o[k]=cfg[k]!=null?cfg[k]:""; });
+  THEME_EXTRA_KEYS.forEach(function(k){ o[k]=cfg[k]!=null?cfg[k]:THEME_EXTRA_DEFAULTS[k]; });
   return o;
 }
 /* 0913-03 导入升级：主题码 / 明文 JSON / 逐行「字段名: 值」三种格式自动识别 */
 const THEME_FIELDS=["name","style_mode","bg_mode","bg_image","bg_color","user_bubble","ai_bubble","bubble_opacity","bubble_blur","bubble_radius","user_font_color","ai_font_color","font_size","font_family","think_cap_border","think_cap_bg","think_cap_text","tool_cap_border","tool_cap_bg","tool_cap_text","page_text","page_text2","page_text3","accent_color","chrome_bg","header_title","inputbar_bg","inputbar_border","input_text","send_btn","send_icon","avatar_bg","icon_btn_bg","icon_btn_color","bubble_shadow","ui_line","ui_shadow","ui_mask","ui_ok","ui_warn","ui_bad","ui_info","ui_field","ui_menu","ui_code_bg","ui_code_ink","ui_glass","ui_panel_alpha","ui_panel_radius","ui_title_font"];
 const THEME_VAR_ALIAS={"bubble-user":"user_bubble","bubble-ai":"ai_bubble","accent":"accent_color","accent-color":"accent_color","radius":"bubble_radius","glass":"ui_glass","title-font":"ui_title_font","panel-radius":"ui_panel_radius","hd-title":"header_title","inputbar-bg":"inputbar_bg","inputbar-border":"inputbar_border","input-text":"input_text","send-bg":"send_btn","send-icon":"send_icon","avatar-bg":"avatar_bg","icon-btn-bg":"icon_btn_bg","icon-btn-color":"icon_btn_color","code-bg":"ui_code_bg","code-ink":"ui_code_ink","field-bg":"ui_field","menu-bg":"ui_menu","page-text":"page_text","page-text2":"page_text2","page-text3":"page_text3"};
 const THEME_NUM_FIELDS=["bubble_opacity","bubble_blur","bubble_radius","font_size","ui_glass","ui_panel_radius","ui_panel_alpha"];
-const THEME_FIELD_TEMPLATE=JSON.stringify({name:"我的新主题",bg_color:"#f4f1ee",user_bubble:"#d9a3a8",ai_bubble:"#fffdf9",user_font_color:"#ffffff",ai_font_color:"#5a4a3a",bubble_radius:18,bubble_opacity:1,bubble_blur:0,accent_color:"#c89098",chrome_bg:"#ffffff",page_text:"#5a4a3a",page_text2:"#a08a7a",page_text3:"#b09a8a",header_title:"#b07a6a",inputbar_bg:"#ffffff",inputbar_border:"#ddbdc4",input_text:"#5a4a3a",send_btn:"#c98696",send_icon:"#ffffff",avatar_bg:"#d6a2ad",icon_btn_bg:"#f2e3e5",icon_btn_color:"#b07a6a",bubble_shadow:"#b58382",think_cap_border:"#c89098",think_cap_bg:"#f1ebe9",think_cap_text:"#c89098",tool_cap_border:"#5a86a6",tool_cap_bg:"#e7ecf3",tool_cap_text:"#5a86a6"},null,2);
+const THEME_FIELD_TEMPLATE=JSON.stringify({
+  v:2, name:"我的新主题", style_mode:"classic",
+  colors:{ accent:"#c89098", accentDeep:"#b07a6a", bg1:"#ffffff", bg3:"#f4f1ee", ink:"#5a4a3a", ink2:"#a08a7a", ink3:"#b09a8a", line:"#c8909840" },
+  bubbles:{ userBg:"#d9a3a8", userText:"#ffffff", aiBg:"#fffdf9", aiText:"#5a4a3a", radius:18, opacity:1, blur:0, maxWidth:84, gap:12, padding:"11px 15px", shadow:"#b58382" },
+  typography:{ size:15, lineHeight:1.72, letterSpacing:0, weight:400 },
+  shape:{ avatarShape:"circle", avatarSize:34, inputRadius:24 },
+  effects:{ glass:6, transition:0, bgBlur:0 },
+  layout:{ bubbleStyle:"qq", showAvatar:true, showName:true },
+  caps:{ think:{border:"#c89098",bg:"#f1ebe9",text:"#c89098"}, tool:{border:"#5a86a6",bg:"#e7ecf3",text:"#5a86a6"} }
+},null,2);
 function parseThemeAny(code){
   let s=String(code||"").trim();
   if(!s) return null;
   if(s.indexOf("TH1.")===0) return themeFromCode(s);
+  if(s.indexOf("TH2.")===0) return themeFromCode(s);
   s=s.replace(/^```[a-zA-Z]*\s*/,"").replace(/```\s*$/,"").trim();
   if(/^\{/.test(s)){
     try{
       const o=JSON.parse(s);
       const t=Array.isArray(o)?(o.length&&typeof o[o.length-1]==="object"?o[o.length-1]:null):o;
-      if(t&&!Array.isArray(t)&&THEME_FIELDS.some(function(k){return k in t;})) return t;
+      if(t&&!Array.isArray(t)){
+        // v2 分组 JSON（有分组键或 v:2 标记）先迁移成平铺再走统一入口
+        if(t.v===2||t.colors||t.bubbles||t.typography||t.shape||t.effects||t.caps) return migrateThemeObj(t);
+        if(THEME_FIELDS.some(function(k){return k in t;})) return t;
+      }
     }catch(e){}
     return null;
   }
@@ -4762,10 +5112,11 @@ function doImportTheme(){
   const obj=parseThemeAny(code);
   if(!obj){ showToast("无法解析：支持主题码 / 明文 JSON / 逐行「字段名: 值」，可点「复制模板」参考"); return; }
   obj.name=(obj.name&&String(obj.name).trim())||("导入-"+new Date().toLocaleTimeString().slice(0,5));
-  try{ applyCustomTheme(obj); }catch(e){ saveCfg(); applyTheme(); pushSettingsToCloud(); }
-  // 同时放进已存主题列表，方便之后一键切回
-  let arr=loadSavedThemes().filter(function(t){ return t.name!==obj.name; });
-  arr.push(obj); if(arr.length>100) arr=arr.slice(-100);
+  const objFlat=migrateThemeObj(obj); objFlat.name=obj.name;
+  try{ applyCustomTheme(objFlat); }catch(e){ saveCfg(); applyTheme(); pushSettingsToCloud(); }
+  // 同时放进已存主题列表，方便之后一键切回（存迁移后的完整对象，老主题码也不丢）
+  let arr=loadSavedThemes().filter(function(t){ return t.name!==objFlat.name; });
+  arr.push(objFlat); if(arr.length>100) arr=arr.slice(-100);
   try{ localStorage.setItem(LS_THEMES,JSON.stringify(arr)); }catch(e){}
   syncThemesToServer(); renderSavedThemes();
   if(themeImportBox) themeImportBox.style.display="none";
@@ -4813,6 +5164,22 @@ function applyTheme(){
     tool_cap_text:cfg.tool_cap_text||"#5a86a6"
   });
   setWindowVars(root,cfg);
+  // 高感知字段（0913-11）：排版/留白/形状/效果 → CSS 变量
+  root.setProperty("--bubble-line-height",String(cfg.line_height!=null?cfg.line_height:1.72));
+  root.setProperty("--bubble-font-weight",String(cfg.font_weight!=null?cfg.font_weight:400));
+  root.setProperty("--bubble-letter-spacing",(cfg.letter_spacing||0)+"em");
+  root.setProperty("--bubble-para-gap",(cfg.para_gap!=null?cfg.para_gap:8)+"px");
+  root.setProperty("--msg-gap",(cfg.msg_gap!=null?cfg.msg_gap:12)+"px");
+  root.setProperty("--bubble-max-width",(cfg.bubble_max_width!=null?cfg.bubble_max_width:84)+"%");
+  const _bp=(cfg.bubble_padding!=null&&!isNaN(Number(cfg.bubble_padding)))?Number(cfg.bubble_padding):11;
+  root.setProperty("--bubble-padding",_bp+"px "+(_bp+4)+"px");
+  root.setProperty("--avatar-size",(cfg.avatar_size!=null?cfg.avatar_size:34)+"px");
+  root.setProperty("--avatar-radius",cfg.avatar_shape==="square"?"8px":(cfg.avatar_shape==="squircle"?"30%":"50%"));
+  root.setProperty("--inputbar-radius",(cfg.inputbar_radius!=null?cfg.inputbar_radius:24)+"px");
+  root.setProperty("--theme-dur",(cfg.anim_transition||0)+"ms");
+  const _gbl=Number(cfg.bg_blur)||0;
+  root.setProperty("--bg-blur",_gbl+"px");
+  document.body.setAttribute("data-bgblur",(_gbl>0&&cfg.bg_image)?"1":"0");
   if(cfg.font_family)document.body.style.fontFamily=cfg.font_family;else document.body.style.fontFamily="";
   const layout=(cfg.bubble_style||"qq");
   if(cfg.bg_image){
@@ -4855,6 +5222,91 @@ function applyLayout(style){
 }
 [bubbleOpacity,bubbleBlur,bubbleRadius,userBubbleColor,aiBubbleColor,bgColorInput,bgImageInput,userFontColorInput,aiFontColorInput,fontSizeInput,fontFamilyInput,thinkCapBorder,thinkCapBg,thinkCapText,toolCapBorder,toolCapBg,toolCapText,accentColorInput,chromeBgInput,pageTextInput,pageText2Input,pageText3Input,headerTitleInput,inputbarBgInput,inputbarBorderInput,inputTextInput,sendBtnInput,sendIconInput,avatarBgInput,iconBtnBgInput,iconBtnColorInput,bubbleShadowInput].filter(Boolean).forEach(function(el){
   el.addEventListener("input",function(){renderThemeValues();applyThemePreview();});
+});
+/* ===== v2 主题：新字段实时预览 + 风格预设 + JSON 编辑器（0913-11） ===== */
+// 把 cfg 里的 v2 新字段回填到滑块/选择钮（切主题、导入后调用）
+function syncThemeExtraInputs(){
+  if(lineHeightInput)lineHeightInput.value=cfg.line_height!=null?cfg.line_height:1.72;
+  if(letterSpacingInput)letterSpacingInput.value=cfg.letter_spacing||0;
+  if(paraGapInput)paraGapInput.value=cfg.para_gap!=null?cfg.para_gap:8;
+  if(msgGapInput)msgGapInput.value=cfg.msg_gap!=null?cfg.msg_gap:12;
+  if(bubblePadInput)bubblePadInput.value=cfg.bubble_padding!=null?cfg.bubble_padding:11;
+  if(bubbleMaxWidthInput)bubbleMaxWidthInput.value=cfg.bubble_max_width!=null?cfg.bubble_max_width:84;
+  if(avatarSizeInput)avatarSizeInput.value=cfg.avatar_size!=null?cfg.avatar_size:34;
+  if(inputbarRadiusInput)inputbarRadiusInput.value=cfg.inputbar_radius!=null?cfg.inputbar_radius:24;
+  if(animTransInput)animTransInput.value=cfg.anim_transition||0;
+  if(bgBlurInput)bgBlurInput.value=cfg.bg_blur||0;
+  renderPicks();
+}
+function applyExtraVarsLive(){
+  const root=document.documentElement.style;
+  root.setProperty("--bubble-line-height",String(Number(lineHeightInput.value)||1.72));
+  root.setProperty("--bubble-font-weight",String(cfg.font_weight||400));
+  root.setProperty("--bubble-letter-spacing",(Number(letterSpacingInput.value)||0)+"em");
+  root.setProperty("--bubble-para-gap",(Number(paraGapInput.value)||0)+"px");
+  root.setProperty("--msg-gap",(Number(msgGapInput.value)||0)+"px");
+  root.setProperty("--bubble-max-width",(Number(bubbleMaxWidthInput.value)||84)+"%");
+  const bp=Number(bubblePadInput.value)||11;
+  root.setProperty("--bubble-padding",bp+"px "+(bp+4)+"px");
+  root.setProperty("--avatar-size",(Number(avatarSizeInput.value)||34)+"px");
+  root.setProperty("--avatar-radius",cfg.avatar_shape==="square"?"8px":(cfg.avatar_shape==="squircle"?"30%":"50%"));
+  root.setProperty("--inputbar-radius",(Number(inputbarRadiusInput.value)||24)+"px");
+  root.setProperty("--theme-dur",(Number(animTransInput.value)||0)+"ms");
+  const gbl=Number(bgBlurInput.value)||0;
+  root.setProperty("--bg-blur",gbl+"px");
+  document.body.setAttribute("data-bgblur",(gbl>0&&(cfg.bg_image||deriveBgMode()==="image"))?"1":"0");
+}
+[lineHeightInput,letterSpacingInput,paraGapInput,msgGapInput,bubblePadInput,bubbleMaxWidthInput,avatarSizeInput,inputbarRadiusInput,animTransInput,bgBlurInput].filter(Boolean).forEach(function(el){
+  el.addEventListener("input",function(){renderThemeValues();applyExtraVarsLive();});
+});
+if(pickFontWeight)pickFontWeight.querySelectorAll("button").forEach(function(b){
+  b.addEventListener("click",function(){ cfg.font_weight=Number(b.dataset.fw)||400; renderPicks(); applyExtraVarsLive(); saveCfg(); });
+});
+if(pickAvatarShape)pickAvatarShape.querySelectorAll("button").forEach(function(b){
+  b.addEventListener("click",function(){ cfg.avatar_shape=b.dataset.sh||"circle"; renderPicks(); applyExtraVarsLive(); saveCfg(); });
+});
+// 经典=出厂默认平铺；zen/glass=THEME_PRESETS 整包。个人设置（名字/头像）不在预设范围，保留不动
+function applyPreset(id){
+  let th;
+  if(id==="classic"){
+    th=migrateThemeObj({name:"经典粉棕",style_mode:"",bg_mode:"color",bg_color:"",bg_image:"",bubble_style:cfg.bubble_style||"qq"});
+  } else {
+    th=presetToTheme(id);
+  }
+  if(!th){ showToast("未知预设"); return; }
+  th.user_avatar=cfg.user_avatar||""; th.ai_avatar=cfg.ai_avatar||"";
+  applyCustomTheme(th);
+}
+if(pickStylePreset)pickStylePreset.querySelectorAll("button").forEach(function(b){
+  b.addEventListener("click",function(){ applyPreset(b.dataset.preset); });
+});
+// JSON 高级编辑器：当前主题的 v2 分组 JSON，改完直接应用（也接受旧平铺 JSON / TH1 / TH2 码）
+if(jsonThemeBtn)jsonThemeBtn.addEventListener("click",function(){
+  if(!themeJsonBox) return;
+  const show=(themeJsonBox.style.display==="none"||themeJsonBox.style.display==="");
+  if(show){ themeJsonArea.value=JSON.stringify(themeFlatToV2(currentThemeObject()),null,2); }
+  themeJsonBox.style.display=show?"flex":"none";
+});
+if(themeJsonCancel)themeJsonCancel.addEventListener("click",function(){ if(themeJsonBox)themeJsonBox.style.display="none"; });
+if(themeJsonCopy)themeJsonCopy.addEventListener("click",function(){
+  const txt=themeJsonArea&&themeJsonArea.value||"";
+  if(!txt) return;
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(function(){ showToast("主题 JSON 已复制"); }).catch(function(){ window.prompt("复制主题 JSON",txt); }); }
+  else window.prompt("复制主题 JSON",txt);
+});
+if(themeJsonGo)themeJsonGo.addEventListener("click",function(){
+  const raw=(themeJsonArea&&themeJsonArea.value||"").trim();
+  if(!raw){ showToast("请先粘贴或编辑 JSON"); return; }
+  let obj=null;
+  try{
+    if(/^TH[12]\./.test(raw)) obj=themeFromCode(raw);
+    else obj=JSON.parse(raw.replace(/^```[a-zA-Z]*\s*/,"").replace(/```\s*$/,"").trim());
+  }catch(e){}
+  if(!obj||typeof obj!=="object"){ showToast("JSON 解析失败：可粘贴 v2 分组 JSON / 旧平铺 JSON / TH1·TH2 主题码"); return; }
+  const th=migrateThemeObj(obj);
+  th.name=(th.name&&String(th.name).trim())||"JSON 主题";
+  applyCustomTheme(th);
+  if(themeJsonBox)themeJsonBox.style.display="none";
 });
 const bgModeColorBtn=document.getElementById("bgModeColorBtn");
 const bgModeImageBtn=document.getElementById("bgModeImageBtn");
@@ -5109,16 +5561,17 @@ async function loadProviders(){
     if(!r.ok){ if(r.status===401){ try{localStorage.removeItem("han_logged_in");}catch(e){} showLogin(); provMsg.textContent="登录已过期，请重新登录"; provList.innerHTML='<div class="mcp-empty">登录已过期，请重新登录</div>'; return; } provMsg.textContent=j.error||"加载失败"; provList.innerHTML='<div class="mcp-empty">加载失败</div>'; return; }
     _providers=j.providers||[];
     // 无供应商时：把管理台「心跳唤醒」所用的模型自动作为一条供应商加进来并启用
+    // 2026-09-13 审查修复：改调后端专属导入端点——旧逻辑读 /admin/env 的 TARGET_API_KEY，
+    // 但该接口出于安全不回密钥（且响应字段对不上），旧自动导入从未生效过
     if(!_providers.length){
       try{
-        const en=await chatAdmGet(chatAdmBase+'/env');
-        const env=(en&&en.env)||{};
-        const url=env.TARGET_API_URL||"", key=env.TARGET_API_KEY||"", model=env.MODEL_NAME||"deepseek-v4-flash-vision-exp";
-        if(url&&key){
-          _providers.push({ id:"p_"+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36), name:(model||"心跳唤醒模型"), api_url:url, api_key:key, model:model, models:[model], enabled:true });
-          const body={ providers: _providers.map(function(p){ return { id:p.id, name:p.name, api_url:p.api_url, api_key:p.api_key||"", model:p.model||"", models:(Array.isArray(p.models)?p.models:[]), enabled:p.enabled!==false }; }) };
-          await fetch("/heartbeat/admin/ai-providers",{ method:"PUT", headers: mcpAuthHeaders(), body: JSON.stringify(body), credentials:"include" });
+        const ir=await fetch("/heartbeat/admin/ai-providers/import-heartbeat",{ method:"POST", headers: mcpAuthHeaders(), credentials:"include" });
+        const ij=await ir.json().catch(function(){ return {}; });
+        if(ir.ok&&ij&&ij.imported){
           provMsg.textContent="已自动导入心跳唤醒模型作为聊天模型。";
+          const r2=await fetch("/heartbeat/admin/ai-providers",{ headers: mcpAuthHeaders(), credentials:"include" });
+          const j2=await r2.json();
+          if(r2.ok)_providers=j2.providers||[];
         }
       }catch(e){ /* 导入失败不阻塞 */ }
     }

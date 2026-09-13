@@ -778,15 +778,26 @@ async function releaseHeldMessages(sessionId) {
   try { data = JSON.parse(responseText); } catch (err) { throw new Error("模型返回非 JSON: " + responseText.slice(0, 200)); }
   if (_respStatus !== 200) throw new Error("模型请求失败 HTTP " + _respStatus + ": " + responseText.slice(0, 200));
   const aiText = String(normalizeContentToText(data?.choices?.[0]?.message?.content) || "").trim();
+  let delivered = false;
   if (aiText) {
     const clean = stripInternalTags(aiText) || aiText;
+    // 2026-09-13 审查修复：总结回复落时间线并通知前端——此前只推送不落盘，
+    // 时间线里被扣住的消息永远没有配对回复，且在线前端看不到这条回复
+    appendMessages(sid, [{ role: "assistant", content: clean }]);
     const pushResult = await sendPushNotification({ title: "扣住消息已处理", body: clean.slice(0, 300) });
+    delivered = pushResult.ok;
     console.log(`[quiet] 会话 ${sid} 总结回复已生成${pushResult.ok ? "并推送" : "（推送失败：" + pushResult.reason + "）"}`);
   }
   // 释放后清空该会话：重新读取，剔除刚释放的那批，保留「释放期间」新扣住的消息，
   // 避免 read → await(LLM) → write([]) 的竞态把新到的扣住消息一并清掉。
-  const releasedSigs = new Set(held.map(m => quietMsgSignature(m)));
-  writeHeldMessages(readHeldMessages(sid).filter(m => !releasedSigs.has(quietMsgSignature(m))), sid);
+  // 2026-09-13 审查修复：仅总结已送达（推送成功）才清空；模型空回复/推送失败时
+  // 保留扣住消息待下次释放，避免用户消息静默丢失。
+  if (delivered) {
+    const releasedSigs = new Set(held.map(m => quietMsgSignature(m)));
+    writeHeldMessages(readHeldMessages(sid).filter(m => !releasedSigs.has(quietMsgSignature(m))), sid);
+  } else {
+    console.warn(`[quiet] 会话 ${sid} 总结未送达（${aiText ? "推送失败" : "模型空回复"}），扣住消息保留待重试`);
+  }
 }
 
 // 扣住期间返回给客户端的响应：内容为空，让客户端不显示 AI 回复（此时消息只是被扣住）
@@ -2333,7 +2344,23 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
   // 不能再回传（否则二次 writeHead 报错）；此时仅保留副作用收尾（时间线/幂等缓存已在上方完成）。
   if (body.stream === true) {
     if (directResult) return true;   // 已直通透传完毕，无需再回传
-    if (streamStarted) { try { reply.raw.end(); } catch {} return true; }   // 方案2：已用 onEvent 逐轮流式回传，避免 buildSSE 重复
+    if (streamStarted) {
+      // 2026-09-13 审查修复：onEvent 逐轮流式回传后补终止 chunk——此前裸 end 无
+      // finish_reason/usage/[DONE]，与 buildSSE 收尾口径不一致，依赖终止事件的客户端会卡住、usage 丢失
+      try {
+        reply.raw.write("data: " + JSON.stringify({
+          id: "chatcmpl-mcp",
+          object: "chat.completion.chunk",
+          created: Math.floor(Date.now() / 1000),
+          model,
+          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+          usage: (r && r.usage) || null
+        }) + "\n\n");
+        reply.raw.write("data: [DONE]\n\n");
+      } catch {}
+      try { reply.raw.end(); } catch {}
+      return true;
+    }   // 方案2：已用 onEvent 逐轮流式回传，避免 buildSSE 重复
     const stream = mcp.buildSSE(aiClean, { model, usage: r.usage, reasoning: r.reasoning, toolHistory: r.toolHistory });
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -2552,7 +2579,7 @@ function syncDiarySpecialEvents(fileName, newContent, sessionId) {
     return { ...msg, content: `（${timeLabel} 醒来写了日记：${diaryText}）` };
   });
   if (updated > 0) {
-    saveTimeline(next);
+    saveTimeline(next, sessionId);
     console.log(`[diary] 已同步 ${updated} 条日记特殊事件（${fileName}）`);
   }
   return updated;
@@ -2575,7 +2602,7 @@ function removeDiarySpecialEvents(fileName, sessionId) {
   });
   const removed = before - next.length;
   if (removed > 0) {
-    saveTimeline(next);
+    saveTimeline(next, sessionId);
     console.log(`[diary] 已删除 ${removed} 条日记特殊事件（${fileName}）`);
   }
   return removed;
@@ -3885,8 +3912,31 @@ app.get("/admin/ai-providers", { preHandler: mcpManageAuth }, async (req, reply)
   }
 });
 
-app.put("/admin/ai-providers", { preHandler: mcpManageAuth }, async (req, reply) => {
+// 2026-09-13 审查修复（前后端不对齐）：前端「自动导入心跳唤醒模型」此前期望从 /admin/env
+// 拿 TARGET_API_KEY 明文，但该接口出于安全从不回密钥（响应结构也对不上），该功能自上线起
+// 永不生效。改为后端专属端点：密钥不出服务器，前端只在供应商列表为空时触发导入。
+app.post("/admin/ai-providers/import-heartbeat", { preHandler: mcpManageAuth }, async (req, reply) => {
   try {
+    const list = loadAiProviders();
+    if (list.length) { reply.send({ ok: true, imported: false, reason: "已有供应商，跳过导入" }); return; }
+    const url = readEnvValue("TARGET_API_URL");
+    const key = readEnvValue("TARGET_API_KEY");
+    const model = readEnvValue("MODEL_NAME") || "deepseek-v4-flash-vision-exp";
+    if (!url || !key) { reply.send({ ok: true, imported: false, reason: "缺少 TARGET_API_URL/TARGET_API_KEY 配置" }); return; }
+    const prov = {
+      id: "p_" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36),
+      name: model || "心跳唤醒模型", api_url: url, api_key: key, model: model, models: [model], enabled: true
+    };
+    saveAiProviders([prov]);
+    console.log("[ai-providers] 已自动导入心跳唤醒模型作为聊天模型（model=" + model + "）");
+    reply.send({ ok: true, imported: true });
+  } catch (err) {
+    console.error("[import-heartbeat] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+app.put("/admin/ai-providers", { preHandler: mcpManageAuth }, async (req, reply) => {  try {
     const arr = Array.isArray(req.body && req.body.providers) ? req.body.providers : [];
     // 批注 2026-09-13（审查 S1）：GET 已不回明文 api_key，客户端回传空值视为「未改动」，
     // 按 id 从旧配置恢复，避免脱敏回写抹掉真实凭据（也顺带修复「编辑不改 key 即被清空」）。
@@ -6399,8 +6449,9 @@ app.put("/admin/wake-locked", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const body = (req.body && typeof req.body === "object") ? req.body : {};
     const sessions = (body.sessions && Array.isArray(body.sessions)) ? body.sessions.filter(function (s) { return typeof s === "string" && s; }) : [];
-    fs.ensureDirSync(path.dirname(WAKE_LOCKED_FILE));
-    fs.writeFileSync(WAKE_LOCKED_FILE, JSON.stringify(sessions, null, 2), "utf-8");
+    // 2026-09-13 审查修复：改原子写——裸 writeFileSync 的写盘窗口被唤醒侧读到半截 JSON 时，
+    // readWakeLockedSessions 解析失败返回空，当轮唤醒（含到期显式闹钟）整体静默停摆
+    writeJsonFileAtomic(WAKE_LOCKED_FILE, sessions);
     reply.send({ ok: true, saved: true, count: sessions.length });
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });

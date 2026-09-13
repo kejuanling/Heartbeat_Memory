@@ -250,13 +250,14 @@ function _truncateResult(text, max = 800) {
   return s.length > max ? s.slice(0, max) + "…" : s;
 }
 
-// 工具调用时间（Asia/Shanghai，精确到秒）；调用时间取执行起点，跨轮回灌时随 toolHistory 落盘复用。
-// 用 UTC 取值器读 +8 偏移后的时刻，宿主机时区不影响结果
+// 工具调用时间（精确到秒）；调用时间取执行起点，跨轮回灌时随 toolHistory 落盘复用。
+// 2026-09-13 审查修复：改用可配置 TIME_ZONE（与 server.js 同一 resolveTimeZone 口径）——
+// 此前硬编码 UTC+8，非 +8 时区部署时工具调用时间戳会错 8 小时并随 toolHistory 进模型上下文
+const { getDatePartsInTimeZone, resolveTimeZone } = require("./time_utils");
+const TOOLCALL_TIME_ZONE = resolveTimeZone();
 function _toolCallTime(d = new Date()) {
-  const loc = new Date(d.getTime() + 8 * 3600 * 1000);
-  const p = (n) => String(n).padStart(2, "0");
-  return loc.getUTCFullYear() + "-" + p(loc.getUTCMonth() + 1) + "-" + p(loc.getUTCDate()) + " " +
-    p(loc.getUTCHours()) + ":" + p(loc.getUTCMinutes()) + ":" + p(loc.getUTCSeconds());
+  const p = getDatePartsInTimeZone(d, TOOLCALL_TIME_ZONE);
+  return p.year + "-" + p.month + "-" + p.day + " " + p.hour + ":" + p.minute + ":" + p.second;
 }
 
 // 工具结果进模型上下文的统一标头（与 routes/chat.js 跨轮回灌转换保持同一格式，两处改要同步）：

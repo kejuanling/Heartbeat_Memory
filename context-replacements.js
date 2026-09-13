@@ -345,7 +345,11 @@ function eventInjectionVisibleKeys() {
   const cfg = loadEventInjectConfig();
   let stat;
   try { stat = fs.statSync(TIMELINE_FILE); } catch (e) { stat = { mtimeMs: 0, size: 0 }; }
-  const ck = JSON.stringify(cfg) + ":" + stat.mtimeMs + ":" + stat.size;
+  // 2026-09-13 审查修复：缓存键加入 ALS 当前会话——缓存值是按当前会话时间线算的，
+  // 此前键只含主时间线文件 stat，多会话交替请求时会话 B 直接命中会话 A 的可见事件集合，
+  // 导致压缩索引编号漂移、块窗口判定错位。
+  const sidSafe = String(getActiveSession() || "").replace(/[^A-Za-z0-9_-]/g, "");
+  const ck = sidSafe + ":" + JSON.stringify(cfg) + ":" + stat.mtimeMs + ":" + stat.size;
   if (_eventVisCache && _eventVisCache.ck === ck) return _eventVisCache.keys;
   const keys = collectInjectionVisibleEvents(loadTimeline());
   _eventVisCache = { ck: ck, keys: keys };
@@ -362,6 +366,9 @@ function isEventInjectionVisible(msg) {
 
 function isCompressible(msg, includeEvents) {
   if (!msg || (msg.role !== "user" && msg.role !== "assistant")) return false;
+  // 2026-09-13 审查修复：软删除消息不进压缩索引——此前已删除的容量提醒仍占编号、
+  // 计入容量估算，且原文被发给摘要模型导致摘要串味（compactor/findContentByKey 等处均已过滤）
+  if (msg.deleted) return false;
   if (isDiaryEvent(msg)) return false; // 日记永远不压缩
   if (isStarEvent(msg)) return false; // 记忆碎片永远不压缩（与日记同级，跨窗口带走的标星正文）
   if (!includeEvents && msg.role === "assistant" && isSpecialEvent(msg)) return false;
@@ -477,8 +484,12 @@ function effectiveSession(sessionId) { return activeSessionOr(sessionId) || rece
 function loadTimeline(sessionId) {
   const sid = effectiveSession(sessionId);
   if (sid && sid !== "default") {
+    // 2026-09-13 审查修复：与 server.js safeSessionToken 完全同口径——清洗后为空的会话 ID
+    // （如纯中文）用 md5 哈希兜底，否则这里读 enhanced_messages_.json 而落盘在
+    // enhanced_messages_h<md5>.json，该会话压缩索引恒为空、替换定位失败。
     const safe = String(sid).replace(/[^A-Za-z0-9_-]/g, "");
-    return readJson(path.join(__dirname, "enhanced_messages_" + safe + ".json"), []);
+    const token = safe || ("h" + crypto.createHash("md5").update(String(sid)).digest("hex").slice(0, 12));
+    return readJson(path.join(__dirname, "enhanced_messages_" + token + ".json"), []);
   }
   return readJson(TIMELINE_FILE, []);
 }
@@ -1241,7 +1252,9 @@ function matchedShareSig(matched) {
 function saveMarks(marks) {
   try {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    const tmp = MARKS_FILE + ".tmp";
+    // 2026-09-13 审查修复：tmp 名加进程/随机后缀——gateway 与 wake-up 双进程都可能写 marks
+    // （唤醒链路遇 <star> 标签会 saveMarks），固定共享 tmp 名在双进程同写时会落交错/半截内容
+    const tmp = MARKS_FILE + ".tmp." + process.pid + "." + Date.now() + "." + Math.random().toString(36).slice(2, 8);
     fs.writeFileSync(tmp, JSON.stringify({ version: 1, marks: marks }, null, 2), "utf-8");
     fs.renameSync(tmp, MARKS_FILE);
   } catch (err) {

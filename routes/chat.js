@@ -1510,8 +1510,11 @@ app.post("/v1/chat/completions", async (req, reply) => {
     reply.raw.end();
     } catch (streamErr) {
       // 上游中断/超时时确保响应结束，避免连接悬挂
+      // 2026-09-13 审查修复：不再 rethrow——rethrow 会跳过下方的落盘块（已生成的部分回复
+      // 不落盘，刷新即丢），且外层 catch 会对已发头的响应二次 send。中断后仍走落盘块，
+      // 把已收到的部分回复存档（tailHasReply 保证重试时不重复写）。
+      console.warn("[stream] 流式中断（客户端断开/上游异常）:", streamErr.message);
       try { reply.raw.end(); } catch {}
-      throw streamErr;
     } finally {
       clearTimeout(upstreamTimer);
     }
