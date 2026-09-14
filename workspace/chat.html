@@ -679,12 +679,26 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .saved-theme{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;cursor:pointer;font-size:13px;color:var(--ink)}
 .saved-theme:active{background:var(--accent-soft)}
 .theme-row input[type="text"]{flex:1;width:100%;border:1px solid var(--line);border-radius:var(--radius-sm);padding:9px 11px;font-size:13px;color:var(--ink);outline:none;background:var(--field-bg,#fff);font-family:inherit}
+/* 当前主题条 + 预设胶囊（0913-13）：胶囊用预设真实配色画迷你气泡，所见即所得 */
+.cur-theme-bar{font-size:12px;color:var(--ink2);background:var(--field-bg,#fff);border:1px solid var(--line);border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:10px}
+.cur-theme-bar b{color:var(--ink);font-weight:600}
+.cur-theme-bar .ct-dirty{color:var(--warn,#c98696);margin-left:4px}
+.preset-chips{display:flex;gap:8px;margin:2px 0 12px}
+.preset-chip{flex:1;min-width:0;border:1px solid rgba(var(--shadow-rgb,90,74,58),.14);border-radius:12px;padding:9px 4px 7px;display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;font-size:11px;background:transparent;color:inherit}
+.preset-chip.on{outline:2px solid var(--accent,#c89098);outline-offset:1px}
+.preset-chip .pc-bs{width:76%;display:flex;flex-direction:column;gap:3px}
+.preset-chip .pc-bs i{display:block;height:9px;border-radius:5px}
+.preset-chip .pc-bs i.u{margin-left:auto;width:70%}
+.preset-chip .pc-bs i.a{width:86%}
 /* 迷你对话实时预览（0913-11 升级）：随主题变量实时反映配色/圆角/排版/头像形状 */
 .theme-preview{border-radius:var(--radius-sm);border:1px solid var(--line);position:relative;overflow:hidden;margin-top:8px;padding:10px 8px;display:flex;flex-direction:column;gap:7px;background:var(--card,transparent)}
 .theme-preview .tp-row{display:flex;align-items:flex-end;gap:6px}
 .theme-preview .tp-row.user{flex-direction:row-reverse}
 .theme-preview .tp-av{width:calc(var(--avatar-size,34px)*0.62);height:calc(var(--avatar-size,34px)*0.62);border-radius:var(--avatar-radius,50%);background:var(--accent-grad);flex-shrink:0;box-shadow:0 1px 3px rgba(var(--shadow-rgb),.18)}
-.theme-preview .tp-b{border-radius:var(--radius);padding:var(--bubble-padding,11px 14px);font-size:10.5px;line-height:var(--bubble-line-height,1.72);letter-spacing:var(--bubble-letter-spacing,0);font-weight:var(--bubble-font-weight,400);max-width:72%;word-break:break-word}
+.theme-preview .tp-col{display:flex;flex-direction:column;gap:2px;min-width:0;max-width:78%}
+.theme-preview .tp-row.user .tp-col{align-items:flex-end}
+.theme-preview .tp-nm{font-size:9.5px;color:var(--ink2);padding:0 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.theme-preview .tp-b{border-radius:var(--radius);padding:var(--bubble-padding,11px 14px);font-size:10.5px;line-height:var(--bubble-line-height,1.72);letter-spacing:var(--bubble-letter-spacing,0);font-weight:var(--bubble-font-weight,400);max-width:100%;width:fit-content;word-break:break-word}
 .theme-preview .tp-row.ai .tp-b{background:var(--bubble-ai);color:var(--ai-font-color,var(--ink));border:1px solid var(--line);border-radius:var(--radius) var(--radius) var(--radius) 6px}
 .theme-preview .tp-row.user .tp-b{background:linear-gradient(135deg,var(--bubble-user1),var(--bubble-user2));color:var(--user-font-color,#fff);border-radius:var(--radius) var(--radius) 6px var(--radius)}
 .mcp-block{margin-top:14px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--accent-faint);padding:12px}
@@ -1768,12 +1782,9 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
               <button data-bs="sms">短信</button>
               <button data-bs="custom">自定义</button>
             </div>
-            <div class="set-sec-label">风格预设<span class="tag">一键整包套用，再微调</span></div>
-            <div class="pick" id="pickStylePreset">
-              <button data-preset="classic" class="on">经典</button>
-              <button data-preset="zen">素白极简</button>
-              <button data-preset="glass">暗夜玻璃</button>
-            </div>
+            <div class="cur-theme-bar" id="curThemeBar">当前主题：<b id="curThemeName">—</b><span class="ct-dirty" id="curThemeDirty" style="display:none">· 已修改</span></div>
+            <div class="set-sec-label">风格预设<span class="tag">点击整包套用为当前主题</span></div>
+            <div class="preset-chips" id="pickStylePreset"></div>
             <div class="set-sec-label">背景</div>
             <div class="bg-mode-switch" style="display:flex;gap:8px;margin:2px 0 10px">
               <button type="button" class="mcp-btn bg-mode-btn" id="bgModeColorBtn" data-bg="color" style="flex:1">纯色背景</button>
@@ -1892,7 +1903,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
             </div>
             <div class="set-sec-label">保存主题</div>
             <div class="theme-save">
-              <div class="ts-row"><input type="text" id="themeNameInput" placeholder="主题名（新增主题时必填，留空则仅保存修改）"><button type="button" class="mcp-btn primary ts-btn" id="saveThemeBtn">保存</button></div>
+              <div class="ts-row"><input type="text" id="themeNameInput" placeholder="副本名（把当前样式存为可切换主题）"><button type="button" class="mcp-btn primary ts-btn" id="saveThemeBtn">存为副本</button></div>
               <div class="ts-row"><button type="button" class="mcp-btn ts-btn" id="exportThemeBtn">导出当前</button><button type="button" class="mcp-btn ts-btn" id="importThemeBtn">一键导入</button><button type="button" class="mcp-btn ts-btn" id="jsonThemeBtn">JSON 高级</button></div>
               <div id="themeJsonBox" style="display:none;flex-direction:column;gap:8px">
                 <textarea id="themeJsonArea" placeholder="当前主题的 v2 分组 JSON，可直接改后应用…" style="min-height:140px;font-size:11px;line-height:1.5;font-family:monospace" rows="4"></textarea>
@@ -4231,9 +4242,7 @@ function renderPicks(){
   if(pickAvatarShape)pickAvatarShape.querySelectorAll("button").forEach(b=>{
     b.classList.toggle("on",b.dataset.sh===(cfg.avatar_shape||"circle"));
   });
-  if(pickStylePreset)pickStylePreset.querySelectorAll("button").forEach(b=>{
-    b.classList.toggle("on",(cfg.style_mode||"classic")===(b.dataset.preset==="classic"?"classic":b.dataset.preset));
-  });
+  if(typeof updateCurThemeBar==="function")updateCurThemeBar(); // 当前主题条 + 预设胶囊高亮（0913-13）
   if(pickMode)pickMode.querySelectorAll("button").forEach(b=>{
     b.classList.toggle("on",b.dataset.m===(cfg.send_mode||"stream"));
   });
@@ -4685,9 +4694,9 @@ function migrateThemeObj(t){
   out.font_size=or(o.font_size,15);
   out.font_family=o.font_family||"";
   out.style_mode=(typeof o.style_mode==="string")?o.style_mode:"";
-  out.bubble_style=or(o.bubble_style,"qq");
-  out.show_avatar=o.show_avatar!==false;
-  out.show_name=o.show_name!==false;
+  out.bubble_style=or(o.bubble_style,"qq"); // 0913-13 解耦：主题对象不再消费此键，仅保留兼容旧数据
+  if(o.show_avatar!==undefined) out.show_avatar=!!o.show_avatar; // 未定义时不覆盖用户显隐偏好
+  if(o.show_name!==undefined) out.show_name=!!o.show_name;
   out.think_cap_border=or(o.think_cap_border,"#c89098");
   out.think_cap_bg=or(o.think_cap_bg,"#f1ebe9");
   out.think_cap_text=or(o.think_cap_text,"#c89098");
@@ -4699,7 +4708,8 @@ function migrateThemeObj(t){
   THEME_EXTRA_KEYS.forEach(function(k){ out[k]=o[k]!=null?o[k]:THEME_EXTRA_DEFAULTS[k]; });
   return out;
 }
-/* ===== 内置风格预设（0913-11）：v2 分组定义，点胶囊整包套用；classic=现有默认不做预设 ===== */
+/* ===== 内置风格预设（0913-13 重构）：v2 分组定义，点胶囊整包套用；classic=现有默认不做预设 =====
+   解耦原则（0913-13 用户拍板）：预设只管视觉（配色/排版/形状/效果/胶囊），不碰聊天布局与头像/名字显隐 */
 const THEME_PRESETS={
   zen:{
     v:2, name:"素白极简", style_mode:"zen",
@@ -4708,7 +4718,6 @@ const THEME_PRESETS={
     typography:{ size:15, lineHeight:1.7, letterSpacing:0.01, weight:400 },
     shape:{ avatarShape:"circle", avatarSize:34, inputRadius:22 },
     effects:{ glass:16, transition:240, bgBlur:0 },
-    layout:{ bubbleStyle:"custom", showAvatar:false, showName:false },
     caps:{ think:{border:"#c9c9ce",bg:"#f2f2f4",text:"#6e6e73"}, tool:{border:"#c9d4e2",bg:"#eef2f7",text:"#5a6b80"} }
   },
   glass:{
@@ -4718,7 +4727,6 @@ const THEME_PRESETS={
     typography:{ size:15, lineHeight:1.72, letterSpacing:0, weight:400 },
     shape:{ avatarShape:"circle", avatarSize:34, inputRadius:24 },
     effects:{ glass:18, transition:260, bgBlur:0 },
-    layout:{ bubbleStyle:"custom", showAvatar:true, showName:true },
     caps:{ think:{border:"#5d6a82",bg:"#1a2334",text:"#9aa7bd"}, tool:{border:"#4a7ba6",bg:"#16202e",text:"#7fb3d9"} },
     inputbar_bg:"#131a28", inputbar_border:"#2a3548", input_text:"#e8ecf4",
     send_btn:"#33518f", send_icon:"#f2f6ff", avatar_bg:"#33518f",
@@ -4825,7 +4833,7 @@ function themeInputs(){
     style_mode: cfg.style_mode||"",
     user_avatar: or(userAvatarInput&&userAvatarInput.value, cfg.user_avatar||""),
     ai_avatar: or(aiAvatarInput&&aiAvatarInput.value, cfg.ai_avatar||""),
-    bubble_style: (chatEl&&chatEl.getAttribute("data-layout"))||cfg.bubble_style||"qq",
+    /* 0913-13 解耦：bubble_style 不入主题（布局独立）；show_avatar/show_name 为用户显隐偏好，随副本记录 */
     show_avatar: cfg.show_avatar!==false,
     show_name: cfg.show_name!==false,
     think_cap_border: or(thinkCapBorder&&thinkCapBorder.value, cfg.think_cap_border||"#c89098"),
@@ -4873,27 +4881,22 @@ async function loadThemesFromServer(){
 async function saveCustomTheme(){
   const nmEl=document.getElementById("themeNameInput");
   const name=(nmEl&&nmEl.value||"").trim();
+  // 0913-13：当前样式已自动保存，这里只负责「存为副本」；不填名直接提示返回
+  if(!name){ showToast("当前样式已自动保存。想存成可切换的副本，请先填个名字"); if(nmEl)nmEl.focus(); return; }
   const th=themeInputs(); th.name=name;
   // 背景图还是本地 dataURL 时先转存服务器，否则主题存进 localStorage 很容易撑爆配额
   if(/^data:image\//.test(th.bg_image||"")){
     try{ th.bg_image=await uploadImageToServer(th.bg_image); }
     catch(e){ showToast("背景图未能转存服务器（"+(e.message||"")+"）"); }
   }
-  if(name){
-    // 输入名称：新增主题胶囊 + 应用 + 云同步
-    let arr=loadSavedThemes().filter(function(t){ return t.name!==th.name; });
-    arr.push(th); if(arr.length>100) arr=arr.slice(-100);
-    let savedLocal=true;
-    try{ localStorage.setItem(LS_THEMES, JSON.stringify(arr)); }catch(e){ savedLocal=false; }
-    // 先应用（设好 current_theme_name 标记），再云同步 + 重渲染，保证云端 current 与列表「当前」徽标一致
-    try{ applyCustomTheme(th); }catch(e){ saveCfg(); applyTheme(); pushSettingsToCloud(); }
-    syncThemesToServer(); renderSavedThemes(savedLocal?null:arr);
-    showToast(savedLocal?"主题已保存":"本机存储空间不足，主题仅同步到云端，换设备可恢复");
-  } else {
-    // 名称留空：不新增主题胶囊，只把当前参数作为生效主题保存并云同步
-    showToast("没填主题名：只保存当前参数、不新增主题。想新增请填个主题名再点保存");
-    try{ applyCustomTheme(th,true); }catch(e){ saveCfg(); applyTheme(); pushSettingsToCloud(); }
-  }
+  // 新增/覆盖同名副本 + 设为当前主题 + 云同步
+  let arr=loadSavedThemes().filter(function(t){ return t.name!==th.name; });
+  arr.push(th); if(arr.length>100) arr=arr.slice(-100);
+  let savedLocal=true;
+  try{ localStorage.setItem(LS_THEMES, JSON.stringify(arr)); }catch(e){ savedLocal=false; }
+  try{ applyCustomTheme(th); }catch(e){ saveCfg(); applyTheme(); pushSettingsToCloud(); }
+  syncThemesToServer(); renderSavedThemes(savedLocal?null:arr);
+  showToast(savedLocal?"副本已保存并设为当前主题":"本机存储空间不足，副本仅同步到云端，换设备可恢复");
   if(nmEl) nmEl.value="";
 }
 function applyCustomTheme(t,silent){
@@ -4917,11 +4920,14 @@ function applyCustomTheme(t,silent){
   THEME_EXTRA_KEYS.forEach(function(k){ cfg[k]=(t[k]!=null)?t[k]:THEME_EXTRA_DEFAULTS[k]; });
   if(t.user_avatar!==undefined)cfg.user_avatar=t.user_avatar||"";
   if(t.ai_avatar!==undefined)cfg.ai_avatar=t.ai_avatar||"";
-  if(t.bubble_style)cfg.bubble_style=t.bubble_style;
+  // 0913-13 解耦：主题不再改聊天布局（bubble_style 只由布局行控制）
   cfg.style_mode=(typeof t.style_mode==="string")?t.style_mode:"";
   if(t.show_avatar!==undefined)cfg.show_avatar=!!t.show_avatar;
   if(t.show_name!==undefined)cfg.show_name=!!t.show_name;
+  // 当前主题身份（0913-13）：base=来源主题/预设名；之后手动改任何字段即标「已修改」
   cfg.current_theme_name=(t&&t.name)?String(t.name):"";
+  cfg.current_theme_base=(t&&t.name)?String(t.name):"";
+  cfg.theme_dirty=false;
   if(bgImageInput)bgImageInput.value=cfg.bg_image||""; if(bgColorInput)bgColorInput.value=cfg.bg_color||"#f4f1ee";
   if(userBubbleColor)userBubbleColor.value=cfg.user_bubble; if(aiBubbleColor)aiBubbleColor.value=cfg.ai_bubble;
   if(bubbleOpacity)bubbleOpacity.value=Math.round((cfg.bubble_opacity!=null?cfg.bubble_opacity:1)*100); if(bubbleBlur)bubbleBlur.value=cfg.bubble_blur; if(bubbleRadius)bubbleRadius.value=cfg.bubble_radius;
@@ -4932,10 +4938,9 @@ function applyCustomTheme(t,silent){
   if(toolCapBorder)toolCapBorder.value=cfg.tool_cap_border; if(toolCapBg)toolCapBg.value=cfg.tool_cap_bg; if(toolCapText)toolCapText.value=cfg.tool_cap_text;
   populateWindowInputs(cfg);
   if(userAvatarInput)userAvatarInput.value=cfg.user_avatar||""; if(aiAvatarInput)aiAvatarInput.value=cfg.ai_avatar||"";
-  if(chatEl)chatEl.setAttribute("data-layout",cfg.bubble_style||"qq");
   document.body.setAttribute("data-style",cfg.style_mode||"classic");
   syncBgModeUI(deriveBgMode());
-  renderPicks(); renderThemeValues(); applyTheme(); applyHeader(); saveCfg();
+  renderPicks(); renderThemeValues(); renderThemePreview(); applyTheme(); applyHeader(); saveCfg();
   if(!silent) showToast("已切换到「"+(t.name||"主题")+"」");
   // 关键：应用生效主题后立即上云，否则刷新时云端旧 cfg 权威覆盖，背景会被改回（应用主题必须同步持久化）
   pushSettingsToCloud().then(function(ok){ if(ok===false) showToast("云端同步失败，请重新登录后再试"); });
@@ -4954,7 +4959,8 @@ function renderSavedThemes(srcArr){
   if(themeCountEl) themeCountEl.textContent="（已存 "+arr.length+" / 100）";
   if(!arr.length){ el.innerHTML='<div class="data-tip">还没有保存的主题，点「保存」存一个；或用「一键导入」粘主题码。</div>'; return; }
   const curName=(cfg&&cfg.current_theme_name)||"";
-  el.innerHTML=arr.map(function(t,i){ const isCur=!!(curName&&t.name===curName); return '<div class="saved-theme'+(isCur?' cur':'')+'" data-i="'+i+'">'+themeSwatch(t)+'<span class="st-n">'+escapeHtml(t.name)+'</span>'+(isCur?'<span class="st-cur">当前</span>':'')+'<button type="button" class="st-del" title="删除主题">×</button></div>'; }).join("");
+  const curClean=!(cfg&&cfg.theme_dirty); // 手动改过样式后「当前」徽标熄灭，语义=列表条目正原样生效
+  el.innerHTML=arr.map(function(t,i){ const isCur=!!(curName&&t.name===curName&&curClean); return '<div class="saved-theme'+(isCur?' cur':'')+'" data-i="'+i+'">'+themeSwatch(t)+'<span class="st-n">'+escapeHtml(t.name)+'</span>'+(isCur?'<span class="st-cur">当前</span>':'')+'<button type="button" class="st-del" title="删除主题">×</button></div>'; }).join("");
   el.querySelectorAll(".saved-theme").forEach(function(e){
     e.addEventListener("click",function(ev){
       if(ev.target&&ev.target.classList&&ev.target.classList.contains("st-del")) return;
@@ -5025,7 +5031,7 @@ function currentThemeObject(){
     avatar_bg:cfg.avatar_bg||"",
     icon_btn_bg:cfg.icon_btn_bg||"", icon_btn_color:cfg.icon_btn_color||"",
     bubble_shadow:cfg.bubble_shadow||"",
-    bubble_style:cfg.bubble_style||"qq",
+    /* 0913-13 解耦：bubble_style 不入主题对象（布局独立于主题） */
     show_avatar:cfg.show_avatar!==false,
     show_name:cfg.show_name!==false
   };
@@ -5045,15 +5051,27 @@ const THEME_FIELD_TEMPLATE=JSON.stringify({
   typography:{ size:15, lineHeight:1.72, letterSpacing:0, weight:400 },
   shape:{ avatarShape:"circle", avatarSize:34, inputRadius:24 },
   effects:{ glass:6, transition:0, bgBlur:0 },
-  layout:{ bubbleStyle:"qq", showAvatar:true, showName:true },
-  caps:{ think:{border:"#c89098",bg:"#f1ebe9",text:"#c89098"}, tool:{border:"#5a86a6",bg:"#e7ecf3",text:"#5a86a6"} }
+   caps:{ think:{border:"#c89098",bg:"#f1ebe9",text:"#c89098"}, tool:{border:"#5a86a6",bg:"#e7ecf3",text:"#5a86a6"} }
 },null,2);
+const THEME_AI_TEMPLATE=[
+"请帮我设计一套聊天页主题。严格按照下面的 JSON 格式输出一套配色和谐的新主题，只输出 JSON 本体，前后不要加任何解释文字。",
+"字段含义：colors: accent=强调色 accentDeep=深强调 bg1=面板底色 bg3=页面底色 ink/ink2/ink3=正文/次级/弱化文字色 line=描边色(可带8位透明度)。",
+"bubbles: userBg=我的气泡底色 userText=我的气泡文字色 aiBg=对方气泡底色 aiText=对方气泡文字色 radius=圆角px opacity=不透明度0~1 blur=气泡磨砂px maxWidth=气泡最大宽% gap=消息间距px padding=内边距(如\"11px 15px\") shadow=阴影基色。",
+"typography: size=字号px lineHeight=行高1.4~2.2 letterSpacing=字间距em weight=字重300/400/500。",
+"shape: avatarShape=circle|squircle|square avatarSize=头像px inputRadius=输入框圆角px。",
+"effects: glass=磨砂强度 transition=全局过渡ms bgBlur=背景虚化px(配图片背景用)。",
+"caps: think=思考胶囊 tool=工具胶囊，各含 border/bg/text 三色。",
+"模板（把值改成你要的方案）：",
+THEME_FIELD_TEMPLATE].join("\n");
 function parseThemeAny(code){
   let s=String(code||"").trim();
   if(!s) return null;
   if(s.indexOf("TH1.")===0) return themeFromCode(s);
   if(s.indexOf("TH2.")===0) return themeFromCode(s);
   s=s.replace(/^```[a-zA-Z]*\s*/,"").replace(/```\s*$/,"").trim();
+  // 0913-13：文本里含 JSON 主体（AI 回复常带前后说明）→ 自动抠出第一个 { 到最后一个 }
+  const _jb=s.indexOf("{"), _je=s.lastIndexOf("}");
+  if(_jb>=0&&_je>_jb) s=s.substring(_jb,_je+1);
   if(/^\{/.test(s)){
     try{
       const o=JSON.parse(s);
@@ -5119,7 +5137,7 @@ if(importThemeBtn) importThemeBtn.addEventListener("click",function(){
 });
 if(themeImportCancel) themeImportCancel.addEventListener("click",function(){ if(themeImportBox) themeImportBox.style.display="none"; });
 if(themeImportTpl) themeImportTpl.addEventListener("click",function(){
-  const txt=THEME_FIELD_TEMPLATE;
+  const txt=THEME_AI_TEMPLATE;
   if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(function(){ showToast("字段模板已复制，发给外部 AI 照这个格式出主题"); }).catch(function(){ window.prompt("复制字段模板",txt); }); }
   else window.prompt("复制字段模板",txt);
 });
@@ -5185,34 +5203,21 @@ function applyTheme(){
     document.body.style.background="";
   }
 }
-// 布局预设色：切换聊天布局时套用「默认色」，用户仍可在主题面板手动微调覆盖
-const LAYOUT_PRESETS={
-  qq:{ user_bubble:"#12b7f5", ai_bubble:"#ffffff", bg_color:"#f5f5f7", user_font_color:"#ffffff", ai_font_color:"#333333", bubble_radius:12, bubble_opacity:1, bubble_blur:0 },
-  wx:{ user_bubble:"#95ec69", ai_bubble:"#ffffff", bg_color:"#f5f5f7", user_font_color:"#111111", ai_font_color:"#333333", bubble_radius:4, bubble_opacity:1, bubble_blur:0 },
-  sms:{ user_bubble:"#34c759", ai_bubble:"#e9e9eb", bg_color:"#ffffff", user_font_color:"#ffffff", ai_font_color:"#111111", bubble_radius:20, bubble_opacity:1, bubble_blur:0 },
-  custom:{ user_bubble:"#d9a3a8", ai_bubble:"#fffdf9", bg_color:"", user_font_color:"#ffffff", ai_font_color:"#5a4a3a", bubble_radius:18, bubble_opacity:1, bubble_blur:0 }
-};
-function applyLayoutPreset(style){
-  const p=LAYOUT_PRESETS[style]; if(!p)return;
-  cfg.user_bubble=p.user_bubble; cfg.ai_bubble=p.ai_bubble;
-  cfg.bg_color=p.bg_color; cfg.user_font_color=p.user_font_color; cfg.ai_font_color=p.ai_font_color;
-  cfg.bubble_radius=p.bubble_radius; cfg.bubble_opacity=p.bubble_opacity; cfg.bubble_blur=p.bubble_blur;
-  saveCfg();
-}
+// 布局切换（0913-13 解耦）：只改消息结构（头像位/气泡形态），完全不碰配色——配色归主题管
 function applyLayout(style){
   cfg.bubble_style=style;
-  applyLayoutPreset(style);
   if(chatEl)chatEl.setAttribute("data-layout",cfg.bubble_style);
   applyTheme();
   populateSettings();
   renderThemeValues();
   renderPicks();
   applyHeader();   // 切换模板时同步更新顶部栏名称位置/头像
+  saveCfg();
 }
-[bubbleOpacity,bubbleBlur,bubbleRadius,userBubbleColor,aiBubbleColor,bgColorInput,bgImageInput,userFontColorInput,aiFontColorInput,fontSizeInput,fontFamilyInput,thinkCapBorder,thinkCapBg,thinkCapText,toolCapBorder,toolCapBg,toolCapText,accentColorInput,chromeBgInput,pageTextInput,pageText2Input,pageText3Input,headerTitleInput,inputbarBgInput,inputbarBorderInput,inputTextInput,sendBtnInput,sendIconInput,avatarBgInput,iconBtnBgInput,iconBtnColorInput,bubbleShadowInput].filter(Boolean).forEach(function(el){
-  el.addEventListener("input",function(){renderThemeValues();applyThemePreview();});
+[bubbleOpacity,bubbleBlur,bubbleRadius,userBubbleColor,aiBubbleColor,bgColorInput,bgImageInput,userFontColorInput,aiFontColorInput,fontSizeInput,fontFamilyInput,thinkCapBorder,thinkCapBg,thinkCapText,toolCapBorder,toolCapBg,toolCapText].filter(Boolean).forEach(function(el){
+  el.addEventListener("input",function(){collectThemeInputsToCfg();markThemeDirty();renderThemeValues();applyThemePreview();scheduleThemePersist();});
 });
-/* ===== v2 主题：新字段实时预览 + 风格预设 + JSON 编辑器（0913-11） ===== */
+/* ===== v2 主题：当前主题身份 + 改即存 + 风格预设胶囊 + JSON 编辑器（0913-13 重构） ===== */
 // 把 cfg 里的 v2 新字段回填到滑块/选择钮（切主题、导入后调用）
 function syncThemeExtraInputs(){
   if(lineHeightInput)lineHeightInput.value=cfg.line_height!=null?cfg.line_height:1.72;
@@ -5245,20 +5250,86 @@ function applyExtraVarsLive(){
   root.setProperty("--bg-blur",gbl+"px");
   document.body.setAttribute("data-bgblur",(gbl>0&&(cfg.bg_image||deriveBgMode()==="image"))?"1":"0");
 }
+// —— 当前主题身份（0913-13）：手动改任何主题控件即标记「已修改」，当前样式自动持久化 ——
+function markThemeDirty(){
+  cfg.theme_dirty=true;
+  updateCurThemeBar();
+}
+function updateCurThemeBar(){
+  const n=document.getElementById("curThemeName"), d=document.getElementById("curThemeDirty");
+  if(n) n.textContent=cfg.current_theme_base||(cfg.theme_dirty?"自定义":"默认");
+  if(d) d.style.display=cfg.theme_dirty?"":"none";
+  refreshPresetChips();
+}
+let _themePersistT=null;
+function scheduleThemePersist(){
+  if(_themePersistT)clearTimeout(_themePersistT);
+  _themePersistT=setTimeout(function(){ saveCfg(); try{ pushSettingsToCloud(); }catch(e){} },800);
+}
+// 主题控件现值 → cfg（改即存的采集半边；应用半边是 applyTheme/applyThemePreview）
+function collectThemeInputsToCfg(){
+  cfg.bg_mode=deriveBgMode();
+  if(cfg.bg_mode==="image"){ cfg.bg_image=bgImageInput.value.trim()||""; cfg.bg_color=""; }
+  else { cfg.bg_color=bgColorInput.value||""; cfg.bg_image=""; }
+  cfg.user_bubble=userBubbleColor.value||"#d9a3a8"; cfg.ai_bubble=aiBubbleColor.value||"#fffdf9";
+  cfg.bubble_opacity=Number(bubbleOpacity.value)/100; cfg.bubble_blur=Number(bubbleBlur.value); cfg.bubble_radius=Number(bubbleRadius.value);
+  // 字体2色/胶囊6色的输入框已随 2026-09-11 精简移出界面，元素为 null：有守卫地读，无则沿用 cfg
+  cfg.user_font_color=(userFontColorInput&&userFontColorInput.value)||cfg.user_font_color||"#ffffff";
+  cfg.ai_font_color=(aiFontColorInput&&aiFontColorInput.value)||cfg.ai_font_color||"#5a4a3a";
+  cfg.font_size=Number(fontSizeInput.value)||15; cfg.font_family=fontFamilyInput.value||"";
+  cfg.think_cap_border=(thinkCapBorder&&thinkCapBorder.value)||cfg.think_cap_border; cfg.think_cap_bg=(thinkCapBg&&thinkCapBg.value)||cfg.think_cap_bg; cfg.think_cap_text=(thinkCapText&&thinkCapText.value)||cfg.think_cap_text;
+  cfg.tool_cap_border=(toolCapBorder&&toolCapBorder.value)||cfg.tool_cap_border; cfg.tool_cap_bg=(toolCapBg&&toolCapBg.value)||cfg.tool_cap_bg; cfg.tool_cap_text=(toolCapText&&toolCapText.value)||cfg.tool_cap_text;
+  cfg.line_height=Number(lineHeightInput.value)||1.72;
+  cfg.letter_spacing=Number(letterSpacingInput.value)||0;
+  cfg.para_gap=Number(paraGapInput.value)||0;
+  cfg.msg_gap=Number(msgGapInput.value)||0;
+  cfg.bubble_padding=Number(bubblePadInput.value)||11;
+  cfg.bubble_max_width=Number(bubbleMaxWidthInput.value)||84;
+  cfg.avatar_size=Number(avatarSizeInput.value)||34;
+  cfg.inputbar_radius=Number(inputbarRadiusInput.value)||24;
+  cfg.anim_transition=Number(animTransInput.value)||0;
+  cfg.bg_blur=Number(bgBlurInput.value)||0;
+}
 [lineHeightInput,letterSpacingInput,paraGapInput,msgGapInput,bubblePadInput,bubbleMaxWidthInput,avatarSizeInput,inputbarRadiusInput,animTransInput,bgBlurInput].filter(Boolean).forEach(function(el){
-  el.addEventListener("input",function(){renderThemeValues();applyExtraVarsLive();});
+  el.addEventListener("input",function(){collectThemeInputsToCfg();markThemeDirty();renderThemeValues();applyExtraVarsLive();scheduleThemePersist();});
 });
 if(pickFontWeight)pickFontWeight.querySelectorAll("button").forEach(function(b){
-  b.addEventListener("click",function(){ cfg.font_weight=Number(b.dataset.fw)||400; renderPicks(); applyExtraVarsLive(); saveCfg(); });
+  b.addEventListener("click",function(){ cfg.font_weight=Number(b.dataset.fw)||400; collectThemeInputsToCfg(); markThemeDirty(); renderPicks(); applyExtraVarsLive(); scheduleThemePersist(); });
 });
 if(pickAvatarShape)pickAvatarShape.querySelectorAll("button").forEach(function(b){
-  b.addEventListener("click",function(){ cfg.avatar_shape=b.dataset.sh||"circle"; renderPicks(); applyExtraVarsLive(); saveCfg(); });
+  b.addEventListener("click",function(){ cfg.avatar_shape=b.dataset.sh||"circle"; collectThemeInputsToCfg(); markThemeDirty(); renderPicks(); applyExtraVarsLive(); scheduleThemePersist(); });
 });
-// 经典=出厂默认平铺；zen/glass=THEME_PRESETS 整包。个人设置（名字/头像）不在预设范围，保留不动
+// —— 风格预设胶囊（0913-13）：用预设真实配色画迷你气泡，所见即所得；点击=拷贝为当前主题 ——
+const PRESET_CHIP_DEFS=[
+  {id:"classic",name:"经典粉棕",chipBg:"#f4f1ee",user:"#d9a3a8",ai:"#fffdf9",ink:"#5a4a3a"},
+  {id:"zen",name:THEME_PRESETS.zen.name,chipBg:THEME_PRESETS.zen.colors.bg3,user:THEME_PRESETS.zen.bubbles.userBg,ai:THEME_PRESETS.zen.bubbles.aiBg,ink:THEME_PRESETS.zen.colors.ink},
+  {id:"glass",name:THEME_PRESETS.glass.name,chipBg:THEME_PRESETS.glass.colors.bg3,user:THEME_PRESETS.glass.bubbles.userBg,ai:THEME_PRESETS.glass.bubbles.aiBg,ink:THEME_PRESETS.glass.colors.ink}
+];
+function renderPresetChips(){
+  if(!pickStylePreset) return;
+  pickStylePreset.innerHTML=PRESET_CHIP_DEFS.map(function(p){
+    return '<button type="button" class="preset-chip" data-preset="'+p.id+'" style="background:'+p.chipBg+';color:'+p.ink+'">'
+      +'<span class="pc-bs"><i class="u" style="background:'+p.user+'"></i><i class="a" style="background:'+p.ai+'"></i></span>'
+      +'<span>'+p.name+'</span></button>';
+  }).join("");
+  pickStylePreset.querySelectorAll(".preset-chip").forEach(function(b){
+    b.addEventListener("click",function(){ applyPreset(b.dataset.preset); });
+  });
+  refreshPresetChips();
+}
+function refreshPresetChips(){
+  if(!pickStylePreset) return;
+  const base=cfg.current_theme_base||"";
+  pickStylePreset.querySelectorAll(".preset-chip").forEach(function(b){
+    const def=PRESET_CHIP_DEFS.find(function(p){return p.id===b.dataset.preset;});
+    b.classList.toggle("on", !!def && !cfg.theme_dirty && base===def.name);
+  });
+}
+// 经典=出厂默认平铺；zen/glass=THEME_PRESETS 整包。预设只管视觉，不碰布局/头像/名字/显隐
 function applyPreset(id){
   let th;
   if(id==="classic"){
-    th=migrateThemeObj({name:"经典粉棕",style_mode:"",bg_mode:"color",bg_color:"",bg_image:"",bubble_style:cfg.bubble_style||"qq"});
+    th=migrateThemeObj({name:"经典粉棕",style_mode:"",bg_mode:"color",bg_color:"",bg_image:""});
   } else {
     th=presetToTheme(id);
   }
@@ -5266,14 +5337,35 @@ function applyPreset(id){
   th.user_avatar=cfg.user_avatar||""; th.ai_avatar=cfg.ai_avatar||"";
   applyCustomTheme(th);
 }
-if(pickStylePreset)pickStylePreset.querySelectorAll("button").forEach(function(b){
-  b.addEventListener("click",function(){ applyPreset(b.dataset.preset); });
+// —— 迷你对话实时预览（0913-13 同构）：头像/名字显隐、底色跟随背景设置，与真实聊天一致 ——
+function renderThemePreview(){
+  if(!themePreview) return;
+  const showAv=cfg.show_avatar!==false, showNm=cfg.show_name!==false;
+  const un=cfg.user_name||"我", an=cfg.ai_name||"谢意行";
+  const av=function(ch){ return '<span class="tp-av">'+escapeHtml(String(ch||"?").slice(0,1))+'</span>'; };
+  let bg;
+  const mode=deriveBgMode();
+  if(mode==="image"&&bgImageInput&&bgImageInput.value.trim()) bg='background:url("'+bgImageInput.value.trim()+'") center/cover no-repeat;';
+  else if(bgColorInput&&bgColorInput.value&&bgColorInput.value!=="#f4f1ee") bg='background:linear-gradient(160deg,'+bgColorInput.value+' 0%,'+shade(bgColorInput.value,-12)+' 100%);';
+  else bg='background:var(--bg1);';
+  themePreview.setAttribute("style",bg);
+  themePreview.innerHTML=
+    '<div class="tp-row ai">'+(showAv?av(an):"")+'<span class="tp-col">'+(showNm?'<span class="tp-nm">'+escapeHtml(an)+'</span>':"")+'<span class="tp-b">你好呀，今天过得怎么样？</span></span></div>'
+   +'<div class="tp-row user">'+(showAv?av(un):"")+'<span class="tp-col">'+(showNm?'<span class="tp-nm">'+escapeHtml(un)+'</span>':"")+'<span class="tp-b">还不错，刚看完一本书~</span></span></div>';
+}
+// 名称输入 → 预览同步 + 自动保存（个人设置，不算改主题，不标脏）
+[userNameInput,thAiNameInput].filter(Boolean).forEach(function(el){
+  el.addEventListener("input",function(){
+    cfg.user_name=userNameInput.value.trim()||"我";
+    cfg.ai_name=thAiNameInput.value.trim()||"谢意行";
+    renderThemePreview();scheduleThemePersist();
+  });
 });
 // JSON 高级编辑器：当前主题的 v2 分组 JSON，改完直接应用（也接受旧平铺 JSON / TH1 / TH2 码）
 if(jsonThemeBtn)jsonThemeBtn.addEventListener("click",function(){
   if(!themeJsonBox) return;
   const show=(themeJsonBox.style.display==="none"||themeJsonBox.style.display==="");
-  if(show){ themeJsonArea.value=JSON.stringify(themeFlatToV2(currentThemeObject()),null,2); }
+  if(show){ const _t=themeFlatToV2(currentThemeObject()); _t.name=cfg.current_theme_name||_t.name||"当前主题"; themeJsonArea.value=JSON.stringify(_t,null,2); }
   themeJsonBox.style.display=show?"flex":"none";
 });
 if(themeJsonCancel)themeJsonCancel.addEventListener("click",function(){ if(themeJsonBox)themeJsonBox.style.display="none"; });
@@ -5287,10 +5379,12 @@ if(themeJsonGo)themeJsonGo.addEventListener("click",function(){
   const raw=(themeJsonArea&&themeJsonArea.value||"").trim();
   if(!raw){ showToast("请先粘贴或编辑 JSON"); return; }
   let obj=null;
-  try{
-    if(/^TH[12]\./.test(raw)) obj=themeFromCode(raw);
-    else obj=JSON.parse(raw.replace(/^```[a-zA-Z]*\s*/,"").replace(/```\s*$/,"").trim());
-  }catch(e){}
+  try{ if(/^TH[12]\./.test(raw)) obj=themeFromCode(raw); }catch(e){}
+  if(!obj){
+    let t2=raw; const b2=t2.indexOf("{"), e2=t2.lastIndexOf("}");
+    if(b2>=0&&e2>b2) t2=t2.substring(b2,e2+1);
+    try{ obj=JSON.parse(t2); }catch(e){}
+  }
   if(!obj||typeof obj!=="object"){ showToast("JSON 解析失败：可粘贴 v2 分组 JSON / 旧平铺 JSON / TH1·TH2 主题码"); return; }
   const th=migrateThemeObj(obj);
   th.name=(th.name&&String(th.name).trim())||"JSON 主题";
@@ -5299,8 +5393,8 @@ if(themeJsonGo)themeJsonGo.addEventListener("click",function(){
 });
 const bgModeColorBtn=document.getElementById("bgModeColorBtn");
 const bgModeImageBtn=document.getElementById("bgModeImageBtn");
-if(bgModeColorBtn)bgModeColorBtn.addEventListener("click",function(){setBgMode("color");});
-if(bgModeImageBtn)bgModeImageBtn.addEventListener("click",function(){setBgMode("image");});
+if(bgModeColorBtn)bgModeColorBtn.addEventListener("click",function(){setBgMode("color");collectThemeInputsToCfg();markThemeDirty();renderThemePreview();scheduleThemePersist();});
+if(bgModeImageBtn)bgModeImageBtn.addEventListener("click",function(){setBgMode("image");collectThemeInputsToCfg();markThemeDirty();renderThemePreview();scheduleThemePersist();});
 bgImageUploadBtn.addEventListener("click",function(){bgImageFile.click();});
 bgImageFile.addEventListener("change",function(){
   const f=bgImageFile.files[0];if(!f)return;
@@ -5314,12 +5408,14 @@ bgImageFile.addEventListener("change",function(){
       bgImageInput.value=fr.result;
       showToast("转存服务器失败，暂存本地（"+(e.message||"")+"）");
     }
-    renderThemeValues();applyThemePreview();
+    collectThemeInputsToCfg();markThemeDirty();renderThemeValues();applyThemePreview();renderThemePreview();scheduleThemePersist();
   };
   fr.readAsDataURL(f);
 });
 applyTheme();
 populateSettings();
+renderPresetChips();
+renderThemePreview();
 // 设置分组：点折叠头展开对应组、其余收起（一屏内折叠，不单独成页）
 document.querySelectorAll(".set-acc-h").forEach(function(h){
   h.addEventListener("click",function(){
@@ -5350,7 +5446,7 @@ if(pickOthers)pickOthers.addEventListener("click",e=>{
 if(pickThemeShow)pickThemeShow.addEventListener("click",e=>{
   const b=e.target.closest("button");if(!b)return;
   if(b.dataset.k in cfg){cfg[b.dataset.k]=!cfg[b.dataset.k];}
-  saveCfg();renderPicks();applyHeader();renderAll();
+  markThemeDirty();renderThemePreview();scheduleThemePersist();renderPicks();applyHeader();renderAll();
 });
 pickRender.addEventListener("click",e=>{
   const b=e.target.closest("button");if(!b)return;
