@@ -54,6 +54,19 @@ function buildWakeBaseMessages(deps, sessionId) {
   // 历史：去掉 system 条目与已删除消息，去 position，原样保留（特殊事件/摘要块/工具记录都在）
   const history = deps.stripPosition(timeline.filter(m => m && m.role !== "system" && !m.deleted));
 
+  // 历史图片/附件降级为占位文本（恢复旧唤醒侧行为）：唤醒无需重看历史图片，
+  // 规避上游「下载历史图片 URL 失败 → 整包 400」的坑（2026-09-15 实测）。
+  for (const m of history) {
+    if (!m || !Array.isArray(m.content)) continue;
+    const texts = [];
+    for (const part of m.content) {
+      if (part && part.type === "text" && typeof part.text === "string") texts.push(part.text);
+      else if (part && (part.type === "image" || part.type === "image_url")) texts.push("（图片）");
+      else if (part && part.type === "file") texts.push("（附件）");
+    }
+    m.content = texts.join("\n") || "（图片）";
+  }
+
   const msgs = [];
   if (systemContent) msgs.push({ role: "system", content: systemContent });
 
@@ -84,7 +97,7 @@ async function runWakeCompletion(deps, opts) {
   // 让替换/压缩按当前会话时间线工作（onResponse 钩子复位由 HTTP 层兜底，这里手动收口）
   contextReplacements.setActiveSession(sessionId || null);
   try {
-    const msgs = buildWakeBaseMessages(deps, sessionId);
+    let msgs = buildWakeBaseMessages(deps, sessionId);
 
     // [唤醒] 块：先落盘（追加式、原地不动、不插位），再注入本次请求末尾。
     // 静默唤醒（模型不回话）时它就是该次唤醒在时间线里的唯一留痕。
@@ -107,6 +120,18 @@ async function runWakeCompletion(deps, opts) {
         }
       }
       msgs.push({ role: "developer", content: blockContent });
+    }
+
+    // 上下文记忆替换（与对话侧/共影侧同款，2026-09-15 补）：已记录范围的原文替换为 AI 记忆/摘要，
+    // 源文件不动。此前漏掉该步导致全时间线原文直发上游（3160 条/59.5 万字符）压垮模型。
+    try {
+      const beforeRep = msgs.length;
+      msgs = contextReplacements.applyReplacements(msgs);
+      if (msgs.length !== beforeRep) {
+        console.log("[wake-chat] 上下文替换生效: 消息 " + beforeRep + " -> " + msgs.length);
+      }
+    } catch (repErr) {
+      console.warn("[wake-chat] 上下文替换失败（按原样发送）:", repErr.message);
     }
 
     // 与对话侧同一套加工：容量提醒 → 工具记录全量转换（一条不滤）→ tool 配对修复 → 出口净化
