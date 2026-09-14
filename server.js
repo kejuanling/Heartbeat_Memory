@@ -218,7 +218,7 @@ function timelineFileFor(sessionId) {
 }
 // 批注 2026-07-17：管理页保存 .env 后要让 PM2 刷新进程环境；保留原进程名，
 // 只补 --update-env，避免用户改完推送配置却继续运行旧值。
-const DEFAULT_RESTART_COMMAND = "cd /opt/dylan-heartbeat && pm2 restart wake-up gateway --update-env 2>&1";
+const DEFAULT_RESTART_COMMAND = "cd /opt/dylan-heartbeat && pm2 restart gateway --update-env 2>&1";
 // 上游模型请求超时（毫秒），防止上游挂起时 /v1 请求永久阻塞
 const UPSTREAM_TIMEOUT_MS = Number(process.env.UPSTREAM_TIMEOUT_MS) || 180000;
 const SCREENSHOT_TIMEOUT_MS = Number(process.env.SCREENSHOT_TIMEOUT_MS) || 60000;
@@ -1840,7 +1840,8 @@ require("./routes/chat")(app, {
 // 统一唤醒调用器（2026-09-15 唤醒并入网关）：POST /internal/wake-completions
 // 与对话侧同一套上下文加工（chat-context.js）；唤醒特有行为仍在调用方。
 // ========================
-require("./routes/wake-chat")(app, {
+const wakeChatModule = require("./routes/wake-chat");
+const wakeChatDeps = {
   baseDir: __dirname,
   loadTimeline,
   saveTimeline,
@@ -1857,6 +1858,23 @@ require("./routes/wake-chat")(app, {
   splitMultimodalContent,
   isQuietActive,
   prepareMessageForLLM
+};
+wakeChatModule(app, wakeChatDeps);
+
+// ========================
+// 唤醒调度器（2026-09-15 批3收尾）：wake-up 独立进程退役，调度内核并入 gateway，
+// 进程内直调 runWakeCompletion / applyWakeEventV2 / sendPushNotification（无 HTTP 自环）。
+// 仅构建闭包；定时器与检查循环在下方 listen 回调里 start()。
+// ========================
+const wakeScheduler = require("./lib/wake-scheduler")({
+  baseDir: __dirname,
+  readEnvValue,
+  normalizeContentToText,
+  touchHeartbeat() { wakeUpLastHeartbeat = Date.now(); },
+  sendPushNotification,
+  applyWakeEventV2,
+  runWakeCompletion: wakeChatModule.runWakeCompletion,
+  wakeDeps: wakeChatDeps
 });
 
 // ========================
@@ -2437,6 +2455,41 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
 const _wakeEventSeen = new Map();
 const WAKE_EVENT_DEDUP_MS = 10 * 60 * 1000;
 
+// wake-event v2 落库实现（2026-09-15 批3收尾抽出）：HTTP 入口（/internal/wake-event）
+// 与网关内唤醒调度器（lib/wake-scheduler.js）共用同一实现，杜绝两处口径漂移。
+// 幂等去重只在 HTTP 入口做（调度器进程内调用无重试路径）。
+function applyWakeEventV2(body) {
+  try {
+    const { session_id, speak, diary, push, tools, wake_block_id } = body || {};
+    const evSession = typeof session_id === "string" && session_id.trim() ? String(session_id).trim() : null;
+    const speakRaw = String(speak || "").trim();
+    const diaryRaw = String(diary || "").trim();
+    const pushMeta = (push && typeof push === "object") ? push : null;
+    const wakeTools = Array.isArray(tools) ? tools.filter(t => t && t.name) : [];
+    const appended = [];
+    if (diaryRaw) appended.push({ role: "assistant", content: diaryRaw, kind: "diary" });
+    if (speakRaw) {
+      const stored = stripDiaryBlocks(speakRaw);
+      if (stored) {
+        const msg = { role: "assistant", content: stored };
+        if (pushMeta) msg.push = pushMeta;
+        if (wakeTools.length) msg.tools = wakeTools;
+        appended.push(msg);
+      }
+    }
+    if (appended.length) appendMessages(evSession, appended);
+    // 静默但调过工具：工具记录回填到本次的 developer [唤醒] 块上，不丢工具痕迹
+    if (!appended.length && wakeTools.length && wake_block_id) {
+      try { patchMessage(evSession, wake_block_id, { tools: wakeTools }); } catch (e) {}
+    }
+    console.log(`[wake-event] v2 落库 (session ${evSession || "default"}, speak=${speakRaw ? 1 : 0}, diary=${diaryRaw ? 1 : 0}, push=${pushMeta ? 1 : 0}, tools=${wakeTools.length})`);
+    return { ok: true, v2: true, appended: appended.length };
+  } catch (err) {
+    console.error("[wake-event] v2 落库失败:", err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
 app.post("/internal/wake-event", async (req, reply) => {
   try {
     const body = req.body || {};
@@ -2446,12 +2499,11 @@ app.post("/internal/wake-event", async (req, reply) => {
     // push  = 推送元数据（Bark 成功时），结构化挂 assistant.push 字段，不再生成「刚刚给X发了推送」回显行
     // tools = 唤醒工具调用记录 → 挂 speak 消息 tools 字段；静默无消息时回填到 [唤醒] 块
     if (body.v2 === true) {
-      const { session_id, speak, diary, push, tools, wake_block_id } = body;
+      const { session_id, speak, diary, push } = body;
       const evSession = typeof session_id === "string" && session_id.trim() ? String(session_id).trim() : null;
       const speakRaw = String(speak || "").trim();
       const diaryRaw = String(diary || "").trim();
       const pushMeta = (push && typeof push === "object") ? push : null;
-      const wakeTools = Array.isArray(tools) ? tools.filter(t => t && t.name) : [];
       // 幂等去重（2026-09-15 补）：v2 分支此前漏了 v1 的同款护栏——HTTP 层任何重试
       // 会把 speak/diary 重复落库。同会话+同内容 10 分钟窗口内直接跳过。
       if (speakRaw || diaryRaw) {
@@ -2467,24 +2519,9 @@ app.post("/internal/wake-event", async (req, reply) => {
           for (const [k, t] of _wakeEventSeen) { if (nowTs - t > WAKE_EVENT_DEDUP_MS) _wakeEventSeen.delete(k); }
         }
       }
-      const appended = [];
-      if (diaryRaw) appended.push({ role: "assistant", content: diaryRaw, kind: "diary" });
-      if (speakRaw) {
-        const stored = stripDiaryBlocks(speakRaw);
-        if (stored) {
-          const msg = { role: "assistant", content: stored };
-          if (pushMeta) msg.push = pushMeta;
-          if (wakeTools.length) msg.tools = wakeTools;
-          appended.push(msg);
-        }
-      }
-      if (appended.length) appendMessages(evSession, appended);
-      // 静默但调过工具：工具记录回填到本次的 developer [唤醒] 块上，不丢工具痕迹
-      if (!appended.length && wakeTools.length && wake_block_id) {
-        try { patchMessage(evSession, wake_block_id, { tools: wakeTools }); } catch (e) {}
-      }
-      console.log(`[wake-event] v2 落库 (session ${evSession || "default"}, speak=${speakRaw ? 1 : 0}, diary=${diaryRaw ? 1 : 0}, push=${pushMeta ? 1 : 0}, tools=${wakeTools.length})`);
-      return reply.send({ success: true, v2: true, appended: appended.length });
+      const res = applyWakeEventV2(body);
+      if (!res.ok) return reply.code(500).send({ error: res.error });
+      return reply.send({ success: true, v2: true, appended: res.appended });
     }
     const { content, event, diary, push_meta, session_id, tools } = body;
     // 批注 2026-08-29：多会话。唤醒侧(wake_up.js)现在会携带 session_id，把唤醒事件写到
@@ -6888,15 +6925,15 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err, address) => {
   setTimeout(() => {
     try { contextReplacements.startMsgVectorWarmup(); } catch (e) { console.warn("[context-search] 向量预热启动失败:", e.message); }
   }, 15000);
-  setTimeout(async () => {
+  // 批3收尾（2026-09-15）：wake-up 独立进程退役，唤醒调度器在 gateway 内启动。
+  // 心跳不再 HTTP 自环自拍，直接置位（管理台在线状态同源）；调度器周期检查时持续刷新。
+  setTimeout(() => {
     try {
-      // 启动时自发心跳一次：避免 gateway 重启后管理台把 wake-up 闪显为离线（等 wake-up 下一拍才恢复）。
-      // 副作用（已知口径）：gateway 每次重启会让「wake-up 在线」状态保真一个心跳周期，即便 wake-up 实际已挂。
-      const headers = { "Content-Type": "application/json" };
-      const internalKey = readEnvValue("INTERNAL_API_KEY");
-      if (internalKey) headers["x-internal-key"] = internalKey;
-      await fetch(`http://127.0.0.1:${PORT}/internal/heartbeat`, { method: "POST", headers, body: "{}" });
+      wakeScheduler.start();
+      wakeUpLastHeartbeat = Date.now();
       console.log('心跳状态已恢复');
-    } catch (e) {}
+    } catch (e) {
+      console.error("[wake-scheduler] 启动失败:", e && e.message);
+    }
   }, 3000);
 });
