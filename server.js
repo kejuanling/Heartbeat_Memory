@@ -1851,7 +1851,8 @@ require("./routes/wake-chat")(app, {
   UPSTREAM_TIMEOUT_MS,
   setLastLLMCapture,
   splitMultimodalContent,
-  isQuietActive
+  isQuietActive,
+  prepareMessageForLLM
 });
 
 // ========================

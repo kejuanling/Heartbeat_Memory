@@ -334,6 +334,58 @@ function createCtxLimitReminderGuard(deps) {
   return maybeInject;
 }
 
+// ---- 统一对话构建器（2026-09-15 批3核心）----
+// 聊天与唤醒的唯一上下文来源：从时间线重建同一条对话（role 法全量：日记/历史[唤醒]块/工具记录齐全）。
+// 前缀身份：同一会话同一时刻，聊天请求与唤醒请求的本构建器输出逐字一致 → 上游前缀缓存共享。
+// 图片规则（两侧对称）：历史图片降级为「（图片）」占位（附件正文由 prepareMessageForLLM 读入文本，
+// 与聊天侧同口径）；仅时间线末尾的连续 user 消息（本轮待回复）图片保真。
+function createConversationBuilder(deps) {
+  const { loadTimeline, prepareMessageForLLM, buildCrossMemorySnapshot, stripPosition, memoryEngine } = deps;
+  return function buildConversation(sessionId) {
+    const timeline = loadTimeline(sessionId);
+    const msgs = [];
+    // system 人设：时间线里最后一条未删除 system（客户端每轮「人设同步」维护），与聊天侧同口径清洗
+    let systemRaw = null;
+    for (const m of timeline) {
+      if (m && m.role === "system" && !m.deleted) systemRaw = m;
+    }
+    if (systemRaw) {
+      const sysPrep = prepareMessageForLLM(systemRaw);
+      if (sysPrep) msgs.push(sysPrep);
+    }
+    // developer 头部：[永久上下文] + [跨窗口]（快照稳定，放头部喂前缀缓存）
+    let pinnedCtx = "";
+    try { pinnedCtx = memoryEngine && memoryEngine.buildPinnedContext ? memoryEngine.buildPinnedContext() : ""; }
+    catch (e) { console.warn("[conversation] 永久上下文构建失败（跳过）:", e.message); }
+    let crossCtx = "";
+    try { crossCtx = buildCrossMemorySnapshot(sessionId); }
+    catch (e) { console.warn("[conversation] 跨窗口快照构建失败（跳过）:", e.message); }
+    msgs.push(...buildDeveloperHeaderBlocks({ pinnedCtx, crossCtx }));
+    // 历史：非 system、未删除，剥内部字段
+    const history = stripPosition(timeline.filter(m => m && m.role !== "system" && !m.deleted));
+    // 本轮待回复：时间线末尾的连续 user 消息（图片保真）
+    let turnStart = history.length;
+    while (turnStart > 0 && history[turnStart - 1] && history[turnStart - 1].role === "user") turnStart--;
+    for (let k = 0; k < history.length; k++) {
+      const prepared = prepareMessageForLLM(history[k]);
+      if (!prepared) continue;
+      msgs.push(k < turnStart ? downgradeHistoryImages(prepared) : prepared);
+    }
+    return msgs;
+  };
+}
+
+// 历史图片降级为占位文本（对称规则的历史侧；附件正文已在 prepareMessageForLLM 转为文本）
+function downgradeHistoryImages(m) {
+  if (!m || !Array.isArray(m.content)) return m;
+  let changed = false;
+  const parts = m.content.map(p => {
+    if (p && (p.type === "image" || p.type === "image_url")) { changed = true; return { type: "text", text: "（图片）" }; }
+    return p;
+  });
+  return changed ? { ...m, content: parts } : m;
+}
+
 module.exports = {
   parseToolNoteEntries,
   toolEntryToContent,
@@ -341,5 +393,6 @@ module.exports = {
   repairToolCallPairs,
   sanitizeForUpstream,
   buildDeveloperHeaderBlocks,
-  createCtxLimitReminderGuard
+  createCtxLimitReminderGuard,
+  createConversationBuilder
 };

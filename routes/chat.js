@@ -186,6 +186,15 @@ module.exports = function registerChatRoutes(app, deps) {
     normalizeContentToText
   });
 
+  // 统一对话构建器（2026-09-15 批3核心）：聊天与唤醒同源同前缀的唯一上下文来源
+  const buildConversation = chatCtx.createConversationBuilder({
+    loadTimeline,
+    prepareMessageForLLM,
+    buildCrossMemorySnapshot,
+    stripPosition,
+    memoryEngine
+  });
+
   app.get('/v1/models', async (req, reply) => {
     reply.send({
       object: 'list',
@@ -779,8 +788,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
       console.log("[timeline] 跳过时间线保存 (真实消息=" + kelivoMessages.some(isRealMessageForTimeline) + ")");
     }
 
-    // Kelivo 发图时 content 常是数组。默认原样透传给视觉模型；
-    // 图片默认原样透传给视觉模型（2026-09-08）
+    // 非主聊天（标题总结等旁路请求）的直通底稿；主聊天在下方由统一对话构建器重建覆盖
     let llmMessages = kelivoMessages
       .map(prepareMessageForLLM)
       .filter(Boolean);
@@ -813,131 +821,23 @@ app.post("/v1/chat/completions", async (req, reply) => {
       }
     }
 
-    // 用时间线里的原始回复替换客户端清洗过的版本，保留 <memory>/<pin> 标签：
-    // 模型能看到自己写过什么，管理台上下文窗口也能审查。
-    // 匹配方式：时间线回复去掉内部标签后与客户端内容比对。
-    {
-      const rawByClean = new Map();
-      for (const m of finalTimeline) {
-        if (m.role !== "assistant" || isSpecialEvent(m) || typeof m.content !== "string") continue;
-        const clean = stripInternalTags(m.content).trim();
-        if (clean && !rawByClean.has(clean)) rawByClean.set(clean, m);
-      }
-      llmMessages = llmMessages.map(m => {
-        if (m.role !== "assistant" || typeof m.content !== "string") return m;
-        const raw = rawByClean.get(String(m.content).trim());
-        return raw && raw.content !== m.content ? { ...m, content: raw.content } : m;
-      });
+    // ========================
+    // 统一对话构建器（2026-09-15 批3核心）：聊天与唤醒同源同前缀。
+    // 服务端从时间线重建上下文（role 法全量：日记/历史[唤醒]块/工具记录齐全）；
+    // 客户端窗口仅用于上方增量同步（appendRequestMessages），不再作为上下文底稿。
+    // 非主聊天（标题总结等旁路请求）保持客户端直通，不注入完整上下文。
+    // ========================
+    if (isMainChat) {
+      llmMessages = buildConversation(sessionId);
     }
 
-
-    // 特殊事件按时间定位插入：客户端消息不带 time 字段，
-    // 先用 finalTimeline 里已解析/恢复的时间建立 内容->时间 映射，保证事件能落到对应时间位置
+    // 内容->时间 映射：容量提醒建议段反查时间用（保留原口径）
     const timeByKey = new Map();
     for (const m of finalTimeline) {
       if (isSpecialEvent(m)) continue;
       const key = m.role + "\u0000" + normalizeContentToText(m.content);
       const t = extractTimestampWithMemory(m);
       if (t && !timeByKey.has(key)) timeByKey.set(key, t);
-    }
-    const oldEvents = stripPosition(finalTimeline.filter(m => !m.deleted && isSpecialEvent(m)));
-    // 当前窗口起点：最新一次重建时间线里第一条真实 user 消息时间，用于界定本次会话的特殊事件范围
-    let windowStartMs = null;
-    for (const m of finalTimeline) {
-      if (windowStartMs !== null) break;
-      if (!m || m.role !== "user") continue;
-      if (isSpecialEvent(m)) continue;
-      const mt = extractTimestampWithMemory(m);
-      if (mt) windowStartMs = mt.getTime();
-    }
-    // 特殊事件注入：只取当前窗口（第一条真实 user 消息之后）内的事件；窗口内不限制条数（推送同样不限制）
-    const pushEnabled = memoryPool.getConfig().cross_inject_push !== false;
-    let injectableEvents = oldEvents.slice();
-    if (windowStartMs !== null) {
-      injectableEvents = injectableEvents.filter(ev => {
-        const t = extractTimestampWithMemory(ev) || extractCoRecordEventTime(ev);
-        const tms = t ? t.getTime() : NaN;
-        return !isFinite(tms) || tms >= windowStartMs;
-      });
-    }
-    // 推送开关关闭时剔除推送类特殊事件；条数不再限制（配合压缩摘要统一压缩）
-    if (!pushEnabled) {
-      injectableEvents = injectableEvents.filter(ev => {
-        const cats = classifySpecialEvent(ev) || [];
-        return cats.indexOf('push') < 0;
-      });
-    }
-
-    // 特殊事件注入分类多选：只注入勾选类型；配置里没有该 key 时默认全部注入。
-    // 容量提醒（ctxlimit）不受该配置限制——它是网关塞给 AI 的整理指令，必须始终可见
-    const injectTypesCfg = memoryEngine.getConfig().event_inject_types;
-    if (Array.isArray(injectTypesCfg)) {
-      const enabledTypes = new Set(injectTypesCfg);
-      const before = injectableEvents.length;
-      injectableEvents = injectableEvents.filter(ev => {
-        const cats = classifySpecialEvent(ev);
-        if (!cats.length) return true; // 无法分类的兜底保留
-        return cats.some(k => k === 'ctxlimit' || enabledTypes.has(k));
-      });
-      if (injectableEvents.length !== before) {
-        console.log(`[event-inject] 分类过滤: ${before} -> ${injectableEvents.length} 条`);
-      }
-    }
-
-    // 容量提醒注回受全局开关控制（2026-09-05 修复）：开关关闭时，历史遗留的容量提醒不再注入回流。
-    // 注：上方"必须始终可见"的默认设计前提是开关开启；用户显式关闭开关时应尊重"关=彻底不注入"，
-    // 与 maybeInject 的落盘清理配合，消除"关了开关还在注入"的残留。
-    if (contextCompactor.loadConfig().compaction_context_remind_enabled === false) {
-      const before = injectableEvents.length;
-      injectableEvents = injectableEvents.filter(ev => {
-        if (ev && ev.kind === 'ctx_limit') return false;
-        const cats = classifySpecialEvent(ev);
-        return !(Array.isArray(cats) && cats.indexOf('ctxlimit') >= 0);
-      });
-      if (injectableEvents.length !== before) {
-        console.log(`[ctx-limit] 容量提醒开关已关闭，跳过 ${before - injectableEvents.length} 条历史容量提醒注入`);
-      }
-    }
-
-
-    // 共影记录注入开关：关闭后整段观影记录不再注入主对话（记录仍完整保存在共影里）
-    const coEventInjectEnabled = memoryEngine.getConfig().co_event_inject_enabled !== false;
-    if (!coEventInjectEnabled) {
-      const before = injectableEvents.length;
-      injectableEvents = injectableEvents.filter(ev => !(typeof ev.content === "string" && ev.content.includes("共影）")));
-      if (injectableEvents.length !== before) {
-        console.log("[co-event] 共影记录注入已关闭，跳过观影记录");
-      }
-    }
-
-    if (!isMainChat) injectableEvents = [];
-    console.log("本次注入的特殊事件数量:", injectableEvents.length);
-
-    // 客户端经 /v1/history 带回的推送回显会以普通 assistant 消息出现在 llmMessages，
-    // 与下面 injectableEvents 注入的同一条会重复 → 按 content 去重，保证上下文只出现一次。
-    const llmEventKeys = new Set();
-    for (const m of llmMessages) {
-      if (m && typeof m.content === "string") llmEventKeys.add(normalizeContentToText(m.content));
-    }
-    for (const event of injectableEvents) {
-      const evKey = normalizeContentToText(event.content);
-      if (llmEventKeys.has(evKey)) continue; // 已在 llmMessages（客户端带回），跳过重复注入
-      const eventTime = extractTimestampWithMemory(event) || extractCoRecordEventTime(event);
-      if (!eventTime) { llmMessages.push(event); llmEventKeys.add(evKey); continue; }
-      let inserted = false;
-      for (let i = 0; i < llmMessages.length; i++) {
-        const m = llmMessages[i];
-        if (m.role === "system") continue; // 系统提示保持首位，历史事件不能插到 system 之前
-        let msgTime = timeByKey.get(m.role + "\u0000" + normalizeContentToText(m.content));
-        if (!msgTime) msgTime = extractTimestampWithMemory(m);
-        if (msgTime && msgTime >= eventTime) {
-          llmMessages.splice(i, 0, event);
-          inserted = true;
-          break;
-        }
-      }
-      if (!inserted) llmMessages.push(event);
-      llmEventKeys.add(evKey);
     }
 
 
@@ -963,32 +863,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
 
     const requestedStream = body?.stream === true;
 
-    // ========================
-    // 永久注入上下文（role 法 2026-09-15）：[永久上下文]、[跨窗口] 一律 developer 块，
-    // 插在 system 之后、历史之前；不再拼进 system 内容、不再伪装 assistant。
-    // ========================
-    try {
-      const pinnedCtx = isMainChat && memoryEngine.buildPinnedContext ? memoryEngine.buildPinnedContext() : '';
-      let crossCtx = "";
-      if (isMainChat) {
-        try {
-          // 跨窗口触发条件：新建会话 id 时抓一次快照并固定。
-          // buildCrossMemorySnapshot(sessionId) 会复用已存在的快照（同 sessionId 不再重建），
-          // 因此这里不再按消息条数触发，话题相关记忆交给 surface_memory 按需召回。
-          crossCtx = buildCrossMemorySnapshot(sessionId);
-        } catch (cx) { console.warn("[cross-inject] 失败:", cx.message); }
-      }
-      const headerBlocks = chatCtx.buildDeveloperHeaderBlocks({ pinnedCtx, crossCtx });
-      if (headerBlocks.length) {
-        const sysIdx = llmMessages.findIndex(m => m.role === "system");
-        const insertAt = sysIdx >= 0 ? sysIdx + 1 : 0;
-        llmMessages.splice(insertAt, 0, ...headerBlocks);
-        if (pinnedCtx) console.log('[pinned] 注入永久上下文（developer）');
-        if (crossCtx) console.log('[cross-inject] 注入跨窗口记忆（developer）');
-      }
-    } catch (pinErr) {
-      console.warn('[pinned] 注入失败:', pinErr.message);
-    }
+    // [永久上下文]/[跨窗口] developer 头部块已由统一对话构建器注入（buildConversation），此处不再重复。
 
     // ========================
     // 对话时记忆浮现 / 时间注入：已随记忆池与摘要体系一起移除

@@ -40,47 +40,11 @@ function getWakeMcpClients(baseDir) {
   return _wakeMcpClients;
 }
 
-// 从时间线重建唤醒基础消息（服务端版上下文构建；对话侧是客户端驱动，唤醒侧无客户端，自己重建）。
-// 人设取时间线里的 system（聊天端每轮「人设同步」维护）；唤醒侧剥掉对话侧 search_web 工具说明段
-// （沿用原 wake_up.js 口径，唤醒工具集不同）。
-function buildWakeBaseMessages(deps, sessionId) {
-  const timeline = deps.loadTimeline(sessionId);
-  let systemContent = "";
-  for (const m of timeline) {
-    if (m && m.role === "system" && !m.deleted) systemContent = deps.normalizeContentToText(m.content);
-  }
-  systemContent = systemContent.split("## search_web 工具使用说明")[0].trim();
-
-  // 历史：去掉 system 条目与已删除消息，去 position，原样保留（特殊事件/摘要块/工具记录都在）
-  const history = deps.stripPosition(timeline.filter(m => m && m.role !== "system" && !m.deleted));
-
-  // 历史图片/附件降级为占位文本（恢复旧唤醒侧行为）：唤醒无需重看历史图片，
-  // 规避上游「下载历史图片 URL 失败 → 整包 400」的坑（2026-09-15 实测）。
-  for (const m of history) {
-    if (!m || !Array.isArray(m.content)) continue;
-    const texts = [];
-    for (const part of m.content) {
-      if (part && part.type === "text" && typeof part.text === "string") texts.push(part.text);
-      else if (part && (part.type === "image" || part.type === "image_url")) texts.push("（图片）");
-      else if (part && part.type === "file") texts.push("（附件）");
-    }
-    m.content = texts.join("\n") || "（图片）";
-  }
-
-  const msgs = [];
-  if (systemContent) msgs.push({ role: "system", content: systemContent });
-
-  // 头部 developer 块：[永久上下文] + [跨窗口]（快照原样；稳定内容放头部，喂前缀缓存）
-  let pinnedCtx = "";
-  try { pinnedCtx = memoryEngine.buildPinnedContext ? memoryEngine.buildPinnedContext() : ""; }
-  catch (e) { console.warn("[wake-chat] 永久上下文构建失败（跳过）:", e.message); }
-  let crossCtx = "";
-  try { crossCtx = deps.buildCrossMemorySnapshot(sessionId); }
-  catch (e) { console.warn("[wake-chat] 跨窗口快照构建失败（跳过）:", e.message); }
-  msgs.push(...chatCtx.buildDeveloperHeaderBlocks({ pinnedCtx, crossCtx }));
-
-  msgs.push(...history);
-  return msgs;
+// 唤醒基础上下文：与聊天侧共用统一对话构建器（createConversationBuilder，见 chat-context.js）。
+// 同源同前缀——同一会话同一时刻，唤醒请求与聊天请求的构建器输出逐字一致，上游前缀缓存共享。
+// （原唤醒专属拼装/图片降级已并入构建器，2026-09-15 批3）
+function buildWakeBaseMessages(deps, sessionId, buildConversation) {
+  return buildConversation(sessionId);
 }
 
 // 统一唤醒补全：返回 { text, toolHistory, model }。
@@ -97,7 +61,7 @@ async function runWakeCompletion(deps, opts) {
   // 让替换/压缩按当前会话时间线工作（onResponse 钩子复位由 HTTP 层兜底，这里手动收口）
   contextReplacements.setActiveSession(sessionId || null);
   try {
-    let msgs = buildWakeBaseMessages(deps, sessionId);
+    let msgs = buildWakeBaseMessages(deps, sessionId, ensureBuilder(deps));
 
     // [唤醒] 块：先落盘（追加式、原地不动、不插位），再注入本次请求末尾。
     // 静默唤醒（模型不回话）时它就是该次唤醒在时间线里的唯一留痕。
@@ -225,6 +189,21 @@ async function runWakeCompletion(deps, opts) {
   } finally {
     try { contextReplacements.setActiveSession(null); } catch (e) {}
   }
+}
+
+// 统一对话构建器（惰性创建，与聊天侧同一实例逻辑）
+let buildConversation = null;
+function ensureBuilder(deps) {
+  if (!buildConversation) {
+    buildConversation = chatCtx.createConversationBuilder({
+      loadTimeline: deps.loadTimeline,
+      prepareMessageForLLM: deps.prepareMessageForLLM,
+      buildCrossMemorySnapshot: deps.buildCrossMemorySnapshot,
+      stripPosition: deps.stripPosition,
+      memoryEngine
+    });
+  }
+  return buildConversation;
 }
 
 // 守卫惰性创建（依赖 server.js 注入的时间线函数；直接调用 runWakeCompletion 也可用）
