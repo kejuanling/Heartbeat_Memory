@@ -13,6 +13,9 @@ const contextCompactor = require('../context-compactor');
 const { imageAbsUrl } = require('./imgurl');
 const { formatDateTimeInTimeZone } = require('../time_utils');
 const { parsePushEcho, parseWakeEcho } = require('../utils/push');
+// 对话侧/唤醒侧共用上下文加工函数（2026-09-15 唤醒并入网关）
+const chatCtx = require('./chat-context');
+const { mapMessagesForProvider } = require('../lib/role-mapper');
 
 // 推送回显（成功推送的「刚刚给 X 发了 X 推送：」记录）需要在聊天页显示给用户看，
 // 其余特殊事件（容量提醒/唤醒/日记/记忆浮现等）保持对前端隐藏。
@@ -113,75 +116,7 @@ const sessionMetaCache = new Map();
 const searchIndexCache = { fp: null, index: null };
 
 // ---- 工具调用记录 → role=tool 消息组（发送模型前的内存转换，不落盘）----
-// 历史里的工具结果此前以 assistant 文本「【工具调用记录】…」回灌，模型分不清是工具返回还是自己说过的话。
-// 发送前把这条还原成主流格式：assistant(tool_calls) + 若干 role=tool 消息，内容带来源标头
-// （工具名+调用时间+状态+结果），与 mcp-tool-loop.js / server.js 落盘格式同口径（改动需三处同步）。
-const TOOL_NOTE_HEAD_RE = /^【工具 · (.+?)(?: · (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}))?(?: · (成功|失败|无返回内容))?】\s?/;
-
-// 解析「【工具调用记录】」文本为条目数组 [{name,time,status,body}]；兼容旧格式（无时间/状态段）
-function parseToolNoteEntries(text) {
-  const lines = String(text || "").split("\n");
-  const entries = [];
-  let cur = null;
-  for (let i = 1; i < lines.length; i++) {   // 首行是「【工具调用记录】」总头，跳过
-    const mm = lines[i].match(TOOL_NOTE_HEAD_RE);
-    if (mm) {
-      cur = { name: mm[1].trim(), time: mm[2] || "", status: mm[3] || "", body: lines[i].slice(mm[0].length) };
-      entries.push(cur);
-    } else if (cur) {
-      cur.body += "\n" + lines[i];
-    }
-  }
-  for (const e of entries) {
-    e.body = String(e.body || "").trim();
-    if (!e.status) {   // 旧格式兜底：从正文推状态
-      if (/^\[出错\]/.test(e.body)) e.status = "失败";
-      else if (e.body === "（工具无返回内容）") e.status = "无返回内容";
-      else e.status = e.body ? "成功" : "无返回内容";
-    }
-  }
-  return entries;
-}
-
-// 条目 → role=tool 消息内容（标头格式与 mcp-tool-loop.js buildToolResultContent 一致）
-function toolEntryToContent(e) {
-  const lines = [
-    "[工具调用结果]",
-    "工具：" + (e.name || "unknown"),
-    "调用时间：" + (e.time || "未知（历史记录未含时间）"),
-    "状态：" + (e.status === "无返回内容" ? "成功但无返回内容" : e.status)
-  ];
-  if (e.status === "失败") lines.push("错误信息：" + (e.body.replace(/^\[出错\]\s*/, "") || "未知错误"));
-  else if (e.body) { lines.push("----"); lines.push(e.body); }
-  return lines.join("\n");
-}
-
-// 逐条扫描：assistant 的「【工具调用记录】」消息 → 合成 assistant(tool_calls) + role=tool 组。
-// 解析不出条目则原样保留（兜底不丢内容）。仅在发送前转换，时间线/前端/压缩均不受影响。
-function convertToolNotesToToolRole(msgs) {
-  if (!Array.isArray(msgs)) return msgs;
-  const out = [];
-  let converted = 0;
-  for (const m of msgs) {
-    const isNote = m && m.role === "assistant" && typeof m.content === "string" && m.content.startsWith("【工具调用记录】");
-    if (!isNote) { out.push(m); continue; }
-    const entries = parseToolNoteEntries(m.content);
-    if (!entries.length) { out.push(m); continue; }
-    const toolCalls = [];
-    const toolMsgs = [];
-    const baseId = "call_hist_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
-    entries.forEach((e, k) => {
-      const id = baseId + "_" + k;
-      toolCalls.push({ id, type: "function", function: { name: e.name || "unknown", arguments: "{}" } });
-      toolMsgs.push({ role: "tool", tool_call_id: id, content: toolEntryToContent(e) });
-    });
-    out.push({ role: "assistant", content: "", tool_calls: toolCalls });
-    for (const tm of toolMsgs) out.push(tm);
-    converted++;
-  }
-  if (converted) console.log("[tool-note] 已将 " + converted + " 条工具调用记录转换为 role=tool 消息组");
-  return out;
-}
+// 2026-09-15 已搬至 routes/chat-context.js（对话侧/唤醒侧共用），此处经 chatCtx 调用。
 
 module.exports = function registerChatRoutes(app, deps) {
   const {
@@ -240,182 +175,16 @@ module.exports = function registerChatRoutes(app, deps) {
     setLastLLMCapture
   } = deps;
 
-  // ========================
-  // 会话上下文容量提醒：发送前检测，超限时往当轮消息流塞一条隐藏提醒并落盘，
-  // 让 AI 自己调 context_replace 压缩；提醒随早期对话被压缩块覆盖后自然消失，再超限再塞。
-  // 提醒全文读管理台压缩页维护的独立配置 data/ctx_limit_prompt.json（loadCtxLimitPrompt），
-  // 与压缩提示词（compaction_prompt.json）互不关联；文案为用户定稿（2026-09-02 确认）。
-  // ========================
-  const CTX_LIMIT_HEAD = "（容量提醒）";
-
-  // 摘要占位消息：被压缩块替换成的一段「（回忆 · … /（对话摘要 …」消息（与 context-replacements.js isReplacementMemoryMessage 同口径）
-  function isSummaryPlaceholder(m) {
-    if (!m || m.role !== 'assistant') return false;
-    const c = String(m.content || '');
-    return c.startsWith('（回忆 · ') || c.startsWith('（对话摘要');
-  }
-
-  // 容量提醒统计口径（2026-09-04 起）：按「未覆盖（未被压缩块替换）的对话原文」做 token 估算，
-  // 与管理台设置的容量上限（token 估算）比较。maybeInject 在 applyReplacements 之后运行，
-  // llmMessages 中被压缩块替换的部分已是摘要占位（isSummaryPlaceholder），未压缩的原文仍是原始 user/assistant 内容。
-  // 计入：user/assistant 原文文本 + 标星原句（applyReplacements 有 marks 保护、标星不会被压掉，但它确实占用上下文）
-  //       + 图片估算（每图 EST_IMAGE_TOKENS；历史图片已被 trim 裁剪、只留最近几轮，影响有限）。
-  // 排除：system / 摘要占位 / 特殊事件 / 工具消息 —— 这些不可由 AI 压缩整理，不计入"待整理积压"。
-  function countUncompressedTokens(messages) {
-    let tokTotal = 0;
-    for (const m of messages) {
-      if (!m) continue;
-      if (m.role === 'system') continue;
-      if (m.role !== 'user' && m.role !== 'assistant') continue;
-      if (m._ctxRep || m._ccSummary || m.tool_calls || m.tool_call_id) continue;
-      if (isSummaryPlaceholder(m)) continue;
-      if (isSpecialEvent(m)) continue;
-      if (typeof m.content === 'string') tokTotal += contextCompactor.estimateTokens(m.content);
-      else if (Array.isArray(m.content)) {
-        for (const part of m.content) {
-          if (!part) continue;
-          if (part.type === 'text' && typeof part.text === 'string') tokTotal += contextCompactor.estimateTokens(part.text);
-          else if (part.type === 'image' || part.type === 'image_url') tokTotal += contextCompactor.EST_IMAGE_TOKENS;
-          else if (part.type === 'file' && part.file && typeof part.file.name === 'string') tokTotal += contextCompactor.estimateTokens('[文件] ' + part.file.name);
-          else tokTotal += 1; // 未知分片（附件/文件等）至少占位计 1，避免漏算致容量判定偏乐观（审查 2026-09-05 B2）
-        }
-      }
-    }
-    return tokTotal;
-  }
-
-  // 疑似有落盘 ctx_limit 提醒的会话（进程内存）：低于上限时据此跳过全量读盘清理。
-  // 重启后为空——盘上遗留提醒会被特殊事件机制注入回流，流内出现时仍会触发读盘清理，闭环安全。
-  const _ctxLimitReminderSessions = new Set();
-  // 清理本会话时间线里落盘的历史容量提醒（kind=ctx_limit 且未删除 → 标记 deleted 并保存）。
-  // 供两处使用：① 开关关闭时（不注入新提醒，但旧提醒必须清掉，否则特殊事件机制仍会每轮注回）；
-  //           ② 低于上限时（提醒应消失，再超限才重新塞带新时间边界的）。
-  function clearDiskCtxLimitReminder(sessionId) {
-    let onDisk = false;
-    try {
-      const timeline = loadTimeline(sessionId);
-      for (const m of timeline) {
-        if (m && m.kind === 'ctx_limit' && !m.deleted) { m.deleted = true; onDisk = true; }
-      }
-      if (onDisk) saveTimeline(timeline, sessionId);
-      if (!onDisk) _ctxLimitReminderSessions.delete(sessionId || 'default');
-    } catch (cleanErr) {
-      console.warn('[ctx-limit] 清理落盘容量提醒失败（不影响转发）:', cleanErr.message);
-    }
-    return onDisk;
-  }
-  function maybeInjectContextLimitReminder(llmMessages, sessionId, timeByKey) {    try {
-      const cfg = contextCompactor.loadConfig();
-      const limit = Number(cfg.compaction_context_limit_chars) || 0;
-      // 开关关闭：不注入新提醒，但仍清理本会话落盘的历史容量提醒——
-      // 否则旧提醒会被特殊事件机制每轮注回，表现成"关了开关还在注入"
-      if (!cfg.compaction_context_remind_enabled) {
-        const cleaned = clearDiskCtxLimitReminder(sessionId);
-        if (cleaned) console.log(`[ctx-limit] 容量提醒开关已关闭，已清理会话 ${sessionId || 'default'} 落盘的历史容量提醒`);
-        return;
-      }
-      if (limit <= 0) return;
-      const tokens = countUncompressedTokens(llmMessages);
-      // 注意顺序：必须先做「低于上限清理」再判「已有提醒不重复塞」——
-      // 旧提醒会被特殊事件机制每轮注入回来，若先判「已有」就提前返回，永远走不到清理
-      if (tokens <= limit) {
-        // 已不超限：当轮消息流里不再带提醒，落盘的活跃提醒也标记删除——提示彻底消失；
-        // 之后再次超限时（流里查不到提醒）会重新塞一条带新时间边界的
-        let inStream = false;
-        for (let i = llmMessages.length - 1; i >= 0; i--) {
-          const m = llmMessages[i];
-          if (m && (m.kind === 'ctx_limit' || (typeof m.content === 'string' && m.content.startsWith(CTX_LIMIT_HEAD)))) {
-            llmMessages.splice(i, 1);
-            inStream = true;
-          }
-        }
-        let onDisk = false;
-        // 内存标记说没有落盘提醒且消息流里也没看到（inStream=false）时，跳过全量读盘——
-        // 稳态（从未超限或已清干净）下零读盘；流里出现旧提醒时仍会读盘清理（特殊事件机制会把盘上提醒注回来，闭环安全）
-        if (!_ctxLimitReminderSessions.has(sessionId || 'default') && !inStream) return;
-        onDisk = clearDiskCtxLimitReminder(sessionId);
-        if (inStream || onDisk) {
-          console.log(`[ctx-limit] 会话 ${sessionId || 'default'} 上下文 ${tokens} token（估算）已低于上限 ${limit}，容量提醒已移除（再超限会重新提醒）`);
-        }
-        return;
-      }
-      // 消息流里已有提醒（未随压缩消亡/未被窗口过滤）就不重复塞；kind 标记与文本开头双保险
-      if (llmMessages.some(m => m && (m.kind === 'ctx_limit' || (typeof m.content === 'string' && m.content.startsWith(CTX_LIMIT_HEAD))))) return;
-
-      // 建议整理段：流里最早的一段未压缩真实对话（跳过 system/摘要块/特殊事件/工具消息），
-      // 取前 100 条，用 timeByKey 反查首末时间——给 AI 明确时间边界，防选错段压错范围。
-      // 标星原句会保留在摘要前继续出现在上下文（设计如此），但它们不是「未压缩对话」——
-      // 必须跳过，否则建议区间起点会落在已压缩区里的标星漏网原句上（渲染时间一直指向旧段）
-      const CHUNK_TARGET = 100;
-      let starredKeys = null;
-      try { starredKeys = contextReplacements.loadMarks(); } catch (e) { starredKeys = null; }
-      const isStarredMsg = m => {
-        if (!starredKeys || !m) return false;
-        try { return Boolean(starredKeys[contextReplacements.contentKey(m)]); } catch (e) { return false; }
-      };
-      const picked = [];
-      for (const m of llmMessages) {
-        if (!m || (m.role !== 'user' && m.role !== 'assistant')) continue;
-        if (m._ctxRep || m.tool_calls || m.tool_call_id) continue;
-        if (isSpecialEvent(m)) continue;
-        if (isStarredMsg(m)) continue;
-        picked.push(m);
-        if (picked.length >= CHUNK_TARGET) break;
-      }
-      // 时间反查：消息本身 time 优先，timeByKey 兜底；注入消息（跨窗口快照等）没有时间，跳过它取最近可得的
-      const timeOf = m => {
-        if (!m) return null;
-        if (m.time) { const d = new Date(m.time); if (!isNaN(d.getTime())) return d; }
-        return timeByKey ? timeByKey.get(m.role + '\u0000' + normalizeContentToText(m.content)) : null;
-      };
-      let firstIdx = -1, firstT = null, lastT = null;
-      for (let i = 0; i < picked.length; i++) {
-        const t = timeOf(picked[i]);
-        if (t) { firstIdx = i; firstT = t; break; }
-      }
-      if (firstT) {
-        const lastIdx = Math.min(firstIdx + CHUNK_TARGET - 1, picked.length - 1);
-        for (let i = lastIdx; i >= firstIdx; i--) {
-          const t = timeOf(picked[i]);
-          if (t) { lastT = t; break; }
-        }
-      }
-      let chunkInfo = '最早一段未整理的对话，每块约一百条';
-      if (firstT && lastT) {
-        chunkInfo = '从 ' + formatDateTimeInTimeZone(firstT) + ' 到 ' + formatDateTimeInTimeZone(lastT) + '（最早一段未整理的对话，约 ' + picked.length + ' 条）';
-      }
-
-      // 提醒全文：管理台独立配置 + 占位符替换（chars/limit=实际数字，chunkInfo=带时间边界的建议段）
-      let prompt;
-      try {
-        prompt = String(contextCompactor.loadCtxLimitPrompt() || '');
-      } catch (pcErr) {
-        prompt = '';
-      }
-      const remark = prompt
-        .replace(/\$\{chars\}/g, String(tokens))
-        .replace(/\$\{limit\}/g, String(limit))
-        .replace(/\$\{chunkInfo\}/g, chunkInfo)
-        .replace(/\$\{conversationText\}/g, '（就是上面第 1 点要整理的那段对话）');
-      if (!remark.trim().startsWith(CTX_LIMIT_HEAD)) return; // 模板异常兜底：开头标记缺失就不塞，防识别失效
-
-      // 插入位置：塞到「最后一条 user 之前」（紧跟本轮用户消息之前、而非整个消息流末尾），
-      // 避免对话序列以 assistant 收尾被部分模型当成"自己的上一条输出"续写。
-      let insIdx = -1;
-      for (let i = llmMessages.length - 1; i >= 0; i--) {
-        const mm = llmMessages[i];
-        if (mm && mm.role === 'user' && !isSpecialEvent(mm) && !mm.tool_call_id) { insIdx = i; break; }
-      }
-      const reminderMsg = { role: 'assistant', content: remark };
-      if (insIdx >= 0) llmMessages.splice(insIdx, 0, reminderMsg);
-      else llmMessages.push(reminderMsg);
-      appendSpecialEvent(remark, { hidden: true, kind: 'ctx_limit' }, sessionId);
-      _ctxLimitReminderSessions.add(sessionId || 'default');
-      console.log(`[ctx-limit] 会话 ${sessionId || 'default'} 上下文 ${tokens} token（估算）超过上限 ${limit}，已塞容量提醒（${remark.length} 字符）`);
-    } catch (err) {
-      console.warn('[ctx-limit] 容量提醒检测失败（不影响转发）:', err.message);
-    }
-  }
+  // 会话上下文容量提醒守卫（2026-09-15 搬至 routes/chat-context.js，对话侧/唤醒侧共用同一实现）
+  const ctxLimitGuard = chatCtx.createCtxLimitReminderGuard({
+    contextCompactor,
+    contextReplacements,
+    loadTimeline,
+    saveTimeline,
+    appendSpecialEvent,
+    isSpecialEvent,
+    normalizeContentToText
+  });
 
   app.get('/v1/models', async (req, reply) => {
     reply.send({
@@ -546,6 +315,8 @@ module.exports = function registerChatRoutes(app, deps) {
       if (needWrite) saveTimeline(timeline, sessionId);
       const items = timeline
         .filter(m => isRealMessageForTimeline(m) || (m && !m.deleted && isPushEchoLike(m)))
+        // role 法（2026-09-15）：developer 块（[唤醒]等）与日记（kind=diary）只落盘不对前端展示
+        .filter(m => !(m && (m.role === 'developer' || m.role === 'tool' || m.kind === 'diary')))
         .map(m => {
           const clean = { role: m.role };
           if (m.id !== undefined) clean.id = m.id;
@@ -1176,71 +947,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
       messages: summarizeMessagesForLog(llmMessages)
     }));
 
-    // ---- 自动修复不完整的 tool 调用（双向清理） ----
-    // 第一遍：标记需要移除的索引
-    const removeSet = new Set();
-
-    // 检查 assistant tool_calls 是否完整
-    for (let i = 0; i < llmMessages.length; i++) {
-      const msg = llmMessages[i];
-      if (msg.role !== "assistant" || !msg.tool_calls) continue;
-      const expectedIds = msg.tool_calls.map(tc => tc.id);
-      const followingTools = [];
-      for (let j = i + 1; j < llmMessages.length; j++) {
-        const nxt = llmMessages[j];
-        if (nxt.role === "tool") {
-          followingTools.push(nxt);
-        } else {
-          break;
-        }
-      }
-      const foundIds = followingTools.map(t => t.tool_call_id);
-      const complete = expectedIds.every(id => foundIds.includes(id));
-      if (!complete) {
-        // 标记这条 assistant 为移除，同时标记它后面的所有 tool 消息也移除
-        removeSet.add(i);
-        for (let j = i + 1; j < llmMessages.length; j++) {
-          if (llmMessages[j].role === "tool") {
-            removeSet.add(j);
-          } else {
-            break;
-          }
-        }
-        console.log(`⚠️ 自动修复：移除不完整的 tool_calls (索引 ${i})`);
-      }
-    }
-
-    // 检查孤立 tool 消息（前面没有对应的 tool_calls）
-    for (let i = 0; i < llmMessages.length; i++) {
-      if (llmMessages[i].role !== "tool") continue;
-      // 向前查找最近的 assistant
-      let hasMatchingToolCalls = false;
-      for (let j = i - 1; j >= 0; j--) {
-        const prev = llmMessages[j];
-        if (prev.role === "assistant" && prev.tool_calls) {
-          // 检查这个 tool_call_id 是否在 assistant 的 tool_calls 中
-          const ids = prev.tool_calls.map(tc => tc.id);
-          if (ids.includes(llmMessages[i].tool_call_id)) {
-            hasMatchingToolCalls = true;
-          }
-          break;
-        } else if (prev.role === "tool") {
-          continue; // 继续向前找
-        } else {
-          break; // 遇到 user 或其他消息，停止
-        }
-      }
-      if (!hasMatchingToolCalls) {
-        removeSet.add(i);
-        console.log(`⚠️ 自动修复：移除孤立的 tool 消息 (索引 ${i})`);
-      }
-    }
-
-    // 按索引从大到小删除，避免索引错乱
-    const sortedRemove = Array.from(removeSet).sort((a, b) => b - a);
-    for (const idx of sortedRemove) {
-      llmMessages.splice(idx, 1);
-    }
+    // ---- 自动修复不完整的 tool 调用（双向清理，实现搬至 chat-context.js）----
+    llmMessages = chatCtx.repairToolCallPairs(llmMessages);
 
     // (trim 逻辑在下方最近窗口处执行，当前用户请求的图片始终保留)
 
@@ -1256,7 +964,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
     const requestedStream = body?.stream === true;
 
     // ========================
-    // 永久注入上下文：pinned context 注入 system prompt
+    // 永久注入上下文（role 法 2026-09-15）：[永久上下文]、[跨窗口] 一律 developer 块，
+    // 插在 system 之后、历史之前；不再拼进 system 内容、不再伪装 assistant。
     // ========================
     try {
       const pinnedCtx = isMainChat && memoryEngine.buildPinnedContext ? memoryEngine.buildPinnedContext() : '';
@@ -1269,28 +978,13 @@ app.post("/v1/chat/completions", async (req, reply) => {
           crossCtx = buildCrossMemorySnapshot(sessionId);
         } catch (cx) { console.warn("[cross-inject] 失败:", cx.message); }
       }
-      let sysExtra = "";
-      if (pinnedCtx) sysExtra += '\n\n## 永久上下文\n' + pinnedCtx;
-      // 批注 2026-08-30：memory 提示不再硬编码注入（用户已写入 pin/永久上下文），删除此段。
-      if (sysExtra) {
+      const headerBlocks = chatCtx.buildDeveloperHeaderBlocks({ pinnedCtx, crossCtx });
+      if (headerBlocks.length) {
         const sysIdx = llmMessages.findIndex(m => m.role === "system");
-        if (sysIdx >= 0) {
-          llmMessages[sysIdx].content = llmMessages[sysIdx].content + sysExtra;
-        } else {
-          llmMessages.unshift({ role: "system", content: sysExtra.trim() });
-        }
-        if (pinnedCtx) console.log('[pinned] 注入永久上下文');
-      }
-      // 跨窗口注入：不进系统提示，作为上下文消息拼在 system 之后（与当前时间线特殊事件同属上下文层）
-      if (isMainChat && crossCtx) {
-        const sysIdx = llmMessages.findIndex(m => m.role === "system");
-        const bg = { role: "assistant", content: crossCtx };
-        if (sysIdx >= 0) {
-          llmMessages.splice(sysIdx + 1, 0, bg);
-        } else {
-          llmMessages.unshift(bg);
-        }
-        console.log('[cross-inject] 注入跨窗口记忆（上下文）');
+        const insertAt = sysIdx >= 0 ? sysIdx + 1 : 0;
+        llmMessages.splice(insertAt, 0, ...headerBlocks);
+        if (pinnedCtx) console.log('[pinned] 注入永久上下文（developer）');
+        if (crossCtx) console.log('[cross-inject] 注入跨窗口记忆（developer）');
       }
     } catch (pinErr) {
       console.warn('[pinned] 注入失败:', pinErr.message);
@@ -1314,7 +1008,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
     // 历史图片裁剪已移除（2026-09-08）：图片原样透传，不做任何保留窗口
 
     // 会话容量提醒：替换/裁剪后按最终发送量检测，超限塞一条隐藏提醒（AI 自己压缩）
-    maybeInjectContextLimitReminder(llmMessages, sessionId, timeByKey);
+    ctxLimitGuard(llmMessages, sessionId, timeByKey);
 
     // 上下文压缩已统一进「上下文替换」：早期对话块摘要与 AI 记忆现在都是同一种替换记录，
     // 由 contextReplacements.applyReplacements 统一生效，旧压缩器发送路径已停用。
@@ -1322,13 +1016,27 @@ app.post("/v1/chat/completions", async (req, reply) => {
     // 工具调用记录回灌转换：把历史里 assistant 形态的「【工具调用记录】」还原成
     // role=tool 消息组（带工具名/调用时间/状态标头），模型明确知道来源，不混入普通对话流。
     // 必须在 applyReplacements 之后（压缩块匹配仍按 assistant 文本形态），转发前生效。
-    llmMessages = convertToolNotesToToolRole(llmMessages);
+    llmMessages = chatCtx.convertToolNotesToToolRole(llmMessages);
 
 
-    // 请求模型
-    // Capture the actual messages sent to LLM for inspection
+    // 请求模型（实际捕获移至下方 outboundMessages 组装之后，管理台看到=真正发出）
+
+
+
+
+    // 管理台展示：保留完整消息序列（含动态注入），方便核对注入位置
+
+    // 转发前只保留 OpenAI 兼容字段，剥离 Kelivo 自定义字段（position 等）
+    const sanitizedMessages = chatCtx.sanitizeForUpstream(llmMessages);
+
+    // role 出口映射（2026-09-15）：内部 developer 块按供应商 profile 翻译后再发上游
+    // （default：developer→system；claude：并顶层 system+tool 裹 user；gemini：assistant→model）。
+    const providerProfile = (prov && prov.profile) || 'default';
+    const outboundMessages = mapMessagesForProvider(providerProfile, sanitizedMessages);
+
+    // 捕获发给 LLM 的完整上下文（管理台日志页可查看；= 真正发出的映射后消息）
     if (isMainChat) {
-      setLastLLMCapture(llmMessages.map(m => {
+      setLastLLMCapture(outboundMessages.map(m => {
         const cap = splitMultimodalContent(m.content);
         return {
           role: m.role,
@@ -1340,23 +1048,6 @@ app.post("/v1/chat/completions", async (req, reply) => {
         };
       }), new Date().toISOString());
     }
-
-
-
-
-    // 管理台展示：保留完整消息序列（含动态注入），方便核对注入位置
-
-    // 转发前只保留 OpenAI 兼容字段，剥离 Kelivo 自定义字段（position 等）
-    const sanitizedMessages = llmMessages.map(msg => {
-      const clean = { role: msg.role };
-      if (msg.content !== undefined) clean.content = msg.content;
-      if (msg.name !== undefined) clean.name = msg.name;
-      if (msg.tool_calls !== undefined) clean.tool_calls = msg.tool_calls;
-      if (msg.tool_call_id !== undefined) clean.tool_call_id = msg.tool_call_id;
-      // 多轮对话时可回传思考链（前端若开"回传思考链"会带 reasoning_content），透传给上游而非丢弃
-      if (msg.role === "assistant" && msg.reasoning_content !== undefined) clean.reasoning_content = msg.reasoning_content;
-      return clean;
-    });
 
     // 2026-09-08 图片 URL 统一补全：前端把消息图片转存为 /uploads/<file>（避免大 base64 撑爆 localStorage），
     // 上游 deepseek 只认 https:// 绝对 URL（相对路径/base64/http 均被拒），故发模型前经 imageAbsUrl
@@ -1374,7 +1065,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
           }
         }
       };
-      for (const _m of sanitizedMessages) _imgFill(_m);
+      for (const _m of outboundMessages) _imgFill(_m);
       // 历史遗留：content 可能是字符串里内嵌 data:image（极少数），这里不动——字符串型图片上游走 base64 由上游判断
     } catch (_e) { console.warn("[chat] 图片URL补全忽略:", _e.message); }
 
@@ -1386,7 +1077,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
         // 登记当前聊天会话：AI 在工具循环里调 context_replace 时，工具服务器回调
         // /internal/apply 是独立请求（ALS 已丢），靠这个登记把块记到正确会话
         contextReplacements.noteMcpChatSession(sessionId);
-        if (await handleMcpRequest(body, reply, req, sanitizedMessages, sessionId, kelivoMessages)) return;
+        if (await handleMcpRequest(body, reply, req, outboundMessages, sessionId, kelivoMessages)) return;
       } catch (mcpErr) {
         console.warn("[mcp] 工具循环失败，回退原逻辑:", mcpErr.message, "| session:", sessionId, "| msgs:", Array.isArray(sanitizedMessages) ? sanitizedMessages.length : -1, "| model:", (body && body.model) || "");
       }
@@ -1403,7 +1094,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${targetApiKey}`
         },
-        body: JSON.stringify({ ...body, messages: sanitizedMessages }),
+        body: JSON.stringify({ ...body, messages: outboundMessages }),
         signal: upstreamController.signal
       });
     } catch (upstreamErr) {

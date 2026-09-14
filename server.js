@@ -1833,6 +1833,27 @@ require("./routes/chat")(app, {
 });
 
 // ========================
+// 统一唤醒调用器（2026-09-15 唤醒并入网关）：POST /internal/wake-completions
+// 与对话侧同一套上下文加工（chat-context.js）；唤醒特有行为仍在调用方。
+// ========================
+require("./routes/wake-chat")(app, {
+  baseDir: __dirname,
+  loadTimeline,
+  saveTimeline,
+  appendMessages,
+  appendSpecialEvent,
+  isSpecialEvent,
+  normalizeContentToText,
+  stripPosition,
+  buildCrossMemorySnapshot,
+  resolveChatModel,
+  readEnvValue,
+  UPSTREAM_TIMEOUT_MS,
+  setLastLLMCapture,
+  splitMultimodalContent
+});
+
+// ========================
 // Chat Completions
 // ========================
 // ========================
