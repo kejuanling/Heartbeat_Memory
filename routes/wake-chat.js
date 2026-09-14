@@ -99,7 +99,20 @@ async function runWakeCompletion(deps, opts) {
     }
 
     // 与对话侧同一套加工：容量提醒 → 工具记录全量转换（一条不滤）→ tool 配对修复 → 出口净化
-    ensureGuard(deps)(msgs, sessionId, null);
+    // 容量提醒建议段的时间反查表（role+content → Date）：从会话时间线构建，
+    // 与对话侧同口径（2026-09-15 补：此前传 null，提醒文本退化为无时间锚的默认描述）
+    const timeByKey = new Map();
+    try {
+      for (const tm of deps.loadTimeline(sessionId)) {
+        if (!tm || tm.role === "system" || deps.isSpecialEvent(tm)) continue;
+        if (!tm.time) continue;
+        const d = new Date(tm.time);
+        if (isNaN(d.getTime())) continue;
+        const key = tm.role + "\u0000" + deps.normalizeContentToText(tm.content);
+        if (!timeByKey.has(key)) timeByKey.set(key, d);
+      }
+    } catch (e) { /* 反查表失败不阻断，提醒退化为无时间锚 */ }
+    ensureGuard(deps)(msgs, sessionId, timeByKey);
     let llmMessages = chatCtx.convertToolNotesToToolRole(msgs);
     llmMessages = chatCtx.repairToolCallPairs(llmMessages);
     const sanitized = chatCtx.sanitizeForUpstream(llmMessages);
@@ -166,6 +179,7 @@ async function runWakeCompletion(deps, opts) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), deps.UPSTREAM_TIMEOUT_MS || 180000);
       let resp;
+      let respText;
       try {
         resp = await fetch(url, {
           method: "POST",
@@ -173,10 +187,12 @@ async function runWakeCompletion(deps, opts) {
           body: JSON.stringify({ model, messages: outbound, temperature, top_p: topP, stream: false }),
           signal: controller.signal
         });
+        // body 读取也必须在超时窗口内（2026-09-15 修复）：此前 finally 在 fetch 返回即清定时器，
+        // 上游回完头再挂起时读 body 无超时（退化成 undici 默认 300s），唤醒互斥锁被长时间占死
+        respText = await resp.text();
       } finally {
         clearTimeout(timer);
       }
-      const respText = await resp.text();
       let data;
       try { data = JSON.parse(respText); }
       catch { throw new Error(`上游返回的不是 JSON（HTTP ${resp.status}）：${respText.slice(0, 300)}`); }

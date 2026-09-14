@@ -7003,6 +7003,9 @@ async function switchSessionAndLocate(sid,idx){
   saveMsgs();
   currentSession=sid;
   localStorage.setItem("han_current_session",sid);
+  pushCurrentSession();   // 跨设备同步：搜索定位跳转也上报当前会话
+  startLiveEvents();      // 跳转后重订阅目标会话实时更新（2026-09-15 修复：此前漏订阅，跳转后 AI 唤醒/别的设备新消息不再实时出现）
+  alignLocalStars();      // 标星 UI 按目标会话对齐（与 switchSession 同口径）
   applyHeader();
   msgs=loadMsgs();
   if(!(msgs&&msgs.length)){ const h=await fetchHistory(); if(h&&h.length){ msgs=h; saveMsgs(); } }

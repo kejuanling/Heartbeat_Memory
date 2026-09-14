@@ -221,7 +221,8 @@ module.exports = function registerChatRoutes(app, deps) {
             continue;
           }
           const arr = loadTimeline(sid);
-          const real = arr.filter(isRealMessageForTimeline);
+          // kind=diary 是隐藏日记消息（前端不显示），不计入「真实消息」数（2026-09-15）
+          const real = arr.filter(m => isRealMessageForTimeline(m) && m.kind !== 'diary');
           const meta = { mtimeMs: st.mtimeMs, size: st.size, total: arr.length, real: real.length, last_time: (arr[arr.length - 1] && arr[arr.length - 1].time) || null };
           sessionMetaCache.set(sid, meta);
           sessions.push({ id: sid, name: sid, total: meta.total, real: meta.real, last_time: meta.last_time, is_default: false });
@@ -370,11 +371,17 @@ module.exports = function registerChatRoutes(app, deps) {
           if (!sid) continue;
           let arr = [];
           try { arr = loadTimeline(sid); } catch (e) { continue; }
-          arr.filter(isRealMessageForTimeline).forEach((m, i) => {
-            const text = normalizeContentToText(m.content) || '';
-            if (!text) return;
-            items.push({ sid, sidx: i, name: sid, text });
-          });
+          // sidx 口径必须与 /v1/history 的可见序列完全一致（真实消息+推送回显可见；developer/tool/diary 隐藏），
+          // 前端按该下标定位跳转（switchSessionAndLocate 索引的就是 history 序列）。
+          // 2026-09-15 修复：此前只按 isRealMessageForTimeline 计数，推送回显不入列、v2 日记误入列，
+          // 主会话实测 3059 条可搜消息中 2302 条错位（偏差最多 19 条），搜索跳转落在错误消息上。
+          arr.filter(m => (isRealMessageForTimeline(m) || (m && !m.deleted && isPushEchoLike(m)))
+            && !(m && (m.role === 'developer' || m.role === 'tool' || m.kind === 'diary')))
+            .forEach((m, i) => {
+              const text = normalizeContentToText(m.content) || '';
+              if (!text) return;
+              items.push({ sid, sidx: i, name: sid, text });
+            });
         }
         searchIndexCache.fp = fp;
         searchIndexCache.items = items;
@@ -1006,7 +1013,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
           // 存储用原始含标签文本（<wake>/<memory> 等是上下文一部分，模型可见、前端显示时剥、编辑框可见）。
           if ((kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0)) {
             if (!tailHasReply(sessionId, aiContent)) {
-              appendMessages(sessionId, [{ role: "assistant", content: aiContent }]);
+              // 与流式路径同口径落富字段（2026-09-15：此前非流式丢思考链/token，刷新后不一致）
+              appendMessages(sessionId, [{ role: "assistant", content: aiContent, reasoning: aiThinking || "", tokens: (parsed && parsed.usage) || null }]);
             }
           } else {
             console.log("[timeline] 跳过回复落盘 (非流式)");

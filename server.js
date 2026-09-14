@@ -749,8 +749,12 @@ async function releaseHeldMessages(sessionId) {
   const timeline = loadTimeline(sid);
   const sp = timeline.find(m => m.role === "system");
   const cleanSP = sp ? String(normalizeContentToText(sp.content)).split("## search_web 工具使用说明")[0].trim() : "";
+  // 被扣消息发来时已落时间线（appendRequestMessages），从历史侧剔除，
+  // 避免同批消息在上下文出现两份（历史一份+提示词列表一份）（2026-09-15 修复）
+  const heldSigs = new Set(held.map(m => quietMsgSignature(m)));
   const historyMsgs = timeline
     .filter(m => m.role !== "system" && !isSpecialEvent(m) && m.role !== "tool" && !m.tool_calls && !m.tool_call_id)
+    .filter(m => !heldSigs.has(quietMsgSignature(m)))
     .slice(-50)
     .map(m => ({ role: m.role, content: normalizeContentToText(m.content) }));
   const heldText = held.map((m, i) => `${i + 1}. ${normalizeContentToText(m.content)}`).join("\n");
@@ -2448,6 +2452,21 @@ app.post("/internal/wake-event", async (req, reply) => {
       const diaryRaw = String(diary || "").trim();
       const pushMeta = (push && typeof push === "object") ? push : null;
       const wakeTools = Array.isArray(tools) ? tools.filter(t => t && t.name) : [];
+      // 幂等去重（2026-09-15 补）：v2 分支此前漏了 v1 的同款护栏——HTTP 层任何重试
+      // 会把 speak/diary 重复落库。同会话+同内容 10 分钟窗口内直接跳过。
+      if (speakRaw || diaryRaw) {
+        const dedupKey = "v2\u0000" + (evSession || "default") + "\u0000" + [String(speak || ""), String(diary || ""), pushMeta ? (String(pushMeta.title || "") + "\u0002" + String(pushMeta.at || "")) : ""].map(s => s.slice(0, 2000)).join("\u0001");
+        const seenAt = _wakeEventSeen.get(dedupKey);
+        const nowTs = Date.now();
+        if (seenAt && nowTs - seenAt < WAKE_EVENT_DEDUP_MS) {
+          console.log("[wake-event] 重复事件（重试?）跳过落库 (v2)");
+          return reply.send({ success: true, v2: true, dedup: true });
+        }
+        _wakeEventSeen.set(dedupKey, nowTs);
+        if (_wakeEventSeen.size > 500) {
+          for (const [k, t] of _wakeEventSeen) { if (nowTs - t > WAKE_EVENT_DEDUP_MS) _wakeEventSeen.delete(k); }
+        }
+      }
       const appended = [];
       if (diaryRaw) appended.push({ role: "assistant", content: diaryRaw, kind: "diary" });
       if (speakRaw) {
