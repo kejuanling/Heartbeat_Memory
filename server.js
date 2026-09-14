@@ -1850,7 +1850,8 @@ require("./routes/wake-chat")(app, {
   readEnvValue,
   UPSTREAM_TIMEOUT_MS,
   setLastLLMCapture,
-  splitMultimodalContent
+  splitMultimodalContent,
+  isQuietActive
 });
 
 // ========================
@@ -2433,7 +2434,39 @@ const WAKE_EVENT_DEDUP_MS = 10 * 60 * 1000;
 
 app.post("/internal/wake-event", async (req, reply) => {
   try {
-    const { content, event, diary, push_meta, session_id, tools } = req.body;
+    const body = req.body || {};
+    // ===== v2（2026-09-15 role 法）：唤醒产出原地追加为 assistant 消息，无回显行、无插位 =====
+    // speak = 模型完整输出（含 <wake> 标签，存储保留作上下文；[DIARY] 段由 stripDiaryBlocks 剥除进 diary 消息）
+    // diary = 本次写的日记原文 → assistant(kind=diary) 落时间线（前端隐藏），日记文件由 wake_up.js 侧自行写
+    // push  = 推送元数据（Bark 成功时），结构化挂 assistant.push 字段，不再生成「刚刚给X发了推送」回显行
+    // tools = 唤醒工具调用记录 → 挂 speak 消息 tools 字段；静默无消息时回填到 [唤醒] 块
+    if (body.v2 === true) {
+      const { session_id, speak, diary, push, tools, wake_block_id } = body;
+      const evSession = typeof session_id === "string" && session_id.trim() ? String(session_id).trim() : null;
+      const speakRaw = String(speak || "").trim();
+      const diaryRaw = String(diary || "").trim();
+      const pushMeta = (push && typeof push === "object") ? push : null;
+      const wakeTools = Array.isArray(tools) ? tools.filter(t => t && t.name) : [];
+      const appended = [];
+      if (diaryRaw) appended.push({ role: "assistant", content: diaryRaw, kind: "diary" });
+      if (speakRaw) {
+        const stored = stripDiaryBlocks(speakRaw);
+        if (stored) {
+          const msg = { role: "assistant", content: stored };
+          if (pushMeta) msg.push = pushMeta;
+          if (wakeTools.length) msg.tools = wakeTools;
+          appended.push(msg);
+        }
+      }
+      if (appended.length) appendMessages(evSession, appended);
+      // 静默但调过工具：工具记录回填到本次的 developer [唤醒] 块上，不丢工具痕迹
+      if (!appended.length && wakeTools.length && wake_block_id) {
+        try { patchMessage(evSession, wake_block_id, { tools: wakeTools }); } catch (e) {}
+      }
+      console.log(`[wake-event] v2 落库 (session ${evSession || "default"}, speak=${speakRaw ? 1 : 0}, diary=${diaryRaw ? 1 : 0}, push=${pushMeta ? 1 : 0}, tools=${wakeTools.length})`);
+      return reply.send({ success: true, v2: true, appended: appended.length });
+    }
+    const { content, event, diary, push_meta, session_id, tools } = body;
     // 批注 2026-08-29：多会话。唤醒侧(wake_up.js)现在会携带 session_id，把唤醒事件写到
     // 对应会话语，而不是永远堆在主会话。未携带时回退主会话（100% 兼容旧行为）。
     const evSession = typeof session_id === "string" && session_id.trim() ? String(session_id).trim() : null;

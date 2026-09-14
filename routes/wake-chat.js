@@ -88,16 +88,25 @@ async function runWakeCompletion(deps, opts) {
 
     // [唤醒] 块：先落盘（追加式、原地不动、不插位），再注入本次请求末尾。
     // 静默唤醒（模型不回话）时它就是该次唤醒在时间线里的唯一留痕。
+    // 免打扰/闹钟状态按 role 法写进块里（0915 拍板：只告知模型，由模型自己定说不说）。
+    let wakeBlockId = null;
     if (wakeBlock) {
+      let blockContent = wakeBlock;
+      if (typeof deps.isQuietActive === "function") {
+        try {
+          blockContent += "\n[免打扰] " + (deps.isQuietActive(sessionId) ? "是（是否保持安静由你自行判断）" : "否");
+        } catch (e) {}
+      }
       if (persistWakeBlock) {
         try {
-          deps.appendMessages(sessionId, [{ role: "developer", content: wakeBlock }]);
-          console.log(`[wake-chat] developer [唤醒] 块已落盘（session ${sessionId}，${wakeBlock.length} 字）`);
+          const created = deps.appendMessages(sessionId, [{ role: "developer", content: blockContent }]);
+          wakeBlockId = (created && created[0] && created[0].id) || null;
+          console.log(`[wake-chat] developer [唤醒] 块已落盘（session ${sessionId}，${blockContent.length} 字）`);
         } catch (e) {
           console.warn("[wake-chat] [唤醒] 块落盘失败（仍注入本次请求）:", e.message);
         }
       }
-      msgs.push({ role: "developer", content: wakeBlock });
+      msgs.push({ role: "developer", content: blockContent });
     }
 
     // 与对话侧同一套加工：容量提醒 → 工具记录全量转换（一条不滤）→ tool 配对修复 → 出口净化
@@ -187,7 +196,7 @@ async function runWakeCompletion(deps, opts) {
       if (text) console.log(`[wake-chat] 直连完成：正文 ${text.length} 字`);
     }
 
-    return { text, toolHistory, model };
+    return { text, toolHistory, model, wakeBlockId };
   } finally {
     try { contextReplacements.setActiveSession(null); } catch (e) {}
   }
@@ -219,7 +228,7 @@ module.exports = function registerWakeChatRoutes(app, deps) {
     try {
       const body = req.body || {};
       const res = await runWakeCompletion(deps, body);
-      reply.send({ ok: true, text: res.text, tool_history: res.toolHistory, model: res.model });
+      reply.send({ ok: true, text: res.text, tool_history: res.toolHistory, model: res.model, wake_block_id: res.wakeBlockId });
     } catch (err) {
       console.error("[wake-completions] error:", err.message);
       reply.code(500).send({ ok: false, error: err.message });

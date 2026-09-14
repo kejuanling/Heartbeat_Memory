@@ -92,6 +92,7 @@ const WAKE_DUE_GRACE_MS = 2000;
 const PORT = Number(process.env.PORT) || 3000;
 const GATEWAY_BASE_URL = (process.env.GATEWAY_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
 const GATEWAY_URL = `${GATEWAY_BASE_URL}/internal/wake-event`;
+const WAKE_COMPLETIONS_URL = `${GATEWAY_BASE_URL}/internal/wake-completions`;
 const HEARTBEAT_URL = `${GATEWAY_BASE_URL}/internal/heartbeat`;
 const TIME_ZONE = resolveTimeZone();
 const WEATHER_TIMEOUT_MS = 5000;
@@ -1036,203 +1037,45 @@ async function runWakeForTarget(target) {
   const weatherContext = await fetchWeatherContext();
   const phoneContext = await fetchPhoneStateContext();
 
-  // 永久注入上下文
-  let pinnedContext = "";
-  try {
-    const pinnedCtx = memoryEngine.buildPinnedContext ? memoryEngine.buildPinnedContext() : "";
-    if (pinnedCtx) {
-      pinnedContext = "\n\n## 永久上下文\n" + pinnedCtx;
-      console.log("[pinned] 唤醒时注入永久上下文");
-    }
-  } catch (pinErr) {
-    console.warn("[pinned] 唤醒时注入失败:", pinErr.message);
-  }
-
+  // [永久上下文]/[跨窗口] 注入已收口到网关统一唤醒链路（2026-09-15 批2），本进程不再拼装上下文。
   const wakePrompt = buildWakePrompt(getLocalTimeString(), diffMinutes, weatherContext, phoneContext);
-  let cleanMessages = stripPosition(messages);
-
-  // 上下文记忆替换：唤醒时看到的也是 AI 写好的记忆而不是原文（源文件不动）
-  // 先按当前活跃会话设置压缩模块的会话上下文，让替换记录匹配到正确的会话语。
-  try { contextReplacements.setActiveSession(wakeSessionId); } catch (e) {}
+  // === 统一唤醒链路（2026-09-15 批2）：上下文重建/工具循环全在网关 /internal/wake-completions ===
+  // 本进程只保留：调度、沉默判定、唤醒提示词（= developer [唤醒] 块）、推送/日记/写回决策。
+  let rawAiTextFull = "";
+  let wakeToolHistory = [];
+  let wakeBlockId = null;
   try {
-    const beforeWake = cleanMessages.length;
-    cleanMessages = contextReplacements.applyReplacements(cleanMessages);
-    if (cleanMessages.length !== beforeWake) {
-      console.log("[wake-up] 上下文记忆替换生效: 消息 " + beforeWake + " -> " + cleanMessages.length);
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), WAKE_UPSTREAM_TIMEOUT_MS);
+    let res;
+    try {
+      res = await fetch(WAKE_COMPLETIONS_URL, {
+        method: "POST",
+        headers: internalHeaders(),
+        body: JSON.stringify({
+          session_id: wakeSessionId,
+          wake_block: wakePrompt,
+          with_tools: true,
+          temperature: 0.8,
+          top_p: 0.95
+        }),
+        signal: ctl.signal
+      });
+    } finally { clearTimeout(timer); }
+    let data = null;
+    try { data = await res.json(); } catch (e) {}
+    if (!res.ok || !data || !data.ok) {
+      throw new Error("HTTP " + res.status + " " + String((data && data.error) || "").slice(0, 200));
     }
-  } catch (repErr) {
-    console.warn("[wake-up] 上下文记忆替换失败（按原样处理）:", repErr.message);
-  }
-  try { contextReplacements.setActiveSession(null); } catch (e) {}
-
-  // 唤醒历史消息：拍平成一条 user 消息（与原仓库结构一致）
-  // 先过滤、裁剪，再把历史对话拼接成纯文本
-  function filterMemoryMsgs(msgs) {
-    return msgs.filter(msg => {
-      const c = normalizeContentToText(msg.content);
-      return !c.includes("<memories>") && !c.includes("记忆库使用策略");
-    });
-  }
-
-  // 容量提醒（kind=ctx_limit）只在正常聊天（有工具）时可见：唤醒链路没有工具，
-  // AI 看到提醒也做不了压缩，徒增困惑——唤醒时直接滤掉
-  let historyMsgs = filterMemoryMsgs(cleanMessages.filter(msg => msg.role !== "system"))
-    .filter(m => !m || m.kind !== "ctx_limit");
-
-  // 唤醒不需要工具调用链（对话侧才有）；历史内容统一为纯文本。
-  // 「【工具调用记录】」时间线 note（大块 JSON）对唤醒无用且撑上下文，一并滤掉；
-  // 对话侧由网关转换 role=tool 回灌，唤醒侧无工具循环不做该转换（2026-09-13 用户拍板）。
-  historyMsgs = historyMsgs
-    .filter(m => m.role !== "tool" && !m.tool_calls && !m.tool_call_id)
-    .filter(m => !(m && typeof m.content === "string" && m.content.indexOf("【工具调用记录】") === 0))
-    .map(m => (Array.isArray(m.content) ? { ...m, content: normalizeContentToText(m.content) } : m));
-
-  // 批注 2026-08-19 唐山：唤醒侧兜底——历史末尾若仍是用户最新未回复消息，则剔除这些尾部 user 消息，
-  // 保证发给 AI 的最后一条始终是 AI 自己的回复（正常对话最后一条都是 assistant），
-  // 避免 AI 把最后一条用户消息当成未回答而去生成对话回复。
-  while (historyMsgs.length && historyMsgs[historyMsgs.length - 1].role === "user") {
-    historyMsgs.pop();
-  }
-
-  // 批注 2026-08-26：唤醒历史过长会稀释末尾唤醒规则的权重（长叙事惯性压过尾部指令）；
-  // 裁剪为最近 N 条（管理台「记忆与唤醒参数」可调 wake_history_max_messages，默认见 memory-engine DEFAULT_CONFIG）。
-  // 配置 0 = 不裁剪（与管理台提示一致）；仅当配置缺失(null/undefined)时兜底默认 100
-  const _whRaw = memoryEngine.getConfig().wake_history_max_messages;
-  const wakeHistoryMax = _whRaw == null ? 100 : (Number(_whRaw) || 0);
-  if (wakeHistoryMax > 0 && historyMsgs.length > wakeHistoryMax) {
-    const trimmedCount = historyMsgs.length - wakeHistoryMax;
-    historyMsgs = historyMsgs.slice(-wakeHistoryMax);
-    console.log(`[wake-up] 历史裁剪：省略 ${trimmedCount} 条较早消息（保留最近 ${wakeHistoryMax} 条）`);
-  }
-
-  // 把历史消息拍平成纯文本
-  const userDisplay = process.env.USER_DISPLAY_NAME || "用户";
-  const aiDisplay = process.env.AI_DISPLAY_NAME || "AI";
-  const historyText = historyMsgs
-    .map(msg => {
-      const role = msg.role === "user" ? userDisplay : aiDisplay;
-      return `[${role}] ${msg.content}`;
-    })
-    .join("\n\n");
-
-  const baseSystemPrompt = cleanMessages.find(msg => msg.role === "system");
-  const cleanSP = baseSystemPrompt
-    ? normalizeContentToText(baseSystemPrompt.content).split("## search_web 工具使用说明")[0].trim()
-    : "";
-
-  // system = 唤醒提示词 + 人设(cleanSP) + 永久上下文(pinned)
-  const systemContent = [wakePrompt, cleanSP, pinnedContext].filter(Boolean).join("\n\n");
-
-  const wakeMessages = [
-    {
-      role: "system",
-      content: systemContent
-    },
-    {
-      // 批注 2026-07-15：Claude/部分 New API 适配器会把 system 抽成独立字段；
-      // 唤醒请求如果全是 system，上游 messages 会变空，因此最近记录必须作为 user 任务输入发送。
-      role: "user",
-      content: `以下是你与${userDisplay}最近的聊天记录，仅供回忆和参考。
-
-这些内容不是正在发生的实时对话。
-${userDisplay}并没有给你发消息。
-
-你现在处于后台自主唤醒状态。
-
-最近记录：
-
-${historyText}`
-    }
-  ];
-
-  // 批注 2026-07-15：wake-up prompt 会包含最近聊天记录；
-  // 默认日志只写摘要，避免公开部署时把完整上下文刷进 pm2 日志。
-  console.log("\n===== WAKE MESSAGES SUMMARY =====\n");
-  console.log(JSON.stringify(summarizeWakeMessages(wakeMessages)));
-
-  if (!process.env.TARGET_API_URL || !process.env.TARGET_API_KEY || !process.env.MODEL_NAME) {
-    console.log("缺少 TARGET_API_URL / TARGET_API_KEY / MODEL_NAME，跳过本次唤醒");
+    rawAiTextFull = String(data.text || "");
+    wakeToolHistory = Array.isArray(data.tool_history) ? data.tool_history : [];
+    wakeBlockId = data.wake_block_id || null;
+    console.log("[wake-up] 统一链路完成：工具 " + wakeToolHistory.length + " 个，正文 " + rawAiTextFull.length + " 字");
+  } catch (e) {
+    console.error("[wake-up] 统一唤醒链路失败，本次唤醒中止:", e.message);
     return;
   }
 
-  // === 工具注入（2026-09-08）===
-  // 唤醒时也注入「工具集合」（本地记忆/日记工具，127.0.0.1:8771），
-  // 让模型在唤醒时能主动记日记、查记忆。优先走 runWithTools 工具循环；
-  // 任何失败/无结果则回退到无工具直连，保证唤醒始终可用。
-  let rawAiTextFull = "";
-  let wakeToolHistory = []; // 本次唤醒工具循环实际调用的工具（I13：摘要落时间线）
-  const wakeClients = getWakeMcpClients();
-  let wakeMcpOk = false;
-  if (wakeClients && wakeClients.length > 0) {
-    try {
-      const mcpRes = await mcpLoop.runWithTools({
-        upstreamUrl: process.env.TARGET_API_URL,
-        upstreamKey: process.env.TARGET_API_KEY,
-        model: process.env.MODEL_NAME,
-        messages: wakeMessages,
-        serverClients: wakeClients,
-        sessionId: wakeSessionId, // 批注 2026-09-13（审查 B3）：不传会话导致 diary_add/leave_paper 落到 default，与 appendDiaryEntry 的落盘路径分裂
-        temperature: 0.8,
-        top_p: 0.95
-      });
-      if (mcpRes && typeof mcpRes.text === "string") {
-        const t = normalizeContentToText(mcpRes.text).trim();
-        if (t) {
-          rawAiTextFull = t;
-          wakeMcpOk = true;
-          wakeToolHistory = mcpRes.toolHistory || [];
-          console.log(`[wake-up] 工具循环完成：调用工具 ${(mcpRes.toolHistory || []).length} 个，正文 ${t.length} 字`);
-        }
-      }
-    } catch (e) {
-      console.warn("[wake-up] 工具循环失败，回退无工具直连:", e.message);
-    }
-  }
-
-  if (!wakeMcpOk) {
-    // --- 无工具直连（原逻辑，作为兜底）---
-    const wakeController = new AbortController();
-    const wakeTimer = setTimeout(() => wakeController.abort(), WAKE_UPSTREAM_TIMEOUT_MS);
-    let response;
-    try {
-      response = await fetch(process.env.TARGET_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.TARGET_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: process.env.MODEL_NAME,
-          messages: wakeMessages,
-          temperature: 0.8,
-          top_p: 0.95,
-          stream: false
-        }),
-        signal: wakeController.signal
-      });
-    } catch (e) {
-      clearTimeout(wakeTimer);
-      throw e;
-    }
-
-    let responseText;
-    try {
-      responseText = await response.text();
-    } finally {
-      clearTimeout(wakeTimer);
-    }
-    let data;
-    try {
-      data = JSON.parse(responseText);
-    } catch {
-      throw new Error(`模型返回的不是 JSON（HTTP ${response.status}）：${responseText.slice(0, 300)}`);
-    }
-    if (!response.ok) {
-      throw new Error(`模型请求失败（HTTP ${response.status}）：${responseText.slice(0, 300)}`);
-    }
-
-    rawAiTextFull = normalizeContentToText(data.choices?.[0]?.message?.content).trim();
-  }
 
   // <wake> 标签：AI 可设置下次主动唤醒时间（日期时间或分钟）；标签不进入推送正文和时间线
   const wakeTagMatch = rawAiTextFull.match(/<wake>([\s\S]*?)<\/wake>/i);
@@ -1262,7 +1105,7 @@ ${historyText}`
   }
   const rawAiText = rawAiTextFull.replace(/<wake>[\s\S]*?<\/wake>/gi, "").trim();
   console.log("\nWake Result Summary:\n");
-  console.log(JSON.stringify({ wake_mcp: wakeMcpOk, ai_text_chars: rawAiText.length }));
+  console.log(JSON.stringify({ via_gateway: true, tools: wakeToolHistory.length, ai_text_chars: rawAiText.length }));
 
   const diaryResult = extractDiaryFromResponse(rawAiText);
   const diarySaved = appendDiaryEntry(diaryResult.diaryContent, wakeSessionId);
@@ -1364,6 +1207,9 @@ ${historyText}`
 
     try {
       // 回写必须有超时 + 非 2xx 必须留痕：否则网关重启中/密钥不匹配时回复静默丢失，排查无迹
+      // v2（2026-09-15 role 法）：speak/diary 原地追加为 assistant 消息；push 结构化挂字段；
+      // 不再生成回显事件行、不再按时间戳插位；[NO_ACTION]/空回复时不带 speak（只留 [唤醒] 块）
+      const speakOut = (aiText && !/^\[NO_ACTION\]/.test(aiText)) ? rawAiTextFull : "";
       const ctl = new AbortController();
       const timer = setTimeout(() => ctl.abort(), 30000);
       let aiReplyResponse;
@@ -1372,13 +1218,13 @@ ${historyText}`
           method: "POST",
           headers: internalHeaders(),
           body: JSON.stringify({
-            // 存储原始含标签文本（保留 <wake> 作为上下文一部分）；diary/记忆提取仍用 rawAiText（不带 <wake>）
-            content: rawAiTextFull,
-            event: eventContent,
-            diary: diaryResult.diaryContent || "",
-            push_meta: pushMeta,
+            v2: true,
             session_id: wakeSessionId,
-            tools: wakeToolHistory.length ? wakeToolHistory : undefined
+            speak: speakOut,
+            diary: diaryResult.diaryContent || "",
+            push: pushMeta,
+            tools: wakeToolHistory.length ? wakeToolHistory : undefined,
+            wake_block_id: wakeBlockId || undefined
           }),
           signal: ctl.signal
         });
