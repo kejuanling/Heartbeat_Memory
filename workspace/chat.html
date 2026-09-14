@@ -3426,6 +3426,15 @@ function showError(msg){
 }
 
 /* ================= 发送 ================= */
+// 上传瘦身窗口（2026-09-15）：服务端上下文由时间线重建，请求消息只用于增量同步
+// （人设同步+按 id 去重补齐+重生成清尾），故只上传最近 UPLOAD_WINDOW 条即可，
+// 请求体从 MB 级降到 KB 级。窗口必须取「连续尾部」：新 user 消息/重生成锚点在窗口内，
+// 服务端尾部对齐与免打扰扣住收集的语义才不变。本地 msgs 与渲染不受影响（仍全量）。
+const UPLOAD_WINDOW=80;
+function slimForUpload(list){
+  if(!Array.isArray(list)||list.length<=UPLOAD_WINDOW)return list;
+  return list.slice(list.length-UPLOAD_WINDOW);
+}
 // 组装发送给网关的消息；若"回传思考链"，assistant 带上 reasoning_content（多轮时模型可参考）
 function buildMessages(list){
   const out=[];
@@ -3475,7 +3484,7 @@ async function request(finalMsgs, fromSend){
     const payload={
       model:"deepseek-v4-flash-vision-exp",
       stream:isStream,
-      messages:buildMessages(finalMsgs),
+      messages:buildMessages(slimForUpload(finalMsgs)),
       session_id:currentSession,
       stream_options:{include_usage:true},
       client_msg_id:(Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,10))

@@ -783,13 +783,12 @@ app.post("/v1/chat/completions", async (req, reply) => {
 
     const oldTimeline = loadTimeline(sessionId);
 
-    const finalTimeline = buildTimeline(kelivoMessages, sessionId);
     // 防误伤：携带真实消息(或首次建线)才写时间线。时间线已是追加式增量写、不再全量覆盖历史，
     // 故放宽原先「必须 x-client=dylan-chat 才写」的门槛——第三方客户端(如 Kelivo)不带该头
     // 且已带上真实消息，也能正常写入，供自建前端(chat.html)看到。
     if (kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0) {
       // 方案二增量：落盘改为以盘上为基同步差量（新消息补齐/人设同步/重生成清尾），
-      // 不再拿请求全量重建覆盖；finalTimeline 仅服务后续事件注入与时间映射。通知由同步函数按需发出。
+      // 不再拿请求全量重建覆盖；通知由同步函数按需发出。
       appendRequestMessages(sessionId, kelivoMessages);
     } else {
       console.log("[timeline] 跳过时间线保存 (真实消息=" + kelivoMessages.some(isRealMessageForTimeline) + ")");
@@ -799,8 +798,10 @@ app.post("/v1/chat/completions", async (req, reply) => {
     let llmMessages = kelivoMessages
       .map(prepareMessageForLLM)
       .filter(Boolean);
-    // 主聊天（客户端携带 system 身份提示）才做记忆/跨窗口/特殊事件注入；标题总结等旁路请求保持精简
-    const isMainChat = kelivoMessages.some(function (m) {
+    // 主聊天（客户端携带 system 身份提示）才做记忆/跨窗口/特殊事件注入；标题总结等旁路请求保持精简。
+    // 2026-09-15 上传瘦身配套：x-client=dylan-chat（自建前端）本身就是主聊天信号——
+    // 即使未配置人设（请求里无 system），聊天页请求也要走时间线重建，否则窗口化上传会变成上下文本身。
+    const isMainChat = isClientChat || kelivoMessages.some(function (m) {
       if (!m) return false;
       if (m.role === "system") return true;
       if (m.role === "user" && typeof m.content === "string" && m.content.trim().indexOf("<system>") === 0) return true;
@@ -838,14 +839,18 @@ app.post("/v1/chat/completions", async (req, reply) => {
       llmMessages = buildConversation(sessionId);
     }
 
-    // 内容->时间 映射：容量提醒建议段反查时间用（保留原口径）
+    // 内容->时间 映射：容量提醒建议段反查时间用。2026-09-15 上传瘦身配套：改从服务端时间线构建
+    // （此前按客户端全量请求构建，窗口化后老消息的时间锚会丢；与唤醒侧同口径）。
     const timeByKey = new Map();
-    for (const m of finalTimeline) {
-      if (isSpecialEvent(m)) continue;
-      const key = m.role + "\u0000" + normalizeContentToText(m.content);
-      const t = extractTimestampWithMemory(m);
-      if (t && !timeByKey.has(key)) timeByKey.set(key, t);
-    }
+    try {
+      for (const tm of loadTimeline(sessionId)) {
+        if (!tm || tm.role === "system" || isSpecialEvent(tm)) continue;
+        const key = tm.role + "\u0000" + normalizeContentToText(tm.content);
+        if (timeByKey.has(key)) continue;
+        const t = extractTimestampWithMemory(tm);
+        if (t) timeByKey.set(key, t);
+      }
+    } catch (e) { /* 反查表失败不阻断，提醒退化为无时间锚 */ }
 
 
 
@@ -966,11 +971,11 @@ app.post("/v1/chat/completions", async (req, reply) => {
     }
     // === MCP_TOOL_LOOP_END ===
     // 上游请求超时保护，避免上游挂起导致 /v1 请求永久阻塞
-    const upstreamController = new AbortController();
-    const upstreamTimer = setTimeout(() => upstreamController.abort(), UPSTREAM_TIMEOUT_MS);
+    let upstreamController = new AbortController();
+    let upstreamTimer = setTimeout(() => upstreamController.abort(), UPSTREAM_TIMEOUT_MS);
     let response;
     try {
-      response = await fetch(targetApiUrl, {
+      const doFetch = () => fetch(targetApiUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -979,6 +984,33 @@ app.post("/v1/chat/completions", async (req, reply) => {
         body: JSON.stringify({ ...body, messages: outboundMessages }),
         signal: upstreamController.signal
       });
+      response = await doFetch();
+      // 图片 400 优雅降级（2026-09-15）：上游拉不到本轮新图（CDN 拦截供应商爬虫/文件失效）会整包 400，
+      // 此前用户只能看到报错。这里把消息里的图片换成占位文本重试一次，保证回复仍能生成。
+      // 用 clone() 探测错误体：非图片原因不降级时，原响应体保持可读、照常透传给客户端。
+      if (response.status === 400) {
+        const errText = await response.clone().text().catch(() => "");
+        if (/failed to download image/i.test(errText)) {
+          let degraded = false;
+          for (const m of outboundMessages) {
+            if (!Array.isArray(m.content)) continue;
+            for (let pi = 0; pi < m.content.length; pi++) {
+              const p = m.content[pi];
+              if (p && p.type === "image_url") {
+                m.content[pi] = { type: "text", text: "（图片暂时无法读取，本轮已省略）" };
+                degraded = true;
+              }
+            }
+          }
+          if (degraded) {
+            console.warn("[chat] 上游拉取图片失败(400)，本轮图片换占位后重试一次");
+            clearTimeout(upstreamTimer);
+            upstreamController = new AbortController();
+            upstreamTimer = setTimeout(() => upstreamController.abort(), UPSTREAM_TIMEOUT_MS);
+            response = await doFetch();
+          }
+        }
+      }
     } catch (upstreamErr) {
       clearTimeout(upstreamTimer);
       throw upstreamErr;
