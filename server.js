@@ -6063,9 +6063,17 @@ app.post("/internal/co/wake", async (req, reply) => {
         .replace(/\$\{frameDescription\}/g, frameDescription || "（画面无法获取）")
         .replace(/\$\{subtitle\}/g, String(body.subtitle || "").trim() || "（无字幕）");
     }
-    const messages = coBuildHistory();
-    messages.push({ role: "user", content: userContent });
-    const aiReply = await callCoLLM(messages, body.manual === true ? 0.7 : 0.9);
+    // 统一唤醒链路（2026-09-15 批3收尾②）：与主唤醒同一套上下文构建（role 法/替换/容量守卫/出口映射），
+    // 进程内直调 runWakeCompletion，会话=共影记录所在的 default 会话。
+    // 不带工具（保持共影既有成本口径，播放期每帧间隔一次检查）；不落盘 [唤醒] 块（高频检查落盘会刷屏）。
+    const res = await wakeChatModule.runWakeCompletion(wakeChatDeps, {
+      session_id: "default",
+      wake_block: userContent,
+      with_tools: false,
+      persist_wake_block: false,
+      temperature: body.manual === true ? 0.7 : 0.9
+    });
+    const aiReply = res.text;
     const clean = String(aiReply || "").trim();
     if (!clean) return reply.send({ action: "silent", reply: null });
     if (body.manual !== true && clean.includes("[NO_ACTION]")) {
@@ -6261,9 +6269,16 @@ app.post("/internal/screenshot/wake", async (req, reply) => {
         const wakePrompt = readScreenshotWakePrompt()
           .replace(/\$\{currentTime\}/g, nowText)
           .replace(/\$\{frameDescription\}/g, frameDescription || "（画面无法获取）");
-        const messages = coBuildHistory();
-        messages.push({ role: "user", content: wakePrompt });
-        const aiReply = await callCoLLM(messages, 0.9);
+        // 统一唤醒链路（2026-09-15 批3收尾②）：与主唤醒/共影同一套上下文构建，进程内直调 runWakeCompletion。
+        // 截图唤醒是低频事件，同样不落盘 [唤醒] 块（截图已有「（截图）」事件留痕）、不带工具。
+        const res = await wakeChatModule.runWakeCompletion(wakeChatDeps, {
+          session_id: "default",
+          wake_block: wakePrompt,
+          with_tools: false,
+          persist_wake_block: false,
+          temperature: 0.9
+        });
+        const aiReply = res.text;
         const clean = String(aiReply || "").trim();
         if (clean && !clean.includes("[NO_ACTION]")) {
           const displayName = readEnvValue("AI_DISPLAY_NAME") || "谢";
