@@ -1512,9 +1512,10 @@ function ccBuildSummaryStatsHtml(d, t){
     +'<span class="cc-mini-item"><b>'+fmtCcNum(t.totalChars||0)+'</b><i>字</i></span>'
     +'<span class="cc-mini-item" title="未覆盖对话积压的 token 估算（触发容量提醒的口径）"><b>'+fmtCcNum(t.estUncoveredTokens||0)+'</b><i>积压tok</i></span>'
     +'<span class="cc-mini-item'+(t.estTotalTokens?'':' zero')+'" title="实际发送 token 估算 = 未覆盖积压 + 摘要块 + 标星原句 + 图片 + 置顶记忆（永久上下文）。估算口径：中文≈1字/token、英文≈4字符/token、图片每张约1000。"><b>'+fmtCcNum(t.estTotalTokens||0)+'</b><i>总tok</i></span>'
-    +(t.hiddenCount>0?'<span class="cc-mini-item zero"><b>'+(t.hiddenCount||0)+'</b><i>隐藏</i></span>':'')
+    +((t.hiddenCount>0||t.manualHiddenCount>0)?'<span class="cc-mini-item zero"><b>'+((t.hiddenCount||0)+(t.manualHiddenCount||0))+'</b><i>隐藏</i></span>':'')
     +'</div>'
     +(t.hiddenCount>0?'<div class="cc-hidden-tip">最早 <b>'+(t.hiddenCount||0)+'</b> 块已隐藏、未进入上下文（活跃块上限 '+(t.maxActiveBlocks||'?')+'，手动+AI 合计保留最近 N 个）；如需保留信息，建议将块解析入池。</div>':'')
+    +(t.manualHiddenCount>0?'<div class="cc-hidden-tip"><b>'+(t.manualHiddenCount||0)+'</b> 块手动隐藏（入池归档）：摘要与原文均不进入上下文，可在对应块上点「取消隐藏」恢复。</div>':'')
     +'<div class="cc-token-tip" style="font-size:11px;color:#6B7280;margin-top:4px;">容量占用（token 估算）：未覆盖积压 <b>'+fmtCcNum(t.estUncoveredTokens||0)+'</b>，实际发送约 <b>'+fmtCcNum(t.estTotalTokens||0)+'</b>（含标星 <b>'+fmtCcNum(t.markedTokens||0)+'</b>、图片 <b>'+fmtCcNum(t.imageTokens||0)+'</b>、置顶记忆 <b>'+fmtCcNum(t.pinnedTokens||0)+'</b>）。容量上限见上方配置，超限时网关塞隐藏提醒。</div>';
 }
 
@@ -1597,6 +1598,7 @@ function ccBuildSummaryStatsHtml(d, t){
      const expanded=AppState.ccExpanded.has(c.index);
      const enabled = c.enabled!==false;
      const hidden = !!c.hidden;
+     const manualHidden = !!c.manualHidden;
      const timeLabel = isAi
        ? (c.range_label||'')
        : ((c.startTime||'?')+' ~ '+(c.endTime||'?'));
@@ -1606,11 +1608,13 @@ function ccBuildSummaryStatsHtml(d, t){
        +(c.cached?'<span class="cc-chunk-arrow">'+(expanded?'▾':'▸')+'</span>':'')
        +'<span class="cc-chunk-title '+(isAi?'ai':'manual')+'">块 #'+c.index+'</span>'
        +(hidden
-         ? '<span class="cc-badge off">已隐藏</span>'
+         ? '<span class="cc-badge off">'+(manualHidden?'已隐藏·手动':'已隐藏')+'</span>'
          : '<span class="cc-badge '+(isAi?(enabled?'done':'off'):(c.cached?(enabled?'done':'warn'):'todo'))+'">'+(isAi?(enabled?'已替换':'已停用'):(c.cached?(enabled?'已替换':'待替换'):'待生成'))+'</span>')
        +'<span class="cc-chunk-stat">'+count+' 条 · '+fmtCcNum(c.chars)+' 字</span>'
        +(hidden
-         ? ''
+         ? (manualHidden
+            ? '<button class="cc-btn cc-head-toggle" onclick="event.stopPropagation();unhideBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')" title="取消手动隐藏，块恢复参与上下文">取消隐藏</button>'
+            : '')
          : '<button class="cc-btn cc-head-toggle'+(enabled?' on':'')+(c.cached?'':' gen')+'" onclick="event.stopPropagation();'+(c.cached?'toggleCcReplace('+c.index+','+blockIndex+','+(isAi?1:0)+')':'regenerateBlockSummary('+c.index+','+blockIndex+')')+'"'+((!c.cached&&AppState.ccBlockGenerating.has(c.index))?' disabled':'')+'>'+(c.cached?(enabled?'取消替换':'替换'):(AppState.ccBlockGenerating.has(c.index)?'生成中…':'✦ 生成摘要'))+'</button>')
        +'</div>'
        +'<div class="cc-meta">第 '+start+'~'+end+' 条 · '+escHtml(timeLabel)+'</div>'
@@ -2097,30 +2101,74 @@ function updateCcStatusBar(d){
    updateMultiSelectBar();
  }
 
- // 单块入池：按摘要里现成的【分类】标签本地拆分直接入库（不调 LLM）
- async function ingestSingleBlock(cid, blockIndex, isAi){
-   const d = AppState.compactionPlan;
-   if(!d) return;
-   const c = (d.chunks || []).find(function(x){ return x.index === cid; });
-   if(!c || c.enabled === false){ toast('该块未替换，无法入池'); return; }
-   if(!confirm('将该块摘要按【分类】标签拆分后直接入池（不调用 AI 解析，重要级默认）？')) return;
-   const msg = document.getElementById('compaction-msg');
-   if(msg) msg.textContent = '正在按分类直接入池…';
-   try{
-     const r = await fetch(ADMIN_API + '/memory-pool/reparse', {
-       method: 'POST', headers: {'Content-Type': 'application/json'},
-       body: JSON.stringify({chunkIds: [c.id], direct: true})
-     });
-     const j = await r.json();
-     if(j.error) throw new Error(j.error);
-     const s = '已入池 ' + j.processed + ' 段 -> 新增 ' + j.added + ' / 合并 ' + j.merged + ' / 失败 ' + j.failed + (j.skipped ? ' / 跳过(无分类标签) ' + j.skipped : '') + (j.already ? ' / 已存在(已入过) ' + j.already : '');
-     if(msg) msg.textContent = s;
-     toast(s);
-   }catch(e){
-     if(msg) msg.textContent = '直接入池失败: ' + e.message;
-     toast('直接入池失败: ' + e.message);
-   }
- }
+  // 单块入池：按摘要里现成的【分类】标签本地拆分直接入库（不调 LLM）；
+  // 入池前问是否同时隐藏（2026-09-15）：确定=入池且隐藏（摘要与原文都不再进上下文），取消=只入池
+  async function ingestSingleBlock(cid, blockIndex, isAi){
+    const d = AppState.compactionPlan;
+    if(!d) return;
+    const c = (d.chunks || []).find(function(x){ return x.index === cid; });
+    if(!c || c.enabled === false){ toast('该块未替换，无法入池'); return; }
+    if(!confirm('将该块摘要按【分类】标签拆分后直接入池（不调用 AI 解析，重要级默认）？')) return;
+    const alsoHide = confirm('是否同时隐藏该块？\n\n隐藏后这块的摘要与原文都不再发给 AI（信息已存入记忆池，不会丢）；之后可在块上点「取消隐藏」恢复。\n\n【确定】入池并隐藏　【取消】只入池');
+    const msg = document.getElementById('compaction-msg');
+    if(msg) msg.textContent = '正在按分类直接入池…';
+    try{
+      const r = await fetch(ADMIN_API + '/memory-pool/reparse', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({chunkIds: [c.id], direct: true})
+      });
+      const j = await r.json();
+      if(j.error) throw new Error(j.error);
+      let s = '已入池 ' + j.processed + ' 段 -> 新增 ' + j.added + ' / 合并 ' + j.merged + ' / 失败 ' + j.failed + (j.skipped ? ' / 跳过(无分类标签) ' + j.skipped : '') + (j.already ? ' / 已存在(已入过) ' + j.already : '');
+      if(alsoHide){
+        try{
+          await ccSetBlockHidden(c, blockIndex, isAi, true);
+          s += '；块 #' + cid + ' 已隐藏（不再进入上下文）';
+        }catch(e2){
+          s += '；隐藏失败: ' + e2.message;
+        }
+      }
+      if(msg) msg.textContent = s;
+      toast(s);
+      if(alsoHide) loadCompactionPreview();
+    }catch(e){
+      if(msg) msg.textContent = '直接入池失败: ' + e.message;
+      toast('直接入池失败: ' + e.message);
+    }
+  }
+
+  // 设置/取消块的手动隐藏（AI 块走 context-replacements/toggle 带 hidden；手工块走 blocks 的 hide 动作）
+  async function ccSetBlockHidden(c, blockIndex, isAi, hidden){
+    const url = isAi
+      ? ADMIN_API + '/context-replacements/toggle'
+      : ADMIN_API + '/context-compaction/blocks';
+    const body = isAi
+      ? {id: c.repId, hidden: hidden}
+      : {action: 'hide', blockIndex: blockIndex, hidden: hidden};
+    const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const j = await r.json();
+    if(j.error) throw new Error(j.error);
+    if(j.ok === false) throw new Error(j.message || '操作未完成');
+    return j;
+  }
+
+  // 取消手动隐藏（块头部「取消隐藏」按钮）
+  async function unhideBlock(cid, blockIndex, isAi){
+    const d = AppState.compactionPlan;
+    if(!d) return;
+    const c = (d.chunks || []).find(function(x){ return x.index === cid; });
+    if(!c) return;
+    const msg = document.getElementById('compaction-msg');
+    try{
+      await ccSetBlockHidden(c, blockIndex, isAi, false);
+      if(msg) msg.textContent = '块 #' + cid + ' 已取消隐藏，恢复参与上下文。';
+      toast('块 #' + cid + ' 已取消隐藏');
+      loadCompactionPreview();
+    }catch(e){
+      if(msg) msg.textContent = '取消隐藏失败: ' + e.message;
+      toast('取消隐藏失败: ' + e.message);
+    }
+  }
 
  // 批量导出
  function batchExportBlocks(){

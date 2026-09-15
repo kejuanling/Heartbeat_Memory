@@ -3673,10 +3673,15 @@ app.post("/admin/context-replacements/undo", { preHandler: basicAuth }, async (r
   }
 });
 
-// 切换 AI 记忆替换块的启用状态（停用 = 保留记录但不再替换）
+// 切换 AI 记忆替换块的启用状态（停用 = 保留记录但不再替换）；
+// body 带 hidden 字段时改为设置/取消手动隐藏（入池归档：摘要与区间原文都不再注入上下文）
 app.post("/admin/context-replacements/toggle", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const body = req.body || {};
+    if (body.hidden !== undefined) {
+      reply.send(contextReplacements.setReplacementHidden(String(body.id || "").trim(), body.hidden === true));
+      return;
+    }
     const enabled = body.enabled !== false;
     reply.send(contextReplacements.toggleReplacement(String(body.id || "").trim(), enabled));
   } catch (err) {
@@ -4559,6 +4564,7 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
       mode: manual ? "manual" : "ai",
       manual: manual,
       enabled: it.enabled !== false,
+      manualHidden: it.hidden === true,
       range_label: it.range_label || "",
       original_preview: matched.slice(0, 2).map(m => ({ role: m.role, content: String(m.content || "").slice(0, 150) })),
       history: (Array.isArray(it.history) ? it.history : []).map(function (h, i) { return { index: i, summary: h.summary, generatedAt: h.generatedAt, mode: h.mode || (manual ? "edited" : "ai"), manual: h.manual === true || manual }; }).slice(0, 8),
@@ -4581,12 +4587,18 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
   chunks.forEach(function (c, i) { c.index = i + 1; c.pos = undefined; });
 
   // 活跃块上限：与发送侧 applyReplacements 同口径（手动+AI 合计保留时间线上最近 N 个）。
-  // 超限的最早块仅标记 hidden 展示，不进上下文；enabled/摘要数据不动。
+  // 手动隐藏块不占活跃名额；超限的最早块与手动隐藏块同样标记 hidden：摘要与区间原文都不进
+  // 上下文（2026-09-15 与发送侧统一——此前截断块原文会漏进上下文）；enabled/摘要数据不动。
   const previewMaxActive = Math.max(0, Math.floor(Number(contextCompactor.loadConfig().compaction_max_active_blocks) || 0));
   let hiddenCount = 0;
-  if (previewMaxActive > 0 && chunks.length > previewMaxActive) {
-    hiddenCount = chunks.length - previewMaxActive;
-    chunks.forEach(function (c, i) { if (i < hiddenCount) c.hidden = true; });
+  const activeChunks = [];
+  chunks.forEach(function (c) {
+    if (c.manualHidden) { c.hidden = true; return; }
+    activeChunks.push(c);
+  });
+  if (previewMaxActive > 0 && activeChunks.length > previewMaxActive) {
+    hiddenCount = activeChunks.length - previewMaxActive;
+    for (let i = 0; i < hiddenCount; i++) activeChunks[i].hidden = true;
   }
 
   // 手工块序号：直接用 manualRecordsSorted()（按会话过滤+排序）的下标，与 blocks 路由同源；
@@ -4715,6 +4727,7 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
       totalChars: totalChars,
       estCompressedChars: estCompressedChars,
       hiddenCount: hiddenCount,
+      manualHiddenCount: chunks.filter(function (c) { return c.manualHidden; }).length,
       maxActiveBlocks: previewMaxActive,
       estSavedChars: Math.max(0, totalChars - estCompressedChars),
       estUncoveredTokens: uncoveredTokens,
@@ -5058,6 +5071,17 @@ app.post("/admin/context-compaction/blocks", { preHandler: basicAuth }, async (r
       if (!r.ok) return reply.send({ ok: false, message: r.message });
       return reply.send({ ok: true, action: "toggle", block: r.record });
     }
+    // 手动隐藏/取消隐藏指定手工块（入池归档：摘要与区间原文都不再注入上下文，可随时取消恢复）
+    if (action === "hide") {
+      const blockIndex = Number(body.blockIndex);
+      const hidden = body.hidden === true;
+      if (!Number.isInteger(blockIndex) || blockIndex < 0) {
+        return reply.code(400).send({ error: "blockIndex 必须是 >=0 的整数" });
+      }
+      const r = contextReplacements.setManualRecordHidden(blockIndex, hidden);
+      if (!r.ok) return reply.send({ ok: false, message: r.message });
+      return reply.send({ ok: true, action: "hide", block: r.record });
+    }
     // 更新指定手工块的起止范围（编号 1-based → 内部 0-based）
     if (action === "update_range") {
       const blockIndex = Number(body.blockIndex);
@@ -5109,7 +5133,7 @@ app.post("/admin/context-compaction/blocks", { preHandler: basicAuth }, async (r
     if (action === "add" || action === "remove") {
       return reply.send({ ok: false, message: "旧式自动分块已下线（统一替换后不再使用）" });
     }
-    return reply.code(400).send({ error: "action 必须是 remove_at / add_range / toggle / update_range / split_range / reset" });
+    return reply.code(400).send({ error: "action 必须是 remove_at / add_range / toggle / hide / update_range / split_range / reset" });
   } catch (err) {
     reply.code(500).send({ error: err.message });
   }

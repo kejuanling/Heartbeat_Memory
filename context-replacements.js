@@ -460,7 +460,8 @@ function publicItem(item) {
     range_label: item.range_label || "",
     count: item.count || 0,
     removed: !!item.removed,
-    enabled: item.enabled !== false
+    enabled: item.enabled !== false,
+    hidden: item.hidden === true
   };
 }
 
@@ -870,6 +871,18 @@ function toggleManualRecord(index, enabled) {
   return { ok: true, record: publicItem(it) };
 }
 
+// 手动隐藏手工块（入池后归档）：hidden=true 时该块的摘要与区间原文都不再注入上下文（标星原句保留）
+function setManualRecordHidden(index, hidden) {
+  const found = manualRecordAt(index);
+  if (!found) return { ok: false, message: "块不存在" };
+  const items = loadItems();
+  const it = items.find(x => x.id === found.record.id);
+  if (!it) return { ok: false, message: "块不存在" };
+  it.hidden = hidden === true;
+  saveItems(items);
+  return { ok: true, record: publicItem(it) };
+}
+
 function updateManualRecordRange(index, start, end) {
   const found = manualRecordAt(index);
   if (!found) return { ok: false, message: "块不存在" };
@@ -1205,6 +1218,17 @@ function toggleReplacement(id, enabled) {
   return { ok: true, item: publicItem(items[idx]) };
 }
 
+// 手动隐藏 AI 块（入池后归档）：hidden=true 时该块的摘要与区间原文都不再注入上下文（标星原句保留）
+function setReplacementHidden(id, hidden) {
+  const items = loadItems();
+  const idx = items.findIndex(it => it.id === id);
+  if (idx < 0) return { ok: false, error: "未找到该记录" };
+  items[idx].hidden = hidden === true;
+  saveItems(items);
+  console.log("[context-replacements] 已" + (items[idx].hidden ? "隐藏" : "取消隐藏") + "块：", items[idx].id, items[idx].range_label || "");
+  return { ok: true, item: publicItem(items[idx]) };
+}
+
 function updateReplacement(id, text) {
   const t = String(text || "").trim();
   if (!t) return { ok: false, error: "替换正文不能为空" };
@@ -1493,14 +1517,23 @@ function applyReplacements(messages, source) {
     })
     .sort(function (a, b) { return tlPos.get(a.id) - tlPos.get(b.id); });
   // 活跃块上限：手动+AI 块合计只保留时间线上最近的 N 个（0=不限）。
-  // 超限的最早块隐藏、摘要不注入本次上下文；块的 enabled/摘要数据不动，调大上限即恢复。
+  // 超限的最早块与手动隐藏块（hidden=true）同样处理：区间仍按锚点定位校验，但摘要不注入、
+  // 区间原文也从上下文剔除（2026-09-15 与预览统计统一口径——此前截断块原文会漏进上下文）；
+  // 块的 enabled/摘要数据不动，调大上限或取消隐藏即恢复。
+  const manualHiddenItems = items.filter(function (it) { return it.hidden === true; });
+  items = items.filter(function (it) { return it.hidden !== true; });
   const maxActiveBlocks = loadMaxActiveBlocks();
+  let truncatedItems = [];
   if (maxActiveBlocks > 0 && items.length > maxActiveBlocks) {
-    items.slice(0, items.length - maxActiveBlocks).forEach(function (it) {
+    truncatedItems = items.slice(0, items.length - maxActiveBlocks);
+    truncatedItems.forEach(function (it) {
       skipped.push({ id: it.id, reason: "活跃块上限截断(" + maxActiveBlocks + ")" });
     });
     items = items.slice(items.length - maxActiveBlocks);
   }
+  // 删除型块（手动隐藏/超限截断）：重新并入处理队列走同一套锚点校验，锚点失配则照常 skipped 兜底（原文保留）
+  const omitIds = new Set(manualHiddenItems.concat(truncatedItems).map(function (it) { return it.id; }));
+  items = items.concat(manualHiddenItems, truncatedItems);
   if (items.length === 0) return messages;
 
   const replacements = [];
@@ -1675,7 +1708,8 @@ function applyReplacements(messages, source) {
       if (blkMax === null || v > blkMax) blkMax = v;
     });
 
-    const curMsg = buildMemoryMessage(item);
+    // 删除型块（手动隐藏/超限截断）：不注入摘要；标星原句与不可压缩消息仍在终循环保留
+    const curMsg = omitIds.has(item.id) ? null : buildMemoryMessage(item);
     const curSer = String(item.created_at || "") + "|" + (item.id || "");
     const dup = replacements.find(function (rp) {
       return !(rp.endIdx < srcStart || rp.startIdx > srcEnd);
@@ -1742,7 +1776,8 @@ function applyReplacements(messages, source) {
         if (marks[contentKey(sm)]) starred.push(sm);
       }
       starred.forEach(function (sm) { final.push(sm); });
-      final.push(replacements[r].message);
+      // 删除型替换（message=null）不注入：该块区间从上下文消失，只剩标星句/不可压缩消息
+      if (replacements[r].message) final.push(replacements[r].message);
       // 区间内：记忆浮现与工具痕迹直接删除；替换占位消息保留；其余不可压缩消息保留
       for (let j = replacements[r].startIdx; j <= replacements[r].endIdx; j++) {
         const m = out[j];
@@ -2595,6 +2630,7 @@ module.exports = {
   inheritSessionBlocks,
   removeReplacement,
   toggleReplacement,
+  setReplacementHidden,
   updateReplacement,
   listReplacements,
   applyReplacements,
@@ -2609,6 +2645,7 @@ module.exports = {
   addManualRecord,
   removeManualRecord,
   toggleManualRecord,
+  setManualRecordHidden,
   updateManualRecordRange,
   updateAiRecordRange,
   splitRangeByGaps,
