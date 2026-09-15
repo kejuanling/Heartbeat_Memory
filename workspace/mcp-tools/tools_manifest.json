@@ -1,10 +1,10 @@
 {
   "server": "小世界MCP工具集",
-  "generated_at": "2026-09-12 22:52:56",
+  "generated_at": "2026-09-16 03:59:02",
   "tools": [
     {
       "name": "context_replace",
-      "description": "把上下文中的一些无用的、无聊的、已经沉淀的片段替换为自己写的记忆。",
+      "description": "根据时间段讲原上下文部分片段替换为谢的记忆。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -64,7 +64,7 @@
         "properties": {
           "q": {
             "type": "string",
-            "description": "检索词或描述（语义模式下可以是描述性语句，如她上次说难过的时候、我们聊过蓝鲸的话题）"
+            "description": "检索词或描述（语义模式下可以是描述性语句"
           },
           "limit": {
             "type": "integer",
@@ -112,7 +112,7 @@
     },
     {
       "name": "context_star",
-      "description": "给聊天原文标星或取消标星。先用 context_search 搜到原文（结果带 session 和 msg_id），再调用本工具；标星后的原文长期保留在上下文中、不参与压缩替换，但不会写入记忆池。",
+      "description": "给聊天原文标星或取消标星。先用 context_search 搜到原文（结果带 session 和 msg_id），再调用本工具；标星后的原文长期保留在上下文中、不被压缩替换，不进入记忆池。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -166,7 +166,7 @@
     },
     {
       "name": "diary_add",
-      "description": "新增一条陪伴日记，追加到今天的日记文件（每个聊天窗口的日记分开存放，自动写入当前窗口名下；与该窗口自动唤醒写的日记同一份）。适用于：想主动记录此刻的想法、感受、对她说的话，或给今天留下一段陪伴记录时使用。",
+      "description": "新增一条谢的日记。适用于：想主动记录此刻的想法、感受、对她说的话，或给今天留下一段陪伴记录时使用。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -176,7 +176,7 @@
           },
           "session_id": {
             "type": "string",
-            "description": "内部参数：由系统自动注入当前窗口标识，无需填写"
+            "description": "内部参数：由系统自动注入，无需填写"
           }
         },
         "required": [
@@ -267,6 +267,38 @@
       "enabled": true
     },
     {
+      "name": "diary_view",
+      "description": "查看谢自己写过的陪伴日记。不带参数=返回最近 1 篇全文；带 date=YYYY-MM-DD 返回那一天；带 count=N 返回最近 N 篇（默认 1，最大 30）。日记按天存放，同一天的多个窗口内容会合并展示。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "可选：某天，格式 YYYY-MM-DD，如 2026-09-12"
+          },
+          "count": {
+            "type": "integer",
+            "description": "可选：不带 date 时，返回最近 N 篇日记，默认 1，最大 30"
+          }
+        }
+      },
+      "defaultDescription": "查看谢自己写过的陪伴日记。不带参数=返回最近 1 篇全文；带 date=YYYY-MM-DD 返回那一天；带 count=N 返回最近 N 篇（默认 1，最大 30）。日记按天存放，同一天的多个窗口内容会合并展示。",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "可选：某天，格式 YYYY-MM-DD，如 2026-09-12"
+          },
+          "count": {
+            "type": "integer",
+            "description": "可选：不带 date 时，返回最近 N 篇日记，默认 1，最大 30"
+          }
+        }
+      },
+      "enabled": true
+    },
+    {
       "name": "leave_paper",
       "description": "留一张纸：把一段创作（小故事、梦、随手写的文字等）单独保存成一张「纸」，只落盘收藏、不会进入对话上下文。适合内容较长、想留档又不打断聊天时使用；如果只是想顺手在回复里标记留档，也可以直接在回复末尾写 <paper/> 记号（整条回复会存成一张纸，可选 <paper title=\"标题\"/>）。",
       "inputSchema": {
@@ -282,7 +314,7 @@
           },
           "session_id": {
             "type": "string",
-            "description": "内部参数：由系统自动注入当前窗口标识，无需填写"
+            "description": "内部参数：由系统自动注入，无需填写"
           }
         },
         "required": [
@@ -310,11 +342,11 @@
           "content"
         ]
       },
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "memory_add",
-      "description": "新增一条长期记忆到记忆池。只支持三类：关于她（她是谁的静态部分：偏好/习惯/身体状况/作息/家人/经历里反复起作用的部分，只收稳定、反复成立的事实，一条一个事实写短句，当天心情和一次性对话内容不写）、认账（我认下的账：答应过她的事、欠着还没做的、被她纠正后认下的毛病，每条都必须能回答“那我该干什么”，写清欠什么、什么状态下兑现，兑现了就删）、拓本（一字不改的原话：引号里原样照抄，不修标点不补主语，写明谁说的、日期，宁短勿长）。适用于：对话里发现她的稳定特征、我认下的账、重要原话，或她在对话里明确说“记住”之类的话时。支持重要级（0~1）。会自动与已有记忆做相似去重合并。 可设 pin=true 让这条记忆直接置顶（之后每次对话作为「相关记忆」注入）。",
+      "description": "新增一条长期记忆到记忆池。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -368,7 +400,7 @@
     },
     {
       "name": "memory_pin",
-      "description": "置顶或取消置顶一条记忆池记忆。先用 memory_search 找到记忆拿到 id，再调用本工具；置顶后该记忆固定注入每次对话的「相关记忆」区。",
+      "description": "置顶或取消置顶一条记忆池记忆。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -406,7 +438,7 @@
     },
     {
       "name": "memory_search",
-      "description": "检索长期记忆池（关于她/认账/拓本/压缩摘要/对话碎片）。支持关键词、完整问题或模糊描述，系统自动综合语义、词面匹配、重要度和新旧程度排序；也可按分类只搜某一类。返回每条记忆的唯一 id（可用 memory_pin 按 id 置顶/取消置顶）。category 填「最近」=按更新时间倒序列出最新记忆（忽略关键词）；填「已置顶」=只看置顶记忆（带 q 则在置顶内按相关性搜）。设置 breath=true 且不填 q 时，浮现最近沉淀的记忆。适用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池、翻最近记了什么、查看所有置顶。区别于 context_search（检索原始对话原文）。",
+      "description": "检索记忆池，支持关键词、完整问题或模糊描述，系统自动综合语义、词面匹配、重要度和新旧程度排序。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -734,7 +766,7 @@
     },
     {
       "name": "view_paper",
-      "description": "翻看自己留过的纸（leave_paper/<paper> 写的收藏）。不带参数调用=列出本窗口最近 10 张（序号+时间+标题/开头）；带 sn=序号 调用=看那一张的全文。",
+      "description": "翻看自己留过的纸（leave_paper/<paper> 写的收藏）。不带参数调用=列出最近 10 张（序号+时间+标题/开头）；带 sn=序号 调用=看那一张的全文。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -744,7 +776,7 @@
           },
           "session_id": {
             "type": "string",
-            "description": "内部参数：由系统自动注入当前窗口标识，无需填写"
+            "description": "内部参数：由系统自动注入，无需填写"
           }
         }
       },

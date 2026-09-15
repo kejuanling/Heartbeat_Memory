@@ -155,6 +155,84 @@ TOOLS["diary_add"] = {
     "handler": tool_diary_add
 }
 
+# ── 查看谢的日记（2026-09-16）：不带参数=最近一篇；date=某天；count=最近 N 篇（默认 1）──
+# 读取口径与 server.js 注入一致：候选 = diary 根（共享层）+ 所有安全会话子目录合并，
+# 同一天多个文件（共享+各会话）内容合并为一篇，按日期降序取。
+def _diary_collect_files():
+    diary_dir = (os.environ.get("DIARY_DIR", "") or "").strip() or "diary"
+    if not os.path.isabs(diary_dir):
+        diary_dir = os.path.join("/opt/dylan-heartbeat", diary_dir)
+    out = []
+    try:
+        for f in os.listdir(diary_dir):
+            if re.match(r"^\d{4}-\d{2}-\d{2}\.md$", f):
+                out.append({"rel": f, "date": f[:10]})
+    except Exception as e:
+        return [], "读取日记目录失败: %s" % e
+    try:
+        for d in os.listdir(diary_dir):
+            if not re.match(r"^[A-Za-z0-9_-]{1,64}$", d):
+                continue
+            sub = os.path.join(diary_dir, d)
+            if not os.path.isdir(sub):
+                continue
+            for f in os.listdir(sub):
+                if re.match(r"^\d{4}-\d{2}-\d{2}\.md$", f):
+                    out.append({"rel": d + "/" + f, "date": f[:10]})
+    except Exception:
+        pass
+    return out, None
+
+def tool_diary_view(args):
+    files, err = _diary_collect_files()
+    if err:
+        return {"error": err}
+    if not files:
+        return {"entries": [], "message": "还没有写过的日记"}
+    diary_dir = (os.environ.get("DIARY_DIR", "") or "").strip() or "diary"
+    if not os.path.isabs(diary_dir):
+        diary_dir = os.path.join("/opt/dylan-heartbeat", diary_dir)
+    def read_one(rel):
+        try:
+            with open(os.path.join(diary_dir, rel), encoding="utf-8") as f:
+                return f.read()
+        except Exception as e:
+            return "（读取失败: %s）" % e
+    date = (args.get("date") or "").strip()
+    if date:
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+            return {"error": "date 格式应为 YYYY-MM-DD，如 2026-09-12"}
+        day = sorted([f for f in files if f["date"] == date], key=lambda x: x["rel"])
+        if not day:
+            return {"error": "没有 %s 的日记" % date}
+        return {"date": date, "content": "\n\n".join("【%s】\n%s" % (f["rel"], read_one(f["rel"])) for f in day),
+                "files": [f["rel"] for f in day]}
+    try:
+        count = max(1, min(int(args.get("count", 1) or 1), 30))
+    except Exception:
+        count = 1
+    all_dates = sorted({f["date"] for f in files}, reverse=True)
+    dates = all_dates[:count]
+    entries = []
+    for d in dates:
+        day = sorted([f for f in files if f["date"] == d], key=lambda x: x["rel"])
+        entries.append({"date": d, "files": [f["rel"] for f in day],
+                        "content": "\n\n".join("【%s】\n%s" % (f["rel"], read_one(f["rel"])) for f in day)})
+    return {"entries": entries, "count": len(entries),
+            "message": "共 %d 天有日记，返回最近 %d 篇；带 date=YYYY-MM-DD 可看某天" % (len(all_dates), len(entries))}
+
+TOOLS["diary_view"] = {
+    "description": "查看谢自己写过的陪伴日记。不带参数=返回最近 1 篇全文；带 date=YYYY-MM-DD 返回那一天；带 count=N 返回最近 N 篇（默认 1，最大 30）。日记按天存放，同一天的多个窗口内容会合并展示。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "date": {"type": "string", "description": "可选：某天，格式 YYYY-MM-DD，如 2026-09-12"},
+            "count": {"type": "integer", "description": "可选：不带 date 时，返回最近 N 篇日记，默认 1，最大 30"}
+        }
+    },
+    "handler": tool_diary_view
+}
+
 # ── 留纸（2026-09-12）：AI 写故事/梦/随手创作，只落盘保存、不注入对话上下文 ──
 def _paper_target_dir():
     papers_dir = (os.environ.get("PAPERS_DIR", "") or "").strip() or "papers"
