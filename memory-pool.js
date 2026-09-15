@@ -785,10 +785,20 @@ function parseCategoryBlocks(text, opts) {
   };
 
   let m;
+  // 一键入池按摘要里现成的【分类】标签映射到新记忆分类；未知标签跳过（不入池）
+  const CATEGORY_ALIAS = {
+    "关于她": "关于她",
+    "认账": "认账",
+    "拓本": "拓本",
+    "压缩摘要": COMPACTION_CATEGORY,
+    "对话碎片": "对话碎片",
+    "对话摘要": COMPACTION_CATEGORY
+  };
   while ((m = re.exec(String(text || ""))) !== null) {
+    const cat = CATEGORY_ALIAS[m[1] ? m[1].trim() : ""];
     const body = m[2].trim();
     for (const p of splitSection(body)) {
-      if (p) blocks.push({ category: COMPACTION_CATEGORY, content: p });
+      if (p && cat) blocks.push({ category: cat, content: p });
     }
   }
   if (blocks.length) return blocks;
@@ -915,7 +925,8 @@ async function ingestSummary(summaryText, opts) {
   // AI 标签路径（memory_tag）限前三类——directCategory 写了别的类一律视为没写，交给 LLM 从三类里判
   const isCompactionSource = source === "compaction" || source === "compaction-direct";
   const fixedCategory = isCompactionSource ? COMPACTION_CATEGORY : null;
-  const allowedCats = fixedCategory ? [fixedCategory] : AI_CATEGORIES;
+  // 一键入池(compaction-direct)按摘要【分类】标签落真实类别；批量解析(compaction)仍固定压缩摘要
+  const allowedCats = source === "compaction-direct" ? CATEGORIES : (fixedCategory ? [fixedCategory] : AI_CATEGORIES);
   // 直接分类/重要级：memory 标签里写了 {category,importance} 时，跳过 LLM 再解析，直接入库。
   const directCategory = opts.directCategory ? String(opts.directCategory).trim() : "";
   const directPinned = opts.directPinned === true;
