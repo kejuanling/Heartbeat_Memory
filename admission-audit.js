@@ -11,7 +11,6 @@ const fs = require("fs-extra");
 const path = require("path");
 const crypto = require("crypto");
 const { nowIso } = require("./time_utils");
-
 // 候选正文指纹（候选还不是 memory 时以此作为身份锚点；同一 text 恒同哈希，可跨月追查）
 function hashText(text) {
   return "sha256:" + crypto.createHash("sha256").update(String(text || ""), "utf8").digest("hex");
@@ -36,8 +35,10 @@ function createAuditLogger(opts = {}) {
   function append(record) {
     if (readonly) return { ok: false, error: "readonly" };
     if (!record || record.action == null) return { ok: false, error: "audit 缺少 action" };
+    const id = "aud_" + Date.now().toString(36) + "-" + crypto.randomBytes(3).toString("hex");
     const { candidate_text, ...rest } = record;
     const line = JSON.stringify({
+      id,
       ts: nowIso(),
       candidate_hash: hashText(candidate_text),
       text_head: String(candidate_text || "").slice(0, 50),
@@ -45,7 +46,7 @@ function createAuditLogger(opts = {}) {
     });
     fs.ensureDirSync(dir);
     fs.appendFileSync(monthFile(), line + "\n", "utf8");
-    return { ok: true };
+    return { ok: true, id };
   }
 
   // 组装标准审计记录（不含时间戳——append 落笔时统一打）
