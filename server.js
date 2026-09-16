@@ -2467,8 +2467,7 @@ function applyWakeEventV2(body) {
     const pushMeta = (push && typeof push === "object") ? push : null;
     const wakeTools = Array.isArray(tools) ? tools.filter(t => t && t.name) : [];
     const appended = [];
-    // 2026-09-16：日记消息统一带 [DIARY] 标签包裹（完整上下文与日常聊天同口径）；先剥残留标签防双重包裹
-    if (diaryRaw) appended.push({ role: "assistant", content: "[DIARY]" + String(diaryRaw).replace(/\[DIARY\]|\[\/DIARY\]/gi, "").trim() + "[/DIARY]", kind: "diary" });
+    if (diaryRaw) appended.push({ role: "assistant", content: diaryRaw, kind: "diary" });
     if (speakRaw) {
       const stored = stripDiaryBlocks(speakRaw);
       if (stored) {
@@ -3474,7 +3473,15 @@ app.delete("/internal/pin/:id", async (req, reply) => {
 // ========================
 // 记忆池（8 分类结构化记忆）管理
 // ========================
-require("./routes/memory-pool")(app, { basicAuth });
+// Memory V2 admission（C5）：惰性轻量初始化，失败仅停用 V2（v2_enabled 默认 false，旧池行为不变）
+let memoryV2Admission = null;
+try {
+  memoryV2Admission = require("./memory-admission").createAdmission({});
+} catch (err) {
+  console.warn("[memory-v2] admission 初始化失败，V2 停用:", err.message);
+}
+require("./routes/memory-pool")(app, { basicAuth, v2Manual: memoryV2Admission ? (b) => memoryV2Admission.submitV2(b) : null });
+require("./routes/memory-review")(app, { basicAuth, admission: memoryV2Admission });
 // 聊天页主题云同步 + 背景图/头像转存（/v1/themes, /v1/upload-image, /uploads/:file）
 require("./routes/themes")(app, { baseDir: __dirname });
 app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, reply) => {

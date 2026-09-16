@@ -56,8 +56,9 @@ function createStateExecutor(opts = {}) {
     return { ok: true, action: "admit", written: true, entry: r.entry };
   }
 
-  // review：挂起进队列（不进集合）；记录必须带 reason（为什么挂起）
-  function review(draft, reason) {
+  // review：挂起进队列（不进集合）；记录必须带 reason（为什么挂起）；
+  // meta.auditId 关联审计行，meta.details 携带 validator/detector 的拒绝或存疑原因供人工查看
+  function review(draft, reason, meta = {}) {
     if (readonly) return { ok: false, action: "review", error: "readonly" };
     const q = loadQueue();
     const rec = {
@@ -65,6 +66,8 @@ function createStateExecutor(opts = {}) {
       status: "pending_review",
       created_at: nowIso(),
       reason: strSafe(reason),
+      audit_id: strSafe(meta.auditId) || null,
+      details: Array.isArray(meta.details) ? meta.details : null,
       draft, // 校验过的基础字段，供人工裁决时直通落地
     };
     q.push(rec);
@@ -96,12 +99,12 @@ function createStateExecutor(opts = {}) {
       if (!r.ok) return { ok: false, error: r.error };
       q.splice(idx, 1);
       flushQueue();
-      return { ok: true, action: "admit", entry: r.entry };
+      return { ok: true, action: "admit", entry: r.entry, resolved: rec };
     }
     if (decision === "reject_with_reason") {
       q.splice(idx, 1);
       flushQueue();
-      return { ok: true, action: "rejected_by_review", reason: strSafe(opts2.note) };
+      return { ok: true, action: "rejected_by_review", reason: strSafe(opts2.note), resolved: rec };
     }
     return { ok: false, error: "未知 decision: " + decision };
   }

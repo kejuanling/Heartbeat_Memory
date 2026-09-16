@@ -2,7 +2,7 @@
 // 记忆池管理路由（自 server.js 拆出；依赖 basicAuth + ../memory-pool 模块）
 const memoryPool = require('../memory-pool');
 
-module.exports = function registerMemoryPoolRoutes(app, { basicAuth }) {
+module.exports = function registerMemoryPoolRoutes(app, { basicAuth, v2Manual }) {
   app.get('/admin/memory-pool', { preHandler: basicAuth }, async (req, reply) => {
     try {
       const opts = {
@@ -23,7 +23,13 @@ module.exports = function registerMemoryPoolRoutes(app, { basicAuth }) {
       const b = req.body || {};
       if (!String(b.content || '').trim()) return reply.code(400).send({ error: 'content 必填' });
       const r = await memoryPool.add({ content: b.content, category: b.category, importance: b.importance, source: 'manual' });
-      reply.send({ success: true, dup: r.dup, entry: r.entry });
+      // C5：Memory V2 门控钩子（可选注入）。旧池 add 恒执行在前（v2_enabled=true 时旧池也继续写，
+      // 兼容承诺）；钩子异常只告警不影响旧池响应。
+      let v2 = null;
+      if (typeof v2Manual === 'function') {
+        try { v2 = v2Manual(b); } catch (err) { console.warn('[memory-pool] V2 钩子异常:', err.message); }
+      }
+      reply.send({ success: true, dup: r.dup, entry: r.entry, v2 });
     } catch (err) { reply.code(500).send({ error: err.message }); }
   });
 
