@@ -195,6 +195,9 @@ module.exports = function registerChatRoutes(app, deps) {
     memoryEngine
   });
 
+  // 日记共享模块（2026-09-16）：日常聊天 [DIARY] 提取与保存（与唤醒共用 lib/diary.js）
+  const diaryLib = require('../lib/diary')({ baseDir, readEnvValue });
+
   app.get('/v1/models', async (req, reply) => {
     reply.send({
       object: 'list',
@@ -1044,9 +1047,20 @@ app.post("/v1/chat/completions", async (req, reply) => {
           // 方案二增量：回复只追加一条；盘尾已有同内容回复（重试/重发）则跳过，不重复写。
           // 存储用原始含标签文本（<wake>/<memory> 等是上下文一部分，模型可见、前端显示时剥、编辑框可见）。
           if ((kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0)) {
-            if (!tailHasReply(sessionId, aiContent)) {
-              // 与流式路径同口径落富字段（2026-09-15：此前非流式丢思考链/token，刷新后不一致）
-              appendMessages(sessionId, [{ role: "assistant", content: aiContent, reasoning: aiThinking || "", tokens: (parsed && parsed.usage) || null }]);
+            // 2026-09-16 [DIARY]：AI 在回复中写日记 → 存日记文件 + 时间线追加隐藏日记消息（带标签），可见回复剥掉日记块
+            const diaryResult = diaryLib.extractDiaryFromResponse(aiContent);
+            const visibleContent = diaryResult.diaryContent ? diaryResult.remainingText : aiContent;
+            if (!tailHasReply(sessionId, visibleContent)) {
+              const toAppend = [];
+              if (diaryResult.diaryContent) {
+                diaryLib.appendDiaryEntry(diaryResult.diaryContent, sessionId);
+                toAppend.push({ role: "assistant", content: diaryLib.wrapDiaryTag(diaryResult.diaryContent), kind: "diary" });
+              }
+              if (visibleContent) {
+                // 与流式路径同口径落富字段（2026-09-15：此前非流式丢思考链/token，刷新后不一致）
+                toAppend.push({ role: "assistant", content: visibleContent, reasoning: aiThinking || "", tokens: (parsed && parsed.usage) || null });
+              }
+              if (toAppend.length) appendMessages(sessionId, toAppend);
             }
           } else {
             console.log("[timeline] 跳过回复落盘 (非流式)");
@@ -1181,8 +1195,20 @@ app.post("/v1/chat/completions", async (req, reply) => {
         // 盘尾已有同内容回复（重试/重发）则跳过，不重复写。
         // 存储用原始含标签文本（模型可见、前端显示时剥、编辑框可见）。
         if ((kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0)) {
-          if (!tailHasReply(sessionId, aiFullContent)) {
-            appendMessages(sessionId, [{ role: "assistant", content: aiFullContent, reasoning: aiThinking || "", tokens: aiUsage || null }]);
+          // 2026-09-16 [DIARY]：同非流式，AI 回复中的日记块 → 日记文件 + 隐藏日记消息（带标签），可见回复剥掉日记块
+          const diaryResult = diaryLib.extractDiaryFromResponse(aiFullContent);
+          const visibleContent = diaryResult.diaryContent ? diaryResult.remainingText : aiFullContent;
+          if (!tailHasReply(sessionId, visibleContent)) {
+            const toAppend = [];
+            if (diaryResult.diaryContent) {
+              diaryLib.appendDiaryEntry(diaryResult.diaryContent, sessionId);
+              toAppend.push({ role: "assistant", content: diaryLib.wrapDiaryTag(diaryResult.diaryContent), kind: "diary" });
+            }
+            if (visibleContent) {
+              // 方案二增量：回复只追加一条（富字段 reasoning/tokens 一并落，跨设备刷新不丢）
+              toAppend.push({ role: "assistant", content: visibleContent, reasoning: aiThinking || "", tokens: aiUsage || null });
+            }
+            if (toAppend.length) appendMessages(sessionId, toAppend);
           }
         } else {
           console.log("[timeline] 跳过回复落盘 (流式)");

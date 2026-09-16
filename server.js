@@ -2467,7 +2467,8 @@ function applyWakeEventV2(body) {
     const pushMeta = (push && typeof push === "object") ? push : null;
     const wakeTools = Array.isArray(tools) ? tools.filter(t => t && t.name) : [];
     const appended = [];
-    if (diaryRaw) appended.push({ role: "assistant", content: diaryRaw, kind: "diary" });
+    // 2026-09-16：日记消息统一带 [DIARY] 标签包裹（完整上下文与日常聊天同口径）；先剥残留标签防双重包裹
+    if (diaryRaw) appended.push({ role: "assistant", content: "[DIARY]" + String(diaryRaw).replace(/\[DIARY\]|\[\/DIARY\]/gi, "").trim() + "[/DIARY]", kind: "diary" });
     if (speakRaw) {
       const stored = stripDiaryBlocks(speakRaw);
       if (stored) {
