@@ -68,6 +68,28 @@ h1{
 }
 .input-box .row button:hover{opacity:0.9;transform:translateY(-1px)}
 .input-box .row button:disabled{opacity:0.4;cursor:not-allowed;transform:none}
+.input-box .img-btn{
+  padding:0.4rem 0.6rem;border:none;border-radius:12px;background:none;cursor:pointer;
+  color:#c4a882;display:flex;align-items:center;margin-right:auto;
+  transition:all 0.3s
+}
+.input-box .img-btn:hover{background:rgba(196,168,130,0.10);transform:translateY(-1px)}
+.input-box .img-btn:disabled{opacity:0.35;cursor:not-allowed;transform:none}
+.input-box .img-btn svg{width:20px;height:20px;display:block}
+
+/* 待发表缩略图条 */
+.img-preview{display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:0.6rem}
+.img-preview:empty{display:none}
+.img-preview .pv{position:relative;width:64px;height:64px;border-radius:10px;overflow:hidden;
+  border:1px solid rgba(181,131,122,0.18);box-shadow:0 1px 6px rgba(181,131,122,0.10)}
+.img-preview .pv img{width:100%;height:100%;object-fit:cover;display:block}
+.img-preview .pv .rm{
+  position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;
+  background:rgba(90,74,58,0.55);color:#fff;border:none;cursor:pointer;
+  font-size:0.65rem;line-height:1;display:flex;align-items:center;justify-content:center;
+  transition:background 0.2s
+}
+.img-preview .pv .rm:hover{background:rgba(90,74,58,0.8)}
 
 /* 日记卡片 */
 .entry{
@@ -96,6 +118,28 @@ h1{
 }
 .entry .text .text-toggle:hover{opacity:0.6}
 .entry .edited{font-size:0.6rem;color:#d4bcb0;margin-top:0.3rem;letter-spacing:1px}
+
+/* 日记配图：单张通栏，多张九宫格 */
+.entry .imgs{margin-top:0.6rem;display:grid;gap:5px}
+.entry .imgs.n1{grid-template-columns:1fr}
+.entry .imgs.n1 img{
+  width:100%;max-height:340px;object-fit:cover;border-radius:12px;
+  border:1px solid rgba(181,131,122,0.10);cursor:zoom-in;background:#fff
+}
+.entry .imgs.multi{grid-template-columns:repeat(3,1fr)}
+.entry .imgs.multi img{
+  width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;
+  border:1px solid rgba(181,131,122,0.10);cursor:zoom-in;background:#fff
+}
+
+/* 大图浮层 */
+#lightbox{
+  position:fixed;inset:0;background:rgba(40,32,26,0.88);z-index:999;
+  display:none;align-items:center;justify-content:center;cursor:zoom-out
+}
+#lightbox.open{display:flex}
+#lightbox img{max-width:92vw;max-height:88vh;object-fit:contain;border-radius:10px;
+  box-shadow:0 8px 40px rgba(0,0,0,0.4)}
 
 /* 评论 */
 .comments{margin-top:0.8rem;padding-top:0.8rem;border-top:1px solid rgba(181,131,122,0.08)}
@@ -173,14 +217,108 @@ h1{
   </div>
   <div class="input-box">
     <textarea id="newEntry" placeholder="写一段碎碎念..."></textarea>
-    <div class="row"><button id="submitBtn">写下</button></div>
+    <div id="imgPreview" class="img-preview"></div>
+    <input type="file" id="imgInput" accept="image/*" multiple hidden>
+    <div class="row">
+      <button id="imgBtn" class="img-btn" title="添加图片" aria-label="添加图片">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="3"/>
+          <circle cx="9" cy="9" r="2"/>
+          <path d="M21 15l-4.5-4.5L7 20"/>
+        </svg>
+      </button>
+      <button id="submitBtn">写下</button>
+    </div>
   </div>
   <div id="entryList"><div class="empty">还没有日记 ✍️</div></div>
 </div>
+<div id="lightbox"><img id="lightboxImg" alt=""></div>
 <script>
 var API = window.location.origin;
 var editingId = null;
 var COLLAPSE_LIMIT = 300;
+var MAX_IMAGES = 9;
+var pendingImages = [];
+
+/* 选图：压缩到长边 1600 / 质量 0.85，GIF 原样保留动画 */
+function compressImage(file){
+  return new Promise(function(resolve, reject){
+    if (file.type === 'image/gif') { resolve(file); return; }
+    var url = URL.createObjectURL(file);
+    var img = new Image();
+    img.onload = function(){
+      var maxSide = 1600;
+      var scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+      var cv = document.createElement('canvas');
+      cv.width = Math.round(img.naturalWidth * scale);
+      cv.height = Math.round(img.naturalHeight * scale);
+      var ctx = cv.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, cv.width, cv.height);
+      ctx.drawImage(img, 0, 0, cv.width, cv.height);
+      URL.revokeObjectURL(url);
+      cv.toBlob(function(blob){
+        if (!blob) { reject(new Error('压缩失败')); return; }
+        if (blob.size >= file.size) { resolve(file); }
+        else {
+          var name = (file.name || 'photo').replace(/\.[^.]*$/, '') + '.jpg';
+          resolve(new File([blob], name, {type: 'image/jpeg'}));
+        }
+      }, 'image/jpeg', 0.85);
+    };
+    img.onerror = function(){ URL.revokeObjectURL(url); reject(new Error('图片读取失败')); };
+    img.src = url;
+  });
+}
+
+function renderPreview(){
+  var box = document.getElementById('imgPreview');
+  box.innerHTML = '';
+  pendingImages.forEach(function(f, i){
+    var pv = document.createElement('div'); pv.className = 'pv';
+    var im = document.createElement('img'); im.src = URL.createObjectURL(f);
+    var rm = document.createElement('button'); rm.className = 'rm'; rm.textContent = '×'; rm.title = '移除';
+    rm.addEventListener('click', function(){
+      URL.revokeObjectURL(im.src);
+      pendingImages.splice(i, 1); renderPreview();
+    });
+    pv.appendChild(im); pv.appendChild(rm);
+    box.appendChild(pv);
+  });
+}
+
+document.getElementById('imgBtn').addEventListener('click', function(){
+  document.getElementById('imgInput').click();
+});
+document.getElementById('imgInput').addEventListener('change', function(){
+  var files = Array.prototype.slice.call(this.files || []);
+  this.value = '';
+  var room = MAX_IMAGES - pendingImages.length;
+  if (files.length > room) {
+    files = files.slice(0, room);
+    alert('一篇日记最多带 ' + MAX_IMAGES + ' 张图片');
+  }
+  if (!files.length) return;
+  var imgBtn = document.getElementById('imgBtn');
+  imgBtn.disabled = true;
+  Promise.all(files.map(function(f){ return compressImage(f).catch(function(){ return null; }); }))
+  .then(function(results){
+    results.forEach(function(f){ if (f) pendingImages.push(f); });
+    renderPreview();
+  })
+  .catch(function(){ alert('图片处理失败，请重试'); })
+  .finally(function(){ imgBtn.disabled = false; });
+});
+
+/* 大图浮层 */
+function openLightbox(src){
+  document.getElementById('lightboxImg').src = src;
+  document.getElementById('lightbox').classList.add('open');
+}
+document.getElementById('lightbox').addEventListener('click', function(){
+  this.classList.remove('open');
+  document.getElementById('lightboxImg').src = '';
+});
 
 function load(){
   fetch(API+'/diary/api/entries').then(function(r){return r.json();}).then(function(list){
@@ -222,6 +360,17 @@ function load(){
         txt.textContent = textStr;
       }
       div.appendChild(txt);
+      if(e.images && e.images.length > 0){
+        var imgs = document.createElement('div');
+        imgs.className = 'imgs ' + (e.images.length === 1 ? 'n1' : 'multi');
+        e.images.forEach(function(u){
+          var im = document.createElement('img');
+          im.src = API + u; im.loading = 'lazy'; im.alt = '日记配图';
+          im.addEventListener('click', function(){openLightbox(im.src);});
+          imgs.appendChild(im);
+        });
+        div.appendChild(imgs);
+      }
       if(e.edited){var ed = document.createElement('div'); ed.className = 'edited'; ed.textContent = '已编辑'; div.appendChild(ed);}
       var cmtBox = document.createElement('div'); cmtBox.className = 'comments';
       if(e.comments && e.comments.length > 0){
@@ -293,13 +442,52 @@ function startEdit(id, text){
   cancelBtn.addEventListener('click', function(){load();});
 }
 
+function submitEntry(text){
+  var submitBtn = document.getElementById('submitBtn');
+  submitBtn.disabled = true;
+  var ready = Promise.resolve([]);
+  if (pendingImages.length) {
+    var urls = [];
+    ready = pendingImages.reduce(function(chain, f, i){
+      return chain.then(function(){
+        var fd = new FormData();
+        fd.append('file', f);
+        submitBtn.textContent = '上传中 ' + (i + 1) + '/' + pendingImages.length;
+        return fetch(API+'/diary/api/upload', {method: 'POST', body: fd})
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          if (!d.ok || !d.url) throw new Error('upload fail');
+          urls.push(d.url);
+        });
+      });
+    }, Promise.resolve()).then(function(){ return urls; });
+  }
+  ready.then(function(urls){
+    var body = {text: text};
+    if (urls.length) body.images = urls;
+    submitBtn.textContent = '写下';
+    return fetch(API+'/diary/api/entries/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(d.ok){
+        document.getElementById('newEntry').value='';
+        pendingImages = [];
+        renderPreview();
+        load();
+      }
+    });
+  })
+  .catch(function(){ alert('发布失败，图片和文字已保留，请重试'); })
+  .finally(function(){
+    submitBtn.disabled = false;
+    submitBtn.textContent = '写下';
+  });
+}
+
 document.getElementById('submitBtn').addEventListener('click', function(){
-  var ta = document.getElementById('newEntry');
-  var text = ta.value.trim(); if(!text)return;
-  document.getElementById('submitBtn').disabled = true;
-  fetch(API+'/diary/api/entries/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text})})
-  .then(function(r){return r.json();}).then(function(d){if(d.ok){ta.value='';load();}})
-  .finally(function(){document.getElementById('submitBtn').disabled = false;});
+  var text = document.getElementById('newEntry').value.trim();
+  if(!text)return;
+  submitEntry(text);
 });
 
 load();

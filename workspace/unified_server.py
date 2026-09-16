@@ -5,9 +5,9 @@
 合并模块: 涵的日记, 五子棋, 谢的笔记, 月历, 待办/心动/记忆桶
 数据文件保留在原目录
 """
-import os, json, datetime, csv, io, sys, re, urllib.request, math, hashlib
+import os, json, datetime, csv, io, sys, re, urllib.request, math, hashlib, uuid
 import numpy as np
-from flask import Flask, Blueprint, request, jsonify
+from flask import Flask, Blueprint, request, jsonify, send_from_directory
 
 app = Flask(__name__)
 
@@ -16,6 +16,11 @@ app = Flask(__name__)
 # ============================================================
 DIARY_DIR = '/root/workspace/diary'
 DIARY_DATA = os.path.join(DIARY_DIR, 'diary.json')
+DIARY_UPLOAD_DIR = os.path.join(DIARY_DIR, 'uploads')
+DIARY_MAX_IMAGES = 9
+DIARY_IMG_URL_RE = re.compile(r'^/diary/api/img/[A-Za-z0-9._-]+$')
+DIARY_IMG_NAME_RE = re.compile(r'^[A-Za-z0-9._-]+$')
+if not os.path.isdir(DIARY_UPLOAD_DIR): os.makedirs(DIARY_UPLOAD_DIR)
 diary_bp = Blueprint('diary', __name__)
 
 def diary_load():
@@ -29,13 +34,38 @@ def diary_get_entries():
     d = diary_load()
     return jsonify(sorted(d["entries"], key=lambda x: x["ts"], reverse=True))
 
+@diary_bp.route('/diary/api/upload', methods=['POST'])
+def diary_upload_image():
+    f = request.files.get('file')
+    if not f or not f.filename: return jsonify({"error": "no file"}), 400
+    ext = os.path.splitext(f.filename)[1].lower()
+    if ext not in ('.jpg', '.jpeg', '.png', '.gif', '.webp'):
+        return jsonify({"error": "bad type"}), 400
+    data = f.read()
+    if len(data) > 10 * 1024 * 1024:
+        return jsonify({"error": "too large"}), 400
+    name = 'img_' + datetime.datetime.now().strftime('%Y%m%d_%H%M%S') + '_' + uuid.uuid4().hex[:6] + ext
+    with open(os.path.join(DIARY_UPLOAD_DIR, name), 'wb') as out:
+        out.write(data)
+    return jsonify({"ok": True, "url": '/diary/api/img/' + name})
+
+@diary_bp.route('/diary/api/img/<name>')
+def diary_get_image(name):
+    if not DIARY_IMG_NAME_RE.match(name) or '..' in name:
+        return jsonify({"error": "bad name"}), 400
+    return send_from_directory(DIARY_UPLOAD_DIR, name)
+
 @diary_bp.route('/diary/api/entries/add', methods=['POST'])
 def diary_add_entry():
     body = request.json; text = body.get("text","").strip()
     if not text: return jsonify({"error":"empty"}),400
+    images = body.get("images") or []
+    if not isinstance(images, list): images = []
+    images = [u for u in images if isinstance(u, str) and DIARY_IMG_URL_RE.match(u)][:DIARY_MAX_IMAGES]
     d = diary_load()
     now = datetime.datetime.now().isoformat()
     entry = {"id": len(d["entries"])+1, "text": text, "ts": now, "comments": []}
+    if images: entry["images"] = images
     d["entries"].insert(0, entry)
     diary_save(d)
     return jsonify({"ok": True, "id": entry["id"]})
@@ -53,7 +83,14 @@ def diary_edit_entry():
 def diary_delete_entry():
     body = request.json; eid = body.get("id")
     d = diary_load()
+    removed = [e for e in d["entries"] if e["id"] == eid]
     d["entries"] = [e for e in d["entries"] if e["id"] != eid]
+    for e in removed:
+        for u in e.get("images") or []:
+            fname = os.path.basename(u)
+            if DIARY_IMG_NAME_RE.match(fname):
+                try: os.remove(os.path.join(DIARY_UPLOAD_DIR, fname))
+                except OSError: pass
     diary_save(d); return jsonify({"ok": True})
 
 @diary_bp.route('/diary/api/entries/comment', methods=['POST'])
