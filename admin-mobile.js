@@ -1651,7 +1651,7 @@ function ccBuildSummaryStatsHtml(d, t){
            +'</div>'
          : '')
        +'</div>'
-       +'<div class="cc-swipe-del"><button class="cc-swipe-del-btn" onclick="removeSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">移除</button><button class="cc-swipe-del-btn cc-swipe-del-btn-ingest" onclick="ingestSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">入池</button></div>'
+       +'<div class="cc-swipe-del"><button class="cc-swipe-del-btn" onclick="removeSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">移除</button></div>'
        +'</div>';
    });
  
@@ -2080,10 +2080,10 @@ function updateCcStatusBar(d){
    if(!selectedIds.length){ toast('没有已替换的块可解析'); return; }
    const isMerge = selectedIds.length > 1;
    if(!confirm(isMerge
-     ? '将选中的 ' + selectedIds.length + ' 个块拼接为一次 LLM 提炼，归入记忆池？'
-     : '将选中的 1 个块解析归入记忆池？')) return;
+     ? '将选中的 ' + selectedIds.length + ' 个块的「时间线原文」交给 AI 提取记忆候选，全部进 review 队列人工把关？'
+     : '将选中的 1 个块的「时间线原文」交给 AI 提取记忆候选，进 review 队列人工把关？')) return;
    const msg = document.getElementById('compaction-msg');
-   if(msg) msg.textContent = isMerge ? '正在合并解析选中的摘要并注入记忆池…' : '正在解析选中的摘要并注入记忆池…';
+   if(msg) msg.textContent = '正在解析时间线原文并提取记忆候选…';
    try{
      const r = await fetch(ADMIN_API + '/memory-pool/reparse', {
        method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -2091,7 +2091,7 @@ function updateCcStatusBar(d){
      });
      const j = await r.json();
      if(j.error) throw new Error(j.error);
-     const s = '已解析 ' + j.processed + ' 段 -> 新增 ' + j.added + ' / 合并 ' + j.merged + ' / 失败 ' + j.failed + (j.already ? ' / 已存在(已入过) ' + j.already : '');
+     const s = '已解析 ' + j.processed + ' 块 -> 候选 ' + j.reviewed + ' 条进 review 队列 / 门卫拒 ' + j.rejected + ' / 失败 ' + j.failed + (j.degraded ? ' / ' + j.degraded + ' 块原文缺失退用摘要' : '') + '。请在记忆 review 页人工裁决。';
      if(msg) msg.textContent = s;
      toast(s);
    }catch(e){
@@ -2103,38 +2103,10 @@ function updateCcStatusBar(d){
 
   // 单块入池：按摘要里现成的【分类】标签本地拆分直接入库（不调 LLM）；
   // 入池前问是否同时隐藏（2026-09-15）：确定=入池且隐藏（摘要与原文都不再进上下文），取消=只入池
+  // 单块直灌入池（0918 停用）：无判断直灌是低质量记忆的主通道，入口已删；
+  // 请走「解析」按钮（LLM 解析时间线原文 → 候选进 review 队列人工把关）
   async function ingestSingleBlock(cid, blockIndex, isAi){
-    const d = AppState.compactionPlan;
-    if(!d) return;
-    const c = (d.chunks || []).find(function(x){ return x.index === cid; });
-    if(!c || c.enabled === false){ toast('该块未替换，无法入池'); return; }
-    if(!confirm('将该块摘要按【分类】标签拆分后直接入池（不调用 AI 解析，重要级默认）？')) return;
-    const alsoHide = confirm('是否同时隐藏该块？\n\n隐藏后这块的摘要与原文都不再发给 AI（信息已存入记忆池，不会丢）；之后可在块上点「取消隐藏」恢复。\n\n【确定】入池并隐藏　【取消】只入池');
-    const msg = document.getElementById('compaction-msg');
-    if(msg) msg.textContent = '正在按分类直接入池…';
-    try{
-      const r = await fetch(ADMIN_API + '/memory-pool/reparse', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({chunkIds: [c.id], direct: true})
-      });
-      const j = await r.json();
-      if(j.error) throw new Error(j.error);
-      let s = '已入池 ' + j.processed + ' 段 -> 新增 ' + j.added + ' / 合并 ' + j.merged + ' / 失败 ' + j.failed + (j.skipped ? ' / 跳过(无分类标签) ' + j.skipped : '') + (j.already ? ' / 已存在(已入过) ' + j.already : '');
-      if(alsoHide){
-        try{
-          await ccSetBlockHidden(c, blockIndex, isAi, true);
-          s += '；块 #' + cid + ' 已隐藏（不再进入上下文）';
-        }catch(e2){
-          s += '；隐藏失败: ' + e2.message;
-        }
-      }
-      if(msg) msg.textContent = s;
-      toast(s);
-      if(alsoHide) loadCompactionPreview();
-    }catch(e){
-      if(msg) msg.textContent = '直接入池失败: ' + e.message;
-      toast('直接入池失败: ' + e.message);
-    }
+    toast('直接入池已停用：请用「解析」按钮，候选会进 review 队列人工把关');
   }
 
   // 设置/取消块的手动隐藏（AI 块走 context-replacements/toggle 带 hidden；手工块走 blocks 的 hide 动作）
@@ -2355,16 +2327,16 @@ async function reparseAllFromCompaction(){
   if(!d) return;
   const replaced=(d.chunks||[]).filter(function(c){ return c.enabled!==false; }).length;
   if(!replaced){ toast('还没有已替换的块，请先「替换」后再解析'); return; }
-  if(!confirm('将已替换的压缩摘要重新解析并归入记忆池（会调用 API 去重）？')) return;
+  if(!confirm('将已替换块的「时间线原文」交给 AI 提取记忆候选，全部进 review 队列人工把关？')) return;
   const btn=document.getElementById('cc-reparse-btn');
   if(btn) btn.disabled=true;
   const msg=document.getElementById('compaction-msg');
-  if(msg) msg.textContent='正在解析已替换摘要并注入记忆池…';
+  if(msg) msg.textContent='正在解析时间线原文并提取记忆候选…';
   try{
     const r=await fetch(ADMIN_API+'/memory-pool/reparse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({all:true})});
     const j=await r.json();
     if(j.error) throw new Error(j.error);
-    const s='已解析 '+j.processed+' 段 -> 新增 '+j.added+' / 合并 '+j.merged+' / 失败 '+j.failed;
+    const s='已解析 '+j.processed+' 块 -> 候选 '+j.reviewed+' 条进 review 队列 / 门卫拒 '+j.rejected+' / 失败 '+j.failed+'。请在记忆 review 页人工裁决。';
     if(msg) msg.textContent=s;
     toast(s);
   }catch(e){

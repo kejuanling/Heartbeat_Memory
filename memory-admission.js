@@ -76,11 +76,13 @@ function createAdmission(opts = {}) {
   // 兼容策略：旧路由恒写旧池（v2_enabled=true 也不停）；本适配器只负责 V2 侧落点。
   function submitManual(body, ctx = {}, mode = "shadow") {
     const formal = mode === "formal";
-    if (!formal && !shadowOn) {
+    const isPromo = mode === "promotion"; // 0918：promotion 通道（压缩块原文提炼候选），R7 全落 review，不受双闸门控（按钮即人工授权）
+    if (!formal && !isPromo && !shadowOn) {
       // 影子观察未开启时跳过（正式 admit 通道只经 submitV2 的 v2_enabled 门进入）
       return { action: "skipped_shadow_off", candidate: null, validation: null, audit_id: null };
     }
-    const exec = formal ? mainExecutor : shadowExecutor;
+    const exec = (formal || isPromo) ? mainExecutor : shadowExecutor;
+    const originVal = isPromo ? "promotion" : "manual";
     const b = body || {};
     const text = strSafe(b.content || b.text);
     if (!text) {
@@ -89,16 +91,17 @@ function createAdmission(opts = {}) {
     const mapped = CATEGORY_MAP[b.category] || null;
 
     // [1] candidate_detector（manual 显式类别优先，否则自动粗分）
-    const detection = detect({ text, source: "manual", explicitKind: mapped ? mapped.kind : b.kind, explicitSubject: mapped ? mapped.subject : b.subject });
+    const detection = detect({ text, source: originVal, explicitKind: mapped ? mapped.kind : b.kind, explicitSubject: mapped ? mapped.subject : b.subject });
 
-    // [2] provenance_builder（manual：无 session/msg → null，不伪造）
+    // [2] provenance_builder（manual：无 session/msg → null，不伪造；promotion：block_id 必带（压缩块溯源），msg_id=null）
     const provenance = buildProvenance({
-      origin: "manual",
-      method: "admin_form",
+      origin: originVal,
+      method: isPromo ? "summary_promotion" : "admin_form",
       sessionId: strSafe(ctx.sessionId),
       msgId: strSafe(ctx.msgId),
     });
     if (strSafe(b.quote)) provenance.quote = String(b.quote).slice(0, 200);
+    if (isPromo && strSafe(b.block_id)) provenance.block_id = strSafe(b.block_id);
 
     // [3] validator（仅真实候选类别需要校验；非候选直接走拒绝）
     let validation = null;
@@ -107,18 +110,23 @@ function createAdmission(opts = {}) {
         text,
         kind: detection.kind_guess,
         subject: detection.subject_guess,
-        origin: "manual",
+        origin: originVal,
         speaker: mapped ? mapped.speaker || null : null,
         direction: mapped ? mapped.direction || null : null,
         provenance,
-        source: "manual",
+        source: originVal,
       });
     } else {
       validation = { allowed: false, matched_rules: ["DET.not_candidate"], reasons: detection.reasons.slice() };
     }
 
     // [4] 决策（纯编排策略，无业务规则）
-    const { action, why } = decide(detection, validation);
+    let { action, why } = decide(detection, validation);
+    if (isPromo && action === "admit") {
+      // R7：promotion 来源首入一律人工把关（提炼是二次加工，judge/mock 认准也不自动入库）
+      action = "review";
+      why = why + " +R7(promotion 首入一律 review)";
+    }
 
     // [5] state_executor（唯一写手）+ audit
     //     review 路径先落审计拿 audit_id（队列记录要回链）；admit/reject 执行后记最终动作
@@ -128,7 +136,7 @@ function createAdmission(opts = {}) {
       subject: detection.subject_guess,
       direction: mapped ? mapped.direction || null : null,
       speaker: mapped ? mapped.speaker || null : null,
-      origin: "manual",
+      origin: originVal,
       provenance,
     };
     if (b.importance != null && Number.isFinite(Number(b.importance))) {
@@ -139,8 +147,8 @@ function createAdmission(opts = {}) {
     let execResult, auditRec;
     if (action === "review") {
       auditRec = audit.append(audit.buildRecord({
-        candidateText: text, origin: "manual", validator: validation, action: "review",
-        notes: { shadow: !formal, detector_kind: detection.kind_guess, why },
+        candidateText: text, origin: originVal, validator: validation, action: "review",
+        notes: { shadow: !formal && !isPromo, detector_kind: detection.kind_guess, why },
       }));
       execResult = exec.review(draft, why, {
         auditId: auditRec.ok ? auditRec.id : null,
@@ -149,15 +157,15 @@ function createAdmission(opts = {}) {
     } else if (action === "admit") {
       execResult = exec.admit(draft);
       auditRec = audit.append(audit.buildRecord({
-        candidateText: text, origin: "manual", validator: validation,
+        candidateText: text, origin: originVal, validator: validation,
         action: execResult.ok ? "admit" : "error",
-        notes: { shadow: !formal, detector_kind: detection.kind_guess, why, entry_id: execResult.entry ? execResult.entry.id : null, error: execResult.error || null },
+        notes: { shadow: !formal && !isPromo, detector_kind: detection.kind_guess, why, entry_id: execResult.entry ? execResult.entry.id : null, error: execResult.error || null },
       }));
     } else {
       execResult = exec.reject(draft, why);
       auditRec = audit.append(audit.buildRecord({
-        candidateText: text, origin: "manual", validator: validation, action: "reject",
-        notes: { shadow: !formal, detector_kind: detection.kind_guess, why },
+        candidateText: text, origin: originVal, validator: validation, action: "reject",
+        notes: { shadow: !formal && !isPromo, detector_kind: detection.kind_guess, why },
       }));
     }
 
@@ -168,8 +176,14 @@ function createAdmission(opts = {}) {
       audit_id: auditRec.ok ? auditRec.id : null,
       entry_id: execResult.entry ? execResult.entry.id : null,
       queue_id: execResult.queue_id || null,
-      mode: formal ? "formal" : "shadow",
+      mode: isPromo ? "promotion" : (formal ? "formal" : "shadow"),
     };
+  }
+
+  // promotion 通道（0918）：压缩块原文提炼的候选入口，走完整流水线但 R7 强制 review。
+  // 不受 v2_enabled/v2_shadow 门控——管理台按钮点击即人工授权，候选只进 review 队列，入库仍需人工 approve。
+  function submitPromotion(body, ctx = {}) {
+    return submitManual(body, ctx, "promotion");
   }
 
   // V2 门控（挂旧路由钩子用）：enabled → 正式；shadow → 观察；皆关 → 跳过
@@ -196,6 +210,7 @@ function createAdmission(opts = {}) {
     cfg,
     shadowOn,
     submitManual,
+    submitPromotion,
     submitV2,
     resolveReview,
     executor: shadowExecutor,

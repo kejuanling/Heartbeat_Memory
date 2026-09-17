@@ -3350,11 +3350,26 @@ app.get("/internal/memory-pool/retrieve", async (req, reply) => {
 });
 
 // 记忆池新增记忆：MCP 工具 memory_add 用（x-internal-key 鉴权）
+// 0918 起：v2 总闸任一开启时改道 V2 admission（tool 入口），双闸全关时原路直灌旧池（回滚通道）
 app.post("/internal/memory-pool/add", async (req, reply) => {
   try {
     const b = req.body || {};
     const content = String(b.content || "").trim();
     if (!content) return reply.code(400).send({ error: "content 必填" });
+    if (memoryV2Admission) {
+      const v2 = memoryV2Admission.submitV2(
+        { content, category: b.category, importance: b.importance },
+        { sessionId: String(b.session_id || "").trim() }
+      );
+      if (v2.action !== "skipped_shadow_off") {
+        return reply.send({
+          success: true, v2: true, action: v2.action,
+          id: v2.entry_id || (v2.candidate ? v2.candidate.id : null) || null,
+          queue_id: v2.queue_id || null,
+          note: v2.action === "review" ? "已进 review 队列待人工裁决" : undefined,
+        });
+      }
+    }
     const r = await memoryPool.add({ content, category: b.category, importance: b.importance, pinned: b.pinned, source: "mcp" });
     reply.send({ success: true, dup: r.dup, entry: r.entry });
   } catch (err) {
@@ -3521,67 +3536,109 @@ app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, re
     }
     if (!texts.length) return reply.code(400).send({ error: "无可解析的摘要" });
     const list = texts.slice(0, 200);
-    // 一键入池（direct）：不调 LLM，按摘要里现成的【分类】标签本地正则拆分后入库（重要级默认 0.5）；无分类标签的摘要不入池
+    // 一键入池（direct）：0918 起停用——无判断直灌是低质量记忆的主通道（存量 340+ 条教训）。
+    // 请走 LLM 解析：解析压缩块覆盖区间的「时间线原文」（原文都在，压缩只影响发送），
+    // 产出的候选走 V2 admission 完整流水线并全部进 review 队列人工把关。
     if (b.direct === true) {
-      const directLabel = "直接入池（" + list.length + " 块）";
-      const logId = addCompactionLog({ action: "reparse", label: directLabel, status: "pending", message: "开始直接入池 " + list.length + " 段摘要..." }).id;
-      let dAdded = 0, dMerged = 0, dFailed = 0, dSkipped = 0, dAlready = 0;
-      for (const t of list) {
-        try {
-          const blocks = memoryPool.parseCategoryBlocks(t.summary, { noFallback: true });
-          if (!blocks.length) { dSkipped++; continue; }
-          for (const blk of blocks) {
-            const r = await memoryPool.ingestSummary(blk.content, {
-              source: "compaction-direct",
-              block_id: t.block_id,
-              directCategory: blk.category,
-              directImportance: 0.5
-            });
-            if (r.added) dAdded += r.added;
-            if (r.merged) dMerged += r.merged;
-            if (r.already) dAlready += r.already;
-            if (r.failed) dFailed += r.failed;
-          }
-        } catch (e) {
-          dFailed++;
-          console.error("[memory-pool] 直接入池失败:", e.message);
-        }
-      }
-      addCompactionLog({ id: logId, action: "reparse", label: directLabel, status: "success", message: "已入池 " + list.length + " 段 -> 新增 " + dAdded + " / 合并 " + dMerged + " / 已存在 " + dAlready + " / 失败 " + dFailed + " / 跳过(无分类标签) " + dSkipped });
-      return reply.send({ success: true, direct: true, processed: list.length, added: dAdded, merged: dMerged, already: dAlready, failed: dFailed, skipped: dSkipped });
+      return reply.code(403).send({ error: "直接入池已停用（2026-09-18）。请改用 LLM 解析：候选将进 review 队列人工把关后入库。" });
     }
-    const isMerge = b.merge === true && list.length > 1;
-    const logLabelUse = isMerge ? ("合并再解析（" + list.length + " 块）") : logLabel;
-    const logId = addCompactionLog({ action: "reparse", label: logLabelUse, status: "pending", message: "开始解析 " + list.length + " 段摘要..." }).id;
-    let added = 0, merged = 0, failed = 0, already = 0;
-    if (isMerge) {
-      // 多个块拼接为一次 LLM 提炼：每块带编号前缀，让模型跨块全局合并去重
-      const mergedText = list.map(function (t, i) { return "【块 " + (i + 1) + "】\n" + t.summary; }).join("\n\n");
-      const r = await memoryPool.ingestSummary(mergedText, {
-        source: "compaction",
-        blockIds: list.map(function (t) { return t.block_id; }).filter(Boolean),
-        forceLlm: true
+    // 0918 promotion 改造：LLM 解析对象=压缩块覆盖区间的「时间线原文」（非摘要——摘要是劣化的
+    // 二手文本，在它上面做提取只会产出劣化记忆）。候选逐条走 admission promotion 模式（R7 全落 review）。
+    const slicedOriginals = [];
+    for (const t of list) {
+      const item = active.find(function (it) { return String(it.id) === String(t.block_id); });
+      const original = item && item.range ? sliceTimelineOriginal(item.session, item.range) : null;
+      slicedOriginals.push({
+        block_id: t.block_id,
+        session: item && item.session || null,
+        source_text: original && original.trim() ? original : t.summary,
+        degraded: !(original && original.trim()),
       });
-      if (r.added) added += r.added;
-      if (r.merged) merged += r.merged;
-      if (r.already) already += r.already;
-      if (r.failed) failed += r.failed;
-    } else {
-      for (const t of list) {
-        const r = await memoryPool.ingestSummary(t.summary, { source: "compaction", block_id: t.block_id, forceLlm: true });
-        if (r.added) added += r.added;
-        if (r.merged) merged += r.merged;
-        if (r.already) already += r.already;
-        if (r.failed) failed += r.failed;
-      }
     }
-    addCompactionLog({ id: logId, action: "reparse", label: logLabelUse, status: "success", message: "已解析 " + list.length + " 段 -> 新增 " + added + " / 合并 " + merged + " / 已存在 " + already + " / 失败 " + failed });
-    reply.send({ success: true, processed: list.length, added, merged, already, failed });
+    const degradedCount = slicedOriginals.filter(s => s.degraded).length;
+    if (degradedCount) console.warn("[reparse] " + degradedCount + "/" + slicedOriginals.length + " 块原文切片不可得，退化为摘要文本解析");
+    let reviewed = 0, rejected = 0, failed = 0;
+    const logId2 = addCompactionLog({ action: "reparse", label: "解析原文进 review（" + slicedOriginals.length + " 块）", status: "pending", message: "开始解析原文并提取候选..." }).id;
+    for (const s of slicedOriginals) {
+      try {
+        const candidates = await extractMemoryCandidates(s.source_text);
+        for (const c of candidates) {
+          try {
+            const r = memoryV2Admission
+              ? memoryV2Admission.submitPromotion({ content: c.text, kind: c.kind, block_id: s.block_id }, { sessionId: s.session })
+              : { action: "error" };
+            if (r.action === "reject") rejected++; else reviewed++;
+          } catch (e) { failed++; }
+        }
+      } catch (e) { failed++; console.error("[reparse] 原文解析失败:", e.message); }
+    }
+    addCompactionLog({ id: logId2, action: "reparse", label: "解析原文进 review（" + slicedOriginals.length + " 块）", status: "success", message: "候选 " + reviewed + " 条进 review 队列 / 门卫拒绝 " + rejected + " / 失败 " + failed });
+    return reply.send({ success: true, promotion: true, processed: slicedOriginals.length, degraded: degradedCount, reviewed, rejected, failed, note: "候选已全部进 review 队列，请在记忆 review 页人工裁决" });
   } catch (err) {
     addCompactionLog({ action: "reparse", label: "再解析", status: "error", message: "再解析失败：" + err.message });
     reply.code(500).send({ error: err.message });
   }
 });
+
+// —— promotion 改造 helper（0918）：压缩块区间的时间线原文切片 + LLM 候选提取 ——
+
+// 压缩块覆盖区间的时间线原文（原文都在——压缩替换只影响发送，源时间线未动）
+function sliceTimelineOriginal(sessionId, range) {
+  try {
+    const tl = loadTimeline(sessionId);
+    if (!Array.isArray(tl)) return null;
+    const start = Math.max(0, Number(range && range.start_index) || 0);
+    const end = Math.min(tl.length - 1, Number(range && range.end_index) || 0);
+    if (end < start) return null;
+    const seg = tl.slice(start, end + 1)
+      .filter(function (m) { return m && (m.role === "user" || m.role === "assistant") && !m.deleted; })
+      .map(function (m) {
+        const text = String(typeof m.content === "string" ? m.content : "").replace(/<current_time>[^<]*<\/current_time>/g, "").trim();
+        return text ? (m.role === "user" ? "她: " : "我: ") + text : "";
+      })
+      .filter(Boolean);
+    return seg.join("\n").slice(0, 24000) || null; // 上限约 1.2 万 tok，防异常超长
+  } catch (e) { return null; }
+}
+
+// LLM 候选提取：从对话原文提取值得长期记住的稳定信息（简短风格 prompt，JSON 数组输出）
+async function extractMemoryCandidates(sourceText) {
+  const apiUrl = readEnvValue("TARGET_API_URL");
+  const apiKey = readEnvValue("TARGET_API_KEY");
+  const model = readEnvValue("MODEL_NAME");
+  if (!apiUrl || !apiKey || !model) throw new Error("LLM 未配置（TARGET_API_URL/KEY/MODEL_NAME）");
+  const system = "你是记忆提取器。从对话原文中提取值得长期记住的稳定信息，只输出 JSON 数组。" +
+    "提取标准：跨会话仍然成立才提取——她的偏好/习惯/身体/经历/性格（fact）、承诺与行为规则（rule）、她的重要原话逐字保留（quote）、关系节点（milestone）。" +
+    "当日心情、一次性事件、寒暄调侃、事件流水账一律不提取。每条独立成句（20~60 字），quote 类必须是原文引号内逐字内容。";
+  const user = "对话原文：\n" + sourceText + "\n\n输出 JSON 数组，每项 {\"text\":\"记忆内容\",\"kind\":\"fact|rule|quote|milestone\"}。没有值得记的就输出 []。";
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  let resp, data;
+  try {
+    resp = await fetch(apiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
+      body: JSON.stringify({
+        model, messages: [{ role: "system", content: system }, { role: "user", content: user }],
+        temperature: 0.2, response_format: { type: "json_object" },
+      }),
+      signal: controller.signal,
+    });
+    if (!resp.ok) throw new Error("LLM HTTP " + resp.status);
+    data = await resp.json();
+  } finally { clearTimeout(timer); }
+  const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+  if (!content) throw new Error("LLM 空响应");
+  const cleaned = String(content).replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
+  let arr;
+  try { arr = JSON.parse(cleaned); } catch (e) { throw new Error("LLM 输出非 JSON"); }
+  if (!Array.isArray(arr)) arr = arr && Array.isArray(arr.memories) ? arr.memories : null;
+  if (!Array.isArray(arr)) throw new Error("LLM 输出非数组");
+  const KINDS = ["fact", "rule", "quote", "milestone"];
+  return arr
+    .map(x => (x && typeof x === "object" ? { text: String(x.text || "").trim(), kind: KINDS.includes(x.kind) ? x.kind : "fact" } : null))
+    .filter(x => x && x.text.length >= 4 && x.text.length <= 500);
+}
 
 app.get("/admin/memory-pool/config", { preHandler: basicAuth }, async (req, reply) => {
   try {
