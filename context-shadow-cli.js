@@ -56,7 +56,7 @@ if (inRange.length) {
 }
 
 // ---- v2 块分布 ----
-const BLOCK_ORDER = ["core_identity", "long_term_understanding", "meaningful_moments", "conversation_continuity", "current_state", "recent_experience", "relevant_memories"];
+const BLOCK_ORDER = ["context_assembly", "system_instructions", "core_identity", "long_term_understanding", "meaningful_moments", "conversation_continuity", "relevant_memories"];
 const stat = {};
 for (const r of inRange) {
   for (const b of r.v2 || []) {

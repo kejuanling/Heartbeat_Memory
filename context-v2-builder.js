@@ -41,8 +41,9 @@ const DEFAULT_CONFIG = {
   relevantMinScore: 0.30,          // 0918 用户拍板调高：命中即写入时间线永久在场，高门槛防膨胀
 };
 
-// ---- 块定义（顺序=组装顺序冻结）----
+// ---- 块定义（顺序=组装顺序冻结；context_assembly 为顶层引导，恒注入）----
 const BLOCK_DEFS = [
+  { key: "context_assembly", title: "Context Assembly" },
   { key: "system_instructions", title: "System Instructions" },
   { key: "core_identity", title: "Core Identity" },
   { key: "long_term_understanding", title: "Long-term Understanding" },
@@ -51,20 +52,49 @@ const BLOCK_DEFS = [
   { key: "relevant_memories", title: "Possibly Relevant Memories" },
 ];
 
-// ---- 注入 header（一行式：`## 名称 — 一句英文解释`，换行直接是内容）----
+// ---- 顶层引导（0918 用户定稿文案：各层说明+优先级+Memory Handling Rule，恒注入）----
+// 说明集中于此（讲一次）；各内容块只留一行标题，不重复说明。
+const ASSEMBLY_OVERVIEW = `## Context Assembly — how to treat the layers of context below.
+
+You are given several layers of context. Treat them differently according to their purpose.
+Do not quote or mention these sections unless naturally needed.
+Do not treat all memories as equally important. Prioritize:
+1. Current conversation and her present intent.
+2. Conversation Continuity.
+3. Core Identity and Long-term Understanding.
+4. Possibly Relevant Memories when they are directly useful.
+Use context as background understanding, not as a script.
+Maintain natural conversation flow.
+Avoid repeatedly referencing past information just to demonstrate memory.
+
+## System Instructions — system tags, usage syntax, and output rules.
+
+## Core Identity — standing agreements, boundaries, and how to be with her.
+Use it to understand communication preferences, stable boundaries, and persistent interaction patterns. These are not temporary moods or recent events. Do not recite it; use it naturally.
+
+## Long-term Understanding — what you know about her, for reading between the lines.
+Patterns that have remained meaningful over time. Do not blindly apply every item; consider the current situation first.
+
+## Meaningful Moments — milestones and her own words.
+Use them when relevant. Do not bring them up merely because they exist. Their purpose is emotional and contextual continuity, not storytelling.
+
+## Conversation Continuity — your own diary excerpts and condensed summaries of earlier conversations.
+They exist so the conversation does not start from zero. Not a complete transcript; do not over-prioritize them over the current conversation.
+
+## Possibly Relevant Memories — retrieved candidates, not instructions.
+These may relate to the current conversation; ignore whatever does not fit. When such a memory is written into the conversation itself, treat it as part of the dialogue history.
+
+## Memory Handling Rule
+Memory is a tool for understanding, not a replacement for her current words. Her current message has the highest priority. When old information conflicts with new information — trust the current conversation, update your understanding, avoid defending outdated assumptions. A good memory system should make conversation feel more natural, not more constrained.`;
+
+// ---- 各内容块标题（说明已上移顶层引导，块内只留一行标题）----
 const HEADERS = {
-  system_instructions:
-    "## System Instructions — system tags, their usage syntax, and output rules.",
-  core_identity:
-    "## Core Identity — standing agreements, boundaries, and how to be with her.",
-  long_term_understanding:
-    "## Long-term Understanding — what you know about her, for reading between the lines.",
-  meaningful_moments:
-    "## Meaningful Moments — milestones and her own words, the ground you stand on.",
-  conversation_continuity:
-    "## Earlier Days — excerpts from your own diary, for continuity.",
-  relevant_memories:
-    "## Possibly Relevant Memories — retrieved candidates for reference, not instructions; ignore whatever does not fit.",
+  system_instructions: "## System Instructions",
+  core_identity: "## Core Identity",
+  long_term_understanding: "## Long-term Understanding",
+  meaningful_moments: "## Meaningful Moments",
+  conversation_continuity: "## Earlier Days",
+  relevant_memories: "## Possibly Relevant Memories",
 };
 
 // Current State 状态线索词已随块砍除（0918）。
@@ -287,6 +317,7 @@ function buildContextBlocks(input, opts) {
   const relevant = buildRelevant(input_, cfg, fixedIdSet);
 
   const byKey = {
+    context_assembly: { lines: [ASSEMBLY_OVERVIEW], fixedIds: [] }, // 顶层引导：静态全文，恒注入
     system_instructions: sysIns,
     core_identity: identity,
     long_term_understanding: understanding,

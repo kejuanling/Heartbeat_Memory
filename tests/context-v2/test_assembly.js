@@ -12,7 +12,7 @@ function ok(name, fn) {
 }
 
 const EXPECTED_ORDER = [
-  "system_instructions", "core_identity", "long_term_understanding",
+  "context_assembly", "system_instructions", "core_identity", "long_term_understanding",
   "meaningful_moments", "conversation_continuity", "relevant_memories",
 ];
 
@@ -77,12 +77,15 @@ ok("V2 空仓降级：Understanding/Moments/Relevant 省略；System Instruction
   assert.ok(m2 && m2.content.includes("你是我的锚"), "pinned anchor 降级支撑");
 });
 
-ok("空块省略（默认）+ includeEmpty=true 时六块全在（empty:true, content:'', tokens:0）", () => {
+ok("空块省略（默认，仅剩顶层引导）+ includeEmpty=true 时七块全在（empty:true, content:'', tokens:0）", () => {
   const empty = { pinnedEntries: [], diaryEntries: [], memoriesV2: [], query: "" };
-  assert.deepStrictEqual(buildContextBlocks(empty).blocks, [], "全空输入默认零块");
+  const def = buildContextBlocks(empty).blocks;
+  assert.strictEqual(def.length, 1, "全空输入仅剩恒注入的顶层引导");
+  assert.strictEqual(def[0].key, "context_assembly");
   const res = buildContextBlocks(empty, { includeEmpty: true });
-  assert.strictEqual(res.blocks.length, 6);
+  assert.strictEqual(res.blocks.length, 7);
   for (const b of res.blocks) {
+    if (b.key === "context_assembly") { assert.strictEqual(b.empty, false); continue; }
     assert.strictEqual(b.empty, true);
     assert.strictEqual(b.content, "");
     assert.strictEqual(b.tokens, 0);
@@ -108,13 +111,17 @@ ok("config 覆盖：门槛提高→核心层省略；diaryCount=1→只最新一
   assert.strictEqual(DEFAULT_CONFIG.diaryCount, 3, "默认篇数未被改");
 });
 
-ok("header 一行式：## 名称 — 一句英文解释，换行直接内容", () => {
+ok("内容块标题仅一行（说明已上移顶层引导）；顶层块恒注入且含 Handling Rule", () => {
   const res = buildContextBlocks(fullInput());
   const id = res.blocks.find(b => b.key === "core_identity");
   const lines = id.content.split("\n");
-  assert.strictEqual(lines[0], "## Core Identity — standing agreements, boundaries, and how to be with her.", "header 恰一行");
+  assert.strictEqual(lines[0], "## Core Identity", "标题恰一行");
   assert.ok(lines[1].length > 0, "换行即内容");
-  assert.ok(!id.content.includes("自然遵循即可"), "旧中文说明段已废");
+  assert.ok(!id.content.includes("standing agreements"), "说明段不再重复（已上移）");
+  const top = res.blocks.find(b => b.key === "context_assembly");
+  assert.ok(top, "顶层引导恒注入");
+  assert.ok(top.content.includes("## Memory Handling Rule"), "Handling Rule 并入顶层尾部");
+  assert.ok(top.content.includes("her present intent"), "优先级总纲在");
 });
 
 ok("条目标题 [xxx] 格式（0918：【】→[]）", () => {

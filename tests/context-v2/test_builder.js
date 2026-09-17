@@ -56,7 +56,7 @@ ok("system_instructions: instructions 条目进块、[标题]格式、retire/ide
   assert.ok(b.content.includes("[记忆标签]如果想存记忆，用记忆内联标签。"), "[标题]格式");
   assert.ok(!b.content.includes("回复她要简短有温度"), "identity 条目不进 System Instructions");
   assert.ok(!b.content.includes("只会越轨"), "retire 不进");
-  assert.ok(b.content.startsWith("## System Instructions — system tags"), "一行式 header");
+  assert.ok(b.content.startsWith("## System Instructions\n"), "一行标题（说明已上移顶层）");
 });
 
 ok("identity: 只收 identity target + V2 rule 按准入升序；instructions 不再混入", () => {
