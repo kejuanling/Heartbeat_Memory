@@ -266,6 +266,15 @@ function readShadowRecords(file) {
 // 组合入口（S2-B 接线时一行调用）
 // ============================================================
 
+/** 从 v2 块提取观察样本（截断存 JSONL，控体积）：Current State 截取与 Relevant 检索的实际文本 */
+function extractSamples(v2Blocks) {
+  const get = (key, max) => {
+    const b = (Array.isArray(v2Blocks) ? v2Blocks : []).find(x => x && x.key === key);
+    return b && b.content ? String(b.content).slice(0, max) : "";
+  };
+  return { current_state: get("current_state", 200), relevant_memories: get("relevant_memories", 400) };
+}
+
 /**
  * 一次 shadow 观察：解析旧消息 → diff → 组 record（ts/sessionId/mapVersion/durationMs）→ 追加落盘。
  * @param p { sessionId, map?, oldMessages, v2Blocks, file, now? }
@@ -283,6 +292,7 @@ function observe(p) {
     v2: diff.v2,
     tokenDelta: diff.tokenDelta,
     overlaps: diff.overlaps,
+    samples: extractSamples(params.v2Blocks),
     durationMs: Date.now() - started,
   };
   appendShadowRecord(params.file, record);
@@ -306,11 +316,13 @@ function maybeObserve(o) {
   const p = o || {};
   if (p.flag !== true) return { skipped: true };
   try {
-    const built = buildContextBlocks(p.v2Input || {});
+    const input = p.v2Input || {};
+    const built = buildContextBlocks(input);
     const { record } = observe({
       sessionId: maskSessionId(p.sessionId),
       oldMessages: p.oldMessages,
       v2Blocks: built.blocks,
+      map: input.map, // chat 侧组装时挂在 v2Input 上（mapVersion 溯源）
       file: p.file,
       now: p.now,
     });

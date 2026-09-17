@@ -22,6 +22,7 @@ const fakeV2Input = {
   diaryEntries: [{ date: "2026-09-13", content: "她说最近在准备考试。" }],
   memoriesV2: [],
   query: "你好",
+  map: { version: 7, entries: [] }, // chat 侧组装挂在 v2Input 上，供 mapVersion 溯源
 };
 const fakeOldMessages = [
   { role: "system", content: "你是谢意行。" },
@@ -46,7 +47,7 @@ ok("flag on：调用 shadow，record 落盘，sessionId 已脱敏", () => {
   assert.strictEqual(r.record.old.length, 3, "旧侧块解析（system+pinned+timeline）");
   assert.ok(r.record.v2.some(b => b.key === "core_identity"), "v2 侧 Identity 块");
   assert.strictEqual(typeof r.record.tokenDelta.v2InjectTotal, "number");
-  assert.strictEqual(r.record.mapVersion, null, "maybeObserve 不读映射（chat 侧组装）");
+  assert.strictEqual(r.record.mapVersion, 7, "v2Input.map 透传为 mapVersion");
 });
 
 ok("shadow 异常：吞掉返回 error，不向主链抛出", () => {
