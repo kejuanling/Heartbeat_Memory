@@ -333,6 +333,48 @@ function maybeObserve(o) {
   }
 }
 
+// ============================================================
+// 记忆浮现清单（context_v2_floated.json，0918 拍板）
+// Relevant 命中（≥0.30）的原样写入时间线（（记忆浮现）+原文，mem_id 在元数据字段，
+// LLM 清洗自动剥离不进上下文），清单记录「本会话已浮现」的记忆 id，组装时 Relevant
+// 剥除防重复。浮现消息是特殊事件（isSpecialEvent 判定列表既有「（记忆浮现」前缀），
+// 被压缩保护永不被替换，故清单只增不抹、无「压缩后复注入」场景。
+// ============================================================
+const FLOAT_FILE = "context_v2_floated.json";
+
+function floatFilePath(dataDir) { return path.join(dataDir, FLOAT_FILE); }
+
+/** 读整张清单 { <sessionId>: [memId, ...] }；文件缺失/坏→空对象 */
+function readFloatMap(file) {
+  try {
+    const m = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (!m || typeof m !== "object" || Array.isArray(m)) return {};
+    return m;
+  } catch (e) { return {}; }
+}
+
+/** 某会话已浮现的记忆 id 数组 */
+function floatIdsForSession(file, sessionId) {
+  const map = readFloatMap(file);
+  const arr = map[String(sessionId || "default")];
+  return Array.isArray(arr) ? arr.map(String) : [];
+}
+
+/** 追加浮现 id（幂等去重），写回文件（自动建目录）。返回该会话更新后的全量数组 */
+function appendFloatIds(file, sessionId, memIds) {
+  const map = readFloatMap(file);
+  const key = String(sessionId || "default");
+  const arr = Array.isArray(map[key]) ? map[key].map(String) : [];
+  for (const id of memIds || []) {
+    const s = String(id);
+    if (s && !arr.includes(s)) arr.push(s);
+  }
+  map[key] = arr;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(map, null, 1), "utf8");
+  return arr;
+}
+
 module.exports = {
   TARGETS,
   validatePinnedMap,
@@ -345,4 +387,8 @@ module.exports = {
   observe,
   maskSessionId,
   maybeObserve,
+  floatFilePath,
+  readFloatMap,
+  floatIdsForSession,
+  appendFloatIds,
 };

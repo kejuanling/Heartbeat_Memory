@@ -190,6 +190,18 @@ ok("relevant: 空 query→空块；全部无关→空块省略", () => {
   assert.ok(!blockOf(buildContextBlocks({ memoriesV2: memFull, query: "xyzabc" }), "relevant_memories"), "全无交集省略");
 });
 
+ok("relevant: excludeIds 剥除（本会话已浮现时间线的记忆不再注入）", () => {
+  const mems = [
+    { id: "floated", text: "她对薄荷过敏", kind: "fact", status: "active", priority: 0.6, created_at: "2026-09-01T00:00:00+08:00" },
+    { id: "fresh", text: "她对薄荷轻度过敏史", kind: "fact", status: "active", priority: 0.6, created_at: "2026-09-02T00:00:00+08:00" },
+  ];
+  const res = buildContextBlocks({ memoriesV2: mems, query: "她对薄荷过敏吗", excludeIds: ["floated"] });
+  const b = blockOf(res, "relevant_memories");
+  assert.ok(b, "块存在");
+  assert.ok(!b.content.includes("她对薄荷过敏（"), "已浮现条目被剥除");
+  assert.ok(b.content.includes("轻度过敏史"), "其他条目正常");
+});
+
 ok("relevant: 排序 score desc → priority 打破并列（同分时 priority 高者前）", () => {
   const mems = [
     { id: "lo", text: "她喜欢喝咖啡", kind: "fact", status: "active", priority: 0.5, created_at: "2026-09-01T00:00:00+08:00" },

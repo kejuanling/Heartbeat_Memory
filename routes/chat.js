@@ -222,13 +222,14 @@ module.exports = function registerChatRoutes(app, deps) {
   function buildCtxV2ShadowInput(sessionId, llmMessages) {
     const dataDir = path.join(baseDir, 'data');
     let pinnedEntries = [];
+    let shadowMap = null;
     try {
-      const pinned = fsp.readJsonSync(path.join(dataDir, 'pinned.json'), []);
-      let byId = new Map();
+      const pinned = fsp.readJsonSync(path.join(dataDir, 'pinned.json'));
       try {
-        const map = fsp.readJsonSync(path.join(dataDir, 'context_v2_pinned_map.json'), null);
-        if (map && Array.isArray(map.entries)) byId = new Map(map.entries.map(e => [e.pinnedId, e.target]));
-      } catch (e) { /* 映射缺失/坏：全部按 retire 降级，shadow 仍可跑 */ }
+        shadowMap = fsp.readJsonSync(path.join(dataDir, 'context_v2_pinned_map.json')); // fs-extra 第二参是 options，不能传 default
+        if (!shadowMap || !Array.isArray(shadowMap.entries)) shadowMap = null;
+      } catch (e) { shadowMap = null; }
+      const byId = new Map((shadowMap && Array.isArray(shadowMap.entries) ? shadowMap.entries : []).map(e => [e.pinnedId, e.target]));
       pinnedEntries = (Array.isArray(pinned) ? pinned : []).map(p => ({
         id: p && p.id, title: p && p.title, content: p && p.content,
         target: byId.get(p && p.id) || 'retire',
@@ -242,7 +243,7 @@ module.exports = function registerChatRoutes(app, deps) {
       }));
     } catch (e) {}
     let memoriesV2 = [];
-    try { memoriesV2 = fsp.readJsonSync(path.join(dataDir, 'memory_v2.json'), []); } catch (e) {}
+    try { memoriesV2 = fsp.readJsonSync(path.join(dataDir, 'memory_v2.json')); } catch (e) {}
     let query = '';
     try {
       for (let i = llmMessages.length - 1; i >= 0; i--) {
@@ -250,7 +251,36 @@ module.exports = function registerChatRoutes(app, deps) {
         if (m && m.role === 'user') { query = normalizeContentToText(m.content) || ''; break; }
       }
     } catch (e) {}
-    return { pinnedEntries, timeline, diaryEntries: readDiaryEntriesForShadow(), memoriesV2, query };
+    // 记忆浮现清单：本会话已写入时间线的记忆 id，Relevant 检索剥除防重复（0918 拍板）
+    let excludeIds = [];
+    try {
+      excludeIds = ctxV2Shadow.floatIdsForSession(path.join(dataDir, 'context_v2_floated.json'), sessionId);
+    } catch (e) {}
+    // map 挂在 v2Input 上供 maybeObserve 取 mapVersion（builder 只读已知字段，多余键无害）
+    return { pinnedEntries, timeline, diaryEntries: readDiaryEntriesForShadow(), memoriesV2, query, excludeIds, map: shadowMap };
+  }
+
+  // Context V2 记忆浮现（0918 拍板）：Relevant 命中（≥0.30）的记忆原样写入时间线永久在场，
+  // 断绝「有据回复→支撑消失→编造倾向」的链条。挂 v2_enabled 总闸（正式启用才写，shadow 期只读）。
+  // 消息形态：role=developer、content=组装条目同款纯原文、float_id 为内部簿记字段
+  //（LLM 清洗自动剥离不进上下文）；hidden=true 前端不显示；压缩抹除清单由 addReplacement 侧负责。
+  function floatMemoriesToTimeline(sessionId, mems) {
+    const list = (Array.isArray(mems) ? mems : []).filter(m => m && m.id && String(m.text || '').trim());
+    if (!list.length) return 0;
+    appendMessages(sessionId, list.map(m => ({
+      role: 'developer',
+      content: strSafeEntry(m),
+      float_id: m.id,
+      hidden: true,
+    })), { silent: true });
+    ctxV2Shadow.appendFloatIds(path.join(baseDir, 'data', 'context_v2_floated.json'), sessionId, list.map(m => m.id));
+    return list.length;
+
+    function strSafeEntry(m) {
+      const t = String(m.text || '').trim();
+      const d = m.established_at && /^\d{4}-\d{2}-\d{2}/.test(String(m.established_at)) ? String(m.established_at).slice(0, 10) : (m.created_at && /^\d{4}-\d{2}-\d{2}/.test(String(m.created_at)) ? String(m.created_at).slice(0, 10) : null);
+      return d ? t + '（' + d + '）' : t;
+    }
   }
 
   app.get('/v1/models', async (req, reply) => {

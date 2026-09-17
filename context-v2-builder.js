@@ -38,7 +38,7 @@ const DEFAULT_CONFIG = {
   understandingCoreMinPriority: 0.8,
   momentsAnchorMax: 5,
   relevantTopK: 5,
-  relevantMinScore: 0.15,          // C9 冻结口径：宁缺毋滥
+  relevantMinScore: 0.30,          // 0918 用户拍板调高：命中即写入时间线永久在场，高门槛防膨胀
 };
 
 // ---- 块定义（顺序=组装顺序冻结）----
@@ -218,13 +218,16 @@ function buildContinuity(input, cfg) {
   return { lines, fixedIds: [] };
 }
 
-// [6] Possibly Relevant Memories：V2 检索（排除固定块已注入成员），score desc → priority desc → id；
-// minScore 宁缺毋滥（允许空）。条目带轻量日期后缀；超预算从尾部减条。
+// [6] Possibly Relevant Memories：V2 检索（排除固定块已注入成员＋input.excludeIds
+// ——本会话已写入时间线的浮现记忆，命中后由生产链路落时间线永久在场，不再重复注入），
+// score desc → priority desc → id；minScore 宁缺毋滥（允许空）。条目带轻量日期后缀；超预算从尾部减条。
 function buildRelevant(input, cfg, fixedIdSet) {
   const q = strSafe(input.query);
   if (!q) return { lines: [], fixedIds: [] };
+  const excluded = new Set((Array.isArray(input.excludeIds) ? input.excludeIds : []).map(String));
   const pool = (Array.isArray(input.memoriesV2) ? input.memoriesV2 : [])
-    .filter(m => m && m.status === "active" && m.id != null && !fixedIdSet.has(String(m.id)));
+    .filter(m => m && m.status === "active" && m.id != null
+      && !fixedIdSet.has(String(m.id)) && !excluded.has(String(m.id)));
   if (!pool.length) return { lines: [], fixedIds: [] };
   const qt = tokenize(q);
   const scored = [];
