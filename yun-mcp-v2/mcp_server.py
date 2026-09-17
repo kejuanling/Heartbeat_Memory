@@ -7,9 +7,13 @@
 - 提供：列目录 / 读文件 / 写文件 / 搜索 / 文件信息 / 执行命令 / 服务器状态 / git 只读操作
 - 文件读写受 config.json 白名单限制（写操作只允许项目目录）
 - 命令执行改为本地 subprocess，不再 SSH 绕回自己
+- 双协议对外：streamable-http（/mcp 标准 + /sse 兼容别名）+ 传统 SSE（/legacy-sse + /messages/）
+- 全路径鉴权（X-API-Key / Bearer / Cookie / URL 参数 / 会话 ID）+ CORS，见 AuthMiddleware
 """
 
+import contextlib
 import fnmatch
+import hmac
 import json
 import os
 import re
@@ -390,10 +394,34 @@ def git_diff(path: str, staged: bool = False) -> str:
     return _git_run(path, args)
 
 
-# ===================== 鉴权中间件 =====================
+# ===================== 鉴权与 CORS 中间件 =====================
+
+
+def _cors_headers(scope) -> list:
+    """按请求 Origin 回 CORS 头（无 Origin 则 *），供浏览器类 agent 直连。"""
+    origin = None
+    for raw_k, raw_v in scope.get("headers", []):
+        if raw_k.decode().lower() == "origin":
+            origin = raw_v.decode()
+            break
+    return [
+        (b"access-control-allow-origin", (origin or "*").encode()),
+        (b"access-control-allow-methods", b"GET, POST, DELETE, OPTIONS"),
+        (b"access-control-allow-headers",
+         b"content-type, accept, x-api-key, authorization, mcp-session-id, last-event-id"),
+        (b"access-control-expose-headers", b"mcp-session-id"),
+        (b"access-control-max-age", b"86400"),
+        (b"vary", b"Origin"),
+    ]
 
 
 class AuthMiddleware:
+    """最外层中间件：CORS 预检放行 + 业务路径统一鉴权 + 响应补 CORS 头。
+
+    鉴权任选其一：X-API-Key 头 / Authorization: Bearer / Cookie X-API-Key / URL 参数 X-API-Key；
+    带 mcp-session-id 头的请求视为 initialize 时已通过鉴权建立的会话，直接放行。
+    """
+
     def __init__(self, app):
         self.app = app
 
@@ -401,60 +429,75 @@ class AuthMiddleware:
     def _extract_key(scope):
         headers = dict(scope.get("headers", []))
         for raw_k, raw_v in headers.items():
-            if raw_k.decode().lower() == "x-api-key":
+            k = raw_k.decode().lower()
+            if k == "x-api-key":
                 return raw_v.decode()
+            if k == "authorization":
+                v = raw_v.decode().strip()
+                return v[7:].strip() if v.lower().startswith("bearer ") else v
         cookie_header = headers.get(b"cookie", b"").decode()
         for pair in cookie_header.split(";"):
             if "=" in pair:
-                k, v = pair.split("=", 1)
-                if k.strip() == "X-API-Key":
-                    return v.strip()
-        qs = scope.get("query_string", b"").decode()
-        params = parse_qs(qs)
+                ck, cv = pair.split("=", 1)
+                if ck.strip() == "X-API-Key":
+                    return cv.strip()
+        params = parse_qs(scope.get("query_string", b"").decode())
         return (params.get("X-API-Key") or [None])[0]
 
+    def _authorized(self, scope) -> bool:
+        headers = dict(scope.get("headers", []))
+        if any(k.decode().lower() == "mcp-session-id" and v for k, v in headers.items()):
+            return True
+        key = self._extract_key(scope)
+        if not isinstance(key, str):
+            return False
+        try:
+            return hmac.compare_digest(key, API_KEY)
+        except TypeError:
+            return False
+
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http":
-            path = scope.get("path", "")
-            method = scope.get("method", "")
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
-            # 健康检查放行
-            if path == "/health":
-                pass
-            # 传统 SSE 的消息端点需要鉴权
-            elif path.startswith("/messages/"):
-                if self._extract_key(scope) != API_KEY:
-                    body = b'{"error":"Unauthorized"}'
-                    await send({
-                        "type": "http.response.start", "status": 401,
-                        "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())],
-                    })
-                    await send({"type": "http.response.body", "body": body})
-                    return
-            # Streamable HTTP 的 /sse 端点
-            elif path == "/sse":
-                if method == "POST":
-                    pass
-                else:
-                    qs = scope.get("query_string", b"").decode()
-                    params = parse_qs(qs)
-                    if "session_id" not in params and self._extract_key(scope) != API_KEY:
-                        body = b'{"error":"Unauthorized"}'
-                        await send({
-                            "type": "http.response.start", "status": 401,
-                            "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())],
-                        })
-                        await send({"type": "http.response.body", "body": body})
-                        return
+        path = scope.get("path", "")
+        method = scope.get("method", "")
 
-        await self.app(scope, receive, send)
+        # CORS 预检不带凭据，直接放行
+        if method == "OPTIONS":
+            headers = _cors_headers(scope) + [(b"content-length", b"0")]
+            await send({"type": "http.response.start", "status": 204, "headers": headers})
+            await send({"type": "http.response.body", "body": b""})
+            return
+
+        # 除 /health 外所有路径都要鉴权（堵住此前 POST /sse 匿名直进的洞）
+        if path != "/health" and not self._authorized(scope):
+            body = b'{"error":"Unauthorized"}'
+            headers = [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+            ] + _cors_headers(scope)
+            await send({"type": "http.response.start", "status": 401, "headers": headers})
+            await send({"type": "http.response.body", "body": body})
+            return
+
+        async def send_with_cors(event):
+            if event["type"] == "http.response.start":
+                event = dict(event)
+                event["headers"] = list(event.get("headers", [])) + _cors_headers(scope)
+            await send(event)
+
+        await self.app(scope, receive, send_with_cors)
 
 
 # ===================== 路由与启动 =====================
 
 if __name__ == "__main__":
-    http_app = mcp.http_app(path="/sse", transport="streamable-http")
-    sse_app = create_sse_app(mcp, sse_path="/sse", message_path="/messages/")
+    # streamable-http：标准路径 /mcp（/sse 作兼容别名，由 RouterApp 改写路径）
+    http_app = mcp.http_app(path="/mcp", transport="streamable-http")
+    # 传统 SSE（2024-11-05 协议客户端用）：GET /legacy-sse 建立事件流，POST /messages/ 收消息
+    sse_app = create_sse_app(mcp, sse_path="/legacy-sse", message_path="/messages/")
 
     class RouterApp:
         def __init__(self, http_app, sse_app):
@@ -462,31 +505,69 @@ if __name__ == "__main__":
             self.sse_app = sse_app
 
         async def __call__(self, scope, receive, send):
-            if scope["type"] == "lifespan":
-                await self.http_app(scope, receive, send)
+            if scope["type"] != "http":
                 return
-            if scope["type"] == "http":
-                path = scope.get("path", "")
+            path = scope.get("path", "")
+            if path in ("/mcp", "/sse"):
                 if path == "/sse":
-                    await self.http_app(scope, receive, send)
-                elif path.startswith("/messages/"):
-                    await self.sse_app(scope, receive, send)
-                elif path == "/health":
-                    body = b'{"status":"ok"}'
-                    await send({
-                        "type": "http.response.start", "status": 200,
-                        "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())],
-                    })
-                    await send({"type": "http.response.body", "body": body})
-                else:
-                    body = b'{"error":"Not Found"}'
-                    await send({
-                        "type": "http.response.start", "status": 404,
-                        "headers": [(b"content-type", b"application/json")],
-                    })
-                    await send({"type": "http.response.body", "body": body})
+                    scope = dict(scope)
+                    scope["path"] = "/mcp"
+                await self.http_app(scope, receive, send)
+            elif path == "/legacy-sse" or path.startswith("/messages/"):
+                await self.sse_app(scope, receive, send)
+            elif path == "/health":
+                body = b'{"status":"ok"}'
+                await send({
+                    "type": "http.response.start", "status": 200,
+                    "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())],
+                })
+                await send({"type": "http.response.body", "body": body})
+            else:
+                body = b'{"error":"Not Found"}'
+                await send({
+                    "type": "http.response.start", "status": 404,
+                    "headers": [(b"content-type", b"application/json")],
+                })
+                await send({"type": "http.response.body", "body": body})
+
+    class LifespanApp:
+        """合并两个子应用的 lifespan（各拉起各的会话管理器），请求全部转给 router。"""
+
+        def __init__(self, router):
+            self.router = router
+            self._stack = None
+
+        async def __call__(self, scope, receive, send):
+            if scope["type"] == "lifespan":
+                await self._lifespan(receive, send)
+                return
+            await self.router(scope, receive, send)
+
+        async def _lifespan(self, receive, send):
+            while True:
+                message = await receive()
+                if message["type"] == "lifespan.startup":
+                    break
+            try:
+                stack = contextlib.AsyncExitStack()
+                await stack.enter_async_context(http_app.lifespan(http_app))
+                await stack.enter_async_context(sse_app.lifespan(sse_app))
+                self._stack = stack
+                await send({"type": "lifespan.startup.complete"})
+            except Exception as e:
+                await send({"type": "lifespan.startup.failed", "message": str(e)})
+                return
+            while True:
+                message = await receive()
+                if message["type"] == "lifespan.shutdown":
+                    break
+            try:
+                await self._stack.aclose()
+                await send({"type": "lifespan.shutdown.complete"})
+            except Exception as e:
+                await send({"type": "lifespan.shutdown.failed", "message": str(e)})
 
     router = RouterApp(http_app, sse_app)
-    app = AuthMiddleware(router)
+    app = AuthMiddleware(LifespanApp(router))
 
     uvicorn.run(app, host="0.0.0.0", port=9010, log_level="info")
