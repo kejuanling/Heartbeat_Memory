@@ -21,7 +21,8 @@
 
 const fs = require("fs");
 const path = require("path");
-const { estimateTokens } = require("./context-v2-builder");
+const crypto = require("crypto");
+const { estimateTokens, buildContextBlocks } = require("./context-v2-builder");
 
 const TARGETS = ["identity", "moments_anchor", "retire"];
 
@@ -288,6 +289,38 @@ function observe(p) {
   return { record, file: params.file };
 }
 
+/** sessionId 脱敏：md5 前 8 位（记录不落原文会话 id） */
+function maskSessionId(sessionId) {
+  const s = String(sessionId == null ? "" : sessionId);
+  if (!s) return "s_none";
+  return "s_" + crypto.createHash("md5").update(s).digest("hex").slice(0, 8);
+}
+
+/**
+ * 接线包装（chat.js S2-B1 调用点）：flag 关=零开销直返（不读数据不落盘）；
+ * flag 开=构建 V2 块→observe 落盘；任何异常只记 error 返回，绝不向主聊天抛出。
+ * @param o { flag, sessionId, oldMessages, v2Input, file, now? }
+ * @returns {skipped:true} | {record, file} | {error}
+ */
+function maybeObserve(o) {
+  const p = o || {};
+  if (p.flag !== true) return { skipped: true };
+  try {
+    const built = buildContextBlocks(p.v2Input || {});
+    const { record } = observe({
+      sessionId: maskSessionId(p.sessionId),
+      oldMessages: p.oldMessages,
+      v2Blocks: built.blocks,
+      file: p.file,
+      now: p.now,
+    });
+    return { record, file: p.file };
+  } catch (e) {
+    console.error("[ctx-v2-shadow] shadow 失败（不影响主聊天）:", e && e.message);
+    return { error: e && e.message };
+  }
+}
+
 module.exports = {
   TARGETS,
   validatePinnedMap,
@@ -298,4 +331,6 @@ module.exports = {
   appendShadowRecord,
   readShadowRecords,
   observe,
+  maskSessionId,
+  maybeObserve,
 };

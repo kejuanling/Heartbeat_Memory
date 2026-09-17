@@ -15,6 +15,7 @@ const { formatDateTimeInTimeZone } = require('../time_utils');
 const { parsePushEcho, parseWakeEcho } = require('../utils/push');
 // 对话侧/唤醒侧共用上下文加工函数（2026-09-15 唤醒并入网关）
 const chatCtx = require('./chat-context');
+const ctxV2Shadow = require('../context-v2-shadow'); // Context V2 Shadow 观察（C10 S2-B1，只记录不改生产）
 const { mapMessagesForProvider } = require('../lib/role-mapper');
 
 // 推送回显（成功推送的「刚刚给 X 发了 X 推送：」记录）需要在聊天页显示给用户看，
@@ -197,6 +198,60 @@ module.exports = function registerChatRoutes(app, deps) {
 
   // 日记共享模块（2026-09-16）：日常聊天 [DIARY] 提取与保存（与唤醒共用 lib/diary.js）
   const diaryLib = require('../lib/diary')({ baseDir, readEnvValue });
+
+  // ---- Context V2 Shadow 输入组装（C10 S2-B1，2026-09-17）：全部只读，异常由调用点 try/catch 兜底 ----
+  // 已知简化（观察口径，S3 观察期校准）：日记不做隐藏清单过滤、不做会话创建日边界过滤。
+  // 未进 context_v2_pinned_map.json 的 pinned 条目按 retire 处理（不进任何注入块，报告可见）。
+  function readDiaryEntriesForShadow() {
+    const out = [];
+    const scan = (root, depth) => {
+      let entries = [];
+      try { entries = fsp.readdirSync(root, { withFileTypes: true }); } catch (e) { return; }
+      for (const ent of entries) {
+        if (ent.isFile() && /^\d{4}-\d{2}-\d{2}\.md$/.test(ent.name)) {
+          try { out.push({ date: ent.name.slice(0, 10), content: fsp.readFileSync(path.join(root, ent.name), 'utf8') }); } catch (e) {}
+        } else if (ent.isDirectory() && depth < 1) {
+          scan(path.join(root, ent.name), depth + 1); // 会话子目录收一层
+        }
+      }
+    };
+    scan(path.join(baseDir, 'diary'), 0);
+    return out.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  }
+
+  function buildCtxV2ShadowInput(sessionId, llmMessages) {
+    const dataDir = path.join(baseDir, 'data');
+    let pinnedEntries = [];
+    try {
+      const pinned = fsp.readJsonSync(path.join(dataDir, 'pinned.json'), []);
+      let byId = new Map();
+      try {
+        const map = fsp.readJsonSync(path.join(dataDir, 'context_v2_pinned_map.json'), null);
+        if (map && Array.isArray(map.entries)) byId = new Map(map.entries.map(e => [e.pinnedId, e.target]));
+      } catch (e) { /* 映射缺失/坏：全部按 retire 降级，shadow 仍可跑 */ }
+      pinnedEntries = (Array.isArray(pinned) ? pinned : []).map(p => ({
+        id: p && p.id, title: p && p.title, content: p && p.content,
+        target: byId.get(p && p.id) || 'retire',
+      }));
+    } catch (e) {}
+    let timeline = [];
+    try {
+      timeline = (loadTimeline(sessionId) || []).map(m => ({
+        role: m && m.role,
+        content: typeof (m && m.content) === 'string' ? m.content : '',
+      }));
+    } catch (e) {}
+    let memoriesV2 = [];
+    try { memoriesV2 = fsp.readJsonSync(path.join(dataDir, 'memory_v2.json'), []); } catch (e) {}
+    let query = '';
+    try {
+      for (let i = llmMessages.length - 1; i >= 0; i--) {
+        const m = llmMessages[i];
+        if (m && m.role === 'user') { query = normalizeContentToText(m.content) || ''; break; }
+      }
+    } catch (e) {}
+    return { pinnedEntries, timeline, diaryEntries: readDiaryEntriesForShadow(), memoriesV2, query };
+  }
 
   app.get('/v1/models', async (req, reply) => {
     reply.send({
@@ -840,6 +895,21 @@ app.post("/v1/chat/completions", async (req, reply) => {
     // ========================
     if (isMainChat) {
       llmMessages = buildConversation(sessionId);
+      // ---- Context V2 Shadow 观察（C10 S2-B1，2026-09-17）：只记录不改变生产回答 ----
+      // ctx_v2_shadow=false（memory_v2_config.json）时零行为差异；shadow 全程只读 llmMessages，
+      // maybeObserve 内部 try/catch，任何失败只记 error 不影响主聊天。
+      try {
+        const shadowCfg = await fsp.readJson(path.join(baseDir, 'data', 'memory_v2_config.json')).catch(() => ({}));
+        if (shadowCfg && shadowCfg.ctx_v2_shadow === true) {
+          ctxV2Shadow.maybeObserve({
+            flag: true,
+            sessionId,
+            oldMessages: llmMessages,
+            v2Input: buildCtxV2ShadowInput(sessionId, llmMessages),
+            file: ctxV2Shadow.buildShadowPath(path.join(baseDir, 'data', 'context_shadow'), new Date()),
+          });
+        }
+      } catch (e) { console.error('[ctx-v2-shadow] 接线层失败（不影响主聊天）:', e && e.message); }
     }
 
     // 内容->时间 映射：容量提醒建议段反查时间用。2026-09-15 上传瘦身配套：改从服务端时间线构建
