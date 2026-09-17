@@ -7,7 +7,7 @@
 - 提供：列目录 / 读文件 / 写文件 / 搜索 / 文件信息 / 执行命令 / 服务器状态 / git 只读操作
 - 文件读写受 config.json 白名单限制（写操作只允许项目目录）
 - 命令执行改为本地 subprocess，不再 SSH 绕回自己
-- 双协议对外：streamable-http（/mcp 标准 + /sse 兼容别名）+ 传统 SSE（/legacy-sse + /messages/）
+- 双协议对外：streamable-http（/mcp 标准）+ 传统 SSE（/sse + /messages/，/legacy-sse 为兼容别名）
 - 全路径鉴权（X-API-Key / Bearer / Cookie / URL 参数 / 会话 ID）+ CORS，见 AuthMiddleware
 """
 
@@ -494,10 +494,10 @@ class AuthMiddleware:
 # ===================== 路由与启动 =====================
 
 if __name__ == "__main__":
-    # streamable-http：标准路径 /mcp（/sse 作兼容别名，由 RouterApp 改写路径）
+    # streamable-http：标准路径 /mcp
     http_app = mcp.http_app(path="/mcp", transport="streamable-http")
-    # 传统 SSE（2024-11-05 协议客户端用）：GET /legacy-sse 建立事件流，POST /messages/ 收消息
-    sse_app = create_sse_app(mcp, sse_path="/legacy-sse", message_path="/messages/")
+    # 传统 SSE（2024-11-05 协议客户端用）：GET /sse 建立事件流，POST /messages/ 收消息（/legacy-sse 为兼容别名）
+    sse_app = create_sse_app(mcp, sse_path="/sse", message_path="/messages/")
 
     class RouterApp:
         def __init__(self, http_app, sse_app):
@@ -508,12 +508,12 @@ if __name__ == "__main__":
             if scope["type"] != "http":
                 return
             path = scope.get("path", "")
-            if path in ("/mcp", "/sse"):
-                if path == "/sse":
-                    scope = dict(scope)
-                    scope["path"] = "/mcp"
+            if path == "/mcp":
                 await self.http_app(scope, receive, send)
-            elif path == "/legacy-sse" or path.startswith("/messages/"):
+            elif path in ("/sse", "/legacy-sse") or path.startswith("/messages/"):
+                if path == "/legacy-sse":
+                    scope = dict(scope)
+                    scope["path"] = "/sse"
                 await self.sse_app(scope, receive, send)
             elif path == "/health":
                 body = b'{"status":"ok"}'
