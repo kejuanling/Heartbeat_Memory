@@ -48,7 +48,7 @@ const BLOCK_DEFS = [
   { key: "core_identity", title: "Core Identity" },
   { key: "long_term_understanding", title: "Long-term Understanding" },
   { key: "meaningful_moments", title: "Meaningful Moments" },
-  { key: "conversation_continuity", title: "Conversation Continuity" },
+  { key: "conversation_continuity", title: "Earlier Days" },
   { key: "relevant_memories", title: "Possibly Relevant Memories" },
 ];
 
@@ -225,7 +225,7 @@ function buildMoments(input, cfg) {
   return { lines, fixedIds };
 }
 
-// [5] Conversation Continuity（Earlier Days）：最近 N 篇日记全量（N=diaryCount，
+// [5] Earlier Days：最近 N 篇日记全量（N=diaryCount，
 // 生产同源管理台 cross_inject_diary_count），按时间升序；预算装不下的篇从最旧丢。
 // 质量优先（0918 拍板）：日记是对抗压缩块劣化的原话保真通道，全量注入。
 function buildContinuity(input, cfg) {
