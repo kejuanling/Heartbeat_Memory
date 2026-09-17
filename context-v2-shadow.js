@@ -24,7 +24,7 @@ const path = require("path");
 const crypto = require("crypto");
 const { estimateTokens, buildContextBlocks } = require("./context-v2-builder");
 
-const TARGETS = ["identity", "moments_anchor", "retire"];
+const TARGETS = ["identity", "moments_anchor", "retire", "instructions"];
 
 // ============================================================
 // pinned 映射校验
