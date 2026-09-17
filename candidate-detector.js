@@ -64,9 +64,9 @@ function detect(input = {}) {
   if (source === "diary") return out(false, "diary_only", "unknown", 0.7, ["叙事源直达 Diary 层"]);
   if (source === "summary") return out(false, "history_only", "unknown", 0.7, ["压缩摘要直达 Compressed History 层"]);
 
-  // 1) 人工显式标记：直接采信（人工即隐式准入，validator 仍会复检）
-  if (source === "manual" && input.explicitKind && KIND_GUESSES.includes(input.explicitKind)) {
-    return out(true, input.explicitKind, input.explicitSubject || guessSubject(text, source), 0.95, ["人工显式标记 kind=" + input.explicitKind]);
+  // 1) 人工/入口显式标记：直接采信（显式判断即隐式准入，validator 仍会复检）
+  if (input.explicitKind && KIND_GUESSES.includes(input.explicitKind)) {
+    return out(true, input.explicitKind, input.explicitSubject || guessSubject(text, source), 0.95, ["入口显式标记 kind=" + input.explicitKind]);
   }
 
   // 2) 引用：明确要求保存原话 / 引文结构
