@@ -1155,6 +1155,10 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .alert-dot.error{background:#d65a4f}
 .alert-dot.ok{background:#7cb87c}
 .alert-sec{font-size:11px;letter-spacing:1px;color:var(--ink3);font-weight:600;padding:9px 2px 3px;border-top:1px dashed var(--line);margin-top:4px}
+.alerts-scroll{max-height:240px;overflow-y:auto;padding-right:4px;scrollbar-width:thin}
+.alerts-scroll::-webkit-scrollbar{width:6px}
+.alerts-scroll::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:3px}
+.alerts-scroll::-webkit-scrollbar-track{background:transparent}
 .alert-t{color:var(--ink);font-weight:600}
 .alert-d{color:var(--ink3);font-size:11px;margin-top:2px}
 #navDrawer .set-panel{margin:8px 10px 0;background:var(--accent-faint)}
@@ -7866,7 +7870,7 @@ function renderAlerts(body){
         return '<div class="alert-item"><span class="alert-dot '+(s.ok?'ok':'error')+'"></span><span><div class="alert-t">'+esc(s.label||s.name)+'</div><div class="alert-d">'+(s.ok?'运行正常':'未运行 · '+esc(s.status||''))+'</div></span></div>';
       }).join('');
     }
-    body.innerHTML=html;
+    body.innerHTML='<div class="alerts-scroll">'+html+'</div>';
   }).catch(function(e){ body.innerHTML='<div class="alerts-empty">加载失败</div>'; });
 }
 
