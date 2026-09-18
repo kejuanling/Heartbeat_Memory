@@ -1076,7 +1076,6 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .session-item .s-title{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .session-item .s-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;display:inline-block;margin-right:5px}
 .session-item .s-dot.lock{background:var(--warn)}
-.session-item .s-dot.tp{background:var(--info)}
 .session-item .s-name .s-icon{display:inline-flex;align-items:center;justify-content:center;border:none;background:none;color:var(--ink3);cursor:pointer;padding:3px;border-radius:6px;flex-shrink:0;transition:all .12s}
 .session-item .s-name .s-icon:hover{color:var(--accent-deep);background:var(--accent-faint)}
 .session-item .s-name .s-icon.pin.on{color:var(--accent)}
@@ -1263,7 +1262,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .adm-imp{width:60px;height:5px;border-radius:3px;background:var(--accent-faint);overflow:hidden;flex-shrink:0}
 .adm-imp i{display:block;height:100%;background:var(--accent-grad)}
 /* 会话搜索 */
-.session-search{display:flex;align-items:center;gap:6px;margin:0 14px 8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--chrome-item,rgba(255,255,255,.7))}
+.session-search{display:flex;align-items:center;gap:6px;margin:10px 14px 8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--chrome-item,rgba(255,255,255,.7))}
 .session-search input{flex:1;min-width:0;border:none;outline:none;background:transparent;font-size:13px;color:var(--ink);font-family:inherit}
 .session-search .si{color:var(--ink3);font-size:14px;flex-shrink:0}
 .sr-score{font-size:10px;color:var(--ink3);margin-left:auto;padding:1px 5px;background:var(--accent-faint);border-radius:4px}
@@ -1446,12 +1445,11 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
   <div class="drawer-backdrop" id="sessionBackdrop"></div>
   <div class="drawer-panel">
     <div class="drawer-head">
-      <span>会话</span>
+      <span>会话列表</span>
       <button class="drawer-close" id="sessionClose"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>
     <div class="drawer-actions">
       <button class="drawer-btn" id="newSessionBtn">＋ 新建</button>
-      <button class="drawer-btn ghost" id="exportSessionBtn">导出</button>
       <button class="drawer-btn ghost" id="importSessionBtn">导入</button>
       <button class="drawer-btn ghost" id="mergeSessionBtn" title="选择多个会话合并为一个新会话（原会话保留）">合并</button>
       <button class="drawer-btn ghost" id="mergeCancelBtn" style="display:none">取消</button>
@@ -2017,7 +2015,7 @@ let _callAfterAI=false;   // 通话页文字发送后，AI 回复完成时朗读
 let _callPending=false;    // 已发出"来电"，待 AI 用 <phone> 表态接/不接
 let msgs=[];
 let selectMode=false, selectSet=new Set(), actIdx=-1;
-// 多会话：会话状态（名单/锁定唤醒/第三方专用）由 SessionStore 统一管理
+// 多会话：会话状态（名单/锁定唤醒）由 SessionStore 统一管理
 
 function loadCfg(){
   try{
@@ -6399,7 +6397,7 @@ function initSettingsDrawer(){
   if(sessPanel && !document.getElementById("settingsOpenBtn")){
     var btn=document.createElement("button");
     btn.type="button"; btn.className="session-settings-btn"; btn.id="settingsOpenBtn";
-    btn.innerHTML='<span class="mi"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.12-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.12 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.01A1.7 1.7 0 0 0 9.03 4.1V4a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.12z"/></svg></span><span><span class="mt">设置</span><div class="md">偏好 · MCP · 语音 · 主题</div></span><span class="mrow">›</span>';
+    btn.innerHTML='<span class="mi"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.12-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.12 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.01A1.7 1.7 0 0 0 9.03 4.1V4a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.12z"/></svg></span><span><span class="mt">设置</span></span><span class="mrow">›</span>';
     btn.addEventListener("click",openSettingsDrawer);
     sessPanel.appendChild(btn);
   }
@@ -6576,11 +6574,6 @@ async function loadSessions(){
     const j2=await r2.json();
     if(j2&&Array.isArray(j2.sessions)){SessionStore.setWakeLocked(j2.sessions);renderSessionList();}
   }catch(e){console.warn("loadSessions wake-locked fail:",e.message);}
-  try{
-    const r3=await fetch("/v1/sessions/third-party",{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
-    const j3=await r3.json();
-    if(j3&&j3.ok){SessionStore.setThirdPartySid(j3.session_id||null);renderSessionList();}
-  }catch(e){console.warn("loadSessions third-party fail:",e.message);}
 }
 function renderSessionList(){
   const el=document.getElementById("sessionList");
@@ -6614,7 +6607,7 @@ function renderSessionList(){
     if(!name)name=s.name||(s.id==="default"?"主会话":s.id);
     const pinned=isPinned(s.id);
     const locked=isLocked(s.id);
-    const meta=(locked?'<span class="s-dot lock" title="锁定唤醒"></span>':'')+(SessionStore.getThirdPartySid()===s.id?'<span class="s-dot tp" title="第三方专用"></span>':'')+escapeHtml((s.real!=null?(""+s.real+" 条"):"")+(s.last_time?(" · "+fmtTime(new Date(s.last_time))):""));
+    const meta=(locked?'<span class="s-dot lock" title="锁定唤醒"></span>':'')+escapeHtml((s.real!=null?(""+s.real+" 条"):"")+(s.last_time?(" · "+fmtTime(new Date(s.last_time))):""));
     const checkHtml=merging?('<span class="s-check'+(mergeSel.has(s.id)?' on':'')+'">'+(mergeSel.has(s.id)?'✓':'')+'</span>'):'';
     item.innerHTML='<div class="s-name">'+checkHtml+'<button class="s-icon pin'+(pinned?' on':'')+'" data-op="pin" data-id="'+escapeHtml(s.id)+'" title="'+(pinned?"取消置顶":"置顶")+'"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/></svg></button>'+'<span class="s-title" title="'+escapeHtml(name)+'">'+escapeHtml(name)+'</span><button class="s-icon ren" data-op="rename" data-id="'+escapeHtml(s.id)+'" title="改名"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/><path d="m15 5 4 4"/></svg></button></div>'+
       '<div class="s-ops"><span class="s-meta">'+meta+'</span><button class="s-more" title="更多操作" aria-label="更多操作"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button></div>';
@@ -6635,7 +6628,7 @@ function renderSessionList(){
   updateMergeBar();
 }
 
-// ===== 会话「…」菜单（压缩/导出/第三方/人设 收进三个点） =====
+// ===== 会话「…」菜单（压缩/导出/人设 收进三个点） =====
 let _sessMenuEl=null;
 let _sessMenuSeq=0;   // 每次打开递增：异步补勾回来时对不上号就丢弃，防止勾到另一个会话的菜单
 function ensureSessMenu(){
@@ -6655,16 +6648,14 @@ function ensureSessMenu(){
 function closeSessMenu(){ if(_sessMenuEl) _sessMenuEl.classList.add("hidden"); }
 function openSessMenu(sid, anchorEl){
   const el=ensureSessMenu();
-  const tpOn=(SessionStore.getThirdPartySid()===sid);
   const lockOn=(SessionStore.getWakeLocked()||[]).indexOf(sid)>=0;
   el.innerHTML='<button class="sess-menu-item" data-op="cc">压缩</button>'
     +'<button class="sess-menu-item" data-op="export">导出</button>'
-    +'<button class="sess-menu-item'+(tpOn?' on':'')+'" data-op="thirdparty">第三方</button>'
-    +'<button class="sess-menu-item'+(lockOn?' on':'')+'" data-op="lock">锁定唤醒'+(lockOn?' ✓':'')+'</button>'
-    +'<button class="sess-menu-item" data-op="persona">人设</button>'
+    +'<button class="sess-menu-item'+(lockOn?' on':'')+'" data-op="lock">唤醒'+(lockOn?' ✓':'')+'</button>'
+    +'<button class="sess-menu-item" data-op="persona">设定</button>'
     +'<button class="sess-menu-item" data-op="cross">跨窗口</button>'
     +'<button class="sess-menu-item" data-op="provider">模型</button>'
-    +'<button class="sess-menu-item danger" data-op="del">删除会话</button>';
+    +'<button class="sess-menu-item danger" data-op="del">归档</button>';
   Array.prototype.forEach.call(el.querySelectorAll(".sess-menu-item"),function(btn){
     btn.addEventListener("click",function(e){
       e.stopPropagation();
@@ -6672,7 +6663,6 @@ function openSessMenu(sid, anchorEl){
       closeSessMenu();
       if(op==="cc")openSessionCc(sid);
       else if(op==="export")exportSession(sid);
-      else if(op==="thirdparty")setThirdPartySession(sid);
       else if(op==="persona")openSessionPersona(sid);
       else if(op==="cross")openSessionCrossInject(sid);
       else if(op==="provider")openSessionProvider(sid);
@@ -6768,7 +6758,7 @@ async function openSessionProvider(sid){
   try{
     const r2=await fetch("/heartbeat/admin/ai-providers",{headers: mcpAuthHeaders(), credentials:"include"});
     const j2=await r2.json();
-    if(j2&&Array.isArray(j2.providers)) providers=j2.providers.filter(function(p){ return p.enabled!==false && (p.api_url||p.base_url) && p.api_key; });
+    if(j2&&Array.isArray(j2.providers)) providers=j2.providers.filter(function(p){ return p.enabled!==false && (p.api_url||p.base_url) && (p.api_key || p.api_key_set===true); });
   }catch(e){}
   let opts='<option value="">默认（跟随全局）</option>';
   if(providers.length){
@@ -6813,23 +6803,6 @@ async function saveSessionProvider(sid, providerId, modelName, nm){
   }catch(e){ showToast("保存失败:"+(e&&e.message||"")); return false; }
 }
 
-// ===== 第三方专用会话 =====
-// 设置/取消某个会话为「第三方专用」：不带 session_id 的第三方客户端(如 Kelivo)
-// 连网关时，对话落到这个会话，自建前端(chat.html)能看到。存到后端 data/config.json。
-async function setThirdPartySession(id){
-  if(id==="default"){ showToast("主会话不能设为第三方专用"); return; }
-  const isCur = (SessionStore.getThirdPartySid()===id);
-  const action = isCur ? "取消" : "设为";
-  if(!confirm("确定将「"+escapeHtml(sessionDisplayName(id))+"」"+action+"为第三方专用会话？\n\n设为后：不带 session_id 的第三方客户端(如 Kelivo)发来的对话都会汇聚到这个会话，不会混进主会话。"))return;
-  try{
-    const r=await fetch("/v1/sessions/third-party",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({session_id:isCur?"":id})});
-    const j=await r.json().catch(()=>({}));
-    if(!r.ok){ showToast(j.error||"设置失败"); return; }
-    SessionStore.setThirdPartySid(j.session_id||null);
-    renderSessionList();
-    showToast(isCur?"已取消第三方专用":"已设为第三方专用会话");
-  }catch(e){ showToast("设置失败:"+(e&&e.message||"")); }
-}
 // ===== 会话合并（原会话保留，多选后合成新会话）=====
 let mergeMode=false, mergeSel=new Set();
 function toggleMergeMode(){
@@ -7450,7 +7423,7 @@ function clearLocalCache(){
 document.getElementById("importFile").addEventListener("change",e=>{const f=e.target.files[0];if(f)importSession(f);e.target.value="";});
 
 /* ================= 初始化 ================= */
-try{applyHeader();}catch(e){}
+applyHeader();
 /* ---- 密码登录（管理台账号密码） ---- */
 const loginMask=document.getElementById("loginMask");
 const loginUser=document.getElementById("loginUser");
