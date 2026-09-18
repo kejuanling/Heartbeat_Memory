@@ -3287,7 +3287,21 @@ app.get("/internal/context-search", async (req, reply) => {
     const allSessions = req.query.all_sessions === "1" || req.query.all_sessions === "true";
     const limit = Number(req.query.limit) || undefined;
     const threshold = req.query.threshold !== undefined ? Number(req.query.threshold) : undefined;
-    reply.send(await contextReplacements.searchContextEnhanced(req.query.q, { mode, allSessions, limit, threshold }));
+    let q = req.query.q;
+    const useLatestUser = req.query.use_latest_user === "1";
+    if (useLatestUser && String(q || "").trim() === "") {
+      // MCP 工具未提供 q：取当前会话最新一条用户消息原文当检索查询。
+      // 会话解析走 getLatestUserMessage → loadTimeline 的 effectiveSession 链
+      //（工具回调场景由 noteMcpChatSession 的 90 秒窗口兜底）。
+      const latest = contextReplacements.getLatestUserMessage({ session: req.query.session || undefined });
+      if (!latest || !latest.content) {
+        return reply.code(404).send({ ok: false, error: "没有提供 q，且当前会话取不到最新的用户消息（时间线为空或尚无用户发言），请显式提供 q" });
+      }
+      q = latest.content;
+    }
+    const result = await contextReplacements.searchContextEnhanced(q, { mode, allSessions, limit, threshold });
+    if (useLatestUser && result && result.ok) result.query_source = "latest_user";
+    reply.send(result);
   } catch (err) {
     console.error("[GET /internal/context-search] error:", err.message);
     reply.code(500).send({ error: err.message });

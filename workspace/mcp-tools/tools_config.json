@@ -1,5 +1,6 @@
 {
   "disabled": [
+    "leave_paper",
     "moments_list",
     "pin_add",
     "pin_delete",
@@ -15,18 +16,19 @@
     "pin_update": "修改一条永久记忆。",
     "todo_add": "新增一条待办。可用于她透露了一些安排或计划的时候帮她记住。",
     "todo_list": "查看待办",
-    "context_replace": "把上下文中的一些无用的、无聊的、已经沉淀的片段替换为自己写的记忆。",
-    "context_search": "检索原始上下文对话内容。关键词按空格分词，部分命中也会返回，命中越多越靠前。返回每条命中的所属会话(session)与消息编号(msg_id)，可用 context_star 按 msg_id 给该原文标星。",
+    "context_replace": "根据时间段讲原上下文部分片段替换为谢的记忆。",
+    "context_search": "原上下文回忆检索：跨所有会话翻原始对话和导入对话（含已被压缩区域的原文）。q 可不填——不填时系统自动拿她最新一条消息当检索内容，适合她刚问起某段往事（如「还记得…吗」）、不需要提炼关键词时直接空手调用；想找别的明确主题再给 q。返回相关消息段落及所属会话(session)与消息编号(msg_id)，可用 context_star 按 msg_id 给该原文标星；候选多时由一个旁路 LLM 挑出真正相关的原文（失败自动回退普通排序），返回的都是未改写的原文。",
     "period_get": "查看她是否在经期中。",
     "period_set": "设置经期：把某天标记为经期开始或结束。",
     "moments_list": "查看心动时刻记录列表。默认按时间倒序返回最近 200 条，limit<=0 取全部",
     "moments_count": "统计心动时刻：总条数、按分类/阶段/是否定义时刻分组、最近N条预览。",
-    "memory_add": "新增一条长期记忆到记忆池。只支持三类：关于她（她是谁的静态部分：偏好/习惯/身体状况/作息/家人/经历里反复起作用的部分，只收稳定、反复成立的事实，一条一个事实写短句，当天心情和一次性对话内容不写）、认账（我认下的账：答应过她的事、欠着还没做的、被她纠正后认下的毛病，每条都必须能回答“那我该干什么”，写清欠什么、什么状态下兑现，兑现了就删）、拓本（一字不改的原话：引号里原样照抄，不修标点不补主语，写明谁说的、日期，宁短勿长）。适用于：对话里发现她的稳定特征、我认下的账、重要原话，或她在对话里明确说“记住”之类的话时。支持重要级（0~1）。会自动与已有记忆做相似去重合并。 可设 pin=true 让这条记忆直接置顶（之后每次对话作为「相关记忆」注入）。",
-    "memory_search": "检索长期记忆池（关于她/认账/拓本/压缩摘要/对话碎片）。支持关键词、完整问题或模糊描述，系统自动综合语义、词面匹配、重要度和新旧程度排序；也可按分类只搜某一类。返回每条记忆的唯一 id（可用 memory_pin 按 id 置顶/取消置顶）。category 填「最近」=按更新时间倒序列出最新记忆（忽略关键词）；填「已置顶」=只看置顶记忆（带 q 则在置顶内按相关性搜）。设置 breath=true 且不填 q 时，浮现最近沉淀的记忆。适用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池、翻最近记了什么、查看所有置顶。区别于 context_search（检索原始对话原文）。",
-    "context_star": "给聊天原文标星或取消标星。先用 context_search 搜到原文（结果带 session 和 msg_id），再调用本工具；标星后的原文长期保留在上下文中、不参与压缩替换，但不会写入记忆池。",
-    "memory_pin": "置顶或取消置顶一条记忆池记忆。先用 memory_search 找到记忆拿到 id，再调用本工具；置顶后该记忆固定注入每次对话的「相关记忆」区。",
+    "memory_add": "新增一条长期记忆到记忆池。",
+    "context_star": "给聊天原文标星或取消标星。先用 context_search 搜到原文（结果带 session 和 msg_id），再调用本工具；标星后的原文长期保留在上下文中、不被压缩替换，不进入记忆池。",
+    "memory_pin": "置顶或取消置顶一条记忆池记忆。",
     "phone_state": "读她最近一次手机上报的状态快照：电池电量、当前正在用的 App、位置（地点）。",
-    "diary_add": "新增一条陪伴日记，追加到今天的日记文件（每个聊天窗口的日记分开存放，自动写入当前窗口名下；与该窗口自动唤醒写的日记同一份）。适用于：想主动记录此刻的想法、感受、对她说的话，或给今天留下一段陪伴记录时使用。"
+    "diary_add": "新增一条谢的日记。适用于：想主动记录此刻的想法、感受、对她说的话，或给今天留下一段陪伴记录时使用。",
+    "memory_search": "检索记忆池，支持关键词、完整问题或模糊描述，系统自动综合语义、词面匹配、重要度和新旧程度排序。",
+    "view_paper": "翻看自己留过的纸（leave_paper/<paper> 写的收藏）。不带参数调用=列出最近 10 张（序号+时间+标题/开头）；带 sn=序号 调用=看那一张的全文。"
   },
   "schemas": {
     "context_replace": {
@@ -49,90 +51,75 @@
         "memory"
       ]
     },
-    "memory_search": {
+    "context_search": {
       "type": "object",
       "properties": {
         "q": {
           "type": "string",
-          "description": "检索关键词或想问的问题；category=最近/已置顶 或 breath=true 时可不填"
-        },
-        "breath": {
-          "type": "boolean",
-          "description": "可选：true 且不填 q 时，浮现最近更新的记忆（默认3条，最多5条）"
-        },
-        "category": {
-          "type": "string",
-          "description": "按分类过滤，可选：关于她/认账/拓本/压缩摘要/对话碎片；特殊值：最近（按时间倒序列最新，忽略关键词）、已置顶（只看置顶记忆）"
+          "description": "检索词或描述（可选）。不提供时自动以她最新一条消息为检索内容；提供则按 q 检索（语义模式下可以是描述性语句，如她上次说难过的时候、我们聊过蓝鲸的话题）"
         },
         "limit": {
           "type": "integer",
-          "description": "返回条数，默认5，最大50"
+          "description": "返回条数，默认8，最大50"
+        },
+        "mode": {
+          "type": "string",
+          "description": "检索模式：semantic=语义检索（默认，推荐，意思相近也能搜到） | keyword=关键词精确匹配"
+        },
+        "scope": {
+          "type": "string",
+          "description": "搜索范围：all=跨所有会话（默认，最全） | current=仅当前会话"
         }
       }
     },
-    "memory_add": {
+    "diary_add": {
       "type": "object",
       "properties": {
         "content": {
           "type": "string",
-          "description": "记忆正文（要长期记住的信息，写清结论/原话，避免模糊）"
+          "description": "日记正文（第一人称、自然的陪伴语气，写下此刻想记录的内容）"
         },
-        "category": {
+        "session_id": {
           "type": "string",
-          "description": "分类，可选：关于她/认账/拓本（默认关于她）。关于她=她的静态稳定事实；认账=我认下的账（答应的事/欠着的事/被纠正认下的毛病）；拓本=一字不改的原话（写明谁说的、日期）"
-        },
-        "importance": {
-          "type": "number",
-          "description": "重要级 0~1，默认 0.5"
-        },
-        "pin": {
-          "type": "boolean",
-          "description": "true 时直接把这条记忆置顶：会随每次对话注入「相关记忆」，默认 false"
+          "description": "内部参数：由系统自动注入，无需填写"
         }
       },
       "required": [
         "content"
       ]
     },
-    "context_star": {
+    "leave_paper": {
       "type": "object",
       "properties": {
-        "session": {
+        "content": {
           "type": "string",
-          "description": "会话 id（context_search 返回的 session 字段）"
+          "description": "纸的正文（故事/梦/随手创作，建议单篇一两千字以内）"
         },
-        "msg_ids": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "要标星的消息编号列表（context_search 返回的 msg_id），可一次传多条"
+        "title": {
+          "type": "string",
+          "description": "可选：这张纸的标题"
         },
-        "marked": {
-          "type": "boolean",
-          "description": "true=标星（默认），false=取消标星"
+        "session_id": {
+          "type": "string",
+          "description": "内部参数：由系统自动注入，无需填写"
         }
       },
       "required": [
-        "session",
-        "msg_ids"
+        "content"
       ]
     },
-    "memory_pin": {
+    "view_paper": {
       "type": "object",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "记忆 id（memory_search 返回的 id 字段，mp_ 开头）"
+        "sn": {
+          "type": "integer",
+          "description": "可选：要看的第几张（列表返回的 sn）"
         },
-        "pinned": {
-          "type": "boolean",
-          "description": "true=置顶（默认），false=取消置顶"
+        "session_id": {
+          "type": "string",
+          "description": "内部参数：由系统自动注入，无需填写"
         }
-      },
-      "required": [
-        "id"
-      ]
+      }
     }
   }
 }

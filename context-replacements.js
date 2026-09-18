@@ -1867,6 +1867,34 @@ function loadAllSessionTimelines() {
   return all;
 }
 
+// 取当前会话（或指定会话）时间线里最新一条有正文的 user 消息，供 /internal/context-search
+// 在「MCP 工具未提供 q」时当作检索查询。会话解析复用 loadTimeline 的 effectiveSession 链
+//（请求入口 setActiveSession 的 ALS → MCP 工具回调 90 秒兜底 recentMcpChatSession → default）。
+// loaders 参数供测试注入假的 loadTimeline。
+function getLatestUserMessage(opts, loaders) {
+  const o = opts || {};
+  const ld = loaders || {};
+  const raw = ld.loadTimeline ? ld.loadTimeline(o.session) : loadTimeline(o.session);
+  const timeline = nonSystemMessages(raw);
+  for (let i = timeline.length - 1; i >= 0; i--) {
+    const m = timeline[i];
+    if (!m || m.role !== "user") continue;
+    const text = contentToText(m);
+    if (!text || !String(text).trim()) continue;
+    return {
+      session: m._session || (o.session ? String(o.session) : null),
+      msg_id: m.id || null,
+      time: m.time || null,
+      content: text
+    };
+  }
+  return null;
+}
+
+// ── LLM 精排（可选增强层）：模块缺失/异常时精排自动停用，检索回退基线排序 ──
+let _contextRerank = null;
+try { _contextRerank = require("./context-rerank"); } catch (e) { _contextRerank = null; }
+
 // ── 语义搜索：TF-IDF + 字符 bigram + 余弦相似度 ──
 const SEMANTIC_CACHE = { version: null, vocab: null, tfidfRows: null, ids: null, messages: null };
 
@@ -2274,7 +2302,24 @@ async function searchContextEnhanced(query, options) {
     groups.push(group);
   }
   
-  const matches = groups.slice(0, maxReturn).map(function(g) {
+  // LLM 精排（增强层）：只要粗检索出了候选组就交给 LLM 挑真正相关的（含剔除碰巧词面
+  // 相似的模糊命中）；picked 只保留 LLM 选中的组，不拿基线结果凑数。任何失败/空选择
+  // 保持原排序回退——LLM 挂了工具行为与升级前完全一致。
+  let orderedGroups = groups;
+  let rerankMeta = null;
+  if (_contextRerank && groups.length > 0) {
+    try {
+      const rr = await _contextRerank.rerankGroupsWithLLM(q, groups, { pickMax: maxReturn });
+      rerankMeta = rr && rr.meta ? rr.meta : null;
+      if (rr && Array.isArray(rr.picked) && rr.picked.length > 0) {
+        orderedGroups = rr.picked.map(function (gi) { return groups[gi]; });
+      }
+    } catch (e) {
+      rerankMeta = { reranked: false, reranker: "baseline", reason: "精排异常: " + ((e && e.message) || e) };
+    }
+  }
+
+  const matches = orderedGroups.slice(0, maxReturn).map(function(g) {
     const rep = g[0];
     const content = rep.content;
     let snippet = content;
@@ -2309,7 +2354,14 @@ async function searchContextEnhanced(query, options) {
     return out;
   });
   
-  return { ok: true, total: scored.length, matches: matches, mode: mode, all_sessions: allSessions };
+  const out = { ok: true, total: scored.length, matches: matches, mode: mode, all_sessions: allSessions };
+  if (rerankMeta) {
+    out.reranked = !!rerankMeta.reranked;
+    out.reranker = rerankMeta.reranker || "baseline";
+    if (rerankMeta.reason) out.rerank_reason = rerankMeta.reason;
+    if (rerankMeta.model) out.rerank_model = rerankMeta.model;
+  }
+  return out;
 }
 
 // ========================
@@ -2636,6 +2688,7 @@ module.exports = {
   applyReplacements,
   getReplaceLog,
   searchContextEnhanced,
+  getLatestUserMessage,
   startMsgVectorWarmup,
   loadAllSessionTimelines,
   resolveRange,

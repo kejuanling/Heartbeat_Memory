@@ -900,8 +900,6 @@ TOOLS["context_replace"] = {
 
 def tool_context_search(args):
     q = (args.get("q") or "").strip()
-    if not q:
-        return {"error": "q 必填：检索关键词或想问的问题"}
     limit = args.get("limit") or 8
     try:
         limit = max(1, min(50, int(limit)))
@@ -910,10 +908,17 @@ def tool_context_search(args):
     mode = args.get("mode", "semantic")  # semantic | keyword
     scope = args.get("scope", "all")  # all | current
     all_sessions = "1" if scope == "all" else "0"
-    url = f"{BASE_URL}:3000/internal/context-search?q=" + urllib.parse.quote(q) + "&limit=" + str(limit) + "&mode=" + mode + "&all_sessions=" + all_sessions
+    params = {"limit": str(limit), "mode": mode, "all_sessions": all_sessions}
+    if q:
+        params["q"] = q
+    else:
+        # 2026-09-18 起可不带 q（原上下文回忆工具化）：让网关取当前会话最新一条
+        # 用户消息原文当检索查询；取不到时网关回 404 明确报错，不猜。
+        params["use_latest_user"] = "1"
+    url = f"{BASE_URL}:3000/internal/context-search?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, headers={"x-internal-key": INTERNAL_KEY})
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         try:
@@ -933,21 +938,25 @@ def tool_context_search(args):
                 continue
             seen.add(c)
             matches.append({"session": m.get("session"), "msg_id": m.get("msg_id"), "content": c, "time": m.get("time"), "role": m.get("role")})
-        return {"total": len(matches), "matches": matches}
+        out = {"total": len(matches), "matches": matches}
+        # LLM 精排标记（网关侧失败已自动回退普通排序，这里只透传供排查）
+        if data.get("reranker"):
+            out["reranked"] = bool(data.get("reranked"))
+            out["reranker"] = data.get("reranker")
+        return out
     return {"error": data.get("error", "检索失败")}
 
 
 TOOLS["context_search"] = {
-    "description": "语义检索所有会话的原始上下文和导入对话（含已被压缩区域的原文）。默认跨所有会话、语义模式，用描述性语句也能搜到相关内容；返回相关消息段落及所属会话(session)、消息编号(msg_id)、时间、角色，相邻命中自动合并，相同内容只保留一条。可用于：回忆旧对话细节、找某段聊过的内容、确认要替换的范围；拿到 msg_id 后可用 context_star 给该原文标星。注意：仅当前会话模式下最近5分钟内容不返回。",
+    "description": "原上下文回忆检索：跨所有会话翻原始对话和导入对话（含已被压缩区域的原文）。q 可不填——不填时系统自动拿她最新一条消息当检索内容，适合她刚问起某段往事（如「还记得…吗」）、不需要提炼关键词时直接空手调用；想找别的明确主题再给 q（语义模式下描述性语句也能搜到）。返回相关消息段落及所属会话(session)、消息编号(msg_id)、时间、角色，相邻命中自动合并，相同内容只保留一条；候选多时由一个旁路 LLM 挑出真正相关的原文（失败自动回退普通排序），返回的都是未改写的原文。拿到 msg_id 后可用 context_star 给该原文标星。注意：仅当前会话模式下最近5分钟内容不返回。",
     "inputSchema": {
         "type": "object",
         "properties": {
-            "q": {"type": "string", "description": "检索词或描述（语义模式下可以是描述性语句，如她上次说难过的时候、我们聊过蓝鲸的话题）"},
+            "q": {"type": "string", "description": "检索词或描述（可选）。不提供时自动以她最新一条消息为检索内容；提供则按 q 检索（语义模式下可以是描述性语句，如她上次说难过的时候、我们聊过蓝鲸的话题）"},
             "limit": {"type": "integer", "description": "返回条数，默认8，最大50"},
             "mode": {"type": "string", "description": "检索模式：semantic=语义检索（默认，推荐，意思相近也能搜到） | keyword=关键词精确匹配"},
             "scope": {"type": "string", "description": "搜索范围：all=跨所有会话（默认，最全） | current=仅当前会话"}
-        },
-        "required": ["q"]
+        }
     },
     "handler": tool_context_search
 }
