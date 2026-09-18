@@ -1639,7 +1639,7 @@ function ccBuildSummaryStatsHtml(d, t){
            +'</div>'
          : ''))
        +'</div>'
-       +(hidden?'':'<div class="cc-swipe-del"><button class="cc-swipe-del-btn" onclick="removeSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">移除</button><button class="cc-swipe-del-btn" onclick="hideSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">隐藏</button></div>')
+       +(hidden?'':'<div class="cc-swipe-del"><button class="cc-swipe-del-btn" onclick="removeSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">移除</button><button class="cc-swipe-del-btn" onclick="hideSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">隐藏</button><button class="cc-swipe-del-btn" onclick="reparseSingleBlock('+c.index+')">解析</button></div>')
        +'</div>';
    });
  
@@ -2095,6 +2095,31 @@ function updateCcStatusBar(d){
   // 请走「解析」按钮（LLM 解析时间线原文 → 候选进 review 队列人工把关）
   async function ingestSingleBlock(cid, blockIndex, isAi){
     toast('直接入池已停用：请用「解析」按钮，候选会进 review 队列人工把关');
+  }
+
+  // 左滑单块「解析」（0918）：该压缩块覆盖区间的时间线原文 → LLM 提候选 → review 队列人工裁决
+  async function reparseSingleBlock(cid){
+    const d = AppState.compactionPlan;
+    if(!d) return;
+    const c = (d.chunks || []).find(function(x){ return x.index === cid; });
+    if(!c || c.enabled === false){ toast('该块未替换，无法解析'); return; }
+    if(!confirm('将该块的「时间线原文」交给 AI 提取记忆候选，进 review 队列人工把关？')) return;
+    const msg = document.getElementById('compaction-msg');
+    if(msg) msg.textContent = '正在解析时间线原文并提取记忆候选…';
+    try{
+      const r = await fetch(ADMIN_API + '/memory-pool/reparse', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({chunkIds: [c.id]})
+      });
+      const j = await r.json();
+      if(j.error) throw new Error(j.error);
+      const s2 = '已解析 1 块 -> 候选 ' + j.reviewed + ' 条进 review 队列 / 门卫拒 ' + j.rejected + ' / 失败 ' + j.failed + (j.degraded ? '（原文缺失退用摘要）' : '') + '。请在记忆 review 页人工裁决。';
+      if(msg) msg.textContent = s2;
+      toast(s2);
+    }catch(e){
+      if(msg) msg.textContent = '解析失败: ' + e.message;
+      toast('解析失败: ' + e.message);
+    }
   }
 
   // 左滑「隐藏」按钮（0918 补回独立隐藏入口，替代原入池时附带隐藏）：摘要与原文都不再发 AI，可「取消隐藏」恢复
