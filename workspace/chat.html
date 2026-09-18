@@ -2017,11 +2017,7 @@ let _callAfterAI=false;   // 通话页文字发送后，AI 回复完成时朗读
 let _callPending=false;    // 已发出"来电"，待 AI 用 <phone> 表态接/不接
 let msgs=[];
 let selectMode=false, selectSet=new Set(), actIdx=-1;
-// 多会话：当前会话ID（default=主会话），本地缓存会话名单
-let currentSession="default";
-let sessionList=[];
-let wakeLocked=[];   // 锁定唤醒会话集合（服务器端同步）
-let thirdPartySid=null;   // 当前「第三方专用会话」id（不带 session_id 的第三方客户端落地的会话）
+// 多会话：会话状态（名单/锁定唤醒/第三方专用）由 SessionStore 统一管理
 
 function loadCfg(){
   try{
@@ -2409,9 +2405,9 @@ let fileData=[];
 
 /* ================= 存储 ================= */
 function loadMsgs(){
-  try{return JSON.parse(localStorage.getItem(LS_MSGS+"_"+currentSession)||"[]");}catch(e){return [];}
+  try{return JSON.parse(localStorage.getItem(LS_MSGS+"_"+SessionStore.getCurrentSession())||"[]");}catch(e){return [];}
 }
-function saveMsgs(){ try{ localStorage.setItem(LS_MSGS+"_"+currentSession,JSON.stringify(msgs)); }catch(e){ /* 配额满或超限时忽略，避免中断发送/流式 */ } }
+function saveMsgs(){ try{ localStorage.setItem(LS_MSGS+"_"+SessionStore.getCurrentSession(),JSON.stringify(msgs)); }catch(e){ /* 配额满或超限时忽略，避免中断发送/流式 */ } }
 
 /* 顶部加载指示：in-flight 计数，超过 250ms 才显示，防快速请求闪烁 */
 let _topLoadCnt=0,_topLoadTimer=null;
@@ -2422,7 +2418,7 @@ function topLoadEnd(){_topLoadCnt=Math.max(0,_topLoadCnt-1);if(_topLoadCnt===0){
 async function fetchHistory(){
   topLoadStart();
   try{
-    const r=await fetch(HISTORY_API+"?session_id="+encodeURIComponent(currentSession),{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
+    const r=await fetch(HISTORY_API+"?session_id="+encodeURIComponent(SessionStore.getCurrentSession()),{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
     if(!r.ok)return null;
     const j=await r.json();
     if(!j||!Array.isArray(j.items))return null;
@@ -2503,14 +2499,14 @@ document.addEventListener("visibilitychange",function(){
 });
 function startLiveEvents(){
   stopLiveEvents();
-  const sid=encodeURIComponent(currentSession);
+  const sid=encodeURIComponent(SessionStore.getCurrentSession());
   const es=new EventSource("/v1/events?session_id="+sid);
   liveES=es;
   es.onopen=function(){ /* 连接建立（服务端回 hello） */ };
   es.onmessage=function(ev){
     try{
       const d=JSON.parse(ev.data);
-      if(d&&d.type==="history_update"&&d.session_id===currentSession) liveReloadNow();
+      if(d&&d.type==="history_update"&&d.session_id===SessionStore.getCurrentSession()) liveReloadNow();
     }catch(e){}
   };
   es.onerror=function(){ /* EventSource 会自动重连，无需处理 */ };
@@ -2529,7 +2525,7 @@ function syncTimelineLocal(ops){
     try{
       // 优先 diff：编辑/删除按稳定 id 定点同步（position 稳定、不重排）；ops 为空或含无 id（本地新消息）时回退整份（旧兼容）
       const useDiff=!!(ops&&ops.length&&ops.every(function(o){return o&&o.id;}));
-      const payload={session_id:currentSession};
+      const payload={session_id:SessionStore.getCurrentSession()};
       if(useDiff){
         payload.ops=ops;
       } else {
@@ -2676,7 +2672,7 @@ if(jumpBtn)jumpBtn.addEventListener("click",function(){
   if(jumpBtn.dataset.go==="top"){
     // 回到顶部：只渲染头部窗口 [_from,_to)=[0,min(len,_WIN)]，避免一次性全量渲染 3000 条阻塞主线程
     // 头部窗口不含尾部，_replaceWindow 会自动挂底部哨兵，向下滚动时逐批补载剩余历史；语义即回到对话第一屏
-    _winSession=currentSession;
+    _winSession=SessionStore.getCurrentSession();
     _lockFrom=true;
     _from=0;
     _to=Math.min(msgs.length||0, _WIN);
@@ -2686,7 +2682,7 @@ if(jumpBtn)jumpBtn.addEventListener("click",function(){
   }
   else{
     // 回到底部：解除定位, 锚定尾部窗口
-    _lockFrom=false; _winSession=currentSession;
+    _lockFrom=false; _winSession=SessionStore.getCurrentSession();
     renderAll(false);   // 窗口重置到尾部并 scrollBottom
     jumpSeen=false;
   }
@@ -3383,7 +3379,7 @@ function makeSegPlayer(srcMsg){   // 流式喂入式播放器：feed 喂当前�
 }
 function renderAll(keepPos){
   // 会话切换自动复位窗口（避免上一个会话的定位窗口被沿用）
-  if(_winSession!==currentSession){ _winSession=currentSession; _lockFrom=false; _from=0; _to=null; }
+  if(_winSession!==SessionStore.getCurrentSession()){ _winSession=SessionStore.getCurrentSession(); _lockFrom=false; _from=0; _to=null; }
   // 先摘下切会话转圈遮罩再清空，否则第一次 renderAll 就把它删掉，遮罩此后永久失效
   const csKeep=document.getElementById("chatSwitching");
   if(csKeep&&csKeep.parentNode===chatEl)chatEl.removeChild(csKeep);
@@ -3475,7 +3471,7 @@ async function request(finalMsgs, fromSend){
   if(sending&&!fromSend)return;
   if(!fromSend){ sending=true;setSendState(true); }
   aborter=new AbortController();
-  const sidAtStart=currentSession;   // 收尾时校验：请求期间切了会话就不回写（防旧会话消息写进新会话的缓存）
+  const sidAtStart=SessionStore.getCurrentSession();   // 收尾时校验：请求期间切了会话就不回写（防旧会话消息写进新会话的缓存）
   appendTypingBox();
   let full="",reasoning="",usage=null,tools=[],reader=null,flushStreamSegs=null,_streamToolMode="live";
   const syncToolSave=function(){ if(_streamToolMode!=="group"){ tools=_finalTools(); } };
@@ -3485,7 +3481,7 @@ async function request(finalMsgs, fromSend){
       model:"deepseek-v4-flash-vision-exp",
       stream:isStream,
       messages:buildMessages(slimForUpload(finalMsgs)),
-      session_id:currentSession,
+      session_id:SessionStore.getCurrentSession(),
       stream_options:{include_usage:true},
       client_msg_id:(Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,10))
     };
@@ -3567,7 +3563,7 @@ async function request(finalMsgs, fromSend){
     if(flushStreamSegs){await flushStreamSegs();}
     syncToolSave();
     finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});
-    if(currentSession===sidAtStart){
+    if(SessionStore.getCurrentSession()===sidAtStart){
       msgs=finalMsgs;saveMsgs();
       if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
       autoNameSessionWhenUntitled(full);
@@ -3577,7 +3573,7 @@ async function request(finalMsgs, fromSend){
     try{if(flushStreamSegs){await flushStreamSegs();}}catch(e){}
     if(full){syncToolSave();
     finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});}
-    if(currentSession===sidAtStart){
+    if(SessionStore.getCurrentSession()===sidAtStart){
       msgs=finalMsgs;saveMsgs();
       if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
       autoNameSessionWhenUntitled(full);
@@ -4021,7 +4017,7 @@ async function branchFromMsg(idx){
   if(idx==null||idx<0||idx>=msgs.length)return;
   if(sending){showToast("正在回复中，暂不能分支");return;}
   const m=msgs[idx];if(!m)return;
-  const srcSession=currentSession;
+  const srcSession=SessionStore.getCurrentSession();
   const branchMsgs=JSON.parse(JSON.stringify(msgs.slice(0,idx+1)));
   const sid=genSessionId();
   let parents={};
@@ -4035,14 +4031,14 @@ async function branchFromMsg(idx){
   nameMap[sid]=named;
   try{ localStorage.setItem("han_session_names",JSON.stringify(nameMap)); }catch(e){}
   saveMsgs();
-  currentSession=sid;
-  localStorage.setItem("han_current_session",sid);
+  SessionStore.setCurrentSession(sid);
   applyHeader();
   msgs=branchMsgs; saveMsgs();
   renderAll(); scrollBottom();
   closeAct();
-  sessionList=sessionList.filter(function(s){return s.id!=="default"&&s.id!==sid;});
-  sessionList.push({id:sid,name:named,total:branchMsgs.length,real:branchMsgs.length,last_time:(branchMsgs[branchMsgs.length-1]&&branchMsgs[branchMsgs.length-1].time)||new Date().toISOString(),is_default:false});
+  SessionStore.removeSession("default");
+  SessionStore.removeSession(sid);
+  SessionStore.upsertSession({id:sid,name:named,total:branchMsgs.length,real:branchMsgs.length,last_time:(branchMsgs[branchMsgs.length-1]&&branchMsgs[branchMsgs.length-1].time)||new Date().toISOString(),is_default:false});
   renderSessionList();
   pushSessionNames();
   startLiveEvents();
@@ -4173,10 +4169,10 @@ function sessionDisplayName(id){
   // 2026-09-13 审查修复：合并两个同名定义——原第二定义(无参版)覆盖本函数，
   // 导致所有带参调用全部拿到「当前会话」的名字(合并会话命名/弹窗标题显示错名)。
   // 统一口径：id 缺省 = 当前会话；本地改名映射 > 会话列表名 > 兜底。
-  var sid=id||currentSession||"default";
+  var sid=id||SessionStore.getCurrentSession()||"default";
   var nm={}; try{ nm=JSON.parse(localStorage.getItem("han_session_names")||"{}"); }catch(e){}
   if(nm[sid])return nm[sid];
-  const s=(sessionList||[]).find(x=>x.id===sid);
+  const s=SessionStore.getSessionList().find(x=>x.id===sid);
   if(s&&s.name&&s.name!==sid)return s.name;
   return sid==="default" ? "主会话" : sid;
 }
@@ -4185,11 +4181,11 @@ async function autoNameSessionWhenUntitled(full){
   if(!snip)return;                    // 无正文(纯工具链/空)不命名
   try{
     let nm={}; try{ nm=JSON.parse(localStorage.getItem("han_session_names")||"{}"); }catch(e){}
-    if(nm[currentSession])return;               // 分支/合并/手动改名过的不覆盖
-    const s=(sessionList||[]).find(x=>x.id===currentSession);
+    if(nm[SessionStore.getCurrentSession()])return;               // 分支/合并/手动改名过的不覆盖
+    const s=SessionStore.getSessionList().find(x=>x.id===SessionStore.getCurrentSession());
     const curName=(s&&s.name)||"";
-    if(curName&&curName!==currentSession&&curName!=="未识别")return;  // 已有语义化名字不覆盖
-    nm[currentSession]=snip;
+    if(curName&&curName!==SessionStore.getCurrentSession()&&curName!=="未识别")return;  // 已有语义化名字不覆盖
+    nm[SessionStore.getCurrentSession()]=snip;
     localStorage.setItem("han_session_names",JSON.stringify(nm));
     if(s&&!s.name)s.name=snip;
     applyHeader();
@@ -4379,7 +4375,7 @@ const LS_SESSION_PROMPTS="han_session_prompts";
 function getSessionPromptMap(){ try{ return JSON.parse(localStorage.getItem(LS_SESSION_PROMPTS)||"{}")||{}; }catch(e){ return {}; } }
 function setSessionPrompt(sid,backupId){ const m=getSessionPromptMap(); if(backupId) m[sid]=backupId; else delete m[sid]; try{ localStorage.setItem(LS_SESSION_PROMPTS,JSON.stringify(m)); }catch(e){} pushSessionPrompts(); }
 function resolveSessionSystemPrompt(){
-  const bid=currentSession&&getSessionPromptMap()[currentSession];
+  const bid=SessionStore.getCurrentSession()&&getSessionPromptMap()[SessionStore.getCurrentSession()];
   if(bid){ const b=promptBackups.find(function(x){return x.id===bid;}); if(b&&typeof b.content==="string"&&b.content.trim()) return b.content.trim(); }
   return system_prompt;
 }
@@ -6478,7 +6474,7 @@ function closeSettingsDrawer(){ var sd=document.getElementById("settingsDrawer")
 function openSessionCc(id){
   const drawer=document.getElementById("ccDrawer");
   const title=document.getElementById("ccDrawerTitle");
-  const s=(sessionList||[]).find(x=>x.id===id);
+  const s=SessionStore.getSessionList().find(x=>x.id===id);
   const name=(s&&s.name)||(id==="default"?"主会话":id);
   title.textContent="压缩 · "+name;
   drawer.classList.add("open");
@@ -6573,33 +6569,33 @@ async function loadSessions(){
   try{
     const r=await fetch(SESSIONS_API,{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
     const j=await r.json();
-    if(j&&Array.isArray(j.sessions)){sessionList=j.sessions;renderSessionList();}
+    if(j&&Array.isArray(j.sessions)){SessionStore.setSessionList(j.sessions);renderSessionList();}
   }catch(e){console.warn("loadSessions fail:",e.message);}
   try{
     const r2=await fetch("/heartbeat/admin/wake-locked",{headers:{"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include"});
     const j2=await r2.json();
-    if(j2&&Array.isArray(j2.sessions)){wakeLocked=j2.sessions;renderSessionList();}
+    if(j2&&Array.isArray(j2.sessions)){SessionStore.setWakeLocked(j2.sessions);renderSessionList();}
   }catch(e){console.warn("loadSessions wake-locked fail:",e.message);}
   try{
     const r3=await fetch("/v1/sessions/third-party",{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
     const j3=await r3.json();
-    if(j3&&j3.ok){thirdPartySid=j3.session_id||null;renderSessionList();}
+    if(j3&&j3.ok){SessionStore.setThirdPartySid(j3.session_id||null);renderSessionList();}
   }catch(e){console.warn("loadSessions third-party fail:",e.message);}
 }
 function renderSessionList(){
   const el=document.getElementById("sessionList");
   if(!el)return;
   el.innerHTML="";
-  const list=[...sessionList];
+  const list=[...SessionStore.getSessionList()];
   // 确保当前会话在列表里(前端新建但后端还没记录时)
-  if(currentSession!=="default"&&!list.find(s=>s.id===currentSession)){
-    list.push({id:currentSession,name:currentSession,total:0,real:0,last_time:null,is_default:false});
+  if(SessionStore.getCurrentSession()!=="default"&&!list.find(s=>s.id===SessionStore.getCurrentSession())){
+    list.push({id:SessionStore.getCurrentSession(),name:SessionStore.getCurrentSession(),total:0,real:0,last_time:null,is_default:false});
   }
   // 置顶会话优先(本地 han_pinned_sessions)，其余按最后活跃时间倒序
   let pinnedArr=[];
   try{ pinnedArr=JSON.parse(localStorage.getItem("han_pinned_sessions")||"[]"); }catch(e){ pinnedArr=[]; }
   const isPinned=function(id){ return pinnedArr.indexOf(id)>=0; };
-  const isLocked=function(id){ return wakeLocked.indexOf(id)>=0; };
+  const isLocked=function(id){ return SessionStore.getWakeLocked().indexOf(id)>=0; };
   list.sort(function(a,b){
     const pa=isPinned(a.id)?1:0, pb=isPinned(b.id)?1:0;
     if(pa!==pb)return pb-pa;
@@ -6608,7 +6604,7 @@ function renderSessionList(){
   list.forEach(s=>{
     const item=document.createElement("div");
     const merging=!!mergeMode;
-    item.className="session-item"+(s.id===currentSession?" active":"")+(merging?" merging":"");
+    item.className="session-item"+(s.id===SessionStore.getCurrentSession()?" active":"")+(merging?" merging":"");
     // 名字优先取本地改名映射(han_session_names)，其次服务器 name，兜底 id/主会话。
     let name="";
     try{
@@ -6618,7 +6614,7 @@ function renderSessionList(){
     if(!name)name=s.name||(s.id==="default"?"主会话":s.id);
     const pinned=isPinned(s.id);
     const locked=isLocked(s.id);
-    const meta=(locked?'<span class="s-dot lock" title="锁定唤醒"></span>':'')+(thirdPartySid===s.id?'<span class="s-dot tp" title="第三方专用"></span>':'')+escapeHtml((s.real!=null?(""+s.real+" 条"):"")+(s.last_time?(" · "+fmtTime(new Date(s.last_time))):""));
+    const meta=(locked?'<span class="s-dot lock" title="锁定唤醒"></span>':'')+(SessionStore.getThirdPartySid()===s.id?'<span class="s-dot tp" title="第三方专用"></span>':'')+escapeHtml((s.real!=null?(""+s.real+" 条"):"")+(s.last_time?(" · "+fmtTime(new Date(s.last_time))):""));
     const checkHtml=merging?('<span class="s-check'+(mergeSel.has(s.id)?' on':'')+'">'+(mergeSel.has(s.id)?'✓':'')+'</span>'):'';
     item.innerHTML='<div class="s-name">'+checkHtml+'<button class="s-icon pin'+(pinned?' on':'')+'" data-op="pin" data-id="'+escapeHtml(s.id)+'" title="'+(pinned?"取消置顶":"置顶")+'"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/></svg></button>'+'<span class="s-title" title="'+escapeHtml(name)+'">'+escapeHtml(name)+'</span><button class="s-icon ren" data-op="rename" data-id="'+escapeHtml(s.id)+'" title="改名"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/><path d="m15 5 4 4"/></svg></button></div>'+
       '<div class="s-ops"><span class="s-meta">'+meta+'</span><button class="s-more" title="更多操作" aria-label="更多操作"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button></div>';
@@ -6659,8 +6655,8 @@ function ensureSessMenu(){
 function closeSessMenu(){ if(_sessMenuEl) _sessMenuEl.classList.add("hidden"); }
 function openSessMenu(sid, anchorEl){
   const el=ensureSessMenu();
-  const tpOn=(thirdPartySid===sid);
-  const lockOn=(wakeLocked||[]).indexOf(sid)>=0;
+  const tpOn=(SessionStore.getThirdPartySid()===sid);
+  const lockOn=(SessionStore.getWakeLocked()||[]).indexOf(sid)>=0;
   el.innerHTML='<button class="sess-menu-item" data-op="cc">压缩</button>'
     +'<button class="sess-menu-item" data-op="export">导出</button>'
     +'<button class="sess-menu-item'+(tpOn?' on':'')+'" data-op="thirdparty">第三方</button>'
@@ -6822,14 +6818,14 @@ async function saveSessionProvider(sid, providerId, modelName, nm){
 // 连网关时，对话落到这个会话，自建前端(chat.html)能看到。存到后端 data/config.json。
 async function setThirdPartySession(id){
   if(id==="default"){ showToast("主会话不能设为第三方专用"); return; }
-  const isCur = (thirdPartySid===id);
+  const isCur = (SessionStore.getThirdPartySid()===id);
   const action = isCur ? "取消" : "设为";
   if(!confirm("确定将「"+escapeHtml(sessionDisplayName(id))+"」"+action+"为第三方专用会话？\n\n设为后：不带 session_id 的第三方客户端(如 Kelivo)发来的对话都会汇聚到这个会话，不会混进主会话。"))return;
   try{
     const r=await fetch("/v1/sessions/third-party",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({session_id:isCur?"":id})});
     const j=await r.json().catch(()=>({}));
     if(!r.ok){ showToast(j.error||"设置失败"); return; }
-    thirdPartySid=j.session_id||null;
+    SessionStore.setThirdPartySid(j.session_id||null);
     renderSessionList();
     showToast(isCur?"已取消第三方专用":"已设为第三方专用会话");
   }catch(e){ showToast("设置失败:"+(e&&e.message||"")); }
@@ -6909,17 +6905,9 @@ function togglePinSession(id){
 
 // 锁定/解锁唤醒（会话独立）：自动唤醒只对锁定的会话进行，与置顶无关
 function toggleWakeLockSession(id){
-  if(!wakeLocked) wakeLocked=[];
-  const idx=wakeLocked.indexOf(id);
-  if(idx>=0){
-    wakeLocked.splice(idx,1);
-    pushWakeLocked();
-    showToast("已解除唤醒锁定");
-  } else {
-    wakeLocked.push(id);
-    pushWakeLocked();
-    showToast("已锁定唤醒（自动联系只对这个会话进行）");
-  }
+  const nowLocked=SessionStore.toggleWakeLocked(id);
+  pushWakeLocked();
+  showToast(nowLocked?"已锁定唤醒（自动联系只对这个会话进行）":"已解除唤醒锁定");
   updateSessionItem(id);
 }
 
@@ -6936,8 +6924,8 @@ function updateSessionItem(id){
   let pinnedArr=[]; try{ pinnedArr=JSON.parse(localStorage.getItem("han_pinned_sessions")||"[]"); }catch(e){}
   const pinned=pinnedArr.indexOf(id)>=0;
   const pinBtn=item.querySelector('.s-name .s-icon.pin'); if(pinBtn) pinBtn.classList.toggle('on', pinned);
-  const s=(typeof sessionList!=="undefined"&&sessionList)?sessionList.find(function(x){return x.id===id;}):null;
-  const isLock=(typeof wakeLocked!=="undefined"&&wakeLocked)?wakeLocked.indexOf(id)>=0:false;
+  const s=SessionStore.getSessionList().find(function(x){return x.id===id;})||null;
+  const isLock=SessionStore.getWakeLocked().indexOf(id)>=0;
   const meta=(isLock?'<span class="s-dot lock" title="锁定唤醒"></span>':'')+escapeHtml((s&&s.real!=null?(""+s.real+" 条"):"")+(s&&s.last_time?(" · "+fmtTime(new Date(s.last_time))):""));
   const me=item.querySelector(".s-meta"); if(me) me.innerHTML=meta;
   function pinState(sidv){ let arr=[]; try{ arr=JSON.parse(localStorage.getItem("han_pinned_sessions")||"[]"); }catch(e){} return arr.indexOf(sidv)>=0; }
@@ -7010,8 +6998,7 @@ async function doSearchSessions(ql){
 
 async function switchSessionAndLocate(sid,idx){
   saveMsgs();
-  currentSession=sid;
-  localStorage.setItem("han_current_session",sid);
+  SessionStore.setCurrentSession(sid);
   pushCurrentSession();   // 跨设备同步：搜索定位跳转也上报当前会话
   startLiveEvents();      // 跳转后重订阅目标会话实时更新（2026-09-15 修复：此前漏订阅，跳转后 AI 唤醒/别的设备新消息不再实时出现）
   alignLocalStars();      // 标星 UI 按目标会话对齐（与 switchSession 同口径）
@@ -7038,13 +7025,12 @@ async function switchSessionAndLocate(sid,idx){
 
 // 切换会话
 async function switchSession(id){
-  if(id===currentSession){closeDrawer();return;}
+  if(id===SessionStore.getCurrentSession()){closeDrawer();return;}
   // 回复/连播进行中切会话会让收尾逻辑把旧会话消息写进新会话缓存，先挡下
   if(sending||_segBusy){ showToast("回复进行中，等这轮结束再切换会话"); return; }
   // 保存当前会话到本地，再切到目标会话
   saveMsgs();
-  currentSession=id;
-  localStorage.setItem("han_current_session",id);
+  SessionStore.setCurrentSession(id);
   pushCurrentSession();   // 跨设备同步：上报当前打开的会话
   applyHeader();
   const csEl=document.getElementById("chatSwitching");
@@ -7088,9 +7074,7 @@ function createSessionWithPrompt(backupId){
   // 回复/连播进行中新建会话会让收尾逻辑把旧会话消息写进新会话缓存，先挡下
   if(sending||_segBusy){ showToast("回复进行中，等这轮结束再新建会话"); return; }
   const sid=genSessionId();
-  localStorage.setItem("han_current_session",sid);
-  // 清空当前显示
-  currentSession=sid;
+  SessionStore.setCurrentSession(sid);
   pushCurrentSession();   // 跨设备同步：新会话也上报
   setSessionPrompt(sid, backupId);
   // 会话级跨窗口注入覆盖：选「开启/关闭」则写入服务端；选「跟随全局」不提交（默认跟随全局总开关）
@@ -7103,8 +7087,8 @@ function createSessionWithPrompt(backupId){
   renderAll();
   closeDrawer();
   // 把新会话加入本地列表
-  sessionList=sessionList.filter(s=>s.id!=="default");
-  sessionList.push({id:sid,name:sid,total:0,real:0,last_time:null,is_default:false});
+  SessionStore.removeSession("default");
+  SessionStore.upsertSession({id:sid,name:sid,total:0,real:0,last_time:null,is_default:false});
   renderSessionList();
   startLiveEvents();   // 空会话也订阅，等 AI 主动消息/别设备消息进来时即时可刷新
   showToast(backupId?"新会话已创建，本会话使用所选提示词":"新会话已创建");
@@ -7122,13 +7106,12 @@ async function deleteSession(id){
     setSessionPrompt(id,"");   // 顺带清掉会话级提示词映射
     const nameMap=JSON.parse(localStorage.getItem("han_session_names")||"{}");
     delete nameMap[id];localStorage.setItem("han_session_names",JSON.stringify(nameMap));
-    if(currentSession===id){
+    if(SessionStore.getCurrentSession()===id){
       // 删除的是当前会话：落到剩余会话里最后活跃的那个；主会话已废弃，仅在没有任何会话时才回退它
-      sessionList=sessionList.filter(s=>s.id!==id);
-      const best=sessionList.slice().sort((a,b)=>((b.last_time||"")>(a.last_time||"")?1:((b.last_time||"")<(a.last_time||"")?-1:0)))[0];
+      SessionStore.removeSession(id);
+      const best=SessionStore.getSessionList().slice().sort((a,b)=>((b.last_time||"")>(a.last_time||"")?1:((b.last_time||"")<(a.last_time||"")?-1:0)))[0];
       const target=(best&&best.id)?best.id:"default";
-      currentSession=target;
-      localStorage.setItem("han_current_session",target);
+      SessionStore.setCurrentSession(target);
       pushCurrentSession();   // 跨设备同步：删除当前会话后落到的新会话也上报
       applyHeader();
       msgs=[];const h=await fetchHistory();
@@ -7143,7 +7126,7 @@ async function deleteSession(id){
 
 // 重命名会话(存到本地映射)
 function renameSession(id){
-  const cur=sessionList.find(s=>s.id===id);
+  const cur=SessionStore.getSessionList().find(s=>s.id===id);
   const old=cur&&cur.name?(cur.name==="主会话"?"主会话":cur.name):id;
   const nn=prompt("给这个会话起个名字",old);
   if(!nn||nn.trim()==="")return;
@@ -7152,7 +7135,7 @@ function renameSession(id){
   localStorage.setItem("han_session_names",JSON.stringify(map));
   pushSessionNames();   // 跨设备同步改名映射
   // 若重命名的是当前会话，同步左上角标题
-  if(id===currentSession) applyHeader();
+  if(id===SessionStore.getCurrentSession()) applyHeader();
   loadSessions();
 }
 
@@ -7166,7 +7149,7 @@ async function pushSessionNames(){
 }
 async function pushWakeLocked(){
   try{
-    const r=await fetch("/heartbeat/admin/wake-locked",{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":getCookie("admin_csrf")},body:JSON.stringify({sessions:wakeLocked}),credentials:"include"});
+    const r=await fetch("/heartbeat/admin/wake-locked",{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":getCookie("admin_csrf")},body:JSON.stringify({sessions:SessionStore.getWakeLocked()}),credentials:"include"});
     return r.ok;
   }catch(e){ console.warn("pushWakeLocked fail:",e.message); return false; }
 }
@@ -7254,7 +7237,7 @@ async function pullSessionParents(){
 // 当前会话跨设备同步（单用户：手机/电脑打开同一会话）
 async function pushCurrentSession(){
   try{
-    const r=await fetch("/heartbeat/admin/current-session",{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":getCookie("admin_csrf")},body:JSON.stringify({session:currentSession||""}),credentials:"include"});
+    const r=await fetch("/heartbeat/admin/current-session",{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":getCookie("admin_csrf")},body:JSON.stringify({session:SessionStore.getCurrentSession()||""}),credentials:"include"});
     return r.ok;
   }catch(e){ return false; }
 }
@@ -7381,7 +7364,8 @@ async function importSession(file){
     await new Promise(function(res){ setTimeout(res,30); });
     const newId=genSessionId();
     // 写入本地
-    currentSession=newId;
+    // C1-e：importSession 特殊路径——persist:false 不写 localStorage（仅内存置位），刷新后应恢复导入前会话。
+    SessionStore.setCurrentSession(newId, { persist: false });
     applyHeader();
     msgs=items;saveMsgs();
     syncTimelineLocal();  // 导入即落盘：带导入消息的 time 一次性写进服务器时间线，建好会话文件（后续发消息走追加，不再整份重建）
@@ -7391,8 +7375,8 @@ async function importSession(file){
     const nameMap=JSON.parse(localStorage.getItem("han_session_names")||"{}");
     nameMap[newId]=name;
     localStorage.setItem("han_session_names",JSON.stringify(nameMap));
-    sessionList=sessionList.filter(s=>s.id!=="default");
-    sessionList.push({id:newId,name:name,total:items.length,real:items.length,last_time:(items[items.length-1]&&items[items.length-1].time)||null,is_default:false});
+    SessionStore.removeSession("default");
+    SessionStore.upsertSession({id:newId,name:name,total:items.length,real:items.length,last_time:(items[items.length-1]&&items[items.length-1].time)||null,is_default:false});
     renderSessionList();
     startLiveEvents();   // 导入后切换到新会话，订阅其实时更新
     showToast("已导入 "+items.length+" 条");
@@ -7406,7 +7390,7 @@ async function importSession(file){
     catch(e){ console.error("[drawer-btn] 绑定 #"+id+" 失败",e); return false; }
   };
   bind("newSessionBtn",newSession);
-  bind("exportSessionBtn",function(){ exportSession&&exportSession(currentSession); });
+  bind("exportSessionBtn",function(){ exportSession&&exportSession(SessionStore.getCurrentSession()); });
   bind("importSessionBtn",function(){ const fi=document.getElementById("importFile"); if(fi) fi.click(); });
   bind("mergeSessionBtn",function(){ if(mergeMode){ doMergeSessions&&doMergeSessions(); } else { toggleMergeMode&&toggleMergeMode(); } });
   bind("mergeCancelBtn",toggleMergeMode);
@@ -7454,8 +7438,8 @@ function clearLocalCache(){
     }
     try{localStorage.removeItem("han_current_session");}catch(e){}
   }catch(e){}
-  localStorage.setItem("han_current_session","default");
-  currentSession="default";
+  // 注意：此处普通 setter 持久化为 default，随后 initChat(bootstrap) 会重新决策最终 best。
+  SessionStore.setCurrentSession("default");
   applyHeader();
   msgs=[];
   loadSessions();
@@ -7466,7 +7450,7 @@ function clearLocalCache(){
 document.getElementById("importFile").addEventListener("change",e=>{const f=e.target.files[0];if(f)importSession(f);e.target.value="";});
 
 /* ================= 初始化 ================= */
-applyHeader();
+try{applyHeader();}catch(e){}
 /* ---- 密码登录（管理台账号密码） ---- */
 const loginMask=document.getElementById("loginMask");
 const loginUser=document.getElementById("loginUser");
@@ -7603,18 +7587,24 @@ function rehydrateCallFlagsFromMarkers(arr){
   return arr;
 }
 async function initChat(){
-  currentSession=localStorage.getItem("han_current_session")||"default";
-  const remoteCur=await pullCurrentSession();   // 跨设备同步：以服务器"最后打开的会话"优先
-  if(remoteCur){ currentSession=remoteCur; }
+  // initChat 保留 pullCurrentSession / loadSessions / best candidate 计算；
+  // bootstrap 负责 final 裁决（best > remote > local）+ best 命中时写 localStorage。
+  const local = localStorage.getItem("han_current_session") || "default";
+  const remoteCur = await pullCurrentSession();   // 跨设备同步：以服务器"最后打开的会话"优先
   await loadSessions();
   // 主会话(default)已废弃：恢复到 default 或已不存在的会话时，自动落到列表里最后活跃的会话
-  if((currentSession==="default"||!sessionList.some(s=>s.id===currentSession))&&sessionList.length){
-    const best=sessionList.slice().sort((a,b)=>((b.last_time||"")>(a.last_time||"")?1:((b.last_time||"")<(a.last_time||"")?-1:0)))[0];
-    if(best&&best.id&&best.id!==currentSession){
-      currentSession=best.id;
-      localStorage.setItem("han_current_session",best.id);
-      renderSessionList();   // loadSessions 渲染列表时 active 还是旧值，这里补一次
+  const preliminary = remoteCur || local;   // local→remote 后用于触发 best 的判定值
+  let bestSeed;
+  if((preliminary==="default"||!SessionStore.getSessionList().some(s=>s.id===preliminary))&&SessionStore.getSessionList().length){
+    const best=SessionStore.getSessionList().slice().sort((a,b)=>((b.last_time||"")>(a.last_time||"")?1:((b.last_time||"")<(a.last_time||"")?-1:0)))[0];
+    if(best&&best.id&&best.id!==preliminary){
+      bestSeed=best.id;
     }
+  }
+  // 一次 bootstrap：best 命中则采用并落盘；否则 remote 优先于 local（remote 仅 truthy 覆盖，均不落盘）
+  SessionStore.bootstrap({ local, remote: remoteCur || undefined, best: bestSeed });
+  if(bestSeed){   // best 命中时补刷列表 active（loadSessions 渲染时 active 还是旧值）
+    renderSessionList();
   }
   pullSessionNames();    // 拉取跨设备改名映射
   pullSessionPins();    // 拉取跨设备会话置顶
@@ -8321,7 +8311,7 @@ function openPinEdit(id, body){
 /* ---------------- 跨窗口注入 ---------------- */
 function renderCross(body){
   body.innerHTML='<div class="adm-load">加载中…</div>';
-  admGet(BASE+'/cross-window-inject?session_id='+encodeURIComponent(currentSession)).then(function(d){
+  admGet(BASE+'/cross-window-inject?session_id='+encodeURIComponent(SessionStore.getCurrentSession())).then(function(d){
     var t=(d&&d.text)||'';
     if(!t){ body.innerHTML='<div class="adm-empty">当前没有可注入的跨窗口内容</div>'; return; }
     body.innerHTML='<div class="adm-tip">共 '+t.length+' 字</div><div style="white-space:pre-wrap;word-break:break-all;font-size:12px;color:var(--ink2);background:rgba(0,0,0,.03);border-radius:8px;padding:8px;font-family:monospace;line-height:1.6">'+esc(t)+'</div>';
@@ -8482,5 +8472,7 @@ else{ initAdminCards(); }
   });
 })();
 </script>
+<!-- C0 基建：仅加载 SessionStore 桥接（暴露 window.SessionStore），不接入任何业务逻辑 -->
+<script type="module" src="../shared-runtime/bridge/session-bridge.js"></script>
 </body>
 </html>

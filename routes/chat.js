@@ -370,38 +370,6 @@ module.exports = function registerChatRoutes(app, deps) {
     }
   });
 
-  // 第三方专用会话：读/写「不带 session_id 的第三方客户端(如 Kelivo)」落地到哪个会话。
-  // 前端在会话列表里把某个会话设为「第三方专用」，存到 data/config.json 的 third_party_session_id。
-  // 读：GET /v1/sessions/third-party → 返回当前第三方专用会话 id（可能为空）。
-  // 写：POST /v1/sessions/third-party body:{session_id} → 设置/清空（传空串清空，回退 default 行为）。
-  app.get('/v1/sessions/third-party', async (req, reply) => {
-    try {
-      const sid = String(memoryEngine.getConfig().third_party_session_id || '').trim();
-      reply.send({ ok: true, session_id: sid || null });
-    } catch (err) {
-      console.error('[GET /v1/sessions/third-party] error:', err.message);
-      reply.code(500).send({ error: err.message });
-    }
-  });
-  app.post('/v1/sessions/third-party', async (req, reply) => {
-    try {
-      const body = (req.body && typeof req.body === 'object') ? req.body : {};
-      const sid = String(body.session_id || '').trim();
-      // 允许清空：传空串即回退 default 行为
-      if (!sid) {
-        await memoryEngine.updateConfig({ third_party_session_id: '' });
-        return reply.send({ ok: true, session_id: '' });
-      }
-      const safe = sid.replace(/[^A-Za-z0-9_-]/g, '');
-      if (safe !== sid) return reply.code(400).send({ error: '非法会话ID' });
-      await memoryEngine.updateConfig({ third_party_session_id: safe });
-      reply.send({ ok: true, session_id: safe });
-    } catch (err) {
-      console.error('[POST /v1/sessions/third-party] error:', err.message);
-      reply.code(500).send({ error: err.message });
-    }
-  });
-
   // 只读返回完整时间线（供自建聊天前端首次拉取历史；剥离内部 position 字段，保留 role/content/time）
   app.get('/v1/history', async (req, reply) => {
     try {
@@ -820,12 +788,6 @@ app.post("/v1/chat/completions", async (req, reply) => {
 
     // 多会话：识别当前请求来自哪个会话
     let sessionId = String(body.session_id || req.headers["x-session-id"] || "").trim();
-    // 第三方客户端(Kelivo 等)通常不带 session_id：若配置了「第三方专用会话」，
-    // 则落到该会话，避免混入主会话 default；未配置才回退空(==default)。
-    if (!sessionId) {
-      const tpSid = String(memoryEngine.getConfig().third_party_session_id || "").trim();
-      if (tpSid) sessionId = tpSid;
-    }
     // 让压缩/替换按当前会话时间线工作（onResponse 钩子复位）
     contextReplacements.setActiveSession(sessionId || null);
     req.__ctxWasSet = true;
