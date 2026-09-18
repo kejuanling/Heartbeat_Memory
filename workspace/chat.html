@@ -1627,7 +1627,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
             <div class="mcp-msg" id="pwMsg" style="margin-top:4px"></div>
             <button type="button" class="mcp-btn primary" id="pwSaveBtn">保存密码</button>
             <div style="font-size:11px;color:var(--ink3);margin-top:6px">修改后用于聊天页登录与管理台，保存即生效（下次登录用新密码）。</div>
-            </div></div><div class="set-panel" data-acc="behav"><div class="set-acc-h" data-acc="behav">显示与行为<span class="ar">▾</span></div><div class="set-sec">
+            </div></div><div class="set-panel" data-acc="shadowtl"><div class="set-acc-h" data-acc="shadowtl">影子时间线<span class="ar">▾</span></div><div class="set-sec"><div class="mcp-block"><div class="mcp-h">影子时间线（记忆浮现 / 隐藏事件）<button type="button" class="mcp-btn" style="margin-left:auto;border:1px solid var(--line);background:none;border-radius:7px;font-size:11px;color:var(--ink2);padding:3px 9px;cursor:pointer" onclick="loadShadowTL()">刷新</button></div><div id="shadowTLList" class="mcp-list"><div class="mcp-empty">展开时自动加载…</div></div></div></div></div><div class="set-panel" data-acc="behav"><div class="set-acc-h" data-acc="behav">显示与行为<span class="ar">▾</span></div><div class="set-sec">
               <div class="set-sec-label">思考链</div>
               <div class="pick" id="pickThinking">
                 <button data-k="show" class="on">显示思考链</button>
@@ -3634,13 +3634,40 @@ async function addToPoolMsg(){
   const content=msgText(m);
   if(!content||!content.trim()){ showToast("这条消息没有正文，无法入池"); return; }
   try{
-    const r=await fetch(ccBase()+"/memory-pool",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":ccGetCookie("admin_csrf")},body:JSON.stringify({content:content,category:"对话碎片",importance:0.7}),credentials:"include"});
+    // 0918 起走记忆流水线：人工发起 → V2 admission（manual_review）→ review 队列人工裁决后入库
+    const r=await fetch(ccBase()+"/memory-v2/entries",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":ccGetCookie("admin_csrf")},body:JSON.stringify({content:content,session_id:SessionStore.getCurrentSession()}),credentials:"include"});
     if(!r.ok){ showToast("入池失败: HTTP "+r.status); return; }
     const j=await r.json().catch(function(){return {};});
+    if(j.success===false&&j.action==="reject"){ showToast("流水线拒绝："+((j.reasons||[])[0]||"不符合记忆标准")); return; }
     if(!j||!j.success){ showToast("入池失败: "+((j&&j.error)||"")); return; }
-    showToast(j.dup?"已在池中（自动去重合并）":"已入池（对话碎片）");
+    showToast(j.action==="review"?"已进记忆流水线（review 队列待裁决）":"已处理: "+(j.action||"ok"));
     closeAct();
   }catch(e){ showToast("入池失败:"+e.message); }
+}
+
+/* 影子时间线（0918）：后台活动抽屉展示落盘但前端不显示的内容（记忆浮现/developer 块/日记/隐藏事件） */
+async function loadShadowTL(){
+  const el=document.getElementById("shadowTLList"); if(!el) return;
+  el.innerHTML='<div class="mcp-empty">加载中…</div>';
+  try{
+    const r=await fetch("/v1/timeline-hidden?session_id="+encodeURIComponent(SessionStore.getCurrentSession()),{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
+    const j=await r.json();
+    if(j.error) throw new Error(j.error);
+    const items=j.items||[];
+    if(!items.length){ el.innerHTML='<div class="mcp-empty">暂无影子内容（记忆浮现后在这里出现）</div>'; return; }
+    const KIND_NAMES={memory_float:"记忆浮现",diary:"日记",developer_block:"注入块",hidden_event:"隐藏事件"};
+    const KIND_COLORS={memory_float:"#8e44ad",diary:"#27ae60",developer_block:"#2980b9",hidden_event:"#7f8c8d"};
+    el.innerHTML=items.map(function(it){
+      const col=KIND_COLORS[it.kind]||"#7f8c8d";
+      return '<div style="border:1px solid var(--line);border-radius:8px;padding:7px 10px;margin-bottom:6px">'
+        +'<div style="font-size:10.5px;font-weight:700;color:'+col+'">'+(KIND_NAMES[it.kind]||it.kind)
+        +(it.float_id?'　<span style="color:var(--text3);font-weight:400">'+it.float_id+'</span>':'')
+        +'　<span style="color:var(--text3);font-weight:400">'+String(it.time||"").slice(0,16).replace("T"," ")+'</span></div>'
+        +'<div style="font-size:12px;color:var(--ink2);margin-top:3px;line-height:1.5;white-space:pre-wrap;word-break:break-word">'+String(it.text||"").replace(/</g,"&lt;").slice(0,300)+'</div>'
+        +(it.chars>300?'<div style="font-size:10px;color:var(--text3);margin-top:2px">…共 '+it.chars+' 字</div>':'')
+        +'</div>';
+    }).join("");
+  }catch(e){ el.innerHTML='<div class="mcp-empty">加载失败: '+e.message+'</div>'; }
 }
 function closeAct(){actMask.classList.remove("show");actSheet.classList.remove("show");actIdx=-1;}
 actMask.addEventListener("click",closeAct);
@@ -4248,6 +4275,7 @@ document.querySelectorAll(".set-acc-h").forEach(function(h){
       document.querySelectorAll(".set-panel").forEach(function(p){p.classList.remove("open");});
       panel.classList.add("open");
       if(tab==='conn'||tab==='mcp'){ loadMcpServers(); }
+      if(tab==='shadowtl'){ loadShadowTL(); }
       if(tab==='conn'||tab==='prov'){ loadProviders(); }
     }
   });

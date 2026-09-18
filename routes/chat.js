@@ -400,6 +400,34 @@ module.exports = function registerChatRoutes(app, deps) {
       reply.code(500).send({ error: err.message });
     }
   });
+  // 影子时间线（0918）：后台活动抽屉展示「落盘但前端不显示」的时间线内容——
+  // 记忆浮现（float_id）、developer 块、diary、特殊事件等。只读，不影响任何链路。
+  app.get('/v1/timeline-hidden', async (req, reply) => {
+    try {
+      const sessionId = String(req.query.session_id || req.headers['x-session-id'] || '').trim();
+      const timeline = loadTimeline(sessionId);
+      const items = timeline
+        .filter(m => m && !m.deleted)
+        .filter(m => m.float_id || m.role === 'developer' || m.kind === 'diary' || (m.role === 'assistant' && m.hidden === true))
+        .sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')))
+        .map(m => {
+          const kind = m.float_id ? 'memory_float' : (m.kind === 'diary' ? 'diary' : (m.role === 'developer' ? 'developer_block' : 'hidden_event'));
+          const text = String(typeof m.content === 'string' ? m.content : '').trim();
+          return {
+            id: m.id || null,
+            kind,
+            float_id: m.float_id || null,
+            time: m.time || null,
+            text: text.slice(0, 600),
+            chars: text.length,
+          };
+        });
+      reply.send({ ok: true, total: items.length, items, session_id: sessionId || 'default' });
+    } catch (err) {
+      console.error('[GET /v1/timeline-hidden] error:', err.message);
+      reply.code(500).send({ error: err.message });
+    }
+  });
   // 跨会话全量搜索：扫描所有会话时间线，混合模式 = 语义分（TF-IDF+bigram 余弦）与关键词命中分五五开合成排序。
   // 语义索引只存两字 bigram，单字/纯符号查询在语义侧必为 0 分，靠关键词腿保底（2026-09-13，替代原 semantic|keyword 二选一）。
   app.get('/v1/search', async (req, reply) => {

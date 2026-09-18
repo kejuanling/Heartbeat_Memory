@@ -1639,7 +1639,7 @@ function ccBuildSummaryStatsHtml(d, t){
            +'</div>'
          : ''))
        +'</div>'
-       +(hidden?'':'<div class="cc-swipe-del"><button class="cc-swipe-del-btn" onclick="removeSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">移除</button></div>')
+       +(hidden?'':'<div class="cc-swipe-del"><button class="cc-swipe-del-btn" onclick="removeSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">移除</button><button class="cc-swipe-del-btn" onclick="hideSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">隐藏</button></div>')
        +'</div>';
    });
  
@@ -2095,6 +2095,22 @@ function updateCcStatusBar(d){
   // 请走「解析」按钮（LLM 解析时间线原文 → 候选进 review 队列人工把关）
   async function ingestSingleBlock(cid, blockIndex, isAi){
     toast('直接入池已停用：请用「解析」按钮，候选会进 review 队列人工把关');
+  }
+
+  // 左滑「隐藏」按钮（0918 补回独立隐藏入口，替代原入池时附带隐藏）：摘要与原文都不再发 AI，可「取消隐藏」恢复
+  async function hideSingleBlock(cid, blockIndex, isAi){
+    const d = AppState.compactionPlan;
+    if(!d) return;
+    const c = (d.chunks || []).find(function(x){ return x.index === cid; });
+    if(!c || c.enabled === false){ toast('该块未替换，无需隐藏'); return; }
+    if(!confirm('隐藏该块？隐藏后这块的摘要与原文都不再发给 AI；之后可在块上点「取消隐藏」恢复。')) return;
+    try{
+      await ccSetBlockHidden(c, blockIndex, isAi, true);
+      toast('块 #' + cid + ' 已隐藏（不再进入上下文）');
+      loadCompactionPreview();
+    }catch(e){
+      toast('隐藏失败: ' + e.message);
+    }
   }
 
   // 设置/取消块的手动隐藏（AI 块走 context-replacements/toggle 带 hidden；手工块走 blocks 的 hide 动作）
@@ -4256,6 +4272,41 @@ async function deletePinned(id){
     window.__memShowAll=false;
     populateMemPoolCatOptions();
     loadMemPool();
+    loadMemoryV2();
+  }
+
+  // ---- 记忆 V2（新池）卡片（0918）：GET /admin/memory-v2/entries，迁移前显示空态 ----
+  async function loadMemoryV2(){
+    const statsEl=document.getElementById('memv2-stats');
+    const listEl=document.getElementById('memv2-list');
+    if(!statsEl||!listEl) return;
+    try{
+      const r=await fetch(ADMIN_API+'/memory-v2/entries',{credentials:'include'});
+      const j=await r.json();
+      if(j.error) throw new Error(j.error);
+      const st=j.stats||{};
+      const kinds=Object.entries(st.by_kind||{}).map(([k,v])=>k+' '+v).join(' · ');
+      statsEl.textContent='共 '+st.total+' 条｜active '+st.active+'｜superseded '+st.superseded+'｜archived '+st.archived+(kinds?'｜'+kinds:'');
+      const items=(j.items||[]).slice(0,50);
+      if(!items.length){
+        listEl.innerHTML='<div style="font-size:11px;color:var(--text3);padding:6px 2px">暂无 V2 记忆（迁移后在此显示）</div>';
+        return;
+      }
+      const KIND_COLORS={fact:'#2980b9',rule:'#c0392b',quote:'#8e44ad',milestone:'#f39c12'};
+      listEl.innerHTML=items.map(function(it){
+        const col=KIND_COLORS[it.kind]||'#7f8c8d';
+        const stColor=it.status==='active'?'#27ae60':(it.status==='superseded'?'#95a5a6':'#7f8c8d');
+        return '<div style="border:1px solid var(--line);border-radius:8px;padding:7px 10px">'
+          +'<div style="font-size:10.5px;color:'+col+';font-weight:700">'+(it.kind||'?')+' · '+(it.subject||'?')+' · '+it.id
+          +'　<span style="color:'+stColor+'">'+(it.status||'')+'</span>'
+          +(it.anchor?'　<span style="color:#f39c12">anchor</span>':'')+'</div>'
+          +'<div style="font-size:12px;color:var(--ink);margin-top:3px;line-height:1.5">'+String(it.text||'').replace(/</g,'&lt;')+'</div>'
+          +'<div style="font-size:10px;color:var(--text3);margin-top:3px">'+String(it.created_at||'').slice(0,10)+'｜origin='+(it.origin||'-')+'｜conf='+(it.confidence!=null?Number(it.confidence).toFixed(2):'-')+'</div>'
+          +'</div>';
+      }).join('');
+    }catch(e){
+      if(statsEl) statsEl.textContent='加载失败: '+e.message;
+    }
   }
   function populateMemPoolCatOptions(){
     const sel=document.getElementById('mempool-cat');

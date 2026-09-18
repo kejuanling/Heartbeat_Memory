@@ -76,12 +76,14 @@ function createAdmission(opts = {}) {
   // 兼容策略：旧路由恒写旧池（v2_enabled=true 也不停）；本适配器只负责 V2 侧落点。
   function submitManual(body, ctx = {}, mode = "shadow") {
     const formal = mode === "formal";
-    const isPromo = mode === "promotion"; // 0918：promotion 通道（压缩块原文提炼候选），R7 全落 review，不受双闸门控（按钮即人工授权）
-    if (!formal && !isPromo && !shadowOn) {
+    const isPromo = mode === "promotion";
+    const isManualReview = mode === "manual_review"; // 0918：promotion 通道（压缩块原文提炼候选），R7 全落 review，不受双闸门控（按钮即人工授权）
+    const isManualReviewGate = isPromo || isManualReview;
+    if (!formal && !isManualReviewGate && !shadowOn) {
       // 影子观察未开启时跳过（正式 admit 通道只经 submitV2 的 v2_enabled 门进入）
       return { action: "skipped_shadow_off", candidate: null, validation: null, audit_id: null };
     }
-    const exec = (formal || isPromo) ? mainExecutor : shadowExecutor;
+    const exec = (formal || isManualReviewGate) ? mainExecutor : shadowExecutor;
     const originVal = isPromo ? "promotion" : "manual";
     const b = body || {};
     const text = strSafe(b.content || b.text);
@@ -96,7 +98,7 @@ function createAdmission(opts = {}) {
     // [2] provenance_builder（manual：无 session/msg → null，不伪造；promotion：block_id 必带（压缩块溯源），msg_id=null）
     const provenance = buildProvenance({
       origin: originVal,
-      method: isPromo ? "summary_promotion" : "admin_form",
+      method: isPromo ? "summary_promotion" : (isManualReview ? "chat_manual_pick" : "admin_form"),
       sessionId: strSafe(ctx.sessionId),
       msgId: strSafe(ctx.msgId),
     });
@@ -122,10 +124,10 @@ function createAdmission(opts = {}) {
 
     // [4] 决策（纯编排策略，无业务规则）
     let { action, why } = decide(detection, validation);
-    if (isPromo && action === "admit") {
+    if (isManualReviewGate && action === "admit") {
       // R7：promotion 来源首入一律人工把关（提炼是二次加工，judge/mock 认准也不自动入库）
       action = "review";
-      why = why + " +R7(promotion 首入一律 review)";
+      why = why + " +R7(" + (isPromo ? "promotion" : "manual_review") + " 人工发起一律 review)";
     }
 
     // [5] state_executor（唯一写手）+ audit
@@ -176,7 +178,7 @@ function createAdmission(opts = {}) {
       audit_id: auditRec.ok ? auditRec.id : null,
       entry_id: execResult.entry ? execResult.entry.id : null,
       queue_id: execResult.queue_id || null,
-      mode: isPromo ? "promotion" : (formal ? "formal" : "shadow"),
+      mode: isPromo ? "promotion" : (isManualReview ? "manual_review" : (formal ? "formal" : "shadow")),
     };
   }
 

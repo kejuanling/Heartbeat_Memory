@@ -3605,6 +3605,8 @@ try {
 }
 require("./routes/memory-pool")(app, { basicAuth, v2Manual: memoryV2Admission ? (b) => memoryV2Admission.submitV2(b) : null });
 require("./routes/memory-review")(app, { basicAuth, admission: memoryV2Admission });
+// 记忆 V2 管理台：集合查看 + 聊天页入池（manual_review 走流水线进 review）
+require("./routes/memory-v2-admin")(app, { basicAuth, admission: memoryV2Admission, baseDir: __dirname });
 // 聊天页主题云同步 + 背景图/头像转存（/v1/themes, /v1/upload-image, /uploads/:file）
 require("./routes/themes")(app, { baseDir: __dirname });
 app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, reply) => {
