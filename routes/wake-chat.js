@@ -237,6 +237,7 @@ module.exports = function registerWakeChatRoutes(app, deps) {
   ensureGuard(deps);
 
   // 内部接口：主唤醒（独立进程期）/ 未来其他调用方经 HTTP 使用统一唤醒链路。
+  // 注（2026-09-19 复核）：当前全仓无调用方——唤醒调度已在 gateway 内直调 runWakeCompletion，本端点预留。
   // 鉴权走全局 /internal/ 钩子（x-internal-key）。
   app.post("/internal/wake-completions", async (req, reply) => {
     try {

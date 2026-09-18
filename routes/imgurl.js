@@ -15,6 +15,7 @@
 // 并对最终 host 做净化：去掉端口、路径、查询与空白/换行等非法字符，防止注入。
 const pathFn = require('path');
 
+// 本机/内网 host 判定：imageAbsUrl 据此选 http（本机）或 https（公网）拼绝对 URL
 function isLocalHost(host) {
   return /^(localhost|127\.|::1|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(host);
 }

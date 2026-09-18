@@ -34,6 +34,7 @@ const MIME_EXT = {
   'application/pdf': 'pdf',
   'text/plain': 'txt'
 };
+// 扩展名 → MIME 回查表（/uploads/:file 直出时定 Content-Type）
 const EXT_MIME = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', pdf: 'application/pdf', txt: 'text/plain' };
 // 通用附件（/v1/upload-file）：mime → 扩展名白名单（映射外一律 .bin + octet-stream，防扩展名注入/可执行直出）
 const FILE_MIME_EXT = Object.assign({}, MIME_EXT, {
@@ -46,6 +47,7 @@ const FILE_MIME_EXT = Object.assign({}, MIME_EXT, {
   'video/mp4': 'mp4',
   'application/zip': 'zip'
 });
+// 展示用原始文件名净化：只留 basename、非法字符换下划线、截 80 字（落盘名是服务端生成的 file-*，不用它）
 function safeBaseName(name) {
   return path.basename(String(name || 'file')).replace(/[^\w.\-\u4e00-\u9fff]+/g, '_').slice(0, 80) || 'file';
 }
@@ -100,6 +102,7 @@ module.exports = function registerThemeRoutes(app, deps) {
     reply.send({ ok: true, name: keepName, url: imageAbsUrl(req, '/uploads/' + name), size: buf.length, mime: outMime });
   });
 
+  // 网关直出兜底（正常流量走 nginx alias 直读磁盘）：path.basename 剥掉目录成分防路径穿越
   app.get('/uploads/:file', async (req, reply) => {
     const file = path.basename(String((req.params && req.params.file) || ''));
     let buf;

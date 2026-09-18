@@ -27,6 +27,7 @@ function isPushEchoLike(m) {
 }
 
 // ---- 跨会话语义检索（TF-IDF + 字符 bigram，与前端旧逻辑同口径）----
+// 文本 → 字符 bigram 序列（小写化；中英文数字以外的字符折成空格并丢弃；不足两字时退化为单字序列）
 function charBigrams(text) {
   if (!text) return [];
   const t = String(text).toLowerCase().replace(/[^\w\u4e00-\u9fa5]/g, ' ');
@@ -37,6 +38,7 @@ function charBigrams(text) {
   for (let i = 0; i < chars.length - 1; i++) r.push(chars[i] + chars[i + 1]);
   return r;
 }
+// 对 items 建 TF-IDF 向量索引（每文档 L2 归一化），返回 { vocab, rows, items } 供 semanticSearch 点积
 function buildSemIndex(items) {
   const vocab = {};
   const docFreq = [];
@@ -75,6 +77,7 @@ function buildSemIndex(items) {
   }
   return { vocab, rows, items };
 }
+// 查询向量与索引逐行点积（稀疏交集），返回 [{ i, score }] 按分降序；低于 threshold 丢弃（默认 0.05）
 function semanticSearch(index, query, threshold) {
   if (!threshold) threshold = 0.05;
   const qTokens = charBigrams(query);
@@ -264,6 +267,7 @@ module.exports = function registerChatRoutes(app, deps) {
   // 断绝「有据回复→支撑消失→编造倾向」的链条。挂 v2_enabled 总闸（正式启用才写，shadow 期只读）。
   // 消息形态：role=developer、content=组装条目同款纯原文、float_id 为内部簿记字段
   //（LLM 清洗自动剥离不进上下文）；hidden=true 前端不显示；压缩抹除清单由 addReplacement 侧负责。
+  // 注（2026-09-19 复核）：当前全仓无调用点——记忆浮现尚未接线，上述 v2_enabled 总闸未生效，本函数为预留实现。
   function floatMemoriesToTimeline(sessionId, mems) {
     const list = (Array.isArray(mems) ? mems : []).filter(m => m && m.id && String(m.text || '').trim());
     if (!list.length) return 0;
@@ -955,8 +959,6 @@ app.post("/v1/chat/completions", async (req, reply) => {
     // ---- 自动修复不完整的 tool 调用（双向清理，实现搬至 chat-context.js）----
     llmMessages = chatCtx.repairToolCallPairs(llmMessages);
 
-    // (trim 逻辑在下方最近窗口处执行，当前用户请求的图片始终保留)
-
     // 统一模型解析（2026-09-08）：会话级设置 → 全局默认供应商 → env 兜底，与 MCP 路径同一口径
     const { provider: prov, model: resolvedModel } = deps.resolveChatModel(sessionId, body.model);
     if (resolvedModel) body.model = resolvedModel;
@@ -997,14 +999,6 @@ app.post("/v1/chat/completions", async (req, reply) => {
     // role=tool 消息组（带工具名/调用时间/状态标头），模型明确知道来源，不混入普通对话流。
     // 必须在 applyReplacements 之后（压缩块匹配仍按 assistant 文本形态），转发前生效。
     llmMessages = chatCtx.convertToolNotesToToolRole(llmMessages);
-
-
-    // 请求模型（实际捕获移至下方 outboundMessages 组装之后，管理台看到=真正发出）
-
-
-
-
-    // 管理台展示：保留完整消息序列（含动态注入），方便核对注入位置
 
     // 转发前只保留 OpenAI 兼容字段，剥离 Kelivo 自定义字段（position 等）
     const sanitizedMessages = chatCtx.sanitizeForUpstream(llmMessages);

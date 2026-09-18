@@ -3,6 +3,7 @@
 const memoryPool = require('../memory-pool');
 
 module.exports = function registerMemoryPoolRoutes(app, { basicAuth, v2Manual }) {
+  // 记忆池列表（管理台）：按类目/关键词/active/pinned 筛选排序，一次带回列表+统计+分类+配置
   app.get('/admin/memory-pool', { preHandler: basicAuth }, async (req, reply) => {
     try {
       const opts = {
@@ -15,8 +16,6 @@ module.exports = function registerMemoryPoolRoutes(app, { basicAuth, v2Manual })
       reply.send({ items: memoryPool.list(opts), stats: memoryPool.stats(), categories: memoryPool.CATEGORIES, config: memoryPool.getConfig() });
     } catch (err) { reply.code(500).send({ error: err.message }); }
   });
-
-  // 2026-09-13 死接口清理：GET /admin/memory-pool/stats 全仓无调用方（前端用上方列表接口自带的 stats 字段），已删除
 
   app.post('/admin/memory-pool', { preHandler: basicAuth }, async (req, reply) => {
     try {
@@ -49,6 +48,7 @@ module.exports = function registerMemoryPoolRoutes(app, { basicAuth, v2Manual })
     } catch (err) { reply.code(500).send({ error: err.message }); }
   });
 
+  // 沉底：把条目标记为失活（active=false，保留不删除），revive 可恢复
   app.post('/admin/memory-pool/sink', { preHandler: basicAuth }, async (req, reply) => {
     try {
       const r = memoryPool.sink(String((req.body || {}).id || ''));
@@ -57,6 +57,7 @@ module.exports = function registerMemoryPoolRoutes(app, { basicAuth, v2Manual })
     } catch (err) { reply.code(500).send({ error: err.message }); }
   });
 
+  // 复活：把失活条目恢复为 active=true
   app.post('/admin/memory-pool/revive', { preHandler: basicAuth }, async (req, reply) => {
     try {
       const r = memoryPool.revive(String((req.body || {}).id || ''));

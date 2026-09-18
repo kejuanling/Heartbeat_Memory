@@ -36,6 +36,7 @@ function listAllTimelines(baseDir) {
   return result;
 }
 
+// 时间线 → 推送回显条目：取未删除消息中可解析出推送元数据的（pushEchoMeta），附上所属会话
 function extractPushItems(timeline, sessionId) {
   if (!Array.isArray(timeline)) return [];
   return timeline
