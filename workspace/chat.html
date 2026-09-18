@@ -1155,7 +1155,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .alert-dot.error{background:#d65a4f}
 .alert-dot.ok{background:#7cb87c}
 .alert-sec{font-size:11px;letter-spacing:1px;color:var(--ink3);font-weight:600;padding:9px 2px 3px;border-top:1px dashed var(--line);margin-top:4px}
-.alerts-scroll{max-height:240px;overflow-y:auto;padding-right:4px;scrollbar-width:thin}
+.alerts-scroll{max-height:240px;overflow-y:auto;margin:0;padding:0 4px 0 0;scrollbar-width:thin}
 .alerts-scroll::-webkit-scrollbar{width:6px}
 .alerts-scroll::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:3px}
 .alerts-scroll::-webkit-scrollbar-track{background:transparent}
@@ -1217,7 +1217,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .mnav .mnav-btn[data-adm]:active{background:var(--accent-soft)}
 /* 展开内容：直接接在按钮下方（同一 li 内），去掉多余的外层盒子 */
 .adm-rowli{margin:4px 10px}
-.adm-rowli .adm-card-b{display:none;margin:0 0 12px;padding:0 6px 12px;border:none;border-radius:0;background:transparent;box-shadow:none;max-height:min(80vh,900px);overflow-y:auto;-webkit-overflow-scrolling:touch}
+.adm-rowli .adm-card-b{display:none;margin:0 0 12px;padding:0 14px 12px;border:none;border-radius:0;background:transparent;box-shadow:none;max-height:min(80vh,900px);overflow-y:auto;-webkit-overflow-scrolling:touch}
 .adm-rowli .adm-card-b.open{display:block;animation:fadeIn .2s ease}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 .adm-rowli .adm-card-b::-webkit-scrollbar{width:6px}
