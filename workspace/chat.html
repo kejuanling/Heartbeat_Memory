@@ -1377,7 +1377,6 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
   </div>
 </div>
 <input type="file" id="importFile" accept=".txt,.json,text/plain,application/json" style="display:none">
-<input type="file" id="avatarFile" accept="image/*" style="display:none">
 
 <div id="selBar">
   <span class="st" id="selCount">已选 0 条</span>
@@ -3943,12 +3942,6 @@ function renderPicks(){
   if(pickRender)pickRender.querySelectorAll("button").forEach(b=>{
     b.classList.toggle("on",!!cfg[b.dataset.k]);
   });
-  if(pickFontWeight)pickFontWeight.querySelectorAll("button").forEach(b=>{
-    b.classList.toggle("on",Number(b.dataset.fw)===(cfg.font_weight!=null?Number(cfg.font_weight):400));
-  });
-  if(pickAvatarShape)pickAvatarShape.querySelectorAll("button").forEach(b=>{
-    b.classList.toggle("on",b.dataset.sh===(cfg.avatar_shape||"circle"));
-  });
   if(pickMode)pickMode.querySelectorAll("button").forEach(b=>{
     b.classList.toggle("on",b.dataset.m===(cfg.send_mode||"stream"));
   });
@@ -3990,7 +3983,7 @@ async function saveSettingsAll(){
   const k=keyInput.value.trim();
   if(k){api_key=k;}
   system_prompt=(promptInput.value||"").trim();
-  cfg.ai_name=(thAiNameInput.value.trim()||aiNameInput.value.trim()||"谢意行");
+  cfg.ai_name=(aiNameInput.value.trim()||"谢意行");
   cfg.ai_sub=(aiSubInput && aiSubInput.value)? aiSubInput.value.trim() : "";
   cfg.temperature=tempInput.value!==""?Number(tempInput.value):null;
   cfg.top_p=topPInput.value!==""?Number(topPInput.value):null;
@@ -6579,7 +6572,6 @@ var CARDS = [
 
   { group:'log', id:'reqctx',    n:'当前请求上下文', d:'只读查看实际发送内容', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 8 7 8"/></svg>' },
   { group:'log', id:'cross',      n:'跨窗口注入', d:'新窗口注入预览', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' },
-  { group:'log', id:'pin',        n:'永久注入上下文', d:'固定注入 · 排序', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 3h6l1 7 2 2H6l2-2z"/></svg>' },
   { group:'log', id:'repllog',    n:'替换记录',   d:'每次请求的压缩/替换记录', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>' }
 ];
 var CARD_GROUPS = [
