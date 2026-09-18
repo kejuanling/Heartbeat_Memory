@@ -1153,6 +1153,8 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .alert-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:4px}
 .alert-dot.warn{background:#e0a33c}
 .alert-dot.error{background:#d65a4f}
+.alert-dot.ok{background:#7cb87c}
+.alert-sec{font-size:11px;letter-spacing:1px;color:var(--ink3);font-weight:600;padding:9px 2px 3px;border-top:1px dashed var(--line);margin-top:4px}
 .alert-t{color:var(--ink);font-weight:600}
 .alert-d{color:var(--ink3);font-size:11px;margin-top:2px}
 #navDrawer .set-panel{margin:8px 10px 0;background:var(--accent-faint)}
@@ -7846,14 +7848,28 @@ function renderAlerts(){
   el.innerHTML='<div class="adm-load">加载中…</div>';
   admGet(BASE+'/alerts').then(function(j){
     var list=(j&&Array.isArray(j.alerts))?j.alerts:[];
-    if(!list.length){ el.innerHTML='<div class="alerts-empty">一切正常</div>'; return; }
+    var services=(j&&Array.isArray(j.services))?j.services:[];
+    var bad=services.filter(function(s){ return !s.ok; });
+    if(!list.length&&!bad.length){ el.innerHTML='<div class="alerts-empty">一切正常</div>'; return; }
     var sessMap={};
     try{ SessionStore.getSessionList().forEach(function(s){ sessMap[s.id]=s.name||s.id; }); }catch(e){}
-    el.innerHTML=list.map(function(a){
+    var html='';
+    list.forEach(function(a){
       var t=a.title||'', d=a.desc||'';
-      if(a.session_id&&sessMap[a.session_id]) t+='：'+sessMap[a.session_id];
-      return '<div class="alert-item"><span class="alert-dot '+(a.level==='error'?'error':'warn')+'"></span><span><div class="alert-t">'+esc(t)+'</div><div class="alert-d">'+esc(d)+'</div></span></div>';
-    }).join('');
+      var nm=a.session_name||(a.session_id?sessMap[a.session_id]:null);
+      if(a.session_id){
+        t+='：'+(nm||a.session_id);
+        if(a.token_used!=null&&a.token_limit!=null) d='ID '+a.session_id+' · 约 '+a.token_used+' / '+a.token_limit+' token · '+(d||'AI 将自动压缩');
+      }
+      html+='<div class="alert-item"><span class="alert-dot '+(a.level==='error'?'error':'warn')+'"></span><span><div class="alert-t">'+esc(t)+'</div><div class="alert-d">'+esc(d)+'</div></span></div>';
+    });
+    if(services.length){
+      html+='<div class="alert-sec">服务状态</div>';
+      html+=services.map(function(s){
+        return '<div class="alert-item"><span class="alert-dot '+(s.ok?'ok':'error')+'"></span><span><div class="alert-t">'+esc(s.label||s.name)+'</div><div class="alert-d">'+(s.ok?'运行正常':'未运行 · '+esc(s.status||''))+'</div></span></div>';
+      }).join('');
+    }
+    el.innerHTML=html;
   }).catch(function(e){ el.innerHTML='<div class="alerts-empty">加载失败</div>'; });
 }
 

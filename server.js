@@ -3974,6 +3974,32 @@ app.get("/admin/tools", { preHandler: basicAuth }, async (req, reply) => {
   }
 });
 
+// 批次4 C5：容量提醒 token 估算（与容量提醒守卫 countUncompressedTokens 同口径）
+function estimateAlertTokens(timeline) {
+  let tok = 0;
+  for (const m of timeline) {
+    if (!m) continue;
+    if (m.role === "system" || m.role === "developer") continue;
+    if (m.role !== "user" && m.role !== "assistant") continue;
+    if (m._ctxRep || m._ccSummary || m.tool_calls || m.tool_call_id) continue;
+    if (isSpecialEvent(m)) continue;
+    const c = m.content;
+    if (typeof c === "string") {
+      if (c.startsWith("（回忆 · ") || c.startsWith("（对话摘要")) continue;
+      tok += contextCompactor.estimateTokens(c);
+    } else if (Array.isArray(c)) {
+      for (const part of c) {
+        if (!part) continue;
+        if (part.type === "text" && typeof part.text === "string") tok += contextCompactor.estimateTokens(part.text);
+        else if (part.type === "image" || part.type === "image_url") tok += (contextCompactor.EST_IMAGE_TOKENS || 1200);
+        else if (part.type === "file" && part.file && typeof part.file.name === "string") tok += contextCompactor.estimateTokens("[文件] " + part.file.name);
+        else tok += 1;
+      }
+    }
+  }
+  return tok;
+}
+
 // 批次4 C5：后台活动「提醒」板块数据源：网易云 Cookie 失效 / 会话上下文达容量上限 / 服务异常
 app.get("/admin/alerts", { preHandler: basicAuth }, async (req, reply) => {
   const alerts = [];
@@ -3988,7 +4014,9 @@ app.get("/admin/alerts", { preHandler: basicAuth }, async (req, reply) => {
       }
     }
   } catch (e) { console.warn("[alerts] netease:", e.message); }
-  // 2) 会话上下文达容量上限：最近活跃会话时间线中存在未删除的 ctx_limit 落盘提醒（与容量提醒守卫同口径）
+  // 2) 会话上下文达容量上限：最近活跃会话时间线中存在未删除的 ctx_limit 落盘提醒（与容量提醒守卫同口径），带会话 id/名称/用量
+  const sessNames = {};
+  try { Object.assign(sessNames, readJsonFileSafe(SESSION_NAMES_FILE, {})); } catch (e) {}
   try {
     const limit = Number(contextCompactor.loadConfig().compaction_context_limit_chars) || 0;
     if (limit) {
@@ -4004,15 +4032,18 @@ app.get("/admin/alerts", { preHandler: basicAuth }, async (req, reply) => {
       for (const { f } of recent) {
         try {
           const tl = JSON.parse(fs.readFileSync(path.join(__dirname, f), "utf-8"));
-          const hit = Array.isArray(tl) && tl.some(function (m) { return m && m.kind === "ctx_limit" && !m.deleted; });
+          if (!Array.isArray(tl)) continue;
+          const hit = tl.some(function (m) { return m && m.kind === "ctx_limit" && !m.deleted; });
           if (!hit) continue;
           const sid = f === TIMELINE_FILE ? "default" : f.replace(/^enhanced_messages_/, "").replace(/\.json$/, "");
-          alerts.push({ type: "capacity", level: "warn", title: "上下文已达容量上限", session_id: sid, desc: "该会话上下文超出上限（约 " + limit + " 字符），AI 将自动压缩" });
+          const used = estimateAlertTokens(tl);
+          alerts.push({ type: "capacity", level: "warn", title: "上下文已达容量上限", session_id: sid, session_name: sessNames[sid] || null, token_used: used, token_limit: limit, desc: "AI 将自动压缩" });
         } catch (e) {}
       }
     }
   } catch (e) { console.warn("[alerts] capacity:", e.message); }
-  // 3) 服务异常：只检查实际部署的服务（pm2 存在 / systemd unit 存在 / 端口型全部）
+  // 3) 服务状态：列出全部实际部署的服务（pm2 存在 / systemd unit 存在 / 端口型全部），异常高亮
+  const services = [];
   try {
     const pm2Out = runShellCommand("pm2 jlist").output || "[]";
     const pm2ByName = {};
@@ -4022,22 +4053,27 @@ app.get("/admin/alerts", { preHandler: basicAuth }, async (req, reply) => {
     const mm = ssOut.match(/:(\d{2,5})\s/g) || [];
     mm.forEach(function (s) { ports.add(s.replace(/[:\s]/g, "")); });
     for (const svc of MANAGED_SERVICES) {
-      let ok = true;
+      let ok = true, status = "unknown";
       if (svc.type === "pm2") {
         if (!(svc.name in pm2ByName)) continue; // 未部署，跳过
-        ok = pm2ByName[svc.name] === "online";
+        status = pm2ByName[svc.name] || "unknown";
+        ok = status === "online";
       } else if (svc.type === "port") {
-        ok = ports.has(String(svc.port));
+        status = ports.has(String(svc.port)) ? "running" : "stopped";
+        ok = status === "running";
       } else if (svc.type === "systemd") {
         const en = runShellCommand("systemctl is-enabled " + svc.name + " 2>/dev/null").output || "";
         if (en !== "enabled" && en !== "disabled") continue; // unit 不存在，跳过
-        ok = runShellCommand("systemctl is-active " + svc.name).output === "active";
+        status = runShellCommand("systemctl is-active " + svc.name).output || "unknown";
+        ok = status === "active";
       }
-      if (!ok) alerts.push({ type: "service", level: "error", title: "服务异常：" + (svc.label || svc.name), desc: "当前未运行" });
+      services.push({ name: svc.name, label: svc.label || svc.name, status: status, ok: ok });
     }
   } catch (e) { console.warn("[alerts] services:", e.message); }
-  reply.send({ ok: true, alerts: alerts, ts: Date.now() });
+  reply.send({ ok: true, alerts: alerts, services: services, ts: Date.now() });
 });
+
+
 
 app.put("/admin/tools", { preHandler: mcpManageAuth }, async (req, reply) => {
   try {
