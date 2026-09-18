@@ -66,10 +66,10 @@
           <label class="cc-cfg-field">衰减半衰期(天)<input type="number" id="mw-decay-days" min="1" step="1"></label>
           <label class="cc-cfg-field">自动置顶检索次数<input type="number" id="mw-auto-pin-count" min="2" step="1"></label>
           <div class="cc-cfg-btns"><button type="button" class="cc-btn secondary" onclick="clearRetrievalStats()">一键清空检索次数（不影响已置顶）</button><span id="mw-clear-retrieval-msg" class="cc-cfg-msg"></span></div>
-          <div class="cc-cfg-group-title">再解析（压缩摘要 → 记忆池）</div>
-          <label class="cc-cfg-field cc-cfg-check">再解析·温暖风格<span class="cc-sw"><input type="checkbox" id="mw-reparse-warm"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
-          <label class="cc-cfg-field">再解析·每条字数上限<input type="number" id="mw-reparse-maxchars" min="5" step="1"></label>
-          <label class="cc-cfg-field">再解析·每段最多条数<input type="number" id="mw-reparse-maxitems" min="1" step="1"></label>
+          <div class="cc-cfg-group-title">解析（压缩块原文 → 记忆候选）</div>
+          <label class="cc-cfg-field cc-cfg-check" style="opacity:.45">再解析·温暖风格<span style="font-size:9px;color:var(--text3)">已废弃</span><span class="cc-sw"><input type="checkbox" id="mw-reparse-warm"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
+          <label class="cc-cfg-field" style="opacity:.45">再解析·每条字数上限<span style="font-size:9px;color:var(--text3)">已废弃</span><input type="number" id="mw-reparse-maxchars" min="5" step="1"></label>
+          <label class="cc-cfg-field" style="opacity:.45">再解析·每段最多条数<span style="font-size:9px;color:var(--text3)">已废弃</span><input type="number" id="mw-reparse-maxitems" min="1" step="1"></label>
           <label class="cc-cfg-field">合并解析·总字数上限<input type="number" id="mw-reparse-mergemaxchars" min="0" step="100"></label>
           <div class="cc-cfg-group-title">跨窗口注入</div>
           <label class="cc-cfg-field cc-cfg-check">总开关<span class="cc-sw"><input type="checkbox" id="mw-cross-enabled"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
@@ -264,7 +264,7 @@
        <div class="card" data-collapse-id="reparse-prompt-config" data-default="collapsed">
       <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆池·再解析提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
       <div class="card-body">
-        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:6px;">下面展示当前内置的再解析提示词（系统 + 用户）。可直接修改、保存后覆盖内置；点「恢复内置默认」会清空自定义、回到内置版。</div>
+        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:6px;">下面展示「解析」用的提示词（系统 + 用户）——解析对象是压缩块覆盖区间的对话原文，产出候选全部进记忆 review 队列人工把关。可直接修改、保存后覆盖内置；点「恢复内置默认」会清空自定义、回到内置版。</div>
         <div class="cc-cfg-msg" id="reparse-prompt-msg" style="margin-bottom:8px"></div>
         <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">System 提示词</div>
         <textarea id="reparse-sys-prompt" rows="4" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;margin-bottom:10px"></textarea>

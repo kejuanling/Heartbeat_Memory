@@ -831,20 +831,13 @@ function parseLlmArray(cleaned) {
   return null;
 }
 
-function buildReparsePrompt(warm, fixedCategory) {
-  const maxChars = Math.max(5, Number(CONFIG.reparse_max_chars) || 30);
-  const maxItems = Math.max(1, Number(CONFIG.reparse_max_items) || 8);
-  const catEnum = "(" + AI_CATEGORIES.join("|") + ")";
-  const catNote = "分类含义：关于她=她是谁的静态部分（稳定、反复成立的事实，一条一个事实，短句）；认账=我认下的账（答应过的事、欠着没做的、被纠正后认下的毛病，每条都必须能回答\"那我该干什么\"）；拓本=一字不改的原话（逐字照抄，写明谁说的、日期）。";
-  const system = warm
-    ? '你是这段关系的记忆整理者。把压缩记忆提炼成有温度、可长期复用的一条条记忆：既客观，也保留她与“我”之间真实的相处质感。禁止编造、禁止脑补、禁止写成冰冷档案。'
-    : '你是记忆整理器。把对话压缩记忆按客观事实提炼成结构化记忆条目，禁止脑补。';
-  const itemShape = fixedCategory
-    ? '{"content":"...","importance":0~1}'
-    : '{"content":"...","category":"' + catEnum + '","importance":0~1}';
-  const user = warm
-    ? '下面是一段我用第一人称/零散记录写的压缩记忆。请提炼成若干条能长期记住的关系记忆，每条保留一个明确信息，贴近“我”的视角与语气，有温度但不煽情；既要有明确的相处规律/她的特点，也要保留那些让我觉得真实、会心或心底一动的细节。输出 JSON 数组，每项形如 ' + itemShape + '。' + (fixedCategory ? '' : catNote) + ' 同一条信息只保留一次，同义合并。只提炼最重要的，尽量不超过 ' + maxItems + ' 条；每条尽量精简，不要超过 ' + maxChars + ' 字。直接输出 JSON，不要额外解释。'
-    : '下面是一段压缩记忆。请客观提炼出若干条记忆，每条只保留一个明确信息，输出 JSON 数组，每项形如 ' + itemShape + '。' + (fixedCategory ? '' : catNote) + ' 若多条信息同义则只保留一条。只提炼最重要的，尽量不超过 ' + maxItems + ' 条；每条尽量精简，不要超过 ' + maxChars + ' 字。直接输出 JSON，不要额外解释。';
+function buildReparsePrompt() {
+  // 0918 promotion 接线：解析对象=压缩块覆盖区间的「时间线原文」（不再是压缩摘要文本），
+  // 产出走 V2 admission（R7 全落 review）。warm/fixedCategory 旧参数退役（签名保留兼容旧调用方）。
+  const system = "你是记忆提取器。从对话原文中提取值得长期记住的稳定信息，只输出 JSON 数组。" +
+    "提取标准：跨会话仍然成立才提取——她的偏好/习惯/身体/经历/性格（fact）、承诺与行为规则（rule）、她的重要原话逐字保留（quote）、关系节点（milestone）。" +
+    "当日心情、一次性事件、寒暄调侃、事件流水账一律不提取。每条独立成句（20~60 字），quote 类必须是原文引号内逐字内容。";
+  const user = "输出 JSON 数组，每项 {\"text\":\"记忆内容\",\"kind\":\"fact|rule|quote|milestone\"}。没有值得记的就输出 []。";
   return { system, user };
 }
 

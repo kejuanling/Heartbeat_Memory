@@ -3717,10 +3717,11 @@ async function extractMemoryCandidates(sourceText) {
   const apiKey = readEnvValue("TARGET_API_KEY");
   const model = readEnvValue("MODEL_NAME");
   if (!apiUrl || !apiKey || !model) throw new Error("LLM 未配置（TARGET_API_URL/KEY/MODEL_NAME）");
-  const system = "你是记忆提取器。从对话原文中提取值得长期记住的稳定信息，只输出 JSON 数组。" +
-    "提取标准：跨会话仍然成立才提取——她的偏好/习惯/身体/经历/性格（fact）、承诺与行为规则（rule）、她的重要原话逐字保留（quote）、关系节点（milestone）。" +
-    "当日心情、一次性事件、寒暄调侃、事件流水账一律不提取。每条独立成句（20~60 字），quote 类必须是原文引号内逐字内容。";
-  const user = "对话原文：\n" + sourceText + "\n\n输出 JSON 数组，每项 {\"text\":\"记忆内容\",\"kind\":\"fact|rule|quote|milestone\"}。没有值得记的就输出 []。";
+  // 提示词接入管理台配置（0918）：reparse_system_prompt/user_prompt 自定义覆盖，内置默认=buildReparsePrompt（原文提取版）
+  const pcfg = memoryPool.getConfig();
+  const pdef = memoryPool.buildReparsePrompt();
+  const system = String(pcfg.reparse_system_prompt || "").trim() || pdef.system;
+  const user = (String(pcfg.reparse_user_prompt || "").trim() || pdef.user) + "\n\n对话原文：\n" + sourceText;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 60000);
   let resp, data;
