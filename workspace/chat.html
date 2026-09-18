@@ -1145,6 +1145,16 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .session-logout .mnav-btn .mrow{margin-left:auto;color:var(--ink3);font-size:14px}
 
 /* 设置区：恢复可折叠（点标题收起/展开）；仅保留配色与去掉内层重复标题盒的微调 */
+/* 批次4 C5：提醒板块 */
+.alerts-panel{margin:0 10px 10px;border:1px solid var(--line);border-radius:12px;background:var(--field-bg,#fff);padding:6px 10px}
+.alerts-empty{font-size:12px;color:var(--ink3);padding:7px 2px}
+.alert-item{display:flex;gap:9px;padding:7px 2px;border-bottom:1px solid var(--line);font-size:12px;line-height:1.5}
+.alert-item:last-child{border-bottom:none}
+.alert-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:4px}
+.alert-dot.warn{background:#e0a33c}
+.alert-dot.error{background:#d65a4f}
+.alert-t{color:var(--ink);font-weight:600}
+.alert-d{color:var(--ink3);font-size:11px;margin-top:2px}
 #navDrawer .set-panel{margin:8px 10px 0;background:var(--accent-faint)}
 #navDrawer .set-panel .set-sec{padding:8px 14px 12px}
 #navDrawer .set-panel .set-acc-h{font-size:13px}
@@ -1675,8 +1685,11 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 <div id="navDrawer" class="drawer">
   <div class="drawer-backdrop" id="navBackdrop"></div>
   <div class="drawer-panel">
-    <div class="drawer-head"><span><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg> 菜单</span><span class="drawer-head-right"><button class="drawer-close" id="navClose"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></span></div>
+    <div class="drawer-head"><span><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg> 后台活动</span><span class="drawer-head-right"><button class="drawer-close" id="navClose"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></span></div>
     <ul class="mnav">
+      <li><div class="mnav-group">提醒</div></li>
+      <div id="alertsPanel" class="alerts-panel"><div class="adm-load">加载中…</div></div>
+
       <li><div class="mnav-group">管理</div></li>
 
       <li id="admGroup" style="display:contents"></li>
@@ -7682,7 +7695,7 @@ init();
   var panel=document.getElementById('featurePanel'), featureBack=document.getElementById('featureBack'),
       featureTitle=document.getElementById('featureTitle'), featureBody=document.getElementById('featureBody');
 
-  function openNav(){ if(navDrawer) navDrawer.classList.add('open'); }
+  function openNav(){ if(navDrawer) navDrawer.classList.add('open'); if(typeof renderAlerts==='function') renderAlerts(); }
   function closeNav(){ if(navDrawer) navDrawer.classList.remove('open'); }
   if(navBtn) navBtn.addEventListener('click', openNav);
   var worldBtn=document.getElementById('worldBtn');
@@ -7798,23 +7811,14 @@ function admGet(url){ return admFetch(url).then(function(r){ return r.json(); })
 function admPost(url, body){ return admFetch(url,{method:'POST',body:body}).then(function(r){ return r.json(); }); }
 
 /* ---- 卡片注册表：每个卡片一个 id + 标题 + 分组 + 渲染函数 ---- */
-/* 分组：sys=系统配置, mem=记忆与上下文, log=日志与推送 */
+/* 批次4：删「系统配置」「记忆与上下文」两组与「管理台」跳转项，log 组 5 张卡平铺 */
 var CARDS = [
-  { group:'sys', id:'env',        n:'环境变量',   d:'运行 · 模型 · 推送 · 天气', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="9" cy="18" r="2"/></svg>' },
-  { group:'sys', id:'netease',    n:'网易云环境', d:'登录会话 · 账号状态', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>' },
-
-  { group:'mem', id:'diary',      n:'日记阅览',   d:'编辑日记 · 同步上下文', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>' },
-  { group:'mem', id:'mempool',    n:'记忆池',     d:'新增 · 整理 · 检索', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 1 5 5v9a5 5 0 0 1-10 0V7a5 5 0 0 1 5-5z"/><path d="M12 12v6"/></svg>' },
-  { group:'mem', id:'marked',     n:'上下文已标星', d:'标星消息 · 防止被摘要覆盖', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1Z"/></svg>' },
-  { group:'mem', id:'pin',        n:'永久注入上下文', d:'固定注入 · 排序', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 3h6l1 7 2 2H6l2-2z"/></svg>' },
-
   { group:'log', id:'wakelog',    n:'唤醒原始日志', d:'最近唤醒日志', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4a7 7 0 0 0-7 7v4a3 3 0 0 0 3 3h1v-8H5a6 6 0 0 1 12 0h-3v8h1a3 3 0 0 0 3-3v-4a7 7 0 0 0-7-7z"/><line x1="12" y1="4" x2="12" y2="2"/></svg>' },
   { group:'log', id:'push',       n:'推送管理',   d:'修改 · 删除推送记录', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>' },
 
   { group:'log', id:'reqctx',    n:'当前请求上下文', d:'只读查看实际发送内容', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 8 7 8"/></svg>' },
   { group:'log', id:'cross',      n:'跨窗口注入', d:'新窗口注入预览', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' },
-  { group:'log', id:'repllog',    n:'替换记录',   d:'每次请求的压缩/替换记录', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>' },
-  { group:'log', id:'adminjump',  n:'管理台',     d:'打开完整管理台 · 新窗口', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>' }
+  { group:'log', id:'repllog',    n:'替换记录',   d:'每次请求的压缩/替换记录', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>' }
 ];
 var CARD_GROUPS = [
   { key:'sys', n:'系统配置' },
@@ -7826,32 +7830,35 @@ var CARD_GROUPS = [
 function buildMenu(){
   var marker=document.getElementById('admGroup');
   if(!marker) return;
-  var html = '';
-  CARD_GROUPS.forEach(function(g){
-    var items = CARDS.filter(function(c){ return c.group===g.key; });
-    if(!items.length) return;
-    html += '<li><button class="mnav-group mg-collapsed" data-group="'+g.key+'" title="点击展开/收起"><span>'+esc(g.n)+'</span><span class="mg-meta"><span class="mg-count">'+items.length+'</span><span class="mg-arrow">▾</span></span></button></li>';
-    html += items.map(function(c){
-      // 跳转特例：管理台项不展开内嵌卡片，点击直接新窗口打开管理台
-      if(c.id==='adminjump'){
-        return '<li class="adm-rowli mg-item" data-group="'+c.group+'" style="display:none"><button class="mnav-btn" data-adminjump="1"><span class="mi">'+c.i+'</span><span><span class="mt">'+esc(c.n)+'</span><div class="md">'+esc(c.d)+'</div></span><span class="mrow">↗</span></button></li>';
-      }
-      return '<li class="adm-rowli mg-item" data-group="'+c.group+'" style="display:none"><button class="mnav-btn" data-adm="'+c.id+'"><span class="mi">'+c.i+'</span><span><span class="mt">'+esc(c.n)+'</span><div class="md">'+esc(c.d)+'</div></span><span class="mrow">▾</span></button>'
-        +'<div class="adm-card-b" id="adm-body-'+c.id+'"><div class="adm-load">加载中…</div></div></li>';
-    }).join('');
+  var html='';
+  // 批次4 C2：无分组标题，卡片全部平铺（提醒板块在菜单顶部独立渲染）
+  CARDS.forEach(function(c){
+    html+='<li class="adm-rowli mg-item" data-group=""><button class="mnav-btn" data-adm="'+c.id+'"><span class="mi">'+c.i+'</span><span><span class="mt">'+esc(c.n)+'</span><div class="md">'+esc(c.d)+'</div></span><span class="mrow">▾</span></button>'
+      +'<div class="adm-card-b" id="adm-body-'+c.id+'"><div class="adm-load">加载中…</div></div></li>';
   });
-  // 以 marker 的兄弟节点插入（mnav 的直接子元素是 <li>），避免 <li> 嵌套 <li>
   marker.insertAdjacentHTML('beforebegin', html);
   marker.parentNode.removeChild(marker);
   Array.prototype.forEach.call(document.querySelectorAll('[data-adm]'), function(b){
     b.addEventListener('click', function(){ toggleCard(b.getAttribute('data-adm')); });
   });
-  Array.prototype.forEach.call(document.querySelectorAll('[data-adminjump]'), function(b){
-    b.addEventListener('click', function(){ window.open('/heartbeat/admin/mobile', '_blank'); });
-  });
-  Array.prototype.forEach.call(document.querySelectorAll('.mnav-group'), function(gb){
-    gb.addEventListener('click', function(){ toggleMenuGroup(gb.getAttribute('data-group')); });
-  });
+}
+
+// 批次4 C5：提醒板块（网易云 Cookie 失效 / 会话上下文达容量上限 / 服务异常）
+function renderAlerts(){
+  var el=document.getElementById('alertsPanel');
+  if(!el) return;
+  el.innerHTML='<div class="adm-load">加载中…</div>';
+  admGet(BASE+'/alerts').then(function(j){
+    var list=(j&&Array.isArray(j.alerts))?j.alerts:[];
+    if(!list.length){ el.innerHTML='<div class="alerts-empty">一切正常</div>'; return; }
+    var sessMap={};
+    try{ SessionStore.getSessionList().forEach(function(s){ sessMap[s.id]=s.name||s.id; }); }catch(e){}
+    el.innerHTML=list.map(function(a){
+      var t=a.title||'', d=a.desc||'';
+      if(a.session_id&&sessMap[a.session_id]) t+='：'+sessMap[a.session_id];
+      return '<div class="alert-item"><span class="alert-dot '+(a.level==='error'?'error':'warn')+'"></span><span><div class="alert-t">'+esc(t)+'</div><div class="alert-d">'+esc(d)+'</div></span></div>';
+    }).join('');
+  }).catch(function(e){ el.innerHTML='<div class="alerts-empty">加载失败</div>'; });
 }
 
 function toggleMenuGroup(key){
