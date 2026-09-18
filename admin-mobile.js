@@ -218,7 +218,7 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    try{
      let savedTab = localStorage.getItem('adminTab');
      try{ const qp=new URLSearchParams(location.search); const t=qp.get('tab'); if(t) savedTab=t; }catch(e){}
-     if(savedTab && ['status','config','memory','compaction','prompts','system'].indexOf(savedTab)>=0 && savedTab!=='status'){
+     if(savedTab && ['status','config','memory','compaction','prompts'].indexOf(savedTab)>=0 && savedTab!=='status'){
        switchTab(savedTab);
      }
    }catch(e){}
@@ -539,7 +539,7 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
      startUnreadPoll();
      if(AppState.logPanelOpen) startLogPolling();
      let cur=''; try{ cur=localStorage.getItem('adminTab')||''; }catch(e){}
-     if(cur==='system') startLogsAutoRefresh();
+     if(cur==='system' && document.getElementById('tab-system')) startLogsAutoRefresh();
    }
  });
 
