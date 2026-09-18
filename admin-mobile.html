@@ -38,8 +38,6 @@
      <div class="stat-row"><span class="stat-label">单位</span><span class="stat-value" id="weather-units">-</span></div>
    </div>
 
-   <div class="card"><div class="card-title">日记阅览</div><div id="diary-list"></div></div>
-   <div class="card"><div class="card-title">留纸一览</div><div style="font-size:11px;color:var(--text3);margin:-4px 0 8px">AI 写的故事/梦/随手创作，只落盘保存、不注入对话上下文</div><div id="papers-list"></div></div>
    <button type="button" class="btn btn-primary" onclick="restartService()" style="margin-top:4px;background:#c89098">重启服务</button>
 
 </div>
@@ -53,36 +51,9 @@
      <button type="button" class="btn btn-outline" onclick="openNeteaseEditor()">编辑网易云环境</button>
    </div>
    <div class="card">
-     <div class="card-title" style="display:flex;align-items:center;justify-content:space-between">
-       <span>视觉模型</span>
-       <span id="vision-models-count" style="font-size:10px;font-weight:500;color:var(--text3);background:rgba(0,0,0,0.05);padding:3px 8px;border-radius:10px;letter-spacing:0">0 个</span>
-     </div>
-     <div id="vision-models-list"></div>
-     <button type="button" class="btn btn-outline" onclick="openVisionModelsEditor()">编辑视觉模型</button>
-   </div>
-   <div class="card">
      <div class="card-title">共影环境</div>
      <div id="co-view-status"></div>
      <button type="button" class="btn btn-outline" onclick="openCoViewEditor()">编辑共影环境</button>
-   </div>
-   <div class="card">
-     <div class="card-title">截图上传</div>
-     <div id="screenshot-status"></div>
-     <button type="button" class="btn btn-outline" onclick="openScreenshotEditor()">编辑截图上传</button>
-   </div>
-   <div class="card" data-collapse-id="send-config" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>对话发送配置</span><span class="collapse-arrow">▾</span></div>
-     <div class="card-body">
-       <div class="cc-cfg-grid">
-         <label class="cc-cfg-field">保留最近 N 条带图消息的历史图片（0=不保留历史图片，当前发送的图始终保留）
-           <input type="number" id="img-keep-turns" min="0" step="1"></label>
-       </div>
-       <div class="cc-cfg-btns">
-         <button type="button" class="cc-btn primary" onclick="saveSendConfig()">保存</button>
-         <button type="button" class="cc-btn secondary" onclick="loadSendConfig()">重新载入</button>
-       </div>
-       <div id="send-config-msg" class="cc-cfg-msg"></div>
-     </div>
    </div>
    <div class="card" data-collapse-id="memory-wake-config" data-default="collapsed">
      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆与唤醒参数</span><span class="collapse-arrow">▾</span></div>
@@ -115,7 +86,7 @@
    </div>
 
    <div class="card" data-collapse-id="cc-config" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>压缩参数配置</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>压缩参数配置</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
      <div class="card-body">
        <div class="cc-cfg-grid">
          <label class="cc-cfg-field">保留最近 N 条不压缩
@@ -134,20 +105,16 @@
            <input type="number" id="cc-cfg-chunk-min" min="1" step="1"></label>
          <label class="cc-cfg-field">块最多条数
            <input type="number" id="cc-cfg-chunk-max" min="1" step="1"></label>
-         <label class="cc-cfg-field cc-cfg-check">摘要包含思考内容
-           <input type="checkbox" id="cc-cfg-think"></label>
-         <label class="cc-cfg-field cc-cfg-check">压缩特殊事件
-           <input type="checkbox" id="cc-cfg-events"></label>
-         <label class="cc-cfg-field">活跃块上限（手动+AI 合计保留最近 N 个，0=不限）
+         <label class="cc-cfg-field">活跃块上限<span class="hint-i" onclick="event.preventDefault();event.stopPropagation();showHintText(this,'活跃块上限','手动+AI 合计保留最近 N 个块，0=不限。超限的最早块仅隐藏、不注入上下文，块的摘要数据不动，调大即恢复。')">i</span>
            <input type="number" id="cc-cfg-max-blocks" min="0" step="1"></label>
-         <label class="cc-cfg-field">上下文容量上限（token 估算，0=不限；超过时网关塞隐藏提醒让 AI 自己压缩）
+         <label class="cc-cfg-field">上下文容量上限<span class="hint-i" onclick="event.preventDefault();event.stopPropagation();showHintText(this,'上下文容量上限','按 token 估算，0=不限。超过时网关塞一条隐藏提醒，让 AI 自己压缩上下文。')">i</span>
            <input type="number" id="cc-cfg-ctx-limit" min="0" step="1000"></label>
          <label class="cc-cfg-field cc-cfg-check">容量提醒开关
            <input type="checkbox" id="cc-cfg-ctx-remind"></label>
          <label class="cc-cfg-field">AI 压缩保护最近条数（AI 建的替换块不许覆盖最近 N 条，0=不保护）
            <input type="number" id="cc-cfg-protect-recent" min="0" step="1"></label>
        </div>
-        <div class="cc-cfg-hint" id="cc-config-hint"><b>生效范围提醒</b>：「保留最近 / 消息少于 N 条 / 摘要字数 / 分块间隔 / 思考 / 事件」 作用于「整段对话的自动压缩计划」；<b>「自动分块目标 / 最少 / 最多条数」</b>同时作用于「整段对话自动压缩计划」和「未覆盖区·自动分块」。请保持：摘要最少 ≤ 摘要最多；块最少 ≤ 目标 ≤ 块最多。</div>
+        <div class="cc-cfg-hint hint-body" id="cc-config-hint"><b>生效范围提醒</b>：「保留最近 / 消息少于 N 条 / 摘要字数 / 分块间隔」作用于「整段对话的自动压缩计划」；<b>「自动分块目标 / 最少 / 最多条数」</b>同时作用于「整段对话自动压缩计划」和「未覆盖区·自动分块」。请保持：摘要最少 ≤ 摘要最多；块最少 ≤ 目标 ≤ 块最多。</div>
 
        <div class="cc-cfg-btns">
          <button type="button" class="cc-btn primary" onclick="saveCompactionConfig()">保存参数</button>
@@ -168,30 +135,15 @@
      </div>
    </div>
 
-   <div class="card" data-collapse-id="services" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>服务管理</span><span class="collapse-arrow">▾</span></div>
-     <div class="card-body">
-       <div id="services-list"><div class="loading">加载中...</div></div>
-       <button type="button" class="cc-btn secondary" onclick="loadServices()" style="margin-top:8px">刷新</button>
-     </div>
-   </div>
 </div>
 
 <!-- Tab 3: 记忆 -->
 <div class="tab-content" id="tab-memory" style="position:relative">
    <div style="margin:12px 0 16px;padding:0 2px">
-     <h2 style="font-family:'Noto Serif SC',serif;font-size:27px;font-weight:700;color:var(--tab-active);letter-spacing:4px;margin:0;line-height:1.35">记忆</h2>
+     <h2 style="font-family:'Noto Serif SC',serif;font-size:27px;font-weight:700;color:var(--tab-active);letter-spacing:4px;margin:0;line-height:1.35">记忆池</h2>
      <div style="width:38px;height:4px;border-radius:2px;background:var(--accent);margin-top:10px;box-shadow:0 2px 8px rgba(200,144,152,.30)"></div>
    </div>
-   <div id="mem-view-toggle" class="mem-tabs">
-     <button type="button" class="mem-tab active" id="mem-view-cloud" onclick="switchMemView('cloud')">词云</button>
-     <button type="button" class="mem-tab" id="mem-view-mempool" onclick="switchMemView('mempool')">记忆池</button>
-   </div>
-   <div id="mem-cloud-wrap">
-     <div id="mem-cloud" class="cloud-card"><div class="loading">统计中...</div></div>
-     <div class="cloud-hint">词越大 = 出现越多越重要，点词查看相关对话</div>
-   </div>
-   <div id="mem-mempool-wrap" style="display:none">
+   <div id="mem-mempool-wrap">
       <div class="mp-head">
         <div class="mp-actions">
           <button type="button" class="mp-btn primary" onclick="openMemPoolAdd()">＋ 新增记忆</button>
@@ -263,48 +215,48 @@
 
 <div class="tab-content" id="tab-prompts">
    <div class="card" data-collapse-id="wake-prompt" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>唤醒提示词</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>唤醒提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
      <div class="card-body">
          <textarea id="wake-prompt-edit" rows="8" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;font-family:monospace;line-height:1.6;resize:vertical;"></textarea>
          <div class="env-row" style="margin-top:8px;gap:8px;">
            <button type="button" class="btn btn-primary" onclick="saveWakePrompt()" style="flex:1;background:var(--accent)">保存</button>
            <button type="button" class="btn btn-outline" onclick="loadWakePrompt()" style="flex:1">重新载入</button>
          </div>
-         <div style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 wake_prompt.txt，下次唤醒即生效。</div>
+         <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 wake_prompt.txt，下次唤醒即生效。</div>
      </div>
    </div>
    <div class="card" data-collapse-id="cc-prompt" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>压缩上下文提示词</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>压缩上下文提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
      <div class="card-body">
        <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">System（身份提示）</div>
        <textarea id="cc-prompt-system-edit" rows="12" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;line-height:1.6;font-family:monospace;min-height:240px;max-height:420px;resize:vertical;"></textarea>
-       <div style="font-size:11px;color:var(--text3);margin:8px 0 4px;">User Prompt 模板（占位符：${PERSONA}=人设、${chunkInfo}=块时间段、${conversationText}=对话原文、${normalChars}=基准字数、${maxChars}=上限字数）</div>
+       <div class="hint-body" style="font-size:11px;color:var(--text3);margin:8px 0 4px;">User Prompt 模板占位符：${PERSONA}=人设、${chunkInfo}=块时间段、${conversationText}=对话原文、${normalChars}=基准字数、${maxChars}=上限字数。</div>
        <textarea id="cc-prompt-edit" rows="10" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;font-family:monospace;line-height:1.6;resize:vertical;"></textarea>
        <div class="env-row" style="margin-top:8px;gap:8px;">
          <button type="button" class="btn btn-primary" onclick="saveCompactionPrompt()" style="flex:1;background:var(--accent)">保存</button>
          <button type="button" class="btn btn-outline" onclick="loadCompactionPrompt()" style="flex:1">重新载入</button>
          <button type="button" class="btn btn-outline" onclick="resetCompactionPrompt()" style="flex:1">恢复默认</button>
        </div>
-       <div style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 data/compaction_prompt.json，下次生成压缩摘要即生效。</div>
+       <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 data/compaction_prompt.json，下次生成压缩摘要即生效。</div>
      </div>
    </div>
    <div class="card" data-collapse-id="ctx-limit-prompt" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>容量提醒提示词</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>容量提醒提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
      <div class="card-body">
-       <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">会话上下文超过容量上限时，网关塞给 AI 的整条隐藏提醒（前端不显示）。占位符：${chars}=当前字符数、${limit}=容量上限、${chunkInfo}=建议整理范围、${conversationText}=要整理的对话。开头「（容量提醒）」是系统识别标记，保存时会强制校验，不可删改。与上面的压缩上下文提示词互相独立。</div>
+       <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:4px;">会话上下文超过容量上限时，网关塞给 AI 的整条隐藏提醒（前端不显示）。占位符：${chars}=当前字符数、${limit}=容量上限、${chunkInfo}=建议整理范围、${conversationText}=要整理的对话。开头「（容量提醒）」是系统识别标记，保存时会强制校验，不可删改。与压缩上下文提示词互相独立。</div>
        <textarea id="ctx-limit-prompt-edit" rows="14" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;line-height:1.6;font-family:monospace;resize:vertical;"></textarea>
        <div class="env-row" style="margin-top:8px;gap:8px;">
          <button type="button" class="btn btn-primary" onclick="saveCtxLimitPrompt()" style="flex:1;background:var(--accent)">保存</button>
          <button type="button" class="btn btn-outline" onclick="loadCtxLimitPrompt()" style="flex:1">重新载入</button>
          <button type="button" class="btn btn-outline" onclick="resetCtxLimitPrompt()" style="flex:1">恢复默认</button>
        </div>
-       <div style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 data/ctx_limit_prompt.json，下次触发容量提醒即生效。</div>
+       <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 data/ctx_limit_prompt.json，下次触发容量提醒即生效。</div>
      </div>
    </div>
        <div class="card" data-collapse-id="reparse-prompt-config" data-default="collapsed">
-      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆池·再解析提示词</span><span class="collapse-arrow">▾</span></div>
+      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆池·再解析提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
       <div class="card-body">
-        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">下面展示当前内置的再解析提示词（系统 + 用户）。可直接修改、保存后覆盖内置；点「恢复内置默认」会清空自定义、回到内置版。</div>
+        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:6px;">下面展示当前内置的再解析提示词（系统 + 用户）。可直接修改、保存后覆盖内置；点「恢复内置默认」会清空自定义、回到内置版。</div>
         <div class="cc-cfg-msg" id="reparse-prompt-msg" style="margin-bottom:8px"></div>
         <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">System 提示词</div>
         <textarea id="reparse-sys-prompt" rows="4" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;margin-bottom:10px"></textarea>
@@ -318,9 +270,9 @@
     </div>
 
     <div class="card" data-collapse-id="clean-prompt-config" data-default="collapsed">
-      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆池·整理清洗提示词</span><span class="collapse-arrow">▾</span></div>
+      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆池·整理清洗提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
       <div class="card-body">
-        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">下面展示「整理记忆池」用的清洗提示词（系统 + 用户）。可直接修改、保存后覆盖内置；点「恢复内置默认」会清空自定义、回到内置版。</div>
+        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:6px;">下面展示「整理记忆池」用的清洗提示词（系统 + 用户）。可直接修改、保存后覆盖内置；点「恢复内置默认」会清空自定义、回到内置版。</div>
         <div class="cc-cfg-msg" id="clean-prompt-msg" style="margin-bottom:8px"></div>
         <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">System 提示词</div>
         <textarea id="clean-sys-prompt" rows="4" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;margin-bottom:10px"></textarea>
@@ -332,59 +284,18 @@
         </div>
       </div>
     </div>
-<div class="card" data-collapse-id="co-wake-prompt" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>观影唤醒提示词</span><span class="collapse-arrow">▾</span></div>
-     <div class="card-body">
-       <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">User Prompt 模板（占位符：${currentTime}=当前时间、${frameDescription}=画面描述、${subtitle}=当前字幕）</div>
-       <textarea id="co-wake-prompt-edit" rows="10" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;font-family:monospace;line-height:1.6;resize:vertical;"></textarea>
-       <div class="env-row" style="margin-top:8px;gap:8px;">
-         <button type="button" class="btn btn-primary" onclick="saveCoWakePrompt()" style="flex:1;background:var(--accent)">保存</button>
-         <button type="button" class="btn btn-outline" onclick="loadCoWakePrompt()" style="flex:1">重新载入</button>
-         <button type="button" class="btn btn-outline" onclick="resetCoWakePrompt()" style="flex:1">恢复默认</button>
-       </div>
-       <div style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 data/co_wake_prompt.json，共影定时唤醒时生效。</div>
-     </div>
-   </div>
-   <div class="card" data-collapse-id="co-vision-prompt" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>画面描述提示词</span><span class="collapse-arrow">▾</span></div>
-     <div class="card-body">
-       <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">视觉模型描述画面用的提示词（可选占位符：${seconds}=本次采样秒数、${frameCount}=本次帧数）</div>
-       <textarea id="co-vision-prompt-edit" rows="8" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;font-family:monospace;line-height:1.6;resize:vertical;"></textarea>
-       <div class="env-row" style="margin-top:8px;gap:8px;">
-         <button type="button" class="btn btn-primary" onclick="saveCoVisionPrompt()" style="flex:1;background:var(--accent)">保存</button>
-         <button type="button" class="btn btn-outline" onclick="loadCoVisionPrompt()" style="flex:1">重新载入</button>
-         <button type="button" class="btn btn-outline" onclick="resetCoVisionPrompt()" style="flex:1">恢复默认</button>
-       </div>
-       <div style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 data/co_vision_prompt.json，手动看一眼 / 定时唤醒 / 附带画面时生效。</div>
-     </div>
-   </div>
-   <div class="card" data-collapse-id="screenshot-wake-prompt" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>截图唤醒提示词</span><span class="collapse-arrow">▾</span></div>
-     <div class="card-body">
-       <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">User Prompt 模板（占位符：${currentTime}=当前时间、${frameDescription}=画面描述）</div>
-       <textarea id="log-screenshot-wake-prompt" rows="8" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;font-family:monospace;line-height:1.6;resize:vertical;"></textarea>
-       <div class="env-row" style="margin-top:8px;gap:8px;">
-         <button type="button" class="btn btn-primary" onclick="saveScreenshotWakePromptLog()" style="flex:1;background:var(--accent)">保存</button>
-         <button type="button" class="btn btn-outline" onclick="loadScreenshotWakePromptLog()" style="flex:1">重新载入</button>
-         <button type="button" class="btn btn-outline" onclick="resetScreenshotWakePromptLog()" style="flex:1">恢复默认</button>
-       </div>
-       <div style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 data/screenshot_wake_prompt.json，截图唤醒开启时生效。</div>
-     </div>
-   </div>
-   <div class="card" data-collapse-id="screenshot-vision-prompt" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>截图画面描述提示词</span><span class="collapse-arrow">▾</span></div>
-     <div class="card-body">
-       <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">视觉模型描述截图内容用的提示词</div>
-       <textarea id="log-screenshot-vision-prompt" rows="8" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;font-family:monospace;line-height:1.6;resize:vertical;"></textarea>
-       <div class="env-row" style="margin-top:8px;gap:8px;">
-         <button type="button" class="btn btn-primary" onclick="saveScreenshotVisionPromptLog()" style="flex:1;background:var(--accent)">保存</button>
-         <button type="button" class="btn btn-outline" onclick="loadScreenshotVisionPromptLog()" style="flex:1">重新载入</button>
-         <button type="button" class="btn btn-outline" onclick="resetScreenshotVisionPromptLog()" style="flex:1">恢复默认</button>
-       </div>
-       <div style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 data/screenshot_vision_prompt.json，截图上传解析时生效。</div>
-     </div>
-   </div>
 
+</div>
+
+<!-- 通用说明（问号图标） -->
+<div class="modal-overlay" id="hintModal">
+  <div class="modal" style="max-width:min(94vw,520px)">
+    <h3 id="hintModalTitle" style="margin:0 0 10px;font-size:15px;color:var(--tab-active)">说明</h3>
+    <div id="hintModalBody" style="font-size:12px;color:var(--text2);line-height:1.75;max-height:60vh;overflow-y:auto"></div>
+    <div class="modal-actions" style="margin-top:12px">
+      <button type="button" class="btn btn-primary" onclick="closeModal('hintModal')" style="background:var(--accent)">知道了</button>
+    </div>
+  </div>
 </div>
 
 <!-- 编辑永久注入上下文 -->
@@ -419,24 +330,24 @@
      </div>
    </div>
    <div class="card" data-collapse-id="cc-marked" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>已标星消息</span><span class="card-title-actions"><button type="button" class="icon-btn" onclick="event.stopPropagation();loadMarkedList()" title="刷新已标星" aria-label="刷新已标星"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button><span class="collapse-arrow">▾</span></span></div>
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>已标星消息</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="card-title-actions"><button type="button" class="icon-btn" onclick="event.stopPropagation();loadMarkedList()" title="刷新已标星" aria-label="刷新已标星"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button><span class="collapse-arrow">▾</span></span></div>
      <div class="card-body">
        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
          <span id="cc-marked-info" style="font-size:11px;color:var(--text3)" aria-live="polite"></span>
        </div>
        <div id="cc-marked-list" style="max-height:400px;overflow-y:auto;padding-right:4px"></div>
-       <div style="font-size:11px;color:var(--text3);margin-top:6px">标星的消息会在压缩/替换时以原句保留在上下文中，不被摘要覆盖。点星可取消标记。</div>
+       <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px">标星的消息会在压缩/替换时以原句保留在上下文中，不被摘要覆盖。点星可取消标记。</div>
      </div>
    </div>
 
    <div class="card" data-collapse-id="cc-replacelog" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>每次请求的替换/压缩记录</span><span class="card-title-actions"><button type="button" class="icon-btn" onclick="event.stopPropagation();loadReplaceLog()" title="刷新替换记录" aria-label="刷新替换记录"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button><span class="collapse-arrow">▾</span></span></div>
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>每次请求的替换/压缩记录</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="card-title-actions"><button type="button" class="icon-btn" onclick="event.stopPropagation();loadReplaceLog()" title="刷新替换记录" aria-label="刷新替换记录"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button><span class="collapse-arrow">▾</span></span></div>
      <div class="card-body">
        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
          <span id="cc-replacelog-info" style="font-size:11px;color:var(--text3)"></span>
        </div>
        <div id="cc-replacelog-list" style="max-height:220px;overflow-y:auto;padding-right:4px"><div class="loading">加载中...</div></div>
-       <div style="font-size:11px;color:var(--text3);margin-top:6px">记录每次请求发送给模型前实际发生上下文替换的情况：时间、来源、消息数与替换块数、每块覆盖的原文范围与新正文字数。</div>
+       <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px">记录每次请求发送给模型前实际发生上下文替换的情况：时间、来源、消息数与替换块数、每块覆盖的原文范围与新正文字数。</div>
      </div>
    </div>
 
@@ -454,9 +365,9 @@
      </div>
    </div>
     <div class="card" data-collapse-id="cross-window-inject" data-default="collapsed">
-      <div class="card-title collapsible" onclick="toggleCard(this)"><span>跨窗口注入</span><span class="card-title-actions"><button type="button" class="icon-btn" onclick="event.stopPropagation();loadCrossWindowInject()" title="刷新预览" aria-label="刷新预览"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button><span class="collapse-arrow">▾</span></span></div>
+      <div class="card-title collapsible" onclick="toggleCard(this)"><span>跨窗口注入</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="card-title-actions"><button type="button" class="icon-btn" onclick="event.stopPropagation();loadCrossWindowInject()" title="刷新预览" aria-label="刷新预览"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button><span class="collapse-arrow">▾</span></span></div>
       <div class="card-body">
-        <div style="font-size:11px;color:var(--text3);margin-bottom:8px">新窗口启动时按「系统提示词 → 永久上下文(pin) → 跨窗口注入」顺序注入：近期日记 / 高重要级记忆。</div>
+        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:8px">新窗口启动时按「系统提示词 → 永久上下文(pin) → 跨窗口注入」顺序注入：近期日记 / 高重要级记忆。</div>
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
           <span id="cross-inject-info" style="font-size:11px;color:var(--text3)"></span>
         </div>
@@ -558,47 +469,15 @@
    </div>
  </div>
  
- <!-- 视觉模型 Editor Modal -->
- <div class="modal-overlay" id="visionModelsModal">
-   <div class="modal modal-edit-mem" style="max-width:min(94vw,560px)">
-     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-shrink:0">
-       <h3 style="margin:0;font-size:16px">编辑视觉模型</h3>
-       <button type="button" onclick="closeModal('visionModelsModal')" style="background:rgba(0,0,0,0.04);border:none;font-size:16px;color:var(--text2);cursor:pointer;padding:6px 10px;border-radius:8px;line-height:1">&times;</button>
-     </div>
-     <div style="font-size:11px;color:var(--text3);margin-bottom:8px">共影环境 / 截图上传从这里选模型；状态灯：配了 Key 亮绿，没配灰。</div>
-     <div id="vision-models-edit-list"></div>
-     <div style="display:flex;gap:10px;margin-top:12px;flex-shrink:0">
-       <button type="button" class="btn btn-outline" onclick="addVisionModel()" style="flex:1">新增视觉模型</button>
-       <button type="button" class="btn btn-outline" onclick="closeModal('visionModelsModal')" style="flex:1">取消</button>
-       <button type="button" class="btn btn-primary" id="vm-save-btn" onclick="saveVisionModels()" style="flex:1;background:var(--accent)">保存</button>
-     </div>
-   </div>
- </div>
- 
  <!-- 共影环境 Editor Modal -->
  <div class="modal-overlay" id="coViewModal">
    <div class="modal" style="max-width:min(94vw,440px)">
      <h3>编辑共影环境</h3>
-     <div class="form-group"><label>视觉模型</label><select id="co-model-select" style="width:100%"></select></div>
      <div class="form-group"><label>定时截帧间隔（秒）</label><input type="number" id="co-frame-interval" min="5" max="600"></div>
      <div class="form-group"><label>手动查看采样（秒）</label><input type="number" id="co-peek-seconds" min="1" max="10"></div>
      <div class="modal-actions">
        <button type="button" class="btn btn-outline" onclick="closeModal('coViewModal')">取消</button>
        <button type="button" class="btn btn-primary" id="covew-save-btn" onclick="saveCoViewConfig()">保存</button>
-     </div>
-   </div>
- </div>
- 
- <!-- 截图上传 Editor Modal -->
- <div class="modal-overlay" id="screenshotModal">
-   <div class="modal" style="max-width:min(94vw,440px)">
-     <h3>编辑截图上传</h3>
-     <div class="form-group"><label>视觉模型</label><select id="shot-model-select" style="width:100%"></select></div>
-     <div class="switch-row"><div><div class="ci-label">截图唤醒</div><div class="ci-desc">截图解析完让 AI 决定是否说话，说了就推送</div></div><label class="switch"><input type="checkbox" id="screenshot-wake-switch"><span class="slider"></span></label></div>
-     <div class="switch-row"><div><div class="ci-label">解析结果注入上下文</div><div class="ci-desc">截图画面描述写入上下文时间线</div></div><label class="switch"><input type="checkbox" id="screenshot-inject-switch"><span class="slider"></span></label></div>
-     <div class="modal-actions">
-       <button type="button" class="btn btn-outline" onclick="closeModal('screenshotModal')">取消</button>
-       <button type="button" class="btn btn-primary" id="shot-save-btn" onclick="saveScreenshotConfig()">保存</button>
      </div>
    </div>
  </div>

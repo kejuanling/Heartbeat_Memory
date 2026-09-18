@@ -236,15 +236,9 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    renderHeartbeat();
    renderEnv();
    renderNetease();
-   renderVisionModels();
    renderCoView();
-   renderScreenshotStatus();
    loadMemoryWakeConfig();
-   renderDiary();
    initAdminSessionSelector();
-   // 日记分组标题需要会话名：异步加载后补渲染一次（不阻塞首屏）
-   loadDiarySessionNames().then(()=>renderDiary()).catch(()=>{});
-   loadPapers();
  }
 
  // ---------- 留纸一览（2026-09-12）：AI 留的纸（故事/梦/创作），只读+删除 ----------
@@ -809,24 +803,18 @@ function toast(msg){
    el.innerHTML='<div class="empty">加载中…</div>';
    fetch(ADMIN_API + '/config').then(r=>r.json()).then(cfg=>{
      if(!cfg||typeof cfg!=='object'){el.innerHTML='<div class="empty">加载失败</div>';return}
-     const vm=AppState.visionModels.find(m=>m.id===cfg.co_vision_model_id);
-   const ok=!!(vm&&(vm.api_key_set||(vm.api_key&&String(vm.api_key).trim())));
      let rows='';
-     rows+='<div class="env-row"><span class="env-key">视觉模型</span><span class="env-val">'+escapeHtml(selectedVisionModelName(cfg.co_vision_model_id))+'</span></div>';
      rows+='<div class="env-row"><span class="env-key">定时截帧间隔</span><span class="env-val">'+escapeHtml(String(cfg.co_frame_interval!=null?cfg.co_frame_interval:30))+' 秒</span></div>';
      rows+='<div class="env-row"><span class="env-key">手动查看采样</span><span class="env-val">'+escapeHtml(String(cfg.co_peek_seconds!=null?cfg.co_peek_seconds:3))+' 秒</span></div>';
-     rows+='<div class="env-row"><span class="env-key">状态</span><span class="env-val">'+(ok?'<span style="color:var(--accent)">视觉模型已配置</span>':'<span style="color:#c0392b">视觉模型未配置或未选择</span>')+'</span></div>';
      el.innerHTML=rows;
    }).catch(e=>{el.innerHTML='<div class="empty">加载失败: '+escapeHtml(e.message)+'</div>'});
  }
  
  function openCoViewEditor(){
-   document.getElementById('co-model-select').innerHTML=visionModelsOptionHtml('');
    document.getElementById('co-frame-interval').value='';
    document.getElementById('co-peek-seconds').value='';
    fetch(ADMIN_API + '/config').then(r=>r.json()).then(cfg=>{
      if(!cfg||typeof cfg!=='object')return;
-     document.getElementById('co-model-select').innerHTML=visionModelsOptionHtml(cfg.co_vision_model_id);
      document.getElementById('co-frame-interval').value=cfg.co_frame_interval!=null?cfg.co_frame_interval:30;
      document.getElementById('co-peek-seconds').value=cfg.co_peek_seconds!=null?cfg.co_peek_seconds:3;
      openModal('coViewModal');
@@ -835,7 +823,6 @@ function toast(msg){
  
  async function saveCoViewConfig(){
    const updates={};
-   updates.co_vision_model_id=document.getElementById('co-model-select').value;
    const interval=parseFloat(document.getElementById('co-frame-interval').value);
    if(Number.isFinite(interval)&&interval>=5)updates.co_frame_interval=interval;
    const peek=parseFloat(document.getElementById('co-peek-seconds').value);
@@ -1604,8 +1591,8 @@ function ccBuildSummaryStatsHtml(d, t){
        : ((c.startTime||'?')+' ~ '+(c.endTime||'?'));
      html+='<div class="cc-chunk-swipe" data-cid="'+c.index+'">'
        +'<div class="card cc-chunk'+(c.cached?'':' pending')+(hidden?' cc-chunk-hidden':'')+'">'
-       + (AppState.ccMultiSelectMode?'<input type="checkbox" class="cc-chk" '+(AppState.ccSelectedChunks.has(c.index)?'checked':'')+' onclick="event.stopPropagation();toggleCcChunkSelect(\'chunk\','+c.index+')" title="选中此块">':'')+'<div class="cc-chunk-head" onclick="toggleCcExpand('+c.index+')">'
-       +(c.cached?'<span class="cc-chunk-arrow">'+(expanded?'▾':'▸')+'</span>':'')
+       + (AppState.ccMultiSelectMode&&!hidden?'<input type="checkbox" class="cc-chk" '+(AppState.ccSelectedChunks.has(c.index)?'checked':'')+' onclick="event.stopPropagation();toggleCcChunkSelect(\'chunk\','+c.index+')" title="选中此块">':'')+'<div class="cc-chunk-head"'+(hidden?'':' onclick="toggleCcExpand('+c.index+')"')+'>'
+       +(!hidden&&c.cached?'<span class="cc-chunk-arrow">'+(expanded?'▾':'▸')+'</span>':'')
        +'<span class="cc-chunk-title '+(isAi?'ai':'manual')+'">块 #'+c.index+'</span>'
        +(hidden
          ? '<span class="cc-badge off">'+(manualHidden?'已隐藏·手动':'已隐藏')+'</span>'
@@ -1617,7 +1604,8 @@ function ccBuildSummaryStatsHtml(d, t){
             : '')
          : '<button class="cc-btn cc-head-toggle'+(enabled?' on':'')+(c.cached?'':' gen')+'" onclick="event.stopPropagation();'+(c.cached?'toggleCcReplace('+c.index+','+blockIndex+','+(isAi?1:0)+')':'regenerateBlockSummary('+c.index+','+blockIndex+')')+'"'+((!c.cached&&AppState.ccBlockGenerating.has(c.index))?' disabled':'')+'>'+(c.cached?(enabled?'取消替换':'替换'):(AppState.ccBlockGenerating.has(c.index)?'生成中…':'✦ 生成摘要'))+'</button>')
        +'</div>'
-       +'<div class="cc-meta">第 '+start+'~'+end+' 条 · '+escHtml(timeLabel)+'</div>'
+       +(hidden?'':
+       '<div class="cc-meta">第 '+start+'~'+end+' 条 · '+escHtml(timeLabel)+'</div>'
        +'<div class="cc-preview">'+escHtml(c.head||'')+'</div>'
          +(!isAi ? '<div id="cc-addman-'+c.index+'"></div>' : '')
  +(!isAi
@@ -1649,9 +1637,9 @@ function ccBuildSummaryStatsHtml(d, t){
            +'</div>'
            +'<div id="cc-collapse-sum-'+c.index+'" class="cc-collapse'+(AppState.ccSummaryOpen.has(c.index)&&(prevOpenCol['cc-collapse-sum-'+c.index]||!AppState.ccAnimateOpen.has('cc-collapse-sum-'+c.index))?' open':'')+'"><div class="cc-collapse-inner">'+renderCcSummaryEditor(c, blockIndex)+renderCcHistory(c)+'</div></div>'
            +'</div>'
-         : '')
+         : ''))
        +'</div>'
-       +'<div class="cc-swipe-del"><button class="cc-swipe-del-btn" onclick="removeSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">移除</button></div>'
+       +(hidden?'':'<div class="cc-swipe-del"><button class="cc-swipe-del-btn" onclick="removeSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">移除</button></div>')
        +'</div>';
    });
  
@@ -2901,10 +2889,6 @@ function ccArmAllGapAutoLoad(){
      const el=document.getElementById(id);
      if(el && fields[id]!==undefined) el.value=fields[id];
    });
-   const th=document.getElementById('cc-cfg-think');
-   if(th) th.checked=!!c.compaction_include_thinking;
-   const ev=document.getElementById('cc-cfg-events');
-   if(ev) ev.checked=c.compaction_compress_events!==false;
    const cr=document.getElementById('cc-cfg-ctx-remind');
    if(cr) cr.checked=c.compaction_context_remind_enabled!==false;
  }
@@ -2940,8 +2924,6 @@ function ccArmAllGapAutoLoad(){
     compaction_chunk_size: chunkSize,
     compaction_chunk_min: chunkMin,
     compaction_chunk_max: chunkMax,
-    compaction_include_thinking: getC('cc-cfg-think'),
-    compaction_compress_events: getC('cc-cfg-events'),
     compaction_max_active_blocks: Math.max(0, Math.floor(Number(get('cc-cfg-max-blocks'))||0)),
     compaction_context_limit_chars: Math.max(0, Math.floor(Number(get('cc-cfg-ctx-limit'))||0)),
     compaction_context_remind_enabled: getC('cc-cfg-ctx-remind'),
@@ -3410,6 +3392,8 @@ function ccNumLiveCheck(input, max){
  document.addEventListener('touchstart',function(e){
    const w=e.target.closest?e.target.closest('.cc-chunk-swipe'):null;
    if(!w) return;
+   // 已隐藏块不参与左滑移除（其正文/移除按钮均不渲染）
+   if(w.querySelector('.cc-chunk-hidden')) return;
    // 块展开时禁止左滑（只有收起时才允许滑出“移除”按钮）
    if(isCcChunkExpanded(w)){ w.classList.remove('swiped'); return; }
    document.querySelectorAll('.cc-chunk-swipe.swiped').forEach(function(x){ if(x!==w) x.classList.remove('swiped'); });
@@ -3480,11 +3464,11 @@ function ccNumLiveCheck(input, max){
    document.querySelectorAll('.tab-item').forEach(el=>el.classList.remove('active'));
    document.getElementById('tab-'+name).classList.add('active');
    document.querySelector('.tab-item[data-tab="'+name+'"]').classList.add('active');
-  if(name==='memory'){switchMemView(AppState.memView);}
+  if(name==='memory'){ if(!window.__memPoolInited){ initMemPoolView(); window.__memPoolInited=true; } }
   if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
-  if(name==='prompts'){loadWakePrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadCoWakePrompt();loadCoVisionPrompt();loadReparsePrompt();loadCleanPrompt();}
-  if(name==='config'){loadToolsConfig();loadServices();}
-  if(name==='system'){startLogsAutoRefresh(); loadReplaceLog();}
+  if(name==='prompts'){loadWakePrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadReparsePrompt();loadCleanPrompt();}
+  if(name==='config'){loadToolsConfig();}
+  if(name==='system'){startLogsAutoRefresh();}
   if(name!=='system'){stopLogsAutoRefresh();}
   }
  
@@ -3513,7 +3497,7 @@ function ccNumLiveCheck(input, max){
       const isWake=it.sent===false;
       const dotBg=isWake?'#e67e22':'#34495e';
       const sessLabel = escapeHtml(it.session_id || 'default');
-      html+='<div class="card push-item" data-push-pos="'+it.position+'" data-push-session="'+escapeHtml(it.session_id||'default')+'" style="margin-bottom:10px;padding:12px 14px">'
+      html+='<div class="push-item" data-push-pos="'+it.position+'" data-push-session="'+escapeHtml(it.session_id||'default')+'">'
         +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
         +'<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text2);font-weight:600"><i style="width:8px;height:8px;border-radius:50%;background:'+dotBg+';display:inline-block;flex-shrink:0"></i>'+escapeHtml(it.channel||'bark')+'</span>'
         +'<span style="display:inline-block;padding:1px 6px;font-size:10px;background:var(--bg2);color:var(--text3);border-radius:4px;flex-shrink:0">'+sessLabel+'</span>'
@@ -3598,21 +3582,14 @@ function ccNumLiveCheck(input, max){
   }
 
  function startLogsAutoRefresh(){
-   loadWakeLog();
-   loadPinned();
-   loadPushLog();
-   loadCrossWindowInject();
-   // 注意：这里不再加载各提示词（loadWakePrompt/loadCompactionPrompt 等）——
-   // 它们与「提示词」tab 共用同一批 textarea，切到系统页重拉会静默覆盖用户未保存的编辑；
-   // 提示词统一由切到 prompts tab 时的入口加载（见 tab 切换处）
-   loadScreenshotWakePromptLog();
-   loadScreenshotVisionPromptLog();
-   // 完整上下文改为折叠时按需加载(懒加载)，不再自动/定时拉取，避免每5秒重渲染大体积数据卡死
-   checkLazyLoadLLMContext();
+   // J1：唤醒日志默认展开，切到系统页即拉并每 5s 刷新（折叠时暂停）；
+   // 其余卡片（永久上下文/推送/跨窗口/替换记录等）一律展开时懒加载，不轮询。
+   const wakeCard=document.querySelector('.card[data-collapse-id="wake-log"]');
+   if(wakeCard && !wakeCard.classList.contains('collapsed')) loadWakeLog();
    if(logsRefreshTimer) clearInterval(logsRefreshTimer);
    logsRefreshTimer = setInterval(() => {
-     loadWakeLog();
-     loadPinned();
+     const wc=document.querySelector('.card[data-collapse-id="wake-log"]');
+     if(wc && !wc.classList.contains('collapsed')) loadWakeLog();
    }, 5000);
  }
  
@@ -3789,6 +3766,14 @@ function ccNumLiveCheck(input, max){
  }
  
  // 后台页板块折叠
+ const CARD_LOADERS={
+   'wake-log':function(){loadWakeLog()},
+   'cc-marked':function(){loadMarkedList()},
+   'cc-replacelog':function(){loadReplaceLog()},
+   'pinned':function(){loadPinned()},
+   'cross-window-inject':function(){loadCrossWindowInject()},
+   'push-log':function(){loadPushLog()}
+ };
  function toggleCard(header){
    const card=header.closest('.card');
    if(!card)return;
@@ -3797,6 +3782,23 @@ function ccNumLiveCheck(input, max){
    card.classList.toggle('collapsed',!nowCollapsed);
    if(id){try{localStorage.setItem('card-collapse-'+id,nowCollapsed?'open':'collapsed')}catch(e){}}
    if(header && header.setAttribute) header.setAttribute('aria-expanded', nowCollapsed ? 'true' : 'false');
+   // 展开时拉取最新（折叠→展开瞬间 nowCollapsed=true）
+   if(nowCollapsed && id && CARD_LOADERS[id]){ try{ CARD_LOADERS[id](); }catch(e){} }
+ }
+ // 全局H2：问号图标说明弹窗（收集卡片内 .hint-body）
+ function showHintCard(el){
+   const card=el.closest('.card'); if(!card)return;
+   const parts=Array.prototype.slice.call(card.querySelectorAll('.hint-body')).map(function(n){return n.innerHTML;});
+   const titleEl=card.querySelector('.card-title span');
+   document.getElementById('hintModalTitle').textContent=(titleEl?titleEl.textContent:'说明')+' · 说明';
+   const body=document.getElementById('hintModalBody');
+   body.innerHTML=parts.length?parts.join('<div style="border-top:1px solid var(--border);margin:8px 0"></div>'):'（无说明）';
+   openModal('hintModal');
+ }
+ function showHintText(el,title,text){
+   document.getElementById('hintModalTitle').textContent=title||'说明';
+   document.getElementById('hintModalBody').textContent=text||'';
+   openModal('hintModal');
  }
  
  function initCollapsibleCards(){
@@ -4251,6 +4253,7 @@ async function deletePinned(id){
   function initMemPoolView(){
     window.__memShowSunk=false;
     window.__memShowPinned=false;
+    window.__memShowAll=false;
     populateMemPoolCatOptions();
     loadMemPool();
   }
@@ -4300,15 +4303,18 @@ async function deletePinned(id){
     const stats=d.stats||{}, allItems=d.items||[];
     window.__memPoolData=d;
     let items;
-    if(window.__memShowPinned) items=allItems.filter(function(x){return x.pinned===true;});
+    if(window.__memShowAll) items=allItems;
+    else if(window.__memShowPinned) items=allItems.filter(function(x){return x.pinned===true;});
     else if(window.__memShowSunk) items=allItems.filter(function(x){return x.active===false;});
     else items=allItems.filter(function(x){return x.active!==false;});
     window.__memPoolItems=items;
     const st=document.getElementById('mempool-stats');
     if(st){
+      const onAll=!!window.__memShowAll;
+      const onActive=!window.__memShowAll&&!window.__memShowPinned&&!window.__memShowSunk;
       st.innerHTML=''
-        +'<span class="mp-stat">共 <b>'+stats.total+'</b> 条</span>'
-        +'<span class="mp-stat">活跃 <b>'+stats.active+'</b></span>'
+        +'<span class="mp-stat toggle'+(onAll?' on':'')+'" onclick="toggleMemPoolAll()" title="显示全部记忆（含已沉底）">共 <b>'+stats.total+'</b> 条</span>'
+        +'<span class="mp-stat toggle'+(onActive?' on':'')+'" onclick="toggleMemPoolActive()" title="只看活跃记忆">活跃 <b>'+stats.active+'</b></span>'
         +'<span class="mp-stat toggle'+(window.__memShowPinned?' on':'')+'" onclick="toggleMemPoolPinned()" title="点一下只看已置顶记忆，再点回到活跃">已pin <b>'+stats.pinned+'</b></span>'
         +'<span class="mp-stat toggle'+(window.__memShowSunk?' on':'')+'" onclick="toggleMemPoolSunk()" title="点一下只看已沉底记忆，再点回到活跃">已沉底 <b>'+stats.sunk+'</b></span>';
     }
@@ -4461,15 +4467,24 @@ async function deletePinned(id){
       loadMemPool();
     }catch(e){ if(st) st.textContent='导入失败: '+e.message; }
   }
+  function rerenderMemPoolView(){ if(window.__memPoolData){ renderMemPool(window.__memPoolData); } else { loadMemPool(); } }
+  function toggleMemPoolAll(){
+    window.__memShowAll=true; window.__memShowPinned=false; window.__memShowSunk=false;
+    rerenderMemPoolView();
+  }
+  function toggleMemPoolActive(){
+    window.__memShowAll=false; window.__memShowPinned=false; window.__memShowSunk=false;
+    rerenderMemPoolView();
+  }
   function toggleMemPoolSunk(){
     window.__memShowSunk=!window.__memShowSunk;
-    if(window.__memShowSunk) window.__memShowPinned=false;
-    if(window.__memPoolData){ renderMemPool(window.__memPoolData); } else { loadMemPool(); }
+    if(window.__memShowSunk){ window.__memShowPinned=false; window.__memShowAll=false; }
+    rerenderMemPoolView();
   }
   function toggleMemPoolPinned(){
     window.__memShowPinned=!window.__memShowPinned;
-    if(window.__memShowPinned) window.__memShowSunk=false;
-    if(window.__memPoolData){ renderMemPool(window.__memPoolData); } else { loadMemPool(); }
+    if(window.__memShowPinned){ window.__memShowSunk=false; window.__memShowAll=false; }
+    rerenderMemPoolView();
   }
   function openMemPoolAdd(){
     AppState.memPoolEditId=null;

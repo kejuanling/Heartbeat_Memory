@@ -30,8 +30,6 @@ const DEFAULT_CONFIG = {
   compaction_gap_minutes: 30,
   compaction_summary_max_chars: 1200,
   compaction_summary_min_chars: 250,
-  compaction_include_thinking: false,
-  compaction_compress_events: true,
   // 活跃块上限：手动+AI 块合计只保留时间线上最近的 N 个进入上下文（0=不限，默认关）。
   // 超限的最早块仅隐藏不注入，块的 enabled/摘要数据不动，调大即恢复。
   compaction_max_active_blocks: 0,
@@ -346,7 +344,7 @@ function buildCompactionPrompt(chunk, cfg) {
   const lines = targetMsgs.map(function (m) {
     const role = m.role === "user" ? (process.env.USER_DISPLAY_NAME || "对方") : "我";
     const body = contentToText(m);
-    const think = cfg.compaction_include_thinking && m.thinking ? "\n（内心活动）" + String(m.thinking) : "";
+    const think = "";
     const line = "[" + role + "] " + body + think;
     return line;
   });

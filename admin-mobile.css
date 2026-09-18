@@ -1,4 +1,4 @@
-
+﻿
  :root{--bg:#f6f6f5;--card:#ffffff;--text:#3a3533;--text2:#8a8280;--text3:#b0a8a4;--border:rgba(60,40,40,0.08);--accent:#c89098;--accent2:#d8a8b0;--tab-active:#6a4848;--tab-inactive:#b8aea8;--shadow:0 2px 16px rgba(0,0,0,0.04);--shadow-card:0 3px 18px rgba(60,40,40,0.06);--radius:16px;--radius-sm:10px;--sp-xs:8px;--sp-sm:12px;--sp-md:16px;--sp-lg:20px;--sp-xl:24px;--fs-title:16px;--fs-body:13px;--fs-hint:11px;--fs-tag:10px;--safe-bottom:env(safe-area-inset-bottom,0px)}
  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
  body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:calc(68px + var(--safe-bottom));line-height:1.6}
@@ -328,7 +328,10 @@
  /* ── 上下文压缩页 UI ── */
  .cc-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;line-height:1.4;flex-shrink:0;letter-spacing:.3px}
 /* 超出活跃块上限被隐藏的块：置灰 + 顶部提示建议入池 */
-.cc-chunk-hidden{opacity:.55}
+.cc-chunk-hidden{opacity:1;background:var(--bg2,rgba(0,0,0,.035))}
+.cc-chunk-hidden .cc-chunk-head{cursor:default}
+.cc-chunk-hidden .cc-chunk-head .cc-chunk-title{color:var(--text3);font-weight:600}
+.cc-chunk-hidden .cc-meta,.cc-chunk-hidden .cc-preview,.cc-chunk-hidden .cc-boundary,.cc-chunk-hidden .cc-ai-summary-wrap,.cc-chunk-hidden .cc-manual-entry{display:none!important}
 .cc-hidden-tip{font-size:11px;color:#a8845c;background:rgba(233,196,138,.14);border:1px dashed rgba(210,170,110,.35);border-radius:8px;padding:7px 10px;margin:0 0 8px;line-height:1.5}
  .cc-badge.todo{background:rgba(200,144,152,.12);color:var(--accent);animation:ccTodoPulse 2.2s ease-in-out infinite}
  .cc-badge.gen{background:rgba(200,144,152,.14);color:var(--accent)}
@@ -895,3 +898,16 @@
 .modal::-webkit-scrollbar-track,.log-panel-body::-webkit-scrollbar-track,.psum-think::-webkit-scrollbar-track,.diary-item pre::-webkit-scrollbar-track,.cloud-res-content.expanded::-webkit-scrollbar-track,#cloud-results::-webkit-scrollbar-track,.cc-hist-body.expanded::-webkit-scrollbar-track,#mempool-clean-body::-webkit-scrollbar-track,.cc-ai-mem::-webkit-scrollbar-track,#wake-log::-webkit-scrollbar-track,#cc-marked-list::-webkit-scrollbar-track,#cc-replacelog-list::-webkit-scrollbar-track,#pinned-list::-webkit-scrollbar-track,#cross-inject-view::-webkit-scrollbar-track,#push-log-list::-webkit-scrollbar-track{background:transparent}
 .modal::-webkit-scrollbar-thumb,.log-panel-body::-webkit-scrollbar-thumb,.psum-think::-webkit-scrollbar-thumb,.diary-item pre::-webkit-scrollbar-thumb,.cloud-res-content.expanded::-webkit-scrollbar-thumb,#cloud-results::-webkit-scrollbar-thumb,.cc-hist-body.expanded::-webkit-scrollbar-thumb,#mempool-clean-body::-webkit-scrollbar-thumb,.cc-ai-mem::-webkit-scrollbar-thumb,#wake-log::-webkit-scrollbar-thumb,#cc-marked-list::-webkit-scrollbar-thumb,#cc-replacelog-list::-webkit-scrollbar-thumb,#pinned-list::-webkit-scrollbar-thumb,#cross-inject-view::-webkit-scrollbar-thumb,#push-log-list::-webkit-scrollbar-thumb{background:rgba(200,144,152,.45);border-radius:999px}
 .modal::-webkit-scrollbar-thumb:hover,.log-panel-body::-webkit-scrollbar-thumb:hover,.psum-think::-webkit-scrollbar-thumb:hover,.diary-item pre::-webkit-scrollbar-thumb:hover,.cloud-res-content.expanded::-webkit-scrollbar-thumb:hover,#cloud-results::-webkit-scrollbar-thumb:hover,.cc-hist-body.expanded::-webkit-scrollbar-thumb:hover,#mempool-clean-body::-webkit-scrollbar-thumb:hover,.cc-ai-mem::-webkit-scrollbar-thumb:hover,#wake-log::-webkit-scrollbar-thumb:hover,#cc-marked-list::-webkit-scrollbar-thumb:hover,#cc-replacelog-list::-webkit-scrollbar-thumb:hover,#pinned-list::-webkit-scrollbar-thumb:hover,#cross-inject-view::-webkit-scrollbar-thumb:hover,#push-log-list::-webkit-scrollbar-thumb:hover{background:rgba(200,144,152,.8)}
+
+
+/* ===== 批次5（2026-09-18）===== */
+/* 全局H2：说明文字收进问号图标 */
+.hint-i{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;border:1px solid var(--text3);color:var(--text3);font-size:9px;font-style:normal;font-family:Georgia,'Times New Roman',serif;margin-left:5px;cursor:pointer;flex-shrink:0;line-height:1;padding:0;box-sizing:border-box;background:transparent}
+.hint-i:active{background:var(--accent);border-color:var(--accent);color:#fff}
+.hint-body{display:none!important}
+/* G2：记忆池顶部四按钮改方形（卡片内操作按钮保持胶囊） */
+.mp-head .mp-btn{border-radius:8px}
+/* J2：推送管理去嵌套卡片，紧凑列表 */
+.push-item{margin-bottom:8px!important;padding:10px 12px!important;border-radius:10px;background:var(--card,#fff);border:1px solid var(--border)}
+.push-item-title{margin:6px 0 0!important}
+.push-item-body{margin:0!important}

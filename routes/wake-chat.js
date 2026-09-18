@@ -65,15 +65,9 @@ async function runWakeCompletion(deps, opts) {
 
     // [唤醒] 块：先落盘（追加式、原地不动、不插位），再注入本次请求末尾。
     // 静默唤醒（模型不回话）时它就是该次唤醒在时间线里的唯一留痕。
-    // 免打扰/闹钟状态按 role 法写进块里（0915 拍板：只告知模型，由模型自己定说不说）。
     let wakeBlockId = null;
     if (wakeBlock) {
       let blockContent = wakeBlock;
-      if (typeof deps.isQuietActive === "function") {
-        try {
-          blockContent += "\n[免打扰] " + (deps.isQuietActive(sessionId) ? "是（是否保持安静由你自行判断）" : "否");
-        } catch (e) {}
-      }
       if (persistWakeBlock) {
         try {
           const created = deps.appendMessages(sessionId, [{ role: "developer", content: blockContent }]);
