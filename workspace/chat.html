@@ -1689,7 +1689,6 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
   <div class="drawer-panel">
     <div class="drawer-head"><span><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg> 后台活动</span><span class="drawer-head-right"><button class="drawer-close" id="navClose"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></span></div>
     <ul class="mnav">
-      <div id="alertsPanel" class="alerts-panel"><div class="adm-load">加载中…</div></div>
       <li id="admGroup" style="display:contents"></li>
 
       <li><div class="mnav-group">设置</div></li>
@@ -7693,7 +7692,7 @@ init();
   var panel=document.getElementById('featurePanel'), featureBack=document.getElementById('featureBack'),
       featureTitle=document.getElementById('featureTitle'), featureBody=document.getElementById('featureBody');
 
-  function openNav(){ if(navDrawer) navDrawer.classList.add('open'); if(typeof renderAlerts==='function') renderAlerts(); }
+  function openNav(){ if(navDrawer) navDrawer.classList.add('open'); }
   function closeNav(){ if(navDrawer) navDrawer.classList.remove('open'); }
   if(navBtn) navBtn.addEventListener('click', openNav);
   var worldBtn=document.getElementById('worldBtn');
@@ -7811,6 +7810,7 @@ function admPost(url, body){ return admFetch(url,{method:'POST',body:body}).then
 /* ---- 卡片注册表：每个卡片一个 id + 标题 + 分组 + 渲染函数 ---- */
 /* 批次4：删「系统配置」「记忆与上下文」两组与「管理台」跳转项，log 组 5 张卡平铺 */
 var CARDS = [
+  { group:'log', id:'alerts',     n:'后台提醒',   d:'网易云 · 容量 · 服务状态', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' },
   { group:'log', id:'wakelog',    n:'唤醒原始日志', d:'最近唤醒日志', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4a7 7 0 0 0-7 7v4a3 3 0 0 0 3 3h1v-8H5a6 6 0 0 1 12 0h-3v8h1a3 3 0 0 0 3-3v-4a7 7 0 0 0-7-7z"/><line x1="12" y1="4" x2="12" y2="2"/></svg>' },
   { group:'log', id:'push',       n:'推送管理',   d:'修改 · 删除推送记录', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>' },
 
@@ -7842,15 +7842,13 @@ function buildMenu(){
 }
 
 // 批次4 C5：提醒板块（网易云 Cookie 失效 / 会话上下文达容量上限 / 服务异常）
-function renderAlerts(){
-  var el=document.getElementById('alertsPanel');
-  if(!el) return;
-  el.innerHTML='<div class="adm-load">加载中…</div>';
+function renderAlerts(body){
+  body.innerHTML='<div class="adm-load">加载中…</div>';
   admGet(BASE+'/alerts').then(function(j){
     var list=(j&&Array.isArray(j.alerts))?j.alerts:[];
     var services=(j&&Array.isArray(j.services))?j.services:[];
     var bad=services.filter(function(s){ return !s.ok; });
-    if(!list.length&&!bad.length){ el.innerHTML='<div class="alerts-empty">一切正常</div>'; return; }
+    if(!list.length&&!bad.length){ body.innerHTML='<div class="alerts-empty">一切正常</div>'; return; }
     var sessMap={};
     try{ SessionStore.getSessionList().forEach(function(s){ sessMap[s.id]=s.name||s.id; }); }catch(e){}
     var html='';
@@ -7869,8 +7867,8 @@ function renderAlerts(){
         return '<div class="alert-item"><span class="alert-dot '+(s.ok?'ok':'error')+'"></span><span><div class="alert-t">'+esc(s.label||s.name)+'</div><div class="alert-d">'+(s.ok?'运行正常':'未运行 · '+esc(s.status||''))+'</div></span></div>';
       }).join('');
     }
-    el.innerHTML=html;
-  }).catch(function(e){ el.innerHTML='<div class="alerts-empty">加载失败</div>'; });
+    body.innerHTML=html;
+  }).catch(function(e){ body.innerHTML='<div class="alerts-empty">加载失败</div>'; });
 }
 
 function toggleMenuGroup(key){
@@ -7923,12 +7921,8 @@ function toggleCard(id){
       menu.scrollTop = menu.scrollTop + delta;
     }
   }
-  if(body.getAttribute('data-loaded')!=='1'){
-    // 懒加载：先显示「加载中…」，下一帧渲染完成后再定位，确保高度完整、底部项也能顶到最上
-    requestAnimationFrame(function(){ renderCard(id, body); body.setAttribute('data-loaded','1'); scrollItemTop(); });
-  } else {
-    scrollItemTop();
-  }
+  // 每次展开都重新拉取最新（不做缓存，无实时轮询）
+  requestAnimationFrame(function(){ renderCard(id, body); scrollItemTop(); });
 }
 
 function renderCard(id, body){
@@ -7938,6 +7932,7 @@ function renderCard(id, body){
       case 'env': return renderEnv(body);
       case 'netease': return renderNetease(body);
       case 'mempool': return renderMemPoolCard(body);
+      case 'alerts': return renderAlerts(body);
       case 'wakelog': return renderWakeLog(body);
       case 'marked': return renderMarked(body);
       case 'repllog': return renderReplLog(body);
