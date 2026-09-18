@@ -1720,7 +1720,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
               <div style="margin-top:10px"><label>max_tokens<span class="tag">可选</span></label><input type="number" min="1" id="maxTokInput" placeholder="留空不限制"></div>
             </div>
             <button type="button" class="mcp-btn primary" id="aiSaveBtn" style="margin-top:12px" onclick="saveSettingsAll()">保存 AI 设置</button>
-            </div></div><div class="set-panel" data-acc="memwake"><div class="set-acc-h" data-acc="memwake">记忆与唤醒参数<span class="ar">▾</span></div><div class="set-sec"><div class="set-sec-label">唤醒</div><div class="field"><label>唤醒历史最大条数</label><input type="number" id="mwWake" value="80"></div><div class="set-sec-label">记忆池</div><div class="field"><label>去重阈值</label><input type="number" step="0.05" min="0" max="1" id="mwDedup" value="0.78"></div><div class="field"><label>衰减半衰期（天）</label><input type="number" step="1" min="1" id="mwDecay" value="30"></div><div class="set-sec-label">再解析（压缩摘要 → 记忆池）</div><div class="field"><label>每条字数上限</label><input type="number" step="1" min="5" id="mwRmax" value="30"></div><div class="field"><label>每段最多条数</label><input type="number" step="1" min="1" id="mwRmaxitems" value="8"></div><div class="set-sec-label">跨窗口注入</div><div class="field" style="display:flex;align-items:center;justify-content:space-between"><label style="margin:0">总开关</label><label class="adm-sw"><input type="checkbox" id="mwCross" checked><i></i></label></div><div class="field"><label>日记天数</label><input type="number" step="1" min="0" id="mwDays" value="3"></div><div class="field"><label>每类注入条数</label><input type="number" step="1" min="1" id="mwMempercat" value="2"></div><div class="field"><label>摘要最近天数</label><input type="number" step="1" min="1" id="mwSumdays" value="7"></div><div class="set-sec-label">压缩</div><div class="field"><label>活跃块保留上限（0=不限）</label><input type="number" step="1" min="0" id="mwCcmax" value="0"><div style="font-size:11px;color:var(--ink3);margin-top:4px">手动+AI 块合计只保留时间线上最近的 N 个进入上下文，更早的块隐藏不注入（数据不删，调大即恢复）。</div></div><div class="field" style="font-size:11px;color:var(--ink3);margin-top:4px">上下文容量上限与容量提醒开关请在「管理台 → 日志与推送」统一设置。</div><div class="mcp-msg" id="mwMsg"></div><button type="button" class="mcp-btn primary" id="mwSaveBtn">保存参数</button></div></div><div class="set-panel" data-acc="password"><div class="set-acc-h" data-acc="password">修改登录密码<span class="ar">▾</span></div><div class="set-sec">
+            </div></div><div class="set-panel" data-acc="password"><div class="set-acc-h" data-acc="password">修改登录密码<span class="ar">▾</span></div><div class="set-sec">
             <div class="field">
               <label>旧密码</label>
               <input type="password" id="pwOld" autocomplete="off">
@@ -1747,12 +1747,11 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
               <div class="pick" id="pickOthers">
                 <button data-k="show_token" class="on">token</button>
                 <button data-k="show_tools" class="on">工具痕迹</button>
-                <button data-k="show_time">消息时间</button>
+                <button data-k="show_time">时间显示</button>
               </div>
               <div class="set-sec-label">发送方式</div>
               <div class="pick" id="pickMode">
                 <button data-m="stream" class="on">流式</button>
-                <button data-m="nonstream">非流式</button>
               </div>
               <div class="field"><label>附件大小上限 (MB，1~30)<span class="tag">图片/文件通用</span></label><input type="number" id="uploadMaxMb" step="0.5" min="1" max="30" value="2"><div style="font-size:11px;color:var(--ink3);margin-top:4px">聊天窗口发图片/PDF/文本等附件的转存上限，保存后即生效。</div></div>
               <div class="field" style="margin-top:10px">
@@ -2020,7 +2019,9 @@ let selectMode=false, selectSet=new Set(), actIdx=-1;
 function loadCfg(){
   try{
     const s=JSON.parse(localStorage.getItem(LS_CFG)||"null");
-    return Object.assign({},DEFAULT_CFG,s||{});
+    const c=Object.assign({},DEFAULT_CFG,s||{});
+    if(c.send_mode!=="stream") c.send_mode="stream";   // B4 2026-09-18：删非流式 UI 后固定流式，旧配置一次性归一（内存态；后续保存自然写回）
+    return c;
   }catch(e){return Object.assign({},DEFAULT_CFG);}
 }
 function saveCfg(){localStorage.setItem(LS_CFG,JSON.stringify(cfg));try{localStorage.setItem(LS_PROMPT,system_prompt);}catch(e){} }
@@ -5468,15 +5469,21 @@ if(pickMode)pickMode.addEventListener("click",e=>{
 
 /* ================= MCP 工具管理 ================= */
 function mcpAuthHeaders(){ const h={ "Authorization": "Bearer " + api_key, "Content-Type": "application/json" }; const t=getCookie("admin_csrf"); if(t) h["X-CSRF-Token"]=t; return h; }
-async function loadMcpServers(){
+// B2 2026-09-18：打开设置抽屉预取一次 + 内存缓存（__mcpCache，不写 localStorage）；进 MCP 页命中缓存直接渲染，手动刷新强制重拉。
+let __mcpCache=null, __mcpLoading=false;
+async function loadMcpServers(force){
+  if(!force && __mcpCache){ renderMcpServers(); return; }
+  if(!force && __mcpLoading) return;
   if(!mcpList) return;
+  __mcpLoading=true;
   mcpList.innerHTML='<div class="mcp-empty">加载中…</div>';
   try{
     const r=await fetch("/heartbeat/admin/mcp/servers",{ headers: mcpAuthHeaders(), credentials:"include" });
     const j=await r.json();
     if(!r.ok){ if(r.status===401){ try{localStorage.removeItem("han_logged_in");}catch(e){} showLogin(); mcpMsg.textContent="登录已过期，请重新登录"; mcpList.innerHTML='<div class="mcp-empty">登录已过期，请重新登录</div>'; return; } mcpMsg.textContent=j.error||"加载失败"; mcpList.innerHTML='<div class="mcp-empty">加载失败</div>'; return; }
-    _mcpServers=j.servers||[]; renderMcpServers(); scheduleMcpRetry();
+    __mcpCache=j; _mcpServers=j.servers||[]; renderMcpServers(); scheduleMcpRetry();
   }catch(e){ mcpMsg.textContent="加载失败: "+e.message; mcpList.innerHTML='<div class="mcp-empty">加载失败</div>'; }
+  finally{ __mcpLoading=false; }
 }
 function renderMcpServers(){
   if(!mcpList) return;
@@ -5602,7 +5609,7 @@ function scheduleMcpRetry(){
   const delay = Math.min(2000*Math.pow(2,__mcpRetryN), 30000); __mcpRetryN++;
   __mcpRetryT = setTimeout(function(){ __mcpRetryT=null; loadMcpServers(); }, delay);
 }
-function refreshMcpServers(){ __mcpRetryN=0; if(__mcpRetryT){ clearTimeout(__mcpRetryT); __mcpRetryT=null; } loadMcpServers(); }
+function refreshMcpServers(){ __mcpRetryN=0; if(__mcpRetryT){ clearTimeout(__mcpRetryT); __mcpRetryT=null; } loadMcpServers(true); }
 async function saveMcpServers(){
   const name=mcpName.value.trim(); if(!name){ mcpMsg.textContent="请填名称"; return; }
   const type=mcpType.value; const urlOrCmd=mcpUrl.value.trim();
@@ -5619,7 +5626,7 @@ async function saveMcpServers(){
     const r=await fetch("/heartbeat/admin/mcp/servers",{ method:"PUT", headers: mcpAuthHeaders(), body: JSON.stringify(body), credentials:"include" });
     const j=await r.json();
     if(!r.ok){ mcpMsg.textContent=j.error||"保存失败"; return; }
-    closeMcpForm(); mcpMsg.textContent="已保存（热生效）"; loadMcpServers();
+    closeMcpForm(); mcpMsg.textContent="已保存（热生效）"; loadMcpServers(true);
   }catch(e){ mcpMsg.textContent="保存失败: "+e.message; }
 }
 async function deleteMcp(i){
@@ -5628,7 +5635,7 @@ async function deleteMcp(i){
   try{
     const r=await fetch("/heartbeat/admin/mcp/servers",{ method:"PUT", headers: mcpAuthHeaders(), body: JSON.stringify(body), credentials:"include" });
     const j=await r.json(); if(!r.ok){ mcpMsg.textContent=j.error||"删除失败"; return; }
-    mcpMsg.textContent="已删除（热生效）"; loadMcpServers();
+    mcpMsg.textContent="已删除（热生效）"; loadMcpServers(true);
   }catch(e){ mcpMsg.textContent="删除失败: "+e.message; }
 }
 if(mcpAddBtn) mcpAddBtn.addEventListener("click",function(){ openMcpForm(null); });
@@ -6390,7 +6397,7 @@ function initSettingsDrawer(){
   document.querySelectorAll("#navDrawer .mnav-group").forEach(function(g){
     if(g.parentElement && g.parentElement.tagName.toLowerCase()==="li" && (g.textContent||"").trim()==="设置"){ g.parentElement.remove(); }
   });
-  // 2) 会话侧边栏底部「退出登录」稍后放到设置「首页」底部（只在首页显示一次，不跟子页）
+  // 2) 会话侧边栏底部「退出登录」移入「账号与数据」子页底部（B3 2026-09-18；只在设置页显示一次）
   var logout=document.querySelector(".session-logout");
   // 3) 会话列表右下角「设置」按钮
   var sessPanel=document.querySelector("#sessionDrawer .drawer-panel");
@@ -6405,7 +6412,6 @@ function initSettingsDrawer(){
   var CATS=[
     {key:"chat",       name:"对话与 AI",  accs:["ai","behav","prov"],     icon:'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'},
     {key:"appearance", name:"外观与主题", accs:["theme","render"],        icon:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/>'},
-    {key:"memwake",    name:"记忆与唤醒", accs:["memwake"],               icon:'<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>'},
     {key:"voice",      name:"语音服务",   accs:["voice"],                 icon:'<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>'},
     {key:"mcp",        name:"MCP 管理",   accs:["mcp"],                   icon:'<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4L15 12l-3-3z"/>'},
     {key:"account",    name:"账号与数据", accs:["conn","password","data"],icon:'<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'}
@@ -6427,14 +6433,14 @@ function initSettingsDrawer(){
       if(p){ pgBody.appendChild(p); }
     });
     pgBody.querySelectorAll(".set-panel").forEach(function(pp){ pp.classList.add("no-acc"); });
+    if(cat.key==="account" && logout){ logout.style.marginTop="16px"; logout.style.marginLeft="0"; logout.style.marginRight="0"; pgBody.appendChild(logout); }   // B3：退出登录在账号与数据页底部
     var li=document.createElement("button");
     li.type="button"; li.className="scat"; li.dataset.cat=cat.key;
     li.innerHTML='<span class="mi"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+cat.icon+'</svg></span><span class="mt">'+cat.name+'</span><span class="mrow">›</span>';
     li.addEventListener("click",function(){ settingsShowPage(cat.key); });
     home.appendChild(li);
   });
-  // 6) 退出登录放到设置「首页」分类列表底部（只显示一次）
-  if(logout){ home.appendChild(logout); }
+  // 6) 退出登录改放「账号与数据」子页底部（B3 2026-09-18）
   if(footer){ footer.innerHTML='<button type="button" class="mcp-btn primary" id="settingsSaveBtn" style="display:none">保存</button>'; }
   var ssb=document.getElementById("settingsSaveBtn"); if(ssb && typeof saveSettingsAll==="function") ssb.addEventListener("click",saveSettingsAll);
   // 5) 开合 + 返回
@@ -6464,7 +6470,7 @@ function settingsBackHome(){
   __settingsPage=null;
   var ssb=document.getElementById("settingsSaveBtn"); if(ssb) ssb.style.display="none";
 }
-function openSettingsDrawer(){ var sd=document.getElementById("settingsDrawer"); if(sd) sd.classList.add("open"); }
+function openSettingsDrawer(){ var sd=document.getElementById("settingsDrawer"); if(sd) sd.classList.add("open"); if(typeof loadMcpServers==="function") loadMcpServers(); }   // B2：打开设置抽屉即预取 MCP（缓存/加载中保护不重复拉）
 function closeSettingsDrawer(){ var sd=document.getElementById("settingsDrawer"); if(sd) sd.classList.remove("open"); }
 (function(){ var sdb=document.getElementById("settingsBody"); if(sdb) sdb.addEventListener("click",function(e){ var b=e.target.closest?e.target.closest(".settings-back"):null; if(b){ settingsBackHome(); } }); })();
 
@@ -7423,7 +7429,7 @@ function clearLocalCache(){
 document.getElementById("importFile").addEventListener("change",e=>{const f=e.target.files[0];if(f)importSession(f);e.target.value="";});
 
 /* ================= 初始化 ================= */
-applyHeader();
+try{applyHeader();}catch(e){}
 /* ---- 密码登录（管理台账号密码） ---- */
 const loginMask=document.getElementById("loginMask");
 const loginUser=document.getElementById("loginUser");
@@ -8018,27 +8024,6 @@ function editNetease(body){
   document.getElementById('adm-net-back').addEventListener('click', function(){ renderNetease(body); });
 }
 
-/* ---------------- 记忆与唤醒参数（设置页 · 由原菜单卡片迁移） ---------------- */function loadMemWakeSettings(){
-  (function(){ // 记忆与唤醒参数改由管理台统一维护：此处整卡只读，避免同名双入口（服务端 /admin/chat-settings 亦拦截管理台专属键）。
-    var pnl=document.querySelector('.set-panel[data-acc="memwake"]');
-    if(!pnl) return;
-    var ins=pnl.querySelectorAll('input');
-    for(var i=0;i<ins.length;i++){ ins[i].disabled=true; try{ ins[i].setAttribute('readonly','readonly'); }catch(e){} }
-    var sb=document.getElementById('mwSaveBtn'); if(sb){ sb.style.display='none'; }
-    if(!document.getElementById('mwReadonlyNote')){
-      var note=document.createElement('div');
-      note.id='mwReadonlyNote';
-      note.className='mcp-msg';
-      note.style.cssText='margin:6px 0;padding:6px 8px;border-radius:6px;font-size:12px;line-height:1.5;color:var(--ink3);background:var(--bg1, rgba(0,0,0,0.03));';
-      note.textContent='以上参数由管理台统一维护，此处仅只读展示，如需修改请前往管理台。';
-      var hdr=pnl.querySelector('.set-acc-h');
-      if(hdr) hdr.insertAdjacentElement('afterend', note); else pnl.insertBefore(note, pnl.firstChild);
-    }
-  })();  Promise.all([admGet(BASE+'/config'), admGet(BASE+'/memory-pool/config'), admGet(BASE+'/context-compaction/config')]).then(function(res){    var c=res[0], m=res[1], cc=(res[2]&&typeof res[2]==='object')?res[2]:{};    function num(v,d){ return v!=null?v:d; }    function setVal(id,v){ var el=document.getElementById(id); if(el) el.value=v; }    function setChk(id,b){ var el=document.getElementById(id); if(el) el.checked=!!b; }    setVal('mwWake',num(c.wake_history_max_messages,80));    setVal('mwDedup',num(m.dedup_threshold,0.78));    setVal('mwDecay',num(m.decay_days,30));    setVal('mwRmax',num(m.reparse_max_chars,30));    setVal('mwRmaxitems',num(m.reparse_max_items,8));    setChk('mwCross',m.cross_inject_enabled!==false);    setVal('mwDays',num(m.cross_inject_diary_days,3));    setVal('mwMempercat',num(m.cross_inject_memory_per_category,2));    setVal('mwSumdays',num(m.cross_inject_summary_days,7));    setVal('mwCcmax',num(cc.compaction_max_active_blocks,0));  }).catch(function(e){ var m=document.getElementById('mwMsg'); if(m) m.textContent='加载失败: '+(e&&e.message||e); });}
-// 只读化入口必须可达：本段 IIFE 内函数对第一段脚本全局不可见（设置页 switch 处的 typeof 检查恒 undefined，
-// 禁输入/藏保存按钮/提示从未执行）。这里挂到 window 并在加载时自执行一次（函数幂等，重复执行无害）。
-window.loadMemWakeSettings = loadMemWakeSettings;
-try { loadMemWakeSettings(); } catch (e) { console.warn('[memwake] 只读化执行失败:', e); }
 /* ---------------- 记忆池 ---------------- */
 var _mpRefresh = null;
 function refreshMemPoolList(){ if(_mpRefresh) _mpRefresh(); }
