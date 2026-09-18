@@ -931,6 +931,7 @@ function createContentTagFilter() {
 // 任何 saveTimeline 都会改动文件 mtime/size → 指纹变化 → 下次自动重读，无需显式失效。
 const _timelineCache = new Map(); // sessionId -> { fp, data }
 const _TIMELINE_CACHE_MAX = 60;
+const _corruptBackupDone = new Set(); // 已做过 .corrupt-* 备份的文件：同一轮损坏只备份一次，防反复 load 堆积备份
 function timelineFingerprint(file) {
   try {
     const st = fs.statSync(file);
@@ -940,29 +941,45 @@ function timelineFingerprint(file) {
 function cloneTimeline(data) {
   try { return structuredClone(data); } catch (e) { return JSON.parse(JSON.stringify(data)); }
 }
+// 守卫标记（2026-09-19 审查 P1-2 配套）：loadTimeline 返回的克隆统一在「clone 之后」挂 __fp
+// （load 时刻的盘上指纹），因此 structuredClone 与 JSON fallback 两条克隆路径拿到的快照都带
+// 标记。数组自定义属性不进 JSON.stringify，不会落盘污染文件；saveTimeline 据此识别过期快照。
+function tagTimelineSnapshot(cloned, fp) {
+  try { cloned.__fp = fp; } catch (e) {}
+  return cloned;
+}
 function loadTimeline(sessionId) {
   const file = timelineFileFor(sessionId);
   if (!fs.existsSync(file)) return [];
   const fp = timelineFingerprint(file);
   const hit = _timelineCache.get(sessionId);
-  if (hit && hit.fp === fp) return cloneTimeline(hit.data);
+  if (hit && hit.fp === fp) return tagTimelineSnapshot(cloneTimeline(hit.data), fp);
   try {
     const data = fs.readJsonSync(file);
+    _corruptBackupDone.delete(file); // 文件能正常解析＝已从损坏中恢复，下次再损坏要重新备份
     _timelineCache.set(sessionId, { fp, data });
     if (_timelineCache.size > _TIMELINE_CACHE_MAX) {
       // 防长期运行膨胀：超上限清掉最旧的一条
       const firstKey = _timelineCache.keys().next().value;
       if (firstKey !== undefined) _timelineCache.delete(firstKey);
     }
-    return cloneTimeline(data);
+    return tagTimelineSnapshot(cloneTimeline(data), fp);
   } catch (err) {
-    // 文件损坏时先备份再按空时间线处理，避免被下一次保存静默覆盖
-    try {
-      const bak = file + ".corrupt-" + new Date().toISOString().replace(/[:.]/g, "-");
-      fs.copySync(file, bak);
-      console.error("[timeline] 时间线文件损坏，已备份到 " + bak + "，本次按空时间线处理:", err.message);
-    } catch (bakErr) {}
-    return [];
+    // 文件损坏：先备份（同一文件只备一次），返回带 __corrupt 标记的空时间线——
+    // saveTimeline 见标记且原文件仍在即拒写，绝不能用空数组覆盖损坏的历史文件。
+    if (!_corruptBackupDone.has(file)) {
+      try {
+        const bak = file + ".corrupt-" + new Date().toISOString().replace(/[:.]/g, "-");
+        fs.copySync(file, bak);
+        _corruptBackupDone.add(file);
+        console.error("[timeline] 时间线文件损坏，已备份到 " + bak + "，本次按空时间线处理；该文件的后续写入将被拒绝直至人工恢复:", err.message);
+      } catch (bakErr) {
+        console.error("[timeline] 时间线文件损坏且备份失败（写入守卫仍会拒绝覆盖）:", err.message, "|", bakErr.message);
+      }
+    }
+    const empty = [];
+    try { empty.__corrupt = true; } catch (e) {}
+    return empty;
   }
 }
 
@@ -996,6 +1013,23 @@ function atomicWriteFileSync(file, content) {
 // ========================
 function saveTimeline(messages, sessionId) {
   const file = timelineFileFor(sessionId);
+  // ── 写守卫（2026-09-19 审查 P1-2 配套）：两条拒写规则，先 corrupt 后过期快照。──
+  // 1) 损坏守卫：loadTimeline 因文件损坏返回的空时间线（带 __corrupt）绝不能写回，
+  //    否则一次普通 append 就把整份历史覆盖成「空 + 新消息」（原文件已有 .corrupt-* 备份）。
+  if (messages && messages.__corrupt === true && fs.existsSync(file)) {
+    console.error("[timeline] 拒绝写入：会话 " + (sessionId || "default") + " 的时间线文件此前读取损坏（.corrupt-* 已备份），本次写入已丢弃以保护原文件。请人工核对恢复后重试。");
+    return false;
+  }
+  // 2) 过期快照守卫：克隆数组带 __fp（load 时刻的盘上指纹）。盘上指纹已变＝load 与 save
+  //    之间发生过其他写入（跨 await 携带旧快照的调用方式），放行会覆盖掉那些新写入——
+  //    拒写并要求重新 load。现有同步原语（load→改→save 无 await）指纹必然一致，不受影响。
+  if (messages && messages.__fp !== undefined && fs.existsSync(file)) {
+    const curFp = timelineFingerprint(file);
+    if (curFp && curFp !== messages.__fp) {
+      console.error("[timeline] 拒绝写入：会话 " + (sessionId || "default") + " 的快照已过期（load 时指纹 " + messages.__fp + " ≠ 盘上当前 " + curFp + "，期间有其他写入）。本次写入已丢弃以避免覆盖新消息，请重新 loadTimeline 后再修改。");
+      return false;
+    }
+  }
   // 稳定 id：任何写盘路径都保证每条消息有唯一 id（老数据首次被写时补齐），
   // 供「编辑/删除 diff 协议」按 id 定点 patch，position 不动、不再重排。system 也统一给 id。
   for (const m of messages) { if (m && !m.id) m.id = crypto.randomUUID(); }
@@ -1006,6 +1040,7 @@ function saveTimeline(messages, sessionId) {
   // 不再截断：完全保留客户端发送的全部消息（仅将 SP 放在首位）
   const final = sp ? [sp, ...nonSP] : nonSP;
   atomicWriteJsonSync(file, final);
+  return true;
 }
 
 // ========================
