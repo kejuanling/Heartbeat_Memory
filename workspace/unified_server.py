@@ -5,11 +5,51 @@
 合并模块: 涵的日记, 五子棋, 谢的笔记, 月历, 待办/心动/记忆桶
 数据文件保留在原目录
 """
-import os, json, datetime, csv, io, sys, re, urllib.request, math, hashlib, uuid
+import os, json, datetime, csv, io, sys, re, urllib.request, math, hashlib, uuid, threading
 import numpy as np
 from flask import Flask, Blueprint, request, jsonify, send_from_directory
 
 app = Flask(__name__)
+
+# ============================================================
+# 0. gateway 内部事件回调（2026-09-19 批6 D4）
+# 涵写日记 / 经期开始结束时，把事件推给 gateway /internal/timeline-event，
+# 由其往「最新请求的会话」时间线追加 developer(kind=diary) 隐藏消息（前端不显示、模型可见）。
+# 鉴权用 .env 的 INTERNAL_API_KEY（X-Internal-Key 头）。推送失败只记日志，绝不影响保存本身。
+# ============================================================
+GATEWAY_TIMELINE_EVENT_URL = 'http://127.0.0.1:3000/internal/timeline-event'
+_ENV_FILE = '/opt/dylan-heartbeat/.env'
+_env_cache = None
+def _env_get(key):
+    global _env_cache
+    if _env_cache is None:
+        _env_cache = {}
+        try:
+            with open(_ENV_FILE) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#') or '=' not in line: continue
+                    k, v = line.split('=', 1)
+                    _env_cache[k.strip()] = v.strip().strip('"').strip("'")
+        except Exception as e:
+            print('[timeline-event] 读 .env 失败:', e)
+    return _env_cache.get(key)
+
+def notify_timeline_event(event):
+    def _post():
+        try:
+            key = _env_get('INTERNAL_API_KEY')
+            if not key:
+                print('[timeline-event] 缺 INTERNAL_API_KEY，跳过推送')
+                return
+            data = json.dumps(event, ensure_ascii=False).encode('utf-8')
+            req = urllib.request.Request(GATEWAY_TIMELINE_EVENT_URL, data=data, method='POST',
+                headers={'Content-Type': 'application/json', 'X-Internal-Key': key})
+            resp = urllib.request.urlopen(req, timeout=5)
+            print('[timeline-event]', event.get('type'), '->', resp.status)
+        except Exception as e:
+            print('[timeline-event] 推送失败（不影响保存）:', e)
+    threading.Thread(target=_post, daemon=True).start()
 
 # ============================================================
 # 1. 涵的日记 Blueprint
@@ -68,6 +108,7 @@ def diary_add_entry():
     if images: entry["images"] = images
     d["entries"].insert(0, entry)
     diary_save(d)
+    notify_timeline_event({"type": "han_diary", "time": now})
     return jsonify({"ok": True, "id": entry["id"]})
 
 @diary_bp.route('/diary/api/entries/edit', methods=['POST'])
@@ -468,6 +509,8 @@ def monthly_parse_wechat_xlsx(file_obj):
 
 @monthly_bp.route('/monthly/api/period/toggle', methods=['POST'])
 def monthly_toggle_period():
+    """经期开关（2026-09-19 批6 D3 重做）：开=从今天开始（已有进行中则不重复建）；
+    关=结束于今天（当天开当天关保留为单日记录，不再丢弃）。开始/结束日的精确修正走 /period/update。"""
     body = request.json or {}
     on = body.get("on") in (True, "true", 1, "1")
     date = str(body.get("date", "") or "").strip()
@@ -476,21 +519,52 @@ def monthly_toggle_period():
     d = monthly_load()
     periods = d.get("periods") or []
     active = [p for p in periods if not p.get("end")]
+    event = None
     if on:
         if not active:
-            periods.append({"start": date, "end": None, "flow": "", "note": "", "by": "涵", "updated_at": datetime.datetime.now().isoformat()})
+            p = {"start": date, "end": None, "flow": "", "note": "", "by": "涵", "updated_at": datetime.datetime.now().isoformat()}
+            periods.append(p)
+            event = {"type": "period_start", "start": date, "time": p["updated_at"]}
     else:
-        prev = (datetime.datetime.strptime(date, "%Y-%m-%d").date() - datetime.timedelta(days=1)).isoformat()
-        kept = []
-        for p in periods:
-            if p.get("end"):
-                kept.append(p)
-            elif p.get("start") <= prev:
-                p["end"] = prev
-                p["updated_at"] = datetime.datetime.now().isoformat()
-                kept.append(p)
-            # 当天开当天关：直接丢弃
-        periods = kept
+        if active:
+            p = active[-1]
+            p["end"] = date if date >= p.get("start", date) else p["start"]
+            p["updated_at"] = datetime.datetime.now().isoformat()
+            event = {"type": "period_end", "start": p["start"], "end": p["end"], "time": p["updated_at"]}
+    d["periods"] = periods
+    monthly_save(d)
+    if event:
+        notify_timeline_event(event)
+    return jsonify({"ok": True})
+
+@monthly_bp.route('/monthly/api/period/update', methods=['POST'])
+def monthly_update_period():
+    """手动修正某次经期的开始/结束日（end 传空 = 进行中）。按原开始日定位记录。"""
+    body = request.json or {}
+    start_old = str(body.get("start_old", "") or "").strip()
+    start = str(body.get("start", "") or "").strip()
+    end = str(body.get("end", "") or "").strip() or None
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', start_old):
+        return jsonify({"error": "start_old 日期格式应为 YYYY-MM-DD"}), 400
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', start):
+        return jsonify({"error": "start 日期格式应为 YYYY-MM-DD"}), 400
+    if end and not re.match(r'^\d{4}-\d{2}-\d{2}$', end):
+        return jsonify({"error": "end 日期格式应为 YYYY-MM-DD"}), 400
+    if end and end < start:
+        return jsonify({"error": "结束日不能早于开始日"}), 400
+    d = monthly_load()
+    periods = d.get("periods") or []
+    target = None
+    for p in periods:
+        if p.get("start") == start_old:
+            target = p
+    if target is None:
+        return jsonify({"error": "未找到开始日为 " + start_old + " 的经期记录"}), 404
+    if any(p is not target and p.get("start") == start for p in periods):
+        return jsonify({"error": "已存在相同开始日的记录"}), 400
+    target["start"] = start
+    target["end"] = end
+    target["updated_at"] = datetime.datetime.now().isoformat()
     d["periods"] = periods
     monthly_save(d)
     return jsonify({"ok": True})
@@ -517,9 +591,14 @@ def monthly_get_markers():
         if content.get("finance") and len(content["finance"]) > 0: finance_dates.add(date)
         if content.get("summary") and content["summary"].get("text"): summary_dates.add(date)
     today_iso = datetime.datetime.now().strftime("%Y-%m-%d")
-    for p in d.get("periods") or []:
-        end = p.get("end") or today_iso
-        for dt in _iter_date_strs(p["start"], end):
+    # 2026-09-19 批6 D3：月历只显示最近一次经期（历史记录不再全部撒点）
+    plist = [p for p in (d.get("periods") or []) if p.get("start")]
+    if plist:
+        latest = max(plist, key=lambda p: p["start"])
+        end = latest.get("end") or today_iso
+        if end < latest["start"]:
+            end = latest["start"]
+        for dt in _iter_date_strs(latest["start"], end):
             period_dates.add(dt)
     return jsonify({"finance": sorted(list(finance_dates)), "period": sorted(list(period_dates)), "summary": sorted(list(summary_dates))})
 

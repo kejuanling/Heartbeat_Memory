@@ -208,7 +208,7 @@ module.exports = function registerChatRoutes(app, deps) {
       let entries = [];
       try { entries = fsp.readdirSync(root, { withFileTypes: true }); } catch (e) { return; }
       for (const ent of entries) {
-        if (ent.isFile() && /^\d{4}-\d{2}-\d{2}\.md$/.test(ent.name)) {
+        if (ent.isFile() && /^\d{4}-\d{2}-\d{2}(_\d{6})?\.md$/.test(ent.name)) {
           try { out.push({ date: ent.name.slice(0, 10), content: fsp.readFileSync(path.join(root, ent.name), 'utf8') }); } catch (e) {}
         } else if (ent.isDirectory() && depth < 1) {
           scan(path.join(root, ent.name), depth + 1); // 会话子目录收一层

@@ -82,6 +82,23 @@ h1{
 .expand-btn:hover{text-decoration:underline}
 .empty{padding:3rem 0;text-align:center;color:#d4bcb0;font-size:0.75rem;letter-spacing:3px}
 .loading{padding:3rem 0;text-align:center;color:#d4bcb0;font-size:0.75rem;letter-spacing:3px}
+/* 按天分组（2026-09-19 批6 D2）：组头展开/收起 */
+.day-group{margin-bottom:1rem}
+.group-head{display:flex;align-items:center;gap:0.6rem;padding:0.55rem 0.95rem;cursor:pointer;user-select:none;-webkit-user-select:none;background:rgba(255,255,255,0.4);border:1px solid rgba(255,255,255,0.35);border-radius:14px;transition:all 0.25s ease}
+.group-head:hover{background:rgba(255,255,255,0.65)}
+.g-date{font-size:0.92rem;font-weight:700;color:#b07a6a;letter-spacing:2px}
+.g-count{font-size:0.66rem;color:#d4bcb0;letter-spacing:1px}
+.g-caret{margin-left:auto;width:16px;height:16px;color:#c9a89a;transition:transform 0.25s ease;flex:none}
+.day-group.open .g-caret{transform:rotate(180deg)}
+.group-body{display:none}
+.day-group.open .group-body{display:block}
+.group-body .day-card:last-child{margin-bottom:0}
+.day-time{font-size:0.72rem;color:#b5837a;letter-spacing:1px;font-weight:600}
+/* 隐藏状态（隐藏=不参与注入给 AI，可恢复） */
+.diary-is-hidden{opacity:0.55}
+.diary-hidden-tag{font-size:0.6rem;color:#c08080;border:1px solid rgba(192,128,128,0.4);border-radius:8px;padding:0.05rem 0.5rem;letter-spacing:1px;flex:none}
+.diary-hide-btn{background:none;border:1px solid rgba(181,131,122,0.35);border-radius:10px;color:#b5837a;font-family:inherit;font-size:0.65rem;letter-spacing:1px;padding:0.15rem 0.6rem;cursor:pointer;flex:none}
+.diary-hide-btn:hover{background:rgba(240,196,192,0.25)}
 .ft{text-align:center;margin-top:1.8rem;color:#d4bcb0;font-size:0.62rem;letter-spacing:2px}
 </style>
 </head>
@@ -158,18 +175,55 @@ h1{
     if(!entries.length){ list.innerHTML='<div class="empty">日记本还是空的</div>'; meta.textContent=''; return; }
     if(!shown.length){ list.innerHTML='<div class="empty">没有匹配「'+esc(kw)+'」的日记</div>'; meta.textContent='0 篇 · 搜索中'; return; }
     meta.textContent=(kw?('匹配 '+shown.length+' 篇 · '):('共 '+entries.length+' 篇 · '))+'最新 '+shown[0].date;
-    list.innerHTML=shown.map(function(d,i){
-      var fullHtml=renderDayHtml(d.text,kw);
-      var needClip=!kw && d.text.length>EXCERPT_LEN;
-      var bodyId='db'+i;
-      return '<div class="day-card'+(kw?' match':'')+'">'
-        +'<div class="day-head"><span class="day-date">'+esc(d.date)+'</span>'
-        +(d.src?'<span class="day-src">'+esc(d.src)+'</span>':'')
+    // 按天分组（批6 D2）：日期作组头，点组头展开/收起；搜索时全展开；默认最新一天展开
+    var groups=[];
+    shown.forEach(function(d){
+      var g=groups[groups.length-1];
+      if(!g||g.date!==d.date){ g={date:d.date,items:[]}; groups.push(g); }
+      g.items.push(d);
+    });
+    list.innerHTML=groups.map(function(g,gi){
+      var cards=g.items.map(function(d,i){
+        var fullHtml=renderDayHtml(d.text,kw);
+        var needClip=!kw && d.text.length>EXCERPT_LEN;
+        var bodyId='db'+gi+'-'+i;
+        return '<div class="day-card'+(kw?' match':'')+(d.hidden?' diary-is-hidden':'')+'">'
+          +'<div class="day-head"><span class="day-time">'+esc(d.sortKey.slice(11)||d.date)+'</span>'
+          +(d.src?'<span class="day-src">'+esc(d.src)+'</span>':'')
+          +(d.hidden?'<span class="diary-hidden-tag">已隐藏</span>':'')
+          +'<button class="diary-hide-btn" data-rel="'+esc(d.relPath)+'" data-hidden="'+(d.hidden?'1':'0')+'">'+(d.hidden?'显示':'隐藏')+'</button>'
+          +'</div>'
+          +'<div class="day-body'+(needClip?' clip':'')+'" id="'+bodyId+'">'+fullHtml+'</div>'
+          +(needClip?'<button class="expand-btn" data-for="'+bodyId+'">展开全文</button>':'')
+          +'</div>';
+      }).join('');
+      return '<div class="day-group'+((kw||gi===0)?' open':'')+'">'
+        +'<div class="group-head" data-g="'+gi+'"><span class="g-date">'+esc(g.date)+'</span>'
+        +'<span class="g-count">'+g.items.length+' 篇</span>'
+        +'<svg class="g-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>'
         +'</div>'
-        +'<div class="day-body'+(needClip?' clip':'')+'" id="'+bodyId+'">'+fullHtml+'</div>'
-        +(needClip?'<button class="expand-btn" data-for="'+bodyId+'">展开全文</button>':'')
+        +'<div class="group-body">'+cards+'</div>'
         +'</div>';
     }).join('');
+    Array.prototype.forEach.call(list.querySelectorAll('.group-head'),function(head){
+      head.addEventListener('click',function(){ head.parentNode.classList.toggle('open'); });
+    });
+    Array.prototype.forEach.call(list.querySelectorAll('.diary-hide-btn'),function(btn){
+      btn.addEventListener('click',function(){
+        var rel=btn.getAttribute('data-rel');
+        var toHidden=btn.getAttribute('data-hidden')!=='1';
+        btn.disabled=true;
+        fetch('/xie-diary/api/hide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({relPath:rel,hidden:toHidden})})
+          .then(function(r){return r.json();})
+          .then(function(j){
+            if(j&&j.success){
+              entries.forEach(function(d){ if(d.relPath===rel) d.hidden=toHidden; });
+              render(document.getElementById('searchInput').value);
+            } else { alert('操作失败：'+((j&&j.error)||'未知错误')); btn.disabled=false; }
+          })
+          .catch(function(e){ alert('操作失败：'+e.message); btn.disabled=false; });
+      });
+    });
     Array.prototype.forEach.call(list.querySelectorAll('.expand-btn'),function(btn){
       btn.addEventListener('click',function(){
         var b=document.getElementById(btn.getAttribute('data-for'));
@@ -201,7 +255,9 @@ h1{
         date:d,
         src:e.session?('窗口 '+e.session):'',
         sortKey:(lw || (e.updated_at||'').slice(0,16).replace('T',' ') || d),
-        text:String(e.content||'').trim()
+        text:String(e.content||'').trim(),
+        relPath:e.relPath||e.name,
+        hidden:!!e.hidden
       };
     });
     entries.sort(function(a,b){
