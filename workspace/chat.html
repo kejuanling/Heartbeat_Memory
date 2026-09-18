@@ -7862,7 +7862,6 @@ function renderAlerts(body){
       html+='<div class="alert-item"><span class="alert-dot '+(a.level==='error'?'error':'warn')+'"></span><span><div class="alert-t">'+esc(t)+'</div><div class="alert-d">'+esc(d)+'</div></span></div>';
     });
     if(services.length){
-      html+='<div class="alert-sec">服务状态</div>';
       html+=services.map(function(s){
         return '<div class="alert-item"><span class="alert-dot '+(s.ok?'ok':'error')+'"></span><span><div class="alert-t">'+esc(s.label||s.name)+'</div><div class="alert-d">'+(s.ok?'运行正常':'未运行 · '+esc(s.status||''))+'</div></span></div>';
       }).join('');
