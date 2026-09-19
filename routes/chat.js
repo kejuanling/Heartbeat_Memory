@@ -404,23 +404,26 @@ module.exports = function registerChatRoutes(app, deps) {
       reply.code(500).send({ error: err.message });
     }
   });
-  // 影子时间线（0918）：后台活动抽屉展示「落盘但前端不显示」的时间线内容——
-  // 记忆浮现（float_id）、developer 块、diary、特殊事件等。只读，不影响任何链路。
-  app.get('/v1/timeline-hidden', async (req, reply) => {
+  // 完整时间线（0918 用户拍板：不过滤全展现）——时间线全部未删除消息 + visible 标记
+  //（visible=true=聊天页正常显示的对话；false=影子内容：记忆浮现/特殊事件/developer/日记/工具记录等）。
+  // 只读，供后台活动「影子时间线」卡片对照查看。
+  app.get('/v1/timeline-full', async (req, reply) => {
     try {
       const sessionId = String(req.query.session_id || req.headers['x-session-id'] || '').trim();
       const timeline = loadTimeline(sessionId);
-      // 影子全集 = /v1/history 不显示的一切（特殊事件/developer/日记/工具记录/记忆浮现等）
       const items = timeline
         .filter(m => m && !m.deleted)
-        .filter(m => !isPushEchoLike(m) && (!isRealMessageForTimeline(m) || m.role === 'developer' || m.role === 'tool' || m.kind === 'diary' || m.float_id))
         .sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')))
         .map(m => {
-          const kind = m.float_id ? 'memory_float' : (m.kind === 'diary' ? 'diary' : (m.role === 'developer' ? 'developer_block' : 'hidden_event'));
+          const isPush = isPushEchoLike(m);
+          const shadow = !isPush && (!isRealMessageForTimeline(m) || m.role === 'developer' || m.role === 'tool' || m.kind === 'diary' || m.float_id);
+          const kind = m.float_id ? 'memory_float' : (m.kind === 'diary' ? 'diary' : (m.role === 'developer' ? 'developer_block' : (m.role === 'tool' ? 'tool_record' : (shadow ? 'hidden_event' : 'chat'))));
           const text = String(typeof m.content === 'string' ? m.content : '').trim();
           return {
             id: m.id || null,
+            role: m.role || null,
             kind,
+            visible: !shadow,
             float_id: m.float_id || null,
             time: m.time || null,
             text,
@@ -429,7 +432,7 @@ module.exports = function registerChatRoutes(app, deps) {
         });
       reply.send({ ok: true, total: items.length, items, session_id: sessionId || 'default' });
     } catch (err) {
-      console.error('[GET /v1/timeline-hidden] error:', err.message);
+      console.error('[GET /v1/timeline-full] error:', err.message);
       reply.code(500).send({ error: err.message });
     }
   });
