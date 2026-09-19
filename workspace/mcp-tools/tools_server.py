@@ -1207,7 +1207,7 @@ class MCPHandler(BaseHTTPRequestHandler):
         # ── 鉴权检查 ──
         auth = self.headers.get('Authorization', '')
         print("[req] POST %s UA=%r Accept=%r" % (
-            self.path, self.headers.get('User-Agent', ''), self.headers.get('Accept', '')))
+            self.path, self.headers.get('User-Agent', ''), self.headers.get('Accept', '')), flush=True)
         if auth != f'Bearer {API_TOKEN}':
             self.send_response(401)
             self.send_header('Content-Type', 'application/json')
@@ -1253,7 +1253,7 @@ class MCPHandler(BaseHTTPRequestHandler):
             # 2026-09-19: 回显客户端请求的版本号；实测 yun(FastMCP) 无条件回显任意版本且各客户端可通，
             # 白名单外版本回退旧版会让严格客户端按规范断开
             client_ver = params.get("protocolVersion", "2025-03-26")
-            print("[init] client protocolVersion=%r" % (client_ver,))
+            print("[init] client protocolVersion=%r" % (client_ver,), flush=True)
             return {
                 "jsonrpc": "2.0", "id": req_id,
                 "result": {
