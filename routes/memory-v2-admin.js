@@ -6,11 +6,12 @@ const path = require("path");
 const { createStore } = require("../memory-v2");
 const v2vectors = require("../memory-v2-vectors");
 
-const KIND_MAP = { "关于她": "fact", "认账": "rule", "拓本": "quote", fact: "fact", rule: "rule", quote: "quote", milestone: "milestone" };
+const KIND_MAP = { "关于她": "fact", "认账": "rule", "拓本": "quote", fact: "fact", rule: "rule", quote: "quote", milestone: "milestone" }; // 旧池类名 → V2 kind（管理台表单仍传类名，落库前翻译）
 
 module.exports = function registerMemoryV2Admin(app, deps) {
   const { basicAuth, admission, baseDir } = deps;
 
+  // 每请求新建 store 实例：memory-v2 惰性加载且写穿透，无跨请求缓存成本
   function store() {
     return createStore({ rootDir: baseDir, config: {} });
   }
