@@ -165,6 +165,7 @@ const contextReplacements = require("./context-replacements");
 
 const DEFAULT_BODY_LIMIT_MB = 50;
 
+// 请求体大小上限（MB → 字节）：REQUEST_BODY_LIMIT_MB 可调，默认 50MB（大 base64 附件需要）
 function readBodyLimitBytes() {
   const configured = Number(process.env.REQUEST_BODY_LIMIT_MB);
   const mb = Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_BODY_LIMIT_MB;
@@ -223,6 +224,8 @@ const DEFAULT_RESTART_COMMAND = "cd /opt/dylan-heartbeat && pm2 restart gateway 
 const UPSTREAM_TIMEOUT_MS = Number(process.env.UPSTREAM_TIMEOUT_MS) || 180000;
 const SCREENSHOT_TIMEOUT_MS = Number(process.env.SCREENSHOT_TIMEOUT_MS) || 60000;
 
+// 布尔环境读取：注意这里直读 process.env（非 readEnvValue 的 cachedEnv 口径），
+// 管理台改 .env 后要等重启才对本函数生效
 function readBooleanEnv(key, fallback = false) {
   const raw = String(process.env[key] ?? "").trim().toLowerCase();
   if (!raw) return fallback;
@@ -343,6 +346,8 @@ function getTextFromContentPart(part) {
   return "";
 }
 
+// 从 assistant 消息提取思考链文本：依次找 reasoning_content/reasoning/thinking 字段
+// （字符串或分片数组），再找 content 里的 think/reason 类型分片；取第一个非空来源
 function extractAssistantThinking(message) {
   if (!message || typeof message !== "object") return "";
   const direct = [message.reasoning_content, message.reasoning, message.thinking];
@@ -361,6 +366,8 @@ function extractAssistantThinking(message) {
   return "";
 }
 
+// 任意 content 形态（字符串/多模态数组/null）→ 纯文本：文本分片取文本、图片→[图片]、
+// 文件→元信息摘要、其他→[非文本内容]。全文件最常用的内容归一函数，时间线/日志/扣住等都靠它
 function normalizeContentToText(content) {
   if (typeof content === "string") return content;
   if (content == null) return "";
@@ -383,6 +390,8 @@ function normalizeContentToText(content) {
   return "[非文本内容]";
 }
 
+// 截掉 Kelivo 客户端 system prompt 自带的「## search_web 工具使用说明」及之后内容
+// （第三方 App 注入的宣传段，与本项目人设无关，不进时间线/不进模型）
 function stripKelivoSystemBloat(text) {
   const marker = '## search_web 工具使用说明';
   const idx = text.indexOf(marker);
@@ -390,6 +399,7 @@ function stripKelivoSystemBloat(text) {
   return text.substring(0, idx).trimEnd();
 }
 
+// 时间线落盘前的消息归一：content 转纯文本；system 额外剥 Kelivo 自带说明段
 function normalizeMessageForTimeline(msg) {
   const raw = normalizeContentToText(msg.content);
   const cleaned = msg.role === 'system' ? stripKelivoSystemBloat(raw) : raw;
@@ -397,6 +407,8 @@ function normalizeMessageForTimeline(msg) {
 }
 
 
+// 消息 → LLM 可用形态（发模型前的统一入口）：system 清洗、文件 part 转文本（文本类注入正文，
+// 见「文件内容注入」节）、多模态数组透传/转文本、空内容返回 null 由调用方丢弃
 function prepareMessageForLLM(msg) {
   if (msg.role === "assistant" && msg.tool_calls) return msg;
   if (msg.role === "tool") return msg;
@@ -423,6 +435,7 @@ function prepareMessageForLLM(msg) {
   return { ...msg, content: textContent };
 }
 
+// 单条消息的日志摘要（只记角色/形态/字数/分片数，内容不进 pm2 日志）
 function summarizeMessageForLog(msg) {
   const parts = Array.isArray(msg?.content) ? msg.content : [msg?.content];
   const textChars = parts.reduce((sum, part) => sum + getTextFromContentPart(part).length, 0);
@@ -457,16 +470,17 @@ function summarizeMessagesForLog(messages = []) {
 // 上游（如 DeepSeek）会把 <memory>/<pin> 拆成 <、memory、> 等多个 SSE 事件，
 // 字节层找不到完整标签，必须在 content 文本层做带缓冲的过滤。
 // ========================
-// 与 wake-up 进程共用同一份 wake_schedule.json（v2 多会话 per-session 槽位）：
-// 读写已收口到 lib/wake-schedule.js（跨进程文件锁 + 锁内重读合并 + 损坏拒写），
-// wake-up 轮询感知后重新挂定时器。批注 2026-09-13（审查 D3）。
+// 与唤醒调度器（lib/wake-scheduler.js，2026-09-15 起同在 gateway 进程内）共用同一份
+// wake_schedule.json（v2 多会话 per-session 槽位）：读写已收口到 lib/wake-schedule.js
+// （文件锁 + 锁内重读合并 + 损坏拒写），调度器以 20s 轻量轮询文件指纹感知变化后重挂定时器
+// （原 wake-up 独立进程轮询，进程已退役）。批注 2026-09-13（审查 D3）。
 const wakeSchedule = require("./lib/wake-schedule");
 function saveWakeSchedule(nextWakeAtIso, sessionId) {
   return wakeSchedule.saveSlot(nextWakeAtIso, sessionId);
 }
 
 // 对话侧 <wake> 闹钟标签：AI 在对话里设置闹钟（日期时间或分钟）；标签不显示给用户。
-// 返回剥离标签后的文本；同时把闹钟写入 wake_schedule.json（wake-up 进程轮询感知后挂定时器）。
+// 返回剥离标签后的文本；同时把闹钟写入 wake_schedule.json（唤醒调度器轮询感知后挂定时器）。
 function parseWakeTagAndSchedule(text, sessionId) {
   const cleaned = String(text || "").replace(/<wake>[\s\S]*?<\/wake>/gi, "").trim();
   const m = String(text || "").match(/<wake>([\s\S]*?)<\/wake>/i);
@@ -618,6 +632,7 @@ function writeHeldMessagesContent(perSession) {
   fs.writeFileSync(tmp, JSON.stringify(perSession, null, 2), "utf-8");
   fs.renameSync(tmp, HELD_MESSAGES_PATH);
 }
+// 写某会话的扣住消息（读到旧全局数组格式时自动迁移成 v2 per-session 结构再写）
 function writeHeldMessages(arr, sessionId) {
   const sid = quietSid(sessionId);
   const d = readHeldMessagesRaw();
@@ -932,12 +947,14 @@ function createContentTagFilter() {
 const _timelineCache = new Map(); // sessionId -> { fp, data }
 const _TIMELINE_CACHE_MAX = 60;
 const _corruptBackupDone = new Set(); // 已做过 .corrupt-* 备份的文件：同一轮损坏只备份一次，防反复 load 堆积备份
+// 时间线文件指纹（size:mtimeMs）：读缓存失效与写守卫「过期快照拒写」共用
 function timelineFingerprint(file) {
   try {
     const st = fs.statSync(file);
     return st.size + ":" + st.mtimeMs;
   } catch (e) { return ""; }
 }
+// 时间线深拷贝（structuredClone 优先，退 JSON 往返）
 function cloneTimeline(data) {
   try { return structuredClone(data); } catch (e) { return JSON.parse(JSON.stringify(data)); }
 }
@@ -1130,6 +1147,8 @@ function classifySpecialEvent(msg) {
   return out;
 }
 
+// 「真实对话消息」判定（时间线写入/计数/搜索的统一口径）：排除 system、工具调用、
+// 特殊事件、<system> 开头的 user 伪装消息，只认 user/assistant
 function isRealMessageForTimeline(msg) {
   if (msg.role === "system") return false;
   if (msg.tool_calls) return false;
@@ -1567,7 +1586,7 @@ function stripDiaryBlocks(text) {
 }
 
 function stripPosition(messages) {
-  // 只保留消息正文，剥离内部排序与时间字段（与 wake_up.js 保持一致，避免内部字段外泄）
+  // 只保留消息正文，剥离内部排序与时间字段（position/time 等内部字段不外泄给上游/前端）
   return messages.map(({ position, time, ...rest }) => rest);
 }
 
@@ -1656,6 +1675,7 @@ function writeNeteaseSession(musicU, csrf) {
   fs.renameSync(tmp, NETEASE_SESSION_FILE);
 }
 
+// 用 Cookie 调网易云官方接口查账号资料（昵称/userId/VIP 等级），登录状态校验用
 async function fetchNeteaseAccount(cookieHeader) {
   if (!cookieHeader) return null;
   try {
@@ -1683,12 +1703,14 @@ async function fetchNeteaseAccount(cookieHeader) {
   }
 }
 
+// 请求是否期望 JSON 响应（Content-Type 或 Accept 含 application/json）
 function wantsJsonResponse(req) {
   const contentType = req.headers["content-type"] || "";
   const accept = req.headers.accept || "";
   return contentType.includes("application/json") || accept.includes("application/json");
 }
 
+// 解析 .env 文件为键值对象（忽略空行与 # 注释行）
 function loadEnvFileObject() {
   const result = {};
   try {
@@ -2588,7 +2610,8 @@ app.post("/internal/wake-event", async (req, reply) => {
     const body = req.body || {};
     // ===== v2（2026-09-15 role 法）：唤醒产出原地追加为 assistant 消息，无回显行、无插位 =====
     // speak = 模型完整输出（含 <wake> 标签，存储保留作上下文；[DIARY] 段由 stripDiaryBlocks 剥除进 diary 消息）
-    // diary = 本次写的日记原文 → assistant(kind=diary) 落时间线（前端隐藏），日记文件由 wake_up.js 侧自行写
+    // diary = 本次写的日记原文 → assistant(kind=diary) 落时间线（前端隐藏），日记文件由唤醒侧自行写
+    //（原 wake_up.js；现为 gateway 内调度器经共享模块 lib/diary.js，口径一致）
     // push  = 推送元数据（Bark 成功时），结构化挂 assistant.push 字段，不再生成「刚刚给X发了推送」回显行
     // tools = 唤醒工具调用记录 → 挂 speak 消息 tools 字段；静默无消息时回填到 [唤醒] 块
     if (body.v2 === true) {
@@ -2617,8 +2640,8 @@ app.post("/internal/wake-event", async (req, reply) => {
       return reply.send({ success: true, v2: true, appended: res.appended });
     }
     const { content, event, diary, push_meta, session_id, tools } = body;
-    // 批注 2026-08-29：多会话。唤醒侧(wake_up.js)现在会携带 session_id，把唤醒事件写到
-    // 对应会话语，而不是永远堆在主会话。未携带时回退主会话（100% 兼容旧行为）。
+    // 批注 2026-08-29：多会话。唤醒侧（原 wake_up.js 独立进程，现 gateway 内调度器）会携带 session_id，
+    // 把唤醒事件写到对应会话语，而不是永远堆在主会话。未携带时回退主会话（100% 兼容旧行为）。
     const evSession = typeof session_id === "string" && session_id.trim() ? String(session_id).trim() : null;
     // 幂等去重（放在 400 校验之后，保证参数非法仍报错）
     if (content || event || diary) {
@@ -2861,6 +2884,7 @@ function getSessionSecret() {
   } catch (e) {}
   return sessionSecret;
 }
+// 签发管理台会话 token（有效期 30 天，HMAC-SHA256 签名；密钥持久化于 data/session_secret.txt）
 function createSessionToken() {
   const exp = Date.now() + SESSION_MAX_AGE_DAYS * 24 * 3600 * 1000;
   const payload = `${exp}.${process.env.ADMIN_USER}`;
@@ -3571,28 +3595,6 @@ app.delete("/internal/pin/:id", async (req, reply) => {
 });
 
 
-// 给下一个窗口自己的信：列表（管理台信封页，新的在前）
-
-
-// 记忆列表（支持搜索和分页）
-
-// 获取单条记忆 (剥离 embedding 避免传输大量数据)
-
-// 删除单条记忆
-
-// 编辑单条记忆
-
-// 批量归档
-
-// 批量永久删除沉底记忆（物理移除，不可恢复；清理指向被删记忆的 superseded_by 引用）
-
-// 批量恢复沉底记忆（active=true 重新参与检索；同时清除被覆盖标记）
-
-
-// 批量导入记忆
-
-// 查找相似记忆（重复检测）
-
 // ========================
 // 记忆池（8 分类结构化记忆）管理
 // ========================
@@ -3833,12 +3835,6 @@ app.get("/admin/cross-window-inject", { preHandler: basicAuth }, async (req, rep
 });
 
 
-// 触发摘要（支持 exclude：手动摘要前剔除不需要写摘要的消息下标，从待摘要队列移除）
-// 手动摘要窗口：删除所选（从待摘要队列永久移除，不可恢复）
-
-
-// 最近一次摘要信息
-
 // 上下文记忆替换：管理台撤销（压缩页 AI 块的「撤销」按钮用）
 app.post("/admin/context-replacements/undo", { preHandler: basicAuth }, async (req, reply) => {
   try {
@@ -3959,7 +3955,7 @@ const MANAGED_SERVICES = [
   { name: "mcp-ssh", type: "systemd", label: "SSH MCP（9000）" },
   { name: "zzf-mcp", type: "systemd", label: "远程玩具 MCP（8890）" },
   { name: "gateway", type: "pm2", label: "网关 gateway" },
-  { name: "wake-up", type: "pm2", label: "唤醒 wake-up" },
+  { name: "wake-up", type: "pm2", label: "唤醒 wake-up" },   // 已退役（2026-09-15 并入 gateway）；进程不存在时服务页显示 stopped，条目清理待拍板
   { name: "heart-web", type: "pm2", label: "心跳网页 heart-web" },
   { name: "netease-music-mcp", type: "port", port: 3303, label: "网易云 MCP（3303）", cmd: "cd /opt/netease-music-mcp && PORT=3303 nohup node src/http-server.js > http-server.log 2>&1 &", pattern: "netease-music-mcp" },
   { name: "decision-trail", type: "port", port: 8787, label: "决策痕迹 MCP（8787）", cmd: "cd /root/workspace/decision-trail && PORT=8787 nohup node server.mjs >> logs/server.log 2>&1 &", pattern: "decision-trail" },
@@ -3975,6 +3971,7 @@ function readJsonFileSafe(file, fallback) {
   }
 }
 
+// 原子写 JSON（tmp+rename）。与上方 atomicWriteJsonSync 功能重复（历史并存，未合并清理）
 function writeJsonFileAtomic(file, data) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = file + ".tmp";
@@ -3982,6 +3979,7 @@ function writeJsonFileAtomic(file, data) {
   fs.renameSync(tmp, file);
 }
 
+// 同步执行 shell 命令（20s 超时），返回 {ok, output}；管理台服务状态/控制用（注意：同步阻塞事件循环）
 function runShellCommand(cmd) {
   const { execSync } = require("child_process");
   try {
@@ -4687,12 +4685,9 @@ app.post("/admin/services/:name/:action", { preHandler: basicAuth }, async (req,
   }
 });
 
-// 配置管理：获取配置
 // ========================
 // 上下文压缩（分块预览 / 摘要生成 / 边界调整）
 // ========================
-// 词云关键词：从上下文文件（enhanced_messages.json 主对话时间线）提取
-// 词云关键词接口已下线（统一替换后不再使用）
 
 // ========================
 // 统一替换预览（管理台「上下文压缩」页）：所有记录（AI + 手工）合并成块视图
@@ -5131,11 +5126,6 @@ app.post("/admin/context-compaction/config", { preHandler: basicAuth }, async (r
 
 
 
-// 恢复某块摘要的历史版本
-// 历史版本恢复已下线（统一替换后摘要只保留当前正文）
-
-// 「添加摘要」已下线（统一替换后直接在块里编辑正文）
-
 // 保存手动编辑后的替换正文（统一替换：写入手工记录 text）
 app.post("/admin/context-compaction/update", { preHandler: basicAuth }, async (req, reply) => {
   const body = req.body || {};
@@ -5299,10 +5289,6 @@ app.post("/admin/context-compaction/history/delete", { preHandler: basicAuth }, 
     reply.code(400).send({ error: err.message });
   }
 });
-
-// 强制替换标记已下线（统一替换：开关即替换/取消替换）
-// 批量清除摘要已下线（统一替换后直接移除块）
-// 自动分块配置已下线（统一替换：全部走手工块）
 
 // 「添加一块 / 移除一块」：追加式分块——旧块边界完全不动，
 // 添加 = 从最后一块之后的未覆盖内容里按自然边界切一块（约 chunk_size 条）；
@@ -5860,7 +5846,6 @@ app.get("/admin/mobile.js", async (req, reply) => {
 // 日志与上下文查看 API
 // ========================
 
-// 获取唤醒原始日志
 // 获取唤醒提示词（wake_prompt.txt 当前内容）
 app.get("/admin/logs/wake-prompt", { preHandler: basicAuth }, async (req, reply) => {
   try {
@@ -5882,16 +5867,6 @@ app.post("/admin/logs/wake-prompt", { preHandler: basicAuth }, async (req, reply
     reply.code(500).send({ error: err.message });
   }
 });
-
-// 获取摘要提示词（system + 模板）
-
-// 保存摘要提示词
-
-// 恢复摘要提示词默认
-
-// 压缩上下文提示词
-// 压缩提示词编辑器已下线（统一替换后沿用默认压缩提示词）
-
 
 // 共影：观影唤醒提示词
 const CO_WAKE_PROMPT_FILE = path.join(__dirname, "data", "co_wake_prompt.json");
@@ -6240,7 +6215,7 @@ function splitMultimodalContent(content) {
   return { content: String(content == null ? "" : content) };
 }
 
-// 调上游聊天模型（DeepSeek）
+// 调上游聊天模型（TARGET_API_URL / MODEL_NAME 配置的上游；共影 chat/wake 用）
 async function callCoLLM(messages, temperature) {
   const targetUrl = readEnvValue("TARGET_API_URL");
   const targetKey = readEnvValue("TARGET_API_KEY");
@@ -6421,7 +6396,7 @@ app.post("/internal/co/wake", async (req, reply) => {
 
 // 推送（Bark / ntfy，与唤醒系统同一套配置）
 async function sendPushNotification({ title, body }) {
-  // 15s 超时：Bark/ntfy 对端挂起时不能卡住免打扰释放等调用方（与 wake_up.js 同名函数同口径）
+  // 15s 超时：Bark/ntfy 对端挂起时不能卡住免打扰释放等调用方
   const pushController = new AbortController();
   const pushTimer = setTimeout(() => pushController.abort(), 15000);
   try {
@@ -7113,6 +7088,8 @@ app.post("/internal/co/resolve", async (req, reply) => {
   }
 });
 
+// 唤醒原始日志（wake-up 独立进程的 pm2 日志尾读）：2026-09-15 进程退役后日志不再增长，
+// 仅剩历史排查价值；路径可经 WAKE_UP_LOG_PATH 覆盖
 app.get("/admin/logs/wake-up", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const lines = parseInt(req.query.lines) || 200;
