@@ -1219,11 +1219,19 @@ class MCPHandler(BaseHTTPRequestHandler):
 
         content_length = int(self.headers.get('Content-Length', 0))
         post_data = self.rfile.read(content_length)
+        req = None
         try:
             req = json.loads(post_data.decode('utf-8'))
             resp = self.handle_request(req)
         except Exception as e:
             resp = {"jsonrpc": "2.0", "error": {"code": -32700, "message": str(e)}}
+
+        # MCP streamable HTTP: JSON-RPC 通知（有 method 无 id）不回响应体，按规范回 202
+        if isinstance(req, dict) and req.get("method") and "id" not in req:
+            self.send_response(202)
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            return
 
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
@@ -1237,10 +1245,13 @@ class MCPHandler(BaseHTTPRequestHandler):
         params = req.get("params", {})
 
         if method == "initialize":
+            # 2026-09-19: 回显客户端请求的标准版本（不认识则回 2025-03-26）；硬编码 0.1.0 会让标准客户端版本协商失败直接断开
+            client_ver = params.get("protocolVersion", "2025-03-26")
+            supported = ("2024-11-05", "2025-03-26", "2025-06-18")
             return {
                 "jsonrpc": "2.0", "id": req_id,
                 "result": {
-                    "protocolVersion": "0.1.0",
+                    "protocolVersion": client_ver if client_ver in supported else "2025-03-26",
                     "capabilities": {"tools": {}},
                     "serverInfo": {"name": "小世界MCP工具集", "version": "1.0.0"}
                 }
@@ -1283,6 +1294,14 @@ class MCPHandler(BaseHTTPRequestHandler):
     # ── GET: 白兰访问计数（供前端页面调用）──
     # ── GET: 白兰访问计数（供前端页面调用）──
     def do_GET(self):
+        # 2026-09-19: MCP streamable HTTP 客户端握手后会 GET 开 SSE 流；本服务不支持流式，
+        # 按规范回 405 让客户端降级为纯 POST（此前对任意路径回 200 JSON，会被标准客户端判为无效响应）
+        if self.path != '/baillan-visit':
+            self.send_response(405)
+            self.send_header('Allow', 'POST')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            return
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
