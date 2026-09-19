@@ -6882,9 +6882,30 @@ const RUN_CONFIG_TYPES = {
   third_party_session_id: "string"
 };
 
+// ── 配置读出口脱敏（2026-09-20 审查 P1-1 收尾）──
+// data/config.json 里的视觉模型 api_key 此前经 GET /admin/config 明文回传（0913 审查 S4 只修了
+// /admin/vision-models，同源漏网）。读出口统一置空+附 *_set 布尔；写入口（POST /admin/config 的
+// vision_models 数组）空 api_key 按 id 从现值恢复，脱敏后的 GET 数据原样回传不会抹掉真 key。
+function maskConfigSecrets(cfg) {
+  const out = JSON.parse(JSON.stringify(cfg || {}));
+  if (typeof out.co_vision_api_key === "string") {
+    out.co_vision_api_key_set = !!out.co_vision_api_key.trim();
+    out.co_vision_api_key = "";
+  }
+  if (Array.isArray(out.vision_models)) {
+    out.vision_models = out.vision_models.map(function (m) {
+      if (!m || typeof m !== "object") return m;
+      const has = !!(m.api_key && String(m.api_key).trim());
+      return Object.assign({}, m, { api_key: "", api_key_set: has });
+    });
+  }
+  return out;
+}
+
 app.get("/admin/config", { preHandler: basicAuth }, async (req, reply) => {
   try {
-    reply.send(require("./memory-engine").getConfig ? require("./memory-engine").getConfig() : {});
+    const cfg = require("./memory-engine").getConfig ? require("./memory-engine").getConfig() : {};
+    reply.send(maskConfigSecrets(cfg));
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
@@ -6901,6 +6922,20 @@ app.post("/admin/config", { preHandler: basicAuth }, async (req, reply) => {
         return reply.code(400).send({ error: `配置项 ${key} 类型无效：期望 ${want}，实际 ${got}` });
       }
       updates[key] = value;
+    }
+    // vision_models 空 api_key 按 id 从现值恢复：GET 已脱敏（api_key 恒空），客户端回传空值
+    // 视为「未改动」，避免脱敏回写把真实凭据抹掉（与 /admin/vision-models 同一套协议）
+    if (Array.isArray(updates.vision_models)) {
+      const oldModels = (require("./memory-engine").getConfig().vision_models) || [];
+      updates.vision_models = updates.vision_models.map(function (m) {
+        if (!m || typeof m !== "object") return m;
+        let apiKey = String(m.api_key || "").trim();
+        if (!apiKey) {
+          const old = oldModels.find(function (x) { return x && String(x.id || "") === String(m.id || "") && x.api_key; });
+          if (old) apiKey = String(old.api_key);
+        }
+        return Object.assign({}, m, { api_key: apiKey });
+      });
     }
     if (Object.keys(updates).length === 0) {
       return reply.code(400).send({ error: "没有可更新的配置项" });
@@ -6947,6 +6982,12 @@ app.get("/admin/chat-settings", { preHandler: basicAuth }, async (req, reply) =>
   try {
     if (!fs.existsSync(CHAT_SETTINGS_FILE)) return reply.send({ ok: true, exists: false });
     const data = JSON.parse(fs.readFileSync(CHAT_SETTINGS_FILE, "utf-8")) || {};
+    // api_key（GATEWAY key）不回明文：置空+api_key_set 布尔（2026-09-20 审查 P1-1 收尾）；
+    // PUT 端空值视为「未改动」保留现值，脱敏回写不会抹掉真 key
+    if (typeof data.api_key === "string") {
+      data.api_key_set = !!data.api_key.trim();
+      data.api_key = "";
+    }
     if (data.cfg && typeof data.cfg === "object") {
       const blocked = consoleOwnedCfgKeys();
       const cleanCfg = {};
@@ -6959,8 +7000,12 @@ app.get("/admin/chat-settings", { preHandler: basicAuth }, async (req, reply) =>
 app.put("/admin/chat-settings", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const body = (req.body && typeof req.body === "object") ? req.body : {};
-    const clean = {};
-    if (typeof body.api_key === "string") clean.api_key = body.api_key;
+    // 以现文件为基合并（此前整份覆盖：PUT 不带 api_key/system_prompt 会把现值抹掉）；
+    // api_key 空串=未改动，保留现值（配合 GET 脱敏回写协议）
+    let clean = {};
+    try { if (fs.existsSync(CHAT_SETTINGS_FILE)) clean = JSON.parse(fs.readFileSync(CHAT_SETTINGS_FILE, "utf-8")) || {}; } catch (e) { clean = {}; }
+    if (!clean || typeof clean !== "object" || Array.isArray(clean)) clean = {};
+    if (typeof body.api_key === "string" && body.api_key.trim()) clean.api_key = body.api_key;
     if (typeof body.system_prompt === "string") clean.system_prompt = body.system_prompt;
     if (body.cfg && typeof body.cfg === "object") {
       const blocked = consoleOwnedCfgKeys();
