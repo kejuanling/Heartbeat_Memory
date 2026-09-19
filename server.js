@@ -1003,6 +1003,53 @@ function loadTimeline(sessionId) {
   }
 }
 
+// ── 会话删除墓碑（2026-09-20 审查 F-3 配套）──
+// 删除会话后，迟到的写入（生成中回复收尾/唤醒事件等）会用「空时间线+新消息」把已删会话
+// 以残骸文件复活。删除时在此记墓碑（相对路径，与 TIMELINE_FILE 同一 cwd 约定），saveTimeline
+// 见墓碑且文件不存在即拒写；TTL 过期自动失效（此后同 id 重建不再拦截）。单用户场景 cap 50 条。
+const TOMBSTONE_FILE = path.join("data", "deleted_sessions.json");
+const SESSION_TOMBSTONE_TTL_MS = 24 * 60 * 60 * 1000;
+function readDeletedSessionsMap() {
+  try {
+    const v = fs.readJsonSync(TOMBSTONE_FILE);
+    return (v && typeof v === "object" && !Array.isArray(v)) ? v : {};
+  } catch (e) { return {}; }
+}
+function writeDeletedSessionsMap(map) {
+  try {
+    fs.mkdirSync(path.dirname(TOMBSTONE_FILE), { recursive: true });
+    atomicWriteJsonSync(TOMBSTONE_FILE, map);
+  } catch (e) { console.warn("[timeline] 写会话删除墓碑失败:", e.message); }
+}
+function pruneDeletedSessions(map, now) {
+  const out = {};
+  for (const k of Object.keys(map)) {
+    const t = Number(map[k]);
+    if (Number.isFinite(t) && now - t < SESSION_TOMBSTONE_TTL_MS) out[k] = t;
+  }
+  return out;
+}
+function isSessionTombstoned(token, now) {
+  if (!token || token === "default") return false;
+  const map = readDeletedSessionsMap();
+  const t = Number(map[token]);
+  return Number.isFinite(t) && (now || Date.now()) - t < SESSION_TOMBSTONE_TTL_MS;
+}
+function markSessionDeleted(sessionId) {
+  const token = safeSessionToken(sessionId);
+  if (!token || token === "default") return false;
+  const now = Date.now();
+  const map = pruneDeletedSessions(readDeletedSessionsMap(), now);
+  map[token] = now;
+  const keys = Object.keys(map);
+  if (keys.length > 50) {
+    keys.sort((a, b) => map[a] - map[b]);
+    for (let i = 0; i < keys.length - 50; i++) delete map[keys[i]];
+  }
+  writeDeletedSessionsMap(map);
+  return true;
+}
+
 // 原子写入：先写临时文件再 rename，避免进程被杀/崩溃时把 JSON 写坏。
 // 临时文件名加 pid+时间戳后缀，避免同名 .tmp 交叉；失败/中断时尽力清理残留。
 function atomicWriteJsonSync(file, data) {
@@ -1047,6 +1094,13 @@ function saveTimeline(messages, sessionId) {
     const curFp = timelineFingerprint(file);
     if (curFp && curFp !== messages.__fp) {
       console.error("[timeline] 拒绝写入：会话 " + (sessionId || "default") + " 的快照已过期（load 时指纹 " + messages.__fp + " ≠ 盘上当前 " + curFp + "，期间有其他写入）。本次写入已丢弃以避免覆盖新消息，请重新 loadTimeline 后再修改。");
+      return false;
+    }
+  }
+  // 3) 墓碑守卫：文件已删除且仍在墓碑期内 → 拒绝重建（防迟到写入复活已删会话，见 markSessionDeleted）
+  if (!fs.existsSync(file)) {
+    if (isSessionTombstoned(safeSessionToken(sessionId))) {
+      console.error("[timeline] 拒绝写入：会话 " + (sessionId || "default") + " 已删除且在墓碑期内，本次写入已丢弃（防迟到写入复活已删会话）。");
       return false;
     }
   }
@@ -1852,6 +1906,7 @@ require("./routes/chat")(app, {
   tailHasReply,
   patchMessage,
   deleteMessage,
+  markSessionDeleted,
   sseSubscribe,
   sseUnsubscribe,
   sseNotify,

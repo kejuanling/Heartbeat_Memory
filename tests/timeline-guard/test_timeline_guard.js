@@ -45,19 +45,26 @@ const parts = [
   extractLine(src, "const _timelineCache"),
   extractLine(src, "const _TIMELINE_CACHE_MAX"),
   extractLine(src, "const _corruptBackupDone"),
+  extractLine(src, "const TOMBSTONE_FILE"),
+  extractLine(src, "const SESSION_TOMBSTONE_TTL_MS"),
   extractFunction(src, "safeSessionToken"),
   extractFunction(src, "timelineFileFor"),
   extractFunction(src, "timelineFingerprint"),
   extractFunction(src, "cloneTimeline"),
   extractFunction(src, "tagTimelineSnapshot"),
   extractFunction(src, "loadTimeline"),
+  extractFunction(src, "readDeletedSessionsMap"),
+  extractFunction(src, "writeDeletedSessionsMap"),
+  extractFunction(src, "pruneDeletedSessions"),
+  extractFunction(src, "isSessionTombstoned"),
+  extractFunction(src, "markSessionDeleted"),
   extractFunction(src, "atomicWriteJsonSync"),
   extractFunction(src, "backfillMissingTimes"),
   extractFunction(src, "saveTimeline"),
 ];
 // fs 参数 = fs-extra 最小面 shim（server.js 里 const fs = require("fs-extra")）
-const factory = new Function("fs", "crypto", parts.join("\n\n") +
-  "\nreturn { timelineFileFor, timelineFingerprint, cloneTimeline, loadTimeline, saveTimeline };");
+const factory = new Function("fs", "crypto", "path", parts.join("\n\n") +
+  "\nreturn { timelineFileFor, timelineFingerprint, cloneTimeline, loadTimeline, saveTimeline, isSessionTombstoned, markSessionDeleted };");
 
 function makeFsShim() {
   return {
@@ -75,7 +82,7 @@ function makeFsShim() {
 }
 
 function makeModule() {
-  return factory(makeFsShim(), crypto);
+  return factory(makeFsShim(), crypto, nodePath);
 }
 
 // ---- 测试环境：每个用例独立临时目录 + 独立模块实例（独立缓存/守卫状态）----
@@ -184,6 +191,32 @@ test("cloneTimeline：JSON fallback 分支可用（两条克隆路径的 __fp �
     assert.strictEqual(cloned[0].content, "x");
     // 端到端：readJsonSync 产物永远可 clone，故 fallback 在真实 load 路径为兜底分支；
     // __fp 由 tagTimelineSnapshot 在 clone 之后统一挂，两条路径的快照都带标记（见第一条用例）。
+  });
+});
+
+test("墓碑：已删除会话的迟到写入被拒，不复活残骸文件", () => {
+  withTempDir((dir, m) => {
+    assert.strictEqual(m.markSessionDeleted("s_t7_dead"), true, "标记删除应成功");
+    assert.strictEqual(m.markSessionDeleted("default"), false, "主会话不可墓碑");
+    const snap = m.loadTimeline("s_t7_dead"); // 文件不存在 → 空数组、非 corrupt
+    assert.strictEqual(snap.length, 0);
+    snap.push(msg("user", "迟到的消息"));
+    assert.strictEqual(m.saveTimeline(snap, "s_t7_dead"), false, "墓碑期内必须拒写");
+    assert.ok(!nodeFs.existsSync("enhanced_messages_s_t7_dead.json"), "不得重建文件");
+    assert.ok(m.isSessionTombstoned("s_t7_dead"));
+  });
+});
+
+test("墓碑过期后恢复可写（TTL 语义）", () => {
+  withTempDir((dir, m) => {
+    nodeFs.mkdirSync("data", { recursive: true });
+    const old = Date.now() - 25 * 60 * 60 * 1000; // 超过 24h TTL
+    nodeFs.writeFileSync(nodePath.join("data", "deleted_sessions.json"), JSON.stringify({ s_t8_old: old }));
+    assert.strictEqual(m.isSessionTombstoned("s_t8_old"), false, "过期墓碑不生效");
+    const snap = m.loadTimeline("s_t8_old");
+    snap.push(msg("user", "过期后的同 id 重建首条"));
+    assert.strictEqual(m.saveTimeline(snap, "s_t8_old"), true, "墓碑过期必须放行");
+    assert.ok(nodeFs.existsSync("enhanced_messages_s_t8_old.json"));
   });
 });
 

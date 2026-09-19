@@ -138,6 +138,7 @@ module.exports = function registerChatRoutes(app, deps) {
     tailHasReply,
     patchMessage,
     deleteMessage,
+    markSessionDeleted,
     sseSubscribe,
     sseUnsubscribe,
     sseNotify,
@@ -352,6 +353,9 @@ module.exports = function registerChatRoutes(app, deps) {
         }
       } catch (e) {}
       console.log(`[sessions] 会话 ${safe} 已删除，周边文件清理 ${cleaned} 处`);
+      // 删除墓碑（2026-09-20 审查 F-3）：记录删除时刻，24h 内迟到的写入（生成中回复收尾等）
+      // 在 saveTimeline 被拒，防止已删会话以残骸文件复活；过期自动失效，同 id 重建不受影响。
+      try { if (typeof markSessionDeleted === 'function') markSessionDeleted(safe); } catch (e) {}
       reply.send({ ok: true, deleted: true, cleaned });
     } catch (err) {
       console.error('[DELETE /v1/sessions/:id] error:', err.message);
@@ -744,14 +748,16 @@ module.exports = function registerChatRoutes(app, deps) {
         console.log(`[timeline-sync] diff编辑/删除同步 (session=${sessionId || 'default'}, 改=${ok}, 删=${del}, 未命中=${miss})`);
         return reply.send({ ok: true, edited: ok, deleted: del, missed: miss, session_id: sessionId || 'default' });
       }
-      // 旧整份分支：保留兼容（老前端/退化场景）
+      // 旧整份分支（老前端/退化场景）：改「以盘上为基同步请求差量」（2026-09-20 审查 F-2）——
+      // 此前整份 buildTimeline 重建会把「客户端列表里没有的服务器新写入」（他端新消息/唤醒事件）
+      // 物理删除。appendRequestMessages 语义=人设同步+按 id 去重补齐+重生成清尾：盘上已有的跳过、
+      // 缺的补齐；仅请求尾是 user（重生成）才清尾。中部删除不再支持走此分支（diff 分支按 id 定点
+      // 删除不受影响）；空 messages 不再把时间线清空。变更时 appendRequestMessages 内部已 sseNotify。
       const messages = Array.isArray(body.messages) ? body.messages : [];
-      const realMsgs = messages.filter(isRealMessageForTimeline).map(normalizeMessageForTimeline);
-      const rebuilt = buildTimeline(realMsgs, sessionId);
-      saveTimeline(rebuilt, sessionId);
-      sseNotify(sessionId);
-      console.log(`[timeline-sync] 编辑/删除全量同步 (session=${sessionId || 'default'}, 条数=${rebuilt.length})`);
-      reply.send({ ok: true, total: rebuilt.length, session_id: sessionId || 'default' });
+      const syncRes = appendRequestMessages(sessionId, messages);
+      const afterTl = loadTimeline(sessionId);
+      console.log(`[timeline-sync] 旧整份分支改差量同步 (session=${sessionId || 'default'}, 补齐=${syncRes.appended}, 清尾=${syncRes.removedTail}, 总条数=${afterTl.length})`);
+      reply.send({ ok: true, total: afterTl.length, appended: syncRes.appended, removedTail: syncRes.removedTail, session_id: sessionId || 'default' });
     } catch (err) {
       console.error('[timeline-sync] error:', err.message);
       reply.code(500).send({ error: err.message });

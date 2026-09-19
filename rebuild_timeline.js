@@ -8,6 +8,18 @@ const FILE = "/opt/dylan-heartbeat/enhanced_messages.json";
 const TMP = FILE + ".rebuild.tmp";
 const TZ = process.env.TIME_ZONE || "Asia/Shanghai";
 
+// 运行前置检查（2026-09-20 审查 F-1）：本脚本与 gateway 并行写同一时间线文件会互相覆盖
+// （双进程实测：gateway 持续 append 时跑一次本脚本，约 13% 消息被旧快照吞掉）。
+// 检测到 pm2 gateway 在线直接拒绝退出；停写期间跑完再启动（pm2 stop/start gateway）。
+const { execSync } = require("child_process");
+let gwPid = "";
+try { gwPid = execSync("pm2 pid gateway 2>/dev/null", { encoding: "utf8" }).trim(); } catch (e) {}
+if (gwPid && Number(gwPid) > 0) {
+  console.error("检测到 gateway 正在运行 (pid " + gwPid + ")。与本脚本并行会互相覆盖丢消息（实测丢约 13%）。");
+  console.error("请先执行 `pm2 stop gateway`，跑完本脚本后再 `pm2 start gateway`。");
+  process.exit(1);
+}
+
 const data = JSON.parse(fs.readFileSync(FILE, "utf8"));
 if (!Array.isArray(data)) { console.error("not an array: ", typeof data); process.exit(1); }
 
