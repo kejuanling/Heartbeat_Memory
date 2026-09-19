@@ -1221,6 +1221,7 @@ class MCPHandler(BaseHTTPRequestHandler):
 
         content_length = int(self.headers.get('Content-Length', 0))
         post_data = self.rfile.read(content_length)
+        print("[body] %r" % (post_data[:600],), flush=True)
         req = None
         try:
             req = json.loads(post_data.decode('utf-8'))
