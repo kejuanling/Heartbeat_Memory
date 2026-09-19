@@ -44,7 +44,11 @@ KNOWN_IP_PREFIXES = ("223.160.", "120.76.99.224")
 MCP_KNOWN_IP_PREFIXES = KNOWN_IP_PREFIXES + ("9.129.57.",)
 MCP_KNOWN_UA_PREFIXES = ("openai-mcp/", "Trae/", "curl/")
 PM2 = "/usr/local/bin/pm2"
-SERVICES_SYSTEMD = ("nginx", "yun-mcp-v2", "unified-backend")
+SERVICES_SYSTEMD = ("nginx", "yun-mcp-v2", "unified-backend", "mcp-tools")
+PM2_SERVICES = ("gateway", "email-mcp", "embed-server")
+# 事件落盘：chat 后台提醒栏（server.js /admin/alerts）读这里展示 24h 内事件
+EVENTS_FILE = "/opt/dylan-heartbeat/data/sentinel_events.json"
+EVENTS_KEEP = 50
 # -----------------
 
 MONTHS = {m: i for i, m in enumerate(
@@ -90,10 +94,32 @@ def cooled(rule):
         return False
 
 
+def record_event(rule, title, body):
+    """事件追加写入 data/sentinel_events.json（保留最近 EVENTS_KEEP 条；原子替换防半写）"""
+    try:
+        with open(EVENTS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict) or not isinstance(data.get("events"), list):
+            data = {"events": []}
+    except Exception:
+        data = {"events": []}
+    data["events"].append({"ts": int(time.time() * 1000), "rule": rule,
+                           "title": title, "body": body})
+    data["events"] = data["events"][-EVENTS_KEEP:]
+    tmp = EVENTS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(tmp, EVENTS_FILE)
+
+
 def alert(rule, title, body):
     if cooled(rule):
         print("cooldown:", rule)
         return
+    try:
+        record_event(rule, title, body)
+    except Exception as e:
+        print("record-fail:", e)
     bark(title, body)
     with open(os.path.join(STATE_DIR, "last_" + rule), "w") as f:
         f.write(str(time.time()))
@@ -219,13 +245,15 @@ def check_services():
     down = []
     try:
         out = run_cmd([PM2, "jlist"], 20)
+        pm2_status = {}
         for p in json.loads(out or "[]"):
             try:
-                if p.get("name") == "gateway" and \
-                        p.get("pm2_env", {}).get("status") != "online":
-                    down.append("gateway(pm2)")
+                pm2_status[p.get("name")] = p.get("pm2_env", {}).get("status")
             except AttributeError:
                 pass
+        for name in PM2_SERVICES:
+            if name in pm2_status and pm2_status[name] != "online":
+                down.append("%s(pm2)=%s" % (name, pm2_status[name] or "?"))
     except Exception as e:
         down.append("pm2检查失败:%s" % e)
     for s in SERVICES_SYSTEMD:

@@ -3959,7 +3959,12 @@ const MANAGED_SERVICES = [
   { name: "heart-web", type: "pm2", label: "心跳网页 heart-web" },
   { name: "netease-music-mcp", type: "port", port: 3303, label: "网易云 MCP（3303）", cmd: "cd /opt/netease-music-mcp && PORT=3303 nohup node src/http-server.js > http-server.log 2>&1 &", pattern: "netease-music-mcp" },
   { name: "decision-trail", type: "port", port: 8787, label: "决策痕迹 MCP（8787）", cmd: "cd /root/workspace/decision-trail && PORT=8787 nohup node server.mjs >> logs/server.log 2>&1 &", pattern: "decision-trail" },
-  { name: "spicy-monopoly", type: "port", port: 8773, label: "涩涩大富翁 MCP（8773）", cmd: `cd /opt/dylan-heartbeat/spicy-monopoly && SPICY_MONOPOLY_MCP_TRANSPORT=streamable-http SPICY_MONOPOLY_MCP_HOST=0.0.0.0 SPICY_MONOPOLY_MCP_PORT=8773 SPICY_MONOPOLY_MCP_PATH=/mcp SPICY_MONOPOLY_MCP_BEARER_TOKEN=${process.env.SPICY_MONOPOLY_MCP_BEARER_TOKEN || ""} nohup node mcp-server.js > mcp_spicy.log 2>&1 &`, pattern: "spicy-monopoly" }
+  { name: "spicy-monopoly", type: "port", port: 8773, label: "涩涩大富翁 MCP（8773）", cmd: `cd /opt/dylan-heartbeat/spicy-monopoly && SPICY_MONOPOLY_MCP_TRANSPORT=streamable-http SPICY_MONOPOLY_MCP_HOST=0.0.0.0 SPICY_MONOPOLY_MCP_PORT=8773 SPICY_MONOPOLY_MCP_PATH=/mcp SPICY_MONOPOLY_MCP_BEARER_TOKEN=${process.env.SPICY_MONOPOLY_MCP_BEARER_TOKEN || ""} nohup node mcp-server.js > mcp_spicy.log 2>&1 &`, pattern: "spicy-monopoly" },
+  { name: "yun-mcp-v2", type: "systemd", label: "云文件 MCP yun（9010）" },
+  { name: "unified-backend", type: "systemd", label: "统一后端（8777）" },
+  { name: "nginx", type: "systemd", label: "nginx 网关（80/443）" },
+  { name: "email-mcp", type: "pm2", label: "邮箱 MCP email-mcp" },
+  { name: "embed-server", type: "pm2", label: "向量服务 embed-server" }
 ];
 
 function readJsonFileSafe(file, fallback) {
@@ -4137,6 +4142,18 @@ app.get("/admin/alerts", { preHandler: basicAuth }, async (req, reply) => {
       }
     }
   } catch (e) { console.warn("[alerts] capacity:", e.message); }
+  // 4) 日志哨兵事件（ops/log_sentinel.py 落盘 data/sentinel_events.json）：24h 内的新IP登录/SSH爆破/MCP入口异常/服务掉线
+  try {
+    const sentEv = readJsonFileSafe(path.join(__dirname, "data", "sentinel_events.json"), null);
+    const evList = sentEv && Array.isArray(sentEv.events) ? sentEv.events : [];
+    const cutoff = Date.now() - 24 * 3600 * 1000;
+    const fresh = evList.filter(function (ev) { return ev && typeof ev.ts === "number" && ev.ts >= cutoff; });
+    fresh.slice(-10).forEach(function (ev) {
+      const d = new Date(ev.ts);
+      const when = (d.getMonth() + 1) + "月" + d.getDate() + "日 " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+      alerts.push({ type: "sentinel", level: "warn", title: ev.title || "哨兵事件", desc: when + " · " + (ev.body || "") });
+    });
+  } catch (e) { console.warn("[alerts] sentinel:", e.message); }
   // 3) 服务状态：列出全部实际部署的服务（pm2 存在 / systemd unit 存在 / 端口型全部），异常高亮
   const services = [];
   try {
