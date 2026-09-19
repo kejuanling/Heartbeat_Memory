@@ -301,6 +301,12 @@ function createCtxLimitReminderGuard(deps) {
     if (firstT && lastT) {
       chunkInfo = '从 ' + formatDateTimeInTimeZone(firstT) + ' 到 ' + formatDateTimeInTimeZone(lastT) + '（最早一段未整理的对话，约 ' + picked.length + ' 条）';
     }
+    // 系统 直接附上待整理区间的首尾消息 id（2026-09-19 统一 id 锚点后 AI 无需再检索取 id）
+    const startId = picked.length ? (picked[0] && picked[0].id ? String(picked[0].id) : '') : '';
+    const endId = picked.length ? (picked[picked.length - 1] && picked[picked.length - 1].id ? String(picked[picked.length - 1].id) : '') : '';
+    const idRange = startId && endId
+      ? 'start_id=' + startId + ' end_id=' + endId
+      : '（本次未能自动取得消息 id，请先用 context_search 检索该段原文，取首尾两条的 msg_id）';
 
     let prompt;
     try {
@@ -312,6 +318,7 @@ function createCtxLimitReminderGuard(deps) {
       .replace(/\$\{chars\}/g, String(tokens))
       .replace(/\$\{limit\}/g, String(limit))
       .replace(/\$\{chunkInfo\}/g, chunkInfo)
+      .replace(/\$\{id_range\}/g, idRange)
       .replace(/\$\{conversationText\}/g, '（就是上面第 1 点要整理的那段对话）');
     if (!remark.trim().startsWith(CTX_LIMIT_HEAD)) return;
 
