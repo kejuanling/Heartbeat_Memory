@@ -17,6 +17,7 @@ const mcp = require('../mcp-tool-loop');
 const { McpServerClient, loadConfig } = require('../mcp-client');
 const { mapMessagesForProvider } = require('../lib/role-mapper');
 const chatCtx = require('./chat-context');
+const ctxV2Runtime = require('../context-v2-runtime');
 
 // 唤醒侧注入白名单服务器：「工具集合」（本地记忆/日记工具，127.0.0.1:8771）+「花园」+「邮箱」，
 // 从 mcp-servers.json 里按名称/端口挑出，避免把 search.parallel / 网易云等带进唤醒；
@@ -62,6 +63,19 @@ async function runWakeCompletion(deps, opts) {
   contextReplacements.setActiveSession(sessionId || null);
   try {
     let msgs = buildWakeBaseMessages(deps, sessionId, ensureBuilder(deps));
+    // 唤醒与聊天共用 Context V2 组装；开关关闭时完全保留旧路径。
+    if (ctxV2Runtime.enabled(deps.baseDir)) {
+      try {
+        const input = ctxV2Runtime.buildInput(deps.baseDir, sessionId, msgs, deps.normalizeContentToText);
+        // 0919 注入语义升级（与聊天侧同款）：算好 bge 余弦传入 vecScores；失败回落字面。
+        try {
+          const activeRows = require('../memory-v2').createStore({ config: {} }).list({ status: 'active' });
+          const rs = await require('../memory-v2-vectors').relevantScores(activeRows, input.query);
+          if (rs && rs.ok) input.vecScores = rs.scores;
+        } catch (_) { /* 语义算分失败按字面回落 */ }
+        msgs = ctxV2Runtime.apply(msgs, ctxV2Runtime.buildContextBlocks(input).blocks);
+      } catch (e) { console.warn('[wake-chat] Context V2 组装失败，回退旧上下文:', e.message); }
+    }
 
     // [唤醒] 块：先落盘（追加式、原地不动、不插位），再注入本次请求末尾。
     // 静默唤醒（模型不回话）时它就是该次唤醒在时间线里的唯一留痕。

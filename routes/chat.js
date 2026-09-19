@@ -222,7 +222,7 @@ module.exports = function registerChatRoutes(app, deps) {
 
   // S4 正式切换（0919）：把 buildConversation 产出的旧两块换成 V2 块。
   // 旧块识别=developer 且 content 以 [永久上下文]/[跨窗口] 开头；[唤醒] 等 developer 块保留。
-  // 顺序（19.txt）：system → V2 固定块（assembly/instructions/identity/understanding/moments/continuity）
+  // 顺序（0919 修正）：system 人设永远在最前 → V2 固定块（assembly/instructions/identity/understanding/moments/continuity）
   //   → 时间线历史 → Possibly Relevant Memories → 尾部 user。
   function applyContextV2(messages, blocks) {
     const oldDevIdx = [];
@@ -233,17 +233,11 @@ module.exports = function registerChatRoutes(app, deps) {
     const fixed = (blocks || []).filter(b => b.key !== 'relevant_memories' && !b.empty);
     const relevant = (blocks || []).find(b => b.key === 'relevant_memories' && !b.empty);
     const newDevs = fixed.map(b => ({ role: 'developer', content: b.content }));
-    // 删旧块、插新块（新块放原第一个旧块位置；若原本无旧块则放 system 之后）
+    // 删旧块、插新块：无论旧块原位置如何，V2 固定块都放在开头 system 人设之后。
+    // 旧块删除后不能再按旧内容反查位置，否则找不到时会退到 0，把记忆块插到人设前面。
     const out = messages.filter(function (m, i) { return oldDevIdx.indexOf(i) < 0; });
     let insertAt = 0;
-    if (oldDevIdx.length) {
-      const firstOldContent = messages[oldDevIdx[0]].content;
-      insertAt = out.findIndex(function (m) { return m && m.role === 'developer' && m.content === firstOldContent; });
-      if (insertAt < 0) insertAt = 0;
-    } else {
-      insertAt = out.findIndex(function (m) { return m && m.role === 'system'; });
-      insertAt = insertAt < 0 ? 0 : insertAt + 1;
-    }
+    while (insertAt < out.length && out[insertAt] && out[insertAt].role === 'system') insertAt++;
     out.splice.apply(out, [insertAt, 0].concat(newDevs));
     // Relevant 插到尾部连续 user 消息之前（贴本轮消息、位于历史之后）
     if (relevant) {
@@ -890,6 +884,13 @@ app.post("/v1/chat/completions", async (req, reply) => {
         // 回滚 = ctx_v2_enabled 置 false，旧路径原样恢复。
         try {
           const v2Input = buildCtxV2ShadowInput(sessionId, llmMessages);
+          // 0919 注入语义升级：Relevant 打分换 bge 余弦（阈值 0.55、最多 3 条，向量由 memory-v2-vectors 缓存）；
+          // 算分失败（embed 熔断等）不传 vecScores，builder 回落字面，注入不致全灭。
+          try {
+            const activeRows = require('../memory-v2').createStore({ config: {} }).list({ status: 'active' });
+            const rs = await require('../memory-v2-vectors').relevantScores(activeRows, v2Input.query);
+            if (rs && rs.ok) v2Input.vecScores = rs.scores;
+          } catch (_) { /* 语义算分失败按字面回落 */ }
           const built = buildContextBlocks(v2Input);
           const { messages, hits } = applyContextV2(llmMessages, built.blocks);
           llmMessages = messages;

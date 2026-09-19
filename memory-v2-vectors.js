@@ -213,4 +213,24 @@ function breath(rows, opts = {}) {
   return pool.slice(0, limit).map(r => toItem(r));
 }
 
-module.exports = { ensureVectors, pruneVectors, similarGroups, retrieveHybrid, recent, breath, entryHash, VECTOR_FILE };
+// 注入用语义打分（0919 自动注入 Relevant 升级）：给全量行算与 query 的 bge 余弦。
+// builder 是纯函数禁网络 I/O，故由调用方（chat/wake）先调本函数，把 scores 挂到 input.vecScores。
+// 返回 { ok, scores }；ok=false（embed 熔断/失败/空查询）时调用方不传 vecScores，builder 回落字面。
+async function relevantScores(rows, query) {
+  const q = String(query || "").trim();
+  if (!q) return { ok: false, scores: null };
+  const ready = await ensureVectors(rows);
+  if (!ready) return { ok: false, scores: null };
+  const qv = await embedClient.embedBatch([q], true, 8000); // 查询侧按 BGE 约定加指令前缀
+  if (!qv || !qv[0] || !qv[0].length) return { ok: false, scores: null };
+  const m = vecMap();
+  const scores = {};
+  for (const r of rows) {
+    const v = (m[r.id] || {}).v;
+    if (!Array.isArray(v) || !v.length) continue; // 无向量条目不参与语义注入（宁缺毋滥）
+    scores[r.id] = Math.round(Math.max(0, cosine(qv[0], v)) * 1000) / 1000;
+  }
+  return { ok: true, scores };
+}
+
+module.exports = { ensureVectors, pruneVectors, similarGroups, retrieveHybrid, recent, breath, relevantScores, entryHash, VECTOR_FILE };

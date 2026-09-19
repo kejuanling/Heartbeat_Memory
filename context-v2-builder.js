@@ -39,6 +39,10 @@ const DEFAULT_CONFIG = {
   momentsAnchorMax: 5,
   relevantTopK: 5,
   relevantMinScore: 0.30,          // 0918 用户拍板调高：命中即写入时间线永久在场，高门槛防膨胀
+  // 0919 语义模式（用户拍板）：input.vecScores 由调用方算好传入（bge 余弦，memory-v2-vectors.relevantScores）；
+  // vecScores 在场时 Relevant 用语义打分（下两行），缺场回落字面（上两行，embed 熔断/shadow 诊断层）。
+  relevantMinSemScore: 0.55,       // 校准实测：相关查询 top1 0.54-0.65，闲聊 0.43-0.53；0.55 挡全部闲聊
+  relevantSemTopK: 3,              // 语义模式条数 5→3：命中永久写时间线，宁缺毋滥
 };
 
 // ---- 块定义（顺序=组装顺序冻结；context_assembly 为顶层引导，恒注入）----
@@ -160,7 +164,7 @@ function buildSystemInstructions(input, cfg) {
   return { lines, fixedIds };
 }
 
-// [2] Core Identity：pinned(identity) 保序 ＋ V2 rule(active) 按准入时间正序。
+// [2] Core Identity：pinned(identity) 保序 ＋ V2 rule(active 且 anchor=true) 按准入时间正序。
 // 预算不截断（超限=管理问题报警，代码不自动删约定）。
 function buildCoreIdentity(input, cfg) {
   const lines = [];
@@ -174,7 +178,7 @@ function buildCoreIdentity(input, cfg) {
     }
   }
   const rules = (Array.isArray(input.memoriesV2) ? input.memoriesV2 : [])
-    .filter(m => m && m.status === "active" && m.kind === "rule")
+    .filter(m => m && m.status === "active" && m.kind === "rule" && m.anchor === true)
     .sort(byCreatedAt);
   for (const r of rules) {
     lines.push(entryLine(r.text, r.created_at));
@@ -183,13 +187,13 @@ function buildCoreIdentity(input, cfg) {
   return { lines, fixedIds };
 }
 
-// [3] Long-term Understanding 核心层：V2 fact(active) 且 priority ≥ 门槛；
+// [3] Long-term Understanding 核心层：V2 fact(active 且 anchor=true) 且 priority ≥ 门槛；
 // 排列按准入时间正序；预算含 header，整体超预算时按 priority 升序淘汰（同 priority 淘汰更旧），保底 1 条
 function buildUnderstanding(input, cfg) {
   const fixedIds = [];
   const available = cfg.budgets.long_term_understanding - estimateTokens(HEADERS.long_term_understanding);
   const cand = (Array.isArray(input.memoriesV2) ? input.memoriesV2 : [])
-    .filter(m => m && m.status === "active" && m.kind === "fact"
+    .filter(m => m && m.status === "active" && m.kind === "fact" && m.anchor === true
       && Number(m.priority || 0) >= cfg.understandingCoreMinPriority)
     .sort(byCreatedAt)
     .map(m => ({ m, cost: estimateTokens(strSafe(m.text)), pr: Number(m.priority || 0) }));
@@ -239,7 +243,7 @@ function buildContinuity(input, cfg) {
   const lines = [];
   for (let i = recent.length - 1; i >= 0; i--) { // 从最新往最旧装，装不下跳过更旧的
     const d = recent[i];
-    const line = `（${String(d.date || "无日期")}）\n${strSafe(d.content)}`;
+    const line = strSafe(d.content);
     const cost = estimateTokens(line);
     if (used + cost > budget) continue;
     lines.unshift(line); // 保持时间正序呈现
@@ -251,6 +255,8 @@ function buildContinuity(input, cfg) {
 // [6] Possibly Relevant Memories：V2 检索（排除固定块已注入成员＋input.excludeIds
 // ——本会话已写入时间线的浮现记忆，命中后由生产链路落时间线永久在场，不再重复注入），
 // score desc → priority desc → id；minScore 宁缺毋滥（允许空）。条目带轻量日期后缀；超预算从尾部减条。
+// 0919 语义模式：input.vecScores（bge 余弦，调用方算好）在场时用语义打分（阈值 0.55、最多 3 条，
+// 无向量条目不参与）；缺场回落字面（embed 熔断/shadow 诊断）。两种模式的排除逻辑完全一致。
 function buildRelevant(input, cfg, fixedIdSet) {
   const q = strSafe(input.query);
   if (!q) return { lines: [], fixedIds: [] };
@@ -259,12 +265,22 @@ function buildRelevant(input, cfg, fixedIdSet) {
     .filter(m => m && m.status === "active" && m.id != null
       && !fixedIdSet.has(String(m.id)) && !excluded.has(String(m.id)));
   if (!pool.length) return { lines: [], fixedIds: [] };
-  const qt = tokenize(q);
+  const vecScores = (input.vecScores && typeof input.vecScores === "object") ? input.vecScores : null;
   const scored = [];
-  for (const m of pool) {
-    const score = Math.round(similarity(qt, m.text) * 1000) / 1000;
-    if (score < cfg.relevantMinScore) continue;
-    scored.push({ m, score });
+  if (vecScores) {
+    for (const m of pool) {
+      const s = vecScores[String(m.id)];
+      if (typeof s !== "number" || !(s >= 0)) continue;
+      if (s < cfg.relevantMinSemScore) continue;
+      scored.push({ m, score: s });
+    }
+  } else {
+    const qt = tokenize(q);
+    for (const m of pool) {
+      const score = Math.round(similarity(qt, m.text) * 1000) / 1000;
+      if (score < cfg.relevantMinScore) continue;
+      scored.push({ m, score });
+    }
   }
   scored.sort((a, b) => b.score - a.score
     || (Number(b.m.priority || 0) - Number(a.m.priority || 0))
@@ -274,8 +290,9 @@ function buildRelevant(input, cfg, fixedIdSet) {
   let used = headerCost;
   const lines = [];
   const hits = [];
+  const maxK = vecScores ? cfg.relevantSemTopK : cfg.relevantTopK;
   for (const s of scored) {
-    if (lines.length >= cfg.relevantTopK) break;
+    if (lines.length >= maxK) break;
     const line = entryLine(s.m.text, strSafe(s.m.established_at) || strSafe(s.m.created_at));
     const cost = estimateTokens(line);
     if (used + cost > budget) break;
