@@ -1296,7 +1296,9 @@ class MCPHandler(BaseHTTPRequestHandler):
                     "error": {"code": -32000, "message": str(e)}
                 }
 
-        return {"jsonrpc": "2.0", "id": req_id, "result": {}}
+        # JSON-RPC 2.0 规范：未知方法必须回 -32601 错误（回 200 空 result 会让 openai-mcp 的
+        # server/discover 探测拿到"成功但无效"的响应而不回退标准 initialize 流程）
+        return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": "Method not found: %s" % method}}
 
     # ── GET: 白兰访问计数（供前端页面调用）──
     # ── GET: 白兰访问计数（供前端页面调用）──
