@@ -420,16 +420,17 @@ def tool_moments_list(args):
     items = items[:limit]
     return {"moments": items, "count": len(items)}
 
-TOOLS["moments_list"] = {
-    "description": "查看心动时刻：最近被保存的珍贵对话片段（即标星内容/记忆碎片），最近在前。当你想了解这段关系里刚沉淀/被标星的重要内容时使用。",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "limit": {"type": "integer", "description": "返回条数，默认200；<=0取全部"}
-        }
-    },
-    "handler": tool_moments_list
-}
+# 已停用：moments 工具不再暴露给 AI，函数体保留供参考/回滚。
+# TOOLS["moments_list"] = {
+#     "description": "查看心动时刻：最近被保存的珍贵对话片段（即标星内容/记忆碎片），最近在前。当你想了解这段关系里刚沉淀/被标星的重要内容时使用。",
+#     "inputSchema": {
+#         "type": "object",
+#         "properties": {
+#             "limit": {"type": "integer", "description": "返回条数，默认200；<=0取全部"}
+#         }
+#     },
+#     "handler": tool_moments_list
+# }
 
 
 # ↓↓↓ 旧心动时刻工具:2026-08-31 已关闭注册,函数体保留供参考/回滚,勿再注册 ↓↓↓
@@ -804,44 +805,47 @@ def tool_pin_delete(args):
     return {"success": True, "message": "已删除永久上下文条目（id=" + pid + "），下一次请求起不再注入。"}
 
 
-TOOLS["pin_add"] = {
-    "description": "写入一条「永久注入上下文」（钉选 pin）。注意区分：记忆池工具（memories_*）是长期记忆检索库、按需浮现；而 pin 会随每一次对话和唤醒直接注入 system prompt，跨窗口永久生效，不会被时间线切换或摘要压缩弄丢。只用于真正不能丢的原则、关系要点、结论性内容，宁少勿滥。",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "title": {"type": "string", "description": "条目标题（简短，方便以后用标题定位修改/删除；可留空）"},
-            "content": {"type": "string", "description": "要永久钉住的具体内容（第一人称，写清结论/原则，避免模糊）"}
-        },
-        "required": ["content"]
-    },
-    "handler": tool_pin_add
-}
+# 已停用：永久上下文 pin 工具不再暴露给 AI，函数体保留供参考/回滚。
+# TOOLS["pin_add"] = {
+#     "description": "写入一条「永久注入上下文」（钉选 pin）。注意区分：记忆池工具（memories_*）是长期记忆检索库、按需浮现；而 pin 会随每一次对话和唤醒直接注入 system prompt，跨窗口永久生效，不会被时间线切换或摘要压缩弄丢。只用于真正不能丢的原则、关系要点、结论性内容，宁少勿滥。",
+#     "inputSchema": {
+#         "type": "object",
+#         "properties": {
+#             "title": {"type": "string", "description": "条目标题（简短，方便以后用标题定位修改/删除；可留空）"},
+#             "content": {"type": "string", "description": "要永久钉住的具体内容（第一人称，写清结论/原则，避免模糊）"}
+#         },
+#         "required": ["content"]
+#     },
+#     "handler": tool_pin_add
+# }
 
-TOOLS["pin_update"] = {
-    "description": "修改一条「永久注入上下文」的内容或标题。按 pin_id（pin_add 返回）精确定位，或按标题 title 定位。",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "id": {"type": "string", "description": "条目 id（pin_add 返回的 pin_id）；id 和 title 至少填一个"},
-            "title": {"type": "string", "description": "不填 id 时，用条目标题精确定位要改哪一条"},
-            "new_title": {"type": "string", "description": "新的标题（可选）"},
-            "content": {"type": "string", "description": "新的内容（可选）"}
-        }
-    },
-    "handler": tool_pin_update
-}
+# 已停用：永久上下文 pin 工具不再暴露给 AI。
+# TOOLS["pin_update"] = {
+#     "description": "修改一条「永久注入上下文」的内容或标题。按 pin_id（pin_add 返回）精确定位，或按标题 title 定位。",
+#     "inputSchema": {
+#         "type": "object",
+#         "properties": {
+#             "id": {"type": "string", "description": "条目 id（pin_add 返回的 pin_id）；id 和 title 至少填一个"},
+#             "title": {"type": "string", "description": "不填 id 时，用条目标题精确定位要改哪一条"},
+#             "new_title": {"type": "string", "description": "新的标题（可选）"},
+#             "content": {"type": "string", "description": "新的内容（可选）"}
+#         }
+#     },
+#     "handler": tool_pin_update
+# }
 
-TOOLS["pin_delete"] = {
-    "description": "删除一条「永久注入上下文」。按 pin_id 或标题 title 定位。删除后从下一次请求起不再注入。",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "id": {"type": "string", "description": "条目 id；id 和 title 至少填一个"},
-            "title": {"type": "string", "description": "不填 id 时，用条目标题精确定位"}
-        }
-    },
-    "handler": tool_pin_delete
-}
+# 已停用：永久上下文 pin 工具不再暴露给 AI。
+# TOOLS["pin_delete"] = {
+#     "description": "删除一条「永久注入上下文」。按 pin_id 或标题 title 定位。删除后从下一次请求起不再注入。",
+#     "inputSchema": {
+#         "type": "object",
+#         "properties": {
+#             "id": {"type": "string", "description": "条目 id；id 和 title 至少填一个"},
+#             "title": {"type": "string", "description": "不填 id 时，用条目标题精确定位"}
+#         }
+#     },
+#     "handler": tool_pin_delete
+# }
 
 # ── 上下文记忆替换 ──
 def tool_context_replace(args):
@@ -849,17 +853,14 @@ def tool_context_replace(args):
     if not memory:
         return {"error": "memory 必填：AI 自己写好的第一人称回忆记忆正文"}
     rng = {}
-    for k in ("start_time", "end_time", "start_index", "end_index"):
-        if args.get(k) is not None and str(args.get(k)).strip() != "":
-            v = args[k]
-            if k.endswith("_index"):
-                try:
-                    v = int(v)
-                except (TypeError, ValueError):
-                    return {"error": k + " 必须是整数消息编号"}
-            rng[k] = v
+    for k in ("start_id", "end_id"):
+        v = args.get(k)
+        if v is not None and str(v).strip() != "":
+            rng[k] = str(v).strip()
     if not rng:
-        return {"error": "请提供替换范围：时间范围（start_time/end_time，如 2026-08-12、2026-08-16 23:00）或消息编号范围（start_index/end_index，可用 context_search 查编号）"}
+        return {"error": "请提供替换范围：start_id 和 end_id（消息 id）——先用 context_search 检索原文，取首尾两条的 msg_id 传入"}
+    if len(rng) < 2:
+        return {"error": "start_id 和 end_id 都必填（消息 id）——先用 context_search 检索原文，取首尾两条的 msg_id 传入"}
     url = f"{BASE_URL}:3000/internal/context-replacements/apply"
     req = urllib.request.Request(url,
         data=json.dumps({"range": rng, "memory": memory}).encode("utf-8"),
@@ -882,17 +883,15 @@ def tool_context_replace(args):
 
 
 TOOLS["context_replace"] = {
-    "description": "把完整对话上下文里的一段「原始对话」替换成 AI 自己写的回忆记忆。AI 想压缩某段对话时：先用 context_search 确认要替换的范围（拿到时间范围），再自己写一段第一人称、有温度的回忆记忆，调用本工具填入范围 + 记忆正文。系统会记录这次替换：源文件（完整对话）不动、永久保留可检索，只有之后发送给 AI 的上下文会把这段原文替换成记忆；同时从待摘要队列移除这些消息，避免再被手动摘要处理。替换前自动备份，可在管理后台查看记录或撤销。",
+    "description": "把一段原始对话替换成 AI 自己写的回忆，用于压缩上下文而不是写入长期记忆池。使用前先用 context_search 检索到目标原文，取首尾两条消息的 msg_id 作为 start_id/end_id 传入（消息 id 唯一且不会因对话增删而错位），再提供一段基于真实对话写成的第一人称回忆。原始对话文件不会被删除，仍可检索；之后发送给 AI 的上下文会用这段回忆代替原文。",
     "inputSchema": {
         "type": "object",
         "properties": {
-            "start_time": {"type": "string", "description": "替换范围开始时间（可选）：如 2026-08-12 或 2026-08-12 08:00"},
-            "end_time": {"type": "string", "description": "替换范围结束时间（可选）：如 2026-08-16 或 2026-08-16 23:59"},
-            "start_index": {"type": "integer", "description": "替换范围起始消息编号（可选，0 起；推荐改用时间范围）"},
-            "end_index": {"type": "integer", "description": "替换范围结束消息编号（可选；推荐改用时间范围）"},
+            "start_id": {"type": "string", "description": "替换范围起始消息的 id（context_search 返回的 msg_id）"},
+            "end_id": {"type": "string", "description": "替换范围结束消息的 id（context_search 返回的 msg_id），需与 start_id 同一会话"},
             "memory": {"type": "string", "description": "AI 自己写的第一人称回忆记忆正文（有温度，像在回忆里写下的自己的话；按真实对话写，不编造）"}
         },
-        "required": ["memory"]
+        "required": ["start_id", "end_id", "memory"]
     },
     "handler": tool_context_replace
 }
@@ -948,7 +947,7 @@ def tool_context_search(args):
 
 
 TOOLS["context_search"] = {
-    "description": "原上下文回忆检索：跨所有会话翻原始对话和导入对话（含已被压缩区域的原文）。q 可不填——不填时系统自动拿她最新一条消息当检索内容，适合她刚问起某段往事（如「还记得…吗」）、不需要提炼关键词时直接空手调用；想找别的明确主题再给 q（语义模式下描述性语句也能搜到）。返回相关消息段落及所属会话(session)、消息编号(msg_id)、时间、角色，相邻命中自动合并，相同内容只保留一条；候选多时由一个旁路 LLM 挑出真正相关的原文（失败自动回退普通排序），返回的都是未改写的原文。拿到 msg_id 后可用 context_star 给该原文标星。注意：仅当前会话模式下最近5分钟内容不返回。",
+    "description": "检索原始对话：可跨所有会话搜索完整对话和导入对话，包括已经被上下文压缩替换的原文。q 可省略，省略时自动用当前会话她最新一条消息作为检索内容；也可直接提供关键词或描述性问题。结果返回相关原文及 session、msg_id（消息唯一 id）、时间、角色；相邻命中会合并，重复内容会去重，候选较多时会用旁路 LLM 精排。返回的是原文，不是改写后的记忆。需要永久保留某段原文时，可在找到 session/msg_id 后使用 context_star；需要把某段原文压缩成回忆（context_replace）时，同样把首尾两条的 msg_id 作为 start_id/end_id 传入。",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -1003,13 +1002,12 @@ def tool_memory_search(args):
 
 
 TOOLS["memory_search"] = {
-    "description": "检索长期记忆池（关于她/认账/拓本/压缩摘要/对话碎片）。支持关键词、完整问题或模糊描述，系统自动综合语义、词面匹配、重要度和新旧程度排序；也可按分类只搜某一类。返回每条记忆的唯一 id（可用 memory_pin 按 id 置顶/取消置顶）。category 填「最近」=按更新时间倒序列出最新记忆（忽略关键词）；填「已置顶」=只看置顶记忆（带 q 则在置顶内按相关性搜）。设置 breath=true 且不填 q 时，浮现最近沉淀的记忆。适用于：回忆长期互动里的结论/偏好/约定、确认自己对她了解要点、补上下文前先查记忆池、翻最近记了什么、查看所有置顶。区别于 context_search（检索原始对话原文）。",
+    "description": "检索长期记忆池。支持关键词、完整问题或模糊描述，并可按分类过滤；系统负责按相关性等因素排序。分类只有四类：fact（稳定事实）、rule（承诺/边界）、quote（重要原话）、milestone（关系里程碑）；另有特殊值「最近」和「已置顶」用于浏览。返回记忆内容及唯一 id，id 可交给 memory_pin。这里查到的是已经进入长期记忆池的记忆，不是原始对话；需要找原文时使用 context_search。",
     "inputSchema": {
         "type": "object",
         "properties": {
-            "q": {"type": "string", "description": "检索关键词或想问的问题；category=最近/已置顶 或 breath=true 时可不填"},
-            "breath": {"type": "boolean", "description": "可选：true 且不填 q 时，浮现最近更新的记忆（默认3条，最多5条）"},
-            "category": {"type": "string", "description": "按分类过滤，可选：关于她/认账/拓本/压缩摘要/对话碎片；特殊值：最近（按时间倒序列最新，忽略关键词）、已置顶（只看置顶记忆）"},
+            "q": {"type": "string", "description": "检索关键词、问题或描述；category=最近/已置顶 时可不填"},
+            "category": {"type": "string", "description": "分类过滤：fact=稳定事实、rule=承诺/边界、quote=重要原话、milestone=关系里程碑；特殊值：最近、已置顶"},
             "limit": {"type": "integer", "description": "返回条数，默认5，最大50"}
         }
     },
@@ -1063,14 +1061,14 @@ def tool_memory_add(args):
 
 
 TOOLS["memory_add"] = {
-    "description": "新增一条长期记忆到记忆池。只支持三类：关于她（她是谁的静态部分：偏好/习惯/身体状况/作息/家人/经历里反复起作用的部分，只收稳定、反复成立的事实，一条一个事实写短句，当天心情和一次性对话内容不写）、认账（我认下的账：答应过她的事、欠着还没做的、被她纠正后认下的毛病，每条都必须能回答“那我该干什么”，写清欠什么、什么状态下兑现，兑现了就删）、拓本（一字不改的原话：引号里原样照抄，不修标点不补主语，写明谁说的、日期，宁短勿长）。适用于：对话里发现她的稳定特征、我认下的账、重要原话，或她在对话里明确说“记住”之类的话时。支持重要级（0~1）。会自动与已有记忆做相似去重合并。区别于 pin（永久注入）与 context_replace（压缩替换）。",
+    "description": "提交一条你想长期留下的记忆。只要你觉得某件事以后可能值得记得，就可以提交，不需要先替系统判断它是否应该进入记忆池；所有提交都会经过后续记忆流水线的筛选、去重、合并等处理，提交不代表一定会最终保留。分类只有四类：fact（稳定事实）、rule（承诺/边界）、quote（重要原话）、milestone（关系里程碑）。这是长期记忆的提交入口，不等同于永久注入，也不用于压缩当前上下文。",
     "inputSchema": {
         "type": "object",
         "properties": {
-            "content": {"type": "string", "description": "记忆正文（要长期记住的信息，写清结论/原话，避免模糊）"},
-            "category": {"type": "string", "description": "分类，可选：关于她/认账/拓本（默认关于她）。关于她=她的静态稳定事实；认账=我认下的账（答应的事/欠着的事/被纠正认下的毛病）；拓本=一字不改的原话（写明谁说的、日期）"},
-            "importance": {"type": "number", "description": "重要级 0~1，默认 0.5"},
-            "pin": {"type": "boolean", "description": "true 时直接把这条记忆置顶：会随每次对话注入「相关记忆」，默认 false"}
+            "content": {"type": "string", "description": "想留下的记忆内容；基于真实对话，不编造"},
+            "category": {"type": "string", "enum": ["fact", "rule", "quote", "milestone"], "description": "可选：fact=稳定事实、rule=承诺/边界、quote=重要原话、milestone=关系里程碑"},
+            "importance": {"type": "number", "description": "重要级 0~1，可选；仅作为提交信息，最终是否保留由记忆流水线决定"},
+            "pin": {"type": "boolean", "description": "可选；请求将这条提交同时置顶。默认 false"}
         },
         "required": ["content"]
     },
@@ -1130,7 +1128,7 @@ def tool_context_star(args):
 
 
 TOOLS["context_star"] = {
-    "description": "给聊天原文标星（或取消标星）。标星后的原文会长期保留在 AI 上下文中、不参与压缩替换（与用户手动标星同等待遇），但不会写入记忆池。用法：先用 context_search 搜到原文（结果每条带 session 和 msg_id），再把同一 session 下的 msg_id 传给本工具，可一次传多条。注意：msg_id 必须搭配其所属 session 使用，跨会话的原文要分别调用；标星按「角色+原文内容」识别，同一段原文即使出现在别处也会一起被标星/取消。",
+    "description": "让指定的原始聊天消息长期保留在上下文中，并跳过后续压缩/替换；不会写入长期记忆池。先用 context_search 找到原文，再把它返回的 session 和 msg_id 传入；可一次标星或取消多条消息。",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -1181,7 +1179,7 @@ def tool_memory_pin(args):
 
 
 TOOLS["memory_pin"] = {
-    "description": "置顶或取消置顶一条记忆池记忆。先用 memory_search 找到记忆（结果每条带 id），再把 id 传给本工具。置顶后的记忆固定注入每次对话的「相关记忆」区，不再依赖检索命中。适用于：她明确说「这个要一直记住」、要把某条记忆升级为长期固定记住、或取消某条不再需要固定注入的置顶。",
+    "description": "置顶或取消置顶一条已经进入长期记忆池的记忆。先用 memory_search 找到它的 id，再传给本工具。置顶后会固定注入每次对话的「相关记忆」区，不再依赖检索命中；取消置顶则恢复普通记忆池状态。",
     "inputSchema": {
         "type": "object",
         "properties": {

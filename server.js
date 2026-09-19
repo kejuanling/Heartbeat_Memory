@@ -3605,6 +3605,45 @@ try {
 } catch (err) {
   console.warn("[memory-v2] admission 初始化失败，V2 停用:", err.message);
 }
+
+// 旧记忆池静默迁移：只走 promotion→review，绝不直接写入 V2 主集合。
+// 配置 memory_v2_config.json 的 mig_background=true 后启用；done-set 保证可重启续跑且不重复。
+function startMemoryBackgroundMigration(admission) {
+  if (!admission || !admission.submitPromotion) return;
+  const fsx = require("fs-extra");
+  const pathx = require("path");
+  const cfgFile = pathx.join(__dirname, "data", "memory_v2_config.json");
+  let cfg = {};
+  try { cfg = fsx.readJsonSync(cfgFile) || {}; } catch (_) {}
+  if (cfg.mig_background !== true) return;
+  const batchSize = Math.max(1, Math.min(50, Number(cfg.mig_batch_size) || 10));
+  const intervalMs = Math.max(60 * 1000, (Number(cfg.mig_interval_min) || 10) * 60 * 1000);
+  const poolFile = pathx.join(__dirname, "data", "memory_pool.json");
+  const doneFile = pathx.join(__dirname, "data", "memory_v2_mig_done.json");
+  const kindMap = { "关于她": "fact", "认账": "rule", "拓本": "quote", "压缩摘要": "milestone", "对话碎片": "fact", "关于我们": "fact", "锚点": "quote", "信号": "fact", "对话摘要": "fact" };
+  let running = false;
+  const runBatch = () => {
+    if (running) return;
+    running = true;
+    try {
+      const rows = fsx.readJsonSync(poolFile);
+      const done = fsx.existsSync(doneFile) ? (fsx.readJsonSync(doneFile) || {}) : {};
+      const list = Array.isArray(rows) ? rows.filter(r => r && r.active !== false && r.id && !done[r.id]) : [];
+      let n = 0;
+      for (const r of list.slice(0, batchSize)) {
+        const result = admission.submitPromotion({ content: String(r.content || "").trim(), kind: kindMap[r.category] || "fact", importance: Number(r.importance) || 0.5, block_id: "legacy:" + r.id });
+        if (result && result.action !== "error") { done[r.id] = { at: new Date().toISOString(), action: result.action, queue_id: result.queue_id || null }; n++; }
+      }
+      if (n) fsx.writeJsonSync(doneFile, done, { spaces: 2 });
+      if (n) console.log(`[memory-v2-mig] processed=${n}, remaining=${Math.max(0, list.length - n)}`);
+    } catch (e) { console.warn("[memory-v2-mig] batch failed:", e.message); }
+    finally { running = false; }
+  };
+  setTimeout(runBatch, 15 * 1000).unref();
+  setInterval(runBatch, intervalMs).unref();
+  console.log(`[memory-v2-mig] enabled: batch=${batchSize}, interval=${Math.round(intervalMs / 60000)}min`);
+}
+startMemoryBackgroundMigration(memoryV2Admission);
 require("./routes/memory-pool")(app, { basicAuth, v2Manual: memoryV2Admission ? (b) => memoryV2Admission.submitV2(b) : null });
 require("./routes/memory-review")(app, { basicAuth, admission: memoryV2Admission });
 // 记忆 V2 管理台：集合查看 + 聊天页入池（manual_review 走流水线进 review）
@@ -3695,14 +3734,17 @@ app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, re
 // —— promotion 改造 helper（0918）：压缩块区间的时间线原文切片 + LLM 候选提取 ——
 
 // 压缩块覆盖区间的时间线原文（原文都在——压缩替换只影响发送，源时间线未动）
+// 锚点=消息 id（2026-09-19 统一）：按块 range 的 start_id/end_id 在时间线里精确定位，
+// 编号下标已废弃（压缩编号≠原始数组下标，直接 slice 会错位）。
 function sliceTimelineOriginal(sessionId, range) {
   try {
     const tl = loadTimeline(sessionId);
     if (!Array.isArray(tl)) return null;
-    const start = Math.max(0, Number(range && range.start_index) || 0);
-    const end = Math.min(tl.length - 1, Number(range && range.end_index) || 0);
-    if (end < start) return null;
-    const seg = tl.slice(start, end + 1)
+    let s = -1, e = -1;
+    if (range && range.start_id) s = tl.findIndex(function (m) { return m && String(m.id) === String(range.start_id); });
+    if (range && range.end_id) e = tl.findIndex(function (m) { return m && String(m.id) === String(range.end_id); });
+    if (s < 0 || e < 0 || e < s) return null;
+    const seg = tl.slice(s, e + 1)
       .filter(function (m) { return m && (m.role === "user" || m.role === "assistant") && !m.deleted; })
       .map(function (m) {
         const text = String(typeof m.content === "string" ? m.content : "").replace(/<current_time>[^<]*<\/current_time>/g, "").trim();

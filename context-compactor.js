@@ -521,6 +521,7 @@ function rangePreview(start, end, opts) {
     const t = msgTime(m);
     return {
       num: ps + i + 1,
+      id: m && m.id ? String(m.id) : undefined,
       role: m.role,
       content: contentToText(m),
       thinking: m.thinking,

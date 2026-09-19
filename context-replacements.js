@@ -176,24 +176,7 @@ function messageTime(m) {
   return null;
 }
 
-// 解析时间范围边界：带 Z 的按 UTC；不带 Z 的按服务器本地墙上时间（Asia/Shanghai）
-function parseRangeBound(value) {
-  if (value === undefined || value === null || value === "") return null;
-  let s = String(value).trim();
-  const m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2})[:：]?(\d{1,2})?)?$/);
-  if (m) {
-    const y = Number(m[1]);
-    const mo = Number(m[2]);
-    const dd = Number(m[3]);
-    const hh = m[4] ? Number(m[4]) : 0;
-    const mm = m[5] ? Number(m[5]) : 0;
-    // 与 messageTime 同口径：按业务时区解析，不依赖服务器本地时区
-    const d = zonedWallTimeToDate({ year: y, month: mo, day: dd, hour: hh, minute: mm }, TIME_ZONE);
-    return isNaN(d.getTime()) ? null : d;
-  }
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? null : d;
-}
+// 解析时间范围边界的 parseRangeBound 已删（2026-09-19 统一消息 id 锚点，时间定位入口全清）
 
 // ========================
 // 消息判断（与旧压缩器口径一致，发送链路统一后迁到本模块）
@@ -523,62 +506,39 @@ function compressibleItems() {
 }
 
 // ========================
-// 范围解析：把「时间范围 / 编号范围」映射到具体消息
+// 范围解析：只认「消息 id」（2026-09-19 统一锚点：时间/编号定位已删——编号随时间线增删漂移、
+// 时间撞车，只有消息自带 id 全库唯一不漂移）。start_id/end_id 来自 context_search 返回的 msg_id。
 // ========================
 function resolveRange(range) {
   const timeline = nonSystemMessages(loadTimeline());
   const rng = range || {};
-  const hasTime = rng.start_time !== undefined && rng.start_time !== null && rng.start_time !== ""
-    || rng.end_time !== undefined && rng.end_time !== null && rng.end_time !== "";
-  const hasIndex = rng.start_index !== undefined && rng.start_index !== null
-    || rng.end_index !== undefined && rng.end_index !== null;
-
-  let matched = [];
-  let rangeLabel = "";
-
-  let firstIdx = -1;
-  let lastIdx = -1;
-  if (hasIndex) {
-    const start = Math.max(0, Math.floor(Number(rng.start_index !== undefined ? rng.start_index : rng.end_index) || 0));
-    const end = rng.end_index !== undefined && rng.end_index !== null
-      ? Math.floor(Number(rng.end_index))
-      : start;
-    if (start > end) return { ok: false, error: "start_index 不能大于 end_index" };
-    if (end >= timeline.length) {
-      return { ok: false, error: "编号越界：当前时间线共 " + timeline.length + " 条非系统消息，end_index 最大 " + (timeline.length - 1) };
-    }
-    matched = timeline.slice(start, end + 1);
-    rangeLabel = "#" + start + " ~ #" + end;
-    firstIdx = start;
-    lastIdx = end;
-  } else if (hasTime) {
-    const startD = parseRangeBound(rng.start_time);
-    const endD = parseRangeBound(rng.end_time);
-    if (!startD && !endD) return { ok: false, error: "时间范围无法解析" };
-    if (startD && endD && startD > endD) return { ok: false, error: "start_time 不能晚于 end_time" };
-    firstIdx = -1;
-    lastIdx = -1;
-    timeline.forEach(function (m, i) {
-      const t = messageTime(m);
-      if (!t) return;
-      if (startD && t < startD) return;
-      if (endD && t > endD) return;
-      if (firstIdx === -1) firstIdx = i;
-      lastIdx = i;
-    });
-    if (firstIdx === -1) {
-      return { ok: false, error: "范围内没有匹配到任何消息（可能时间不准，可先用检索工具确认）" };
-    }
-    matched = timeline.slice(firstIdx, lastIdx + 1);
-    rangeLabel = (rng.start_time || "…") + " ~ " + (rng.end_time || "…");
-  } else {
-    return { ok: false, error: "需要提供时间范围（start_time/end_time）或编号范围（start_index/end_index）" };
+  const startId = rng.start_id !== undefined && rng.start_id !== null ? String(rng.start_id).trim() : "";
+  const endId = rng.end_id !== undefined && rng.end_id !== null ? String(rng.end_id).trim() : "";
+  if (!startId || !endId) {
+    return { ok: false, error: "需要提供消息 id（start_id/end_id）：先用 context_search 检索原文，取首尾两条的 msg_id" };
   }
-
-  if (matched.length === 0) {
-    return { ok: false, error: "范围内没有匹配到任何消息（可能时间/编号不准，可先用检索工具确认）" };
+  const idPos = new Map();
+  for (let i = 0; i < timeline.length; i++) {
+    const id = timeline[i] && timeline[i].id ? String(timeline[i].id) : null;
+    if (id && !idPos.has(id)) idPos.set(id, i);
   }
-  return { ok: true, matched: matched, count: matched.length, range_label: rangeLabel, start_index: firstIdx, end_index: lastIdx };
+  const s = idPos.get(startId);
+  const e = idPos.get(endId);
+  if (s === undefined || e === undefined) {
+    return { ok: false, error: "消息 id 在当前会话时间线中不存在（可能换了会话或窗口）" };
+  }
+  if (s > e) {
+    return { ok: false, error: "start_id 在时间线中的位置晚于 end_id，请调换" };
+  }
+  const matched = timeline.slice(s, e + 1);
+  return {
+    ok: true,
+    matched: matched,
+    count: matched.length,
+    range_label: rangeLabelOf(matched.map(function (m) { return { msg: m }; })),
+    start_index: s,
+    end_index: e
+  };
 }
 
 // ========================
@@ -612,7 +572,7 @@ function addReplacement(options) {
     if (resolved.end_index >= total - protectN) {
       return {
         ok: false,
-        error: "该范围覆盖到了最近 " + protectN + " 条消息（近期对话受保护，不参与压缩）。请把 end_time 提前，选择更早的时间段。"
+        error: "该范围覆盖到了最近 " + protectN + " 条消息（近期对话受保护，不参与压缩）。请把 end_id 换成更早的消息 id。"
       };
     }
   }
@@ -772,9 +732,9 @@ function rangeLabelOf(slice) {
   return (minT !== null ? fmtWall(new Date(minT)) : "?") + " ~ " + (maxT !== null ? fmtWall(new Date(maxT)) : "?");
 }
 
-function manualStart(it) {
-  const s = it && it.range && it.range.start_index;
-  return Number.isInteger(s) ? s : Number.MAX_SAFE_INTEGER;
+function manualStart(it, compItems) {
+  const r = recordCompRange(it, compItems);
+  return r ? r.start : Number.MAX_SAFE_INTEGER;
 }
 
 function manualRecordsSorted() {
@@ -782,10 +742,11 @@ function manualRecordsSorted() {
   //（无 session 字段的旧块视为通用，各会话均可见可操作）。不过滤时其他会话的块会占据
   // 全局序号，导致 blocks 路由按 blockIndex 错位命中别的会话的块。
   const cur = activeSessionOr() || "default";
+  const compItems = compressibleItems(); // 只算一次：排序比较里复用，避免每次比较重载时间线
   return loadItems()
     .filter(it => it.source === "manual" && !it.removed)
     .filter(it => !it.session || it.session === cur)
-    .sort((a, b) => manualStart(a) - manualStart(b));
+    .sort((a, b) => manualStart(a, compItems) - manualStart(b, compItems));
 }
 
 function manualRecordAt(index) {
@@ -801,6 +762,10 @@ function buildManualRecord(start, end, enabled) {
   const ee = Math.min(end, items.length - 1);
   const slice = items.slice(start, ee + 1);
   if (slice.length === 0) return { ok: false, message: "范围内没有可压缩消息" };
+  // 锚点=消息 id（2026-09-19 统一）：存储 range 只存首尾消息 id，定位一律由 matched[].id 解析
+  const startId = slice[0].msg && slice[0].msg.id ? String(slice[0].msg.id) : "";
+  const endId = slice[slice.length - 1].msg && slice[slice.length - 1].msg.id ? String(slice[slice.length - 1].msg.id) : "";
+  if (!startId || !endId) return { ok: false, message: "该区间消息缺少 id 字段，无法锚定（需要消息自带 id）" };
   return {
     ok: true,
     record: {
@@ -810,7 +775,7 @@ function buildManualRecord(start, end, enabled) {
       session: activeSessionOr() || "default",   // 多会话：记录归属当前会话，只在该会话内套用
       text: "",
       memory: "",
-      range: { start_index: start, end_index: ee },
+      range: { start_id: startId, end_id: endId },
       range_label: rangeLabelOf(slice),
       matched: slice.map(e => ({
         role: e.msg.role,
@@ -821,6 +786,8 @@ function buildManualRecord(start, end, enabled) {
       enabled: enabled === true,
       removed: false
     },
+    startIndex: start,
+    endIndex: ee,
     slice: slice
   };
 }
@@ -839,7 +806,7 @@ function addManualRecord(start, end, enabled) {
       // 吞并判定用「当前真实覆盖区间」而非存储 range：时间线增删后旧块的存储编号会漂移，
       // 按过期存储编号判断会误吞内容已移动到别处的块，导致被顶块的内容退回未覆盖区（边界被顶）。
       const cur = recordCompRange(it, compItems);
-      if (cur && cur.start <= built.record.range.end_index && cur.end >= built.record.range.start_index) {
+      if (cur && cur.start <= built.endIndex && cur.end >= built.startIndex) {
         removedCount++;
         continue;
       }
@@ -929,9 +896,9 @@ function updateManualRecordRange(index, start, end) {
 }
 
 
-// AI 块：按编号范围更新覆盖区间（前端管理台用）。编号为 compressibleItems 下标（与手动块一致）。
-// 保留 source=ai，时间范围由新编号段内消息的实际时间重算回写；只改自身，不吞并其他块。
-function updateAiRecordRange(repId, startIdx, endIdx) {
+  // AI 块：按消息 id 范围更新覆盖区间（前端管理台用，编号入参由路由层换算）。
+  // 保留 source=ai；只改自身，不吞并其他块。
+  function updateAiRecordRange(repId, startIdx, endIdx) {
   const items = compressibleItems();
   if (!repId) return { ok: false, message: '缺少记录 id' };
   const s = Math.floor(Number(startIdx));
@@ -964,17 +931,11 @@ function updateAiRecordRange(repId, startIdx, endIdx) {
   }
   const slice = items.slice(mergedStart, mergedEnd + 1);
   if (slice.length === 0) return { ok: false, message: '范围内没有可压缩消息' };
-  let minT = null, maxT = null;
-  slice.forEach(function (r) {
-    const m = r.msg;
-    const t = messageTime && typeof messageTime === 'function' ? messageTime(m) : null;
-    if (!t) return;
-    const v = t.getTime();
-    if (minT === null || v < minT) minT = v;
-    if (maxT === null || v > maxT) maxT = v;
-  });
-  if (minT === null) return { ok: false, message: '新范围内消息缺少时间，无法映射时间范围' };
-  rec.range = { start_time: fmtWall(new Date(minT)), end_time: fmtWall(new Date(maxT)) };
+  // 锚点=消息 id（2026-09-19 统一）：range 只存首尾消息 id
+  const startId = slice[0].msg && slice[0].msg.id ? String(slice[0].msg.id) : "";
+  const endId = slice[slice.length - 1].msg && slice[slice.length - 1].msg.id ? String(slice[slice.length - 1].msg.id) : "";
+  if (!startId || !endId) return { ok: false, message: '新范围区间消息缺少 id 字段，无法锚定' };
+  rec.range = { start_id: startId, end_id: endId };
   rec.range_label = rangeLabelOf(slice);
   rec.matched = slice.map(function (r) {
     return { role: r.msg.role, content: typeof r.msg.content === 'string' ? r.msg.content : contentToText(r.msg), id: r.msg && r.msg.id ? String(r.msg.id) : undefined };
@@ -1094,9 +1055,9 @@ function splitRangeByGaps(start, end, cfg) {
       // 只吞并同会话（或无 session 的通用旧块）的重叠手工块，与 addManualRecord 同口径：
       // 跨会话块序号空间互相独立，重叠很正常，不加过滤会把其他会话的块整批误删
       if (it.source === "manual" && (!it.session || it.session === built.record.session)) {
-        const rs = it.range && it.range.start_index;
-        const re = it.range && it.range.end_index;
-        if (Number.isInteger(rs) && Number.isInteger(re) && rs <= seg.end && re >= seg.start) {
+        // 吞并判定用「当前真实覆盖区间」（id 解析）而非存储 range：与 addManualRecord 同口径
+        const cur = recordCompRange(it, items);
+        if (cur && cur.start <= seg.end && cur.end >= seg.start) {
           removedCount++;
           continue;
         }
@@ -2475,50 +2436,33 @@ function searchRelatedSegments(word, maxSegments) {
 // ========================
 // 压缩页搜索：搜全部原文，返回命中消息的原文编号(第X条) + 所属块
 // ========================
-function compactionKeyOf(m) {
-  return String(m.role || "") + "\u0000" + String(m.content || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-}
-
-function locateCompIdx(target, items) {
-  const k = compactionKeyOf(target);
-  for (let i = 0; i < items.length; i++) {
-    if (compactionKeyOf(items[i].msg) === k) return i;
-  }
-  return -1;
-}
+// compactionKeyOf / locateCompIdx 内容锚点已删（2026-09-19 统一消息 id 锚点，见 recordCompRange）
 
 // 解析记录在压缩索引空间(compressibleItems)中的覆盖范围
 function recordCompRange(it, items) {
   const compItems = items || compressibleItems();
-  // 手工块等带精确压缩索引的记录：直接信任存储范围（锚点定位遇重复内容/特殊事件会漂移）。
-  // 但存储编号只在时间线未重建/未换窗口时有效：首条 matched 与同编号消息内容一致才信任，
-  // 否则退回内容锚点定位，避免旧窗口块的编号漂移到新窗口消息上。
-  const rng = it && it.range;
-  if (rng && Number.isInteger(rng.start_index) && Number.isInteger(rng.end_index)) {
-    const m0 = (Array.isArray(it.matched) && it.matched.length > 0) ? it.matched[0] : null;
-    const atStart = compItems[rng.start_index];
-    const storedValid = !!(m0 && atStart && compactionKeyOf(atStart.msg) === compactionKeyOf(m0));
-    if (storedValid) {
-      const s = Math.max(0, rng.start_index);
-      const e = Math.min(rng.end_index, compItems.length - 1);
-      if (s >= compItems.length || e < s) return null;
-      return windowFilteredRange(s, e, compItems);
-    }
-    // 时间线已变化（换窗口/重建）：编号漂移，退回内容锚点定位
+  // 2026-09-19 统一 id 锚点定位：块的真实覆盖区间由 matched[].id（消息自带 UUID，全库唯一、
+  // 随时间线增删不漂移）解析——首条有 id 的 matched 定起点，末条有 id 的定终点。
+  // 旧的时间/编号存储定位与内容锚点已删；matched 全无 id 的极老块视为不可定位（不显示不注入）。
+  const matched = (Array.isArray(it && it.matched) && it.matched.length > 0) ? it.matched : [];
+  if (!matched.length) return null;
+  const idPos = new Map();
+  for (let i = 0; i < compItems.length; i++) {
+    const id = compItems[i].msg && compItems[i].msg.id ? String(compItems[i].msg.id) : null;
+    if (id && !idPos.has(id)) idPos.set(id, i);
   }
-  const matched = (Array.isArray(it.matched) && it.matched.length > 0) ? it.matched : [];
-  if (matched.length === 0) return null;
-  const fl = locateCompIdx(matched[0], compItems);
-  if (fl < 0) return null;
-  let ll = locateCompIdx(matched[matched.length - 1], compItems);
-  if (ll < 0) {
-    for (let k = matched.length - 2; k >= 0; k--) {
-      const ck = locateCompIdx(matched[k], compItems);
-      if (ck >= 0) { ll = ck; break; }
-    }
+  let s = -1;
+  for (const m of matched) {
+    const id = m && m.id ? String(m.id) : null;
+    if (id && idPos.has(id)) { s = idPos.get(id); break; }
   }
-  if (ll < 0 || ll < fl) return null;
-  return windowFilteredRange(fl, ll, compItems);
+  let e = -1;
+  for (let k = matched.length - 1; k >= 0; k--) {
+    const id = matched[k] && matched[k].id ? String(matched[k].id) : null;
+    if (id && idPos.has(id)) { e = idPos.get(id); break; }
+  }
+  if (s < 0 || e < 0 || e < s) return null;
+  return windowFilteredRange(s, e, compItems);
 }
 
 // 窗口隔离：范围首条消息早于当前窗口起点 → 旧窗口块，视为不在当前时间线（不显示、不注入）
@@ -2694,6 +2638,7 @@ module.exports = {
   startMsgVectorWarmup,
   loadAllSessionTimelines,
   resolveRange,
+  recordCompRange,
   loadItems,
   recordText,
   // 手工记录管理
