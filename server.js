@@ -2407,23 +2407,8 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         ? kelivoMessages
         : (messages || body.messages || []);
       const syncRes = appendRequestMessages(sessionId, reqMsgs);
-      // 保留工具调用记录：写成一条带标记的 assistant 消息入时间线，
-      // 让模型跨轮能"记住"工具结果（大小交给上下文压缩兜底）；前端渲染时跳过这条。
-      // 每条带 调用时间+状态（成功/失败/无返回内容），空返回显式写明不省略；
-      // routes/chat.js 发送前会把本条解析还原成 role=tool 消息组（格式改动两处需同步）。
+      // 工具结果已经由 assistant.tools 结构化保存，不再额外写入旧式「【工具调用记录】」assistant 消息。
       const toAppend = [];
-      if (r.toolHistory && r.toolHistory.length) {
-        const toolNote = r.toolHistory.map(function (t) {
-          const resBody = String(t.result || "").trim();
-          const tstat = t.error ? "失败" : (resBody ? "成功" : "无返回内容");
-          const head = "【工具 · " + (t.name || "") + " · " + (t.time || "未知") + " · " + tstat + "】";
-          const body = t.error
-            ? ("[出错] " + t.error + ((resBody && resBody !== "…") ? ("\n" + resBody) : ""))
-            : (resBody ? resBody : "（工具无返回内容）");
-          return head + "\n" + body;
-        }).join("\n");
-        toAppend.push({ role: "assistant", content: "【工具调用记录】\n" + toolNote });
-      }
       // 富字段一并落时间线：reasoning/tools/tokens，跨设备刷新不再丢（前端 /v1/history 读取这些字段）。
       // 盘尾已有同内容回复（重试/重复写回）则跳过，不重复追写。
       // 存储用原始文本但去工具回声：保留 <wake>/<memory> 等标签作为上下文一部分；下发/回放仍用 aiClean。
