@@ -1206,6 +1206,8 @@ class MCPHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         # ── 鉴权检查 ──
         auth = self.headers.get('Authorization', '')
+        print("[req] POST %s UA=%r Accept=%r" % (
+            self.path, self.headers.get('User-Agent', ''), self.headers.get('Accept', '')))
         if auth != f'Bearer {API_TOKEN}':
             self.send_response(401)
             self.send_header('Content-Type', 'application/json')
@@ -1248,13 +1250,14 @@ class MCPHandler(BaseHTTPRequestHandler):
         params = req.get("params", {})
 
         if method == "initialize":
-            # 2026-09-19: 回显客户端请求的标准版本（不认识则回 2025-03-26）；硬编码 0.1.0 会让标准客户端版本协商失败直接断开
+            # 2026-09-19: 回显客户端请求的版本号；实测 yun(FastMCP) 无条件回显任意版本且各客户端可通，
+            # 白名单外版本回退旧版会让严格客户端按规范断开
             client_ver = params.get("protocolVersion", "2025-03-26")
-            supported = ("2024-11-05", "2025-03-26", "2025-06-18")
+            print("[init] client protocolVersion=%r" % (client_ver,))
             return {
                 "jsonrpc": "2.0", "id": req_id,
                 "result": {
-                    "protocolVersion": client_ver if client_ver in supported else "2025-03-26",
+                    "protocolVersion": client_ver or "2025-03-26",
                     "capabilities": {"tools": {}},
                     "serverInfo": {"name": "小世界MCP工具集", "version": "1.0.0"}
                 }
