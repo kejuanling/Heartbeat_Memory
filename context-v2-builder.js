@@ -273,15 +273,17 @@ function buildRelevant(input, cfg, fixedIdSet) {
   const headerCost = estimateTokens(HEADERS.relevant_memories);
   let used = headerCost;
   const lines = [];
+  const hits = [];
   for (const s of scored) {
     if (lines.length >= cfg.relevantTopK) break;
     const line = entryLine(s.m.text, strSafe(s.m.established_at) || strSafe(s.m.created_at));
     const cost = estimateTokens(line);
     if (used + cost > budget) break;
     lines.push(line);
+    hits.push({ id: String(s.m.id), text: s.m.text, kind: s.m.kind, priority: s.m.priority, established_at: s.m.established_at || null, created_at: s.m.created_at || null, score: s.score });
     used += cost;
   }
-  return { lines, fixedIds: [] };
+  return { lines, fixedIds: [], hits };
 }
 
 // ============================================================
@@ -315,6 +317,7 @@ function buildContextBlocks(input, opts) {
   const fixedIdSet = new Set([].concat(sysIns.fixedIds, identity.fixedIds, understanding.fixedIds, moments.fixedIds));
   const continuity = buildContinuity(input_, cfg);
   const relevant = buildRelevant(input_, cfg, fixedIdSet);
+  const relevantHits = relevant.hits || [];
 
   const byKey = {
     context_assembly: { lines: [ASSEMBLY_OVERVIEW], fixedIds: [] }, // 顶层引导：静态全文，恒注入
@@ -340,7 +343,7 @@ function buildContextBlocks(input, opts) {
       empty: isEmpty,
     });
   }
-  return { blocks };
+  return { blocks, relevantHits };
 }
 
 module.exports = { buildContextBlocks, DEFAULT_CONFIG, BLOCK_DEFS, HEADERS, estimateTokens };

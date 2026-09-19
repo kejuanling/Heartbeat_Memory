@@ -16,6 +16,7 @@ const { parsePushEcho, parseWakeEcho } = require('../utils/push');
 // 对话侧/唤醒侧共用上下文加工函数（2026-09-15 唤醒并入网关）
 const chatCtx = require('./chat-context');
 const ctxV2Shadow = require('../context-v2-shadow'); // Context V2 Shadow 观察（C10 S2-B1，只记录不改生产）
+const { buildContextBlocks } = require('../context-v2-builder'); // Context V2 组装（S4 正式）
 const { mapMessagesForProvider } = require('../lib/role-mapper');
 
 // 推送回显（成功推送的「刚刚给 X 发了 X 推送：」记录）需要在聊天页显示给用户看，
@@ -264,6 +265,40 @@ module.exports = function registerChatRoutes(app, deps) {
     try { diaryCount = Number(fsp.readJsonSync(path.join(dataDir, 'memory_pool_config.json')).cross_inject_diary_count) || 3; } catch (e) {}
     // map 挂在 v2Input 上供 maybeObserve 取 mapVersion（builder 只读已知字段，多余键无害）
     return { pinnedEntries, timeline, diaryEntries: readDiaryEntriesForShadow(), memoriesV2, query, excludeIds, map: shadowMap, config: { diaryCount } };
+  }
+
+  // S4 正式切换（0919）：把 buildConversation 产出的旧两块换成 V2 块。
+  // 旧块识别=developer 且 content 以 [永久上下文]/[跨窗口] 开头；[唤醒] 等 developer 块保留。
+  // 顺序（19.txt）：system → V2 固定块（assembly/instructions/identity/understanding/moments/continuity）
+  //   → 时间线历史 → Possibly Relevant Memories → 尾部 user。
+  function applyContextV2(messages, blocks) {
+    const oldDevIdx = [];
+    messages.forEach(function (m, i) {
+      if (m && m.role === 'developer' && typeof m.content === 'string' &&
+          (m.content.startsWith('[永久上下文]') || m.content.startsWith('[跨窗口]'))) oldDevIdx.push(i);
+    });
+    const fixed = (blocks || []).filter(b => b.key !== 'relevant_memories' && !b.empty);
+    const relevant = (blocks || []).find(b => b.key === 'relevant_memories' && !b.empty);
+    const newDevs = fixed.map(b => ({ role: 'developer', content: b.content }));
+    // 删旧块、插新块（新块放原第一个旧块位置；若原本无旧块则放 system 之后）
+    const out = messages.filter(function (m, i) { return oldDevIdx.indexOf(i) < 0; });
+    let insertAt = 0;
+    if (oldDevIdx.length) {
+      const firstOldContent = messages[oldDevIdx[0]].content;
+      insertAt = out.findIndex(function (m) { return m && m.role === 'developer' && m.content === firstOldContent; });
+      if (insertAt < 0) insertAt = 0;
+    } else {
+      insertAt = out.findIndex(function (m) { return m && m.role === 'system'; });
+      insertAt = insertAt < 0 ? 0 : insertAt + 1;
+    }
+    out.splice.apply(out, [insertAt, 0].concat(newDevs));
+    // Relevant 插到尾部连续 user 消息之前（贴本轮消息、位于历史之后）
+    if (relevant) {
+      let tail = out.length;
+      while (tail > 0 && out[tail - 1] && out[tail - 1].role === 'user') tail--;
+      out.splice(tail, 0, { role: 'developer', content: relevant.content });
+    }
+    return { messages: out, hits: relevant ? relevant.lines : [] };
   }
 
   // Context V2 记忆浮现（0918 拍板）：Relevant 命中（≥0.30）的记忆原样写入时间线永久在场，
@@ -893,13 +928,26 @@ app.post("/v1/chat/completions", async (req, reply) => {
     // 非主聊天（标题总结等旁路请求）保持客户端直通，不注入完整上下文。
     // ========================
     if (isMainChat) {
-      llmMessages = buildConversation(sessionId);
-      // ---- Context V2 Shadow 观察（C10 S2-B1，2026-09-17）：只记录不改变生产回答 ----
-      // ctx_v2_shadow=false（memory_v2_config.json）时零行为差异；shadow 全程只读 llmMessages，
-      // maybeObserve 内部 try/catch，任何失败只记 error 不影响主聊天。
-      try {
-        const shadowCfg = await fsp.readJson(path.join(baseDir, 'data', 'memory_v2_config.json')).catch(() => ({}));
-        if (shadowCfg && shadowCfg.ctx_v2_shadow === true) {
+      // 开关在请求开始时快照读取（17.txt：防切换瞬间半新半旧）
+      const v2Cfg = await fsp.readJson(path.join(baseDir, 'data', 'memory_v2_config.json')).catch(() => ({}));
+      if (v2Cfg && v2Cfg.ctx_v2_enabled === true) {
+        // ---- S4 正式上下文（0919 用户拍板）：V2 块替换旧两块 + Relevant 插尾 + 记忆浮现写入 ----
+        // 回滚 = ctx_v2_enabled 置 false，旧路径原样恢复。
+        try {
+          const v2Input = buildCtxV2ShadowInput(sessionId, llmMessages);
+          const built = buildContextBlocks(v2Input);
+          const { messages, hits } = applyContextV2(llmMessages, built.blocks);
+          llmMessages = messages;
+          // 记忆浮现：命中的记忆原样写入时间线永久在场（hidden 前端不显示；清单防重复由 builder excludeIds 保证）
+          if (built.relevantHits && built.relevantHits.length) {
+            const n = floatMemoriesToTimeline(sessionId, built.relevantHits);
+            if (n) console.log('[ctx-v2] 本轮记忆浮现', n, '条');
+          }
+          void hits;
+        } catch (e) { console.error('[ctx-v2] 切换层失败，回退旧上下文（不影响主聊天）:', e && e.message); }
+      } else if (v2Cfg && v2Cfg.ctx_v2_shadow === true) {
+        // ---- Shadow 观察（S3 遗留，enabled 后自动停用）----
+        try {
           ctxV2Shadow.maybeObserve({
             flag: true,
             sessionId,
@@ -907,8 +955,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
             v2Input: buildCtxV2ShadowInput(sessionId, llmMessages),
             file: ctxV2Shadow.buildShadowPath(path.join(baseDir, 'data', 'context_shadow'), new Date()),
           });
-        }
-      } catch (e) { console.error('[ctx-v2-shadow] 接线层失败（不影响主聊天）:', e && e.message); }
+        } catch (e) { console.error('[ctx-v2-shadow] 接线层失败（不影响主聊天）:', e && e.message); }
+      }
     }
 
     // 内容->时间 映射：容量提醒建议段反查时间用。2026-09-15 上传瘦身配套：改从服务端时间线构建
