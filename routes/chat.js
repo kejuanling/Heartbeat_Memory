@@ -404,38 +404,6 @@ module.exports = function registerChatRoutes(app, deps) {
       reply.code(500).send({ error: err.message });
     }
   });
-  // 完整时间线（0918 用户拍板：不过滤全展现）——时间线全部未删除消息 + visible 标记
-  //（visible=true=聊天页正常显示的对话；false=影子内容：记忆浮现/特殊事件/developer/日记/工具记录等）。
-  // 只读，供后台活动「影子时间线」卡片对照查看。
-  app.get('/v1/timeline-full', async (req, reply) => {
-    try {
-      const sessionId = String(req.query.session_id || req.headers['x-session-id'] || '').trim();
-      const timeline = loadTimeline(sessionId);
-      const items = timeline
-        .filter(m => m && !m.deleted)
-        .sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')))
-        .map(m => {
-          const isPush = isPushEchoLike(m);
-          const shadow = !isPush && (!isRealMessageForTimeline(m) || m.role === 'developer' || m.role === 'tool' || m.kind === 'diary' || m.float_id);
-          const kind = m.float_id ? 'memory_float' : (m.kind === 'diary' ? 'diary' : (m.role === 'developer' ? 'developer_block' : (m.role === 'tool' ? 'tool_record' : (shadow ? 'hidden_event' : 'chat'))));
-          const text = String(typeof m.content === 'string' ? m.content : '').trim();
-          return {
-            id: m.id || null,
-            role: m.role || null,
-            kind,
-            visible: !shadow,
-            float_id: m.float_id || null,
-            time: m.time || null,
-            text,
-            chars: text.length,
-          };
-        });
-      reply.send({ ok: true, total: items.length, items, session_id: sessionId || 'default' });
-    } catch (err) {
-      console.error('[GET /v1/timeline-full] error:', err.message);
-      reply.code(500).send({ error: err.message });
-    }
-  });
   // 跨会话全量搜索：扫描所有会话时间线，混合模式 = 语义分（TF-IDF+bigram 余弦）与关键词命中分五五开合成排序。
   // 语义索引只存两字 bigram，单字/纯符号查询在语义侧必为 0 分，靠关键词腿保底（2026-09-13，替代原 semantic|keyword 二选一）。
   app.get('/v1/search', async (req, reply) => {
