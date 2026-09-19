@@ -29,7 +29,10 @@ from datetime import datetime
 STATE_DIR = "/root/.log_sentinel"
 SECURE_LOG = "/var/log/secure"
 NGINX_LOG = "/var/log/nginx/access.log"
-MCP_SECRET = "38498f044695328ba3ec99b9d94f233256913078"   # ChatGPT/Trae 专用密码路径段
+MCP_SECRETS = (
+    "38498f044695328ba3ec99b9d94f233256913078",   # yun-mcp-v2 (9010) 密码路径段
+    "9d51e15ba2380d086afed2d67052971f4d7621a0",   # mcp-tools (8771) 密码路径段
+)
 BARK_ENV = "/opt/dylan-heartbeat/.env"
 BARK_GROUP = "yun"
 COOLDOWN = 1800            # 同类告警 30 分钟冷却
@@ -185,7 +188,7 @@ def check_mcp(now_dt):
         return
     with fh:
         for line in fh:
-            if MCP_SECRET not in line:
+            if not any(s in line for s in MCP_SECRETS):
                 continue
             m = NGINX_LINE.match(line)
             if not m:
