@@ -5,6 +5,7 @@
 import os, re, sys, time
 d = "/opt/dylan-heartbeat/data"
 dry = "--dry-run" in sys.argv
+# 文件名 → 所属备份组基名：*.bak-时间戳 按 .bak- 前缀归组；_fix_backup_* 归单组；*.tmp 按 去尾4 归组；其余（非备份）返回 None
 def base_of(f):
     m = re.match(r"^(.*)\.bak-", f)
     if m: return m.group(1)
