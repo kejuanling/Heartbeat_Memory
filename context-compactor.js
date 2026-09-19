@@ -2,9 +2,10 @@
 
 // ============================================================
 // 上下文压缩引擎 v1
-// 阶段一：自然边界分块 + 摘要缓存读写
-// 阶段二：LLM 摘要生成（人设 + 反幻觉提示词，长度自适应）
-// 阶段三：手动边界调整（cutPoints）
+// 现职（2026-09-15 统一替换后）：压缩参数配置读写 / 压缩与容量提醒提示词 /
+// token 估算 / 可压缩区间编号预览(rangePreview) / 摘要生成(generateSummaryForRange)。
+// 「发送前自动压缩」的旧路径已停用（由 context-replacements 统一处理），
+// makeChunk 等分块函数仅服务于摘要生成的切片。
 // ============================================================
 
 const fs = require("fs");
@@ -154,7 +155,7 @@ function contentToText(msg) {
   return "";
 }
 
-// 日记特殊事件：AI 唤醒时自动写的日记，永远不参与压缩，单独保留在上下文
+// 解析正文开头的墙上时间前缀（（YYYY-MM-DD HH:mm…），按 TIME_ZONE 转 UTC
 function parseLeadingTime(text) {
   const m = String(text || "").match(/^（?\s*(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})/);
   if (!m) return null;
@@ -170,6 +171,7 @@ function parseTrailingTime(text) {
   return zonedWallTimeToDate({ year: Number(p[1]), month: Number(p[2]), day: Number(p[3]), hour: Number(p[4]), minute: Number(p[5]) }, TIME_ZONE);
 }
 
+// 消息时间解析链：time 字段 → <current_time> 标签 → 末尾时间缀 → 开头时间前缀
 function msgTime(msg) {
   if (msg && msg.time) {
     const d = new Date(msg.time);
@@ -202,8 +204,9 @@ function snippet(text, max) {
 
 // ---------------- 分块（软目标 + 自然边界） ----------------
 
-// 在 [start+minSize-1, start+maxSize-1] 内选一个最接近 idealSize、
-// 且尽量落在自然边界（时间间隔 / 对方发言）上的切分点，返回该点下标。
+// 把一段 items 构造成 chunk 对象：首尾压缩下标/时间范围/字数/首尾摘要/签名
+// （签名只计普通对话，特殊事件不计入，防后台增删事件导致缓存摘要失配）；
+// includeMsgs 时附带逐条原文与标星态，供摘要生成与压缩页展示
 function makeChunk(items, index, includeMsgs, manual) {
   // 签名只统计普通对话内容：特殊事件（记忆浮现/推送/共影/唤醒等）会被后台流程增删移动，
   // 若计入签名会导致块签名漂移、缓存摘要全部失配。
@@ -484,11 +487,13 @@ async function generateSummaryForRange(start, end) {
   return { ok: true, summary: summary, length: summary.length, count: chunk.count };
 }
 
+// 与 context-replacements.js 的 contentKey 同实现同口径（本模块独立副本，改动需两处同步）
 function contentKey(msg) {
   const text = contentToText(msg);
   return crypto.createHash("sha256").update((msg && msg.role ? msg.role : "") + "\u0000" + text).digest("hex").slice(0, 32);
 }
 
+// 与 context-replacements.js 的 loadMarks 同实现（独立副本，改动需两处同步）
 function loadMarks() {
   try {
     const data = JSON.parse(fs.readFileSync(MARKS_FILE, "utf-8"));

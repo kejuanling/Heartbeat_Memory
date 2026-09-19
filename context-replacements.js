@@ -426,6 +426,7 @@ function saveItems(items) {
   writeJsonAtomic(REPLACEMENTS_FILE, items);
 }
 
+// 取条目的替换正文（text/memory 双字段历史并存，同值读写，兼容旧数据）
 function recordText(item) {
   const t = item && (item.text || item.memory);
   return typeof t === "string" ? t : "";
@@ -1072,7 +1073,6 @@ function splitRangeByGaps(start, end, cfg) {
   return { ok: true, count: created.length, records: created.map(publicItem), removedCount: removedCount };
 }
 
-// 给手工记录写入/更新替换正文（摘要生成后调用）
 // ========================
 // 历史版本（记录内 history 数组；编辑/覆盖前把旧版归档）
 // ========================
@@ -1131,6 +1131,7 @@ function removeHistory(id, historyIndex) {
   return { ok: true, remaining: it.history.length };
 }
 
+// 给手工记录写入/更新替换正文（摘要生成后调用）
 function setManualRecordText(index, text) {
   const found = manualRecordAt(index);
   if (!found) return { ok: false, message: "块不存在" };
@@ -1150,6 +1151,7 @@ function setManualRecordText(index, text) {
   return { ok: true, length: t.length, record: publicItem(it) };
 }
 
+// 清空全部手工块（压缩页 blocks 路由 reset 动作用）
 function removeAllManualRecords() {
   const items = loadItems();
   const filtered = items.filter(it => it.source !== "manual");
@@ -1251,8 +1253,8 @@ function matchedShareSig(matched) {
 function saveMarks(marks) {
   try {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    // 2026-09-13 审查修复：tmp 名加进程/随机后缀——gateway 与 wake-up 双进程都可能写 marks
-    // （唤醒链路遇 <star> 标签会 saveMarks），固定共享 tmp 名在双进程同写时会落交错/半截内容
+    // 2026-09-13 审查修复：tmp 名加进程/随机后缀（批注时 gateway 与 wake-up 双进程都会写 marks，
+    // 固定共享 tmp 名会同写交错；2026-09-15 起 wake-up 退役为单进程，后缀机制保留作防御）
     const tmp = MARKS_FILE + ".tmp." + process.pid + "." + Date.now() + "." + Math.random().toString(36).slice(2, 8);
     fs.writeFileSync(tmp, JSON.stringify({ version: 1, marks: marks }, null, 2), "utf-8");
     fs.renameSync(tmp, MARKS_FILE);
@@ -2326,10 +2328,6 @@ async function searchContextEnhanced(query, options) {
   }
   return out;
 }
-
-// ========================
-// 导出
-// ========================
 
 // ========================
 // 词云关键词：从检索池（时间线 + 导入对话）提取高频重点词
