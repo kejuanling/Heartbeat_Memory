@@ -1627,7 +1627,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
             <div class="mcp-msg" id="pwMsg" style="margin-top:4px"></div>
             <button type="button" class="mcp-btn primary" id="pwSaveBtn">保存密码</button>
             <div style="font-size:11px;color:var(--ink3);margin-top:6px">修改后用于聊天页登录与管理台，保存即生效（下次登录用新密码）。</div>
-            </div></div><div class="set-panel" data-acc="shadowtl"><div class="set-acc-h" data-acc="shadowtl">影子时间线<span class="ar">▾</span></div><div class="set-sec"><div class="mcp-block"><div class="mcp-h">影子时间线（记忆浮现 / 隐藏事件）<button type="button" class="mcp-btn" style="margin-left:auto;border:1px solid var(--line);background:none;border-radius:7px;font-size:11px;color:var(--ink2);padding:3px 9px;cursor:pointer" onclick="loadShadowTL()">刷新</button></div><div id="shadowTLList" class="mcp-list"><div class="mcp-empty">展开时自动加载…</div></div></div></div></div><div class="set-panel" data-acc="behav"><div class="set-acc-h" data-acc="behav">显示与行为<span class="ar">▾</span></div><div class="set-sec">
+            </div></div><div class="set-panel" data-acc="behav"><div class="set-acc-h" data-acc="behav">显示与行为<span class="ar">▾</span></div><div class="set-sec">
               <div class="set-sec-label">思考链</div>
               <div class="pick" id="pickThinking">
                 <button data-k="show" class="on">显示思考链</button>
@@ -3645,29 +3645,6 @@ async function addToPoolMsg(){
   }catch(e){ showToast("入池失败:"+e.message); }
 }
 
-/* 影子时间线（0918）：后台活动抽屉展示落盘但前端不显示的内容（记忆浮现/developer 块/日记/隐藏事件） */
-async function loadShadowTL(){
-  const el=document.getElementById("shadowTLList"); if(!el) return;
-  el.innerHTML='<div class="mcp-empty">加载中…</div>';
-  try{
-    const r=await fetch("/v1/timeline-hidden?session_id="+encodeURIComponent(SessionStore.getCurrentSession()),{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
-    const j=await r.json();
-    if(j.error) throw new Error(j.error);
-    const items=j.items||[];
-    if(!items.length){ el.innerHTML='<div class="mcp-empty">暂无影子内容（记忆浮现后在这里出现）</div>'; return; }
-    const KIND_NAMES={memory_float:"记忆浮现",diary:"日记",developer_block:"注入块",hidden_event:"隐藏事件"};
-    const KIND_COLORS={memory_float:"#8e44ad",diary:"#27ae60",developer_block:"#2980b9",hidden_event:"#7f8c8d"};
-    el.innerHTML=items.map(function(it){
-      const col=KIND_COLORS[it.kind]||"#7f8c8d";
-      return '<div style="border:1px solid var(--line);border-radius:8px;padding:7px 10px;margin-bottom:6px">'
-        +'<div style="font-size:10.5px;font-weight:700;color:'+col+'">'+(KIND_NAMES[it.kind]||it.kind)
-        +(it.float_id?'　<span style="color:var(--text3);font-weight:400">'+it.float_id+'</span>':'')
-        +'　<span style="color:var(--text3);font-weight:400">'+String(it.time||"").slice(0,16).replace("T"," ")+'</span></div>'
-        +'<div style="font-size:12px;color:var(--ink2);margin-top:3px;line-height:1.5;white-space:pre-wrap;word-break:break-word">'+String(it.text||"").replace(/</g,"&lt;")+'</div>'
-        +'</div>';
-    }).join("");
-  }catch(e){ el.innerHTML='<div class="mcp-empty">加载失败: '+e.message+'</div>'; }
-}
 function closeAct(){actMask.classList.remove("show");actSheet.classList.remove("show");actIdx=-1;}
 actMask.addEventListener("click",closeAct);
 
@@ -4274,7 +4251,6 @@ document.querySelectorAll(".set-acc-h").forEach(function(h){
       document.querySelectorAll(".set-panel").forEach(function(p){p.classList.remove("open");});
       panel.classList.add("open");
       if(tab==='conn'||tab==='mcp'){ loadMcpServers(); }
-      if(tab==='shadowtl'){ loadShadowTL(); }
       if(tab==='conn'||tab==='prov'){ loadProviders(); }
     }
   });
@@ -6598,6 +6574,7 @@ var CARDS = [
   { group:'log', id:'push',       n:'推送管理',   d:'修改 · 删除推送记录', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>' },
 
   { group:'log', id:'reqctx',    n:'当前请求上下文', d:'只读查看实际发送内容', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 8 7 8"/></svg>' },
+  { group:'log', id:'shadowtl',  n:'影子时间线', d:'记忆浮现 · 隐藏事件 · 注入块 · 日记', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h20"/><path d="M12 2v20"/><circle cx="12" cy="12" r="9"/></svg>' },
   { group:'log', id:'cross',      n:'跨窗口注入', d:'新窗口注入预览', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' },
   { group:'log', id:'pin',        n:'永久注入上下文', d:'固定注入 · 排序', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 3h6l1 7 2 2H6l2-2z"/></svg>' },
   { group:'log', id:'repllog',    n:'替换记录',   d:'每次请求的压缩/替换记录', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>' }
@@ -6723,6 +6700,7 @@ function renderCard(id, body){
       case 'cross': return renderCross(body);
       case 'push': return renderPush(body);
       case 'reqctx': return renderReqCtx(body);
+      case 'shadowtl': return renderShadowTL(body);
       default: body.innerHTML='<div class="adm-empty">未知卡片</div>';
     }
   }catch(e){
@@ -7148,6 +7126,24 @@ function renderPush(body){
       });
     });
   }).catch(function(e){ body.innerHTML='<div class="adm-empty">加载失败</div>'; });
+}
+/* ---------------- 影子时间线（只读）：/v1/history 不显示的时间线内容 ---------------- */
+function renderShadowTL(body){
+  body.innerHTML='<div class="adm-load">加载中…</div>';
+  fetch("/v1/timeline-hidden?session_id="+encodeURIComponent(SessionStore.getCurrentSession()),{headers:{"Authorization":"Bearer "+api_key},credentials:"include"}).then(function(r){return r.json();}).then(function(j){
+    if(j.error) throw new Error(j.error);
+    var list=(j&&j.items)||[];
+    if(!list.length){ body.innerHTML='<div class="adm-empty">暂无影子内容（记忆浮现/隐藏事件出现后在这里看）</div>'; return; }
+    var KIND_NAMES={memory_float:"记忆浮现",diary:"日记",developer_block:"注入块",hidden_event:"隐藏事件"};
+    var KIND_COLORS={memory_float:"#8e44ad",diary:"#27ae60",developer_block:"#2980b9",hidden_event:"#e0a960"};
+    body.innerHTML='<div class="adm-tip">共 '+list.length+' 条（落盘但不发给前端显示的时间线内容）</div>'
+      +'<div id="adm-shadowtl-list">'+list.map(function(it,i){
+        var col=KIND_COLORS[it.kind]||'#7f8c8d';
+        var name=KIND_NAMES[it.kind]||it.kind;
+        var tags=it.float_id?(' · '+it.float_id):'';
+        return '<div class="adm-item"><div class="adm-item-h"><span class="adm-cat" style="--c:'+col+'">'+esc(name)+'</span><span class="adm-tag">'+esc(tags)+'</span><span class="adm-k" style="width:auto;min-width:0;margin-left:auto;color:var(--ink3)">'+esc(String(it.time||"").slice(0,16).replace("T"," "))+'</span></div><div class="adm-item-b">'+esc(it.text||"")+'</div></div>';
+      }).join('')+'</div>';
+  }).catch(function(e){ body.innerHTML='<div class="adm-empty">加载失败: '+esc(e.message)+'</div>'; });
 }
 /* ---------------- 请求完整上下文（只读） ---------------- */
 function renderReqCtx(body){

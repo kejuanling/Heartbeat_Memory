@@ -410,9 +410,10 @@ module.exports = function registerChatRoutes(app, deps) {
     try {
       const sessionId = String(req.query.session_id || req.headers['x-session-id'] || '').trim();
       const timeline = loadTimeline(sessionId);
+      // 影子全集 = /v1/history 不显示的一切（特殊事件/developer/日记/工具记录/记忆浮现等）
       const items = timeline
         .filter(m => m && !m.deleted)
-        .filter(m => m.float_id || m.role === 'developer' || m.kind === 'diary' || (m.role === 'assistant' && m.hidden === true))
+        .filter(m => !isPushEchoLike(m) && (!isRealMessageForTimeline(m) || m.role === 'developer' || m.role === 'tool' || m.kind === 'diary' || m.float_id))
         .sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')))
         .map(m => {
           const kind = m.float_id ? 'memory_float' : (m.kind === 'diary' ? 'diary' : (m.role === 'developer' ? 'developer_block' : 'hidden_event'));
