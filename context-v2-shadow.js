@@ -266,7 +266,8 @@ function readShadowRecords(file) {
 // 组合入口（S2-B 接线时一行调用）
 // ============================================================
 
-/** 从 v2 块提取观察样本（截断存 JSONL，控体积）：Current State 截取与 Relevant 检索的实际文本 */
+/** 从 v2 块提取观察样本（截断存 JSONL，控体积）：Relevant 检索的实际文本。
+ * 注：Current State 块已随 0918 修订砍除，current_state 键恒为空（保留键位兼容旧报表） */
 function extractSamples(v2Blocks) {
   const get = (key, max) => {
     const b = (Array.isArray(v2Blocks) ? v2Blocks : []).find(x => x && x.key === key);
