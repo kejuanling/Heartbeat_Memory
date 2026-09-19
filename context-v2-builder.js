@@ -39,10 +39,13 @@ const DEFAULT_CONFIG = {
   momentsAnchorMax: 5,
   relevantTopK: 5,
   relevantMinScore: 0.30,          // 0918 用户拍板调高：命中即写入时间线永久在场，高门槛防膨胀
-  // 0919 语义模式（用户拍板）：input.vecScores 由调用方算好传入（bge 余弦，memory-v2-vectors.relevantScores）；
-  // vecScores 在场时 Relevant 用语义打分（下两行），缺场回落字面（上两行，embed 熔断/shadow 诊断层）。
-  relevantMinSemScore: 0.55,       // 校准实测：相关查询 top1 0.54-0.65，闲聊 0.43-0.53；0.55 挡全部闲聊
-  relevantSemTopK: 3,              // 语义模式条数 5→3：命中永久写时间线，宁缺毋滥
+  // 0920 混合模式（用户拍板「词面为主」）：input.vecScores（bge 余弦，调用方算好）在场时，
+  // Relevant 改混合打分——词面当门槛（无关闲聊的语义地板再高也进不来），混合分排序：
+  // 0.55 词面 + 0.25 语义 + 0.20 重要级×衰减（30天半衰期），≥0.35 入选，最多 3 条。
+  // 校准实测：相关命中 0.475-0.594、带门槛闲聊 ≤0.299，中间有空隙。vecScores 缺场回落字面（上行）。
+  relevantLitGate: 0.15,
+  relevantMinHybridScore: 0.35,
+  relevantHybridTopK: 3,
 };
 
 // ---- 块定义（顺序=组装顺序冻结；context_assembly 为顶层引导，恒注入）----
@@ -254,9 +257,10 @@ function buildContinuity(input, cfg) {
 
 // [6] Possibly Relevant Memories：V2 检索（排除固定块已注入成员＋input.excludeIds
 // ——本会话已写入时间线的浮现记忆，命中后由生产链路落时间线永久在场，不再重复注入），
-// score desc → priority desc → id；minScore 宁缺毋滥（允许空）。条目带轻量日期后缀；超预算从尾部减条。
-// 0919 语义模式：input.vecScores（bge 余弦，调用方算好）在场时用语义打分（阈值 0.55、最多 3 条，
-// 无向量条目不参与）；缺场回落字面（embed 熔断/shadow 诊断）。两种模式的排除逻辑完全一致。
+// score desc → priority desc → id；宁缺毋滥（允许空）。条目带轻量日期后缀；超预算从尾部减条。
+// 0920 混合模式：input.vecScores（bge 余弦，调用方算好）在场时——词面 ≥0.15 当门槛 +
+// 混合分（0.55词面+0.25语义+0.20重要级×衰减）≥0.35 入选，最多 3 条；无向量条目不参与。
+// vecScores 缺场回落字面（embed 熔断/shadow 诊断）。两种模式的排除逻辑完全一致。
 function buildRelevant(input, cfg, fixedIdSet) {
   const q = strSafe(input.query);
   if (!q) return { lines: [], fixedIds: [] };
@@ -268,11 +272,18 @@ function buildRelevant(input, cfg, fixedIdSet) {
   const vecScores = (input.vecScores && typeof input.vecScores === "object") ? input.vecScores : null;
   const scored = [];
   if (vecScores) {
+    const qt = tokenize(q);
     for (const m of pool) {
-      const s = vecScores[String(m.id)];
-      if (typeof s !== "number" || !(s >= 0)) continue;
-      if (s < cfg.relevantMinSemScore) continue;
-      scored.push({ m, score: s });
+      const lit = Math.round(similarity(qt, m.text + " " + (m.kind || "")) * 1000) / 1000;
+      if (lit < cfg.relevantLitGate) continue; // 词面门槛（词面为主第一层）
+      const sem = vecScores[String(m.id)];
+      if (typeof sem !== "number" || !(sem >= 0)) continue; // 无向量条目不参与（宁缺毋滥）
+      const t = new Date(m.content_updated_at || m.created_at || "").getTime();
+      const decay = isNaN(t) ? 1 : Math.pow(0.5, (Date.now() - t) / 86400000 / 30);
+      const imp = Number(m.priority) || 0.5;
+      const score = Math.round((0.55 * lit + 0.25 * sem + 0.20 * imp * decay) * 1000) / 1000;
+      if (score < cfg.relevantMinHybridScore) continue;
+      scored.push({ m, score });
     }
   } else {
     const qt = tokenize(q);
@@ -290,7 +301,7 @@ function buildRelevant(input, cfg, fixedIdSet) {
   let used = headerCost;
   const lines = [];
   const hits = [];
-  const maxK = vecScores ? cfg.relevantSemTopK : cfg.relevantTopK;
+  const maxK = vecScores ? cfg.relevantHybridTopK : cfg.relevantTopK;
   for (const s of scored) {
     if (lines.length >= maxK) break;
     const line = entryLine(s.m.text, strSafe(s.m.established_at) || strSafe(s.m.created_at));
