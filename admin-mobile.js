@@ -930,42 +930,6 @@ function toast(msg){
     }catch(e){ toast('网络错误: '+e.message); }
   }
 
-  async function loadCleanPrompt(){
-    const msg=document.getElementById('clean-prompt-msg');
-    try{
-      const r=await fetch(ADMIN_API + '/memory-pool/clean/prompt');
-      const c=await r.json();
-      const s=document.getElementById('clean-sys-prompt'); if(s) s.value=c.clean_system_prompt||c.default_clean_system_prompt||'';
-      const u=document.getElementById('clean-user-prompt'); if(u) u.value=c.clean_user_prompt||c.default_clean_user_prompt||'';
-      if(msg) msg.textContent='已载入内置默认清洗提示词；可修改保存覆盖，或点「恢复内置默认」。';
-    }catch(e){ if(msg) msg.textContent='读取清洗提示词失败: '+e.message; }
-  }
-  async function saveCleanPrompt(){
-    const msg=document.getElementById('clean-prompt-msg');
-    const s=document.getElementById('clean-sys-prompt').value;
-    const u=document.getElementById('clean-user-prompt').value;
-    try{
-      const r=await fetch(ADMIN_API+'/memory-pool/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clean_system_prompt:s.trim(),clean_user_prompt:u.trim()})});
-      const d=await r.json();
-      if(d.error){ if(msg) msg.textContent='保存失败: '+d.error; return; }
-      if(msg) msg.textContent='已保存，下次整理记忆池生效。';
-      toast('清洗提示词已保存');
-    }catch(e){ if(msg) msg.textContent='保存失败: '+e.message; }
-  }
-  async function resetCleanPrompt(){
-    const s=document.getElementById('clean-sys-prompt');
-    const u=document.getElementById('clean-user-prompt');
-    const _c=await (await fetch(ADMIN_API + '/memory-pool/clean/prompt')).json() || {};
-    if(s) s.value=_c.default_clean_system_prompt||'';
-    if(u) u.value=_c.default_clean_user_prompt||'';
-    try{
-      const r=await fetch(ADMIN_API+'/memory-pool/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clean_system_prompt:'',clean_user_prompt:''})});
-      const d=await r.json();
-      if(d.error){ toast('恢复失败: '+d.error); return; }
-      toast('已恢复内置默认清洗提示词');
-      const m=document.getElementById('clean-prompt-msg'); if(m) m.textContent='已恢复内置默认';
-    }catch(e){ toast('网络错误: '+e.message); }
-  }
   async function loadMemoryWakeConfig(){
     const msg=document.getElementById('memory-wake-config-msg');
     try{
@@ -1502,8 +1466,7 @@ function ccBuildSummaryStatsHtml(d, t){
     +((t.hiddenCount>0||t.manualHiddenCount>0)?'<span class="cc-mini-item zero"><b>'+((t.hiddenCount||0)+(t.manualHiddenCount||0))+'</b><i>隐藏</i></span>':'')
     +'</div>'
     +(t.hiddenCount>0?'<div class="cc-hidden-tip">最早 <b>'+(t.hiddenCount||0)+'</b> 块已隐藏、未进入上下文（活跃块上限 '+(t.maxActiveBlocks||'?')+'，手动+AI 合计保留最近 N 个）；如需保留信息，建议将块解析入池。</div>':'')
-    +(t.manualHiddenCount>0?'<div class="cc-hidden-tip"><b>'+(t.manualHiddenCount||0)+'</b> 块手动隐藏（入池归档）：摘要与原文均不进入上下文，可在对应块上点「取消隐藏」恢复。</div>':'')
-    +'<div class="cc-token-tip" style="font-size:11px;color:#6B7280;margin-top:4px;">容量占用（token 估算）：未覆盖积压 <b>'+fmtCcNum(t.estUncoveredTokens||0)+'</b>，实际发送约 <b>'+fmtCcNum(t.estTotalTokens||0)+'</b>（含标星 <b>'+fmtCcNum(t.markedTokens||0)+'</b>、图片 <b>'+fmtCcNum(t.imageTokens||0)+'</b>、置顶记忆 <b>'+fmtCcNum(t.pinnedTokens||0)+'</b>）。容量上限见上方配置，超限时网关塞隐藏提醒。</div>';
+    ;
 }
 
 /**
@@ -1639,7 +1602,7 @@ function ccBuildSummaryStatsHtml(d, t){
            +'</div>'
          : ''))
        +'</div>'
-       +(hidden?'':'<div class="cc-swipe-del"><button class="cc-swipe-del-btn" onclick="removeSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">移除</button><button class="cc-swipe-del-btn" onclick="hideSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">隐藏</button><button class="cc-swipe-del-btn" onclick="reparseSingleBlock('+c.index+')">解析</button></div>')
+       +(hidden?'':'<div class="cc-swipe-del"><button class="cc-swipe-del-btn" onclick="removeSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">移除</button><button class="cc-swipe-del-btn" onclick="hideSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">隐藏</button></div>')
        +'</div>';
    });
  
@@ -1865,7 +1828,7 @@ function updateCcStatusBar(d){
          canExport++;
          canRemove++;
          if(!c.cached) canGenerate++; // 未生成的可以生成
-         if(c.cached && c.enabled === false) canReplace++; // 待替换的可以替换
+         if(c.cached) canReplace++; // 已生成摘要的块都可执行替换/取消替换转换
          if(c.enabled !== false) canReparse++; // 已替换的可以解析入池
        }
      }
@@ -2004,13 +1967,13 @@ function updateCcStatusBar(d){
    if(!d) return;
    const chunks = d.chunks || [];
    const manualChunks = chunks.filter(function(x){ return !x.aiRep; });
-   // 收集待替换的块（cached 且 enabled === false）
+   // 收集选中块：未替换→替换，已替换→取消替换
    const todo = [];
    AppState.ccSelectedChunks.forEach(function(key){
      if(String(key).startsWith('gap-')) return; // 未覆盖区不能替换
      const idx = Number(key);
      const c = chunks.find(function(x){ return x.index === idx; });
-     if(c && c.cached && c.enabled === false){
+     if(c && c.cached){
        if(c.aiRep){
          todo.push({type: 'ai', repId: c.repId, idx: idx, label: '块 #' + idx});
        }else{
@@ -2019,8 +1982,8 @@ function updateCcStatusBar(d){
        }
      }
    });
-   if(!todo.length){ toast('没有待替换的块'); return; }
-   if(!confirm('替换选中的 ' + todo.length + ' 个「待替换」块？')) return;
+   if(!todo.length){ toast('没有可转换的块'); return; }
+   if(!confirm('将选中的 ' + todo.length + ' 个块按当前状态执行替换/取消替换？')) return;
    const msg = document.getElementById('compaction-msg');
    let done = 0;
    for(let i = 0; i < todo.length; i++){
@@ -2030,10 +1993,12 @@ function updateCcStatusBar(d){
        let url, body;
        if(item.type === 'ai'){
          url = ADMIN_API + '/context-replacements/toggle';
-         body = JSON.stringify({id: item.repId, enabled: true});
+         const c0 = chunks.find(function(x){ return x.index === item.idx; });
+         body = JSON.stringify({id: item.repId, enabled: !(c0 && c0.enabled === true)});
        }else{
          url = ADMIN_API + '/context-compaction/blocks';
-         body = JSON.stringify({action: 'toggle', blockIndex: item.blockIndex, enabled: true});
+         const c0 = chunks.find(function(x){ return x.index === item.idx; });
+         body = JSON.stringify({action: 'toggle', blockIndex: item.blockIndex, enabled: !(c0 && c0.enabled === true)});
        }
        const r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: body});
        const j = await r.json();
@@ -2047,7 +2012,7 @@ function updateCcStatusBar(d){
    }
    resetCcMsgCache();
    await loadCompactionPreview();
-   if(msg) msg.textContent = '已替换 ' + done + '/' + todo.length + ' 块。';
+   if(msg) msg.textContent = '已完成 ' + done + '/' + todo.length + ' 块状态转换。';
    updateMultiSelectBar();
  }
 
@@ -2098,12 +2063,13 @@ function updateCcStatusBar(d){
   }
 
   // 左滑单块「解析」（0918）：该压缩块覆盖区间的时间线原文 → LLM 提候选 → review 队列人工裁决
-  async function reparseSingleBlock(cid){
+  // skipConfirm=true：从隐藏后的追问进入，免二次确认（0919 去重复弹窗）
+  async function reparseSingleBlock(cid, skipConfirm){
     const d = AppState.compactionPlan;
     if(!d) return;
     const c = (d.chunks || []).find(function(x){ return x.index === cid; });
     if(!c || c.enabled === false){ toast('该块未替换，无法解析'); return; }
-    if(!confirm('将该块的「时间线原文」交给 AI 提取记忆候选，进 review 队列人工把关？')) return;
+    if(!skipConfirm && !confirm('将该块的「时间线原文」交给 AI 提取记忆候选，进 review 队列人工把关？')) return;
     const msg = document.getElementById('compaction-msg');
     if(msg) msg.textContent = '正在解析时间线原文并提取记忆候选…';
     try{
@@ -2132,6 +2098,7 @@ function updateCcStatusBar(d){
     try{
       await ccSetBlockHidden(c, blockIndex, isAi, true);
       toast('块 #' + cid + ' 已隐藏（不再进入上下文）');
+      if(confirm('是否顺便对该块做上下文解析（提取记忆候选）？')) await reparseSingleBlock(cid, true);
       loadCompactionPreview();
     }catch(e){
       toast('隐藏失败: ' + e.message);
@@ -3505,9 +3472,9 @@ function ccNumLiveCheck(input, max){
    document.querySelectorAll('.tab-item').forEach(el=>el.classList.remove('active'));
    document.getElementById('tab-'+name).classList.add('active');
    document.querySelector('.tab-item[data-tab="'+name+'"]').classList.add('active');
-  if(name==='memory'){ if(!window.__memPoolInited){ initMemPoolView(); window.__memPoolInited=true; } }
+  if(name==='memory'){ if(!window.__memPoolInited){ initMemPoolView(); window.__memPoolInited=true; } loadReviewQueue(); }
   if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
-  if(name==='prompts'){loadWakePrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadReparsePrompt();loadCleanPrompt();}
+  if(name==='prompts'){loadWakePrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadReparsePrompt();}
   if(name==='config'){loadToolsConfig();}
   if(name==='system'){startLogsAutoRefresh();}
   if(name!=='system'){stopLogsAutoRefresh();}
@@ -4295,6 +4262,7 @@ async function deletePinned(id){
     window.__memShowSunk=false;
     window.__memShowPinned=false;
     window.__memShowAll=false;
+    window.__memShowReview=false;
     populateMemPoolCatOptions();
     loadMemPool();
   }
@@ -4303,10 +4271,8 @@ async function deletePinned(id){
     const sel=document.getElementById('mempool-cat');
     const ed=document.getElementById('mempool-edit-cat');
     const cats=['fact','rule','quote','milestone'];
-    // 筛选下拉带旧四类（存量只读兼容，清洗导入完成后自然为空）
-    const legacy=['关于我们','锚点','信号','对话摘要'];
-    if(sel){ sel.innerHTML='<option value="">全部分类</option>'+cats.concat(legacy).map(function(c){return '<option value="'+c+'">'+c+(legacy.indexOf(c)>=0?'（旧）':'')+'</option>';}).join(''); }
-    // 编辑下拉只放新五类：编辑旧类条目时必须顺手归到新类
+    // 筛选与编辑统一只允许 V2 四类；旧分类存量由后台迁移处理，不再暴露为可选项。
+    if(sel){ sel.innerHTML='<option value="">全部分类</option>'+cats.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join(''); }
     if(ed){ ed.innerHTML=cats.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join(''); }
   }
   function mempoolSearchInput(v){
@@ -4345,7 +4311,8 @@ async function deletePinned(id){
     const stats=d.stats||{}, allItems=d.items||[];
     window.__memPoolData=d;
     let items;
-    if(window.__memShowAll) items=allItems;
+    if(window.__memShowReview) items=[];
+    else if(window.__memShowAll) items=allItems;
     else if(window.__memShowPinned) items=allItems.filter(function(x){return x.pinned===true;});
     else if(window.__memShowSunk) items=allItems.filter(function(x){return x.active===false;});
     else items=allItems.filter(function(x){return x.active!==false;});
@@ -4353,16 +4320,20 @@ async function deletePinned(id){
     const st=document.getElementById('mempool-stats');
     if(st){
       const onAll=!!window.__memShowAll;
-      const onActive=!window.__memShowAll&&!window.__memShowPinned&&!window.__memShowSunk;
+      const onActive=!window.__memShowAll&&!window.__memShowPinned&&!window.__memShowSunk&&!window.__memShowReview;
       st.innerHTML=''
         +'<span class="mp-stat toggle'+(onAll?' on':'')+'" onclick="toggleMemPoolAll()" title="显示全部记忆（含已沉底）">共 <b>'+stats.total+'</b> 条</span>'
         +'<span class="mp-stat toggle'+(onActive?' on':'')+'" onclick="toggleMemPoolActive()" title="只看活跃记忆">活跃 <b>'+stats.active+'</b></span>'
         +'<span class="mp-stat toggle'+(window.__memShowPinned?' on':'')+'" onclick="toggleMemPoolPinned()" title="点一下只看已置顶记忆，再点回到活跃">已pin <b>'+stats.pinned+'</b></span>'
-        +'<span class="mp-stat toggle'+(window.__memShowSunk?' on':'')+'" onclick="toggleMemPoolSunk()" title="点一下只看已沉底记忆，再点回到活跃">已沉底 <b>'+stats.sunk+'</b></span>';
+        +'<span class="mp-stat toggle'+(window.__memShowSunk?' on':'')+'" onclick="toggleMemPoolSunk()" title="点一下只看已沉底记忆，再点回到活跃">已沉底 <b>'+stats.sunk+'</b></span>'
+        +'<span class="mp-stat toggle'+(window.__memShowReview?' on':'')+'" onclick="toggleMemPoolReview()" title="人工裁决解析出的记忆候选：通过入库 / 驳回">待审 <b>'+(window.__reviewTotal!=null?window.__reviewTotal:'…')+'</b></span>';
     }
     const el=document.getElementById('mempool-list');
     if(!el)return;
+    const ctr=document.getElementById('mempool-controls');
+    if(ctr) ctr.style.display=window.__memShowReview?'none':'';
     el.className='mp-list';
+    if(window.__memShowReview){ renderReviewItems(el); return; }
     if(!items.length){ el.innerHTML='<div class="mp-empty">暂无记忆，点右上角「＋ 新增记忆」或「整理记忆池」</div>'; return; }
     let html='';
     items.forEach(function(it){
@@ -4509,24 +4480,93 @@ async function deletePinned(id){
       loadMemPool();
     }catch(e){ if(st) st.textContent='导入失败: '+e.message; }
   }
-  function rerenderMemPoolView(){ if(window.__memPoolData){ renderMemPool(window.__memPoolData); } else { loadMemPool(); } }
+  function rerenderMemPoolView(){ if(window.__memShowReview){ loadReviewQueue(); return; } if(window.__memPoolData){ renderMemPool(window.__memPoolData); } else { loadMemPool(); } }
   function toggleMemPoolAll(){
-    window.__memShowAll=true; window.__memShowPinned=false; window.__memShowSunk=false;
+    window.__memShowAll=true; window.__memShowPinned=false; window.__memShowSunk=false; window.__memShowReview=false;
     rerenderMemPoolView();
   }
   function toggleMemPoolActive(){
-    window.__memShowAll=false; window.__memShowPinned=false; window.__memShowSunk=false;
+    window.__memShowAll=false; window.__memShowPinned=false; window.__memShowSunk=false; window.__memShowReview=false;
     rerenderMemPoolView();
   }
   function toggleMemPoolSunk(){
     window.__memShowSunk=!window.__memShowSunk;
     if(window.__memShowSunk){ window.__memShowPinned=false; window.__memShowAll=false; }
+    window.__memShowReview=false;
     rerenderMemPoolView();
   }
   function toggleMemPoolPinned(){
     window.__memShowPinned=!window.__memShowPinned;
     if(window.__memShowPinned){ window.__memShowSunk=false; window.__memShowAll=false; }
+    window.__memShowReview=false;
     rerenderMemPoolView();
+  }
+  // 待审（review 队列，0919 第五个统计按钮）：列表区切换显示记忆候选，通过入库 / 驳回
+  function toggleMemPoolReview(){
+    window.__memShowReview=!window.__memShowReview;
+    if(window.__memShowReview){ window.__memShowAll=false; window.__memShowPinned=false; window.__memShowSunk=false; loadReviewQueue(); return; }
+    loadMemPool();
+  }
+  async function loadReviewQueue(){
+    try{
+      const r=await fetch(ADMIN_API + '/memory-review/queue');
+      const d=await r.json();
+      if(d.error) throw new Error(d.error);
+      window.__reviewQueue=d.items||[];
+      window.__reviewTotal=window.__reviewQueue.length;
+      if(window.__memShowReview||window.__memPoolData) renderMemPool(window.__memPoolData||{stats:{total:0,active:0,pinned:0,sunk:0},items:[]});
+    }catch(e){
+      if(window.__memShowReview){
+        const el=document.getElementById('mempool-list');
+        if(el) el.innerHTML='<div class="mp-empty">review 队列加载失败: '+escapeHtml(e.message)+'</div>';
+      }
+      toast('review 队列加载失败: '+e.message);
+    }
+  }
+  function renderReviewItems(el){
+    const q=window.__reviewQueue;
+    if(!q){ el.innerHTML='<div class="loading">加载 review 队列...</div>'; return; }
+    if(!q.length){ el.innerHTML='<div class="mp-empty">待审队列空，候选都处理完了</div>'; return; }
+    const ORIGIN={promotion:'压缩块解析',manual:'手动提交'};
+    let html='';
+    q.forEach(function(it){
+      const c=it.candidate||{};
+      const cc=mpCatColor(c.kind||'fact');
+      html+='<div class="mp-card" style="--mp-cat:'+cc+'">'
+        +'<div class="mp-card-head">'
+          +'<span class="mp-cat"><span class="mp-dot"></span>'+escapeHtml(c.kind||'fact')+'</span>'
+          +'<span class="mp-badges"><span class="mp-badge">待审</span></span>'
+        +'</div>'
+        +'<div class="mp-body">'+escapeHtml(c.text||'')+'</div>'
+        +'<div class="mp-meta">'
+          +'<span>来源 '+(ORIGIN[c.origin]||escapeHtml(String(c.origin||'未知')))+'</span>'
+          +(it.created_at?'<span>'+escapeHtml(String(it.created_at).slice(0,10))+'</span>':'')
+        +'</div>'
+        +'<div class="mp-actions">'
+          +'<button type="button" class="mp-btn ghost" onclick="approveReviewItem(\''+it.id+'\')">通过入库</button>'
+          +'<button type="button" class="mp-btn danger" onclick="rejectReviewItem(\''+it.id+'\')">驳回</button>'
+        +'</div>'
+      +'</div>';
+    });
+    el.innerHTML=html;
+  }
+  async function approveReviewItem(id){
+    try{
+      const r=await fetch(ADMIN_API + '/memory-review/queue/'+encodeURIComponent(id)+'/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+      const j=await r.json();
+      if(j.error) throw new Error(j.error);
+      toast('已通过入库，可在记忆池查看');
+    }catch(e){ toast('通过失败: '+e.message); }
+    loadReviewQueue();
+  }
+  async function rejectReviewItem(id){
+    try{
+      const r=await fetch(ADMIN_API + '/memory-review/queue/'+encodeURIComponent(id)+'/reject',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+      const j=await r.json();
+      if(j.error) throw new Error(j.error);
+      toast('已驳回');
+    }catch(e){ toast('驳回失败: '+e.message); }
+    loadReviewQueue();
   }
   function openMemPoolAdd(){
     AppState.memPoolEditId=null;

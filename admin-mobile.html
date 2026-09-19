@@ -139,20 +139,17 @@
 
 <!-- Tab 3: 记忆 -->
 <div class="tab-content" id="tab-memory" style="position:relative">
-   <div style="margin:12px 0 16px;padding:0 2px">
-     <h2 style="font-family:'Noto Serif SC',serif;font-size:27px;font-weight:700;color:var(--tab-active);letter-spacing:4px;margin:0;line-height:1.35">记忆池</h2>
-     <div style="width:38px;height:4px;border-radius:2px;background:var(--accent);margin-top:10px;box-shadow:0 2px 8px rgba(200,144,152,.30)"></div>
+   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin:12px 0 0;padding:0 2px">
+     <div><h2 style="font-family:'Noto Serif SC',serif;font-size:27px;font-weight:700;color:var(--tab-active);letter-spacing:4px;margin:0;line-height:1.35">记忆池</h2>
+     <div style="width:38px;height:4px;border-radius:2px;background:var(--accent);margin-top:10px;box-shadow:0 2px 8px rgba(200,144,152,.30)"></div></div>
+     <button type="button" class="mp-btn primary" onclick="openMemPoolAdd()" style="flex-shrink:0">＋ 新增记忆</button>
    </div>
    <div id="mem-mempool-wrap">
       <div class="mp-head">
-        <div class="mp-actions">
-          <button type="button" class="mp-btn primary" onclick="openMemPoolAdd()">＋ 新增记忆</button>
-        </div>
-        <div id="mempool-clean-msg" style="width:100%;font-size:11px;color:var(--text3);min-height:16px;margin-top:2px"></div>
+        <div id="mempool-clean-msg" style="width:100%;font-size:11px;color:var(--text3);min-height:0;margin-top:0"></div>
       </div>
-      <div id="mempool-stats" class="mp-stats"><span class="mp-stat">统计中...</span></div>
-      </div>
-      <div class="mp-controls">
+       <div id="mempool-stats" class="mp-stats" style="margin-top:14px"><span class="mp-stat">统计中...</span></div>
+      <div class="mp-controls" id="mempool-controls">
         <input type="text" id="mempool-search" placeholder="搜索记忆（关键词）..." oninput="mempoolSearchInput(this.value)">
         <select id="mempool-cat" onchange="loadMemPool()"><option value="">全部分类</option></select>
         <select id="mempool-sort" onchange="loadMemPool()"><option value="score">综合</option><option value="importance">重要级</option><option value="recent">最近</option></select>
@@ -165,9 +162,10 @@
      <div class="cc-head">
        <div class="cc-head-title">
          <h2 class="cc-head-h2">上下文压缩</h2>
+         <div class="cc-head-underline"></div>
        </div>
        <div class="cc-head-actions">
-         <label class="cc-session-sel" title="选择要操作的会话（默认跟随聊天页当前会话）">会话
+         <label class="cc-session-sel" title="选择要操作的会话（默认跟随聊天页当前会话）">
            <select id="adm-session-sel" onchange="onAdminSessionChange()" aria-label="选择会话"></select>
          </label>
          <button type="button" class="cc-btn secondary" onclick="loadCompactionPreview()">刷新</button>
@@ -241,7 +239,7 @@
    <div class="card" data-collapse-id="ctx-limit-prompt" data-default="collapsed">
      <div class="card-title collapsible" onclick="toggleCard(this)"><span>容量提醒提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
      <div class="card-body">
-       <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:4px;">会话上下文超过容量上限时，网关塞给 AI 的整条隐藏提醒（前端不显示）。占位符：${chars}=当前字符数、${limit}=容量上限、${chunkInfo}=建议整理范围、${conversationText}=要整理的对话。开头「（容量提醒）」是系统识别标记，保存时会强制校验，不可删改。与压缩上下文提示词互相独立。</div>
+       <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:4px;"></div>
        <textarea id="ctx-limit-prompt-edit" rows="14" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;line-height:1.6;font-family:monospace;resize:vertical;"></textarea>
        <div class="env-row" style="margin-top:8px;gap:8px;">
          <button type="button" class="btn btn-primary" onclick="saveCtxLimitPrompt()" style="flex:1;background:var(--accent)">保存</button>
@@ -252,7 +250,7 @@
      </div>
    </div>
        <div class="card" data-collapse-id="reparse-prompt-config" data-default="collapsed">
-      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆池·再解析提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆池·解析提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
       <div class="card-body">
         <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:6px;">下面展示「解析」用的提示词（系统 + 用户）——解析对象是压缩块覆盖区间的对话原文，产出候选全部进记忆 review 队列人工把关。可直接修改、保存后覆盖内置；点「恢复内置默认」会清空自定义、回到内置版。</div>
         <div class="cc-cfg-msg" id="reparse-prompt-msg" style="margin-bottom:8px"></div>
@@ -263,22 +261,6 @@
         <div style="display:flex;gap:10px">
           <button type="button" class="cc-btn primary" onclick="saveReparsePrompt()">保存提示词</button>
           <button type="button" class="cc-btn secondary" onclick="resetReparsePrompt()">恢复内置默认</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="card" data-collapse-id="clean-prompt-config" data-default="collapsed">
-      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆池·整理清洗提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
-      <div class="card-body">
-        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:6px;">下面展示「整理记忆池」用的清洗提示词（系统 + 用户）。可直接修改、保存后覆盖内置；点「恢复内置默认」会清空自定义、回到内置版。</div>
-        <div class="cc-cfg-msg" id="clean-prompt-msg" style="margin-bottom:8px"></div>
-        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">System 提示词</div>
-        <textarea id="clean-sys-prompt" rows="4" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;margin-bottom:10px"></textarea>
-        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">User 提示词（不含记忆文本，运行时自动追加）</div>
-        <textarea id="clean-user-prompt" rows="10" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;margin-bottom:10px"></textarea>
-        <div style="display:flex;gap:10px">
-          <button type="button" class="cc-btn primary" onclick="saveCleanPrompt()">保存提示词</button>
-          <button type="button" class="cc-btn secondary" onclick="resetCleanPrompt()">恢复内置默认</button>
         </div>
       </div>
     </div>
