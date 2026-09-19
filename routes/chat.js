@@ -422,7 +422,7 @@ module.exports = function registerChatRoutes(app, deps) {
             kind,
             float_id: m.float_id || null,
             time: m.time || null,
-            text: text.slice(0, 600),
+            text,
             chars: text.length,
           };
         });

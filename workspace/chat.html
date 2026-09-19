@@ -3663,8 +3663,7 @@ async function loadShadowTL(){
         +'<div style="font-size:10.5px;font-weight:700;color:'+col+'">'+(KIND_NAMES[it.kind]||it.kind)
         +(it.float_id?'　<span style="color:var(--text3);font-weight:400">'+it.float_id+'</span>':'')
         +'　<span style="color:var(--text3);font-weight:400">'+String(it.time||"").slice(0,16).replace("T"," ")+'</span></div>'
-        +'<div style="font-size:12px;color:var(--ink2);margin-top:3px;line-height:1.5;white-space:pre-wrap;word-break:break-word">'+String(it.text||"").replace(/</g,"&lt;").slice(0,300)+'</div>'
-        +(it.chars>300?'<div style="font-size:10px;color:var(--text3);margin-top:2px">…共 '+it.chars+' 字</div>':'')
+        +'<div style="font-size:12px;color:var(--ink2);margin-top:3px;line-height:1.5;white-space:pre-wrap;word-break:break-word">'+String(it.text||"").replace(/</g,"&lt;")+'</div>'
         +'</div>';
     }).join("");
   }catch(e){ el.innerHTML='<div class="mcp-empty">加载失败: '+e.message+'</div>'; }
