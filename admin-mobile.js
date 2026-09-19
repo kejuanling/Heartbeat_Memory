@@ -1602,7 +1602,7 @@ function ccBuildSummaryStatsHtml(d, t){
            +'</div>'
          : ''))
        +'</div>'
-       +(hidden?'':'<div class="cc-swipe-del"><button class="cc-swipe-del-btn" onclick="removeSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">移除</button><button class="cc-swipe-del-btn" onclick="hideSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">隐藏</button></div>')
+       +(hidden?'':'<div class="cc-swipe-del"><button class="cc-swipe-del-btn" onclick="removeSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">移除</button><button class="cc-swipe-del-btn cc-swipe-del-btn-hide" onclick="hideSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">隐藏</button></div>')
        +'</div>';
    });
  
