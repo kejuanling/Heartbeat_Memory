@@ -4288,7 +4288,7 @@ async function deletePinned(id){
    // ============ 记忆池（五类结构化记忆，2026-09-12 五类改造） ============
   // 五类：关于她/认账/拓本（AI 写入）、压缩摘要（压缩替换入池）、对话碎片（用户侧）；
   // 旧四类（关于我们/锚点/信号/对话摘要）为存量只读兼容，清洗导入完成后消失，统一暗灰显示
-  const MP_CAT_COLORS={关于她:'#2980b9',认账:'#c0392b',拓本:'#8e44ad',压缩摘要:'#7f8c8d',对话碎片:'#f39c12',关于我们:'#95a5a6',锚点:'#95a5a6',信号:'#95a5a6',对话摘要:'#95a5a6'};
+  const MP_CAT_COLORS={fact:'#2980b9',rule:'#c0392b',quote:'#8e44ad',milestone:'#f39c12',关于她:'#2980b9',认账:'#c0392b',拓本:'#8e44ad',压缩摘要:'#7f8c8d',对话碎片:'#f39c12',关于我们:'#95a5a6',锚点:'#95a5a6',信号:'#95a5a6',对话摘要:'#95a5a6'};
   function mpCatColor(c){ return MP_CAT_COLORS[c]||'#7f8c8d'; }
 
   function initMemPoolView(){
@@ -4297,46 +4297,12 @@ async function deletePinned(id){
     window.__memShowAll=false;
     populateMemPoolCatOptions();
     loadMemPool();
-    loadMemoryV2();
   }
 
-  // ---- 记忆 V2（新池）卡片（0918）：GET /admin/memory-v2/entries，迁移前显示空态 ----
-  async function loadMemoryV2(){
-    const statsEl=document.getElementById('memv2-stats');
-    const listEl=document.getElementById('memv2-list');
-    if(!statsEl||!listEl) return;
-    try{
-      const r=await fetch(ADMIN_API+'/memory-v2/entries',{credentials:'include'});
-      const j=await r.json();
-      if(j.error) throw new Error(j.error);
-      const st=j.stats||{};
-      const kinds=Object.entries(st.by_kind||{}).map(([k,v])=>k+' '+v).join(' · ');
-      statsEl.textContent='共 '+st.total+' 条｜active '+st.active+'｜superseded '+st.superseded+'｜archived '+st.archived+(kinds?'｜'+kinds:'');
-      const items=(j.items||[]).slice(0,50);
-      if(!items.length){
-        listEl.innerHTML='<div style="font-size:11px;color:var(--text3);padding:6px 2px">暂无 V2 记忆（迁移后在此显示）</div>';
-        return;
-      }
-      const KIND_COLORS={fact:'#2980b9',rule:'#c0392b',quote:'#8e44ad',milestone:'#f39c12'};
-      listEl.innerHTML=items.map(function(it){
-        const col=KIND_COLORS[it.kind]||'#7f8c8d';
-        const stColor=it.status==='active'?'#27ae60':(it.status==='superseded'?'#95a5a6':'#7f8c8d');
-        return '<div style="border:1px solid var(--line);border-radius:8px;padding:7px 10px">'
-          +'<div style="font-size:10.5px;color:'+col+';font-weight:700">'+(it.kind||'?')+' · '+(it.subject||'?')+' · '+it.id
-          +'　<span style="color:'+stColor+'">'+(it.status||'')+'</span>'
-          +(it.anchor?'　<span style="color:#f39c12">anchor</span>':'')+'</div>'
-          +'<div style="font-size:12px;color:var(--ink);margin-top:3px;line-height:1.5">'+String(it.text||'').replace(/</g,'&lt;')+'</div>'
-          +'<div style="font-size:10px;color:var(--text3);margin-top:3px">'+String(it.created_at||'').slice(0,10)+'｜origin='+(it.origin||'-')+'｜conf='+(it.confidence!=null?Number(it.confidence).toFixed(2):'-')+'</div>'
-          +'</div>';
-      }).join('');
-    }catch(e){
-      if(statsEl) statsEl.textContent='加载失败: '+e.message;
-    }
-  }
   function populateMemPoolCatOptions(){
     const sel=document.getElementById('mempool-cat');
     const ed=document.getElementById('mempool-edit-cat');
-    const cats=['关于她','认账','拓本','压缩摘要','对话碎片'];
+    const cats=['fact','rule','quote','milestone'];
     // 筛选下拉带旧四类（存量只读兼容，清洗导入完成后自然为空）
     const legacy=['关于我们','锚点','信号','对话摘要'];
     if(sel){ sel.innerHTML='<option value="">全部分类</option>'+cats.concat(legacy).map(function(c){return '<option value="'+c+'">'+c+(legacy.indexOf(c)>=0?'（旧）':'')+'</option>';}).join(''); }
@@ -4363,7 +4329,7 @@ async function deletePinned(id){
     const sort=document.getElementById('mempool-sort').value;
     const savedY=(window.pageYOffset!==undefined)?window.pageYOffset:(document.documentElement.scrollTop||0);
     try{
-      const r=await fetch(ADMIN_API + '/memory-pool?q='+encodeURIComponent(q)+'&category='+encodeURIComponent(cat)+'&sort='+encodeURIComponent(sort));
+      const r=await fetch(ADMIN_API + '/memory-v2/pool-view?q='+encodeURIComponent(q)+'&category='+encodeURIComponent(cat)+'&sort='+encodeURIComponent(sort));
       const d=await r.json();
       renderMemPool(d);
       // 重绘后恢复页面滚动位置，防止操作后视口跳动
@@ -4566,7 +4532,7 @@ async function deletePinned(id){
     AppState.memPoolEditId=null;
     populateMemPoolCatOptions();
     const ed=document.getElementById('mempool-edit-cat');
-    if(ed)ed.value='关于她';
+    if(ed)ed.value='fact';
     const ii=document.getElementById('mempool-edit-imp');
     if(ii)ii.value='0.6';
     const ce=document.getElementById('mempool-edit-content');
@@ -4584,8 +4550,8 @@ async function deletePinned(id){
     if(ed){
       // 编辑下拉只有新五类：旧类条目（关于我们/锚点/信号/对话摘要）回落到「关于她」，保存时顺手归入新类
       const has=[].some.call(ed.options,function(o){return o.value===it.category;});
-      ed.value=has?(it.category||'关于她'):'关于她';
-      if(!has) toast('「'+it.category+'」是旧分类，保存时会归入新分类，可先在下拉里选对');
+      ed.value=has?(it.category||'fact'):'fact';
+      if(!has) toast('「'+it.category+'」是旧分类名，保存时会归入对应新分类，可先在下拉里选对');
     }
     const ii=document.getElementById('mempool-edit-imp');
     if(ii)ii.value=(Number(it.importance)||0.5)+'';
@@ -4599,9 +4565,9 @@ async function deletePinned(id){
     const category=document.getElementById('mempool-edit-cat').value;
     const importance=parseFloat(document.getElementById('mempool-edit-imp').value);
     if(!content){ toast('记忆内容不能为空'); return; }
-    const url=AppState.memPoolEditId ? (ADMIN_API + '/memory-pool/'+AppState.memPoolEditId) : (ADMIN_API + '/memory-pool');
+    const url=AppState.memPoolEditId ? (ADMIN_API + '/memory-v2/entries/'+AppState.memPoolEditId) : (ADMIN_API + '/memory-v2/entries');
     try{
-      const r=await apiRequest(AppState.memPoolEditId?'PUT':'POST', url, {content:content, category:category, importance:Number.isFinite(importance)?importance:0.6}, {busy:document.getElementById('mp-save-btn')});
+      const r=await apiRequest(AppState.memPoolEditId?'PUT':'POST', url, {content:content, category:category, importance:Number.isFinite(importance)?importance:0.6, direct:true}, {busy:document.getElementById('mp-save-btn')});
       if(!r.ok) return;
       const d=r.data||{};
       if(d.error){ toast('保存失败: '+d.error); return; }
@@ -4613,15 +4579,15 @@ async function deletePinned(id){
   async function sinkMemPool(id){
     if(!confirm('沉底该条记忆？沉底后不再参与检索浮现。'))return;
     try{
-      const r=await fetch(ADMIN_API+'/memory-pool/sink',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})});
+      const r=await fetch(ADMIN_API+'/memory-v2/entries/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'archive'})});
       const d=await r.json().catch(function(){return {};});
       if(d.error){ toast('操作失败: '+d.error); return; }
-      toast('已沉底'); loadMemPool();
+      toast('已归档'); loadMemPool();
     }catch(e){ toast('操作失败: '+e.message); }
   }
   async function reviveMemPool(id){
     try{
-      const r=await fetch(ADMIN_API+'/memory-pool/revive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})});
+      const r=await fetch(ADMIN_API+'/memory-v2/entries/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'revive'})});
       const dv=await r.json().catch(function(){return {};});
       if(dv.error){ toast('操作失败: '+dv.error); return; }
       toast('已恢复'); loadMemPool();
@@ -4629,19 +4595,19 @@ async function deletePinned(id){
   }
   async function togglePinMemPool(id, v){
     try{
-      const r=await fetch(ADMIN_API+'/memory-pool/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({pinned:!!v})});
+      const r=await fetch(ADMIN_API+'/memory-v2/entries/'+id+'/pin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pinned:!!v})});
       const d=await r.json();
       if(d.error){ toast('置顶失败: '+d.error); return; }
-      toast(v?'已置顶（跨窗口永远带上）':'已取消置顶'); loadMemPool();
+      toast(v?'已置顶（常驻上下文）':'已取消置顶'); loadMemPool();
     }catch(e){ toast('网络错误: '+e.message); }
   }
   async function deleteMemPool(id){
-    if(!confirm('删除该条记忆？此操作不可恢复。'))return;
+    if(!confirm('归档该条记忆？归档后不再注入，可在「已沉底」里恢复。'))return;
     try{
-      const r=await fetch(ADMIN_API+'/memory-pool/'+id,{method:'DELETE'});
+      const r=await fetch(ADMIN_API+'/memory-v2/entries/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'archive'})});
       const d=await r.json();
       if(d.error){ toast('删除失败: '+d.error); return; }
-      toast('已删除'); loadMemPool();
+      toast('已归档'); loadMemPool();
     }catch(e){ toast('操作失败: '+e.message); }
   }
   async function tidyMemPool(){

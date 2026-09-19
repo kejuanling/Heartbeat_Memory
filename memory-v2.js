@@ -364,6 +364,64 @@ function createStore(opts = {}) {
     return { ok: true, entry: e };
   }
 
+  // 管理台人工编辑（0919）：白名单字段直改；text 变化刷 content_updated_at；枚举与 kind 联动铁律同 create
+  const UPDATABLE_FIELDS = ["text", "priority", "note", "kind", "subject", "direction", "speaker", "established_at", "related_subjects", "anchor"];
+  function updateFields(id, patch) {
+    if (readonly) return fail("readonly 模式拒绝写入");
+    const e = get(id);
+    if (!e) return fail("not_found: " + id);
+    if (!patch || typeof patch !== "object") return fail("patch 必须为对象");
+    const now = nowIso();
+    for (const k of Object.keys(patch)) {
+      if (!UPDATABLE_FIELDS.includes(k)) return fail("字段不可编辑: " + k);
+      const v = patch[k];
+      if (k === "text") {
+        const t = typeof v === "string" ? v.trim() : "";
+        if (!t || t.length > TEXT_MAX) return fail("text 非法");
+        if (e.text !== t) { e.text = t; e.content_updated_at = now; }
+      } else if (k === "priority") {
+        const p = pick01(v);
+        if (p == null) return fail("priority 非法");
+        e.priority = p;
+      } else if (k === "note") {
+        const n = strOrNull(v);
+        if (n && n.length > NOTE_MAX) return fail("note 超长");
+        e.note = n;
+      } else if (k === "kind") {
+        if (!KINDS.includes(v)) return fail("kind 非法: " + v);
+        if (v !== e.kind && (v === "quote" || e.kind === "quote")) return fail("quote 条目的 kind 不可切换（speaker/subject 联动）");
+        if (v !== e.kind && (v === "milestone" || e.kind === "milestone")) return fail("milestone 条目的 kind 不可切换");
+        e.kind = v;
+      } else if (k === "subject") {
+        if (!SUBJECTS.includes(v)) return fail("subject 非法: " + v);
+        if (e.kind === "quote" && v !== "user") return fail("quote 必须 subject=user");
+        if (e.kind === "milestone" && v !== "relationship") return fail("milestone 必须 subject=relationship");
+        e.subject = v;
+      } else if (k === "direction") {
+        if (e.kind !== "rule") return fail("direction 仅 rule 可用");
+        if (v != null && !DIRECTIONS.includes(v)) return fail("direction 非法: " + v);
+        e.direction = v == null ? null : v;
+      } else if (k === "speaker") {
+        if (e.kind !== "quote") return fail("speaker 仅 quote 可用");
+        if (v != null && !SPEAKERS.includes(v)) return fail("speaker 非法: " + v);
+        if (v !== "user") return fail("quote 必须 speaker=user");
+        e.speaker = v;
+      } else if (k === "established_at") {
+        e.established_at = strOrNull(v);
+        if (e.kind === "milestone" && !e.established_at) return fail("milestone 必须有 established_at");
+      } else if (k === "related_subjects") {
+        if (!Array.isArray(v)) return fail("related_subjects 必须是数组");
+        for (const x of v) if (!SUBJECTS.includes(x)) return fail("related_subjects 项非法: " + x);
+        if (v.includes(e.subject)) return fail("related_subjects 不得包含主 subject");
+        e.related_subjects = [...new Set(v)];
+      } else if (k === "anchor") {
+        e.anchor = !!v; // 注入层扩展字段（anchor 表待办）：true=常驻 Meaningful Moments/Identity 分层
+      }
+    }
+    flush();
+    return { ok: true, entry: e };
+  }
+
   function stats() {
     const r = load();
     const byStatus = { active: 0, superseded: 0, archived: 0 };
@@ -382,7 +440,7 @@ function createStore(opts = {}) {
     init: ensureFiles,
     create,
     get,
-    list,
+    list, updateFields,
     updateStatus,
     stats,
     flush,

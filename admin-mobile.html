@@ -147,20 +147,10 @@
       <div class="mp-head">
         <div class="mp-actions">
           <button type="button" class="mp-btn primary" onclick="openMemPoolAdd()">＋ 新增记忆</button>
-          <button type="button" class="mp-btn" onclick="tidyMemPool()">整理记忆池</button>
-          <button type="button" class="mp-btn" onclick="openMemPoolExport()">导出</button>
-          <button type="button" class="mp-btn" onclick="openMemPoolImport()">导入清洗</button>
         </div>
         <div id="mempool-clean-msg" style="width:100%;font-size:11px;color:var(--text3);min-height:16px;margin-top:2px"></div>
       </div>
       <div id="mempool-stats" class="mp-stats"><span class="mp-stat">统计中...</span></div>
-      <div class="card" style="margin:10px 0 14px;padding:12px 14px" id="memv2-card">
-        <div style="display:flex;align-items:center;gap:8px">
-          <div style="font-size:14px;font-weight:700;color:var(--tab-active)">记忆 V2（新池）</div>
-          <button type="button" class="mp-btn" style="margin-left:auto;padding:3px 10px;font-size:11px" onclick="loadMemoryV2()">刷新</button>
-        </div>
-        <div id="memv2-stats" style="font-size:11px;color:var(--text3);margin:6px 0 8px">统计中...</div>
-        <div id="memv2-list" style="display:flex;flex-direction:column;gap:6px;max-height:420px;overflow-y:auto"></div>
       </div>
       <div class="mp-controls">
         <input type="text" id="mempool-search" placeholder="搜索记忆（关键词）..." oninput="mempoolSearchInput(this.value)">

@@ -1,9 +1,11 @@
 "use strict";
-// Memory V2 管理台路由（0918）：V2 集合查看 + 聊天页入池入口（manual_review 模式走流水线进 review）
-// 依赖注入：admission = memory-admission 实例（可空=V2 未初始化 503）；baseDir = 项目根。
+// Memory V2 管理台路由：集合查看/编辑 + 聊天页入池 + 旧池形状映射视图（0919 管理台数据源切换）
+// 依赖注入：admission = memory-admission 实例（可空）；baseDir = 项目根。
 
 const path = require("path");
 const { createStore } = require("../memory-v2");
+
+const KIND_MAP = { "关于她": "fact", "认账": "rule", "拓本": "quote", fact: "fact", rule: "rule", quote: "quote", milestone: "milestone" };
 
 module.exports = function registerMemoryV2Admin(app, deps) {
   const { basicAuth, admission, baseDir } = deps;
@@ -12,7 +14,7 @@ module.exports = function registerMemoryV2Admin(app, deps) {
     return createStore({ rootDir: baseDir, config: {} });
   }
 
-  // V2 集合全量列表 + 统计（管理台「记忆 V2」卡片）
+  // V2 集合全量列表 + 统计
   app.get("/admin/memory-v2/entries", { preHandler: basicAuth }, async (req, reply) => {
     try {
       const s = store();
@@ -30,14 +32,69 @@ module.exports = function registerMemoryV2Admin(app, deps) {
     }
   });
 
-  // 聊天页长按入池 / 管理台手填的 V2 入口：人工发起 → 完整流水线 → 强制 review 队列
-  // （裁决 approve 后 formal 入库；旧池不再写——本入口自 0918 起单轨走 V2）
+  // 旧池形状映射视图：管理台记忆池页数据源（0919 起前端显示 V2 数据）
+  app.get("/admin/memory-v2/pool-view", { preHandler: basicAuth }, async (req, reply) => {
+    try {
+      const s = store();
+      const q = String(req.query.q || "").trim();
+      const category = String(req.query.category || "").trim();
+      const sort = String(req.query.sort || "recent");
+      let mapped = s.list({}).map(e => ({
+        id: e.id,
+        content: e.text,
+        category: e.kind,
+        importance: e.priority,
+        active: e.status === "active",
+        pinned: !!e.anchor,
+        sunk: e.status === "archived",
+        updated_at: e.created_at,
+        retrieval_count: 0, // V2 检索恒只读无计数（旧池污染字段的结构性根除）
+        source: e.origin,
+        status: e.status,
+        subject: e.subject,
+      }));
+      if (q) mapped = mapped.filter(x => x.content.includes(q));
+      if (category) mapped = mapped.filter(x => x.category === category);
+      if (sort === "importance") mapped.sort((a, b) => (b.importance || 0) - (a.importance || 0));
+      else mapped.sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
+      const stats = {
+        total: mapped.length,
+        active: mapped.filter(x => x.active).length,
+        pinned: mapped.filter(x => x.pinned).length,
+        sunk: mapped.filter(x => x.sunk).length,
+      };
+      reply.send({ success: true, stats, items: mapped });
+    } catch (err) {
+      reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // 新增/编辑入口。
+  // 管理台表单（direct:true）=人工即准入，直接建条目（P1 直通，不经 review）；
+  // 聊天页长按入池（无 direct）=manual_review，走流水线进 review 队列人工裁决。
   app.post("/admin/memory-v2/entries", { preHandler: basicAuth }, async (req, reply) => {
     try {
       if (!admission) return reply.code(503).send({ error: "Memory V2 admission 未初始化" });
       const b = req.body || {};
       const content = String(b.content || "").trim();
       if (!content) return reply.code(400).send({ error: "content 必填" });
+
+      if (b.direct === true) {
+        const kind = KIND_MAP[String(b.category || "").trim()];
+        if (!kind) return reply.code(400).send({ error: "category 必须是 fact/rule/quote/milestone" });
+        const imp = Number.isFinite(Number(b.importance)) ? Number(b.importance) : undefined;
+        const r2 = store().create({
+          text: content, kind,
+          subject: String(b.subject || "user"),
+          confidence: imp, priority: imp,
+          origin: "manual",
+          provenance: { method: "admin_form" },
+        });
+        if (!r2.ok) return reply.code(400).send({ error: r2.error });
+        if (b.pinned === true) store().updateFields(r2.entry.id, { anchor: true });
+        return reply.send({ success: true, action: "admit_new", id: r2.entry.id, entry: r2.entry });
+      }
+
       const r = admission.submitManual(
         { content, category: b.category, importance: b.importance, kind: b.kind },
         { sessionId: String(b.session_id || "").trim() || null },
@@ -53,6 +110,54 @@ module.exports = function registerMemoryV2Admin(app, deps) {
       });
     } catch (err) {
       console.error("[POST /admin/memory-v2/entries] error:", err.message);
+      reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // 编辑（管理台表单）：content/category/importance/pinned → text/kind/priority/anchor
+  app.put("/admin/memory-v2/entries/:id", { preHandler: basicAuth }, async (req, reply) => {
+    try {
+      const b = req.body || {};
+      const patch = {};
+      if (b.content != null) patch.text = String(b.content);
+      if (b.category != null) {
+        const kind = KIND_MAP[String(b.category).trim()];
+        if (!kind) return reply.code(400).send({ error: "category 非法（fact/rule/quote/milestone）" });
+        patch.kind = kind;
+      }
+      if (Number.isFinite(Number(b.importance))) patch.priority = Number(b.importance);
+      if (b.pinned != null) patch.anchor = !!b.pinned;
+      if (b.subject != null) patch.subject = String(b.subject);
+      const r = store().updateFields(req.params.id, patch);
+      if (!r.ok) return reply.code(400).send({ error: r.error });
+      reply.send({ success: true, entry: r.entry });
+    } catch (err) {
+      reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // 状态机操作：archive（沉底/删除语义，可恢复）| revive（归档恢复）
+  app.post("/admin/memory-v2/entries/:id/status", { preHandler: basicAuth }, async (req, reply) => {
+    try {
+      const action = String((req.body || {}).action || "");
+      let r;
+      if (action === "archive") r = store().updateStatus(req.params.id, "archived", { reason: "archived" });
+      else if (action === "revive") r = store().updateStatus(req.params.id, "active");
+      else return reply.code(400).send({ error: "action 必须是 archive/revive" });
+      if (!r.ok) return reply.code(400).send({ error: r.error });
+      reply.send({ success: true, entry: r.entry });
+    } catch (err) {
+      reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // 置顶（anchor 注入层标记）
+  app.post("/admin/memory-v2/entries/:id/pin", { preHandler: basicAuth }, async (req, reply) => {
+    try {
+      const r = store().updateFields(req.params.id, { anchor: !!((req.body || {}).pinned) });
+      if (!r.ok) return reply.code(400).send({ error: r.error });
+      reply.send({ success: true, entry: r.entry });
+    } catch (err) {
       reply.code(500).send({ error: err.message });
     }
   });
