@@ -1,3 +1,5 @@
+// ntfy_priority.js — ntfy 推送载荷构造：优先级归一化（1-5 或 min/low/high/max，
+// default/空值省略字段）+ 逗号分隔 tags 拆分。Bark/ntfy 双渠道中 ntfy 侧的专用逻辑。
 const NAMED_PRIORITIES = new Set(["min", "low", "high", "max"]);
 
 function normalizeNtfyPriority(rawValue) {
@@ -10,6 +12,7 @@ function normalizeNtfyPriority(rawValue) {
   return undefined;
 }
 
+// 组装 ntfy POST 载荷：topic/title/message 必带，priority/tags 合法才写入
 function buildNtfyPayload({ topic, title, message, priority, tags }) {
   const payload = { topic, title, message };
   const normalizedPriority = normalizeNtfyPriority(priority);

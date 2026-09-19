@@ -11,6 +11,7 @@ const PAPERS_DIR = path.join(__dirname, "papers");
 const MAX_PAPER_CHARS = 30000; // 单篇软上限：超长截断保护，防止单张纸撑爆管理台列表
 const SHARED_TOKEN = "_shared";
 
+// 会话目录名：与 server.js safeSessionToken 同一套规则（非法字符清洗，清洗后为空退 md5 哈希）
 function sessionToken(sessionId) {
   if (!sessionId) return "";
   if (sessionId === "default") return "default";
@@ -38,7 +39,8 @@ function resolvePaperRelPath(relPath) {
   return { rel: m[1] + "/" + m[2] + ".md", session: m[1], fileName: m[2] + ".md", full };
 }
 
-// 落一张纸。返回 {ok, relPath, title, chars} 或 {ok:false, error}
+// 落一张纸（savePaper）：内容截 3 万字上限，文件名=日期_时分秒.md（同秒追加 -N 序号防覆盖），
+// 首行标题 +（日期 时间 · 会话）头。成功返回 {ok, relPath,...}，失败返回 {ok:false, error}
 function savePaper(opts) {
   const clean = String((opts && opts.content) || "").trim();
   if (!clean) return { ok: false, error: "内容为空" };
@@ -95,6 +97,7 @@ function listPapers(limit) {
   return limit ? out.slice(0, limit) : out;
 }
 
+// 删除一张纸（按相对路径，resolvePaperRelPath 校验防目录穿越）
 function deletePaper(relPath) {
   const r = resolvePaperRelPath(relPath);
   if (!r) return { ok: false, error: "非法路径" };

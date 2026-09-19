@@ -1,5 +1,9 @@
+// time_utils.js — 时间工具（全项目共用）：时区解析、时区化日期部件、墙上时间 ↔ UTC 互转。
+// 全部按 TIME_ZONE（默认 Asia/Shanghai）处理；Railway/服务器时区不可信，
+// 任何「用户侧时间」都必须经本模块换算，禁止直接 new Date(墙上时间字符串)。
 const DEFAULT_TIME_ZONE = "Asia/Shanghai";
 
+// 校验并返回时区名：非法（Intl 不认识）时告警并回退默认值
 function resolveTimeZone(raw = process.env.TIME_ZONE, fallback = DEFAULT_TIME_ZONE) {
   const zone = String(raw || "").trim() || fallback;
   try {
@@ -11,6 +15,7 @@ function resolveTimeZone(raw = process.env.TIME_ZONE, fallback = DEFAULT_TIME_ZO
   }
 }
 
+// Date → 指定时区的日期部件 {year,month,day,hour,minute,second}（两位字符串，year 四位）
 function getDatePartsInTimeZone(date = new Date(), timeZone = resolveTimeZone()) {
   const formatter = new Intl.DateTimeFormat("en-GB", {
     timeZone,
@@ -33,15 +38,18 @@ function getDatePartsInTimeZone(date = new Date(), timeZone = resolveTimeZone())
   };
 }
 
+// Date → 指定时区的「YYYY-MM-DD HH:mm」串（日记标题/日志/展示通用格式）
 function formatDateTimeInTimeZone(date = new Date(), timeZone = resolveTimeZone()) {
   const parts = getDatePartsInTimeZone(date, timeZone);
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
 }
 
+// 取指定时区当前小时数（昼夜判定用）
 function getHourInTimeZone(date = new Date(), timeZone = resolveTimeZone()) {
   return Number(getDatePartsInTimeZone(date, timeZone).hour);
 }
 
+// 该时区在该时刻相对 UTC 的偏移（毫秒，含夏令时）；zonedWallTimeToDate 的两次反推依赖它
 function getTimeZoneOffsetMs(date, timeZone) {
   const parts = getDatePartsInTimeZone(date, timeZone);
   const asUTC = Date.UTC(
@@ -55,6 +63,8 @@ function getTimeZoneOffsetMs(date, timeZone) {
   return asUTC - date.getTime();
 }
 
+// 墙上时间（某时区的年月日时分）→ 真实 UTC Date；两次反推校正偏移变化（如夏令时切换日）。
+// 非法输入返回 null。
 function zonedWallTimeToDate({ year, month, day, hour, minute, second = 0 }, timeZone = resolveTimeZone()) {
   const utcGuess = Date.UTC(
     Number(year),
@@ -146,6 +156,7 @@ function parseWakeTarget(raw, timeZone = resolveTimeZone()) {
   return null;
 }
 
+// 当前时刻的 UTC ISO 串（落库 time 字段统一用）
 function nowIso() {
   return new Date().toISOString();
 }

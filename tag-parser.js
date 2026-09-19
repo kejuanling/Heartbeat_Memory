@@ -1,5 +1,10 @@
 "use strict";
 
+// tag-parser.js — AI 回复内轻量记号的解析入库与剥离：
+//   extractAndStore：各收尾路径各调一次，识别 <memory>/<pin>/<star>/<paper> 并执行入库副作用
+//                    （记忆池/永久上下文/标星/留纸），返回剥净全部标签的正文供下发/落盘；
+//   stripTags      ：纯剥离，流式过滤与时间线内容匹配复用。
+
 const memoryEngine = require("./memory-engine");
 
 const PIN_TAG_RE = /<\s*pin\b[^>]*>([\s\S]*?)<\s*\/pin\s*>/gi;
@@ -97,7 +102,8 @@ async function extractAndStore(text, ctx) {
     );
   }
 
-  // --- <memory> 轻量辅助：AI 顺手写的重要记忆 → 记忆池（自动去重，非必需） ---
+  // --- <pin> 轻量辅助：AI 顺手钉选 → 永久注入上下文（memoryEngine.addPinnedMemory；
+  //     不传 order 追加到尾部，避免打乱用户手动排序） ---
   const pinMatches = text.matchAll(PIN_TAG_RE);
 
   for (const match of pinMatches) {
