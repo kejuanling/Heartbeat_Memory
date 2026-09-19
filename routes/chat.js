@@ -928,6 +928,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
     // 非主聊天（标题总结等旁路请求）保持客户端直通，不注入完整上下文。
     // ========================
     if (isMainChat) {
+      // S4 修复：服务端时间线重建必须先于一切上下文加工（0919 静态测试抓出漏行）
+      llmMessages = buildConversation(sessionId);
       // 开关在请求开始时快照读取（17.txt：防切换瞬间半新半旧）
       const v2Cfg = await fsp.readJson(path.join(baseDir, 'data', 'memory_v2_config.json')).catch(() => ({}));
       if (v2Cfg && v2Cfg.ctx_v2_enabled === true) {
