@@ -259,8 +259,11 @@ module.exports = function registerChatRoutes(app, deps) {
     try {
       excludeIds = ctxV2Shadow.floatIdsForSession(path.join(dataDir, 'context_v2_floated.json'), sessionId);
     } catch (e) {}
+    // 日记篇数跟随管理台配置（0919 用户拍板：按我设定的数量来）
+    let diaryCount = 3;
+    try { diaryCount = Number(fsp.readJsonSync(path.join(dataDir, 'memory_pool_config.json')).cross_inject_diary_count) || 3; } catch (e) {}
     // map 挂在 v2Input 上供 maybeObserve 取 mapVersion（builder 只读已知字段，多余键无害）
-    return { pinnedEntries, timeline, diaryEntries: readDiaryEntriesForShadow(), memoriesV2, query, excludeIds, map: shadowMap };
+    return { pinnedEntries, timeline, diaryEntries: readDiaryEntriesForShadow(), memoriesV2, query, excludeIds, map: shadowMap, config: { diaryCount } };
   }
 
   // Context V2 记忆浮现（0918 拍板）：Relevant 命中（≥0.30）的记忆原样写入时间线永久在场，

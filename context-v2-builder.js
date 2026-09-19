@@ -31,7 +31,7 @@ const DEFAULT_CONFIG = {
     core_identity: 600,            // 超限=管理问题（报警人工清理），代码不截断
     long_term_understanding: 400,  // 核心层预算（含 header）；超限按 priority 升序淘汰
     meaningful_moments: 200,       // anchor 层预算；条数上限兜底，超限照实输出
-    conversation_continuity: 16000, // Earlier Days 封顶（3 篇全量正常碰不到，防单篇异常）
+    conversation_continuity: 40000, // Earlier Days 封顶仅防异常（篇数由用户配置 diaryCount 决定，不在此静默丢篇）
     relevant_memories: 400,        // 超限从尾部减条
   },
   diaryCount: 3,                   // Earlier Days 篇数（生产接线时同源管理台 cross_inject_diary_count）
