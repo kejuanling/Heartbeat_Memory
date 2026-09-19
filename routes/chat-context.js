@@ -185,11 +185,12 @@ function createCtxLimitReminderGuard(deps) {
   } = deps;
   const CTX_LIMIT_HEAD = "（容量提醒）";
 
-  // 摘要占位消息：被压缩块替换成的一段「（回忆 · … /（对话摘要 …」消息（与 context-replacements.js isReplacementMemoryMessage 同口径）
+  // 摘要占位消息：被压缩块替换成的一段「## Historical Summary …」消息（0919 头改英文；旧「（回忆 · /（对话摘要」前缀保留兼容历史）
+  // 与 context-replacements.js isReplacementMemoryMessage 同口径
   function isSummaryPlaceholder(m) {
     if (!m || m.role !== 'assistant') return false;
     const c = String(m.content || '');
-    return c.startsWith('（回忆 · ') || c.startsWith('（对话摘要');
+    return c.startsWith('## Historical Summary') || c.startsWith('（回忆 · ') || c.startsWith('（对话摘要');
   }
 
   // 容量提醒统计口径（2026-09-04 起）：按「未覆盖（未被压缩块替换）的对话原文」做 token 估算

@@ -4085,7 +4085,7 @@ function estimateAlertTokens(timeline) {
     if (isSpecialEvent(m)) continue;
     const c = m.content;
     if (typeof c === "string") {
-      if (c.startsWith("（回忆 · ") || c.startsWith("（对话摘要")) continue;
+      if (c.startsWith("## Historical Summary") || c.startsWith("（回忆 · ") || c.startsWith("（对话摘要")) continue;
       tok += contextCompactor.estimateTokens(c);
     } else if (Array.isArray(c)) {
       for (const part of c) {

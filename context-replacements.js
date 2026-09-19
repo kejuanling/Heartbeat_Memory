@@ -147,10 +147,11 @@ function backupFile(file) {
 const TIME_ZONE = resolveTimeZone();
 
 // 判断消息是否为「替换」生成的占位消息（压缩/唤醒等环节需保护，避免被吞掉）
+// 与 routes/chat-context.js isSummaryPlaceholder、server.js token 估算跳过三处同口径，改一处必须同步其余
 function isReplacementMemoryMessage(msg) {
   if (!msg || msg.role !== "assistant") return false;
   const c = String(msg.content || "");
-  return c.startsWith("（回忆 · ") || c.startsWith("（对话摘要");
+  return c.startsWith("## Historical Summary") || c.startsWith("（回忆 · ") || c.startsWith("（对话摘要");
 }
 
 // 解析消息时间：优先 m.time，其次内容开头的墙上时间前缀
@@ -1251,8 +1252,9 @@ function updateReplacement(id, text) {
 // 应用到发送给 AI 的上下文（统一生效逻辑）
 // ========================
 function buildMemoryMessage(item) {
-  const label = item.range_label ? " · " + item.range_label : "";
-  return { role: "assistant", _ctxRep: true, content: "（对话摘要" + label + "）\n" + recordText(item) };
+  // 占位头 0919 起改英文块头（Context Assembly 0918 定稿命名），时间段紧跟一个空格；旧「（对话摘要」头仅存在于历史会话
+  const label = item.range_label ? " " + item.range_label : "";
+  return { role: "assistant", _ctxRep: true, content: "## Historical Summary" + label + "\n" + recordText(item) };
 }
 
 // ---------------- 重要内容标记（星星） ----------------
