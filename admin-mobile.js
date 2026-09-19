@@ -1,7 +1,8 @@
 
 // ============================================================================
-// 心跳唤醒管理台 · 移动端（admin-mobile.html）
-// 单文件模板：样式 / 结构 / 逻辑集中在同一文件，由 server.js 每请求读取下发。
+// 心跳唤醒管理台 · 移动端逻辑（admin-mobile.html 的配套 JS）
+// 三件套分工：admin-mobile.html 结构 / admin-mobile.css 样式 / 本文件逻辑，
+// 由 server.js 每请求读取下发（no-store），改完推送即生效、无需重启。
 // 结构约定：
 //   1. 业务状态统一放 AppState（压缩/记忆域），其他全局仅限 UI 基础设施。
 //   2. 写操作统一走 apiRequest()（自动 CSRF、错误提示、busy 禁用）。
@@ -891,7 +892,6 @@ function toast(msg){
    }catch(e){toast('网络错误: '+e.message)}
  }
 
- // ============ 日志页：截图提示词 ============
   // ============ 记忆流水线·判定提示词（2026-09-19） ============
   async function loadJudgePrompt(){
     const msg=document.getElementById('judge-prompt-msg');
@@ -1037,6 +1037,7 @@ function toast(msg){
 
  // 2026-09-13 死代码清理：loadSendConfig/saveSendConfig 空壳及其唯一调用点已删（功能 2026-09-08 移除后遗留）
 
+ // ============ 日志页：截图提示词 ============
  async function loadScreenshotWakePromptLog(){
    const pe=document.getElementById('log-screenshot-wake-prompt');
    if(!pe)return;
@@ -1222,7 +1223,6 @@ function toast(msg){
  }
  
  // ============ Tab 5: 上下文压缩 ============
- // 多选模式状态
 
  const CC_GAP_PAGE = 200;
  
@@ -1674,8 +1674,6 @@ function ccBuildSummaryStatsHtml(d, t){
    }
  }
  
- // 移除单块：手动块调 blocks/remove_at，AI块调 context-replacements/undo
- 
 function ccNodeKey(n){
   if(!n||!n.getAttribute) return null;
   const cid=n.getAttribute('data-cid');
@@ -2088,8 +2086,6 @@ function updateCcStatusBar(d){
    updateMultiSelectBar();
  }
 
-  // 单块入池：按摘要里现成的【分类】标签本地拆分直接入库（不调 LLM）；
-  // 入池前问是否同时隐藏（2026-09-15）：确定=入池且隐藏（摘要与原文都不再进上下文），取消=只入池
   // 单块直灌入池（0918 停用）：无判断直灌是低质量记忆的主通道，入口已删；
   // 请走「解析」按钮（LLM 解析时间线原文 → 候选进 review 队列人工把关）
   async function ingestSingleBlock(cid, blockIndex, isAi){
@@ -2402,6 +2398,7 @@ function locateCcFromSearch(el){
   }
 }
 
+ // 移除单块：手动块调 blocks/remove_at，AI块调 context-replacements/undo
 function removeSingleBlock(idx, blockIndex, isAi){
    if(!confirm('移除这块？该块内容退回未覆盖区'+(isAi?'，AI 写的摘要将被撤销':'')+'。')) return;
    const msg=document.getElementById('compaction-msg');
@@ -2491,6 +2488,7 @@ function removeSingleBlock(idx, blockIndex, isAi){
    }).catch(function(e){ if(msg) msg.textContent='添加失败: '+e.message; });
  }
  
+  // 文本 → 话题 token 集：去停用词的中文字/相邻字 bigram + 英数词，供相邻消息相似度比较
  function ccGapTopicTokens(text){
   const STOP=new Set("的了我是你他它她这在在有也就说都还被把让跟和与或但而而且还再不没这那们个种些去来到上下前后时次天点会能要想觉得自己什么怎么这样那样现在然后因为所以但是如果感觉时候东西应该可以已经知道看到听到想到".split(""));
   const raw=String(text||'').replace(/<[^>]+>/g,'').toLowerCase();
@@ -2507,6 +2505,8 @@ function removeSingleBlock(idx, blockIndex, isAi){
   });
   return out;
 }
+// 未覆盖区内启发式找切分点：相邻消息时间空档(5分)/话题相似度低(4分)/用户开新话题(2分)，
+// 总分 ≥4 即推荐为候选切点（点绿点按该条切开成两块）
 function ccGapSuggestCuts(key){
   const msgs=AppState.ccGapMsgByKey[key];
   if(!msgs || msgs.length<2) return [];
@@ -2654,6 +2654,7 @@ function renderCcGapMessages(g){
   html+=ccGapMoreWrapHtml(key, g.startIdx, g.endIdx);
   return html;
 }
+// 未覆盖区消息分页加载：每页 CC_GAP_PAGE 条，滚动到底/哨兵可见时自动续拉并就地追加
 function loadGapPage(key, startIdx, endIdx){
   if(AppState.ccGapLoadingKey===key) return;
   if(AppState.ccGapHasMore[key]===false) return;
@@ -3972,6 +3973,7 @@ function ccNumLiveCheck(input, max){
  }
  
   
+  // 键序无关的深度相等比较（判断工具参数 JSON 是否真被修改，避免无谓覆盖）
  function jsonEq(a, b) {
    function sortKeys(o) {
      if (Array.isArray(o)) return o.map(sortKeys);
@@ -4290,9 +4292,9 @@ async function deletePinned(id){
   if(v==='cloud')loadMemCloud();
   else if(v==='mempool')initMemPoolView();
  }
-   // ============ 记忆池（五类结构化记忆，2026-09-12 五类改造） ============
-  // 五类：关于她/认账/拓本（AI 写入）、压缩摘要（压缩替换入池）、对话碎片（用户侧）；
-  // 旧四类（关于我们/锚点/信号/对话摘要）为存量只读兼容，清洗导入完成后消失，统一暗灰显示
+   // ============ 记忆池（现走 Memory V2，编辑/筛选只认 fact/rule/quote/milestone 四类） ============
+  // 存量兼容：0912 五类（关于她/认账/拓本/压缩摘要/对话碎片）与更早旧四类仍会出现在列表里，
+  // 统一暗灰显示、由后台清洗迁移逐步消化；颜色表保留两套键。
   const MP_CAT_COLORS={fact:'#2980b9',rule:'#c0392b',quote:'#8e44ad',milestone:'#f39c12',关于她:'#2980b9',认账:'#c0392b',拓本:'#8e44ad',压缩摘要:'#7f8c8d',对话碎片:'#f39c12',关于我们:'#95a5a6',锚点:'#95a5a6',信号:'#95a5a6',对话摘要:'#95a5a6'};
   function mpCatColor(c){ return MP_CAT_COLORS[c]||'#7f8c8d'; }
 
@@ -4935,9 +4937,7 @@ async function deletePinned(id){
     }catch(e){ toast('网络错误: '+e.message); if(btn){btn.disabled=false;btn.textContent='确认落地';} }
   }
 
-// ============ 信封：写给下一个窗口自己的信 ============
- // 2026-09-13 死代码清理：letterSeq 已删（声明后从未读写）
-
+ // 词云加载与画布渲染（loadMemCloud / renderWordCloud / selectCloudWord）
  async function loadMemCloud(){
    const el=document.getElementById('mem-cloud');
    if(!el)return;
