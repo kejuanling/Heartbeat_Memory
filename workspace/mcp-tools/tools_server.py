@@ -1300,47 +1300,14 @@ class MCPHandler(BaseHTTPRequestHandler):
         # server/discover 探测拿到"成功但无效"的响应而不回退标准 initialize 流程）
         return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": "Method not found: %s" % method}}
 
-    # ── GET: 白兰访问计数（供前端页面调用）──
-    # ── GET: 白兰访问计数（供前端页面调用）──
     def do_GET(self):
-        # 2026-09-19: MCP streamable HTTP 客户端握手后会 GET 开 SSE 流；本服务不支持流式，
-        # 按规范回 405 让客户端降级为纯 POST（此前对任意路径回 200 JSON，会被标准客户端判为无效响应）
-        if self.path != '/baillan-visit':
-            self.send_response(405)
-            self.send_header('Allow', 'POST')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            return
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
+        # MCP streamable HTTP 客户端握手后会 GET 开 SSE 流；本服务不支持流式，
+        # 按规范回 405 让客户端降级为纯 POST（对任意路径 405）。
+        # 原白兰访问计数接口（/baillan-visit）已于 2026-09-19 经用户拍板移除：数据目录一直缺失、功能从未生效、无前端调用方。
+        self.send_response(405)
+        self.send_header('Allow', 'POST')
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
-
-        if self.path == '/baillan-visit':
-            try:
-                fpath = '/root/workspace/baillan/baillan.json'
-                if os.path.exists(fpath):
-                    with open(fpath) as f:
-                        data = json.load(f)
-                else:
-                    data = {"planted": "2026-07-05", "name": "白兰", "status": "生长中", "count": 0, "stage": "seed", "last_watered": None, "total_visits": 0}
-                data["count"] = data.get("count", 0) + 1
-                data["total_visits"] = data.get("total_visits", 0) + 1
-                stages_list = [1, 3, 6, 10, 15, 25]
-                stage_names = ["seed", "sprout", "grow", "bud", "bloom", "full"]
-                stage_idx = 0
-                for i, th in enumerate(stages_list):
-                    if data["count"] >= th:
-                        stage_idx = i
-                data["stage"] = stage_names[stage_idx]
-                with open(fpath, 'w') as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-                resp = {"ok": True, "count": data["count"], "stage": data["stage"]}
-            except Exception as e:
-                resp = {"ok": False, "error": str(e)}
-            self.wfile.write(json.dumps(resp).encode('utf-8'))
-        else:
-            self.wfile.write(json.dumps({"ok": True, "msg": "MCP Server Running"}).encode('utf-8'))
 
     def log_message(self, fmt, *args):
         pass
@@ -1473,5 +1440,6 @@ if __name__ == "__main__":
             server = ThreadingHTTPServer(("0.0.0.0", PORT), MCPHandler)
             server.serve_forever()
         except Exception as e:
-            print(f"⚠️ 服务器崩溃: {e}，5秒后重启...")
-            time.sleep(5)
+            # systemd restart 时旧进程释放端口有间隙：重试间隔 1s（原 5s 会让新进程最长 5 秒无法接管）
+            print(time.strftime("[%F %T]") + f" ⚠️ 服务器崩溃: {e}，1秒后重启...", flush=True)
+            time.sleep(1)
