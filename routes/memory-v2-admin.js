@@ -82,6 +82,7 @@ module.exports = function registerMemoryV2Admin(app, deps) {
       if (!rows.length) return reply.send({ success: true, threshold: th, group_count: 0, groups: [] });
       const ready = await v2vectors.ensureVectors(rows);
       if (!ready) return reply.code(503).send({ error: "向量服务不可用（embed-server 熔断中），稍后再试" });
+      v2vectors.pruneVectors(rows); // 全量行清理已消失 id（检索等子集调用不做清理，防误删）
       const byId = new Map(rows.map((r) => [r.id, r]));
       const groups = v2vectors.similarGroups(rows, th).map((g) => ({
         max_sim: g.max_sim,

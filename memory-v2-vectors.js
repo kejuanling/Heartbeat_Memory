@@ -49,7 +49,9 @@ function missingVectors(rows) {
   });
 }
 
-// 同步补齐缺失向量（管理台点击触发，条目量小可等待）；分批请求，每批立即落盘
+// 同步补齐缺失向量（调用方可等待，条目量小可接受）；分批请求，每批立即落盘。
+// 注意：本函数不做缓存清理——检索场景传入的是过滤子集，按子集清理会误删全量缓存；
+// 清理请显式调 pruneVectors(全量rows)。
 async function ensureVectors(rows) {
   const missing = missingVectors(rows);
   if (!missing.length) return true;
@@ -64,7 +66,11 @@ async function ensureVectors(rows) {
     });
     saveVecMap();
   }
-  // 清理集合里已不存在的 id（归档条目 revive 后会重算，量小无妨）
+  return true;
+}
+
+// 清理集合里已不存在的 id（调用方须传全量行；归档条目 revive 后会重算，量小无妨）
+function pruneVectors(rows) {
   const ids = new Set(rows.map(function (r) { return r.id; }));
   const m = vecMap();
   let pruned = false;
@@ -72,7 +78,6 @@ async function ensureVectors(rows) {
     if (!ids.has(k)) { delete m[k]; pruned = true; }
   }
   if (pruned) saveVecMap();
-  return true;
 }
 
 // 向量均已 L2 归一化，点积即余弦
@@ -128,4 +133,84 @@ function similarGroups(rows, threshold) {
   return groups;
 }
 
-module.exports = { ensureVectors, similarGroups, entryHash, VECTOR_FILE };
+// ---------------- 检索（0919 memory_search 数据源切 V2：公式沿用旧池，数据换新池） ----------------
+// 权重对齐旧池 retrieveHybrid：0.55 语义余弦(bge) + 0.20 字面 + 0.25 重要级×时间衰减（半衰期30天）；
+// embed 不可用回落旧池 retrieve 字面公式（0.6 字面 + 0.4 重要级）。字面分词用 V2 自有 adapter
+// （铁律：V2 不 require 旧池模块，故不直接复用旧池 contentSimilarity）。恒只读集合：不计数、不自动置顶。
+
+const { tokenize, similarity } = require("./context-v2-adapter");
+
+function decayFactor(e) {
+  const t = new Date(e.content_updated_at || e.created_at || "").getTime();
+  if (isNaN(t)) return 1;
+  const ageDays = (Date.now() - t) / (24 * 60 * 60 * 1000);
+  return Math.pow(0.5, ageDays / 30);
+}
+
+// 输出形状对齐旧池接口（memory_search 工具契约：id/content/category/importance/pinned）
+function toItem(r) {
+  return {
+    id: r.id,
+    content: r.text,
+    category: r.kind,
+    importance: r.priority,
+    pinned: r.anchor === true,
+    created_at: r.created_at,
+    updated_at: r.content_updated_at || r.created_at,
+  };
+}
+
+async function retrieveHybrid(rows, query, opts = {}) {
+  const q = String(query || "").trim();
+  if (!q) return [];
+  const topK = Math.max(1, Number(opts.topK) || 5);
+  const pool = rows.filter(r => (!opts.pinnedOnly || r.anchor === true) && (!opts.kind || r.kind === opts.kind));
+  if (!pool.length) return [];
+  const qt = tokenize(q);
+  const ready = await ensureVectors(pool);
+  let qv = null;
+  if (ready) {
+    const v = await embedClient.embedBatch([q], true, 8000); // 查询侧按 BGE 约定加指令前缀
+    if (v && v[0] && v[0].length) qv = v[0];
+  }
+  const m = vecMap();
+  const scored = pool.map(r => {
+    const vec = (m[r.id] || {}).v;
+    const sem = qv && vec ? Math.max(0, cosine(qv, vec)) : 0; // 均已归一化，点积即余弦
+    const lit = qt.size ? similarity(qt, r.text + " " + (r.kind || "")) : 0;
+    const imp = Number(r.priority) || 0.5;
+    const decay = decayFactor(r);
+    const score = qv ? (0.55 * sem + 0.20 * lit + 0.25 * imp * decay) : (0.6 * lit + 0.4 * imp * decay);
+    return { r, sem, score };
+  });
+  scored.sort((a, b) => b.score - a.score || b.sem - a.sem);
+  return scored.slice(0, topK).map(p => toItem(p.r));
+}
+
+// 最近列表：按正文更新时间倒序（V2 无检索计数污染，content_updated_at 只在正文变化时刷）
+function recent(rows, opts = {}) {
+  const topK = Math.max(1, Number(opts.topK) || 5);
+  const out = rows.filter(r => !opts.pinnedOnly || r.anchor === true);
+  out.sort((a, b) => {
+    const ua = String(a.content_updated_at || a.created_at || ""), ub = String(b.content_updated_at || b.created_at || "");
+    return ua < ub ? 1 : (ua > ub ? -1 : 0);
+  });
+  return out.slice(0, topK).map(r => toItem(r));
+}
+
+// 呼吸：浮现记忆（未沉底，优先置顶 > 重要级 > 最近更新）。用于 memory_search 的 breath 开关。
+function breath(rows, opts = {}) {
+  const limit = Math.max(1, Math.min(Number(opts.limit) || 3, 5));
+  const pool = rows.filter(r => !opts.kind || r.kind === opts.kind);
+  pool.sort((a, b) => {
+    const pinA = a.anchor === true ? 1 : 0, pinB = b.anchor === true ? 1 : 0;
+    if (pinA !== pinB) return pinB - pinA;
+    const impA = Number(a.priority) || 0, impB = Number(b.priority) || 0;
+    if (impA !== impB) return impB - impA;
+    const ua = String(a.content_updated_at || a.created_at || ""), ub = String(b.content_updated_at || b.created_at || "");
+    return ua < ub ? 1 : (ua > ub ? -1 : 0);
+  });
+  return pool.slice(0, limit).map(r => toItem(r));
+}
+
+module.exports = { ensureVectors, pruneVectors, similarGroups, retrieveHybrid, recent, breath, entryHash, VECTOR_FILE };

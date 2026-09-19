@@ -3456,26 +3456,35 @@ app.post("/internal/context-mark", async (req, reply) => {
 });
 
 // 记忆池检索：MCP 工具 memory_search 用（x-internal-key 鉴权）
-// retrieveHybrid = 语义余弦(bge-small-zh) + 字面 + 重要级混合；embed-server 不可用自动降级纯字面
+// 0919 用户拍板「换新」：数据源切 V2 集合（旧池退役为迁移源，不再写入）。
+// 检索公式沿用旧池混合权重：0.55 语义余弦(bge-small-zh) + 0.20 字面 + 0.25 重要级×衰减（半衰期30天）；
+// embed-server 不可用自动降级纯字面（0.6/0.4）。category 兼容旧分类名 → V2 kind。
+// 恒只读：不计数、不自动置顶（旧池检索写状态的污染在 V2 结构性根除）。
+const MEMORY_CATEGORY_TO_KIND = { "关于她": "fact", "认账": "rule", "拓本": "quote", "压缩摘要": "milestone", "对话碎片": "fact", "关于我们": "fact", "锚点": "quote", "信号": "fact", "对话摘要": "fact" };
 app.get("/internal/memory-pool/retrieve", async (req, reply) => {
   try {
+    const { createStore } = require("./memory-v2");
+    const v2vectors = require("./memory-v2-vectors");
     const q = String(req.query.q || "").trim();
     const topK = Number(req.query.limit) || 5;
     const category = String(req.query.category || "").trim();
     const breath = req.query.breath === "1" || req.query.breath === "true";
-    // 特殊分类：「最近」=按更新时间倒序列最新（浏览式，忽略关键词、不计数）；「已置顶」=只在置顶里（带 q 按相关性搜，无 q 按时间列）
+    const kind = MEMORY_CATEGORY_TO_KIND[category] || category || null;
+    // 特殊分类：「最近」=按正文更新时间倒序（浏览式，忽略关键词）；「已置顶」=只在 anchor 置顶里
+    // 每请求新建 store（与 /admin/memory-v2/* 同款）：admission 等旁路实例各自持内存副本，避免读到陈旧缓存
+    const rows = createStore({ config: {} }).list({ status: "active" });
     let items;
     if (category === "最近") {
-      items = memoryPool.recent({ topK });
+      items = v2vectors.recent(rows, { topK });
     } else if (category === "已置顶") {
       items = q
-        ? await memoryPool.retrieveHybrid(q, { topK, pinnedOnly: true })
-        : memoryPool.recent({ topK, pinnedOnly: true });
+        ? await v2vectors.retrieveHybrid(rows, q, { topK, pinnedOnly: true })
+        : v2vectors.recent(rows, { topK, pinnedOnly: true });
     } else if (breath && !q) {
-      // breath 模式：无 q 时只浮现最近沉淀的记忆（未沉底，优先置顶/重要级/最近更新）
-      items = memoryPool.breath({ limit: topK, category: category || undefined });
+      // breath 模式：无 q 时只浮现记忆（未沉底，优先置顶/重要级/最近更新）
+      items = v2vectors.breath(rows, { limit: topK, kind: kind || undefined });
     } else {
-      items = await memoryPool.retrieveHybrid(q, { topK, category: category || undefined });
+      items = await v2vectors.retrieveHybrid(rows, q, { topK, kind: kind || undefined });
     }
     reply.send({ ok: true, total: items.length, items });
   } catch (err) {
@@ -3514,15 +3523,17 @@ app.post("/internal/memory-pool/add", async (req, reply) => {
 });
 
 // 记忆池按 id 置顶/取消置顶：MCP 工具 memory_pin 用（x-internal-key 鉴权）
+// 0919 换新：写 V2 anchor（memory_search 数据源已切 V2，返回 V2 集合条目 id，迁移条目保留 mp_ 原id）；anchor=注入层常驻标记
 app.post("/internal/memory-pool/pin", async (req, reply) => {
   try {
     const b = req.body || {};
     const id = String(b.id || "").trim();
     if (!id) return reply.code(400).send({ error: "id 必填：记忆 id（memory_search 返回）" });
     const pinned = b.pinned === undefined ? true : !!b.pinned;
-    const entry = memoryPool.update(id, { pinned });
-    if (!entry) return reply.code(404).send({ error: "找不到这条记忆：id=" + id });
-    reply.send({ success: true, entry });
+    const r = require("./memory-v2").createStore({ config: {} }).updateFields(id, { anchor: pinned });
+    if (!r.ok) return reply.code(404).send({ error: "找不到这条记忆：id=" + id });
+    const e = r.entry;
+    reply.send({ success: true, entry: { id: e.id, content: e.text, pinned: e.anchor === true } });
   } catch (err) {
     console.error("[POST /internal/memory-pool/pin] error:", err.message);
     reply.code(500).send({ error: err.message });
