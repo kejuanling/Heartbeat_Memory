@@ -65,6 +65,7 @@ scp -i $key C:\deepseek\cloud\server.js root@120.76.99.224:/opt/dylan-heartbeat/
 - 内部接口鉴权不确定时先实测再批量写库：`/v1/upload-image` 等走全局 addHook 要 `Authorization: Bearer <api_key>`（`chat-settings.json` 里的 key 即可用），无鉴权/带错头会 401。批量脚本先小样本验通道，成功再全量。
 - Git Bash scp/ssh 首连报 `Host key verification failed`：加 `-o StrictHostKeyChecking=accept-new`（中文用户名导致 known_hosts 写不进，每次都会刷警告但不影响传输）。
 - Git Bash 里连接密钥路径务必写字面值 `-i "C:/Users/恪眷泠/.ssh/id_rsa"`；别用 PowerShell 的 `$env:USERPROFILE` 语法（在 bash 下会展开成 `:USERPROFILE\.ssh\id_rsa` 导致找不到密钥、Permission denied）。
+- **生成/转换密钥格式（2026-09-16 实测）**：`ssh-keygen -p -m PKCS8` 对 **Ed25519** 私钥提示成功但**静默不转**（文件头仍是 OPENSSH PRIVATE KEY）。要 PKCS#8 PEM（如 ChatGPT SSH 只收未加密 PKCS#8 Ed25519，不收 RSA/OpenSSH 格式）用本机 python cryptography：`serialization.load_ssh_private_key` 读入 → `private_bytes(PEM, PKCS8, NoEncryption())` 覆写同文件。验证用 `openssl pkey -in 密钥 -noout -text_pub`（验类型且不泄私钥；**别用 asn1parse**，会把私钥字节打出来）。新密钥做登录测试务必加 `-o IdentitiesOnly=yes`，防止静默回退旧密钥造成假阳性。
 
 ### 6.3 MCP / 工具解析
 - MCP（streamable-http）响应常是 SSE 而非纯 JSON：`tools/list` 返回 `event: message\ndata: {json}`，直接 `json.loads(raw)` 会报错。解析时逐行找 `data:` 前缀、取其后 JSON（多条时取最后一条 data），且 `result.content[].text` 常是嵌套的 JSON 字符串，要二次 `json.loads`。
