@@ -3585,7 +3585,8 @@ function ccNumLiveCheck(input, max){
       const txt=d.text||'';
       if(!txt){ el.innerHTML='<div class="empty">当前没有可注入的跨窗口内容</div>'; if(info)info.textContent=''; return; }
       el.innerHTML='<pre style="margin:0;white-space:pre-wrap;word-break:break-all">'+escapeHtml(txt)+'</pre>';
-      if(info) info.textContent='共 '+txt.length+' 字';
+      const modeTag=d.mode==='v2'?' · V2 实际注入':(d.mode==='legacy'?' · 旧版（V2 回滚态）':'');
+      if(info) info.textContent='共 '+txt.length+' 字'+modeTag;
     }catch(e){ el.innerHTML='<div class="empty">加载失败: '+e.message+'</div>'; }
   }
 

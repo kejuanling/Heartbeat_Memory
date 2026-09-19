@@ -375,6 +375,82 @@ function appendFloatIds(file, sessionId, memIds) {
   return arr;
 }
 
+// ============================================================
+// 生产输入组装（2026-09-19 自 routes/chat.js 抽出共享）
+// 主聊天（routes/chat.js）与跨窗口注入预览（server.js /admin/cross-window-inject）
+// 共用同一组装，后续唤醒切 V2 也走这里。全部只读，异常由调用点 try/catch 兜底。
+// 已知简化（观察口径，S3 观察期校准）：日记不做隐藏清单过滤、不做会话创建日边界过滤。
+// 未进 context_v2_pinned_map.json 的 pinned 条目按 retire 处理（不进任何注入块，报告可见）。
+// ============================================================
+
+/** 扫描 diary/ 全部日记（会话子目录收一层），按日期升序 */
+function readDiaryEntriesForShadow(baseDir) {
+  const out = [];
+  const scan = (root, depth) => {
+    let entries = [];
+    try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch (e) { return; }
+    for (const ent of entries) {
+      if (ent.isFile() && /^\d{4}-\d{2}-\d{2}(_\d{6})?\.md$/.test(ent.name)) {
+        try { out.push({ date: ent.name.slice(0, 10), content: fs.readFileSync(path.join(root, ent.name), 'utf8') }); } catch (e) {}
+      } else if (ent.isDirectory() && depth < 1) {
+        scan(path.join(root, ent.name), depth + 1); // 会话子目录收一层
+      }
+    }
+  };
+  scan(path.join(baseDir, 'diary'), 0);
+  return out.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+
+/**
+ * 组装 buildContextBlocks 的输入（原 buildCtxV2ShadowInput，逻辑零变化）。
+ * opts: { baseDir, sessionId, llmMessages, loadTimeline, normalizeContentToText }
+ * llmMessages 仅用于提取 query（Relevant 检索用），预览场景传 [] 即可。
+ */
+function assembleInput(opts) {
+  const dataDir = path.join(opts.baseDir, 'data');
+  let pinnedEntries = [];
+  let shadowMap = null;
+  try {
+    const pinned = JSON.parse(fs.readFileSync(path.join(dataDir, 'pinned.json'), 'utf8'));
+    try {
+      shadowMap = JSON.parse(fs.readFileSync(path.join(dataDir, 'context_v2_pinned_map.json'), 'utf8'));
+      if (!shadowMap || !Array.isArray(shadowMap.entries)) shadowMap = null;
+    } catch (e) { shadowMap = null; }
+    const byId = new Map((shadowMap && Array.isArray(shadowMap.entries) ? shadowMap.entries : []).map(e => [e.pinnedId, e.target]));
+    pinnedEntries = (Array.isArray(pinned) ? pinned : []).map(p => ({
+      id: p && p.id, title: p && p.title, content: p && p.content,
+      target: byId.get(p && p.id) || 'retire',
+    }));
+  } catch (e) {}
+  let timeline = [];
+  try {
+    timeline = (opts.loadTimeline(opts.sessionId) || []).map(m => ({
+      role: m && m.role,
+      content: typeof (m && m.content) === 'string' ? m.content : '',
+    }));
+  } catch (e) {}
+  let memoriesV2 = [];
+  try { memoriesV2 = JSON.parse(fs.readFileSync(path.join(dataDir, 'memory_v2.json'), 'utf8')); } catch (e) {}
+  let query = '';
+  try {
+    const llmMessages = Array.isArray(opts.llmMessages) ? opts.llmMessages : [];
+    for (let i = llmMessages.length - 1; i >= 0; i--) {
+      const m = llmMessages[i];
+      if (m && m.role === 'user') { query = opts.normalizeContentToText(m.content) || ''; break; }
+    }
+  } catch (e) {}
+  // 记忆浮现清单：本会话已写入时间线的记忆 id，Relevant 检索剥除防重复（0918 拍板）
+  let excludeIds = [];
+  try {
+    excludeIds = floatIdsForSession(path.join(dataDir, 'context_v2_floated.json'), opts.sessionId);
+  } catch (e) {}
+  // 日记篇数跟随管理台配置（0919 用户拍板：按我设定的数量来）
+  let diaryCount = 3;
+  try { diaryCount = Number(JSON.parse(fs.readFileSync(path.join(dataDir, 'memory_pool_config.json'), 'utf8')).cross_inject_diary_count) || 3; } catch (e) {}
+  // map 挂在 v2Input 上供 maybeObserve 取 mapVersion（builder 只读已知字段，多余键无害）
+  return { pinnedEntries, timeline, diaryEntries: readDiaryEntriesForShadow(opts.baseDir), memoriesV2, query, excludeIds, map: shadowMap, config: { diaryCount } };
+}
+
 module.exports = {
   TARGETS,
   validatePinnedMap,
@@ -391,4 +467,6 @@ module.exports = {
   readFloatMap,
   floatIdsForSession,
   appendFloatIds,
+  readDiaryEntriesForShadow,
+  assembleInput,
 };

@@ -5,6 +5,9 @@ const fs = require("fs-extra");
 const path = require("path");
 const crypto = require("crypto");
 const doubaoAsr = require("./doubao-asr");
+// Context V2 组装（预览接口与主聊天同源，2026-09-19）
+const { buildContextBlocks } = require("./context-v2-builder");
+const ctxV2Shadow = require("./context-v2-shadow");
 
 // === MCP 工具循环接入（隔离式，ENABLE_MCP=true 才生效）===
 const mcp = require("./mcp-tool-loop");
@@ -3854,9 +3857,32 @@ require("./routes/push-events")(app, { basicAuth, baseDir: __dirname });
 
 app.get("/admin/cross-window-inject", { preHandler: basicAuth }, async (req, reply) => {
   try {
+    // 2026-09-19：S4 后生产实际注入=V2 固定六块（旧 [永久上下文]/[跨窗口] 已被剥除），预览随总闸双轨——
+    // ctx_v2_enabled=true 时与主聊天同一 assembleInput+buildContextBlocks 实时拼真实注入内容
+    //（Relevant 块依赖当轮用户消息，预览不含；不受 cross_inject 开关控制，与 V2 生产路径同口径）。
+    // false/配置缺失=回滚态，保持旧逻辑（computeCrossMemoryText，含 cross_inject 总开关/会话覆盖门）。
+    const sid = String(req.query && req.query.session_id ? req.query.session_id : "").trim() || "default";
+    let v2Cfg = null;
+    try { v2Cfg = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "memory_v2_config.json"), "utf8")); } catch (e) {}
+    if (v2Cfg && v2Cfg.ctx_v2_enabled === true) {
+      let v2Text = "";
+      try {
+        const v2Input = ctxV2Shadow.assembleInput({
+          baseDir: __dirname,
+          sessionId: sid,
+          llmMessages: [],
+          loadTimeline: loadTimeline,
+          normalizeContentToText: normalizeContentToText,
+        });
+        const built = buildContextBlocks(v2Input);
+        v2Text = (built.blocks || [])
+          .filter(function (b) { return b && !b.empty && b.key !== "relevant_memories"; })
+          .map(function (b) { return b.content; }).join("\n\n");
+      } catch (cx) { console.warn("[cross-inject] V2 预览失败:", cx.message); }
+      return reply.send({ text: v2Text, session_id: sid, mode: "v2" });
+    }
     // 2026-09-13：预览改「每次实时重算」（computeCrossMemoryText），不再复用开窗口时落盘固定的旧快照；
     // 边界仍用本会话创建日（优先时间线首条消息，其次旧快照固化的 created_at），与实际注入同口径，只算不落盘。
-    const sid = String(req.query && req.query.session_id ? req.query.session_id : "").trim() || "default";
     let text = "";
     try {
       const cfg = memoryPool.getConfig();
@@ -3872,7 +3898,7 @@ app.get("/admin/cross-window-inject", { preHandler: basicAuth }, async (req, rep
         text = computeCrossMemoryText(cfg, createdIso);
       }
     } catch (cx) { console.warn("[cross-inject] 预览失败:", cx.message); }
-    reply.send({ text: text, session_id: sid });
+    reply.send({ text: text, session_id: sid, mode: "legacy" });
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
