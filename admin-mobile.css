@@ -785,6 +785,19 @@
  .mp-card::before{content:"";position:absolute;top:0;left:0;width:4px;height:100%;background:var(--mp-cat,transparent)}
  .mp-card.sunk{opacity:.55}
  .mp-card.pin{box-shadow:0 6px 22px rgba(142,68,173,0.10)}
+ /* 待审多选（0919）：选中态描边 + 卡头内联勾选框；操作条复用 cc-multi-bar，仅扩两列布局 */
+ .mp-card.sel{border-color:var(--accent);box-shadow:0 0 0 1.5px var(--accent) inset}
+ .mp-sel-chk{width:18px;height:18px;accent-color:var(--accent);cursor:pointer;flex-shrink:0}
+ .mp-review-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:2px 0 10px}
+ .mp-review-total{font-size:12px;color:var(--text2);font-weight:600}
+ .cc-multi-bar-actions.cols2{grid-template-columns:repeat(2,1fr)}
+ /* 相似分组（0919 第六个统计按钮）：组容器虚线框通栏，组内卡片纵向排列便于逐条比对 */
+ .mp-similar-head{grid-column:1/-1;font-size:12px;color:var(--text2);padding:2px 0 0}
+ .mp-similar-head b{color:var(--accent)}
+ .mp-similar-group{grid-column:1/-1;display:flex;flex-direction:column;gap:10px;border:1px dashed var(--border);border-radius:var(--radius);padding:12px;background:rgba(200,144,152,0.04)}
+ .mp-similar-group-head{font-size:12px;font-weight:600;color:var(--text2)}
+ .mp-similar-group-head b{color:var(--accent)}
+ .mp-similar-th{padding:3px 10px;border:1px solid var(--border);border-radius:999px;background:rgba(255,255,255,0.85);font-size:11px;color:var(--text);font-family:inherit;outline:none;cursor:pointer;vertical-align:middle}
  .mp-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
  .mp-cat{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:var(--text)}
  .mp-dot{width:9px;height:9px;border-radius:50%;background:var(--mp-cat,var(--accent));flex-shrink:0}

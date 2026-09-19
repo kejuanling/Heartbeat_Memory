@@ -4,6 +4,7 @@
 
 const path = require("path");
 const { createStore } = require("../memory-v2");
+const v2vectors = require("../memory-v2-vectors");
 
 const KIND_MAP = { "关于她": "fact", "认账": "rule", "拓本": "quote", fact: "fact", rule: "rule", quote: "quote", milestone: "milestone" };
 
@@ -65,6 +66,33 @@ module.exports = function registerMemoryV2Admin(app, deps) {
       };
       reply.send({ success: true, stats, items: mapped });
     } catch (err) {
+      reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // 相似分组（0919 第六个统计按钮）：活跃条目按语义向量聚类成组，供人工沉底重复条目。
+  // 阈值 ?th= 可调（0.5-0.99，默认 0.85）；embed-server 不可用时 503，前端显示提示。
+  app.get("/admin/memory-v2/similar-groups", { preHandler: basicAuth }, async (req, reply) => {
+    try {
+      let th = Number(req.query.th);
+      if (!Number.isFinite(th)) th = 0.85;
+      th = Math.min(0.99, Math.max(0.5, th));
+      const s = store();
+      const rows = s.list({ status: "active" });
+      if (!rows.length) return reply.send({ success: true, threshold: th, group_count: 0, groups: [] });
+      const ready = await v2vectors.ensureVectors(rows);
+      if (!ready) return reply.code(503).send({ error: "向量服务不可用（embed-server 熔断中），稍后再试" });
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      const groups = v2vectors.similarGroups(rows, th).map((g) => ({
+        max_sim: g.max_sim,
+        items: g.ids.map((id) => {
+          const e = byId.get(id);
+          return { id: e.id, text: e.text, kind: e.kind, subject: e.subject, priority: e.priority, created_at: e.created_at };
+        }),
+      }));
+      reply.send({ success: true, threshold: th, group_count: groups.length, groups });
+    } catch (err) {
+      console.error("[GET /admin/memory-v2/similar-groups] error:", err.message);
       reply.code(500).send({ error: err.message });
     }
   });

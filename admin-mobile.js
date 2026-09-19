@@ -4301,6 +4301,7 @@ async function deletePinned(id){
     window.__memShowPinned=false;
     window.__memShowAll=false;
     window.__memShowReview=false;
+    window.__memShowSimilar=false;
     populateMemPoolCatOptions();
     loadMemPool();
   }
@@ -4349,7 +4350,7 @@ async function deletePinned(id){
     const stats=d.stats||{}, allItems=d.items||[];
     window.__memPoolData=d;
     let items;
-    if(window.__memShowReview) items=[];
+    if(window.__memShowReview||window.__memShowSimilar) items=[];
     else if(window.__memShowAll) items=allItems;
     else if(window.__memShowPinned) items=allItems.filter(function(x){return x.pinned===true;});
     else if(window.__memShowSunk) items=allItems.filter(function(x){return x.active===false;});
@@ -4358,20 +4359,22 @@ async function deletePinned(id){
     const st=document.getElementById('mempool-stats');
     if(st){
       const onAll=!!window.__memShowAll;
-      const onActive=!window.__memShowAll&&!window.__memShowPinned&&!window.__memShowSunk&&!window.__memShowReview;
+      const onActive=!window.__memShowAll&&!window.__memShowPinned&&!window.__memShowSunk&&!window.__memShowReview&&!window.__memShowSimilar;
       st.innerHTML=''
         +'<span class="mp-stat toggle'+(onAll?' on':'')+'" onclick="toggleMemPoolAll()" title="显示全部记忆（含已沉底）">共 <b>'+stats.total+'</b> 条</span>'
         +'<span class="mp-stat toggle'+(onActive?' on':'')+'" onclick="toggleMemPoolActive()" title="只看活跃记忆">活跃 <b>'+stats.active+'</b></span>'
         +'<span class="mp-stat toggle'+(window.__memShowPinned?' on':'')+'" onclick="toggleMemPoolPinned()" title="点一下只看已置顶记忆，再点回到活跃">已pin <b>'+stats.pinned+'</b></span>'
         +'<span class="mp-stat toggle'+(window.__memShowSunk?' on':'')+'" onclick="toggleMemPoolSunk()" title="点一下只看已沉底记忆，再点回到活跃">已沉底 <b>'+stats.sunk+'</b></span>'
-        +'<span class="mp-stat toggle'+(window.__memShowReview?' on':'')+'" onclick="toggleMemPoolReview()" title="人工裁决解析出的记忆候选：通过入库 / 驳回">待审 <b>'+(window.__reviewTotal!=null?window.__reviewTotal:'…')+'</b></span>';
+        +'<span class="mp-stat toggle'+(window.__memShowReview?' on':'')+'" onclick="toggleMemPoolReview()" title="人工裁决解析出的记忆候选：通过入库 / 驳回">待审 <b>'+(window.__reviewTotal!=null?window.__reviewTotal:'…')+'</b></span>'
+        +'<span class="mp-stat toggle'+(window.__memShowSimilar?' on':'')+'" onclick="toggleMemPoolSimilar()" title="向量相近的记忆一组一组列出，挑重复的沉底">相似'+(window.__similarGroupCount!=null?' <b>'+window.__similarGroupCount+'</b> 组':'')+'</span>';
     }
     const el=document.getElementById('mempool-list');
     if(!el)return;
     const ctr=document.getElementById('mempool-controls');
-    if(ctr) ctr.style.display=window.__memShowReview?'none':'';
+    if(ctr) ctr.style.display=(window.__memShowReview||window.__memShowSimilar)?'none':'';
     el.className='mp-list';
     if(window.__memShowReview){ renderReviewItems(el); return; }
+    if(window.__memShowSimilar){ renderSimilarGroups(el); return; }
     if(!items.length){ el.innerHTML='<div class="mp-empty">暂无记忆，点右上角「＋ 新增记忆」或「整理记忆池」</div>'; return; }
     let html='';
     items.forEach(function(it){
@@ -4547,6 +4550,92 @@ async function deletePinned(id){
     window.__reviewSel={};
     if(window.__memShowReview){ window.__memShowAll=false; window.__memShowPinned=false; window.__memShowSunk=false; loadReviewQueue(); return; }
     loadMemPool();
+  }
+  // 相似（0919 第六个统计按钮）：活跃记忆按语义向量分组列出，组内挑重复的沉底
+  function toggleMemPoolSimilar(){
+    window.__memShowSimilar=!window.__memShowSimilar;
+    if(window.__memShowSimilar){ window.__memShowAll=false; window.__memShowPinned=false; window.__memShowSunk=false; window.__memShowReview=false; loadSimilarGroups(); return; }
+    loadMemPool();
+  }
+  async function loadSimilarGroups(){
+    try{
+      const th=window.__similarThresholdSel?'?th='+encodeURIComponent(window.__similarThresholdSel):'';
+      const r=await fetch(ADMIN_API + '/memory-v2/similar-groups'+th);
+      const d=await r.json();
+      if(d.error) throw new Error(d.error);
+      window.__similarGroups=d.groups||[];
+      window.__similarThreshold=d.threshold;
+      window.__similarGroupCount=window.__similarGroups.length;
+      window.__similarError=null;
+      if(window.__memShowSimilar||window.__memPoolData) renderMemPool(window.__memPoolData||{stats:{total:0,active:0,pinned:0,sunk:0},items:[]});
+    }catch(e){
+      window.__similarGroups=null; window.__similarError=e.message;
+      if(window.__memShowSimilar) renderMemPool(window.__memPoolData||{stats:{total:0,active:0,pinned:0,sunk:0},items:[]});
+      toast('相似分组加载失败: '+e.message);
+    }
+  }
+  function similarThSelect(){
+    const cur=Number(window.__similarThreshold||0.85);
+    return '<select class="mp-similar-th" onchange="changeSimilarTh(this.value)">'
+      +[0.9,0.85,0.8,0.75,0.7].map(function(t){return '<option value="'+t+'"'+(Math.abs(cur-t)<0.001?' selected':'')+'>'+t.toFixed(2)+'</option>';}).join('')
+      +'</select>';
+  }
+  function changeSimilarTh(v){
+    window.__similarThresholdSel=v;
+    loadSimilarGroups();
+  }
+  function renderSimilarGroups(el){
+    const g=window.__similarGroups;
+    if(!g){
+      el.innerHTML='<div class="mp-empty">'+(window.__similarError?('相似分组加载失败: '+escapeHtml(window.__similarError)):'正在计算向量相似…首次会嵌入全部活跃记忆，几秒钟，之后走缓存秒开')+'</div>';
+      return;
+    }
+    if(!g.length){ el.innerHTML='<div class="mp-empty">没有发现向量相近的活跃记忆（当前阈值 '+(window.__similarThreshold||0.85)+'；池子刚清洗过没重复是正常的，想看相近话题可调低）<br>'+similarThSelect()+'</div>'; return; }
+    let html='<div class="mp-similar-head">向量相近分组 · 阈值 '+similarThSelect()+' · 共 <b>'+g.length+'</b> 组，组内挑重复的沉底（沉完组自动缩小）</div>';
+    g.forEach(function(gr,gi){
+      html+='<div class="mp-similar-group"><div class="mp-similar-group-head">组 '+(gi+1)+' · 最高相似度 <b>'+Number(gr.max_sim).toFixed(2)+'</b> · '+gr.items.length+' 条</div>';
+      gr.items.forEach(function(it){
+        const imp=Math.round((Number(it.priority)||0)*100);
+        html+='<div class="mp-card" style="--mp-cat:'+mpCatColor(it.kind)+'">'
+          +'<div class="mp-card-head">'
+            +'<span class="mp-cat"><span class="mp-dot"></span>'+escapeHtml(it.kind)+'</span>'
+            +'<span class="mp-badges"><span class="mp-badge">'+escapeHtml(it.subject||'')+'</span></span>'
+          +'</div>'
+          +'<div class="mp-body">'+escapeHtml(it.text)+'</div>'
+          +'<div class="mp-meta"><span class="mp-imp">重要 '+imp+'%</span><span>'+escapeHtml(String(it.created_at||'').slice(0,10))+'</span></div>'
+          +'<div class="mp-actions">'
+            +'<button type="button" class="mp-btn ghost" onclick="sinkMemPoolSimilar(\''+it.id+'\')">沉底</button>'
+            +'<button type="button" class="mp-btn ghost" onclick="editMemPoolSimilar(\''+it.id+'\')">编辑</button>'
+          +'</div>'
+        +'</div>';
+      });
+      html+='</div>';
+    });
+    el.innerHTML=html;
+  }
+  async function sinkMemPoolSimilar(id){
+    if(!confirm('沉底该条记忆？沉底后不再参与检索浮现。'))return;
+    try{
+      const r=await fetch(ADMIN_API+'/memory-v2/entries/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'archive'})});
+      const d=await r.json().catch(function(){return {};});
+      if(d.error){ toast('操作失败: '+d.error); return; }
+      toast('已归档'); loadSimilarGroups();
+    }catch(e){ toast('操作失败: '+e.message); }
+  }
+  function editMemPoolSimilar(id){
+    let it=null;
+    (window.__similarGroups||[]).forEach(function(gr){ if(it)return; (gr.items||[]).forEach(function(x){ if(x.id===id)it=x; }); });
+    if(!it){ toast('未找到该记忆'); return; }
+    AppState.memPoolEditId=id;
+    populateMemPoolCatOptions();
+    const ed=document.getElementById('mempool-edit-cat');
+    if(ed) ed.value=(it.kind||'fact');
+    const ii=document.getElementById('mempool-edit-imp');
+    if(ii) ii.value=(Number(it.priority)||0.5)+'';
+    const ce=document.getElementById('mempool-edit-content');
+    if(ce) ce.value=it.text||'';
+    document.getElementById('mempool-modal-title').textContent='编辑记忆';
+    openModal('mempoolEditModal');
   }
   async function loadReviewQueue(){
     try{
@@ -4750,7 +4839,7 @@ async function deletePinned(id){
       if(d.error){ toast('保存失败: '+d.error); return; }
       toast(AppState.memPoolEditId?'记忆已更新':'记忆已新增');
       closeModal('mempoolEditModal');
-      loadMemPool();
+      if(window.__memShowSimilar){ loadSimilarGroups(); } else { loadMemPool(); }
     }catch(e){ toast('网络错误: '+e.message); }
   }
   async function sinkMemPool(id){
