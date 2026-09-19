@@ -15,8 +15,9 @@ const { nowIso } = require("./time_utils");
 const DATA_DIR = process.env.MEMORY_DATA_DIR || path.join(__dirname, "data");
 const POOL_FILE = path.join(DATA_DIR, "memory_pool.json");
 const POOL_CONFIG_FILE = path.join(DATA_DIR, "memory_pool_config.json");
-// 只读模式（wake-up 进程）：与 memory-engine 同款守卫。记忆池是 gateway/wake-up 共享数据，
-// 双进程各自整文件覆盖写会互相回滚，只读进程必须拦截一切落盘与内存改写。
+// 只读守卫（MEMORY_ENGINE_READONLY，与 memory-engine 同款）：原为 wake-up 双进程设计——
+// 双进程各自整文件覆盖写会互相回滚，只读进程必须拦截一切落盘与内存改写；
+// 2026-09-15 wake-up 退役后 gateway 单进程，机制保留作多进程部署防御。
 const READONLY = process.env.MEMORY_ENGINE_READONLY === "1";
 // 2026-09-13 审查修复：记忆池旁路 LLM 调用（重解析/清理）统一超时——上游挂起不再拖住聊天回复链路
 const LLM_CALL_TIMEOUT_MS = Number(process.env.MEMORY_POOL_LLM_TIMEOUT_MS) || 60000;

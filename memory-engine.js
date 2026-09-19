@@ -14,9 +14,11 @@ let config = {};
 let pinnedMemories = [];
 let deletedPinSignatures = new Set();
 
-// 只读模式：wake-up 与 gateway 共享同一批数据文件，但只允许 gateway 写盘
+// 只读守卫：多进程共享同一批数据文件时只允许一个进程写盘（原为 wake-up 双进程设计；
+// 2026-09-15 wake-up 退役后 gateway 单进程，机制保留作多进程部署防御）
 const READONLY = process.env.MEMORY_ENGINE_READONLY === "1";
 
+// 同步/异步原子写 JSON（tmp+rename）——本模块 pair 与 server.js 的同名函数重复，历史并存
 function atomicWriteJsonSync(file, data) {
   const tmp = file + ".tmp";
   fs.writeJsonSync(tmp, data, { spaces: 2 });
@@ -31,6 +33,7 @@ async function atomicWriteJson(file, data) {
 
 const DEFAULT_CONFIG = { idle_threshold_minutes: 5, max_interval_minutes: 30, auto_summary_enabled: true, summary_max_messages: 50, memory_retrieval_enabled: true, retrieval_top_k: 5, dedup_threshold: 0.9, conflict_threshold: 0.85, time_decay_days: 30, keyword_search_enabled: true, embedding_enabled: false, embedding_model: "Xenova/paraphrase-multilingual-MiniLM-L12-v2", co_vision_api_url: "https://open.bigmodel.cn/api/paas/v4/chat/completions", co_vision_api_key: "", co_vision_model: "glm-4v-flash", co_frame_interval: 30, memory_relevance_threshold: 0.3, memory_query_window: 3, memory_retrieval_window_days: 0, context_injection_types: ["fact", "preference", "emotion", "summary", "moment"], memory_cooldown_minutes: 30, memory_item_cooldown_minutes: 120, summary_surfacing_min_age_hours: 24, summary_surfacing_min_age_enabled: true, summary_event_injection_enabled: false, summary_event_inject_enabled: true, summary_event_short_ctx_msgs: 20, time_event_injection_enabled: false, wake_query_window: 3, wake_relevance_threshold: 0.3, wake_repeat_window: 3, wake_history_max_messages: 100, wake_context_compaction_enabled: false, memory_persist_on_surface_enabled: false, summary_enabled: true, moment_sync_enabled: true, screenshot_wake_enabled: false, vision_models: [], co_vision_model_id: "", screenshot_vision_model_id: "", event_inject_types: ["wake","diary","push","summary","co","screenshot"] };
 
+// 启动：确保数据目录、读 config/pinned/已删签名；READONLY 时挂 30s 重载定时器跟随写方进程
 async function init() {
   await fs.ensureDir(DATA_DIR);
   try {
@@ -45,7 +48,8 @@ async function init() {
   await loadDeletedSignatures();
   if (READONLY) {
     console.log("[memory-engine] 只读模式：pin/状态由 gateway 进程负责写盘");
-    // 只读进程（wake_up）周期性从磁盘重载 pinned，避免 gateway 更新 pinned.json 后本进程长期用旧缓存
+    // 只读进程周期性从磁盘重载 pinned，避免写方进程更新 pinned.json 后本进程长期用旧缓存
+    // （原为 wake-up 双进程设计；现无只读进程在跑，机制保留）
     setInterval(async function () {
       try {
         const rawPinned = await fs.readJson(PINNED_FILE);
@@ -59,10 +63,12 @@ async function init() {
 // Pinned Memories (永久注入上下文)
 // ========================
 
+// 内容签名（trim 后全文）：已删拦截与去重共用
 function contentSignature(content) {
   return String(content || "").trim();
 }
 
+// pinned.json 跨异步文件锁：wx 独占创建 lock 文件，超时强拆（持锁段毫秒级，基本无竞争）
 function withPinnedLock(fn, timeoutMs) {
   if (timeoutMs === undefined) timeoutMs = 8000;
   const lockFile = PINNED_FILE + ".lock";
@@ -102,6 +108,8 @@ async function saveDeletedSignatures() {
   await atomicWriteJson(DELETED_PINS_FILE, Array.from(deletedPinSignatures).slice(-400));
 }
 
+// 新增 pin：内容签名去重 + 已删签名拦截；allowDeleted=true 放行曾删除的签名并清除记录
+//（编辑/恢复场景用）。锁内重读盘上真身再写，防并发丢条目。
 async function addPinnedMemory(entry, opts) {
   if (READONLY) { console.warn("[memory-engine] 只读模式，忽略新增 pin"); return null; }
   const { title, content } = entry;
@@ -140,6 +148,7 @@ async function updatePinnedMemory(id, updates) {
   });
 }
 
+// 删除 pin：内容签名记入 deleted_pins（防同一内容被 AI 重复写入复活）
 async function deletePinnedMemory(id) {
   if (READONLY) { console.warn("[memory-engine] 只读模式，忽略删除 pin"); return false; }
   return withPinnedLock(async () => {
@@ -183,6 +192,7 @@ function getPinnedMemories() {
   return pinnedMemories.slice().sort((a, b) => (a.order || 0) - (b.order || 0));
 }
 
+// 永久上下文正文（【标题】内容 按序拼接）——[永久上下文] developer 块的数据源
 function buildPinnedContext() {
   if (!pinnedMemories.length) return '';
   const sorted = pinnedMemories.slice().sort((a, b) => (a.order || 0) - (b.order || 0));
