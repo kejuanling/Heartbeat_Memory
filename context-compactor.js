@@ -106,6 +106,13 @@ function saveConfig(updates) {
 }
 
 function loadPersona() {
+  // 人设来源（2026-09-19 用户拍板）：优先前端聊天设置的默认人设（chat-settings.json 的 system_prompt）；
+  // 设置为空/缺失时退回时间线首条 system（旧行为），最后用内置兜底。
+  try {
+    const cs = JSON.parse(fs.readFileSync(path.join(__dirname, "chat-settings.json"), "utf-8"));
+    const sp = String(cs && cs.system_prompt || "").trim();
+    if (sp) return sp;
+  } catch (err) { /* 设置文件缺失时继续走时间线 */ }
   try {
     const data = JSON.parse(fs.readFileSync(TIMELINE_FILE, "utf-8"));
     const sys = (Array.isArray(data) ? data : []).find(function (m) { return m && m.role === "system"; });
@@ -354,7 +361,8 @@ function buildCompactionPrompt(chunk, cfg) {
   }
   const chunkInfo = (chunk.startTime || "未知") + " ~ " + (chunk.endTime || "未知") + "，共 " + chunk.count + " 条";
   return {
-    system: promptCfg.system,
+    // ${PERSONA} 在 system 与 user 模板里都要替换（自定义英文模板把人设写在 system：「You are ${PERSONA}.」）
+    system: String(promptCfg.system).replace("${PERSONA}", persona),
     prompt: promptCfg.template
       .replace("${PERSONA}", persona)
       .replace("${chunkInfo}", chunkInfo)
@@ -554,6 +562,7 @@ module.exports = {
   saveCtxLimitPrompt,
   resetCtxLimitPrompt,
   getCompactionPromptForDisplay,
+  buildCompactionPrompt,
   saveCompactionPromptConfig,
   resetCompactionPromptConfig,
   rangePreview,
