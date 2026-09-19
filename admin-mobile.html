@@ -109,6 +109,8 @@
            <input type="number" id="cc-cfg-max-blocks" min="0" step="1"></label>
          <label class="cc-cfg-field">上下文容量上限<span class="hint-i" onclick="event.preventDefault();event.stopPropagation();showHintText(this,'上下文容量上限','按 token 估算，0=不限。超过时网关塞一条隐藏提醒，让 AI 自己压缩上下文。')">i</span>
            <input type="number" id="cc-cfg-ctx-limit" min="0" step="1000"></label>
+         <label class="cc-cfg-field">提醒上限<span class="hint-i" onclick="event.preventDefault();event.stopPropagation();showHintText(this,'提醒上限','后台提醒卡的超限门槛（token 估算），0=不提醒。只管提醒显示，与容量提醒/自动压缩无关。')">i</span>
+           <input type="number" id="cc-cfg-alert-limit" min="0" step="1000"></label>
          <label class="cc-cfg-field cc-cfg-check">容量提醒开关
            <input type="checkbox" id="cc-cfg-ctx-remind"></label>
          <label class="cc-cfg-field">AI 压缩保护最近条数（AI 建的替换块不许覆盖最近 N 条，0=不保护）

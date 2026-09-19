@@ -6617,13 +6617,14 @@ function renderAlerts(body){
       var nm=a.session_name||(a.session_id?sessMap[a.session_id]:null);
       if(a.session_id){
         t+='：'+(nm||a.session_id);
-        if(a.token_used!=null&&a.token_limit!=null) d='ID '+a.session_id+' · 约 '+a.token_used+' / '+a.token_limit+' token · '+(d||'AI 将自动压缩');
+        if(a.token_used!=null&&a.token_limit!=null) d='ID '+a.session_id+' · 约 '+a.token_used+' / '+a.token_limit+' token · '+(d||'建议整理上下文');
       }
       html+='<div class="alert-item"><span class="alert-dot '+(a.level==='error'?'error':'warn')+'"></span><span><div class="alert-t">'+esc(t)+'</div><div class="alert-d">'+esc(d)+'</div></span></div>';
     });
-    if(services.length){
-      html+=services.map(function(s){
-        return '<div class="alert-item"><span class="alert-dot '+(s.ok?'ok':'error')+'"></span><span><div class="alert-t">'+esc(s.label||s.name)+'</div><div class="alert-d">'+(s.ok?'运行正常':'未运行 · '+esc(s.status||''))+'</div></span></div>';
+    // 只列异常服务：运行正常的不显示（2026-09-19 拍板）
+    if(bad.length){
+      html+=bad.map(function(s){
+        return '<div class="alert-item"><span class="alert-dot error"></span><span><div class="alert-t">'+esc(s.label||s.name)+'</div><div class="alert-d">未运行 · '+esc(s.status||'')+'</div></span></div>';
       }).join('');
     }
     body.innerHTML='<div class="alerts-scroll">'+html+'</div>';

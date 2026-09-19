@@ -4203,11 +4203,11 @@ app.get("/admin/alerts", { preHandler: basicAuth }, async (req, reply) => {
       }
     }
   } catch (e) { console.warn("[alerts] netease:", e.message); }
-  // 2) 会话上下文达容量上限：最近活跃会话时间线按容量提醒守卫同口径估算用量，达到上限即报（不依赖是否已塞容量提醒），带会话 id/名称/用量
+  // 2) 会话 token 达提醒上限：最近活跃会话时间线按容量守卫同口径估算用量，达到「提醒上限」（ctx_limit_alert_tokens，独立配置，与容量提醒/压缩无关）即报，带会话 id/名称/用量
   const sessNames = {};
   try { Object.assign(sessNames, readJsonFileSafe(SESSION_NAMES_FILE, {})); } catch (e) {}
   try {
-    const limit = Number(contextCompactor.loadConfig().compaction_context_limit_chars) || 0;
+    const limit = Number(contextCompactor.loadConfig().ctx_limit_alert_tokens) || 0;
     if (limit) {
       const files = [];
       try { files.push({ f: TIMELINE_FILE, m: fs.statSync(TIMELINE_FILE).mtimeMs }); } catch (e) {}
@@ -4225,7 +4225,7 @@ app.get("/admin/alerts", { preHandler: basicAuth }, async (req, reply) => {
           const used = estimateAlertTokens(tl);
           if (used < limit) continue; // 用量达到上限才提醒（不依赖是否已塞容量提醒；降回上限以下自动消失）
           const sid = f === TIMELINE_FILE ? "default" : f.replace(/^enhanced_messages_/, "").replace(/\.json$/, "");
-          alerts.push({ type: "capacity", level: "warn", title: "上下文已达容量上限", session_id: sid, session_name: sessNames[sid] || null, token_used: used, token_limit: limit, desc: "AI 将自动压缩" });
+          alerts.push({ type: "capacity", level: "warn", title: "会话 token 达提醒上限", session_id: sid, session_name: sessNames[sid] || null, token_used: used, token_limit: limit, desc: "仅提醒，AI 不会自动整理" });
         } catch (e) {}
       }
     }

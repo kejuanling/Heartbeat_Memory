@@ -2925,6 +2925,7 @@ function ccArmAllGapAutoLoad(){
      'cc-cfg-chunk-max':c.compaction_chunk_max,
      'cc-cfg-max-blocks':c.compaction_max_active_blocks,
      'cc-cfg-ctx-limit':(c.compaction_context_limit_chars!==undefined?c.compaction_context_limit_chars:30000),
+     'cc-cfg-alert-limit':(c.ctx_limit_alert_tokens!==undefined?c.ctx_limit_alert_tokens:0),
      'cc-cfg-protect-recent':(c.compaction_protect_recent_messages!==undefined?c.compaction_protect_recent_messages:40)
    };
    Object.keys(fields).forEach(function(id){
@@ -2968,6 +2969,7 @@ function ccArmAllGapAutoLoad(){
     compaction_chunk_max: chunkMax,
     compaction_max_active_blocks: Math.max(0, Math.floor(Number(get('cc-cfg-max-blocks'))||0)),
     compaction_context_limit_chars: Math.max(0, Math.floor(Number(get('cc-cfg-ctx-limit'))||0)),
+    ctx_limit_alert_tokens: Math.max(0, Math.floor(Number(get('cc-cfg-alert-limit'))||0)),
     compaction_context_remind_enabled: getC('cc-cfg-ctx-remind'),
     compaction_protect_recent_messages: Math.max(0, Math.floor(Number(get('cc-cfg-protect-recent'))||0))
   };
@@ -2983,6 +2985,7 @@ function ccArmAllGapAutoLoad(){
       const setV=function(id,v){ const el=document.getElementById(id); if(el) el.value=(v!==undefined?v:''); };
       const setC=function(id,b){ const el=document.getElementById(id); if(el) el.checked=!!b; };
       if(j.config.compaction_context_limit_chars!==undefined) setV('cc-cfg-ctx-limit', j.config.compaction_context_limit_chars);
+      if(j.config.ctx_limit_alert_tokens!==undefined) setV('cc-cfg-alert-limit', j.config.ctx_limit_alert_tokens);
       if(j.config.compaction_max_active_blocks!==undefined) setV('cc-cfg-max-blocks', j.config.compaction_max_active_blocks);
       setC('cc-cfg-ctx-remind', j.config.compaction_context_remind_enabled!==false);
     }
