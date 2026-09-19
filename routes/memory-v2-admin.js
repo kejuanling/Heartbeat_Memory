@@ -95,7 +95,7 @@ module.exports = function registerMemoryV2Admin(app, deps) {
         return reply.send({ success: true, action: "admit_new", id: r2.entry.id, entry: r2.entry });
       }
 
-      const r = admission.submitManual(
+      const r = await admission.submitManual(
         { content, category: b.category, importance: b.importance, kind: b.kind },
         { sessionId: String(b.session_id || "").trim() || null },
         "manual_review"

@@ -890,8 +890,42 @@ function toast(msg){
      else toast('保存失败: '+(j.error||''));
    }catch(e){toast('网络错误: '+e.message)}
  }
- 
+
  // ============ 日志页：截图提示词 ============
+  // ============ 记忆流水线·判定提示词（2026-09-19） ============
+  async function loadJudgePrompt(){
+    const msg=document.getElementById('judge-prompt-msg');
+    try{
+      const r=await fetch(ADMIN_API + '/memory-judge/prompt');
+      const c=await r.json();
+      if(c.error) throw new Error(c.error);
+      const t=document.getElementById('judge-prompt-template');
+      if(t) t.value=c.template||'';
+      if(msg) msg.textContent=c.custom_set?'当前为自定义版本；「恢复内置默认」可回退。':'当前为内置默认。';
+    }catch(e){ if(msg) msg.textContent='读取判定提示词失败: '+e.message; }
+  }
+  async function saveJudgePrompt(){
+    const msg=document.getElementById('judge-prompt-msg');
+    const t=document.getElementById('judge-prompt-template').value;
+    try{
+      const r=await fetch(ADMIN_API + '/memory-judge/prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({template:t})});
+      const j=await r.json();
+      if(j.error) throw new Error(j.error);
+      if(msg) msg.textContent='已保存，下一次记忆入库判定即生效。';
+      toast('判定提示词已保存');
+    }catch(e){ if(msg) msg.textContent='保存失败: '+e.message; }
+  }
+  async function resetJudgePrompt(){
+    if(!confirm('恢复内置默认判定提示词？'))return;
+    const msg=document.getElementById('judge-prompt-msg');
+    try{
+      const r=await fetch(ADMIN_API + '/memory-judge/prompt',{method:'DELETE'});
+      const j=await r.json();
+      if(j.error) throw new Error(j.error);
+      await loadJudgePrompt();
+      toast('已恢复内置默认');
+    }catch(e){ if(msg) msg.textContent='恢复失败: '+e.message; }
+  }
   // ============ 记忆与唤醒参数 ============
   async function loadReparsePrompt(){
     const msg=document.getElementById('reparse-prompt-msg');
@@ -3474,7 +3508,7 @@ function ccNumLiveCheck(input, max){
    document.querySelector('.tab-item[data-tab="'+name+'"]').classList.add('active');
   if(name==='memory'){ if(!window.__memPoolInited){ initMemPoolView(); window.__memPoolInited=true; } loadReviewQueue(); }
   if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
-  if(name==='prompts'){loadWakePrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadReparsePrompt();}
+  if(name==='prompts'){loadWakePrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadReparsePrompt();loadJudgePrompt();}
   if(name==='config'){loadToolsConfig();}
   if(name==='system'){startLogsAutoRefresh();}
   if(name!=='system'){stopLogsAutoRefresh();}
@@ -4505,6 +4539,9 @@ async function deletePinned(id){
   // 待审（review 队列，0919 第五个统计按钮）：列表区切换显示记忆候选，通过入库 / 驳回
   function toggleMemPoolReview(){
     window.__memShowReview=!window.__memShowReview;
+    // 每次进出待审视图都重置多选状态，避免残留勾选跨视图生效
+    window.__reviewMultiSel=false;
+    window.__reviewSel={};
     if(window.__memShowReview){ window.__memShowAll=false; window.__memShowPinned=false; window.__memShowSunk=false; loadReviewQueue(); return; }
     loadMemPool();
   }
@@ -4528,13 +4565,19 @@ async function deletePinned(id){
     const q=window.__reviewQueue;
     if(!q){ el.innerHTML='<div class="loading">加载 review 队列...</div>'; return; }
     if(!q.length){ el.innerHTML='<div class="mp-empty">待审队列空，候选都处理完了</div>'; return; }
+    const multi=!!window.__reviewMultiSel;
     const ORIGIN={promotion:'压缩块解析',manual:'手动提交'};
-    let html='';
+    let html='<div class="mp-review-toolbar">'
+      +'<span class="mp-review-total">待审候选 <b>'+q.length+'</b> 条</span>'
+      +'<button type="button" class="mp-btn'+(multi?' primary':'')+'" onclick="toggleReviewMultiSelect()">'+(multi?'取消多选':'多选')+'</button>'
+    +'</div>';
     q.forEach(function(it){
       const c=it.candidate||{};
       const cc=mpCatColor(c.kind||'fact');
-      html+='<div class="mp-card" style="--mp-cat:'+cc+'">'
+      const on=multi&&!!window.__reviewSel[it.id];
+      html+='<div class="mp-card'+(on?' sel':'')+'"'+(multi?' data-rid="'+escapeHtml(it.id)+'" onclick="toggleReviewSel(\''+it.id+'\')"':'')+' style="--mp-cat:'+cc+'">'
         +'<div class="mp-card-head">'
+          +(multi?'<input type="checkbox" class="mp-sel-chk"'+(on?' checked':'')+' onclick="event.stopPropagation();toggleReviewSel(\''+it.id+'\')">':'')
           +'<span class="mp-cat"><span class="mp-dot"></span>'+escapeHtml(c.kind||'fact')+'</span>'
           +'<span class="mp-badges"><span class="mp-badge">待审</span></span>'
         +'</div>'
@@ -4543,13 +4586,103 @@ async function deletePinned(id){
           +'<span>来源 '+(ORIGIN[c.origin]||escapeHtml(String(c.origin||'未知')))+'</span>'
           +(it.created_at?'<span>'+escapeHtml(String(it.created_at).slice(0,10))+'</span>':'')
         +'</div>'
-        +'<div class="mp-actions">'
+        +(multi?'':'<div class="mp-actions">'
           +'<button type="button" class="mp-btn ghost" onclick="approveReviewItem(\''+it.id+'\')">通过入库</button>'
           +'<button type="button" class="mp-btn danger" onclick="rejectReviewItem(\''+it.id+'\')">驳回</button>'
-        +'</div>'
+        +'</div>')
       +'</div>';
     });
+    // 多选操作条：复用压缩页 cc-multi-bar 固定底栏样式，cols2 两列按钮
+    html+='<div class="cc-multi-bar'+(multi?' show':'')+'" id="review-multi-bar">'
+      +'<div class="cc-multi-bar-top">'
+        +'<div class="cc-multi-bar-left">'
+          +'<span class="cc-multi-count" id="review-multi-count">已选 '+Object.keys(window.__reviewSel||{}).length+' 条</span>'
+          +'<label class="cc-multi-select-all"><input type="checkbox" id="review-multi-select-all"'+(multi&&q.length&&Object.keys(window.__reviewSel||{}).length>=q.length?' checked':'')+' onclick="toggleReviewSelectAll()">全选</label>'
+        +'</div>'
+      +'</div>'
+      +'<div class="cc-multi-bar-actions cols2">'
+        +'<button type="button" class="cc-btn primary" id="review-batch-approve" onclick="batchReviewDecide(\'approve\')">批量通过入库</button>'
+        +'<button type="button" class="cc-btn danger" id="review-batch-reject" onclick="batchReviewDecide(\'reject\')">批量驳回</button>'
+      +'</div>'
+    +'</div>';
     el.innerHTML=html;
+  }
+  // 待审多选：进出多选模式（清空勾选重画）
+  function toggleReviewMultiSelect(){
+    window.__reviewMultiSel=!window.__reviewMultiSel;
+    window.__reviewSel={};
+    renderReviewItems(document.getElementById('mempool-list'));
+  }
+  // 勾选/取消单条：只改对应卡片 DOM，不整页重画（173 条全量重绘会闪烁跳屏）
+  function toggleReviewSel(id){
+    if(window.__reviewSel[id]) delete window.__reviewSel[id]; else window.__reviewSel[id]=true;
+    const el=document.getElementById('mempool-list');
+    if(!el) return;
+    el.querySelectorAll('.mp-card[data-rid]').forEach(function(card){
+      if(card.getAttribute('data-rid')!==id) return;
+      const on=!!window.__reviewSel[id];
+      card.classList.toggle('sel',on);
+      const chk=card.querySelector('.mp-sel-chk');
+      if(chk) chk.checked=on;
+    });
+    updateReviewMultiBar();
+  }
+  // 全选/全不选：以当前队列为准，逐卡同步勾选态
+  function toggleReviewSelectAll(){
+    const q=window.__reviewQueue||[];
+    const allBox=document.getElementById('review-multi-select-all');
+    const all=!!(allBox&&allBox.checked);
+    window.__reviewSel={};
+    if(all) q.forEach(function(it){ window.__reviewSel[it.id]=true; });
+    const el=document.getElementById('mempool-list');
+    if(el) el.querySelectorAll('.mp-card[data-rid]').forEach(function(card){
+      const on=!!window.__reviewSel[card.getAttribute('data-rid')];
+      card.classList.toggle('sel',on);
+      const chk=card.querySelector('.mp-sel-chk');
+      if(chk) chk.checked=on;
+    });
+    updateReviewMultiBar();
+  }
+  // 底栏计数与按钮可用态同步；批量进行中禁用双按钮防重复提交
+  function updateReviewMultiBar(){
+    const sel=window.__reviewSel||{};
+    const n=Object.keys(sel).length;
+    const cnt=document.getElementById('review-multi-count');
+    if(cnt) cnt.textContent='已选 '+n+' 条';
+    const all=document.getElementById('review-multi-select-all');
+    if(all) all.checked=!!window.__reviewQueue&&window.__reviewQueue.length>0&&n>=window.__reviewQueue.length;
+    const busy=!!window.__reviewBatchBusy;
+    const ba=document.getElementById('review-batch-approve'), br=document.getElementById('review-batch-reject');
+    if(ba) ba.disabled=busy||n===0;
+    if(br) br.disabled=busy||n===0;
+  }
+  // 批量裁决：前端顺序调现有单条接口（0919 拍板），逐条计成功/失败，完成后刷新队列
+  async function batchReviewDecide(decision){
+    if(window.__reviewBatchBusy) return;
+    const ids=Object.keys(window.__reviewSel||{});
+    if(!ids.length){ toast('先勾选至少一条候选'); return; }
+    const isReject=decision==='reject';
+    if(!confirm(isReject
+      ?'将驳回选中的 '+ids.length+' 条候选？驳回后从队列移除、不可恢复。'
+      :'将通过入库选中的 '+ids.length+' 条候选？入库后可在记忆池查看。')) return;
+    window.__reviewBatchBusy=true;
+    updateReviewMultiBar();
+    let ok=0, fail=0;
+    for(let i=0;i<ids.length;i++){
+      const cnt=document.getElementById('review-multi-count');
+      if(cnt) cnt.textContent='处理中 '+(i+1)+'/'+ids.length+'…';
+      try{
+        const r=await fetch(ADMIN_API+'/memory-review/queue/'+encodeURIComponent(ids[i])+'/'+(isReject?'reject':'approve'),{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+        const j=await r.json();
+        if(j.error) throw new Error(j.error);
+        ok++;
+      }catch(e){ fail++; }
+    }
+    window.__reviewBatchBusy=false;
+    window.__reviewMultiSel=false;
+    window.__reviewSel={};
+    toast('批量'+(isReject?'驳回':'通过入库')+'完成：成功 '+ok+' 条'+(fail?' / 失败 '+fail+' 条':''));
+    loadReviewQueue();
   }
   async function approveReviewItem(id){
     try{

@@ -3492,7 +3492,7 @@ app.post("/internal/memory-pool/add", async (req, reply) => {
     const content = String(b.content || "").trim();
     if (!content) return reply.code(400).send({ error: "content 必填" });
     if (memoryV2Admission) {
-      const v2 = memoryV2Admission.submitV2(
+      const v2 = await memoryV2Admission.submitV2(
         { content, category: b.category, importance: b.importance },
         { sessionId: String(b.session_id || "").trim() }
       );
@@ -3625,7 +3625,7 @@ function startMemoryBackgroundMigration(admission) {
   const doneFile = pathx.join(__dirname, "data", "memory_v2_mig_done.json");
   const kindMap = { "关于她": "fact", "认账": "rule", "拓本": "quote", "压缩摘要": "milestone", "对话碎片": "fact", "关于我们": "fact", "锚点": "quote", "信号": "fact", "对话摘要": "fact" };
   let running = false;
-  const runBatch = () => {
+  const runBatch = async () => {
     if (running) return;
     running = true;
     try {
@@ -3634,7 +3634,7 @@ function startMemoryBackgroundMigration(admission) {
       const list = Array.isArray(rows) ? rows.filter(r => r && r.active !== false && r.id && !done[r.id]) : [];
       let n = 0;
       for (const r of list.slice(0, batchSize)) {
-        const result = admission.submitPromotion({ content: String(r.content || "").trim(), kind: kindMap[r.category] || "fact", importance: Number(r.importance) || 0.5, block_id: "legacy:" + r.id });
+        const result = await admission.submitPromotion({ content: String(r.content || "").trim(), kind: kindMap[r.category] || "fact", importance: Number(r.importance) || 0.5, block_id: "legacy:" + r.id });
         if (result && result.action !== "error") { done[r.id] = { at: new Date().toISOString(), action: result.action, queue_id: result.queue_id || null }; n++; }
       }
       if (n) fsx.writeJsonSync(doneFile, done, { spaces: 2 });
@@ -3648,6 +3648,27 @@ function startMemoryBackgroundMigration(admission) {
 }
 startMemoryBackgroundMigration(memoryV2Admission);
 require("./routes/memory-pool")(app, { basicAuth, v2Manual: memoryV2Admission ? (b) => memoryV2Admission.submitV2(b) : null });
+
+// 记忆流水线 judge 判定提示词（提示词页配置，2026-09-19）
+const judgeAdapter = require("./judge-adapter");
+app.get("/admin/memory-judge/prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const c = judgeAdapter.getJudgePromptConfig();
+    reply.send({ template: c.effective, custom_set: !!c.custom, default_template: c.default_template });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+app.post("/admin/memory-judge/prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const t = judgeAdapter.saveJudgeTemplate((req.body || {}).template);
+    reply.send({ ok: true, custom_set: !!t });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+app.delete("/admin/memory-judge/prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    judgeAdapter.saveJudgeTemplate("");
+    reply.send({ ok: true, custom_set: false });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
 require("./routes/memory-review")(app, { basicAuth, admission: memoryV2Admission });
 // 记忆 V2 管理台：集合查看 + 聊天页入池（manual_review 走流水线进 review）
 require("./routes/memory-v2-admin")(app, { basicAuth, admission: memoryV2Admission, baseDir: __dirname });
@@ -3718,9 +3739,9 @@ app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, re
         const candidates = await extractMemoryCandidates(s.source_text);
         for (const c of candidates) {
           try {
-            const r = memoryV2Admission
+            const r = await (memoryV2Admission
               ? memoryV2Admission.submitPromotion({ content: c.text, kind: c.kind, block_id: s.block_id }, { sessionId: s.session })
-              : { action: "error" };
+              : Promise.resolve({ action: "error" }));
             if (r.action === "reject") rejected++; else reviewed++;
           } catch (e) { failed++; }
         }
@@ -4182,7 +4203,7 @@ app.get("/admin/alerts", { preHandler: basicAuth }, async (req, reply) => {
       }
     }
   } catch (e) { console.warn("[alerts] netease:", e.message); }
-  // 2) 会话上下文达容量上限：最近活跃会话时间线中存在未删除的 ctx_limit 落盘提醒（与容量提醒守卫同口径），带会话 id/名称/用量
+  // 2) 会话上下文达容量上限：最近活跃会话时间线按容量提醒守卫同口径估算用量，达到上限即报（不依赖是否已塞容量提醒），带会话 id/名称/用量
   const sessNames = {};
   try { Object.assign(sessNames, readJsonFileSafe(SESSION_NAMES_FILE, {})); } catch (e) {}
   try {
@@ -4201,10 +4222,9 @@ app.get("/admin/alerts", { preHandler: basicAuth }, async (req, reply) => {
         try {
           const tl = JSON.parse(fs.readFileSync(path.join(__dirname, f), "utf-8"));
           if (!Array.isArray(tl)) continue;
-          const hit = tl.some(function (m) { return m && m.kind === "ctx_limit" && !m.deleted; });
-          if (!hit) continue;
-          const sid = f === TIMELINE_FILE ? "default" : f.replace(/^enhanced_messages_/, "").replace(/\.json$/, "");
           const used = estimateAlertTokens(tl);
+          if (used < limit) continue; // 用量达到上限才提醒（不依赖是否已塞容量提醒；降回上限以下自动消失）
+          const sid = f === TIMELINE_FILE ? "default" : f.replace(/^enhanced_messages_/, "").replace(/\.json$/, "");
           alerts.push({ type: "capacity", level: "warn", title: "上下文已达容量上限", session_id: sid, session_name: sessNames[sid] || null, token_used: used, token_limit: limit, desc: "AI 将自动压缩" });
         } catch (e) {}
       }

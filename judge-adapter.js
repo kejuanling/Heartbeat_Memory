@@ -35,7 +35,53 @@ function judgeMock(candidateText, existingText) {
 }
 
 // ---- B prompt（16.txt §四原则：无角色扮演、固定判断顺序、封闭词表、一句 reason、单行 JSON）----
+// 提示词页配置（2026-09-19）：data/judge_prompt.json 存自定义模板（占位符
+// ${existing_kind}/${existing_text}/${candidate_kind}/${candidate_text}），不配置走内置组装（行为不变）。
+const fs = require("fs");
+const path = require("path");
+const JUDGE_PROMPT_FILE = path.join(__dirname, "data", "judge_prompt.json");
+
+const JUDGE_TEMPLATE_DEFAULT =
+  "你是记忆关系判定器。判断【候选】与【既有】两条记忆的关系，只输出规定结论。\n" +
+  "判断顺序：1) 主体是否一致；2) 是否表达同一件事；3) 值是否相同；4) 候选是否有时间/否定/变更信号。\n" +
+  "关系定义：duplicate=同主体同谓语同值（含简版与全量版本）；update=同主体同谓语且值随时间变化（候选文本必须含时间/否定/变更词）；coexist=相似但不同事、或同一内容的不同分层形态；need_review=无法确定（疑似矛盾、跨主体、证据不足时必须选它，这不算失败）。\n" +
+  "约束：只依据给定文本判定；禁止输出规定词之外的词；禁止输出 contradiction（疑似矛盾分不清新旧时输出 need_review）；reason 只写一句话。\n" +
+  '输出单行 JSON：{"relation":"duplicate|update|coexist|need_review","confidence":0到1的小数,"reason":"一句话"}\n' +
+  "【既有】（${existing_kind}）：${existing_text}\n" +
+  "【候选】（${candidate_kind}）：${candidate_text}";
+
+function loadJudgeTemplate() {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(JUDGE_PROMPT_FILE, "utf-8"));
+    if (cfg && typeof cfg.template === "string") return cfg.template.trim();
+  } catch (_) { /* 缺失/坏损用内置 */ }
+  return "";
+}
+
+function saveJudgeTemplate(t) {
+  const template = String(t == null ? "" : t).trim();
+  fs.mkdirSync(path.dirname(JUDGE_PROMPT_FILE), { recursive: true });
+  fs.writeFileSync(JUDGE_PROMPT_FILE + ".tmp", JSON.stringify({ template }, null, 2), "utf-8");
+  fs.renameSync(JUDGE_PROMPT_FILE + ".tmp", JUDGE_PROMPT_FILE);
+  return template;
+}
+
+function getJudgePromptConfig() {
+  const custom = loadJudgeTemplate();
+  return { custom, default_template: JUDGE_TEMPLATE_DEFAULT, effective: custom || JUDGE_TEMPLATE_DEFAULT };
+}
+
+function interpolateJudgeTemplate(tpl, candidateText, existingText, meta = {}) {
+  return String(tpl)
+    .replace(/\$\{existing_kind\}/g, meta.existingKind ? String(meta.existingKind) : "")
+    .replace(/\$\{existing_text\}/g, String(existingText == null ? "" : existingText))
+    .replace(/\$\{candidate_kind\}/g, meta.candidateKind ? String(meta.candidateKind) : "")
+    .replace(/\$\{candidate_text\}/g, String(candidateText == null ? "" : candidateText));
+}
+
 function buildPrompt(candidateText, existingText, meta = {}) {
+  const custom = loadJudgeTemplate();
+  if (custom) return interpolateJudgeTemplate(custom, candidateText, existingText, meta);
   const ek = meta.existingKind ? `（${meta.existingKind}/${meta.existingSubject || ""}/${meta.existingStatus || ""}）` : "";
   const ck = meta.candidateKind ? `（${meta.candidateKind}/${meta.candidateSubject || ""}）` : "";
   return [
@@ -103,4 +149,4 @@ async function judge(candidateText, existingText, opts = {}) {
   return judgeMock(candidateText, existingText);
 }
 
-module.exports = { judge, judgeMock, judgeLLM, parseJudgeOutput, buildPrompt, normalizeText, RELATIONS };
+module.exports = { judge, judgeMock, judgeLLM, parseJudgeOutput, buildPrompt, normalizeText, RELATIONS, getJudgePromptConfig, saveJudgeTemplate };

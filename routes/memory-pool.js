@@ -26,7 +26,7 @@ module.exports = function registerMemoryPoolRoutes(app, { basicAuth, v2Manual })
       // 兼容承诺）；钩子异常只告警不影响旧池响应。
       let v2 = null;
       if (typeof v2Manual === 'function') {
-        try { v2 = v2Manual(b); } catch (err) { console.warn('[memory-pool] V2 钩子异常:', err.message); }
+        try { v2 = await v2Manual(b); } catch (err) { console.warn('[memory-pool] V2 钩子异常:', err.message); }
       }
       reply.send({ success: true, dup: r.dup, entry: r.entry, v2 });
     } catch (err) { reply.code(500).send({ error: err.message }); }

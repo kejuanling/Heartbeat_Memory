@@ -265,6 +265,19 @@
       </div>
     </div>
 
+    <div class="card" data-collapse-id="judge-prompt-config" data-default="collapsed">
+      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆流水线·判定提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+      <div class="card-body">
+        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:6px;">新记忆入库前，流水线用它调用 LLM 判定「候选 × 已有记忆」的关系（duplicate=重复 / update=更新 / coexist=共存 / need_review=待审）并决定去向：重复拒收、更新与待审进人工队列、共存直接入库。占位符 ${existing_kind} ${existing_text} ${candidate_kind} ${candidate_text} 运行时自动填充。可直接修改保存覆盖内置；「恢复内置默认」清空自定义。</div>
+        <div class="cc-cfg-msg" id="judge-prompt-msg" style="margin-bottom:8px"></div>
+        <textarea id="judge-prompt-template" rows="10" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;margin-bottom:10px"></textarea>
+        <div style="display:flex;gap:10px">
+          <button type="button" class="cc-btn primary" onclick="saveJudgePrompt()">保存提示词</button>
+          <button type="button" class="cc-btn secondary" onclick="resetJudgePrompt()">恢复内置默认</button>
+        </div>
+      </div>
+    </div>
+
 </div>
 
 <!-- 通用说明（问号图标） -->

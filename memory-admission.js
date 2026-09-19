@@ -8,10 +8,15 @@
 //   v2_enabled=true  → 正式路径：旧池继续写（旧路由恒写，兼容承诺），V2 写主集合/主队列
 //   v2_enabled=false + v2_shadow=true → 影子观察：V2 只写影子集合/队列，旧池照旧
 //   两者皆 false     → V2 完全跳过（skipped_v2_off），旧池行为不变
-// 决策策略（无 judge 的保守默认，业务语义见 14.txt）：
+// 决策策略（2026-09-19 起 LLM judge 正式启用，业务语义见 14.txt）：
 //   detector 非候选 → reject；validator 硬规则命中 → reject；
-//   quote 候选 → review（原话无复核不自动入库）；其余通过 → admit。
-// 输出契约：{ action, candidate, validation, audit_id }
+//   找到相似既有记忆 → judge LLM 判关系：duplicate→reject、update/need_review→review、
+//   coexist→admit（quote 亦然——「quote 无 judge 复核」的前提已消除）；
+//   没有相似既有 → 无需判定，quote→review、其余 admit（原保守路径）；
+//   judge 失败/非法输出 → 回退上述保守路径并在 why 标注。
+//   promotion/manual_review 通道 R7 不变：judge 只注解进 review 队列，不改变首入 review。
+//   judge_mode 配置（memory_v2_config.json）：llm（默认）/ mock / off。
+// 输出契约：{ action, candidate, validation, audit_id }（异步：调用方须 await）
 // ========================
 
 const fs = require("fs-extra");
@@ -22,6 +27,75 @@ const { validate } = require("./admission-validator");
 const { createAuditLogger } = require("./admission-audit");
 const { createStore, DEFAULT_CONFIG } = require("./memory-v2");
 const { createStateExecutor } = require("./state-executor");
+const { buildPrompt, parseJudgeOutput, normalizeText } = require("./judge-adapter");
+
+// ---- 相似既有检索：规范化后字符二元组 Jaccard，取最高分且达阈值的活跃条目 ----
+const JUDGE_SIM_THRESHOLD = 0.35;
+function bigrams(s) {
+  const out = new Set();
+  for (let i = 0; i < s.length - 1; i++) out.add(s.slice(i, i + 2));
+  return out;
+}
+function jaccard(a, b) {
+  if (!a.size || !b.size) return 0;
+  let inter = 0;
+  for (const x of a) if (b.has(x)) inter++;
+  return inter / (a.size + b.size - inter);
+}
+function findBestExisting(store, text) {
+  const key = normalizeText(text);
+  if (!key) return null;
+  const bg = bigrams(key);
+  let best = null, bestScore = 0;
+  for (const e of store.list({ status: "active" })) {
+    const ek = normalizeText(e.text);
+    if (!ek) continue;
+    const score = jaccard(bg, bigrams(ek));
+    if (score > bestScore) { bestScore = score; best = e; }
+  }
+  return bestScore >= JUDGE_SIM_THRESHOLD ? { entry: best, score: Math.round(bestScore * 100) / 100 } : null;
+}
+
+// ---- 内置 LLM 通道（judgeLLM 的 callLLM 注入实现；测试可经 opts.callLLM 覆盖）----
+// .env 直读（与 server.js readEnvValue 同口径；judge 在 admission 模块内，不走 server 助手）
+let _envCache = null;
+function readEnvValue(key) {
+  if (process.env[key]) return process.env[key];
+  if (_envCache === null) {
+    _envCache = {};
+    try {
+      const lines = fs.readFileSync(path.join(__dirname, ".env"), "utf8").split(/\r?\n/);
+      for (const l of lines) { const i = l.indexOf("="); if (i > 0) _envCache[l.slice(0, i).trim()] = l.slice(i + 1).trim().replace(/^"(.*)"$/, "$1"); }
+    } catch (_) { /* .env 缺失用空 */ }
+  }
+  return _envCache[key] || "";
+}
+
+async function defaultCallLLM(prompt) {
+  const apiUrl = readEnvValue("TARGET_API_URL");
+  const apiKey = readEnvValue("TARGET_API_KEY");
+  const model = readEnvValue("MODEL_NAME");
+  if (!apiUrl || !apiKey || !model) throw new Error("LLM 未配置（TARGET_API_URL/KEY/MODEL_NAME）");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 45000);
+  try {
+    const resp = await fetch(apiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.1, max_tokens: 2048, response_format: { type: "json_object" },
+      }),
+      signal: controller.signal,
+    });
+    if (!resp.ok) throw new Error("LLM HTTP " + resp.status);
+    const data = await resp.json();
+    const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+    if (!content) throw new Error("LLM 空响应");
+    return String(content);
+  } finally { clearTimeout(timer); }
+}
 
 // 旧池 category → V2 kind/subject 翻译（manual 兼容层专用；未映射类别交 detector 自判）
 const CATEGORY_MAP = {
@@ -72,9 +146,12 @@ function createAdmission(opts = {}) {
   const shadowExecutor = createStateExecutor({ store: shadowStore, queuePath: shadowStore.paths.review_queue });
   const audit = createAuditLogger({ rootDir, dir: "data" });
 
+  const judgeMode = cfg.judge_mode != null ? String(cfg.judge_mode) : "llm";
+
   // manual 适配器：兼容旧 POST /admin/memory-pool body {content, category, importance}
   // 兼容策略：旧路由恒写旧池（v2_enabled=true 也不停）；本适配器只负责 V2 侧落点。
-  function submitManual(body, ctx = {}, mode = "shadow") {
+  // 异步（2026-09-19）：judge LLM 判定，调用方须 await。
+  async function submitManual(body, ctx = {}, mode = "shadow") {
     const formal = mode === "formal";
     const isPromo = mode === "promotion";
     const isManualReview = mode === "manual_review"; // 0918：promotion 通道（压缩块原文提炼候选），R7 全落 review，不受双闸门控（按钮即人工授权）
@@ -122,8 +199,38 @@ function createAdmission(opts = {}) {
       validation = { allowed: false, matched_rules: ["DET.not_candidate"], reasons: detection.reasons.slice() };
     }
 
-    // [4] 决策（纯编排策略，无业务规则）
+    // [4] 决策（judge LLM 判定 + 保守回退）
     let { action, why } = decide(detection, validation);
+    let judgeNote = null;
+    const judgeApplies = (formal || isManualReviewGate) && detection.candidate && validation.allowed && judgeMode !== "off";
+    if (judgeApplies) {
+      const existing = findBestExisting(mainStore, text);
+      if (existing) {
+        let jr = null;
+        try {
+          const prompt = buildPrompt(text, existing.entry.text, {
+            candidateKind: detection.kind_guess, candidateSubject: detection.subject_guess,
+            existingKind: existing.entry.kind, existingSubject: existing.entry.subject, existingStatus: existing.entry.status,
+          });
+          const raw = await (typeof opts.callLLM === "function" ? opts.callLLM : defaultCallLLM)(prompt, 1);
+          const parsed = parseJudgeOutput(raw);
+          if (parsed.ok) jr = parsed; else jr = { ok: false, error: parsed.error };
+        } catch (e) {
+          jr = { ok: false, error: e && e.message ? e.message : String(e) };
+        }
+        if (jr.ok) {
+          judgeNote = "judge:" + jr.relation + "(" + jr.confidence + "," + existing.score + ")/" + jr.reason;
+          if (!isManualReviewGate) {
+            // 正式路径：按 judge 关系改写动作；R7 通道保持首入 review，judge 只做注解
+            if (jr.relation === "duplicate") { action = "reject"; why = "judge duplicate: " + jr.reason; }
+            else if (jr.relation === "update" || jr.relation === "need_review") { action = "review"; why = "judge " + jr.relation + ": " + jr.reason; }
+            else if (jr.relation === "coexist") { action = "admit"; why = "judge coexist: " + jr.reason; }
+          }
+        } else {
+          judgeNote = "judge 失败回退保守路径(" + jr.error + ")";
+        }
+      }
+    }
     if (isManualReviewGate && action === "admit") {
       // R7：promotion 来源首入一律人工把关（提炼是二次加工，judge/mock 认准也不自动入库）
       action = "review";
@@ -150,24 +257,24 @@ function createAdmission(opts = {}) {
     if (action === "review") {
       auditRec = audit.append(audit.buildRecord({
         candidateText: text, origin: originVal, validator: validation, action: "review",
-        notes: { shadow: !formal && !isPromo, detector_kind: detection.kind_guess, why },
+        notes: { shadow: !formal && !isPromo, detector_kind: detection.kind_guess, why, judge: judgeNote },
       }));
       execResult = exec.review(draft, why, {
         auditId: auditRec.ok ? auditRec.id : null,
-        details: validation.reasons,
+        details: validation.reasons.concat(judgeNote ? [judgeNote] : []),
       });
     } else if (action === "admit") {
       execResult = exec.admit(draft);
       auditRec = audit.append(audit.buildRecord({
         candidateText: text, origin: originVal, validator: validation,
         action: execResult.ok ? "admit" : "error",
-        notes: { shadow: !formal && !isPromo, detector_kind: detection.kind_guess, why, entry_id: execResult.entry ? execResult.entry.id : null, error: execResult.error || null },
+        notes: { shadow: !formal && !isPromo, detector_kind: detection.kind_guess, why, judge: judgeNote, entry_id: execResult.entry ? execResult.entry.id : null, error: execResult.error || null },
       }));
     } else {
       execResult = exec.reject(draft, why);
       auditRec = audit.append(audit.buildRecord({
         candidateText: text, origin: originVal, validator: validation, action: "reject",
-        notes: { shadow: !formal && !isPromo, detector_kind: detection.kind_guess, why },
+        notes: { shadow: !formal && !isPromo, detector_kind: detection.kind_guess, why, judge: judgeNote },
       }));
     }
 
@@ -175,6 +282,7 @@ function createAdmission(opts = {}) {
       action: execResult.ok ? action : "error",
       candidate: { text, kind: detection.kind_guess, subject: detection.subject_guess, detector: detection, provenance },
       validation,
+      judge: judgeNote,
       audit_id: auditRec.ok ? auditRec.id : null,
       entry_id: execResult.entry ? execResult.entry.id : null,
       queue_id: execResult.queue_id || null,
@@ -211,6 +319,7 @@ function createAdmission(opts = {}) {
   return {
     cfg,
     shadowOn,
+    judgeMode,
     submitManual,
     submitPromotion,
     submitV2,
