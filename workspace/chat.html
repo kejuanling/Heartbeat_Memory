@@ -1743,6 +1743,23 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
 <script>
 
 "use strict";
+/* ============================================================================
+ * 谢意行聊天前端 · 主脚本（单文件三脚本块之一）
+ *
+ * 架构一句话：localStorage 按会话缓存消息 + 服务器时间线为唯一真源，SSE 实时推送 +
+ * 节流全量拉取保持两端一致；流式回复本地乐观渲染，落盘交给网关增量追加。
+ *
+ * 三段脚本分工：
+ *   本段 = 聊天主链路（登录/会话/历史拉取/发送与流式渲染/编辑删除同步/设置/主题/通话）
+ *   块2  = 管理卡片 IIFE（记忆池/标星/永久注入/推送管理/日记/环境，原生渲染不跳管理台）
+ *   块3  = 图片灯箱 IIFE（最小实现）
+ * 跨段调用走 window 桥接（见块2 开头的 chatToast/openEditModal 桥）。
+ *
+ * 关键不变量：
+ *   - 渲染是窗口化的（_from/_to 窗口 + 哨兵补载），msgs 全量在内存、DOM 只挂窗口；
+ *   - 会话切换有快照校验（await 期间切会话则丢弃旧会话回包）；
+ *   - 发送中(sending)/分段连播中(_segBusy)时 SSE 拉历史会自动让路。
+ * ============================================================================ */
 /* ================= 配置 ================= */
 const LS_KEY="han_api_key", LS_PROMPT="han_system_prompt", LS_MSGS="han_messages", LS_CFG="han_ai_config";
 const API="/v1/chat/completions", HISTORY_API="/v1/history";
@@ -7162,6 +7179,7 @@ else{ initAdminCards(); }
 })();
 </script>
 <script>
+/* 图片灯箱 IIFE：事件委托点开消息区任意图片 → 全屏遮罩查看，Esc/点遮罩/× 关闭（弹窗懒创建） */
 (function(){
   document.addEventListener("click", function(e){
     var img = e.target && e.target.closest ? e.target.closest(".msg .bubble img, .msg .bubble-imgs img") : null;
