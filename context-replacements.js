@@ -230,10 +230,20 @@ function isMemoryFlash(msg) {
 }
 
 // 日记特殊事件：AI 唤醒/后台自主时写的日记，永远不参与压缩，单独保留在上下文
-// 事件名 2026-09-12 起「醒来写了日记」，旧数据兼容「自动写了日记」
+// 事件名 2026-09-12 起「醒来写了日记」，旧数据兼容「自动写了日记」。
+// 2026-09-21 补：唤醒 v2 落库改为 {kind:"diary", content:"[DIARY]（…醒来写了日记：…）"}——
+// [DIARY] 前缀导致 isSpecialEvent 的 structuredStart（要求以「（」开头）认不出，
+// 日记被当普通对话放行进压缩索引（实测 87 条里 77 条被收录）。此处改为不依赖
+// isSpecialEvent 独立判定：认 kind 字段 / [DIARY] 前缀 / 旧格式文本三种形态。
+// 注意 isSpecialEvent 本身刻意不动：日记当前以普通 assistant 消息内联进上下文，
+// 若升格为特殊事件而注入机制不认回，日记会整段从上下文消失。
 function isDiaryEvent(msg) {
-  if (!msg || msg.role !== "assistant") return false;
+  if (!msg) return false;
+  if (msg.kind === "diary") return true;
+  if (msg.role !== "assistant") return false;
   const c = String(msg.content || "");
+  if (!c) return false;
+  if (/^\s*\[DIARY\]/.test(c)) return true;
   return isSpecialEvent(msg) && (c.indexOf("醒来写了日记") !== -1 || c.indexOf("自动写了日记") !== -1);
 }
 
