@@ -104,7 +104,7 @@ module.exports = function registerPushEventsRoutes(app, { basicAuth, baseDir }) 
       if (!fsx.existsSync(tlPath)) return reply.code(404).send({ error: '时间线不存在' });
       const timeline = fsx.readJsonSync(tlPath);
       if (!Array.isArray(timeline)) return reply.send({ error: '时间线不可读' });
-      const idx = timeline.findIndex(function (x) { return x.role === 'assistant' && x.position === position; });
+      const idx = timeline.findIndex(function (x) { return (x.role === 'assistant' || x.role === 'developer') && x.position === position; });
       if (idx < 0) return reply.code(404).send({ error: '记录不存在' });
       const msg = timeline[idx];
       const meta = pushEchoMeta(msg) || {};
@@ -129,7 +129,7 @@ module.exports = function registerPushEventsRoutes(app, { basicAuth, baseDir }) 
       if (!fsx.existsSync(tlPath)) return reply.code(404).send({ error: '时间线不存在' });
       const timeline = fsx.readJsonSync(tlPath);
       if (!Array.isArray(timeline)) return reply.send({ error: '时间线不可读' });
-      const idx = timeline.findIndex(function (x) { return x.role === 'assistant' && x.position === position; });
+      const idx = timeline.findIndex(function (x) { return (x.role === 'assistant' || x.role === 'developer') && x.position === position; });
       if (idx < 0) return reply.code(404).send({ error: '记录不存在' });
       const msg = timeline[idx];
       msg.deleted = true;

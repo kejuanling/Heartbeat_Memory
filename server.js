@@ -2618,14 +2618,18 @@ app.post("/internal/timeline-event", async (req, reply) => {
 // 幂等去重只在 HTTP 入口做（调度器进程内调用无重试路径）。
 function applyWakeEventV2(body) {
   try {
-    const { session_id, speak, diary, push, tools, wake_block_id } = body || {};
+    const { session_id, speak, diary, push, event, noaction, tools, wake_block_id } = body || {};
     const evSession = typeof session_id === "string" && session_id.trim() ? String(session_id).trim() : null;
     const speakRaw = String(speak || "").trim();
     const diaryRaw = String(diary || "").trim();
+    const eventRaw = String(event || "").trim();
+    const noactionRaw = String(noaction || "").trim();
     const pushMeta = (push && typeof push === "object") ? push : null;
     const wakeTools = Array.isArray(tools) ? tools.filter(t => t && t.name) : [];
     const appended = [];
     if (diaryRaw) appended.push({ role: "assistant", content: diaryRaw, kind: "diary" });
+    // noaction=[NO_ACTION] 原始输出：是 AI 的输出 → assistant 层落时间线，kind=noaction 标记前端隐藏（/v1/history 与 sidx 口径同步）
+    if (noactionRaw) appended.push({ role: "assistant", content: noactionRaw, kind: "noaction" });
     if (speakRaw) {
       const stored = stripDiaryBlocks(speakRaw);
       if (stored) {
@@ -2635,12 +2639,15 @@ function applyWakeEventV2(body) {
         appended.push(msg);
       }
     }
+    // 2026-09-20 恢复判定回写：event=唤醒判定记录（发推/未发/失败，沿用文本格式，推送管理读端直接解析）
+    // → developer 系统层消息落时间线，前端不显示（与 [唤醒] 块同层）
+    if (eventRaw) appended.push({ role: "developer", content: eventRaw });
     if (appended.length) appendMessages(evSession, appended);
     // 静默但调过工具：工具记录回填到本次的 developer [唤醒] 块上，不丢工具痕迹
     if (!appended.length && wakeTools.length && wake_block_id) {
       try { patchMessage(evSession, wake_block_id, { tools: wakeTools }); } catch (e) {}
     }
-    console.log(`[wake-event] v2 落库 (session ${evSession || "default"}, speak=${speakRaw ? 1 : 0}, diary=${diaryRaw ? 1 : 0}, push=${pushMeta ? 1 : 0}, tools=${wakeTools.length})`);
+    console.log(`[wake-event] v2 落库 (session ${evSession || "default"}, speak=${speakRaw ? 1 : 0}, diary=${diaryRaw ? 1 : 0}, push=${pushMeta ? 1 : 0}, event=${eventRaw ? 1 : 0}, tools=${wakeTools.length})`);
     return { ok: true, v2: true, appended: appended.length };
   } catch (err) {
     console.error("[wake-event] v2 落库失败:", err.message);
@@ -2656,6 +2663,8 @@ app.post("/internal/wake-event", async (req, reply) => {
     // diary = 本次写的日记原文 → assistant(kind=diary) 落时间线（前端隐藏），日记文件由唤醒侧自行写
     //（原 wake_up.js；现为 gateway 内调度器经共享模块 lib/diary.js，口径一致）
     // push  = 推送元数据（Bark 成功时），结构化挂 assistant.push 字段，不再生成「刚刚给X发了推送」回显行
+    // event  = 唤醒判定记录（2026-09-20 恢复回写：发推/未发/失败）→ developer 系统层消息（前端不显示），推送管理读端按文本口径解析
+    // noaction = [NO_ACTION] 原始输出 → assistant(kind=noaction) 落时间线（前端不显示）：所有输出标签都保留
     // tools = 唤醒工具调用记录 → 挂 speak 消息 tools 字段；静默无消息时回填到 [唤醒] 块
     if (body.v2 === true) {
       const { session_id, speak, diary, push } = body;
