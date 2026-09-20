@@ -1110,10 +1110,13 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 /* ================= 管理卡片（chat.html 原生渲染，不再 iframe 跳管理台） ================= */
 /* 卡片菜单按钮展开态：选中项高亮，让用户知道当前在看哪张 */
 .mnav .mnav-btn[data-adm]{position:relative}
-.mnav .mnav-btn[data-adm].adm-on{background:var(--accent-soft)}
+/* 展开态吸顶：sticky 作用域是本 li（按钮+卡体），只有当前展开项的按钮钉在菜单顶部 */
+.mnav .mnav-btn[data-adm].adm-on{position:sticky;top:0;z-index:5;background:linear-gradient(var(--accent-soft),var(--accent-soft)),var(--bg1);box-shadow:0 2px 8px rgba(80,65,55,.06)}
 .mnav .mnav-btn[data-adm].adm-on .mrow{color:var(--accent-deep)}
 .mnav .mnav-btn[data-adm] .mrow{transition:transform .2s;color:var(--ink3)}
 .mnav .mnav-btn[data-adm].adm-on .mrow{transform:rotate(180deg)}
+/* 吸顶时按钮底部分割线，滚动内容从底下穿过不糊 */
+.mnav .mnav-btn[data-adm].adm-on::after{content:"";position:absolute;left:14px;right:14px;bottom:0;border-bottom:1px solid var(--line)}
 .mnav .mnav-btn[data-adm]:active{background:var(--accent-soft)}
 /* 展开内容：直接接在按钮下方（同一 li 内），去掉多余的外层盒子 */
 .adm-rowli{margin:4px 10px}
@@ -2158,7 +2161,7 @@ function renderMd(text){
       if(j<lines.length){
         flushBuf();
         const code=escapeHtml(lines.slice(i+1,j).join("\n").replace(/\n$/,""));
-        const wrap=cfg.code_wrap?' class="code-wrap"':'';
+        const wrap=' class="code-wrap"';
         const copyBtn='<button type="button" class="code-copy-btn" aria-label="复制代码">复制</button>';
         if(cfg.fold_code){
           html+='<details class="code-fold"><summary>代码块</summary><div class="code-block">'+copyBtn+'<pre'+wrap+'><code>'+code+'</code></pre></div></details>';
@@ -4107,7 +4110,7 @@ async function uploadFileToServer(dataUrl,name,mime){
 function shade(hex,p){
   try{let c=hex.replace("#","");if(c.length===3)c=c.split("").map(x=>x+x).join("");let n=parseInt(c,16);let r=Math.max(0,Math.min(255,(n>>16)+p)),g=Math.max(0,Math.min(255,((n>>8)&255)+p)),b=Math.max(0,Math.min(255,(n&255)+p));return "#"+(r.toString(16).padStart(2,"0"))+(g.toString(16).padStart(2,"0"))+(b.toString(16).padStart(2,"0"));}catch(e){return hex;}
 }
-const THEME_PRESETS={warm:{name:"暖白",layout:"sms",vars:{"--bg1":"#FCF9F7","--bg2":"#F8F3F1","--bg3":"#F0E9E7","--surface":"rgba(255,253,251,.78)","--surface-solid":"#FFFCFA","--card":"rgba(255,253,251,.78)","--card-solid":"#FFFCFA","--sheet-bg":"#FFFCFA","--chrome-rgb":"255,255,255","--chrome-item":"rgba(255,255,255,.66)","--chrome-item-hover":"rgba(255,255,255,.88)","--ink":"#55483F","--ink2":"#8F8177","--ink3":"#B4A9A1","--accent":"#C9828D","--accent-deep":"#A96876","--accent-soft":"rgba(201,130,141,.16)","--accent-faint":"rgba(201,130,141,.08)","--accent-grad":"linear-gradient(135deg,#D89AA2,#B87482)","--accent-rgb":"197,143,150","--border":"rgba(92,76,66,.09)","--border-strong":"rgba(92,76,66,.14)","--line":"rgba(92,76,66,.09)","--line-strong":"rgba(92,76,66,.14)","--shadow-soft":"0 2px 10px rgba(99,70,68,.035)","--shadow-float":"0 10px 30px rgba(99,70,68,.08)","--shadow-rgb":"80,65,55","--mask-rgb":"92,76,66","--bubble-shadow":"rgba(80,65,55,.05)","--bubble-ai":"#FFFDF9","--bubble-user":"#F3E7E5","--bubble-user1":"#F8E8E8","--bubble-user2":"#F8E8E8","--radius":"16px","--radius-sm":"11px","--panel-radius":"20px","--bg-img":"none","--bubble-opacity":"1","--bubble-blur":"0px","--cap-think-border":"#EDE2E3","--cap-think-bg":"#F8F2F1","--cap-think-text":"#B08784","--cap-tool-border":"#E6E1DA","--cap-tool-bg":"#F6F4F0","--cap-tool-text":"#9A8F80","--hd-title":"#55483F","--inputbar-bg":"transparent","--inputbar-border":"rgba(92,76,66,.10)","--input-text":"#55483F","--send-bg":"#C89098","--send-icon":"#FFFDFB","--avatar-bg":"#C9828D","--icon-btn-bg":"transparent","--icon-btn-color":"#8F8177","--ok":"#7da188","--ok-deep":"#5f8a6d","--ok-soft":"rgba(95,138,109,.14)","--ok-rgb":"125,161,136","--warn":"#b08b4f","--warn-deep":"#8f6f3a","--warn-soft":"rgba(143,111,58,.13)","--warn-rgb":"176,139,79","--bad":"#b97f77","--bad-deep":"#9c5f57","--bad-soft":"rgba(156,95,87,.12)","--bad-rgb":"185,127,119","--bad-grad":"#bc6f66","--info":"#98a2ab","--info-rgb":"152,162,171","--field-bg":"#FFFCFA","--menu-bg":"#FFFCFA","--code-bg":"#F7F2ED","--code-ink":"#9A7E76","--glass":"10px","--font-family":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--font-size":"15px","--line-height":"1.72","--font-weight":"400","--letter-spacing":"0em","--font-family-mono":"ui-monospace,\"SF Mono\",Menlo,Consolas,monospace","--title-font":"\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--header-padding":"calc(env(safe-area-inset-top) + 10px) 14px 10px","--header-gap":"12px","--header-bg":"rgba(255,252,250,.58)","--header-border":"1px solid transparent","--header-shadow":"0 2px 7px rgba(80,65,55,.025)","--header-blur":"20px","--header-saturate":"110%","--header-avatar-size":"36px","--header-avatar-radius":"50%","--header-avatar-bg":"#C9828D","--header-avatar-icon":"#FFFFFF","--header-avatar-font-size":"17px","--header-avatar-shadow":"0 4px 12px rgba(151,91,101,.18)","--header-title-x":"0px","--header-title-y":"0px","--header-title-size":"15px","--header-title-weight":"600","--header-title-letter-spacing":"normal","--header-title-color":"#55483F","--header-title-font":"\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--header-sub-size":"11px","--header-sub-color":"#B4A9A1","--header-sub-letter-spacing":".02em","--header-sub-gap":"2px","--header-btn-size":"36px","--header-btn-radius":"50%","--header-btn-bg":"rgba(255,255,255,.56)","--header-btn-color":"#8F8177","--header-btn-font-size":"17px","--header-btn-shadow":"0 2px 8px rgba(99,70,68,.06),inset 0 1px 0 rgba(255,255,255,.7)","--header-btn-transition":"background .2s,color .2s,transform .15s","--header-btn-hover-bg":"rgba(255,255,255,.9)","--header-btn-hover-color":"#A96876","--header-btn-active-bg":"rgba(201,130,141,.08)","--header-btn-active-color":"#A96876","--session-padding":"10px 14px","--session-margin":"3px 8px","--session-radius":"12px","--session-transition":"background .15s,border-color .15s","--session-bg":"rgba(255,255,255,.66)","--session-hover-bg":"rgba(201,130,141,.08)","--session-active-bg":"rgba(201,130,141,.16)","--session-active-border":"rgba(92,76,66,.14)","--session-title-size":"13px","--session-title-weight":"600","--session-title-color":"#55483F","--session-meta-size":"11px","--session-meta-color":"#B4A9A1","--session-action-hover-color":"#A96876","--session-action-hover-bg":"rgba(201,130,141,.08)","--call-bg":"linear-gradient(165deg,#FBF4F1 0%,#F7E9E8 55%,#F3E0DF 100%)","--bubble-font-size":"15px","--bubble-line-height":"1.72","--bubble-font-weight":"400","--bubble-letter-spacing":"0em","--bubble-para-gap":"8px","--msg-gap":"12px","--bubble-max-width":"84%","--bubble-padding":"11px 15px","--avatar-size":"34px","--avatar-radius":"50%","--inputbar-radius":"20px","--inputbar-gap":"8px","--inputbar-padding":"7px 8px 7px 15px","--inputbar-shadow":"0 1px 5px rgba(99,70,68,.025)","--inputbar-focus-border":"rgba(197,143,150,.35)","--inputbar-focus-shadow":"0 0 0 3px rgba(197,143,150,.07),0 4px 18px rgba(80,65,55,.06)","--input-font-size":"15px","--input-line-height":"1.5","--input-max-height":"120px","--input-placeholder":"#B4A9A1","--icon-btn-size":"34px","--icon-btn-radius":"50%","--icon-btn-font-size":"16px","--send-size":"34px","--send-radius":"50%","--send-font-size":"15px","--send-shadow":"0 2px 6px rgba(169,91,105,.11)","--send-hover-bg":"#A96876","--theme-dur":"0ms","--bg-blur":"0px","--user-font-color":"#4A3F3F","--ai-font-color":"#000000"}},wx:{name:"微信",layout:"wx",vars:{"--bg1":"#F5F6F7","--bg2":"#F5F6F7","--bg3":"#F5F6F7","--surface":"rgba(255,255,255,.88)","--surface-solid":"#FFFFFF","--card":"rgba(255,255,255,.88)","--card-solid":"#FFFFFF","--sheet-bg":"#FFFFFF","--chrome-rgb":"255,255,255","--chrome-item":"rgba(255,255,255,.72)","--chrome-item-hover":"rgba(255,255,255,.92)","--ink":"#111111","--ink2":"#666666","--ink3":"#999999","--accent":"#B7B7B7","--accent-deep":"#969696","--accent-soft":"rgba(0,0,0,.10)","--accent-faint":"rgba(0,0,0,.05)","--accent-grad":"linear-gradient(135deg,#BDBDBD,#9E9E9E)","--accent-rgb":"183,183,183","--border":"rgba(0,0,0,.08)","--border-strong":"rgba(0,0,0,.14)","--line":"rgba(0,0,0,.08)","--line-strong":"rgba(0,0,0,.14)","--shadow-soft":"0 1px 5px rgba(0,0,0,.035)","--shadow-float":"0 8px 24px rgba(0,0,0,.10)","--shadow-rgb":"0,0,0","--mask-rgb":"0,0,0","--bubble-shadow":"rgba(0,0,0,.04)","--bubble-ai":"#FFFFFF","--bubble-user":"#95EC69","--bubble-user1":"#95EC69","--bubble-user2":"#95EC69","--radius":"4px","--radius-sm":"8px","--panel-radius":"12px","--bg-img":"none","--bubble-opacity":"1","--bubble-blur":"0px","--cap-think-border":"#D8D8D8","--cap-think-bg":"#F7F7F7","--cap-think-text":"#777777","--cap-tool-border":"#D8D8D8","--cap-tool-bg":"#F7F7F7","--cap-tool-text":"#777777","--hd-title":"#111111","--inputbar-bg":"#FFFFFF","--inputbar-border":"rgba(0,0,0,.08)","--input-text":"#111111","--send-bg":"#B7B7B7","--send-icon":"#FFFFFF","--avatar-bg":"#B7B7B7","--icon-btn-bg":"transparent","--icon-btn-color":"#666666","--ok":"#7da188","--ok-deep":"#5f8a6d","--ok-soft":"rgba(95,138,109,.14)","--ok-rgb":"125,161,136","--warn":"#b08b4f","--warn-deep":"#8f6f3a","--warn-soft":"rgba(143,111,58,.13)","--warn-rgb":"176,139,79","--bad":"#b97f77","--bad-deep":"#9c5f57","--bad-soft":"rgba(156,95,87,.12)","--bad-rgb":"185,127,119","--bad-grad":"#bc6f66","--info":"#98a2ab","--info-rgb":"152,162,171","--field-bg":"#FFFFFF","--menu-bg":"#FFFFFF","--code-bg":"#F5F5F5","--code-ink":"#666666","--glass":"0px","--font-family":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--font-size":"15px","--line-height":"1.72","--font-weight":"400","--letter-spacing":"0em","--font-family-mono":"ui-monospace,\"SF Mono\",Menlo,Consolas,monospace","--title-font":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--header-padding":"calc(env(safe-area-inset-top) + 10px) 14px 10px","--header-gap":"12px","--header-bg":"rgba(255,255,255,.94)","--header-border":"1px solid rgba(0,0,0,.06)","--header-shadow":"0 1px 4px rgba(0,0,0,.04)","--header-blur":"12px","--header-saturate":"100%","--header-avatar-size":"36px","--header-avatar-radius":"6px","--header-avatar-bg":"#B7B7B7","--header-avatar-icon":"#FFFFFF","--header-avatar-font-size":"17px","--header-avatar-shadow":"none","--header-title-x":"0px","--header-title-y":"0px","--header-title-size":"15px","--header-title-weight":"600","--header-title-letter-spacing":"normal","--header-title-color":"#111111","--header-title-font":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--header-sub-size":"11px","--header-sub-color":"#999999","--header-sub-letter-spacing":".02em","--header-sub-gap":"2px","--header-btn-size":"36px","--header-btn-radius":"50%","--header-btn-bg":"transparent","--header-btn-color":"#555555","--header-btn-font-size":"17px","--header-btn-shadow":"none","--header-btn-transition":"background .2s,color .2s,transform .15s","--header-btn-hover-bg":"rgba(0,0,0,.05)","--header-btn-hover-color":"#777777","--header-btn-active-bg":"rgba(0,0,0,.06)","--header-btn-active-color":"#777777","--session-padding":"10px 14px","--session-margin":"3px 8px","--session-radius":"12px","--session-transition":"background .15s,border-color .15s","--session-bg":"rgba(255,255,255,.72)","--session-hover-bg":"rgba(0,0,0,.04)","--session-active-bg":"rgba(0,0,0,.08)","--session-active-border":"rgba(0,0,0,.14)","--session-title-size":"13px","--session-title-weight":"600","--session-title-color":"#222222","--session-meta-size":"11px","--session-meta-color":"#999999","--session-action-hover-color":"#777777","--session-action-hover-bg":"rgba(0,0,0,.06)","--call-bg":"linear-gradient(165deg,#F5F5F5 0%,#EDEDED 100%)","--bubble-font-size":"15px","--bubble-line-height":"1.55","--bubble-font-weight":"400","--bubble-letter-spacing":"0em","--bubble-para-gap":"8px","--msg-gap":"18px","--bubble-max-width":"72%","--bubble-padding":"7px 12px","--avatar-size":"40px","--avatar-radius":"6px","--inputbar-radius":"12px","--inputbar-gap":"8px","--inputbar-padding":"6px 8px 6px 12px","--inputbar-shadow":"none","--inputbar-focus-border":"rgba(0,0,0,.06)","--inputbar-focus-shadow":"none","--input-font-size":"15px","--input-line-height":"1.5","--input-max-height":"120px","--input-placeholder":"#999999","--icon-btn-size":"34px","--icon-btn-radius":"4px","--icon-btn-font-size":"16px","--send-size":"34px","--send-radius":"4px","--send-font-size":"15px","--send-shadow":"none","--send-hover-bg":"#969696","--theme-dur":"0ms","--bg-blur":"0px","--user-font-color":"#111111","--ai-font-color":"#111111"}}};
+const THEME_PRESETS={warm:{name:"暖白",layout:"sms",vars:{"--bg1":"#FCF9F7","--bg2":"#F8F3F1","--bg3":"#F0E9E7","--surface":"rgba(255,253,251,.78)","--surface-solid":"#FFFCFA","--card":"rgba(255,253,251,.78)","--card-solid":"#FFFCFA","--sheet-bg":"#FFFCFA","--chrome-rgb":"255,255,255","--chrome-item":"rgba(255,255,255,.66)","--chrome-item-hover":"rgba(255,255,255,.88)","--ink":"#55483F","--ink2":"#8F8177","--ink3":"#B4A9A1","--accent":"#C9828D","--accent-deep":"#A96876","--accent-soft":"rgba(201,130,141,.16)","--accent-faint":"rgba(201,130,141,.08)","--accent-grad":"linear-gradient(135deg,#D89AA2,#B87482)","--accent-rgb":"197,143,150","--border":"rgba(92,76,66,.09)","--border-strong":"rgba(92,76,66,.14)","--line":"rgba(92,76,66,.09)","--line-strong":"rgba(92,76,66,.14)","--shadow-soft":"0 2px 10px rgba(99,70,68,.035)","--shadow-float":"0 10px 30px rgba(99,70,68,.08)","--shadow-rgb":"80,65,55","--mask-rgb":"92,76,66","--bubble-shadow":"rgba(80,65,55,.05)","--bubble-ai":"#FFFDF9","--bubble-user":"#F3E7E5","--bubble-user1":"#F8E8E8","--bubble-user2":"#F8E8E8","--radius":"16px","--radius-sm":"11px","--panel-radius":"20px","--bg-img":"none","--bubble-opacity":"1","--bubble-blur":"0px","--cap-think-border":"#EDE2E3","--cap-think-bg":"#F8F2F1","--cap-think-text":"#B08784","--cap-tool-border":"#E6E1DA","--cap-tool-bg":"#F6F4F0","--cap-tool-text":"#9A8F80","--hd-title":"#55483F","--inputbar-bg":"transparent","--inputbar-border":"rgba(92,76,66,.10)","--input-text":"#55483F","--send-bg":"#C89098","--send-icon":"#FFFDFB","--avatar-bg":"#C9828D","--icon-btn-bg":"transparent","--icon-btn-color":"#8F8177","--ok":"#7da188","--ok-deep":"#5f8a6d","--ok-soft":"rgba(95,138,109,.14)","--ok-rgb":"125,161,136","--warn":"#b08b4f","--warn-deep":"#8f6f3a","--warn-soft":"rgba(143,111,58,.13)","--warn-rgb":"176,139,79","--bad":"#b97f77","--bad-deep":"#9c5f57","--bad-soft":"rgba(156,95,87,.12)","--bad-rgb":"185,127,119","--bad-grad":"#bc6f66","--info":"#98a2ab","--info-rgb":"152,162,171","--field-bg":"#FFFCFA","--menu-bg":"#FFFCFA","--code-bg":"#F7F2ED","--code-ink":"#9A7E76","--glass":"10px","--font-family":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--font-size":"15px","--line-height":"1.72","--font-weight":"300","--letter-spacing":"0em","--font-family-mono":"ui-monospace,\"SF Mono\",Menlo,Consolas,monospace","--title-font":"\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--header-padding":"calc(env(safe-area-inset-top) + 10px) 14px 10px","--header-gap":"12px","--header-bg":"rgba(255,252,250,.58)","--header-border":"1px solid transparent","--header-shadow":"0 2px 7px rgba(80,65,55,.025)","--header-blur":"20px","--header-saturate":"110%","--header-avatar-size":"36px","--header-avatar-radius":"50%","--header-avatar-bg":"#C9828D","--header-avatar-icon":"#FFFFFF","--header-avatar-font-size":"17px","--header-avatar-shadow":"0 4px 12px rgba(151,91,101,.18)","--header-title-x":"0px","--header-title-y":"0px","--header-title-size":"15px","--header-title-weight":"600","--header-title-letter-spacing":"normal","--header-title-color":"#55483F","--header-title-font":"\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--header-sub-size":"11px","--header-sub-color":"#B4A9A1","--header-sub-letter-spacing":".02em","--header-sub-gap":"2px","--header-btn-size":"36px","--header-btn-radius":"50%","--header-btn-bg":"rgba(255,255,255,.56)","--header-btn-color":"#8F8177","--header-btn-font-size":"17px","--header-btn-shadow":"0 2px 8px rgba(99,70,68,.06),inset 0 1px 0 rgba(255,255,255,.7)","--header-btn-transition":"background .2s,color .2s,transform .15s","--header-btn-hover-bg":"rgba(255,255,255,.9)","--header-btn-hover-color":"#A96876","--header-btn-active-bg":"rgba(201,130,141,.08)","--header-btn-active-color":"#A96876","--session-padding":"10px 14px","--session-margin":"3px 8px","--session-radius":"12px","--session-transition":"background .15s,border-color .15s","--session-bg":"rgba(255,255,255,.66)","--session-hover-bg":"rgba(201,130,141,.08)","--session-active-bg":"rgba(201,130,141,.16)","--session-active-border":"rgba(92,76,66,.14)","--session-title-size":"13px","--session-title-weight":"600","--session-title-color":"#55483F","--session-meta-size":"11px","--session-meta-color":"#B4A9A1","--session-action-hover-color":"#A96876","--session-action-hover-bg":"rgba(201,130,141,.08)","--call-bg":"linear-gradient(165deg,#FBF4F1 0%,#F7E9E8 55%,#F3E0DF 100%)","--bubble-font-size":"15px","--bubble-line-height":"1.72","--bubble-font-weight":"300","--bubble-letter-spacing":"0em","--bubble-para-gap":"8px","--msg-gap":"12px","--bubble-max-width":"84%","--bubble-padding":"11px 15px","--avatar-size":"34px","--avatar-radius":"50%","--inputbar-radius":"20px","--inputbar-gap":"8px","--inputbar-padding":"7px 8px 7px 15px","--inputbar-shadow":"0 1px 5px rgba(99,70,68,.025)","--inputbar-focus-border":"rgba(197,143,150,.35)","--inputbar-focus-shadow":"0 0 0 3px rgba(197,143,150,.07),0 4px 18px rgba(80,65,55,.06)","--input-font-size":"15px","--input-line-height":"1.5","--input-max-height":"120px","--input-placeholder":"#B4A9A1","--icon-btn-size":"34px","--icon-btn-radius":"50%","--icon-btn-font-size":"16px","--send-size":"34px","--send-radius":"50%","--send-font-size":"15px","--send-shadow":"0 2px 6px rgba(169,91,105,.11)","--send-hover-bg":"#A96876","--theme-dur":"0ms","--bg-blur":"0px","--user-font-color":"#4A3F3F","--ai-font-color":"#000000"}},wx:{name:"微信",layout:"wx",vars:{"--bg1":"#F5F6F7","--bg2":"#F5F6F7","--bg3":"#F5F6F7","--surface":"rgba(255,255,255,.88)","--surface-solid":"#FFFFFF","--card":"rgba(255,255,255,.88)","--card-solid":"#FFFFFF","--sheet-bg":"#FFFFFF","--chrome-rgb":"255,255,255","--chrome-item":"rgba(255,255,255,.72)","--chrome-item-hover":"rgba(255,255,255,.92)","--ink":"#111111","--ink2":"#666666","--ink3":"#999999","--accent":"#B7B7B7","--accent-deep":"#969696","--accent-soft":"rgba(0,0,0,.10)","--accent-faint":"rgba(0,0,0,.05)","--accent-grad":"linear-gradient(135deg,#BDBDBD,#9E9E9E)","--accent-rgb":"183,183,183","--border":"rgba(0,0,0,.08)","--border-strong":"rgba(0,0,0,.14)","--line":"rgba(0,0,0,.08)","--line-strong":"rgba(0,0,0,.14)","--shadow-soft":"0 1px 5px rgba(0,0,0,.035)","--shadow-float":"0 8px 24px rgba(0,0,0,.10)","--shadow-rgb":"0,0,0","--mask-rgb":"0,0,0","--bubble-shadow":"rgba(0,0,0,.04)","--bubble-ai":"#FFFFFF","--bubble-user":"#95EC69","--bubble-user1":"#95EC69","--bubble-user2":"#95EC69","--radius":"4px","--radius-sm":"8px","--panel-radius":"12px","--bg-img":"none","--bubble-opacity":"1","--bubble-blur":"0px","--cap-think-border":"#D8D8D8","--cap-think-bg":"#F7F7F7","--cap-think-text":"#777777","--cap-tool-border":"#D8D8D8","--cap-tool-bg":"#F7F7F7","--cap-tool-text":"#777777","--hd-title":"#111111","--inputbar-bg":"#FFFFFF","--inputbar-border":"rgba(0,0,0,.08)","--input-text":"#111111","--send-bg":"#B7B7B7","--send-icon":"#FFFFFF","--avatar-bg":"#B7B7B7","--icon-btn-bg":"transparent","--icon-btn-color":"#666666","--ok":"#7da188","--ok-deep":"#5f8a6d","--ok-soft":"rgba(95,138,109,.14)","--ok-rgb":"125,161,136","--warn":"#b08b4f","--warn-deep":"#8f6f3a","--warn-soft":"rgba(143,111,58,.13)","--warn-rgb":"176,139,79","--bad":"#b97f77","--bad-deep":"#9c5f57","--bad-soft":"rgba(156,95,87,.12)","--bad-rgb":"185,127,119","--bad-grad":"#bc6f66","--info":"#98a2ab","--info-rgb":"152,162,171","--field-bg":"#FFFFFF","--menu-bg":"#FFFFFF","--code-bg":"#F5F5F5","--code-ink":"#666666","--glass":"0px","--font-family":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--font-size":"15px","--line-height":"1.72","--font-weight":"400","--letter-spacing":"0em","--font-family-mono":"ui-monospace,\"SF Mono\",Menlo,Consolas,monospace","--title-font":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--header-padding":"calc(env(safe-area-inset-top) + 10px) 14px 10px","--header-gap":"12px","--header-bg":"rgba(255,255,255,.94)","--header-border":"1px solid rgba(0,0,0,.06)","--header-shadow":"0 1px 4px rgba(0,0,0,.04)","--header-blur":"12px","--header-saturate":"100%","--header-avatar-size":"36px","--header-avatar-radius":"6px","--header-avatar-bg":"#B7B7B7","--header-avatar-icon":"#FFFFFF","--header-avatar-font-size":"17px","--header-avatar-shadow":"none","--header-title-x":"0px","--header-title-y":"0px","--header-title-size":"15px","--header-title-weight":"600","--header-title-letter-spacing":"normal","--header-title-color":"#111111","--header-title-font":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--header-sub-size":"11px","--header-sub-color":"#999999","--header-sub-letter-spacing":".02em","--header-sub-gap":"2px","--header-btn-size":"36px","--header-btn-radius":"50%","--header-btn-bg":"transparent","--header-btn-color":"#555555","--header-btn-font-size":"17px","--header-btn-shadow":"none","--header-btn-transition":"background .2s,color .2s,transform .15s","--header-btn-hover-bg":"rgba(0,0,0,.05)","--header-btn-hover-color":"#777777","--header-btn-active-bg":"rgba(0,0,0,.06)","--header-btn-active-color":"#777777","--session-padding":"10px 14px","--session-margin":"3px 8px","--session-radius":"12px","--session-transition":"background .15s,border-color .15s","--session-bg":"rgba(255,255,255,.72)","--session-hover-bg":"rgba(0,0,0,.04)","--session-active-bg":"rgba(0,0,0,.08)","--session-active-border":"rgba(0,0,0,.14)","--session-title-size":"13px","--session-title-weight":"600","--session-title-color":"#222222","--session-meta-size":"11px","--session-meta-color":"#999999","--session-action-hover-color":"#777777","--session-action-hover-bg":"rgba(0,0,0,.06)","--call-bg":"linear-gradient(165deg,#F5F5F5 0%,#EDEDED 100%)","--bubble-font-size":"15px","--bubble-line-height":"1.55","--bubble-font-weight":"400","--bubble-letter-spacing":"0em","--bubble-para-gap":"8px","--msg-gap":"18px","--bubble-max-width":"72%","--bubble-padding":"7px 12px","--avatar-size":"40px","--avatar-radius":"6px","--inputbar-radius":"12px","--inputbar-gap":"8px","--inputbar-padding":"6px 8px 6px 12px","--inputbar-shadow":"none","--inputbar-focus-border":"rgba(0,0,0,.06)","--inputbar-focus-shadow":"none","--input-font-size":"15px","--input-line-height":"1.5","--input-max-height":"120px","--input-placeholder":"#999999","--icon-btn-size":"34px","--icon-btn-radius":"4px","--icon-btn-font-size":"16px","--send-size":"34px","--send-radius":"4px","--send-font-size":"15px","--send-shadow":"none","--send-hover-bg":"#969696","--theme-dur":"0ms","--bg-blur":"0px","--user-font-color":"#111111","--ai-font-color":"#111111"}}};
 function applyTheme(){const name=THEME_PRESETS[cfg.theme]?cfg.theme:"warm";cfg.theme=name;const root=document.documentElement.style;Object.keys(THEME_PRESETS[name].vars).forEach(function(k){root.setProperty(k,THEME_PRESETS[name].vars[k]);});document.body.setAttribute("data-theme",name);document.body.setAttribute("data-style","classic");document.body.setAttribute("data-bgblur","0");document.body.style.fontFamily="";document.body.style.background="";if(chatEl)chatEl.setAttribute("data-layout",THEME_PRESETS[name].layout||"sms");cfg.show_avatar=(name==="wx");try{applyHeader();}catch(e){}const grid=document.getElementById("themeGrid");if(grid)grid.querySelectorAll(".theme-choice").forEach(function(b){b.classList.toggle("active",b.dataset.theme===name);});}
 applyTheme();
 const themeGrid=document.getElementById("themeGrid");if(themeGrid)themeGrid.addEventListener("click",function(e){const b=e.target.closest(".theme-choice");if(!b)return;cfg.theme=b.dataset.theme||"warm";saveCfg();applyTheme();renderAll();});
@@ -6556,8 +6559,11 @@ function toggleCard(id){
   var open=body.classList.contains('open');
   document.querySelectorAll('.adm-card-b').forEach(function(b){ b.classList.remove('open'); });
   document.querySelectorAll('.mnav-btn[data-adm]').forEach(function(b){ b.classList.remove('adm-on'); });
-  if(open){ // 收起：恢复本组所有子项
+  if(open){ // 收起：恢复本组所有子项，并平滑滚回展开前的位置
     if(group){ document.querySelectorAll('.mg-item[data-group="'+group+'"]').forEach(function(item){ item.style.display=''; }); }
+    var menu=body.closest('.mnav');
+    var saved=body.getAttribute('data-saved-scroll');
+    if(menu&&saved!=null){ menu.scrollTo({ top: parseInt(saved,10)||0, behavior:'smooth' }); body.removeAttribute('data-saved-scroll'); }
     return;
   }
   // 展开：只保留本子项，隐藏同组其它子项（其它子页面隐藏）
@@ -6565,18 +6571,23 @@ function toggleCard(id){
   body.classList.add('open');
   var btn=document.querySelector('.mnav-btn[data-adm="'+id+'"]');
   if(btn) btn.classList.add('adm-on');
-  // 展开后：内容窗口滚动归顶，并把整项顶到菜单可视区最上方（底部项也能顶到最上）
+  // 展开后：内容窗口滚动归顶，并把整项平滑顶到菜单可视区最上方（底部项也能顶到最上）
   function scrollItemTop(){
     body.scrollTop = 0;
     var li = body.closest('.adm-rowli');
     var menu = li && li.closest('.mnav');
     if(li && menu){
       var delta = li.getBoundingClientRect().top - menu.getBoundingClientRect().top;
-      menu.scrollTop = menu.scrollTop + delta;
+      menu.scrollTo({ top: menu.scrollTop + delta, behavior:'smooth' });
     }
   }
   // 每次展开都重新拉取最新（不做缓存，无实时轮询）
-  requestAnimationFrame(function(){ renderCard(id, body); scrollItemTop(); });
+  requestAnimationFrame(function(){
+    var menu=body.closest('.mnav');
+    if(menu) body.setAttribute('data-saved-scroll', String(menu.scrollTop));  // 记住展开前的菜单位置，收起时回滚
+    renderCard(id, body);
+    scrollItemTop();
+  });
 }
 
 function renderCard(id, body){
@@ -7205,7 +7216,7 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:2%;padding-right:2%}
 #chat[data-layout="wx"] .msg .bubble,
 #chat[data-layout="wx"] #input,
 #chat[data-layout="wx"] .inputbar,
-#chat[data-layout="wx"] .icon-btn{font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue","PingFang SC","Noto Sans CJK SC",Arial,sans-serif;font-weight:300}
+#chat[data-layout="wx"] .icon-btn{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue","PingFang SC","Noto Sans CJK SC",Arial,sans-serif;font-weight:400}
 body:has(#chat[data-layout="wx"]) header.hd-wx .hd-name{font-family:"Songti SC","STSong","SimSun","Noto Serif CJK SC",serif;font-weight:400}
 </style>
 <style>
@@ -7289,3 +7300,97 @@ body:has(#chat[data-layout="wx"]) .session-item .s-name .s-icon.pin.on{color:#11
 body:has(#chat[data-layout="wx"]) .session-item .s-name .s-icon.pin.on .ico{color:#111111!important;stroke:#111111!important;fill:none!important}
 body:has(#chat[data-layout="wx"]) .session-item .s-name .s-icon.pin:not(.on){color:#C9C9C9!important;background:transparent!important}
 </style>
+<style id="wx-bubble-width-20260920-v1">
+/* 微信气泡：长消息延伸到对侧边缘前一点，保留少量呼吸空间 */
+#chat[data-layout="wx"] .mcol>.bubble{max-width:calc(100% - 4px)!important}
+</style>
+
+<style id="wx-bubble-width-20260920-v2">
+/* 微信气泡：对侧气泡到对方头像内侧前一点，保留少量空隙 */
+#chat[data-layout="wx"] .mrow .mcol>.bubble{max-width:calc(100% - 44px)!important}
+</style>
+
+<style id="wx-input-auto-height-20260920-v1">
+/* 微信输入框：取消固定高度，随内容换行自动增高 */
+body:has(#chat[data-layout="wx"]) footer .inputbar #input{
+  height:auto!important;
+  min-height:34px!important;
+  max-height:120px!important;
+  overflow-y:auto!important;
+  box-sizing:border-box!important;
+}
+</style>
+
+<style id="wx-bubble-gap-fix-20260920-v1">
+/* 微信：间距统一挂在消息级，避免流式分段时每个 mrow 叠加间距 */
+body:has(#chat[data-layout="wx"]) #chat .mrow{margin-bottom:0!important}
+body:has(#chat[data-layout="wx"]) #chat .msg{margin-bottom:10px!important}
+</style>
+
+
+<style id="wx-live-gap-normalize-20260920-v2">
+/* 微信：实时分段与刷新后的历史分段统一为同一视觉间距；只控制消息层，不让内部 row/bubble 再叠加间距 */
+body:has(#chat[data-layout="wx"]) #chat .msg{margin-bottom:10px!important}
+body:has(#chat[data-layout="wx"]) #chat .msg .mrow+.mrow{margin-top:0!important}
+body:has(#chat[data-layout="wx"]) #chat .msg .mcol{gap:0!important}
+body:has(#chat[data-layout="wx"]) #chat .msg .mcol .bubble+.bubble{margin-top:0!important}
+</style>
+
+
+<style id="wx-live-gap-normalize-20260920-v3">
+/* 微信：历史多段保留 10px；实时独立 msg 也保持 10px，不再额外叠加 */
+body:has(#chat[data-layout="wx"]) #chat .msg{margin-bottom:10px!important}
+body:has(#chat[data-layout="wx"]) #chat .msg .mrow+.mrow{margin-top:10px!important}
+body:has(#chat[data-layout="wx"]) #chat .msg .mcol{gap:0!important}
+body:has(#chat[data-layout="wx"]) #chat .msg .mcol .bubble+.bubble{margin-top:0!important}
+</style>
+
+
+<style id="wx-live-gap-normalize-20260920-v4">
+/* 微信：只收窄实时分段，历史刷新后的多段间距保持 10px */
+body:has(#chat[data-layout="wx"]) #chat .msg.stream-in{margin-bottom:6px!important}
+body:has(#chat[data-layout="wx"]) #chat .msg .mrow+.mrow{margin-top:10px!important}
+</style>
+
+
+<style id="wx-input-height-20260920-v2">
+/* 微信输入框：单行高度与气泡 40px 对齐，多行仍由原有 JS 自动增高 */
+body:has(#chat[data-layout="wx"]) footer .inputbar #input{
+  min-height:40px!important;
+  height:40px!important;
+  box-sizing:border-box!important;
+}
+</style>
+<script>
+/* 微信输入框：允许多行时覆盖单行固定高度 */
+(function(){
+  var el=document.getElementById('input');
+  if(!el)return;
+  function wxAutoHeight(){
+    if(!document.getElementById('chat')||document.getElementById('chat').dataset.layout!=='wx')return;
+    el.style.height='auto';
+    el.style.height=Math.max(40,Math.min(el.scrollHeight,120))+'px';
+  }
+  el.addEventListener('input',wxAutoHeight);
+  window.addEventListener('load',wxAutoHeight);
+})();
+</script>
+
+
+<script id="wx-input-auto-grow-20260920-v3">
+/* 微信：高度由实际 scrollHeight 驱动；用 important 覆盖主题的固定高度规则 */
+(function(){
+  var el=document.getElementById('input');
+  if(!el)return;
+  function wxGrow(){
+    var chat=document.getElementById('chat');
+    if(!chat||chat.dataset.layout!=='wx')return;
+    el.style.setProperty('height','auto','important');
+    var h=Math.max(40,Math.min(el.scrollHeight,120));
+    el.style.setProperty('height',h+'px','important');
+  }
+  el.addEventListener('input',wxGrow);
+  el.addEventListener('keyup',wxGrow);
+  wxGrow();
+})();
+</script>
