@@ -29,28 +29,32 @@ const { createStore, DEFAULT_CONFIG } = require("./memory-v2");
 const { createStateExecutor } = require("./state-executor");
 const { buildPrompt, parseJudgeOutput, normalizeText } = require("./judge-adapter");
 
-// ---- 相似既有检索：规范化后字符二元组 Jaccard，取最高分且达阈值的活跃条目 ----
+// ---- 相似既有检索（0920 混合打分，用户拍板「关键词为主」）----
+// 词面门槛 0.10（放宽，用户拍板「不用太严」）先挡无关条目；混合分 = 0.55 词面 + 0.25 语义(bge 余弦)
+// + 0.20 重要级×30天半衰期，≥0.35 取最高分交 judge 判关系。语义通道复用 memory-v2-vectors.relevantScores
+// （embed-server 熔断/失败 → ok:false 自动降级 0.6 词面 + 0.4 重要级，同 /internal/memory-pool/retrieve 口径）。
+// 原纯字面 bigram Jaccard 版的漏判（换个说法就够不到阈值 → judge 拿不到 existing → 重复记忆漏进待审）由语义项补齐。
 const JUDGE_SIM_THRESHOLD = 0.35;
-function bigrams(s) {
-  const out = new Set();
-  for (let i = 0; i < s.length - 1; i++) out.add(s.slice(i, i + 2));
-  return out;
-}
-function jaccard(a, b) {
-  if (!a.size || !b.size) return 0;
-  let inter = 0;
-  for (const x of a) if (b.has(x)) inter++;
-  return inter / (a.size + b.size - inter);
-}
-function findBestExisting(store, text) {
+const JUDGE_LIT_GATE = 0.1;
+async function findBestExisting(store, text) {
   const key = normalizeText(text);
   if (!key) return null;
-  const bg = bigrams(key);
+  const rows = store.list({ status: "active" }).filter(e => normalizeText(e.text));
+  if (!rows.length) return null;
+  const vectors = require("./memory-v2-vectors");
+  const rs = await vectors.relevantScores(rows, key);
+  const semById = rs && rs.ok ? rs.scores : null;
+  const { tokenize, similarity } = require("./context-v2-adapter");
+  const qt = tokenize(key);
   let best = null, bestScore = 0;
-  for (const e of store.list({ status: "active" })) {
-    const ek = normalizeText(e.text);
-    if (!ek) continue;
-    const score = jaccard(bg, bigrams(ek));
+  for (const e of rows) {
+    const lit = similarity(qt, normalizeText(e.text));
+    if (lit < JUDGE_LIT_GATE) continue; // 词面门槛（关键词为主第一层）
+    const imp = Number(e.priority) || 0.5;
+    const decay = vectors.decayFactor(e);
+    const score = semById
+      ? 0.55 * lit + 0.25 * (semById[e.id] || 0) + 0.20 * imp * decay
+      : 0.6 * lit + 0.4 * imp * decay;
     if (score > bestScore) { bestScore = score; best = e; }
   }
   return bestScore >= JUDGE_SIM_THRESHOLD ? { entry: best, score: Math.round(bestScore * 100) / 100 } : null;
@@ -204,7 +208,7 @@ function createAdmission(opts = {}) {
     let judgeNote = null;
     const judgeApplies = (formal || isManualReviewGate) && detection.candidate && validation.allowed && judgeMode !== "off";
     if (judgeApplies) {
-      const existing = findBestExisting(mainStore, text);
+      const existing = await findBestExisting(mainStore, text);
       if (existing) {
         let jr = null;
         try {
