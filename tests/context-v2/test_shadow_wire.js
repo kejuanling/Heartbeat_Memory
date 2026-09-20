@@ -84,7 +84,7 @@ ok("chat.js 静态接线检查：调用在位、开关判断在位、原构建�
   assert.ok(src.includes("v2Cfg.ctx_v2_shadow === true"), "ctx_v2_shadow 开关判断（严格 === true）");
   assert.ok(src.includes("buildCtxV2ShadowInput(sessionId, llmMessages)"), "v2 输入组装在位");
   assert.ok(src.includes("v2Cfg.ctx_v2_enabled === true"), "S4 正式开关判断在位");
-  assert.ok(src.includes("applyContextV2(llmMessages, built.blocks)"), "S4 换上下文调用在位");
+  assert.ok(src.includes("ctxV2Runtime.assembleAndApply("), "S4 换上下文调用在位（0920 共享入口）");
   assert.ok(src.includes("buildConversation(sessionId);\n"), "构建行后紧跟 shadow（发送前执行）");
   // 顺序：shadow 调用必须位于 buildConversation 之后、applyReplacements 之前（只观察组装结果）
   const iBuild = src.indexOf("llmMessages = buildConversation(sessionId);");

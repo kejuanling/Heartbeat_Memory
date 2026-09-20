@@ -16,7 +16,7 @@ const { parsePushEcho, parseWakeEcho } = require('../utils/push');
 // 对话侧/唤醒侧共用上下文加工函数（2026-09-15 唤醒并入网关）
 const chatCtx = require('./chat-context');
 const ctxV2Shadow = require('../context-v2-shadow'); // Context V2 Shadow 观察（C10 S2-B1，只记录不改生产）
-const { buildContextBlocks } = require('../context-v2-builder'); // Context V2 组装（S4 正式）
+const ctxV2Runtime = require('../context-v2-runtime'); // Context V2 共享运行时（0920 完全统一：聊天唤醒同一组装入口）
 const { mapMessagesForProvider } = require('../lib/role-mapper');
 
 // 推送回显（成功推送的「刚刚给 X 发了 X 推送：」记录）需要在聊天页显示给用户看，
@@ -221,57 +221,8 @@ module.exports = function registerChatRoutes(app, deps) {
     });
   }
 
-  // S4 正式切换（0919）：把 buildConversation 产出的旧两块换成 V2 块。
-  // 旧块识别=developer 且 content 以 [永久上下文]/[跨窗口] 开头；[唤醒] 等 developer 块保留。
-  // 顺序（0919 修正）：system 人设永远在最前 → V2 固定块（assembly/instructions/identity/understanding/moments/continuity）
-  //   → 时间线历史 → Possibly Relevant Memories → 尾部 user。
-  function applyContextV2(messages, blocks) {
-    const oldDevIdx = [];
-    messages.forEach(function (m, i) {
-      if (m && m.role === 'developer' && typeof m.content === 'string' &&
-          (m.content.startsWith('[永久上下文]') || m.content.startsWith('[跨窗口]'))) oldDevIdx.push(i);
-    });
-    const fixed = (blocks || []).filter(b => b.key !== 'relevant_memories' && !b.empty);
-    const relevant = (blocks || []).find(b => b.key === 'relevant_memories' && !b.empty);
-    const newDevs = fixed.map(b => ({ role: 'developer', content: b.content }));
-    // 删旧块、插新块：无论旧块原位置如何，V2 固定块都放在开头 system 人设之后。
-    // 旧块删除后不能再按旧内容反查位置，否则找不到时会退到 0，把记忆块插到人设前面。
-    const out = messages.filter(function (m, i) { return oldDevIdx.indexOf(i) < 0; });
-    let insertAt = 0;
-    while (insertAt < out.length && out[insertAt] && out[insertAt].role === 'system') insertAt++;
-    out.splice.apply(out, [insertAt, 0].concat(newDevs));
-    // Relevant 插到尾部连续 user 消息之前（贴本轮消息、位于历史之后）
-    if (relevant) {
-      let tail = out.length;
-      while (tail > 0 && out[tail - 1] && out[tail - 1].role === 'user') tail--;
-      out.splice(tail, 0, { role: 'developer', content: relevant.content });
-    }
-    return { messages: out, hits: relevant ? relevant.lines : [] };
-  }
-
-  // Context V2 记忆浮现（0918 拍板）：Relevant 命中（≥0.30）的记忆原样写入时间线永久在场，
-  // 断绝「有据回复→支撑消失→编造倾向」的链条。挂 v2_enabled 总闸（正式启用才写，shadow 期只读）。
-  // 消息形态：role=developer、content=组装条目同款纯原文、float_id 为内部簿记字段
-  //（LLM 清洗自动剥离不进上下文）；hidden=true 前端不显示；压缩抹除清单由 addReplacement 侧负责。
-  // 注（2026-09-19 复核）：当前全仓无调用点——记忆浮现尚未接线，上述 v2_enabled 总闸未生效，本函数为预留实现。
-  function floatMemoriesToTimeline(sessionId, mems) {
-    const list = (Array.isArray(mems) ? mems : []).filter(m => m && m.id && String(m.text || '').trim());
-    if (!list.length) return 0;
-    appendMessages(sessionId, list.map(m => ({
-      role: 'developer',
-      content: strSafeEntry(m),
-      float_id: m.id,
-      hidden: true,
-    })), { silent: true });
-    ctxV2Shadow.appendFloatIds(path.join(baseDir, 'data', 'context_v2_floated.json'), sessionId, list.map(m => m.id));
-    return list.length;
-
-    function strSafeEntry(m) {
-      const t = String(m.text || '').trim();
-      const d = m.established_at && /^\d{4}-\d{2}-\d{2}/.test(String(m.established_at)) ? String(m.established_at).slice(0, 10) : (m.created_at && /^\d{4}-\d{2}-\d{2}/.test(String(m.created_at)) ? String(m.created_at).slice(0, 10) : null);
-      return d ? t + '（' + d + '）' : t;
-    }
-  }
+  // S4 的换块（applyContextV2）与记忆浮现写入（floatMemoriesToTimeline）已于 0920 上移到
+  // context-v2-runtime 共享运行时（与唤醒侧完全统一，同一 assembleAndApply 入口），此处不再保留本地副本。
 
   app.get('/v1/models', async (req, reply) => {
     reply.send({
@@ -886,26 +837,22 @@ app.post("/v1/chat/completions", async (req, reply) => {
       // 开关在请求开始时快照读取（17.txt：防切换瞬间半新半旧）
       const v2Cfg = await fsp.readJson(path.join(baseDir, 'data', 'memory_v2_config.json')).catch(() => ({}));
       if (v2Cfg && v2Cfg.ctx_v2_enabled === true) {
-        // ---- S4 正式上下文（0919 用户拍板）：V2 块替换旧两块 + Relevant 插尾 + 记忆浮现写入 ----
-        // 回滚 = ctx_v2_enabled 置 false，旧路径原样恢复。
+        // ---- S4 正式上下文（0919 用户拍板；0920 起与唤醒共用同一 assembleAndApply 入口）----
+        // V2 块替换旧两块 + Relevant 插尾 + 记忆浮现写入；回滚 = ctx_v2_enabled 置 false。
         try {
-          const v2Input = buildCtxV2ShadowInput(sessionId, llmMessages);
-          // 0919 注入语义升级：Relevant 打分换 bge 余弦（阈值 0.55、最多 3 条，向量由 memory-v2-vectors 缓存）；
-          // 算分失败（embed 熔断等）不传 vecScores，builder 回落字面，注入不致全灭。
-          try {
-            const activeRows = require('../memory-v2').createStore({ config: {} }).list({ status: 'active' });
-            const rs = await require('../memory-v2-vectors').relevantScores(activeRows, v2Input.query);
-            if (rs && rs.ok) v2Input.vecScores = rs.scores;
-          } catch (_) { /* 语义算分失败按字面回落 */ }
-          const built = buildContextBlocks(v2Input);
-          const { messages, hits } = applyContextV2(llmMessages, built.blocks);
-          llmMessages = messages;
+          const r = await ctxV2Runtime.assembleAndApply({
+            baseDir: baseDir,
+            sessionId: sessionId,
+            messages: llmMessages,
+            loadTimeline: loadTimeline,
+            normalizeContentToText: normalizeContentToText,
+          });
+          llmMessages = r.messages;
           // 记忆浮现：命中的记忆原样写入时间线永久在场（hidden 前端不显示；清单防重复由 builder excludeIds 保证）
-          if (built.relevantHits && built.relevantHits.length) {
-            const n = floatMemoriesToTimeline(sessionId, built.relevantHits);
+          if (r.relevantHits && r.relevantHits.length) {
+            const n = ctxV2Runtime.floatMemoriesToTimeline({ appendMessages, sessionId, mems: r.relevantHits, baseDir });
             if (n) console.log('[ctx-v2] 本轮记忆浮现', n, '条');
           }
-          void hits;
         } catch (e) { console.error('[ctx-v2] 切换层失败，回退旧上下文（不影响主聊天）:', e && e.message); }
       } else if (v2Cfg && v2Cfg.ctx_v2_shadow === true) {
         // ---- Shadow 观察（S3 遗留，enabled 后自动停用）----

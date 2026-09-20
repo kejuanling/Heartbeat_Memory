@@ -5,9 +5,10 @@
 // 走工具循环（失败回退直连）调模型，返回文本。
 // 唤醒特有行为（Bark 推送/[NO_ACTION]/日记/<wake> 定时/写回时间线）仍由调用方负责，本模块不碰。
 //
-// role 法（2026-09-15 定稿）：
-//   system 人设 → developer [永久上下文] → developer [跨窗口] → 历史(原样)
-//   → developer [唤醒]（落盘）→ 生成 assistant。
+// role 法（2026-09-15 定稿；0920 起 V2 开启时上下文与聊天侧完全统一——
+// 同一 assembleAndApply 入口：system 人设 → V2 固定块（assembly/instructions/identity/
+// understanding/moments/continuity）→ 历史 → Relevant → [唤醒] 块（落盘）→ 生成 assistant。
+// V2 关闭时回退旧路径：system 人设 → developer [永久上下文] → [跨窗口] → 历史 → [唤醒]）。
 // 内部消息出口前经 lib/role-mapper.js 按供应商 profile 翻译（default: developer→system）。
 
 const path = require('path');
@@ -63,17 +64,23 @@ async function runWakeCompletion(deps, opts) {
   contextReplacements.setActiveSession(sessionId || null);
   try {
     let msgs = buildWakeBaseMessages(deps, sessionId, ensureBuilder(deps));
-    // 唤醒与聊天共用 Context V2 组装；开关关闭时完全保留旧路径。
+    // 唤醒与聊天共用 Context V2 组装（0920 完全统一：同一 assembleAndApply 入口，
+    // 同一时刻同一会话两侧上下文逐字一致，人设 system 恒在最顶）；开关关闭时完全保留旧路径。
     if (ctxV2Runtime.enabled(deps.baseDir)) {
       try {
-        const input = ctxV2Runtime.buildInput(deps.baseDir, sessionId, msgs, deps.normalizeContentToText);
-        // 0919 注入语义升级（与聊天侧同款）：算好 bge 余弦传入 vecScores；失败回落字面。
-        try {
-          const activeRows = require('../memory-v2').createStore({ config: {} }).list({ status: 'active' });
-          const rs = await require('../memory-v2-vectors').relevantScores(activeRows, input.query);
-          if (rs && rs.ok) input.vecScores = rs.scores;
-        } catch (_) { /* 语义算分失败按字面回落 */ }
-        msgs = ctxV2Runtime.apply(msgs, ctxV2Runtime.buildContextBlocks(input).blocks);
+        const r = await ctxV2Runtime.assembleAndApply({
+          baseDir: deps.baseDir,
+          sessionId: sessionId,
+          messages: msgs,
+          loadTimeline: deps.loadTimeline,
+          normalizeContentToText: deps.normalizeContentToText,
+        });
+        msgs = r.messages;
+        // 记忆浮现与聊天侧对齐（0920 拍板）：命中记忆原样写入时间线永久在场
+        if (r.relevantHits && r.relevantHits.length) {
+          const n = ctxV2Runtime.floatMemoriesToTimeline({ appendMessages: deps.appendMessages, sessionId, mems: r.relevantHits, baseDir: deps.baseDir });
+          if (n) console.log('[wake-chat] 本轮记忆浮现', n, '条');
+        }
       } catch (e) { console.warn('[wake-chat] Context V2 组装失败，回退旧上下文:', e.message); }
     }
 
