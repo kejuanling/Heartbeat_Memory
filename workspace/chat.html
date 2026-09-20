@@ -6587,6 +6587,7 @@ function toggleCard(id){
     if(menu) body.setAttribute('data-saved-scroll', String(menu.scrollTop));  // 记住展开前的菜单位置，收起时回滚
     renderCard(id, body);
     scrollItemTop();
+    setTimeout(scrollItemTop, 420);  // 卡片内容异步加载后高度会变，稳定后复滚一次确保贴顶
   });
 }
 
