@@ -325,8 +325,8 @@ module.exports = function registerChatRoutes(app, deps) {
       if (needWrite) saveTimeline(timeline, sessionId);
       const items = timeline
         .filter(m => isRealMessageForTimeline(m) || (m && !m.deleted && isPushEchoLike(m)))
-        // role 法（2026-09-15）：developer 块（[唤醒]等）与日记（kind=diary）、noaction（2026-09-20）只落盘不对前端展示
-        .filter(m => !(m && (m.role === 'developer' || m.role === 'tool' || m.kind === 'diary' || m.kind === 'noaction')))
+        // role 法（2026-09-15）：developer 块（[唤醒]等）与日记（kind=diary）只落盘不对前端展示
+        .filter(m => !(m && (m.role === 'developer' || m.role === 'tool' || m.kind === 'diary')))
         .map(m => {
           const clean = { role: m.role };
           if (m.id !== undefined) clean.id = m.id;
@@ -371,12 +371,12 @@ module.exports = function registerChatRoutes(app, deps) {
           if (!sid) continue;
           let arr = [];
           try { arr = loadTimeline(sid); } catch (e) { continue; }
-          // sidx 口径必须与 /v1/history 的可见序列完全一致（真实消息+推送回显可见；developer/tool/diary/noaction 隐藏），
+          // sidx 口径必须与 /v1/history 的可见序列完全一致（真实消息+推送回显可见；developer/tool/diary 隐藏），
           // 前端按该下标定位跳转（switchSessionAndLocate 索引的就是 history 序列）。
           // 2026-09-15 修复：此前只按 isRealMessageForTimeline 计数，推送回显不入列、v2 日记误入列，
           // 主会话实测 3059 条可搜消息中 2302 条错位（偏差最多 19 条），搜索跳转落在错误消息上。
           arr.filter(m => (isRealMessageForTimeline(m) || (m && !m.deleted && isPushEchoLike(m)))
-            && !(m && (m.role === 'developer' || m.role === 'tool' || m.kind === 'diary' || m.kind === 'noaction')))
+            && !(m && (m.role === 'developer' || m.role === 'tool' || m.kind === 'diary')))
             .forEach((m, i) => {
               const text = normalizeContentToText(m.content) || '';
               if (!text) return;

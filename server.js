@@ -2618,26 +2618,21 @@ app.post("/internal/timeline-event", async (req, reply) => {
 // 幂等去重只在 HTTP 入口做（调度器进程内调用无重试路径）。
 function applyWakeEventV2(body) {
   try {
-    const { session_id, speak, diary, push, event, noaction, tools, wake_block_id } = body || {};
+    const { session_id, speak, diary, push, event, tools, wake_block_id } = body || {};
     const evSession = typeof session_id === "string" && session_id.trim() ? String(session_id).trim() : null;
     const speakRaw = String(speak || "").trim();
     const diaryRaw = String(diary || "").trim();
     const eventRaw = String(event || "").trim();
-    const noactionRaw = String(noaction || "").trim();
     const pushMeta = (push && typeof push === "object") ? push : null;
     const wakeTools = Array.isArray(tools) ? tools.filter(t => t && t.name) : [];
     const appended = [];
     if (diaryRaw) appended.push({ role: "assistant", content: diaryRaw, kind: "diary" });
-    // noaction=[NO_ACTION] 原始输出：是 AI 的输出 → assistant 层落时间线，kind=noaction 标记前端隐藏（/v1/history 与 sidx 口径同步）
-    if (noactionRaw) appended.push({ role: "assistant", content: noactionRaw, kind: "noaction" });
+    // 2026-09-20：AI 完整输出原样落时间线（[DIARY] 等标签内联保留，不再剥除——时间线=完整真实流水账）
     if (speakRaw) {
-      const stored = stripDiaryBlocks(speakRaw);
-      if (stored) {
-        const msg = { role: "assistant", content: stored };
-        if (pushMeta) msg.push = pushMeta;
-        if (wakeTools.length) msg.tools = wakeTools;
-        appended.push(msg);
-      }
+      const msg = { role: "assistant", content: speakRaw };
+      if (pushMeta) msg.push = pushMeta;
+      if (wakeTools.length) msg.tools = wakeTools;
+      appended.push(msg);
     }
     // 2026-09-20 恢复判定回写：event=唤醒判定记录（发推/未发/失败，沿用文本格式，推送管理读端直接解析）
     // → developer 系统层消息落时间线，前端不显示（与 [唤醒] 块同层）
