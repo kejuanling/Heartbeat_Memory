@@ -29,13 +29,11 @@ const DEFAULT_CONFIG = {
   budgets: {
     system_instructions: 1200,     // 超限=管理问题，代码不截断（同 Identity）
     core_identity: 600,            // 超限=管理问题（报警人工清理），代码不截断
-    long_term_understanding: 400,  // 核心层预算（含 header）；超限淘汰更旧（0920 删重要级，原按 priority 升序）
     meaningful_moments: 200,       // anchor 层预算；条数上限兜底，超限照实输出
     conversation_continuity: 40000, // Earlier Days 封顶仅防异常（篇数由用户配置 diaryCount 决定，不在此静默丢篇）
     relevant_memories: 400,        // 超限从尾部减条
   },
   diaryCount: 3,                   // Earlier Days 篇数（生产接线时同源管理台 cross_inject_diary_count）
-  momentsAnchorMax: 5,
   relevantTopK: 5,
   relevantMinScore: 0.30,          // 0918 用户拍板调高：命中即写入时间线永久在场，高门槛防膨胀
   // 0920 混合模式（用户拍板「词面为主」）：input.vecScores（bge 余弦，调用方算好）在场时，
@@ -190,23 +188,18 @@ function buildCoreIdentity(input, cfg) {
 }
 
 // [3] Long-term Understanding 核心层：V2 fact(active 且 anchor=true)（0920 删重要级：原 anchor 且 priority≥0.8）；
-// 排列按准入时间正序；预算含 header，整体超预算时淘汰更旧，保底 1 条
+// 排列按准入时间正序。0920 用户拍板去掉注入上限（原 400 token 超限淘汰更旧、保底 1 条）——置顶记忆全量注入
 function buildUnderstanding(input, cfg) {
   const fixedIds = [];
-  const available = cfg.budgets.long_term_understanding - estimateTokens(HEADERS.long_term_understanding);
-  const cand = (Array.isArray(input.memoriesV2) ? input.memoriesV2 : [])
+  const lines = (Array.isArray(input.memoriesV2) ? input.memoriesV2 : [])
     .filter(m => m && m.status === "active" && m.kind === "fact" && m.anchor === true)
     .sort(byCreatedAt)
-    .map(m => ({ m, cost: estimateTokens(strSafe(m.text)) }));
-  let pool = cand.slice();
-  const total = () => pool.reduce((s, c) => s + c.cost, 0);
-  while (total() > available && pool.length > 1) pool.shift(); // 淘汰更旧（pool 按准入时间正序）
-  const lines = pool.map(c => { if (c.m.id != null) fixedIds.push(String(c.m.id)); return entryLine(c.m.text, null); });
+    .map(m => { if (m.id != null) fixedIds.push(String(m.id)); return entryLine(m.text, null); });
   return { lines, fixedIds };
 }
 
 // [4] Meaningful Moments anchor 层：pinned(moments_anchor) ＋ V2 quote/milestone(active 且 anchor=true)；
-// 合并按事件时间（iso，缺失排尾）升序，条数上限 max 条；带轻量日期后缀。其余 quote/milestone 走检索池不在此。
+// 合并按事件时间（iso，缺失排尾）升序。0920 用户拍板去掉条数上限（原 max=5 截断）——置顶记忆全量注入。其余 quote/milestone 走检索池不在此。
 function buildMoments(input, cfg) {
   const lines = [];
   const fixedIds = [];
@@ -217,8 +210,7 @@ function buildMoments(input, cfg) {
     .filter(m => m && m.status === "active" && (m.kind === "quote" || m.kind === "milestone") && m.anchor === true)
     .map(m => ({ text: m.text, iso: strSafe(m.established_at) || strSafe(m.created_at), id: m.id != null ? String(m.id) : null }));
   const merged = pinned.concat(v2m)
-    .sort((a, b) => (a.iso || "9999") < (b.iso || "9999") ? -1 : (a.iso || "9999") > (b.iso || "9999") ? 1 : 0)
-    .slice(0, cfg.momentsAnchorMax);
+    .sort((a, b) => (a.iso || "9999") < (b.iso || "9999") ? -1 : (a.iso || "9999") > (b.iso || "9999") ? 1 : 0);
   for (const e of merged) {
     lines.push(entryLine(e.text, e.iso));
     if (e.id) fixedIds.push(e.id);

@@ -95,17 +95,15 @@ ok("understanding: 只收 fact+active+priority≥0.8；created_at 升序；无�
   assert.ok(i1 < i2, "created_at 升序");
 });
 
-ok("understanding: 超预算按 priority 升序淘汰（保高 priority，保底 1 条）", () => {
+ok("understanding: 无注入上限（0920 拍板），全量注入", () => {
   const mems = [
-    { id: "a", text: "甲".repeat(150), kind: "fact", status: "active", priority: 0.9, created_at: "2026-09-01T00:00:00+08:00" },
-    { id: "b", text: "乙".repeat(150), kind: "fact", status: "active", priority: 0.82, created_at: "2026-09-02T00:00:00+08:00" },
-    { id: "c", text: "丙".repeat(150), kind: "fact", status: "active", priority: 0.81, created_at: "2026-09-03T00:00:00+08:00" },
+    { id: "a", text: "甲".repeat(150), kind: "fact", status: "active", anchor: true, created_at: "2026-09-01T00:00:00+08:00" },
+    { id: "b", text: "乙".repeat(150), kind: "fact", status: "active", anchor: true, created_at: "2026-09-02T00:00:00+08:00" },
+    { id: "c", text: "丙".repeat(150), kind: "fact", status: "active", anchor: true, created_at: "2026-09-03T00:00:00+08:00" },
   ];
   const res = buildContextBlocks({ memoriesV2: mems });
   const b = blockOf(res, "long_term_understanding");
-  assert.ok(b.tokens <= DEFAULT_CONFIG.budgets.long_term_understanding, "整块（含 header）预算内");
-  assert.ok(b.content.includes("甲"), "priority 最高保留");
-  assert.ok(!b.content.includes("丙"), "priority 最低淘汰");
+  assert.ok(b.content.includes("甲") && b.content.includes("乙") && b.content.includes("丙"), "全部注入，无截断");
 });
 
 // ============================================================
@@ -124,14 +122,14 @@ ok("moments: pinned anchor+V2 anchor(milestone/quote) 进；非 anchor 不进；
   assert.ok(/07-14 我们成为恋人（2026-07-14）/.test(b.content), "established_at 日期后缀");
 });
 
-ok("moments: 超过 max=5 条按事件时间升序截断保前 5", () => {
+ok("moments: 无条数上限（0920 拍板），7 条全注入", () => {
   const mems = [];
   for (let i = 1; i <= 7; i++) {
     mems.push({ id: "q" + i, text: "原话第" + i + "条", kind: "quote", status: "active", anchor: true, established_at: "2026-08-0" + i + "T00:00:00+08:00" });
   }
   const res = buildContextBlocks({ memoriesV2: mems });
   const b = blockOf(res, "meaningful_moments");
-  assert.ok(b.content.includes("原话第5条") && !b.content.includes("原话第6条"), "保前 5");
+  assert.ok(b.content.includes("原话第1条") && b.content.includes("原话第7条"), "全部注入");
 });
 
 // ============================================================

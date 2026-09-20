@@ -104,10 +104,10 @@ ok("config 覆盖：门槛提高→核心层省略；diaryCount=1→只最新一
   const input = fullInput();
   input.config = { understandingCoreMinPriority: 0.95, diaryCount: 1 };
   const res = buildContextBlocks(input);
-  assert.ok(!res.blocks.find(b => b.key === "long_term_understanding"), "0.95 门槛下无条目→省略");
+  // 0920 核心层 priority 门槛已删（仅 anchor），传入的 understandingCoreMinPriority 被忽略
+  assert.strictEqual(DEFAULT_CONFIG.understandingCoreMinPriority, undefined, "核心层 priority 门槛配置已删");
   const cont = res.blocks.find(b => b.key === "conversation_continuity");
   assert.ok(cont.content.includes("2026-09-13") && !cont.content.includes("2026-09-10"), "diaryCount=1 只最新一篇");
-  assert.strictEqual(DEFAULT_CONFIG.understandingCoreMinPriority, 0.8, "默认值未被改");
   assert.strictEqual(DEFAULT_CONFIG.diaryCount, 3, "默认篇数未被改");
 });
 
