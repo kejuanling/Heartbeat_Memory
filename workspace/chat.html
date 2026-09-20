@@ -6986,16 +6986,22 @@ function renderCross(body){
 /* ---------------- 推送管理 ---------------- */
 function renderPush(body){
   body.innerHTML='<div class="adm-load">加载中…</div>';
-  // 与管理台一致：不带 session_id 拉全部窗口的推送（opts.sid=false 阻止自动附加当前会话）
+  // 不带 session_id 拉全部窗口（opts.sid=false 阻止自动附加当前会话）；列表不分组，整体按时间倒序平铺
   admFetch(BASE+'/push-events',{sid:false}).then(function(r){ return r.json(); }).then(function(j){
     var items=(j&&j.items)||[];
     if(!items.length){ body.innerHTML='<div class="adm-empty">暂无推送记录</div>'; return; }
+    // 头部只留状态点（橙=未发送的唤醒记录，灰=已推送）+ 会话 id + 时间；渠道文字（Bark/未发送）不显示
+    items.sort(function(a,b){
+      var ta=String(a.at||''), tb=String(b.at||'');
+      if(ta!==tb) return ta<tb?1:-1;
+      return (b.position||0)-(a.position||0);
+    });
     body.innerHTML='<div class="adm-tip">共 '+items.length+' 条（最新在前）</div>'+items.map(function(it){
       var t=''; try{ if(it.at) t=new Date(String(it.at).replace(' ','T')+':00+08:00').toLocaleString('zh-CN',{hour12:false}); }catch(e){}
       var isWake=it.sent===false;
       var dot=isWake?'#e67e22':'var(--ink3)';
       var sess=it.session_id||'default';
-      return '<div class="adm-item"><div class="adm-item-h"><span style="display:inline-flex;align-items:center;gap:5px;color:var(--ink2)"><i style="width:8px;height:8px;border-radius:50%;background:'+dot+';display:inline-block;flex:none"></i>'+esc(it.channel||'bark')+'</span><span class="adm-tag">'+esc(sess)+'</span><span style="color:var(--ink3)">'+esc(t)+'</span><span style="margin-left:auto"></span>'+(isWake?'':'<button data-push="edit" data-pos="'+esc(it.position)+'" class="adm-editbtn">编辑</button>')+'<button data-push="del" data-pos="'+esc(it.position)+'" class="danger" title="删除" style="border:1px solid var(--bad-deep);background:none;border-radius:7px;font-size:11px;color:var(--bad-deep);padding:3px 9px;cursor:pointer">✕</button></div><div class="adm-item-b"><b>'+esc(it.title||'')+'</b></div><div class="adm-item-b" style="color:var(--ink2)">'+esc(it.body||'')+'</div></div>';
+      return '<div class="adm-item"><div class="adm-item-h"><i style="width:8px;height:8px;border-radius:50%;background:'+dot+';display:inline-block;flex:none"></i><span class="adm-tag">'+esc(sess)+'</span><span style="color:var(--ink3)">'+esc(t)+'</span><span style="margin-left:auto"></span>'+(isWake?'':'<button data-push="edit" data-pos="'+esc(it.position)+'" class="adm-editbtn">编辑</button>')+'<button data-push="del" data-pos="'+esc(it.position)+'" class="danger" title="删除" style="border:1px solid var(--bad-deep);background:none;border-radius:7px;font-size:11px;color:var(--bad-deep);padding:3px 9px;cursor:pointer">✕</button></div><div class="adm-item-b"><b>'+esc(it.title||'')+'</b></div><div class="adm-item-b" style="color:var(--ink2)">'+esc(it.body||'')+'</div></div>';
     }).join('');
     Array.prototype.forEach.call(body.querySelectorAll('button[data-push]'), function(b){
       b.addEventListener('click', function(){
