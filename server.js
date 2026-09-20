@@ -4668,7 +4668,14 @@ app.put("/admin/voice-config", { preHandler: mcpManageAuth }, async (req, reply)
 app.post("/admin/tts", { preHandler: mcpManageAuth }, async (req, reply) => {
   try {
     const cfg = loadVoiceConfig();
-    const p = resolveActiveVoiceProvider(cfg);
+    let p = resolveActiveVoiceProvider(cfg);
+    // 试听覆盖：请求带 provider_id 时用指定供应商（编辑表单里试听非当前生效供应商的音色），
+    // 找不到或已停用则忽略，回落当前生效。
+    const reqPid = String((req.body && req.body.provider_id) || "");
+    if (reqPid) {
+      const ovP = (Array.isArray(cfg.providers) ? cfg.providers : []).find(function (x) { return x && x.id === reqPid && x.enabled !== false; });
+      if (ovP) p = ovP;
+    }
     if (!p || !p.api_key) return reply.code(400).send({ error: "未配置语音供应商 API Key" });
     const text = String((req.body && req.body.text) || "").trim();
     if (!text) return reply.code(400).send({ error: "内容为空" });

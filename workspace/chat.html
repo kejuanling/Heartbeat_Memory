@@ -4627,6 +4627,8 @@ function renderVpDraftVoices(){
 // 试听某个音色（用当前表单参数）
 function playVpVoiceProbe(v){
   const ov={speaker:v.value};
+  // 试听要用正在编辑的供应商（否则落到当前生效供应商，别的家音色 ID 必然对不上）
+  if(_voiceEditingIndex!=null && _voiceProviders[_voiceEditingIndex]) ov.provider_id=_voiceProviders[_voiceEditingIndex].id;
   try{ if(vpEmotion&&vpEmotion.value) ov.emotion=vpEmotion.value; }catch(e){}
   try{ if(vpVol&&vpVol.value!=null&&vpVol.value!=="") ov.vol=Number(vpVol.value); }catch(e){}
   try{ if(vpPitch&&vpPitch.value!=null&&vpPitch.value!=="") ov.pitch=Number(vpPitch.value); }catch(e){}
