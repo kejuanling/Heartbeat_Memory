@@ -29,22 +29,21 @@ const DEFAULT_CONFIG = {
   budgets: {
     system_instructions: 1200,     // 超限=管理问题，代码不截断（同 Identity）
     core_identity: 600,            // 超限=管理问题（报警人工清理），代码不截断
-    long_term_understanding: 400,  // 核心层预算（含 header）；超限按 priority 升序淘汰
+    long_term_understanding: 400,  // 核心层预算（含 header）；超限淘汰更旧（0920 删重要级，原按 priority 升序）
     meaningful_moments: 200,       // anchor 层预算；条数上限兜底，超限照实输出
     conversation_continuity: 40000, // Earlier Days 封顶仅防异常（篇数由用户配置 diaryCount 决定，不在此静默丢篇）
     relevant_memories: 400,        // 超限从尾部减条
   },
   diaryCount: 3,                   // Earlier Days 篇数（生产接线时同源管理台 cross_inject_diary_count）
-  understandingCoreMinPriority: 0.8,
   momentsAnchorMax: 5,
   relevantTopK: 5,
   relevantMinScore: 0.30,          // 0918 用户拍板调高：命中即写入时间线永久在场，高门槛防膨胀
   // 0920 混合模式（用户拍板「词面为主」）：input.vecScores（bge 余弦，调用方算好）在场时，
   // Relevant 改混合打分——词面当门槛（无关闲聊的语义地板再高也进不来），混合分排序：
-  // 0.55 词面 + 0.25 语义 + 0.20 重要级×衰减（30天半衰期），≥0.35 入选，最多 3 条。
-  // 校准实测：相关命中 0.475-0.594、带门槛闲聊 ≤0.299，中间有空隙。vecScores 缺场回落字面（上行）。
+  // 0.55 词面 + 0.25 语义（重要级×衰减项 0920 已删），≥0.28 入选，最多 3 条。
+  // 校准实测（旧公式口径）：相关命中 0.475-0.594、带门槛闲聊 ≤0.299；删项后相关命中约 ×0.8。vecScores 缺场回落字面（上行）。
   relevantLitGate: 0.15,
-  relevantMinHybridScore: 0.35,
+  relevantMinHybridScore: 0.28,   // 0920 删重要级×衰减项后等比换算（原 0.35/满分1.0 → ×0.8）
   relevantHybridTopK: 3,
 };
 
@@ -190,23 +189,18 @@ function buildCoreIdentity(input, cfg) {
   return { lines, fixedIds };
 }
 
-// [3] Long-term Understanding 核心层：V2 fact(active 且 anchor=true) 且 priority ≥ 门槛；
-// 排列按准入时间正序；预算含 header，整体超预算时按 priority 升序淘汰（同 priority 淘汰更旧），保底 1 条
+// [3] Long-term Understanding 核心层：V2 fact(active 且 anchor=true)（0920 删重要级：原 anchor 且 priority≥0.8）；
+// 排列按准入时间正序；预算含 header，整体超预算时淘汰更旧，保底 1 条
 function buildUnderstanding(input, cfg) {
   const fixedIds = [];
   const available = cfg.budgets.long_term_understanding - estimateTokens(HEADERS.long_term_understanding);
   const cand = (Array.isArray(input.memoriesV2) ? input.memoriesV2 : [])
-    .filter(m => m && m.status === "active" && m.kind === "fact" && m.anchor === true
-      && Number(m.priority || 0) >= cfg.understandingCoreMinPriority)
+    .filter(m => m && m.status === "active" && m.kind === "fact" && m.anchor === true)
     .sort(byCreatedAt)
-    .map(m => ({ m, cost: estimateTokens(strSafe(m.text)), pr: Number(m.priority || 0) }));
+    .map(m => ({ m, cost: estimateTokens(strSafe(m.text)) }));
   let pool = cand.slice();
   const total = () => pool.reduce((s, c) => s + c.cost, 0);
-  while (total() > available && pool.length > 1) {
-    let worstIdx = 0; // 同 priority 时保住靠前（更旧）的索引=淘汰更旧一条
-    for (let i = 1; i < pool.length; i++) if (pool[i].pr < pool[worstIdx].pr) worstIdx = i;
-    pool.splice(worstIdx, 1);
-  }
+  while (total() > available && pool.length > 1) pool.shift(); // 淘汰更旧（pool 按准入时间正序）
   const lines = pool.map(c => { if (c.m.id != null) fixedIds.push(String(c.m.id)); return entryLine(c.m.text, null); });
   return { lines, fixedIds };
 }
@@ -257,9 +251,9 @@ function buildContinuity(input, cfg) {
 
 // [6] Possibly Relevant Memories：V2 检索（排除固定块已注入成员＋input.excludeIds
 // ——本会话已写入时间线的浮现记忆，命中后由生产链路落时间线永久在场，不再重复注入），
-// score desc → priority desc → id；宁缺毋滥（允许空）。条目带轻量日期后缀；超预算从尾部减条。
+// score desc → id；宁缺毋滥（允许空）。条目带轻量日期后缀；超预算从尾部减条。
 // 0920 混合模式：input.vecScores（bge 余弦，调用方算好）在场时——词面 ≥0.15 当门槛 +
-// 混合分（0.55词面+0.25语义+0.20重要级×衰减）≥0.35 入选，最多 3 条；无向量条目不参与。
+// 混合分（0.55词面+0.25语义）≥0.28 入选，最多 3 条；无向量条目不参与。重要级×衰减项已删。
 // vecScores 缺场回落字面（embed 熔断/shadow 诊断）。两种模式的排除逻辑完全一致。
 function buildRelevant(input, cfg, fixedIdSet) {
   const q = strSafe(input.query);
@@ -278,10 +272,7 @@ function buildRelevant(input, cfg, fixedIdSet) {
       if (lit < cfg.relevantLitGate) continue; // 词面门槛（词面为主第一层）
       const sem = vecScores[String(m.id)];
       if (typeof sem !== "number" || !(sem >= 0)) continue; // 无向量条目不参与（宁缺毋滥）
-      const t = new Date(m.content_updated_at || m.created_at || "").getTime();
-      const decay = isNaN(t) ? 1 : Math.pow(0.5, (Date.now() - t) / 86400000 / 30);
-      const imp = Number(m.priority) || 0.5;
-      const score = Math.round((0.55 * lit + 0.25 * sem + 0.20 * imp * decay) * 1000) / 1000;
+      const score = Math.round((0.55 * lit + 0.25 * sem) * 1000) / 1000;
       if (score < cfg.relevantMinHybridScore) continue;
       scored.push({ m, score });
     }
@@ -294,7 +285,6 @@ function buildRelevant(input, cfg, fixedIdSet) {
     }
   }
   scored.sort((a, b) => b.score - a.score
-    || (Number(b.m.priority || 0) - Number(a.m.priority || 0))
     || String(a.m.id).localeCompare(String(b.m.id)));
   const budget = cfg.budgets.relevant_memories;
   const headerCost = estimateTokens(HEADERS.relevant_memories);
@@ -308,7 +298,7 @@ function buildRelevant(input, cfg, fixedIdSet) {
     const cost = estimateTokens(line);
     if (used + cost > budget) break;
     lines.push(line);
-    hits.push({ id: String(s.m.id), text: s.m.text, kind: s.m.kind, priority: s.m.priority, established_at: s.m.established_at || null, created_at: s.m.created_at || null, score: s.score });
+    hits.push({ id: String(s.m.id), text: s.m.text, kind: s.m.kind, established_at: s.m.established_at || null, created_at: s.m.created_at || null, score: s.score });
     used += cost;
   }
   return { lines, fixedIds: [], hits };
@@ -324,7 +314,7 @@ function buildRelevant(input, cfg, fixedIdSet) {
  *   pinnedEntries: [{id, title?, content, target: "instructions"|"identity"|"moments_anchor"|"retire"}]
  *   timeline:      （已不再使用——Recent Experience 随 0918 修订剔除；保留键位兼容旧调用）
  *   diaryEntries:  [{date:"YYYY-MM-DD", content}]（任意序，内部按日期排）
- *   memoriesV2:    [{id, text, kind, subject, status, priority?, created_at?, established_at?, anchor?}]
+ *   memoriesV2:    [{id, text, kind, subject, status, created_at?, established_at?, anchor?}]（priority 已删）
  *   query:         string（本轮 user 消息文本；空则 Relevant 块为空）
  *   config:        object（可选，浅合并覆盖 DEFAULT_CONFIG）
  * @param {object} opts 可选：{ includeEmpty: boolean }——true 时空块也返回（empty:true，content:""，shadow 诊断用）

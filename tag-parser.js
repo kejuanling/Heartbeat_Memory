@@ -133,21 +133,20 @@ async function extractAndStore(text, ctx) {
   }
 
   // --- <memory> 轻量辅助：AI 顺手写的重要记忆 → 记忆池（自动去重，非必需） ---
-  // 只允许前三类（关于她/认账/拓本），标签内开头写 {category:"认账", importance:0.8} 指定分类/重要级，如
-  //   <memory>{category:"认账",importance:0.9}她情绪低落时先抱住她，别急着讲道理</memory>
-  //   <memory>{category:"拓本",importance:0.85}涵（9-12）："因为是你。"</memory>
+  // 只允许前三类（关于她/认账/拓本），标签内开头写 {category:"认账"} 指定分类（重要级已删，0920），如
+  //   <memory>{category:"认账"}她情绪低落时先抱住她，别急着讲道理</memory>
+  //   <memory>{category:"拓本"}涵（9-12）："因为是你。"</memory>
   // 写了别的分类（压缩摘要/对话碎片/旧类名）一律视为没写，交给 LLM 从前三类里判
   const memoryMatches = text.matchAll(MEMORY_TAG_RE);
   for (const match of memoryMatches) {
     const raw = (match[1] || "").trim();
     if (!raw) continue;
-    let body = raw, category = "", importance = null, pinned = false;
+    let body = raw, category = "", pinned = false;
     const metaMatch = raw.match(/^\s*\{[\s\S]*?\}\s*([\s\S]*)$/);
     if (metaMatch && /^\s*\{/.test(raw)) {
       const head = raw.slice(0, raw.indexOf("}") + 1);
-      const kv = parseKeyValueBlock(head, ["category", "importance", "type", "pinned"]);
+      const kv = parseKeyValueBlock(head, ["category", "type", "pinned"]); // importance 已删：残留值不解析静默丢弃
       if (kv.category) category = String(kv.category).trim();
-      if (kv.importance != null && isFinite(kv.importance)) importance = Number(kv.importance);
       if (kv.pinned) pinned = (String(kv.pinned) === "true" || String(kv.pinned) === "1");
       body = metaMatch[1].trim();
     }
@@ -155,7 +154,7 @@ async function extractAndStore(text, ctx) {
     promises.push(
       Promise.resolve().then(function () {
         const memoryPool = require("./memory-pool");
-        return memoryPool.ingestSummary(body, { source: "memory_tag", directCategory: category, directImportance: importance, directPinned: pinned });
+        return memoryPool.ingestSummary(body, { source: "memory_tag", directCategory: category, directPinned: pinned });
       }).then(function (r) {
         if (r && (r.added || r.merged)) {
           console.log("[tag-parser] <memory> 已入记忆池:", body.slice(0, 50), "added=", r.added, "merged=", r.merged);

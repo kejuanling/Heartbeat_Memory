@@ -1174,13 +1174,11 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .adm-searchbar input{flex:1;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:12px;color:var(--ink);background:var(--field-bg,#fff);outline:none;font-family:inherit}
 .adm-searchbar select{flex-shrink:0;border:1px solid var(--line);border-radius:8px;padding:8px 8px;font-size:12px;color:var(--ink);background:var(--field-bg,#fff);outline:none;font-family:inherit}
 .adm-searchbar button{flex-shrink:0;border:none;border-radius:8px;padding:8px 12px;font-size:12px;cursor:pointer;background:var(--accent-grad);color:#fff;font-weight:600}
-/* 记忆池：分类标签 / 徽标 / 重要级条形 */
+/* 记忆池：分类标签 / 徽标 */
 .adm-cat{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--c);padding:2px 8px;border-radius:9px;background:color-mix(in srgb,var(--c) 14%,transparent)}
 .adm-cat::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--c);flex-shrink:0}
 .adm-tag{display:inline-flex;align-items:center;font-size:10px;color:var(--ink3);padding:1px 7px;border-radius:8px;background:var(--accent-faint)}
 .adm-badge{font-size:9px;font-weight:600;letter-spacing:1px;color:var(--accent-deep);border:1px solid var(--line-strong);padding:1px 6px;border-radius:8px}
-.adm-imp{width:60px;height:5px;border-radius:3px;background:var(--accent-faint);overflow:hidden;flex-shrink:0}
-.adm-imp i{display:block;height:100%;background:var(--accent-grad)}
 /* 会话搜索 */
 .session-search{display:flex;align-items:center;gap:6px;margin:10px 14px 8px;padding:8px 10px;border:1px solid var(--line);border-radius:18px;background:var(--field-bg,var(--chrome-item,rgba(255,255,255,.7)))}
 .session-search input{flex:1;min-width:0;border:none;outline:none;background:transparent;font-size:13px;color:var(--ink);font-family:inherit}
@@ -6801,12 +6799,11 @@ function renderMemPoolCard(body){
   load();
 }
 function memPoolItem(it){
-  var imp=Math.round((Number(it.importance)||0)*100);
   var catBg=catColor(it.category);
   return '<div class="adm-item"><div class="adm-item-h">'
     +'<span class="adm-cat" style="--c:'+catBg+'">'+esc(it.category||'未分类')+'</span>'
     +(it.pinned?'<span class="adm-badge">PIN</span>':'')
-    +'<span style="margin-left:auto"></span><span class="adm-badge" title="重要 '+imp+'%">重要 '+imp+'%</span>'
+    +'<span style="margin-left:auto"></span>'
     +'</div>'
     +'<div class="adm-item-b">'+esc(it.content)+'</div>'
     +'<div class="adm-item-a">'
@@ -6834,12 +6831,11 @@ function bindMemPool(container, body){
 function addMemPool(body){
   openEditModal('新增记忆',
     '<div class="mcp-row"><label>分类</label><input id="em-cat" placeholder="分类" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;color:var(--ink);background:var(--field-bg,#fff)"></div>'
-    +'<div class="mcp-row"><label>重要级(0-1)</label><input id="em-imp" type="number" min="0" max="1" step="0.05" value="0.6" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;color:var(--ink);background:var(--field-bg,#fff)"></div>'
     +'<div class="field"><label>内容</label><textarea id="em-content" rows="5" placeholder="记忆内容…" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;color:var(--ink);background:var(--field-bg,#fff);min-height:200px;resize:vertical;font-family:inherit"></textarea></div>',
     function(){
-      var content=document.getElementById('em-content').value.trim(), cat=document.getElementById('em-cat').value, imp=Number(document.getElementById('em-imp').value)||0.6;
+      var content=document.getElementById('em-content').value.trim(), cat=document.getElementById('em-cat').value;
       if(!content){ toast('内容不能为空'); return false; }
-      admPost(BASE+'/memory-pool',{content:content,category:cat,importance:imp}).then(function(j){ if(j.success){ toast('已添加'); refreshMemPoolList(); } else { toast('添加失败:'+(j.error||'')); } });
+      admPost(BASE+'/memory-pool',{content:content,category:cat}).then(function(j){ if(j.success){ toast('已添加'); refreshMemPoolList(); } else { toast('添加失败:'+(j.error||'')); } });
     });
 }
 function editMemPool(id, body){
@@ -6847,12 +6843,11 @@ function editMemPool(id, body){
     var it=(d.items||[]).find(function(x){return String(x.id)===String(id);});
     openEditModal('编辑记忆',
       '<div class="mcp-row"><label>分类</label><input id="em-cat" value="'+esc(it?it.category:'')+'" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;color:var(--ink);background:var(--field-bg,#fff)"></div>'
-      +'<div class="mcp-row"><label>重要级(0-1)</label><input id="em-imp" type="number" min="0" max="1" step="0.05" value="'+(it?(Number(it.importance)||0.6):0.6)+'" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;color:var(--ink);background:var(--field-bg,#fff)"></div>'
       +'<div class="field"><label>内容</label><textarea id="em-content" rows="5" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;color:var(--ink);background:var(--field-bg,#fff);min-height:200px;resize:vertical;font-family:inherit">'+esc(it?it.content:'')+'</textarea></div>',
       function(){
-        var content=document.getElementById('em-content').value.trim(), cat=document.getElementById('em-cat').value, imp=Number(document.getElementById('em-imp').value)||0.6;
+        var content=document.getElementById('em-content').value.trim(), cat=document.getElementById('em-cat').value;
         if(!content){ toast('内容不能为空'); return false; }
-        admFetch(BASE+'/memory-pool/'+encodeURIComponent(id),{method:'PUT',body:{content:content,category:cat,importance:imp}}).then(function(r){return r.json();}).then(function(j){ if(j.success){ toast('已保存'); refreshMemPoolList(); } else { toast('保存失败:'+(j.error||'')); } });
+        admFetch(BASE+'/memory-pool/'+encodeURIComponent(id),{method:'PUT',body:{content:content,category:cat}}).then(function(r){return r.json();}).then(function(j){ if(j.success){ toast('已保存'); refreshMemPoolList(); } else { toast('保存失败:'+(j.error||'')); } });
       });
   });
 }

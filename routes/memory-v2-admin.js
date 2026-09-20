@@ -1,5 +1,5 @@
 "use strict";
-// Memory V2 管理台路由：集合查看/编辑 + 聊天页入池 + 旧池形状映射视图（0919 管理台数据源切换）
+// Memory V2 管理台路由：集合查看/编辑 + 聊天页入池 + 旧池形状映射视图（0919 管理台数据源切换；0920 删重要级/时间衰减）
 // 依赖注入：admission = memory-admission 实例（可空）；baseDir = 项目根。
 
 const path = require("path");
@@ -45,7 +45,6 @@ module.exports = function registerMemoryV2Admin(app, deps) {
         id: e.id,
         content: e.text,
         category: e.kind,
-        importance: e.priority,
         active: e.status === "active",
         pinned: !!e.anchor,
         sunk: e.status === "archived",
@@ -57,8 +56,9 @@ module.exports = function registerMemoryV2Admin(app, deps) {
       }));
       if (q) mapped = mapped.filter(x => x.content.includes(q));
       if (category) mapped = mapped.filter(x => x.category === category);
-      if (sort === "importance") mapped.sort((a, b) => (b.importance || 0) - (a.importance || 0));
-      else mapped.sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
+      // 0920 用户拍板：排序只留 最新(recent，默认)/最旧(oldest) 两种
+      const dir = sort === "oldest" ? 1 : -1;
+      mapped.sort((a, b) => dir * String(a.updated_at || "").localeCompare(String(b.updated_at || "")));
       const stats = {
         total: mapped.length,
         active: mapped.filter(x => x.active).length,
@@ -89,7 +89,7 @@ module.exports = function registerMemoryV2Admin(app, deps) {
         max_sim: g.max_sim,
         items: g.ids.map((id) => {
           const e = byId.get(id);
-          return { id: e.id, text: e.text, kind: e.kind, subject: e.subject, priority: e.priority, created_at: e.created_at };
+          return { id: e.id, text: e.text, kind: e.kind, subject: e.subject, created_at: e.created_at };
         }),
       }));
       reply.send({ success: true, threshold: th, group_count: groups.length, groups });
@@ -112,11 +112,9 @@ module.exports = function registerMemoryV2Admin(app, deps) {
       if (b.direct === true) {
         const kind = KIND_MAP[String(b.category || "").trim()];
         if (!kind) return reply.code(400).send({ error: "category 必须是 fact/rule/quote/milestone" });
-        const imp = Number.isFinite(Number(b.importance)) ? Number(b.importance) : undefined;
         const r2 = store().create({
           text: content, kind,
           subject: String(b.subject || "user"),
-          confidence: imp, priority: imp,
           origin: "manual",
           provenance: { method: "admin_form" },
         });
@@ -126,7 +124,7 @@ module.exports = function registerMemoryV2Admin(app, deps) {
       }
 
       const r = await admission.submitManual(
-        { content, category: b.category, importance: b.importance, kind: b.kind },
+        { content, category: b.category, kind: b.kind },
         { sessionId: String(b.session_id || "").trim() || null },
         "manual_review"
       );
@@ -144,7 +142,7 @@ module.exports = function registerMemoryV2Admin(app, deps) {
     }
   });
 
-  // 编辑（管理台表单）：content/category/importance/pinned → text/kind/priority/anchor
+  // 编辑（管理台表单）：content/category/pinned → text/kind/anchor（importance/priority 已删）
   app.put("/admin/memory-v2/entries/:id", { preHandler: basicAuth }, async (req, reply) => {
     try {
       const b = req.body || {};
@@ -155,7 +153,6 @@ module.exports = function registerMemoryV2Admin(app, deps) {
         if (!kind) return reply.code(400).send({ error: "category 非法（fact/rule/quote/milestone）" });
         patch.kind = kind;
       }
-      if (Number.isFinite(Number(b.importance))) patch.priority = Number(b.importance);
       if (b.pinned != null) patch.anchor = !!b.pinned;
       if (b.subject != null) patch.subject = String(b.subject);
       const r = store().updateFields(req.params.id, patch);

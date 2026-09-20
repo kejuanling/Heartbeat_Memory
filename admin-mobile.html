@@ -61,7 +61,6 @@
           <label class="cc-cfg-field">唤醒历史最大条数(0=不裁剪)<input type="number" id="mw-wake-history-max" min="0" step="10"></label>
           <div class="cc-cfg-group-title">记忆池</div>
           <label class="cc-cfg-field">去重阈值<input type="number" id="mw-dedup" min="0" max="1" step="0.05"></label>
-          <label class="cc-cfg-field">衰减半衰期(天)<input type="number" id="mw-decay-days" min="1" step="1"></label>
           <label class="cc-cfg-field">自动置顶检索次数<input type="number" id="mw-auto-pin-count" min="2" step="1"></label>
           <div class="cc-cfg-btns"><button type="button" class="cc-btn secondary" onclick="clearRetrievalStats()">一键清空检索次数（不影响已置顶）</button><span id="mw-clear-retrieval-msg" class="cc-cfg-msg"></span></div>
           <div class="cc-cfg-group-title">解析（压缩块原文 → 记忆候选）</div>
@@ -152,7 +151,7 @@
       <div class="mp-controls" id="mempool-controls">
         <input type="text" id="mempool-search" placeholder="搜索记忆（关键词）..." oninput="mempoolSearchInput(this.value)">
         <select id="mempool-cat" onchange="loadMemPool()"><option value="">全部分类</option></select>
-        <select id="mempool-sort" onchange="loadMemPool()"><option value="score">综合</option><option value="importance">重要级</option><option value="recent">最近</option></select>
+        <select id="mempool-sort" onchange="loadMemPool()"><option value="recent">最新</option><option value="oldest">最旧</option></select>
       </div>
       <div id="mempool-list" class="mp-list"><div class="loading">加载中...</div></div>
     </div></div>
@@ -502,7 +501,6 @@
       </div>
       <div class="mp-modal-fields">
         <label>分类<select id="mempool-edit-cat"></select></label>
-        <label>重要级 (0-1)<input id="mempool-edit-imp" type="number" min="0" max="1" step="0.05" value="0.6"></label>
       </div>
       <textarea id="mempool-edit-content" rows="10" placeholder="记忆内容..."></textarea>
       <div class="mp-modal-actions">
@@ -531,9 +529,9 @@
         <h3>导入清洗结果</h3>
         <button type="button" class="mp-modal-x" onclick="closeModal('mempoolImportModal')">&times;</button>
       </div>
-      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">粘贴或上传清洗产出的变更 JSON（数组，每条 {id, op:"update"/"delete"/"merge", category?, importance?, content?, into?}）。先「预览校验」看统计，再「确认导入」；应用前服务器自动全量备份，条目 id 不变，标星关联不受影响。</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">粘贴或上传清洗产出的变更 JSON（数组，每条 {id, op:"update"/"delete"/"merge", category?, content?, into?}）。先「预览校验」看统计，再「确认导入」；应用前服务器自动全量备份，条目 id 不变，标星关联不受影响。</div>
       <input type="file" id="mempool-import-file" accept=".json,.txt" onchange="memPoolImportFile(this)" style="font-size:12px;margin-bottom:8px">
-      <textarea id="mempool-import-text" rows="10" placeholder='[{"id":"mp_xxxxxxxx","op":"update","category":"认账","importance":0.8}]' style="width:100%;font-size:12px;font-family:monospace"></textarea>
+      <textarea id="mempool-import-text" rows="10" placeholder='[{"id":"mp_xxxxxxxx","op":"update","category":"认账"}]' style="width:100%;font-size:12px;font-family:monospace"></textarea>
       <div id="mempool-import-result" style="font-size:12px;color:var(--text2);min-height:18px;margin:8px 0"></div>
       <div class="mp-modal-actions">
         <button type="button" class="mp-btn" onclick="closeModal('mempoolImportModal')">关闭</button>
@@ -551,7 +549,7 @@
       <div class="mp-modal-fields">
         <label>类别<select id="mempool-export-cat"></select></label>
       </div>
-      <div style="font-size:11px;color:var(--text3)">导出 JSON（含 id/分类/重要级/来源/内容全字段，可直接用于清洗），只含活跃条目。</div>
+      <div style="font-size:11px;color:var(--text3)">导出 JSON（含 id/分类/来源/内容全字段，可直接用于清洗），只含活跃条目。</div>
       <div class="mp-modal-actions">
         <button type="button" class="mp-btn" onclick="closeModal('mempoolExportModal')">取消</button>
         <button type="button" class="mp-btn primary" onclick="exportMemPool()">导出</button>

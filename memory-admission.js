@@ -31,10 +31,10 @@ const { buildPrompt, parseJudgeOutput, normalizeText } = require("./judge-adapte
 
 // ---- 相似既有检索（0920 混合打分，用户拍板「关键词为主」）----
 // 词面门槛 0.10（放宽，用户拍板「不用太严」）先挡无关条目；混合分 = 0.55 词面 + 0.25 语义(bge 余弦)
-// + 0.20 重要级×30天半衰期，≥0.35 取最高分交 judge 判关系。语义通道复用 memory-v2-vectors.relevantScores
-// （embed-server 熔断/失败 → ok:false 自动降级 0.6 词面 + 0.4 重要级，同 /internal/memory-pool/retrieve 口径）。
+// （重要级×衰减项已于 0920 删除，满分 0.8），阈值 0.28=原 0.35 等比换算（0.35×0.8），取最高分交 judge 判关系。
+// 语义通道复用 memory-v2-vectors.relevantScores（embed-server 熔断/失败 → ok:false 自动降级纯词面）。
 // 原纯字面 bigram Jaccard 版的漏判（换个说法就够不到阈值 → judge 拿不到 existing → 重复记忆漏进待审）由语义项补齐。
-const JUDGE_SIM_THRESHOLD = 0.35;
+const JUDGE_SIM_THRESHOLD = 0.28;
 const JUDGE_LIT_GATE = 0.1;
 async function findBestExisting(store, text) {
   const key = normalizeText(text);
@@ -50,11 +50,9 @@ async function findBestExisting(store, text) {
   for (const e of rows) {
     const lit = similarity(qt, normalizeText(e.text));
     if (lit < JUDGE_LIT_GATE) continue; // 词面门槛（关键词为主第一层）
-    const imp = Number(e.priority) || 0.5;
-    const decay = vectors.decayFactor(e);
     const score = semById
-      ? 0.55 * lit + 0.25 * (semById[e.id] || 0) + 0.20 * imp * decay
-      : 0.6 * lit + 0.4 * imp * decay;
+      ? 0.55 * lit + 0.25 * (semById[e.id] || 0)
+      : lit;
     if (score > bestScore) { bestScore = score; best = e; }
   }
   return bestScore >= JUDGE_SIM_THRESHOLD ? { entry: best, score: Math.round(bestScore * 100) / 100 } : null;
@@ -252,9 +250,7 @@ function createAdmission(opts = {}) {
       origin: originVal,
       provenance,
     };
-    if (b.importance != null && Number.isFinite(Number(b.importance))) {
-      draft.confidence = Math.max(0, Math.min(1, Number(b.importance)));
-    }
+    // 0920：重要级（importance）设定整体删除，不再映射 confidence（两者语义不同轴，历史映射一并移除）
     if (b.established_at) draft.established_at = String(b.established_at);
 
     let execResult, auditRec;

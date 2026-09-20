@@ -3,7 +3,7 @@
 // ========================
 // Memory V2 存储层（C1）
 // 六轴单集合记忆：kind(fact/rule/quote/milestone) × subject(user/self/relationship/external)
-// × status(active/superseded/archived) × confidence/priority × origin × provenance。
+// × status(active/superseded/archived) × confidence × origin × provenance。（priority/重要级已删，0920 用户拍板）
 // 设计契约：gpt串口/13.txt（Schema v1.0 冻结稿）、17.txt（MVP Plan C1）。
 // 铁律：
 //   1. 不 require 旧记忆模块（memory-pool/memory-engine），不写旧池任何文件；
@@ -61,7 +61,6 @@ const DEFAULT_CONFIG = {
   recall_sim_threshold: 0.55,
   defaults: {
     confidence: { manual: 0.8, memory_tag: 0.7, tool: 0.5, promotion: 0.5, import: 0.4 },
-    priority: 0.5,
   },
   import_confidence_cap: 0.6, // 迁移/导入条目 confidence 封顶（Round 6/8 决策）
   paths: { collection: "data/memory_v2.json", review_queue: "data/memory_review_queue.json" },
@@ -89,7 +88,6 @@ function mergeConfig(base, overrides) {
     if (k === "defaults" && overrides.defaults && typeof overrides.defaults === "object") {
       out.defaults = {
         confidence: { ...(base.defaults || {}).confidence, ...(overrides.defaults.confidence || {}) },
-        priority: overrides.defaults.priority != null ? overrides.defaults.priority : (base.defaults || {}).priority,
       };
     } else if (k === "paths" && overrides.paths && typeof overrides.paths === "object") {
       out.paths = { ...(base.paths || {}), ...overrides.paths };
@@ -112,7 +110,7 @@ function strOrNull(v) {
 function pick01(v) {
   if (v == null) return null;
   const n = Number(v);
-  if (!Number.isFinite(n) || n < 0 || n > 1) throw new Error(`confidence/priority 必须是 0-1 的数字，got: ${v}`);
+  if (!Number.isFinite(n) || n < 0 || n > 1) throw new Error(`confidence 必须是 0-1 的数字，got: ${v}`);
   return n;
 }
 
@@ -171,16 +169,13 @@ function _buildEntry(input, cfg) {
     direction = input.direction;
   }
 
-  // confidence/priority：显式传值必须合法，缺省按 origin 取默认；import 封顶
+  // confidence：显式传值必须合法，缺省按 origin 取默认；import 封顶
   let confidence = pick01(input.confidence);
   if (confidence == null) {
     const byOrigin = (cfg.defaults.confidence || {})[origin];
     confidence = byOrigin != null ? byOrigin : 0.5;
   }
   if (origin === "import") confidence = Math.min(confidence, Number(cfg.import_confidence_cap) || 0.6);
-  let priority = pick01(input.priority);
-  if (priority == null) priority = Number(cfg.defaults.priority) || 0.5;
-
   const established_at = strOrNull(input.established_at);
 
   // provenance：必需对象；session/msg 由系统生成（写入方传了也被丢弃），quote 是唯一允许 AI 提供的子字段
@@ -238,7 +233,6 @@ function _buildEntry(input, cfg) {
     speaker,
     status: "active", // 创建恒为 active；superseded/archived 只能经 updateStatus 状态机到达
     confidence,
-    priority,
     origin,
     provenance,
     created_at: now,
@@ -365,7 +359,7 @@ function createStore(opts = {}) {
   }
 
   // 管理台人工编辑（0919）：白名单字段直改；text 变化刷 content_updated_at；枚举与 kind 联动铁律同 create
-  const UPDATABLE_FIELDS = ["text", "priority", "note", "kind", "subject", "direction", "speaker", "established_at", "related_subjects", "anchor"];
+  const UPDATABLE_FIELDS = ["text", "note", "kind", "subject", "direction", "speaker", "established_at", "related_subjects", "anchor"];
   function updateFields(id, patch) {
     if (readonly) return fail("readonly 模式拒绝写入");
     const e = get(id);
@@ -379,10 +373,6 @@ function createStore(opts = {}) {
         const t = typeof v === "string" ? v.trim() : "";
         if (!t || t.length > TEXT_MAX) return fail("text 非法");
         if (e.text !== t) { e.text = t; e.content_updated_at = now; }
-      } else if (k === "priority") {
-        const p = pick01(v);
-        if (p == null) return fail("priority 非法");
-        e.priority = p;
       } else if (k === "note") {
         const n = strOrNull(v);
         if (n && n.length > NOTE_MAX) return fail("note 超长");

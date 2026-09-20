@@ -133,27 +133,18 @@ function similarGroups(rows, threshold) {
   return groups;
 }
 
-// ---------------- 检索（0919 memory_search 数据源切 V2：公式沿用旧池，数据换新池） ----------------
-// 权重对齐旧池 retrieveHybrid：0.55 语义余弦(bge) + 0.20 字面 + 0.25 重要级×时间衰减（半衰期30天）；
-// embed 不可用回落旧池 retrieve 字面公式（0.6 字面 + 0.4 重要级）。字面分词用 V2 自有 adapter
+// ---------------- 检索（0919 memory_search 数据源切 V2；0920 删重要级/时间衰减，用户拍板） ----------------
+// 权重：0.55 语义余弦(bge) + 0.20 字面；embed 不可用回落纯字面。字面分词用 V2 自有 adapter
 // （铁律：V2 不 require 旧池模块，故不直接复用旧池 contentSimilarity）。恒只读集合：不计数、不自动置顶。
 
 const { tokenize, similarity } = require("./context-v2-adapter");
 
-function decayFactor(e) {
-  const t = new Date(e.content_updated_at || e.created_at || "").getTime();
-  if (isNaN(t)) return 1;
-  const ageDays = (Date.now() - t) / (24 * 60 * 60 * 1000);
-  return Math.pow(0.5, ageDays / 30);
-}
-
-// 输出形状对齐旧池接口（memory_search 工具契约：id/content/category/importance/pinned）
+// 输出形状对齐旧池接口（memory_search 工具契约：id/content/category/pinned；importance 已删）
 function toItem(r) {
   return {
     id: r.id,
     content: r.text,
     category: r.kind,
-    importance: r.priority,
     pinned: r.anchor === true,
     created_at: r.created_at,
     updated_at: r.content_updated_at || r.created_at,
@@ -178,9 +169,7 @@ async function retrieveHybrid(rows, query, opts = {}) {
     const vec = (m[r.id] || {}).v;
     const sem = qv && vec ? Math.max(0, cosine(qv, vec)) : 0; // 均已归一化，点积即余弦
     const lit = qt.size ? similarity(qt, r.text + " " + (r.kind || "")) : 0;
-    const imp = Number(r.priority) || 0.5;
-    const decay = decayFactor(r);
-    const score = qv ? (0.55 * sem + 0.20 * lit + 0.25 * imp * decay) : (0.6 * lit + 0.4 * imp * decay);
+    const score = qv ? (0.55 * sem + 0.20 * lit) : lit;
     return { r, sem, score };
   });
   scored.sort((a, b) => b.score - a.score || b.sem - a.sem);
@@ -198,15 +187,13 @@ function recent(rows, opts = {}) {
   return out.slice(0, topK).map(r => toItem(r));
 }
 
-// 呼吸：浮现记忆（未沉底，优先置顶 > 重要级 > 最近更新）。用于 memory_search 的 breath 开关。
+// 呼吸：浮现记忆（未沉底，优先置顶 > 最近更新）。用于 memory_search 的 breath 开关。
 function breath(rows, opts = {}) {
   const limit = Math.max(1, Math.min(Number(opts.limit) || 3, 5));
   const pool = rows.filter(r => !opts.kind || r.kind === opts.kind);
   pool.sort((a, b) => {
     const pinA = a.anchor === true ? 1 : 0, pinB = b.anchor === true ? 1 : 0;
     if (pinA !== pinB) return pinB - pinA;
-    const impA = Number(a.priority) || 0, impB = Number(b.priority) || 0;
-    if (impA !== impB) return impB - impA;
     const ua = String(a.content_updated_at || a.created_at || ""), ub = String(b.content_updated_at || b.created_at || "");
     return ua < ub ? 1 : (ua > ub ? -1 : 0);
   });
@@ -233,4 +220,4 @@ async function relevantScores(rows, query) {
   return { ok: true, scores };
 }
 
-module.exports = { ensureVectors, pruneVectors, similarGroups, retrieveHybrid, recent, breath, relevantScores, entryHash, decayFactor, VECTOR_FILE };
+module.exports = { ensureVectors, pruneVectors, similarGroups, retrieveHybrid, recent, breath, relevantScores, entryHash, VECTOR_FILE };

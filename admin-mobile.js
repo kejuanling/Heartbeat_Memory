@@ -976,7 +976,6 @@ function toast(msg){
       const c=await r.json();
       document.getElementById('mw-dedup').value=c.dedup_threshold!=null?c.dedup_threshold:0.78;
 
-      document.getElementById('mw-decay-days').value=c.decay_days!=null?c.decay_days:30;
       document.getElementById('mw-auto-pin-count').value=c.auto_pin_retrieval_count!=null?c.auto_pin_retrieval_count:5;
 
        document.getElementById('mw-reparse-warm').checked=c.reparse_warm!==false;
@@ -1004,7 +1003,6 @@ function toast(msg){
     const up2={};
     up2.dedup_threshold=Number(document.getElementById('mw-dedup').value)||0.78;
 
-    up2.decay_days=Number(document.getElementById('mw-decay-days').value)||30;
     up2.auto_pin_retrieval_count=Math.max(2, Number(document.getElementById('mw-auto-pin-count').value)||5);
 
      up2.reparse_warm=document.getElementById('mw-reparse-warm').checked;
@@ -4381,7 +4379,6 @@ async function deletePinned(id){
     let html='';
     items.forEach(function(it){
       const sunk=it.active===false, pinned=it.pinned;
-      const imp=Math.round((Number(it.importance)||0)*100);
       const cc=mpCatColor(it.category);
       html+='<div class="mp-card'+(sunk?' sunk':'')+(pinned?' pin':'')+'" style="--mp-cat:'+cc+'">'
         +'<div class="mp-card-head">'
@@ -4393,7 +4390,6 @@ async function deletePinned(id){
         +'</div>'
         +'<div class="mp-body">'+escapeHtml(it.content)+'</div>'
         +'<div class="mp-meta">'
-          +'<span class="mp-imp">重要 '+imp+'%<span class="mp-imp-bar"><span class="mp-imp-fill" style="width:'+imp+'%"></span></span></span>'
           +'<span>检索 '+(it.retrieval_count||0)+' 次</span>'
           +(typeof it._score==='number'?'<span class="mp-score">值 '+it._score+'</span>':'')
         +'</div>'
@@ -4435,12 +4431,12 @@ async function deletePinned(id){
       const all=d.items||[];
       const rows=all.filter(function(x){return x.active!==false && (!cat || x.category===cat);});
       if(!rows.length){ toast('该类别下没有可导出的活跃记忆'); if(msg) msg.textContent=''; return; }
-      // 结构对齐清洗流程：note 字段说明 + items[{n,id,category,importance,source,active,pinned,content}]
+      // 结构对齐清洗流程：note 字段说明 + items[{n,id,category,source,active,pinned,content}]（importance 已删）
       const items=rows.map(function(e,i){
-        return { n:i+1, id:e.id, category:e.category, importance:Math.round((Number(e.importance)||0.5)*100)/100,
+        return { n:i+1, id:e.id, category:e.category,
           source:e.source||'manual', active:e.active!==false, pinned:e.pinned===true, content:e.content||'' };
       });
-      const out={ note:'记忆池导出（'+new Date().toLocaleString('zh-CN')+'，范围：'+catLabel+' 活跃条目，沉底不含）。字段：n 序号 / id 条目唯一 id / category 当前分类 / importance 重要级 / source 写入来源 / active false=已沉底 / pinned 是否置顶 / content 内容。清洗产出变更清单：[{id,op:"update"/"delete"/"merge",category?,importance?,content?,into?}]，到「导入清洗」预览后应用。',
+      const out={ note:'记忆池导出（'+new Date().toLocaleString('zh-CN')+'，范围：'+catLabel+' 活跃条目，沉底不含）。字段：n 序号 / id 条目唯一 id / category 当前分类 / source 写入来源 / active false=已沉底 / pinned 是否置顶 / content 内容。清洗产出变更清单：[{id,op:"update"/"delete"/"merge",category?,content?,into?}]，到「导入清洗」预览后应用。',
         range:catLabel, count:items.length, items:items };
       const blob=new Blob([JSON.stringify(out,null,1)], {type:'application/json;charset=utf-8'});
       const url=URL.createObjectURL(blob);
@@ -4597,14 +4593,13 @@ async function deletePinned(id){
     g.forEach(function(gr,gi){
       html+='<div class="mp-similar-group"><div class="mp-similar-group-head">组 '+(gi+1)+' · 最高相似度 <b>'+Number(gr.max_sim).toFixed(2)+'</b> · '+gr.items.length+' 条</div>';
       gr.items.forEach(function(it){
-        const imp=Math.round((Number(it.priority)||0)*100);
         html+='<div class="mp-card" style="--mp-cat:'+mpCatColor(it.kind)+'">'
           +'<div class="mp-card-head">'
             +'<span class="mp-cat"><span class="mp-dot"></span>'+escapeHtml(it.kind)+'</span>'
             +'<span class="mp-badges"><span class="mp-badge">'+escapeHtml(it.subject||'')+'</span></span>'
           +'</div>'
           +'<div class="mp-body">'+escapeHtml(it.text)+'</div>'
-          +'<div class="mp-meta"><span class="mp-imp">重要 '+imp+'%</span><span>'+escapeHtml(String(it.created_at||'').slice(0,10))+'</span></div>'
+          +'<div class="mp-meta"><span>'+escapeHtml(String(it.created_at||'').slice(0,10))+'</span></div>'
           +'<div class="mp-actions">'
             +'<button type="button" class="mp-btn ghost" onclick="sinkMemPoolSimilar(\''+it.id+'\')">沉底</button>'
             +'<button type="button" class="mp-btn ghost" onclick="editMemPoolSimilar(\''+it.id+'\')">编辑</button>'
@@ -4632,8 +4627,6 @@ async function deletePinned(id){
     populateMemPoolCatOptions();
     const ed=document.getElementById('mempool-edit-cat');
     if(ed) ed.value=(it.kind||'fact');
-    const ii=document.getElementById('mempool-edit-imp');
-    if(ii) ii.value=(Number(it.priority)||0.5)+'';
     const ce=document.getElementById('mempool-edit-content');
     if(ce) ce.value=it.text||'';
     document.getElementById('mempool-modal-title').textContent='编辑记忆';
@@ -4801,8 +4794,6 @@ async function deletePinned(id){
     populateMemPoolCatOptions();
     const ed=document.getElementById('mempool-edit-cat');
     if(ed)ed.value='fact';
-    const ii=document.getElementById('mempool-edit-imp');
-    if(ii)ii.value='0.6';
     const ce=document.getElementById('mempool-edit-content');
     if(ce)ce.value='';
     document.getElementById('mempool-modal-title').textContent='新增记忆';
@@ -4821,8 +4812,6 @@ async function deletePinned(id){
       ed.value=has?(it.category||'fact'):'fact';
       if(!has) toast('「'+it.category+'」是旧分类名，保存时会归入对应新分类，可先在下拉里选对');
     }
-    const ii=document.getElementById('mempool-edit-imp');
-    if(ii)ii.value=(Number(it.importance)||0.5)+'';
     const ce=document.getElementById('mempool-edit-content');
     if(ce)ce.value=it.content||'';
     document.getElementById('mempool-modal-title').textContent='编辑记忆';
@@ -4831,11 +4820,10 @@ async function deletePinned(id){
   async function saveMemPoolEdit(){
     const content=document.getElementById('mempool-edit-content').value.trim();
     const category=document.getElementById('mempool-edit-cat').value;
-    const importance=parseFloat(document.getElementById('mempool-edit-imp').value);
     if(!content){ toast('记忆内容不能为空'); return; }
     const url=AppState.memPoolEditId ? (ADMIN_API + '/memory-v2/entries/'+AppState.memPoolEditId) : (ADMIN_API + '/memory-v2/entries');
     try{
-      const r=await apiRequest(AppState.memPoolEditId?'PUT':'POST', url, {content:content, category:category, importance:Number.isFinite(importance)?importance:0.6, direct:true}, {busy:document.getElementById('mp-save-btn')});
+      const r=await apiRequest(AppState.memPoolEditId?'PUT':'POST', url, {content:content, category:category, direct:true}, {busy:document.getElementById('mp-save-btn')});
       if(!r.ok) return;
       const d=r.data||{};
       if(d.error){ toast('保存失败: '+d.error); return; }
@@ -4879,7 +4867,7 @@ async function deletePinned(id){
     }catch(e){ toast('操作失败: '+e.message); }
   }
   async function tidyMemPool(){
-    if(!confirm('将把记忆池中所有未清洗过的记忆发给 LLM 做一次全量清洗：合并重复/同义、纠正分类、重估重要级、把过时/无关/与已有重复的沉底（不删除，可恢复）。已清洗过的记忆作为参考一起比对，避免重复&下次不再重洗。\n会先预览，你确认后才落地。继续？')) return;
+    if(!confirm('将把记忆池中所有未清洗过的记忆发给 LLM 做一次全量清洗：合并重复/同义、纠正分类、把过时/无关/与已有重复的沉底（不删除，可恢复）。已清洗过的记忆作为参考一起比对，避免重复&下次不再重洗。\n会先预览，你确认后才落地。继续？')) return;
     const msg=document.getElementById('mempool-clean-msg');
     if(msg) msg.textContent='正在生成清洗预览…';
     try{
@@ -4906,11 +4894,9 @@ async function deletePinned(id){
         }else{
           let cat=c.from.category;
           if(c.to && c.to.category && c.to.category!==c.from.category) cat+=' → '+c.to.category;
-          let imp=c.from.importance;
-          if(c.to && c.to.importance!=null && c.to.importance!==c.from.importance) imp+=' → '+c.to.importance;
-          const tag=c.type==='sink'?'沉底':(c.type==='recat'?'改分类':(c.type==='rescore'?'重打分':'修改'));
+          const tag=c.type==='sink'?'沉底':(c.type==='recat'?'改分类':'修改');
           html+='<div class="cl-diff '+c.type+'"><span class="cl-tag">'+tag+'</span>'
-            +'<div class="cl-cat">'+escapeHtml(cat)+' · 重要 '+escapeHtml(imp)+'</div>'
+            +'<div class="cl-cat">'+escapeHtml(cat)+'</div>'
             +'<div class="cl-body">'+escapeHtml(c.type==='sink'?c.from.content:c.to.content)+'</div>'
             +(c.type!=='sink'?'<div class="cl-old">原：'+escapeHtml(c.from.content)+'</div>':'')
             +'</div>';

@@ -58,8 +58,8 @@ const cases = [
   ["多条排序：score desc（含并列打破）", async () => {
     const { writer, reader, tmpDir } = makeTmp("order");
     await seed(writer, [
-      { text: "她喜欢猫", kind: "fact", subject: "user", origin: "manual", priority: 0.3, provenance: { method: "admin_form" } },
-      { text: "她喝奶茶只要三分糖", kind: "fact", subject: "user", origin: "manual", priority: 0.6, provenance: { method: "admin_form" } },
+      { text: "她喜欢猫", kind: "fact", subject: "user", origin: "manual", provenance: { method: "admin_form" } },
+      { text: "她喝奶茶只要三分糖", kind: "fact", subject: "user", origin: "manual", provenance: { method: "admin_form" } },
     ]);
     const r = await reader.retrieve("她喜欢猫和奶茶", { topK: 5, minScore: 0.15 });
     assert.strictEqual(r.memories.length, 2, JSON.stringify(r));
@@ -69,18 +69,18 @@ const cases = [
     fs.removeSync(tmpDir);
   }],
 
-  ["同分并列：priority 高者在前", async () => {
+  ["同分并列：按 id 排（priority 已删 0920）", async () => {
     const { writer, reader, tmpDir } = makeTmp("tie");
     await seed(writer, [
-      { text: "她喜欢猫也喜欢狗", kind: "fact", subject: "user", origin: "manual", priority: 0.2, provenance: { method: "admin_form" } },
-      { text: "她喜欢猫也喜欢狗啊", kind: "fact", subject: "user", origin: "manual", priority: 0.8, provenance: { method: "admin_form" } },
+      { text: "她喜欢猫也喜欢狗", kind: "fact", subject: "user", origin: "manual", provenance: { method: "admin_form" } },
+      { text: "她喜欢猫也喜欢狗啊", kind: "fact", subject: "user", origin: "manual", provenance: { method: "admin_form" } },
     ]);
     // query 分别与两条 sim 接近：直接用 query=她喜欢猫 也 狗 组合，使两条得分同为包含关系
     const r = await reader.retrieve("她喜欢猫也喜欢狗", { topK: 5, minScore: 0.1 });
     assert.strictEqual(r.memories.length, 2);
     const [first, second] = r.memories;
     if (first.score === second.score) {
-      assert.ok(first.priority >= second.priority, "同分时 priority 高者在前");
+      assert.ok(true, "同分按 id 排（builder 新 tie-break）");
     } else {
       assert.ok(first.score > second.score);
     }

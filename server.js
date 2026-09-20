@@ -3504,7 +3504,7 @@ app.post("/internal/context-mark", async (req, reply) => {
 
 // 记忆池检索：MCP 工具 memory_search 用（x-internal-key 鉴权）
 // 0919 用户拍板「换新」：数据源切 V2 集合（旧池退役为迁移源，不再写入）。
-// 检索公式沿用旧池混合权重：0.55 语义余弦(bge-small-zh) + 0.20 字面 + 0.25 重要级×衰减（半衰期30天）；
+// 检索公式（0920 删重要级/时间衰减，用户拍板）：0.55 语义余弦(bge-small-zh) + 0.20 字面；
 // embed-server 不可用自动降级纯字面（0.6/0.4）。category 兼容旧分类名 → V2 kind。
 // 恒只读：不计数、不自动置顶（旧池检索写状态的污染在 V2 结构性根除）。
 const MEMORY_CATEGORY_TO_KIND = { "关于她": "fact", "认账": "rule", "拓本": "quote", "压缩摘要": "milestone", "对话碎片": "fact", "关于我们": "fact", "锚点": "quote", "信号": "fact", "对话摘要": "fact" };
@@ -3528,7 +3528,7 @@ app.get("/internal/memory-pool/retrieve", async (req, reply) => {
         ? await v2vectors.retrieveHybrid(rows, q, { topK, pinnedOnly: true })
         : v2vectors.recent(rows, { topK, pinnedOnly: true });
     } else if (breath && !q) {
-      // breath 模式：无 q 时只浮现记忆（未沉底，优先置顶/重要级/最近更新）
+      // breath 模式：无 q 时只浮现记忆（未沉底，优先置顶/最近更新）
       items = v2vectors.breath(rows, { limit: topK, kind: kind || undefined });
     } else {
       items = await v2vectors.retrieveHybrid(rows, q, { topK, kind: kind || undefined });
@@ -3549,7 +3549,7 @@ app.post("/internal/memory-pool/add", async (req, reply) => {
     if (!content) return reply.code(400).send({ error: "content 必填" });
     if (memoryV2Admission) {
       const v2 = await memoryV2Admission.submitV2(
-        { content, category: b.category, importance: b.importance },
+        { content, category: b.category },
         { sessionId: String(b.session_id || "").trim() }
       );
       if (v2.action !== "skipped_shadow_off") {
@@ -3692,7 +3692,7 @@ function startMemoryBackgroundMigration(admission) {
       const list = Array.isArray(rows) ? rows.filter(r => r && r.active !== false && r.id && !done[r.id]) : [];
       let n = 0;
       for (const r of list.slice(0, batchSize)) {
-        const result = await admission.submitPromotion({ content: String(r.content || "").trim(), kind: kindMap[r.category] || "fact", importance: Number(r.importance) || 0.5, block_id: "legacy:" + r.id });
+        const result = await admission.submitPromotion({ content: String(r.content || "").trim(), kind: kindMap[r.category] || "fact", block_id: "legacy:" + r.id });
         if (result && result.action !== "error") { done[r.id] = { at: new Date().toISOString(), action: result.action, queue_id: result.queue_id || null }; n++; }
       }
       if (n) fsx.writeJsonSync(doneFile, done, { spaces: 2 });

@@ -32,7 +32,6 @@ const cases = [
     assert.ok(e.id.startsWith("mv2_") && e.id.length === "mv2_".length + 12, "id 形如 mv2_+12hex");
     assert.strictEqual(e.status, "active");
     assert.strictEqual(e.confidence, 0.8, "manual 默认 confidence 0.8");
-    assert.strictEqual(e.priority, 0.5, "默认 priority 0.5");
     assert.strictEqual(e.speaker, null);
     assert.strictEqual(e.direction, null);
     assert.strictEqual(e.created_at, e.content_updated_at, "创建时两时间戳相等");
@@ -115,14 +114,13 @@ const cases = [
     assert.strictEqual(r.ok, false);
   }],
 
-  ["confidence/priority 显式传非法值拒绝（缺省才走默认）", () => {
+  ["confidence 显式传非法值拒绝（缺省才走默认）；priority 已删（0920）", () => {
     assert.strictEqual(mv2.validateEntry(baseFact({ confidence: 1.5 })).ok, false);
-    assert.strictEqual(mv2.validateEntry(baseFact({ priority: -0.1 })).ok, false);
     assert.strictEqual(mv2.validateEntry(baseFact({ confidence: "高" })).ok, false);
-    const r = mv2.validateEntry(baseFact({ confidence: 0.95, priority: 0.2 }));
+    const r = mv2.validateEntry(baseFact({ confidence: 0.95 }));
     assert.strictEqual(r.ok, true, r.error);
     assert.strictEqual(r.entry.confidence, 0.95);
-    assert.strictEqual(r.entry.priority, 0.2);
+    assert.strictEqual("priority" in r.entry, false, "priority 字段已删除");
   }],
 
   ["import 封顶：confidence 0.9 → 0.6；memory_tag 默认 0.7", () => {
