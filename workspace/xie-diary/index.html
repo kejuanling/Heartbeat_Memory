@@ -87,6 +87,8 @@ h1{
 .diary-hide-btn:hover{background:rgba(240,196,192,0.25)}
 .diary-edit-btn{background:none;border:1px solid rgba(181,131,122,0.35);border-radius:10px;color:#b5837a;font-family:inherit;font-size:0.65rem;letter-spacing:1px;padding:0.15rem 0.6rem;cursor:pointer;flex:none}
 .diary-edit-btn:hover{background:rgba(240,196,192,0.25)}
+.diary-del-btn{background:none;border:1px solid rgba(181,131,122,0.35);border-radius:10px;color:#b5837a;font-family:inherit;font-size:0.65rem;letter-spacing:1px;padding:0.15rem 0.6rem;cursor:pointer;flex:none}
+.diary-del-btn:hover{background:rgba(192,80,77,0.15);color:#c0504d;border-color:rgba(192,80,77,0.5)}
 .ft{text-align:center;margin-top:1.8rem;color:#d4bcb0;font-size:0.62rem;letter-spacing:2px}
 </style>
 </head>
@@ -213,6 +215,7 @@ h1{
       +'<span class="day-ops" style="margin-left:auto;display:inline-flex;gap:0.35rem;flex:none">'
       +'<button class="diary-edit-btn" data-w="'+d._wid+'">编辑</button>'
       +'<button class="diary-hide-btn" data-rel="'+esc(d.relPath)+'" data-w="'+d._wid+'" data-hidden="'+(d.hidden?'1':'0')+'">'+(d.hidden?'显示':'隐藏')+'</button>'
+      +'<button class="diary-del-btn" data-rel="'+esc(d.relPath)+'" data-w="'+d._wid+'">删除</button>'
       +'</span>'
       +'</div>'
       +'<div class="day-body" id="'+bodyId+'">'+renderParas(needClip?clipText(d.text):d.text,kw)+'</div>'
@@ -263,6 +266,25 @@ h1{
             else { alert('操作失败：'+((j&&j.error)||'未知错误')); btn.disabled=false; }
           })
           .catch(function(e){ if(e.message!=='需要访问口令') alert('操作失败：'+e.message); btn.disabled=false; });
+      });
+    });
+    // 删除：整篇文件删除（连时间线「醒来写了日记」事件一起清）；不可恢复
+    Array.prototype.forEach.call(root.querySelectorAll('.diary-del-btn'),function(btn){
+      btn.addEventListener('click',function(){
+        var rel=btn.getAttribute('data-rel');
+        if(!confirm('彻底删除这篇日记？文件与对应时间线事件一并移除，不可恢复。')) return;
+        btn.disabled=true;
+        api('/xie-diary/api/delete',{relPath:rel})
+          .then(function(j){
+            if(j&&j.success){
+              writings= writings.filter(function(o){ return o.relPath!==rel; });
+              var card=btn.closest('.day-card');
+              if(card) card.remove();
+              var remain=writings.filter(function(o){return o.relPath===rel;}).length;
+              if(!remain) load();
+            } else { alert('删除失败：'+((j&&j.error)||'未知错误')); btn.disabled=false; }
+          })
+          .catch(function(e){ if(e.message!=='需要访问口令') alert('删除失败：'+e.message); btn.disabled=false; });
       });
     });
     // 编辑：卡内正文换 textarea，保存=重建整份文件内容（只替换本篇段落，篇头与同文件其它篇不动）

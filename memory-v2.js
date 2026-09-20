@@ -423,6 +423,16 @@ function createStore(opts = {}) {
     return { total: r.length, byStatus, byKind, collectionPath, queuePath };
   }
 
+  // 0920 加：硬删除（管理台专用，不可恢复；区别于 archive 软沉底）。向量缓存由 pruneVectors 在下次检索时清孤儿
+  function hardDelete(id) {
+    const arr = load();
+    const idx = arr.findIndex(e => e && e.id === id);
+    if (idx === -1) return { ok: false, error: "找不到条目: " + id };
+    arr.splice(idx, 1);
+    flush();
+    return { ok: true };
+  }
+
   return {
     cfg,
     paths: { collection: collectionPath, review_queue: queuePath },
@@ -432,6 +442,7 @@ function createStore(opts = {}) {
     get,
     list, updateFields,
     updateStatus,
+    hardDelete,
     stats,
     flush,
     validate: (input) => validateEntry(input, cfg),

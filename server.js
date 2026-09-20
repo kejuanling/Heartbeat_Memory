@@ -3622,6 +3622,18 @@ app.post("/internal/memory-pool/pin", async (req, reply) => {
   }
 });
 
+// 记忆池硬删除：管理台「彻底删除」按钮用（basicAuth；不可恢复，区别于 archive 软沉底）
+app.post("/admin/memory-v2/entries/:id/delete", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const r = require("./memory-v2").createStore({ rootDir: __dirname, config: {} }).hardDelete(req.params.id);
+    if (!r.ok) return reply.code(404).send({ error: r.error });
+    reply.send({ success: true });
+  } catch (err) {
+    console.error("[POST /admin/memory-v2/entries/:id/delete] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
 // 记忆池按 id 直接覆盖正文：MCP 工具 memory_update 用（x-internal-key 鉴权）
 // 0920 加：只改 text（content_updated_at 机制自动刷新）；不走 admission 流水线，直接落 V2 主集合
 app.post("/internal/memory-v2/update", async (req, reply) => {
@@ -6102,6 +6114,27 @@ app.post("/xie-diary/api/update", { preHandler: xieDiaryAuth }, async (req, repl
     reply.send({ success: true, file: r.rel, syncedEvents, chars: newContent.length });
   } catch (err) {
     console.error("[xie-diary] 编辑日记失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 谢的日记：删除整篇（前端「删除」按钮用；连时间线「醒来写了日记」特殊事件一起清）
+app.post("/xie-diary/api/delete", { preHandler: xieDiaryAuth }, async (req, reply) => {
+  try {
+    const { relPath } = req.body || {};
+    const r = resolveDiaryRelPath(relPath);
+    if (!r) {
+      return reply.code(400).send({ error: "日记路径格式不正确（应为 日期.md、日期_时分秒.md 或 会话目录/….md）" });
+    }
+    if (!fs.existsSync(r.full) || !fs.statSync(r.full).isFile()) {
+      return reply.code(404).send({ error: "日记文件不存在：" + r.rel });
+    }
+    fs.unlinkSync(r.full);
+    let syncedEvents = 0;
+    try { syncedEvents = removeDiarySpecialEvents(r.fileName, r.session); } catch (e) { console.warn("[xie-diary] 清时间线事件失败:", e.message); }
+    reply.send({ success: true, file: r.rel, syncedEvents });
+  } catch (err) {
+    console.error("[xie-diary] 删除日记失败:", err);
     reply.code(500).send({ error: err.message });
   }
 });

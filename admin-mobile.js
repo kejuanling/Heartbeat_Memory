@@ -4878,12 +4878,12 @@ async function deletePinned(id){
     }catch(e){ toast('网络错误: '+e.message); }
   }
   async function deleteMemPool(id){
-    if(!confirm('归档该条记忆？归档后不再注入，可在「已沉底」里恢复。'))return;
+    if(!confirm('彻底删除该条记忆？此操作不可恢复（沉底/归档才是可恢复的）。'))return;
     try{
-      const r=await fetch(ADMIN_API+'/memory-v2/entries/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'archive'})});
+      const r=await fetch(ADMIN_API+'/memory-v2/entries/'+id+'/delete',{method:'POST'});
       const d=await r.json();
       if(d.error){ toast('删除失败: '+d.error); return; }
-      toast('已归档'); loadMemPool();
+      toast('已彻底删除'); loadMemPool();
     }catch(e){ toast('操作失败: '+e.message); }
   }
   async function tidyMemPool(){
