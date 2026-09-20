@@ -5849,81 +5849,6 @@ app.get("/admin/env", { preHandler: basicAuth }, async (req, reply) => {
 });
 
 
-// 修改日记：更新文件内容，并同步时间线里对应的「醒来写了日记」特殊事件
-// 2026-09-12：name 支持会话日记相对路径（<会话目录>/日期.md），编辑会话日记只同步该会话的时间线
-app.post("/admin/diary/update", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const { name, content } = req.body || {};
-    const r = resolveDiaryRelPath(name);
-    if (!r) {
-      return reply.code(400).send({ error: "日记路径格式不正确（应为 YYYY-MM-DD.md 或 会话目录/YYYY-MM-DD.md）" });
-    }
-    const newContent = String(content === undefined ? "" : content);
-    if (!fs.existsSync(r.full)) {
-      return reply.code(404).send({ error: "日记文件不存在：" + r.rel });
-    }
-    if (!fs.statSync(r.full).isFile()) {
-      return reply.code(400).send({ error: "目标不是普通文件：" + r.rel });
-    }
-    atomicWriteFileSync(r.full, newContent);
-    const syncedEvents = syncDiarySpecialEvents(r.fileName, newContent, r.session);
-    reply.send({ success: true, file: r.rel, syncedEvents, chars: newContent.length });
-  } catch (err) {
-    console.error("[diary] 修改日记失败:", err);
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-// 删除日记：删除文件，并同步移除时间线里对应的「醒来写了日记」特殊事件
-app.post("/admin/diary/delete", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const { name } = req.body || {};
-    const r = resolveDiaryRelPath(name);
-    if (!r) {
-      return reply.code(400).send({ error: "日记路径格式不正确（应为 YYYY-MM-DD.md 或 会话目录/YYYY-MM-DD.md）" });
-    }
-    if (!fs.existsSync(r.full)) {
-      return reply.code(404).send({ error: "日记文件不存在：" + r.rel });
-    }
-    fs.removeSync(r.full);
-    const removedEvents = removeDiarySpecialEvents(r.fileName, r.session);
-    // 文件删了，隐藏清单里的条目一并清掉，避免残留死条目
-    const hiddenSet = readDiaryHiddenSet();
-    let hiddenDirty = false;
-    if (hiddenSet.has(r.rel)) { hiddenSet.delete(r.rel); hiddenDirty = true; }
-    if (!r.session && hiddenSet.has(r.fileName)) { hiddenSet.delete(r.fileName); hiddenDirty = true; }
-    if (hiddenDirty) writeDiaryHiddenSet(hiddenSet);
-    reply.send({ success: true, file: r.rel, removedEvents });
-  } catch (err) {
-    console.error("[diary] 删除日记失败:", err);
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-// 隐藏/取消隐藏日记（2026-09-09）：只影响「跨窗口注入」——隐藏篇不参与新会话注入、不占注入份数。
-// 不影响：时间线「醒来写了日记」特殊事件、日记文件本身（仍可查看/编辑）。隐藏清单变化会触发快照指纹重建。
-// 2026-09-12：name 支持会话日记相对路径，隐藏 key 记完整相对路径（精确到文件）
-app.post("/admin/diary/hide", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const { name, hidden } = req.body || {};
-    const r = resolveDiaryRelPath(name);
-    if (!r) {
-      return reply.code(400).send({ error: "日记路径格式不正确（应为 YYYY-MM-DD.md 或 会话目录/YYYY-MM-DD.md）" });
-    }
-    if (!fs.existsSync(r.full)) {
-      return reply.code(404).send({ error: "日记文件不存在：" + r.rel });
-    }
-    const wantHidden = hidden !== false;
-    const set = readDiaryHiddenSet();
-    if (wantHidden) set.add(r.rel); else set.delete(r.rel);
-    writeDiaryHiddenSet(set);
-    reply.send({ success: true, file: r.rel, hidden: wantHidden });
-  } catch (err) {
-    console.error("[diary] 切换日记隐藏失败:", err);
-    reply.code(500).send({ error: err.message });
-  }
-});
-
 
 // ── 留纸一览（2026-09-12）：AI 留的纸（故事/梦/随手创作）只落盘不注入上下文，这里供管理台查看/删除 ──
 app.get("/admin/papers", { preHandler: basicAuth }, async (req, reply) => {
@@ -5986,7 +5911,21 @@ app.get("/papers/api/read", async (req, reply) => {
 // 数据源 = diary/ 全目录（共享层 + 各会话目录），与跨窗口注入同一扫描口径但**不做日期边界**：
 // 这是用户自己的阅览页，已隐藏篇置灰标出（hidden=true），可一键恢复；隐藏只影响注入给 AI。
 // ========================
-app.get("/xie-diary/api/list", async (req, reply) => {
+function xieDiaryAuth(req, reply, done) {
+  // 门户日记口令门（2026-09-20）：Bearer GATEWAY_API_KEY / X-API-Key，或已登录管理台会话 cookie 放行
+  const configuredKey = readEnvValue("GATEWAY_API_KEY");
+  const auth = String(req.headers.authorization || "");
+  const bearer = auth.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || "";
+  const headerKey = String(req.headers["x-api-key"] || "").trim();
+  if (configuredKey && (bearer === configuredKey || headerKey === configuredKey)) return done();
+  try {
+    const cookies = parseCookies(req.headers.cookie);
+    if (cookies.admin_session && validSessionToken(cookies.admin_session)) return done();
+  } catch (e) {}
+  reply.code(401).send({ error: "需要访问口令" });
+}
+
+app.get("/xie-diary/api/list", { preHandler: xieDiaryAuth }, async (req, reply) => {
   try {
     const hiddenSet = readDiaryHiddenSet();
     const entries = readDiaryEntries().map(e => ({
@@ -6001,8 +5940,8 @@ app.get("/xie-diary/api/list", async (req, reply) => {
 });
 
 // 小世界门户：切换某篇日记隐藏状态（2026-09-19 批6 D1）。与 /xie-diary/api/list 同级公开；
-// 与管理台 /admin/diary/hide 操作同一份 data/diary_hidden.json，语义=不参与跨窗口注入、可恢复。
-app.post("/xie-diary/api/hide", async (req, reply) => {
+// 与已删的管理台 /admin/diary/hide（2026-09-20 清理）曾操作同一份 data/diary_hidden.json，语义=不参与跨窗口注入、可恢复。
+app.post("/xie-diary/api/hide", { preHandler: xieDiaryAuth }, async (req, reply) => {
   try {
     const { relPath, hidden } = req.body || {};
     const r = resolveDiaryRelPath(relPath);
@@ -6013,6 +5952,32 @@ app.post("/xie-diary/api/hide", async (req, reply) => {
     if (wantHidden) set.add(r.rel); else set.delete(r.rel);
     writeDiaryHiddenSet(set);
     reply.send({ success: true, file: r.rel, hidden: wantHidden });
+
+// 门户：编辑日记（2026-09-20）。与上面 update 同一套落盘+时间线同步逻辑，但走门户口令门；
+// 前端 xie-diary 页「编辑」按钮调用。content=整份文件新内容（前端负责只改本篇段落）。
+app.post("/xie-diary/api/update", { preHandler: xieDiaryAuth }, async (req, reply) => {
+  try {
+    const { relPath, content } = req.body || {};
+    const r = resolveDiaryRelPath(relPath);
+    if (!r) {
+      return reply.code(400).send({ error: "日记路径格式不正确（应为 日期.md、日期_时分秒.md 或 会话目录/….md）" });
+    }
+    if (!fs.existsSync(r.full)) {
+      return reply.code(404).send({ error: "日记文件不存在：" + r.rel });
+    }
+    if (!fs.statSync(r.full).isFile()) {
+      return reply.code(400).send({ error: "目标不是普通文件：" + r.rel });
+    }
+    const newContent = String(content === undefined ? "" : content);
+    atomicWriteFileSync(r.full, newContent);
+    const syncedEvents = syncDiarySpecialEvents(r.fileName, newContent, r.session);
+    reply.send({ success: true, file: r.rel, syncedEvents, chars: newContent.length });
+  } catch (err) {
+    console.error("[xie-diary] 编辑日记失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
   } catch (err) {
     console.error("[xie-diary] 切换隐藏失败:", err);
     reply.code(500).send({ error: err.message });

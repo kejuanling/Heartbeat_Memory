@@ -158,14 +158,31 @@ TOOLS["diary_add"] = {
 # ── 查看谢的日记（2026-09-16）：不带参数=最近一篇；date=某天；count=最近 N 篇（默认 1）──
 # 读取口径与 server.js 注入一致：候选 = diary 根（共享层）+ 所有安全会话子目录合并，
 # 同一天多个文件（共享+各会话）内容合并为一篇，按日期降序取。
+def _diary_hidden_set():
+    # 隐藏清单（2026-09-20）：与网关 data/diary_hidden.json 同一份，隐藏篇工具也检索不到。
+    # 每次调用现读（文件小），门户页隐藏后无需重启本服务即生效。
+    try:
+        with open("/opt/dylan-heartbeat/data/diary_hidden.json", encoding="utf-8") as f:
+            arr = json.load(f)
+        if isinstance(arr, list):
+            return set(x for x in arr if isinstance(x, str) and x)
+    except Exception:
+        pass
+    return set()
+
 def _diary_collect_files():
     diary_dir = (os.environ.get("DIARY_DIR", "") or "").strip() or "diary"
     if not os.path.isabs(diary_dir):
         diary_dir = os.path.join("/opt/dylan-heartbeat", diary_dir)
+    hidden = _diary_hidden_set()
+    # 文件名含批6的每篇一文件格式「日期_时分秒.md」；隐藏清单命中的 rel 剔除（工具检索不到）
+    name_re = r"^\d{4}-\d{2}-\d{2}(_\d{4,6})?\.md$"
     out = []
     try:
         for f in os.listdir(diary_dir):
-            if re.match(r"^\d{4}-\d{2}-\d{2}\.md$", f):
+            if re.match(name_re, f):
+                if f in hidden:
+                    continue
                 out.append({"rel": f, "date": f[:10]})
     except Exception as e:
         return [], "读取日记目录失败: %s" % e
@@ -177,8 +194,11 @@ def _diary_collect_files():
             if not os.path.isdir(sub):
                 continue
             for f in os.listdir(sub):
-                if re.match(r"^\d{4}-\d{2}-\d{2}\.md$", f):
-                    out.append({"rel": d + "/" + f, "date": f[:10]})
+                if re.match(name_re, f):
+                    rel = d + "/" + f
+                    if rel in hidden:
+                        continue
+                    out.append({"rel": rel, "date": f[:10]})
     except Exception:
         pass
     return out, None

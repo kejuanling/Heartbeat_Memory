@@ -85,6 +85,8 @@ h1{
 .diary-hidden-tag{font-size:0.6rem;color:#c08080;border:1px solid rgba(192,128,128,0.4);border-radius:8px;padding:0.05rem 0.5rem;letter-spacing:1px;flex:none}
 .diary-hide-btn{background:none;border:1px solid rgba(181,131,122,0.35);border-radius:10px;color:#b5837a;font-family:inherit;font-size:0.65rem;letter-spacing:1px;padding:0.15rem 0.6rem;cursor:pointer;flex:none}
 .diary-hide-btn:hover{background:rgba(240,196,192,0.25)}
+.diary-edit-btn{background:none;border:1px solid rgba(181,131,122,0.35);border-radius:10px;color:#b5837a;font-family:inherit;font-size:0.65rem;letter-spacing:1px;padding:0.15rem 0.6rem;cursor:pointer;flex:none}
+.diary-edit-btn:hover{background:rgba(240,196,192,0.25)}
 .ft{text-align:center;margin-top:1.8rem;color:#d4bcb0;font-size:0.62rem;letter-spacing:2px}
 </style>
 </head>
@@ -100,6 +102,15 @@ h1{
 </div>
 <div class="meta-line" id="metaLine">加载中…</div>
 
+<div id="keyGate" style="display:none;margin-bottom:0.9rem;padding:0.8rem 1rem;background:rgba(255,255,255,0.6);border:1px solid rgba(181,131,122,0.3);border-radius:14px">
+  <div style="font-size:0.68rem;color:#b5837a;letter-spacing:1px;margin-bottom:0.4rem">本页内容需要访问口令（与聊天页 GATEWAY_API_KEY 相同，只需输一次）</div>
+  <div style="display:flex;gap:0.5rem">
+    <input id="keyInput" type="password" placeholder="粘贴访问口令" autocomplete="off" style="flex:1;padding:0.5rem 0.8rem;border:1px solid rgba(181,131,122,0.3);border-radius:10px;font-family:inherit;font-size:0.8rem;color:#5a4a3a;outline:none;background:rgba(255,255,255,0.7)">
+    <button id="keySave" style="border:none;border-radius:10px;background:#b5837a;color:#fff;font-family:inherit;font-size:0.72rem;letter-spacing:2px;padding:0.4rem 1rem;cursor:pointer">解锁</button>
+  </div>
+  <div id="keyMsg" style="font-size:0.62rem;color:#c08080;margin-top:0.35rem;letter-spacing:1px"></div>
+</div>
+
 <div id="list"><div class="loading">正在翻开日记本…</div></div>
 
 <div class="ft">🕊 谢停云 · 小世界</div>
@@ -108,8 +119,28 @@ h1{
 <script>
 (function(){
   var API='/xie-diary/api/list';
-  var writings=[];  // 每次书写一卡（文件按「##」分篇头拆开）：{date, time, src, text, relPath, hidden}
-  var EXCERPT_LEN=340;
+  var writings=[];  // 每次书写一卡（文件按「##」分篇头拆开）：{date, time, src, text, relPath, hidden, _raw, _bs, _be}
+  var EXCERPT_LEN=160;
+
+  // ── 访问口令（2026-09-20：xie-diary 接口加口令门，与 GATEWAY_API_KEY 同值）──
+  function getKey(){ try{ return localStorage.getItem('xie_diary_key')||''; }catch(e){ return ''; } }
+  function getCsrf(){ var m=/(?:^|;\s*)admin_csrf=([^;]+)/.exec(document.cookie||''); return m?decodeURIComponent(m[1]):''; }
+  function authHeaders(extra){
+    var h=Object.assign({'Content-Type':'application/json'},extra||{});
+    var k=getKey(); if(k) h['Authorization']='Bearer '+k;
+    var c=getCsrf(); if(c) h['X-CSRF-Token']=c;
+    return h;
+  }
+  function showKeyGate(){
+    var bar=document.getElementById('keyGate');
+    if(bar) bar.style.display='block';
+  }
+  function api(url, body){
+    return fetch(url,{method:'POST',headers:authHeaders(),body:JSON.stringify(body)}).then(function(r){
+      if(r.status===401){ showKeyGate(); throw new Error('需要访问口令'); }
+      return r.json();
+    });
+  }
 
   function esc(s){
     return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -145,14 +176,14 @@ h1{
       else marks.push({at:m.index,date:fileDate,time:''});
     }
     var segs=[];
-    if(!marks.length){ segs.push({date:fileDate,time:'',body:raw}); }
+    if(!marks.length){ segs.push({date:fileDate,time:'',body:raw,bs:0,be:raw.length}); }
     else{
-      if(marks[0].at>0) segs.push({date:fileDate,time:'',body:raw.slice(0,marks[0].at)});
+      if(marks[0].at>0) segs.push({date:fileDate,time:'',body:raw.slice(0,marks[0].at),bs:0,be:marks[0].at});
       for(var i=0;i<marks.length;i++){
         var end=(i+1<marks.length)?marks[i+1].at:raw.length;
         var lineEnd=raw.indexOf('\n',marks[i].at);
         var bodyStart=(lineEnd===-1||lineEnd>=end)?end:lineEnd+1;
-        segs.push({date:marks[i].date,time:marks[i].time,body:raw.slice(bodyStart,end)});
+        segs.push({date:marks[i].date,time:marks[i].time,body:raw.slice(bodyStart,end),bs:bodyStart,be:end});
       }
     }
     return segs;
@@ -173,6 +204,126 @@ h1{
     return (e.updated_at||'').slice(11,16);
   }
 
+  // 单张卡的 HTML（render 与就地更新共用）；bodyId 用于展开/收起与编辑定位
+  function cardHtml(d, bodyId, kw, needClip){
+    return '<div class="day-card'+(kw?' match':'')+(d.hidden?' diary-is-hidden':'')+'" data-rel="'+esc(d.relPath)+'" data-w="'+d._wid+'">'
+      +'<div class="day-head"><span class="day-time">'+esc(d.time)+'</span>'
+      +(d.src?'<span class="day-src">'+esc(d.src)+'</span>':'')
+      +'<span class="diary-hidden-tag"'+(d.hidden?'':' style="display:none"')+'>已隐藏</span>'
+      +'<span class="day-ops" style="margin-left:auto;display:inline-flex;gap:0.35rem;flex:none">'
+      +'<button class="diary-edit-btn" data-w="'+d._wid+'">编辑</button>'
+      +'<button class="diary-hide-btn" data-rel="'+esc(d.relPath)+'" data-w="'+d._wid+'" data-hidden="'+(d.hidden?'1':'0')+'">'+(d.hidden?'显示':'隐藏')+'</button>'
+      +'</span>'
+      +'</div>'
+      +'<div class="day-body" id="'+bodyId+'">'+renderParas(needClip?clipText(d.text):d.text,kw)+'</div>'
+      +(needClip?'<button class="expand-btn" data-for="'+bodyId+'">展开全文</button>':'')
+      +'</div>';
+  }
+  // 就地更新某张卡的隐藏状态（不重建列表，折叠/滚动位置不动）
+  function applyHiddenRel(rel, toHidden){
+    writings.forEach(function(d){ if(d.relPath===rel) d.hidden=toHidden; });
+    Array.prototype.forEach.call(document.querySelectorAll('#list .day-card[data-rel]'),function(card){
+      if(card.getAttribute('data-rel')!==rel) return;
+      card.classList.toggle('diary-is-hidden',toHidden);
+      var tag=card.querySelector('.diary-hidden-tag'); if(tag) tag.style.display=toHidden?'':'none';
+      var hb=card.querySelector('.diary-hide-btn'); if(hb){ hb.textContent=toHidden?'显示':'隐藏'; hb.setAttribute('data-hidden',toHidden?'1':'0'); hb.disabled=false; }
+    });
+  }
+  // 把某张卡（按 _wid 定位）就地换回只读渲染；编辑保存后用
+  function rerenderCard(d){
+    var wid=String(d._wid);
+    var idx=writings.indexOf(d);
+    var kw=document.getElementById('searchInput').value.trim();
+    Array.prototype.forEach.call(document.querySelectorAll('#list .day-card'),function(card){
+      if(card.getAttribute('data-w')!==wid) return;
+      var bodyId='db-r'+idx+'-'+wid;
+      var needClip=!kw && d.text.length>EXCERPT_LEN;
+      if(needClip) clipMap[bodyId]={text:d.text,expanded:false}; else delete clipMap[bodyId];
+      var tmp=document.createElement('div');
+      tmp.innerHTML=cardHtml(d,bodyId,kw,needClip);
+      var fresh=tmp.firstChild;
+      card.parentNode.replaceChild(fresh,card);
+      bindCard(fresh);
+    });
+  }
+  // 给一张卡（或整个列表容器）绑交互：隐藏/编辑/展开
+  function bindCard(root){
+    Array.prototype.forEach.call(root.querySelectorAll('.group-head'),function(head){
+      head.addEventListener('click',function(){ head.parentNode.classList.toggle('open'); });
+    });
+    // 隐藏/恢复按文件粒度（隐藏=不注入给 AI、工具 diary_view 也检索不到）：同一文件拆出的多张卡共用一个状态
+    Array.prototype.forEach.call(root.querySelectorAll('.diary-hide-btn'),function(btn){
+      btn.addEventListener('click',function(){
+        var rel=btn.getAttribute('data-rel');
+        var toHidden=btn.getAttribute('data-hidden')!=='1';
+        btn.disabled=true;
+        api('/xie-diary/api/hide',{relPath:rel,hidden:toHidden})
+          .then(function(j){
+            if(j&&j.success){ applyHiddenRel(rel,toHidden); }   // 就地更新，不重建列表
+            else { alert('操作失败：'+((j&&j.error)||'未知错误')); btn.disabled=false; }
+          })
+          .catch(function(e){ if(e.message!=='需要访问口令') alert('操作失败：'+e.message); btn.disabled=false; });
+      });
+    });
+    // 编辑：卡内正文换 textarea，保存=重建整份文件内容（只替换本篇段落，篇头与同文件其它篇不动）
+    Array.prototype.forEach.call(root.querySelectorAll('.diary-edit-btn'),function(btn){
+      btn.addEventListener('click',function(){
+        var wid=btn.getAttribute('data-w');
+        var d=writings[+wid];
+        if(!d) return;
+        var card=btn.closest('.day-card');
+        var body=card.querySelector('.day-body');
+        var expand=card.querySelector('.expand-btn');
+        if(expand) expand.style.display='none';
+        btn.disabled=true;
+        body.innerHTML='<textarea class="diary-edit-ta" style="width:100%;min-height:9em;border:1px solid rgba(181,131,122,0.35);border-radius:10px;padding:0.6rem;font-family:inherit;font-size:0.8rem;line-height:1.8;color:#6a584a;background:rgba(255,255,255,0.8);outline:none;resize:vertical">'+esc(d.text)+'</textarea>'
+          +'<div style="display:flex;gap:0.5rem;margin-top:0.45rem">'
+          +'<button class="diary-save-btn" style="border:none;border-radius:10px;background:#b5837a;color:#fff;font-family:inherit;font-size:0.68rem;letter-spacing:2px;padding:0.25rem 0.9rem;cursor:pointer">保存</button>'
+          +'<button class="diary-cancel-btn" style="border:1px solid rgba(181,131,122,0.35);border-radius:10px;background:none;color:#b5837a;font-family:inherit;font-size:0.68rem;letter-spacing:2px;padding:0.25rem 0.9rem;cursor:pointer">取消</button>'
+          +'<span class="diary-edit-msg" style="font-size:0.62rem;color:#c08080;letter-spacing:1px;align-self:center"></span>'
+          +'</div>';
+        var ta=body.querySelector('.diary-edit-ta');
+        ta.style.height=Math.max(9*1.2, ta.scrollHeight/16)+'em';
+        body.querySelector('.diary-cancel-btn').addEventListener('click',function(){
+          var needClip=d.text.length>EXCERPT_LEN;
+          body.innerHTML=renderParas(needClip?clipText(d.text):d.text,'');
+          if(expand){ expand.style.display=''; }
+          btn.disabled=false;
+        });
+        body.querySelector('.diary-save-btn').addEventListener('click',function(){
+          var newText=ta.value.replace(/\s+$/,'');
+          if(!newText.trim()){ alert('正文不能为空'); return; }
+          var newRaw=d._raw.slice(0,d._bs)+newText+d._raw.slice(d._be);
+          var sb=body.querySelector('.diary-save-btn'), msg=body.querySelector('.diary-edit-msg');
+          sb.disabled=true; msg.textContent='保存中…';
+          api('/xie-diary/api/update',{relPath:d.relPath,content:newRaw})
+            .then(function(j){
+              if(j&&j.success){
+                var delta=newText.length-(d._be-d._bs);
+                d.text=newText; d._raw=newRaw; d._be+=delta;
+                // 同文件其它篇的偏移跟着平移
+                writings.forEach(function(o){ if(o!==d&&o.relPath===d.relPath){ if(o._bs>=d._be-delta) { o._bs+=delta; o._be+=delta; } } });
+                msg.textContent='';
+                rerenderCard(d);
+              } else { sb.disabled=false; msg.textContent='保存失败：'+((j&&j.error)||'未知错误'); }
+            })
+            .catch(function(e){ sb.disabled=false; msg.textContent=(e.message==='需要访问口令')?'':('保存失败：'+e.message); if(e.message==='需要访问口令') showKeyGate(); });
+        });
+      });
+    });
+    // 展开/收起：截断文本与全文整段重渲染
+    Array.prototype.forEach.call(root.querySelectorAll('.expand-btn'),function(btn){
+      btn.addEventListener('click',function(){
+        var st=clipMap[btn.getAttribute('data-for')];
+        var body=document.getElementById(btn.getAttribute('data-for'));
+        if(!st||!body) return;
+        st.expanded=!st.expanded;
+        body.innerHTML=renderParas(st.expanded?st.text:clipText(st.text),'');
+        btn.textContent=st.expanded?'收起':'展开全文';
+      });
+    });
+  }
+  var clipMap={};   // bodyId -> {text, expanded}：截断卡片的展开/收起状态（模块级，rerenderCard 复用）
   function render(kw){
     var list=document.getElementById('list');
     var meta=document.getElementById('metaLine');
@@ -194,21 +345,13 @@ h1{
       if(!g||g.date!==d.date){ g={date:d.date,items:[]}; groups.push(g); }
       g.items.push(d);
     });
-    var clipMap={};   // bodyId -> {text, expanded}：截断卡片的展开/收起状态
+    clipMap={};
     list.innerHTML=groups.map(function(g,gi){
       var cards=g.items.map(function(d,i){
         var bodyId='db'+gi+'-'+i;
         var needClip=!kw && d.text.length>EXCERPT_LEN;
         if(needClip) clipMap[bodyId]={text:d.text,expanded:false};
-        return '<div class="day-card'+(kw?' match':'')+(d.hidden?' diary-is-hidden':'')+'">'
-          +'<div class="day-head"><span class="day-time">'+esc(d.time)+'</span>'
-          +(d.src?'<span class="day-src">'+esc(d.src)+'</span>':'')
-          +(d.hidden?'<span class="diary-hidden-tag">已隐藏</span>':'')
-          +'<button class="diary-hide-btn" data-rel="'+esc(d.relPath)+'" data-hidden="'+(d.hidden?'1':'0')+'">'+(d.hidden?'显示':'隐藏')+'</button>'
-          +'</div>'
-          +'<div class="day-body" id="'+bodyId+'">'+renderParas(needClip?clipText(d.text):d.text,kw)+'</div>'
-          +(needClip?'<button class="expand-btn" data-for="'+bodyId+'">展开全文</button>':'')
-          +'</div>';
+        return cardHtml(d,bodyId,kw,needClip);
       }).join('');
       return '<div class="day-group'+(kw?' open':'')+'">'
         +'<div class="group-head" data-g="'+gi+'"><span class="g-date">'+esc(g.date)+'</span>'
@@ -218,40 +361,14 @@ h1{
         +'<div class="group-body">'+cards+'</div>'
         +'</div>';
     }).join('');
-    Array.prototype.forEach.call(list.querySelectorAll('.group-head'),function(head){
-      head.addEventListener('click',function(){ head.parentNode.classList.toggle('open'); });
-    });
-    // 隐藏/恢复按文件粒度（隐藏=不注入给 AI）：同一文件拆出的多张卡共用一个状态
-    Array.prototype.forEach.call(list.querySelectorAll('.diary-hide-btn'),function(btn){
-      btn.addEventListener('click',function(){
-        var rel=btn.getAttribute('data-rel');
-        var toHidden=btn.getAttribute('data-hidden')!=='1';
-        btn.disabled=true;
-        fetch('/xie-diary/api/hide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({relPath:rel,hidden:toHidden})})
-          .then(function(r){return r.json();})
-          .then(function(j){
-            if(j&&j.success){
-              writings.forEach(function(d){ if(d.relPath===rel) d.hidden=toHidden; });
-              render(document.getElementById('searchInput').value);
-            } else { alert('操作失败：'+((j&&j.error)||'未知错误')); btn.disabled=false; }
-          })
-          .catch(function(e){ alert('操作失败：'+e.message); btn.disabled=false; });
-      });
-    });
-    // 展开/收起：截断文本与全文整段重渲染
-    Array.prototype.forEach.call(list.querySelectorAll('.expand-btn'),function(btn){
-      btn.addEventListener('click',function(){
-        var st=clipMap[btn.getAttribute('data-for')];
-        var body=document.getElementById(btn.getAttribute('data-for'));
-        if(!st||!body) return;
-        st.expanded=!st.expanded;
-        body.innerHTML=renderParas(st.expanded?st.text:clipText(st.text),'');
-        btn.textContent=st.expanded?'收起':'展开全文';
-      });
-    });
+    bindCard(list);
   }
 
-  fetch(API).then(function(r){return r.json();}).then(function(j){
+  function loadList(){
+    fetch(API,{headers:authHeaders()}).then(function(r){
+      if(r.status===401){ showKeyGate(); throw new Error('需要访问口令'); }
+      return r.json();
+    }).then(function(j){
     var files=(j&&j.entries)||[];
     // 每次书写一卡：文件按「##」分篇头拆开（旧的一天多篇文件也拆），时间取各篇头行，
     // 取不到时退回文件名 _HHMMSS，再退回文件修改时间；空段丢弃；完全按时间倒序。
@@ -260,6 +377,7 @@ h1{
       var src=e.session?('窗口 '+e.session):'';
       var rel=e.relPath||e.name;
       var hidden=!!e.hidden;
+      var raw=String(e.content||'').replace(/\r\n/g,'\n').trim();
       splitWritings(e).forEach(function(s){
         var text=String(s.body||'').trim();
         if(!text) return;
@@ -269,7 +387,11 @@ h1{
           src:src,
           text:text,
           relPath:rel,
-          hidden:hidden
+          hidden:hidden,
+          _wid:writings.length,
+          _raw:raw,
+          _bs:s.bs,
+          _be:s.be
         });
       });
     });
@@ -280,7 +402,26 @@ h1{
     });
     render('');
   }).catch(function(e){
-    document.getElementById('list').innerHTML='<div class="empty">加载失败：'+esc(e.message)+'</div>';
+    if(e.message!=='需要访问口令') document.getElementById('list').innerHTML='<div class="empty">加载失败：'+esc(e.message)+'</div>';
+  });
+  }
+  loadList();
+
+  // 口令门：解锁后记住（localStorage），重拉列表
+  document.getElementById('keySave').addEventListener('click',function(){
+    var v=document.getElementById('keyInput').value.trim();
+    var msg=document.getElementById('keyMsg');
+    if(!v){ msg.textContent='请输入口令'; return; }
+    localStorage.setItem('xie_diary_key',v);
+    msg.textContent='验证中…';
+    fetch(API,{headers:authHeaders()}).then(function(r){
+      if(r.status===401){ msg.textContent='口令不对，再试试'; localStorage.removeItem('xie_diary_key'); return null; }
+      document.getElementById('keyGate').style.display='none';
+      loadList();
+    }).catch(function(){ msg.textContent='网络错误'; });
+  });
+  document.getElementById('keyInput').addEventListener('keydown',function(ev){
+    if(ev.key==='Enter') document.getElementById('keySave').click();
   });
 
   var timer=null;
