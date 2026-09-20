@@ -6850,10 +6850,20 @@ function exportMemPool(){
 /* ---------------- 唤醒原始日志 ---------------- */
 function renderWakeLog(body){
   body.innerHTML='<div class="adm-load">加载中…</div>';
-  admGet(BASE+'/logs/wake-up?lines=100').then(function(j){
+  // 段=每次唤醒检查/执行（以「开始自动唤醒」为界，源=gateway 进程日志）；取最近 10 段，滤掉请求级 JSON 噪音行
+  admGet(BASE+'/logs/wake-up?lines=1500').then(function(j){
     var lines=(j&&j.lines)||[];
-    if(!lines.length){ body.innerHTML='<div class="adm-empty">暂无日志</div>'; return; }
-    body.innerHTML='<div style="font-family:monospace;font-size:11px;line-height:1.6;color:var(--ink2);padding:8px;background:rgba(0,0,0,.03);border-radius:8px;word-break:break-all;max-height:240px;overflow-y:auto">'+lines.slice(-22).map(function(l){ return '<div>'+esc(l)+'</div>'; }).join('')+'</div>';
+    var segs=[]; var cur=null;
+    lines.forEach(function(l){
+      if(l.indexOf('开始自动唤醒')>=0){ cur=[l]; segs.push(cur); }
+      else if(cur && l.indexOf('{"level"')!==0){ cur.push(l); }
+    });
+    segs=segs.slice(-10);
+    if(!segs.length){ body.innerHTML='<div class="adm-empty">暂无唤醒记录</div>'; return; }
+    body.innerHTML='<div class="adm-tip">最近 '+segs.length+' 次唤醒（旧→新）</div>'
+      +'<div style="font-family:monospace;font-size:11px;line-height:1.6;color:var(--ink2);padding:8px;background:rgba(0,0,0,.03);border-radius:8px;word-break:break-all;max-height:320px;overflow-y:auto">'
+      +segs.map(function(s){ return '<div style="border-bottom:1px dashed var(--line);padding:6px 0">'+s.map(function(l){return esc(l);}).join('<br>')+'</div>'; }).join('')
+      +'</div>';
   }).catch(function(e){ body.innerHTML='<div class="adm-empty">加载失败</div>'; });
 }
 

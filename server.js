@@ -7294,9 +7294,22 @@ app.post("/internal/co/resolve", async (req, reply) => {
 app.get("/admin/logs/wake-up", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const lines = parseInt(req.query.lines) || 200;
-    const logPath = process.env.WAKE_UP_LOG_PATH || "/root/.pm2/logs/wake-up-out.log";
+    // 2026-09-20：唤醒调度已并入 gateway（wake-up 独立进程退役），日志源改读 gateway-out.log；
+    // gateway 日志含全部请求噪音且持续膨胀，只读尾部 3MB 再取行
+    const logPath = process.env.WAKE_UP_LOG_PATH || "/root/.pm2/logs/gateway-out.log";
     try {
-      const raw = fs.readFileSync(logPath, "utf-8");
+      let raw = "";
+      try {
+        const st = fs.statSync(logPath);
+        const readBytes = Math.min(st.size, 3 * 1024 * 1024);
+        const buf = Buffer.alloc(readBytes);
+        const fd = fs.openSync(logPath, "r");
+        try { fs.readSync(fd, buf, 0, readBytes, st.size - readBytes); } finally { fs.closeSync(fd); }
+        raw = buf.toString("utf-8");
+        if (readBytes < st.size) raw = raw.slice(raw.indexOf("\n") + 1); // 掐掉首行残段
+      } catch (e) {
+        raw = fs.readFileSync(logPath, "utf-8");
+      }
       const allLines = raw.split("\n").filter(l => l.trim());
       const tailLines = allLines.slice(-lines);
       reply.send({ lines: tailLines, total: allLines.length });
