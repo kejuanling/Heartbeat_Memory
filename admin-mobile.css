@@ -379,7 +379,6 @@
  .cc-chunk-swipe.swiped .cc-chunk{transform:translateX(-272px)}
  .cc-swipe-del{position:absolute;top:0;right:0;bottom:0;z-index:1;display:flex;align-items:stretch;gap:8px;padding:8px}
  .cc-swipe-del-btn{flex:1;display:flex;align-items:center;justify-content:center;min-width:80px;background:linear-gradient(180deg,#f06b6b,#d05050);color:#fff;border:none;border-radius:12px;font-size:12px;font-weight:600;letter-spacing:2px;cursor:pointer;font-family:"Noto Sans SC",sans-serif;box-shadow:0 2px 8px rgba(192,80,80,.35)}
- .cc-swipe-del-btn.cc-swipe-del-btn-ingest{background:linear-gradient(180deg,#6a9a5a,#4a7440);box-shadow:0 2px 8px rgba(106,154,90,.35)}
  .cc-swipe-del-btn.cc-swipe-del-btn-parse{background:linear-gradient(180deg,#6a9ad0,#4a6fb0);box-shadow:0 2px 8px rgba(106,140,190,.35)}
  .cc-swipe-del-btn.cc-swipe-del-btn-hide{background:linear-gradient(180deg,#d89a9e,#b8737b);box-shadow:0 2px 8px rgba(184,115,123,.35)}
   .cc-head-toggle{display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:5px 12px;border:1px solid rgba(200,144,152,.4);border-radius:999px;background:rgba(200,144,152,.08);color:var(--accent);font-size:11px;font-weight:600;font-family:inherit;cursor:pointer;flex-shrink:0;margin-left:auto;line-height:1.4;transition:all .2s}

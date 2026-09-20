@@ -2080,20 +2080,13 @@ function updateCcStatusBar(d){
    updateMultiSelectBar();
  }
 
-  // 单块直灌入池（0918 停用）：无判断直灌是低质量记忆的主通道，入口已删；
-  // 请走「解析」按钮（LLM 解析时间线原文 → 候选进 review 队列人工把关）
-  async function ingestSingleBlock(cid, blockIndex, isAi){
-    toast('直接入池已停用：请用「解析」按钮，候选会进 review 队列人工把关');
-  }
-
   // 左滑单块「解析」（0918）：该压缩块覆盖区间的时间线原文 → LLM 提候选 → review 队列人工裁决
-  // skipConfirm=true：从隐藏后的追问进入，免二次确认（0919 去重复弹窗）
-  async function reparseSingleBlock(cid, skipConfirm){
+  async function reparseSingleBlock(cid){
     const d = AppState.compactionPlan;
     if(!d) return;
     const c = (d.chunks || []).find(function(x){ return x.index === cid; });
     if(!c || c.enabled === false){ toast('该块未替换，无法解析'); return; }
-    if(!skipConfirm && !confirm('将该块的「时间线原文」交给 AI 提取记忆候选，进 review 队列人工把关？')) return;
+    if(!confirm('将该块的「时间线原文」交给 AI 提取记忆候选，进 review 队列人工把关？')) return;
     const msg = document.getElementById('compaction-msg');
     if(msg) msg.textContent = '正在解析时间线原文并提取记忆候选…';
     try{
