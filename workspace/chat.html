@@ -6413,8 +6413,9 @@ function admFetch(url, opts){
   var isCtx = url.indexOf('/context-compaction')>=0 || url.indexOf('/context-replacements')>=0;
   var isPush = url.indexOf('/push-events')>=0;
   // session_id 加在 URL 上（压缩/替换接口 GET 和 POST 都要带：服务端会话钩子只认 query，
-  // POST 漏带会把操作落到主会话的 ALS 上下文）；push-events 的 POST 走 body.session_id，此处仅 GET 补
-  if(url.indexOf('session_id=')<0 && (isCtx || (isPush && (opts.method||'GET')==='GET'))){
+  // POST 漏带会把操作落到主会话的 ALS 上下文）；push-events 的 POST 走 body.session_id，此处仅 GET 补；
+  // opts.sid===false 跳过自动补（推送管理与管理台一致：不带会话拉全部窗口）
+  if(opts.sid!==false && url.indexOf('session_id=')<0 && (isCtx || (isPush && (opts.method||'GET')==='GET'))){
     var sep = url.indexOf('?')>=0 ? '&' : '?';
     url = url + sep + 'session_id=' + encodeURIComponent(sessId());
   }
@@ -6424,8 +6425,8 @@ function admFetch(url, opts){
   }
   var init = { method: opts.method||'GET', headers: headers, credentials:'include' };
   if(opts.body!==undefined && opts.body!==null){
-    // POST 请求：push-events 自动带 session_id
-    if(isPush && typeof opts.body !== 'string'){
+    // POST 请求：push-events 自动带 session_id（调用方已带的以调用方为准——编辑/删除要落到该条记录自己的窗口）
+    if(isPush && typeof opts.body !== 'string' && opts.body.session_id==null){
       opts.body.session_id = sessId();
     }
     init.body = (typeof opts.body==='string')?opts.body:JSON.stringify(opts.body);
@@ -6449,6 +6450,7 @@ var CARDS = [
   { group:'log', id:'reqctx',    n:'当前请求上下文', d:'只读查看实际发送内容', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 8 7 8"/></svg>' },
   { group:'log', id:'cross',      n:'跨窗口注入', d:'AI 实际收到的记忆注入内容', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' },
   { group:'log', id:'pin',        n:'永久注入上下文', d:'固定注入 · 排序', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 3h6l1 7 2 2H6l2-2z"/></svg>' },
+  { group:'log', id:'marked',     n:'标星管理',   d:'查看 · 编辑 · 取消标星', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>' },
   { group:'log', id:'repllog',    n:'替换记录',   d:'每次请求的压缩/替换记录', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>' }
 ];
 var CARD_GROUPS = [
@@ -6865,7 +6867,7 @@ function renderMarked(body){
       var c=x.role==='user'?'var(--accent)':(x.role==='system'?'var(--accent-deep)':'var(--ink)');
       var mt=(x.time||x.ts||x.at||'');
       var inCtx=!!x.in_context;
-      return '<div class="adm-item adm-mark" data-key="'+esc(x.key)+'" data-full="'+esc(x.content||'')+'"><div class="adm-item-h"><span class="ctx-lamp'+(inCtx?' on':'')+'" title="'+(inCtx?'正文当前在发给模型的上下文中':'正文当前不在发给模型的上下文中')+'"></span><span>#'+(+x.index+1)+'</span><span style="color:'+c+'">'+esc(x.role||'')+'</span>'+(mt?'<span style="color:var(--ink3)">'+esc(mt)+'</span>':'')+'<span style="margin-left:auto"></span><button class="adm-star on" data-act="unmark" data-key="'+esc(x.key)+'" title="取消标星">★</button><button class="adm-editbtn" data-act="edit" data-key="'+esc(x.key)+'" data-iidx="#'+(+x.index+1)+' · '+esc(x.role||'')+'">编辑</button></div><div class="adm-mark-body"><div class="adm-mark-text">'+esc(x.content||'')+'</div></div></div>';
+      return '<div class="adm-item adm-mark" data-key="'+esc(x.key)+'" data-full="'+esc(x.content||'')+'"><div class="adm-item-h"><span class="ctx-lamp'+(inCtx?' on':'')+'" title="'+(inCtx?'正文当前在发给模型的上下文中':'正文当前不在发给模型的上下文中')+'"></span><span>#'+(+x.index)+'</span><span style="color:'+c+'">'+esc(x.role||'')+'</span>'+(mt?'<span style="color:var(--ink3)">'+esc(mt)+'</span>':'')+'<span style="margin-left:auto"></span><button class="adm-star on" data-act="unmark" data-key="'+esc(x.key)+'" title="取消标星">★</button><button class="adm-editbtn" data-act="edit" data-key="'+esc(x.key)+'" data-iidx="#'+(+x.index)+' · '+esc(x.role||'')+'">编辑</button></div><div class="adm-mark-body"><div class="adm-mark-text">'+esc(x.content||'')+'</div></div></div>';
     }).join('');
     bindMarked(body);
   }).catch(function(e){ body.innerHTML='<div class="adm-empty">加载失败: '+esc(e.message)+'</div>'; });
@@ -6984,13 +6986,16 @@ function renderCross(body){
 /* ---------------- 推送管理 ---------------- */
 function renderPush(body){
   body.innerHTML='<div class="adm-load">加载中…</div>';
-  admGet(BASE+'/push-events').then(function(j){
+  // 与管理台一致：不带 session_id 拉全部窗口的推送（opts.sid=false 阻止自动附加当前会话）
+  admFetch(BASE+'/push-events',{sid:false}).then(function(r){ return r.json(); }).then(function(j){
     var items=(j&&j.items)||[];
     if(!items.length){ body.innerHTML='<div class="adm-empty">暂无推送记录</div>'; return; }
     body.innerHTML='<div class="adm-tip">共 '+items.length+' 条（最新在前）</div>'+items.map(function(it){
       var t=''; try{ if(it.at) t=new Date(String(it.at).replace(' ','T')+':00+08:00').toLocaleString('zh-CN',{hour12:false}); }catch(e){}
       var isWake=it.sent===false;
-      return '<div class="adm-item"><div class="adm-item-h"><span style="color:'+(isWake?'var(--accent)':'var(--ink2)')+'">'+esc(it.channel||'bark')+'</span><span style="color:var(--ink3)">'+esc(t)+'</span><span style="margin-left:auto"></span>'+(isWake?'':'<button data-push="edit" data-pos="'+esc(it.position)+'" class="adm-editbtn">编辑</button>')+'<button data-push="del" data-pos="'+esc(it.position)+'" class="danger" title="删除" style="border:1px solid var(--bad-deep);background:none;border-radius:7px;font-size:11px;color:var(--bad-deep);padding:3px 9px;cursor:pointer">✕</button></div><div class="adm-item-b"><b>'+esc(it.title||'')+'</b></div><div class="adm-item-b" style="color:var(--ink2)">'+esc(it.body||'')+'</div></div>';
+      var dot=isWake?'#e67e22':'var(--ink3)';
+      var sess=it.session_id||'default';
+      return '<div class="adm-item"><div class="adm-item-h"><span style="display:inline-flex;align-items:center;gap:5px;color:var(--ink2)"><i style="width:8px;height:8px;border-radius:50%;background:'+dot+';display:inline-block;flex:none"></i>'+esc(it.channel||'bark')+'</span><span class="adm-tag">'+esc(sess)+'</span><span style="color:var(--ink3)">'+esc(t)+'</span><span style="margin-left:auto"></span>'+(isWake?'':'<button data-push="edit" data-pos="'+esc(it.position)+'" class="adm-editbtn">编辑</button>')+'<button data-push="del" data-pos="'+esc(it.position)+'" class="danger" title="删除" style="border:1px solid var(--bad-deep);background:none;border-radius:7px;font-size:11px;color:var(--bad-deep);padding:3px 9px;cursor:pointer">✕</button></div><div class="adm-item-b"><b>'+esc(it.title||'')+'</b></div><div class="adm-item-b" style="color:var(--ink2)">'+esc(it.body||'')+'</div></div>';
     }).join('');
     Array.prototype.forEach.call(body.querySelectorAll('button[data-push]'), function(b){
       b.addEventListener('click', function(){
@@ -7041,12 +7046,13 @@ function renderReqCtx(body){
   }).catch(function(e){ body.innerHTML='<div class="adm-empty">加载失败: '+esc(e.message)+'</div>'; });
 }
 function editPush(pos, body, isDel){
-  admGet(BASE+'/push-events').then(function(j){
+  // 与管理台一致：全窗口列表里定位该条，操作带该条自己的 session_id（落到它所属窗口的时间线）
+  admFetch(BASE+'/push-events',{sid:false}).then(function(r){ return r.json(); }).then(function(j){
     var it=((j&&j.items)||[]).find(function(x){return String(x.position)===String(pos);});
     if(!it){ toast('未找到该记录'); return; }
     if(isDel){
       if(!confirm('确定删除这条推送？')) return;
-      admPost(BASE+'/push-events/delete',{position:Number(pos),content:it.content}).then(function(j){
+      admPost(BASE+'/push-events/delete',{position:Number(pos),content:it.content,session_id:it.session_id||'default'}).then(function(j){
         if(j.success){
           toast('已删除');
           // 同步本地 msgs：删除对应推送消息
@@ -7062,7 +7068,7 @@ function editPush(pos, body, isDel){
       function(){
         var title=document.getElementById('epush-title').value.trim(), bodyV=document.getElementById('epush-body').value.trim();
         if(!bodyV){ toast('内容不能为空'); return false; }
-        admPost(BASE+'/push-events/update',{position:Number(pos),content:it.content,title:title,body:bodyV}).then(function(j){
+        admPost(BASE+'/push-events/update',{position:Number(pos),content:it.content,title:title,body:bodyV,session_id:it.session_id||'default'}).then(function(j){
           if(j.error){ toast('保存失败: '+j.error); }
           else{
             toast('已保存');
