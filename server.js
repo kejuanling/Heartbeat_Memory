@@ -5952,6 +5952,11 @@ app.post("/xie-diary/api/hide", { preHandler: xieDiaryAuth }, async (req, reply)
     if (wantHidden) set.add(r.rel); else set.delete(r.rel);
     writeDiaryHiddenSet(set);
     reply.send({ success: true, file: r.rel, hidden: wantHidden });
+  } catch (err) {
+    console.error("[xie-diary] 切换隐藏失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
 
 // 门户：编辑日记（2026-09-20）。与上面 update 同一套落盘+时间线同步逻辑，但走门户口令门；
 // 前端 xie-diary 页「编辑」按钮调用。content=整份文件新内容（前端负责只改本篇段落）。
@@ -5974,12 +5979,6 @@ app.post("/xie-diary/api/update", { preHandler: xieDiaryAuth }, async (req, repl
     reply.send({ success: true, file: r.rel, syncedEvents, chars: newContent.length });
   } catch (err) {
     console.error("[xie-diary] 编辑日记失败:", err);
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-  } catch (err) {
-    console.error("[xie-diary] 切换隐藏失败:", err);
     reply.code(500).send({ error: err.message });
   }
 });
