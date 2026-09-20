@@ -38,7 +38,7 @@ const DEFAULT_CONFIG = {
   relevantMinScore: 0.30,          // 0918 用户拍板调高：命中即写入时间线永久在场，高门槛防膨胀
   // 0920 混合模式（用户拍板「词面为主」）：input.vecScores（bge 余弦，调用方算好）在场时，
   // Relevant 改混合打分——词面当门槛（无关闲聊的语义地板再高也进不来），混合分排序：
-  // 0.55 词面 + 0.25 语义（重要级×衰减项 0920 已删），≥0.28 入选，最多 3 条。
+  // 0.55 语义 + 0.25 词面（语义为主，0920 二次拍板；重要级×衰减项已删），≥0.28 入选，最多 3 条。
   // 校准实测（旧公式口径）：相关命中 0.475-0.594、带门槛闲聊 ≤0.299；删项后相关命中约 ×0.8。vecScores 缺场回落字面（上行）。
   relevantLitGate: 0.15,
   relevantMinHybridScore: 0.28,   // 0920 删重要级×衰减项后等比换算（原 0.35/满分1.0 → ×0.8）
@@ -241,18 +241,18 @@ function buildContinuity(input, cfg) {
   return { lines, fixedIds: [] };
 }
 
-// [6] Possibly Relevant Memories：V2 检索（排除固定块已注入成员＋input.excludeIds
-// ——本会话已写入时间线的浮现记忆，命中后由生产链路落时间线永久在场，不再重复注入），
+// [6] Possibly Relevant Memories：V2 检索（排除固定块已注入成员、anchor 置顶条、input.excludeIds
+// ——本会话已写入时间线的浮现记忆，命中后由生产链路落时间线永久在场，不再重复注入；anchor 属常驻块不二次出现），
 // score desc → id；宁缺毋滥（允许空）。条目带轻量日期后缀；超预算从尾部减条。
 // 0920 混合模式：input.vecScores（bge 余弦，调用方算好）在场时——词面 ≥0.15 当门槛 +
-// 混合分（0.55词面+0.25语义）≥0.28 入选，最多 3 条；无向量条目不参与。重要级×衰减项已删。
+// 混合分（0.55语义+0.25词面，语义为主）≥0.28 入选，最多 3 条；无向量条目不参与。重要级×衰减项已删。
 // vecScores 缺场回落字面（embed 熔断/shadow 诊断）。两种模式的排除逻辑完全一致。
 function buildRelevant(input, cfg, fixedIdSet) {
   const q = strSafe(input.query);
   if (!q) return { lines: [], fixedIds: [] };
   const excluded = new Set((Array.isArray(input.excludeIds) ? input.excludeIds : []).map(String));
   const pool = (Array.isArray(input.memoriesV2) ? input.memoriesV2 : [])
-    .filter(m => m && m.status === "active" && m.id != null
+    .filter(m => m && m.status === "active" && m.id != null && m.anchor !== true
       && !fixedIdSet.has(String(m.id)) && !excluded.has(String(m.id)));
   if (!pool.length) return { lines: [], fixedIds: [] };
   const vecScores = (input.vecScores && typeof input.vecScores === "object") ? input.vecScores : null;
@@ -261,10 +261,10 @@ function buildRelevant(input, cfg, fixedIdSet) {
     const qt = tokenize(q);
     for (const m of pool) {
       const lit = Math.round(similarity(qt, m.text + " " + (m.kind || "")) * 1000) / 1000;
-      if (lit < cfg.relevantLitGate) continue; // 词面门槛（词面为主第一层）
+      if (lit < cfg.relevantLitGate) continue; // 词面门槛（过滤层；入围后排序语义为主）
       const sem = vecScores[String(m.id)];
       if (typeof sem !== "number" || !(sem >= 0)) continue; // 无向量条目不参与（宁缺毋滥）
-      const score = Math.round((0.55 * lit + 0.25 * sem) * 1000) / 1000;
+      const score = Math.round((0.55 * sem + 0.25 * lit) * 1000) / 1000; // 0920 二次拍板：门槛词面、排序语义为主
       if (score < cfg.relevantMinHybridScore) continue;
       scored.push({ m, score });
     }
