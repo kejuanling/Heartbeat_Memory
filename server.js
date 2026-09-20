@@ -2615,6 +2615,13 @@ app.post("/internal/timeline-event", async (req, reply) => {
   }
 });
 
+// 日记落库唯一格式（2026-09-21 用户拍板）：[DIARY]日记内容[/DIARY]。
+// 不管调用方传什么形态（裸正文/自带标签），剥净标签后统一重包裹；剥完为空则返回空串由调用方跳过。
+function normalizeDiaryForStore(raw) {
+  const inner = String(raw || "").replace(/\[DIARY\]|\[\/DIARY\]/gi, "").trim();
+  return inner ? "[DIARY]" + inner + "[/DIARY]" : "";
+}
+
 // wake-event v2 落库实现（2026-09-15 批3收尾抽出）：HTTP 入口（/internal/wake-event）
 // 与网关内唤醒调度器（lib/wake-scheduler.js）共用同一实现，杜绝两处口径漂移。
 // 幂等去重只在 HTTP 入口做（调度器进程内调用无重试路径）。
@@ -2623,7 +2630,7 @@ function applyWakeEventV2(body) {
     const { session_id, speak, diary, push, event, tools, wake_block_id } = body || {};
     const evSession = typeof session_id === "string" && session_id.trim() ? String(session_id).trim() : null;
     const speakRaw = String(speak || "").trim();
-    const diaryRaw = String(diary || "").trim();
+    const diaryRaw = normalizeDiaryForStore(diary);
     const eventRaw = String(event || "").trim();
     const pushMeta = (push && typeof push === "object") ? push : null;
     const wakeTools = Array.isArray(tools) ? tools.filter(t => t && t.name) : [];
@@ -2711,7 +2718,9 @@ app.post("/internal/wake-event", async (req, reply) => {
     const isPushEcho = !!(push_meta && event && isPushEchoContent(event));
     if (!content && !event && !diary) return reply.code(400).send({ error: "content or event is required" });
     if (diary) {
-      appendSpecialEvent(`（${formatDateTimeInTimeZone(new Date(), TIME_ZONE)} 醒来写了日记：${String(diary).trim()}）`, null, evSession);
+      // 2026-09-21 统一日记唯一格式：v1 路径同样落 [DIARY]正文[/DIARY]（kind=diary），
+      // 不再用旧「（时间 醒来写了日记：…）」特殊事件包裹
+      appendMessages(evSession, [{ role: "assistant", content: normalizeDiaryForStore(diary), kind: "diary" }].filter(m => m.content), { silent: true });
     }
     if (event) {
       if (push_meta && isPushEchoContent(event)) {
