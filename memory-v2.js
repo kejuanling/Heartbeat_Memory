@@ -379,8 +379,8 @@ function createStore(opts = {}) {
         e.note = n;
       } else if (k === "kind") {
         if (!KINDS.includes(v)) return fail("kind 非法: " + v);
-        if (v !== e.kind && (v === "quote" || e.kind === "quote")) return fail("quote 条目的 kind 不可切换（speaker/subject 联动）");
-        if (v !== e.kind && (v === "milestone" || e.kind === "milestone")) return fail("milestone 条目的 kind 不可切换");
+        // 0920 用户拍板：放开 kind 切换限制（原 quote/milestone 不可切换），管理台可自由改分类；
+        // quote 的 speaker/subject 联动约束仅在仍为 quote 时校验，切走后字段原样保留
         e.kind = v;
       } else if (k === "subject") {
         if (!SUBJECTS.includes(v)) return fail("subject 非法: " + v);

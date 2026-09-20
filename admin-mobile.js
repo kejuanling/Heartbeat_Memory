@@ -4844,7 +4844,7 @@ async function deletePinned(id){
     const url=AppState.memPoolEditId ? (ADMIN_API + '/memory-v2/entries/'+AppState.memPoolEditId) : (ADMIN_API + '/memory-v2/entries');
     try{
       const r=await apiRequest(AppState.memPoolEditId?'PUT':'POST', url, {content:content, category:category, direct:true}, {busy:document.getElementById('mp-save-btn')});
-      if(!r.ok) return;
+      if(!r.ok){ toast('保存失败: '+(r.error||('HTTP '+r.status))); return; }
       const d=r.data||{};
       if(d.error){ toast('保存失败: '+d.error); return; }
       toast(AppState.memPoolEditId?'记忆已更新':'记忆已新增');
