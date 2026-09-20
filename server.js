@@ -165,6 +165,7 @@ const {
 
 const contextCompactor = require("./context-compactor");
 const contextReplacements = require("./context-replacements");
+const contextDigest = require("./context-digest");
 
 const DEFAULT_BODY_LIMIT_MB = 50;
 
@@ -3476,6 +3477,18 @@ app.get("/internal/context-search", async (req, reply) => {
   }
 });
 
+// 「回看已替换历史摘要」：MCP 工具 context_digest 用（鉴权走全局 /internal hook 的 x-internal-key）
+app.post("/internal/context-digest", async (req, reply) => {
+  try {
+    const q = String((req.body && req.body.q) || "").trim();
+    const result = await contextDigest.digest(q);
+    reply.send(result);
+  } catch (err) {
+    console.error("[POST /internal/context-digest] error:", err.message);
+    reply.code(500).send({ ok: false, error: err.message });
+  }
+});
+
 // 按 消息id 给聊天原文标星/取消：MCP 工具 context_star 用（x-internal-key 鉴权）
 // AI 标星只做「原文保留在上下文」（与用户标星共用 marks 存储、同样不参与压缩/替换），
 // 但不同步写记忆池——标星与对话碎片分开（看板 I5 方向）；取消标星直接删 key，无沉底逻辑。
@@ -4935,6 +4948,11 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
   const nKeyOf = nKeyOfMsg;
   // 压缩索引位置表：非特殊事件消息按归一化键定位（与发送侧 tlKeyToPos 同口径）
   const itemPosByKey = compressiblePosMap();
+  // 消息 id -> 压缩下标：与发送侧同口径的 id 优先定位（id 唯一，不受内容编辑/位置漂移/短消息撞键影响）
+  const idPosByKey = new Map();
+  items.forEach(function (e, idx) {
+    if (e && e.msg && e.msg.id != null && e.msg.id !== "") idPosByKey.set(String(e.msg.id), idx);
+  });
 
   const chunks = [];
   let totalChars = 0;
@@ -4976,22 +4994,37 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
       compEnd = Math.min(storedEnd, items.length - 1);
       if (compStart >= items.length || compEnd < compStart) return;
     } else {
-      // 与发送侧 applyReplacements 同口径：用首/末条非特殊事件 matched 定位块边界。
-      // 不整段扫描 matched，避免短消息归一化撞键（如「哥哥」）把旧窗口块错配到新窗口。
-      const kStart = itemPosByKey.get(nKeyOf(aStart));
-      if (kStart === undefined) return;
-      compStart = kStart;
-      let kEnd = itemPosByKey.get(nKeyOf(aEnd));
-      if (kEnd === undefined) {
-        for (let i = matched.length - 2; i >= 0; i--) {
-          const m = matched[i];
-          if (!m || m.role === "system" || contextReplacements.isSpecialEvent(m)) continue;
-          kEnd = itemPosByKey.get(nKeyOf(m));
-          if (kEnd !== undefined) break;
+      // id 精确匹配优先（与发送侧 applyReplacements 同口径）：matched 首尾带 id 且时间线可查时
+      // 直接定位区间，内容搜索跳过——「哥哥」等高频短语内容撞键从根上消失。
+      const sId = aStart && aStart.id != null && aStart.id !== "" ? String(aStart.id) : "";
+      const eId = aEnd && aEnd.id != null && aEnd.id !== "" ? String(aEnd.id) : "";
+      const kIdStart = sId ? idPosByKey.get(sId) : undefined;
+      const kIdEnd = eId ? idPosByKey.get(eId) : undefined;
+      if (kIdStart !== undefined && kIdEnd !== undefined && kIdEnd >= kIdStart) {
+        compStart = kIdStart;
+        compEnd = kIdEnd;
+      } else {
+        // id 查不到（第三方导入/旧记录未迁移）才回退内容锚点匹配。
+        // 与发送侧 applyReplacements 同口径：用首/末条非特殊事件 matched 定位块边界。
+        // 不整段扫描 matched，避免短消息归一化撞键（如「哥哥」）把旧窗口块错配到新窗口。
+        const kStart = itemPosByKey.get(nKeyOf(aStart));
+        if (kStart === undefined) return;
+        compStart = kStart;
+        let kEnd = itemPosByKey.get(nKeyOf(aEnd));
+        if (kEnd === undefined) {
+          for (let i = matched.length - 2; i >= 0; i--) {
+            const m = matched[i];
+            if (!m || m.role === "system" || contextReplacements.isSpecialEvent(m)) continue;
+            kEnd = itemPosByKey.get(nKeyOf(m));
+            if (kEnd !== undefined) break;
+          }
         }
+        if (kEnd === undefined || kEnd < compStart) return;
+        compEnd = kEnd;
       }
-      if (kEnd === undefined || kEnd < compStart) return;
-      compEnd = kEnd;
+      // 区间膨胀闸（与发送侧同口径）：首尾之一误匹配到远处重复内容时整块拒绝（发送侧同样不注入），
+      // 显示为未覆盖区而不是假范围。
+      if (matched.length > 0 && (compEnd - compStart + 1) > matched.length * 1.5 + 20) return;
     }
     // 窗口隔离：块首条消息的实际时间早于当前窗口起点 → 旧窗口块，不显示（发送侧同样不注入）
     if (windowStartMs !== null) {
@@ -5320,13 +5353,19 @@ app.post("/admin/context-compaction/config", { preHandler: basicAuth }, async (r
 
 
 
-// 保存手动编辑后的替换正文（统一替换：写入手工记录 text）
+// 保存手动编辑后的替换正文（统一替换：写入手工记录 text）——优先按记录 id 精确命中
 app.post("/admin/context-compaction/update", { preHandler: basicAuth }, async (req, reply) => {
   const body = req.body || {};
   const chunkIndex = Number(body.chunkIndex);
+  const recId = String(body.id || "").trim();
   const summary = String(body.summary || "").trim();
   try {
     if (!summary) return reply.code(400).send({ error: "替换正文不能为空" });
+    if (recId) {
+      const r = contextReplacements.setManualRecordTextById(recId, summary);
+      if (!r.ok) return reply.code(400).send({ error: r.message });
+      return reply.send({ ok: true, summary: summary, length: r.length });
+    }
     const preview = buildUnifiedReplacementPreview(false);
     const chunk = (preview.chunks || []).find(function (c) { return c.index === chunkIndex && c.source === "manual"; });
     if (!chunk) return reply.code(404).send({ error: "块 #" + chunkIndex + " 不存在" });
@@ -5496,13 +5535,19 @@ app.post("/admin/context-compaction/blocks", { preHandler: basicAuth }, async (r
       const r = contextReplacements.removeAllManualRecords();
       return reply.send({ ok: true, action: "reset", removedCount: r.removedCount || 0 });
     }
-    // 移除指定手工块（0-based 序号）——内容退回未覆盖区
+    // 移除指定手工块——优先按记录 id 精确命中（序号在预览到点击之间可能因块增删错位），
+    // 未传 id 的旧前端回退 0-based 序号。内容退回未覆盖区。
     if (action === "remove_at") {
-      const blockIndex = Number(body.blockIndex);
-      if (!Number.isInteger(blockIndex) || blockIndex < 0) {
-        return reply.code(400).send({ error: "blockIndex 必须是 >=0 的整数" });
-      }
-      const r = contextReplacements.removeManualRecord(blockIndex);
+      const recId = String(body.id || "").trim();
+      const r = recId
+        ? contextReplacements.removeManualRecordById(recId)
+        : (function () {
+            const blockIndex = Number(body.blockIndex);
+            if (!Number.isInteger(blockIndex) || blockIndex < 0) {
+              return { ok: false, message: "blockIndex 必须是 >=0 的整数" };
+            }
+            return contextReplacements.removeManualRecord(blockIndex);
+          })();
       if (!r.ok) return reply.send({ ok: false, message: r.message });
       return reply.send({ ok: true, action: "remove_at" });
     }
@@ -5517,40 +5562,55 @@ app.post("/admin/context-compaction/blocks", { preHandler: basicAuth }, async (r
       if (!r.ok) return reply.send({ ok: false, message: r.message });
       return reply.send({ ok: true, action: "add_range", removedCount: r.removedCount || 0 });
     }
-    // 开关某块的替换（enabled）
+    // 开关某块的替换（enabled）——优先按记录 id，旧前端回退序号
     if (action === "toggle") {
-      const blockIndex = Number(body.blockIndex);
+      const recId = String(body.id || "").trim();
       const enabled = body.enabled !== false;
-      if (!Number.isInteger(blockIndex) || blockIndex < 0) {
-        return reply.code(400).send({ error: "blockIndex 必须是 >=0 的整数" });
-      }
-      const r = contextReplacements.toggleManualRecord(blockIndex, enabled);
+      const r = recId
+        ? contextReplacements.toggleManualRecordById(recId, enabled)
+        : (function () {
+            const blockIndex = Number(body.blockIndex);
+            if (!Number.isInteger(blockIndex) || blockIndex < 0) {
+              return { ok: false, message: "blockIndex 必须是 >=0 的整数" };
+            }
+            return contextReplacements.toggleManualRecord(blockIndex, enabled);
+          })();
       if (!r.ok) return reply.send({ ok: false, message: r.message });
       return reply.send({ ok: true, action: "toggle", block: r.record });
     }
-    // 手动隐藏/取消隐藏指定手工块（入池归档：摘要与区间原文都不再注入上下文，可随时取消恢复）
+    // 手动隐藏/取消隐藏指定手工块（入池归档：摘要与区间原文都不再注入上下文，可随时取消恢复）——优先按记录 id
     if (action === "hide") {
-      const blockIndex = Number(body.blockIndex);
+      const recId = String(body.id || "").trim();
       const hidden = body.hidden === true;
-      if (!Number.isInteger(blockIndex) || blockIndex < 0) {
-        return reply.code(400).send({ error: "blockIndex 必须是 >=0 的整数" });
-      }
-      const r = contextReplacements.setManualRecordHidden(blockIndex, hidden);
+      const r = recId
+        ? contextReplacements.setManualRecordHiddenById(recId, hidden)
+        : (function () {
+            const blockIndex = Number(body.blockIndex);
+            if (!Number.isInteger(blockIndex) || blockIndex < 0) {
+              return { ok: false, message: "blockIndex 必须是 >=0 的整数" };
+            }
+            return contextReplacements.setManualRecordHidden(blockIndex, hidden);
+          })();
       if (!r.ok) return reply.send({ ok: false, message: r.message });
       return reply.send({ ok: true, action: "hide", block: r.record });
     }
-    // 更新指定手工块的起止范围（编号 1-based → 内部 0-based）
+    // 更新指定手工块的起止范围（编号 1-based → 内部 0-based，编号只在输入此刻解析成消息 id 落库）——优先按记录 id
     if (action === "update_range") {
-      const blockIndex = Number(body.blockIndex);
+      const recId = String(body.id || "").trim();
       const start = Number(body.start);
       const end = Number(body.end);
-      if (!Number.isInteger(blockIndex) || blockIndex < 0) {
-        return reply.code(400).send({ error: "blockIndex 必须是 >=0 的整数" });
-      }
       if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
         return reply.code(400).send({ error: "start/end 必须是 start<=end 的正整数（编号 1-based）" });
       }
-      const r = contextReplacements.updateManualRecordRange(blockIndex, start - 1, end - 1);
+      const r = recId
+        ? contextReplacements.updateManualRecordRangeById(recId, start - 1, end - 1)
+        : (function () {
+            const blockIndex = Number(body.blockIndex);
+            if (!Number.isInteger(blockIndex) || blockIndex < 0) {
+              return { ok: false, message: "blockIndex 必须是 >=0 的整数" };
+            }
+            return contextReplacements.updateManualRecordRange(blockIndex, start - 1, end - 1);
+          })();
       if (!r.ok) return reply.send({ ok: false, message: r.message });
       return reply.send({ ok: true, action: "update_range", removedCount: r.removedCount || 0 });
     }
@@ -5697,18 +5757,18 @@ app.post("/admin/context-compaction/generate", { preHandler: basicAuth }, async 
         message: "已生成替换正文（" + gen.length + " 字），点块上的「替换」后生效。"
       });
     }
-    // 支持手动块（blockIndex）或任意记录（repId，含 AI 块）重新生成摘要
+    // 支持手动块（记录 id 或 blockIndex）或任意记录（repId，含 AI 块）重新生成摘要
     const blocks = contextReplacements.manualRecordsSorted();
     let rec = null;
     let writeBack = null;
     let isManual = true;
-    const repId = String(body.repId || "").trim();
+    const repId = String(body.repId || body.id || "").trim();
     if (repId) {
       const items = contextReplacements.loadItems();
       rec = (items || []).filter(it => !it.removed).find(it => String(it.id || "") === repId) || null;
       if (!rec) return reply.send({ ok: false, message: "记录不存在" });
       isManual = rec.source === "manual";
-      if (!isManual) writeBack = "updateReplacement";
+      writeBack = isManual ? "manualTextById" : "updateReplacement";
     } else {
       const blockIndex = Number(body.blockIndex);
       if (!Number.isInteger(blockIndex) || blockIndex < 0) {
@@ -5720,28 +5780,41 @@ app.post("/admin/context-compaction/generate", { preHandler: basicAuth }, async 
     }
     // 计算要传给压缩器的 compressible 序号区间
     // 手动块：range.start_index/end_index 即 compressible 序号；
-    // AI 块 / 时间范围块：range 无 start_index，需用 matched 内容反查当前 compressible 序号
+    // AI 块 / 时间范围块：range 无 start_index，先按 matched[].id 反查（id 唯一不撞键），
+    // id 缺失才回退内容首现匹配
     let gStart = Number(rec.range.start_index);
     let gEnd = Number(rec.range.end_index);
     if (!Number.isInteger(gStart) || !Number.isInteger(gEnd) || gStart < 0 || gEnd < gStart) {
       const matched = (Array.isArray(rec.matched) && rec.matched.length > 0) ? rec.matched : null;
       if (!matched) return reply.send({ ok: false, message: "块没有可用的序号范围，无法重新生成" });
       const comp = contextReplacements.compressibleItems();
-      function keyRange(m) {
-        const t = String((m && m.content) || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-        const role = m && m.role ? m.role : "";
-        return role + "\u0000" + t;
+      const idToComp = new Map();
+      comp.forEach(function (e, ci) {
+        if (e.msg && e.msg.id != null && e.msg.id !== "") idToComp.set(String(e.msg.id), ci);
+      });
+      const mS = matched[0];
+      const mL = matched[matched.length - 1];
+      const sId = mS && mS.id != null && mS.id !== "" ? String(mS.id) : "";
+      const eId = mL && mL.id != null && mL.id !== "" ? String(mL.id) : "";
+      let fi = sId ? idToComp.get(sId) : undefined;
+      let li = eId ? idToComp.get(eId) : undefined;
+      if (fi === undefined || li === undefined || li < fi) {
+        function keyRange(m) {
+          const t = String((m && m.content) || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+          const role = m && m.role ? m.role : "";
+          return role + "\u0000" + t;
+        }
+        const firstKey = keyRange(matched[0]);
+        const lastKey = keyRange(matched[matched.length - 1]);
+        fi = -1;
+        li = -1;
+        for (let ci = 0; ci < comp.length; ci++) {
+          const ck = keyRange(comp[ci].msg);
+          if (ck === firstKey && fi === -1) fi = ci;
+          if (ck === lastKey) li = ci;
+        }
+        if (fi < 0 || li < fi) return reply.send({ ok: false, message: "块内消息在当前时间线定位失败，无法重新生成" });
       }
-      const firstKey = keyRange(matched[0]);
-      const lastKey = keyRange(matched[matched.length - 1]);
-      let fi = -1;
-      let li = -1;
-      for (let ci = 0; ci < comp.length; ci++) {
-        const ck = keyRange(comp[ci].msg);
-        if (ck === firstKey && fi === -1) fi = ci;
-        if (ck === lastKey) li = ci;
-      }
-      if (fi < 0 || li < fi) return reply.send({ ok: false, message: "块内消息在当前时间线定位失败，无法重新生成" });
       gStart = fi;
       gEnd = li;
     }
@@ -5754,6 +5827,12 @@ app.post("/admin/context-compaction/generate", { preHandler: basicAuth }, async 
       saved = contextReplacements.updateReplacement(rec.id, gen.summary);
       if (!saved.ok) return reply.send({ ok: false, message: saved.error });
       addCompactionLog({ id: blockLogId, action: "block", blockIndex: body.blockIndex, repId: repId, label: blockLogLabel, status: "success", message: "生成成功，" + gen.length + " 字" });
+      return reply.send({ ok: true, action: "block", repId: rec.id, length: gen.length, message: "已重新生成替换正文（" + gen.length + " 字）。" });
+    }
+    if (writeBack === "manualTextById") {
+      saved = contextReplacements.setManualRecordTextById(rec.id, gen.summary);
+      if (!saved.ok) return reply.send({ ok: false, message: saved.message });
+      addCompactionLog({ id: blockLogId, action: "block", repId: repId, label: blockLogLabel, status: "success", message: "生成成功，" + gen.length + " 字" });
       return reply.send({ ok: true, action: "block", repId: rec.id, length: gen.length, message: "已重新生成替换正文（" + gen.length + " 字）。" });
     }
     const blockIndex = Number(body.blockIndex);
@@ -6020,6 +6099,39 @@ app.post("/admin/logs/wake-prompt", { preHandler: basicAuth }, async (req, reply
     const text = String((req.body && req.body.text) || "").trim();
     if (!text) return reply.code(400).send({ error: "内容不能为空" });
     atomicWriteFileSync(path.join(__dirname, "wake_prompt.txt"), text + "\n");
+    reply.send({ ok: true });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 「回看已替换历史摘要」整理提示词（context_digest；data/context_digest_prompt.json 覆盖默认模板）
+app.get("/admin/logs/context-digest-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    reply.send({ text: contextDigest.loadPromptTemplate() });
+  } catch (err) {
+    reply.send({ text: "", error: err.message });
+  }
+});
+
+app.post("/admin/logs/context-digest-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const text = String((req.body && req.body.text) || "").trim();
+    if (!text) return reply.code(400).send({ error: "内容不能为空" });
+    if (text.indexOf("${instruction}") === -1 || text.indexOf("${materials}") === -1) {
+      return reply.code(400).send({ error: "模板必须包含 ${instruction} 与 ${materials} 两个占位符" });
+    }
+    atomicWriteFileSync(contextDigest.PROMPT_FILE, JSON.stringify({ template: text }, null, 2) + "\n");
+    reply.send({ ok: true });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 恢复默认（删自定义模板文件，回落内置默认）
+app.delete("/admin/logs/context-digest-prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    fs.rmSync(contextDigest.PROMPT_FILE, { force: true });
     reply.send({ ok: true });
   } catch (err) {
     reply.code(500).send({ error: err.message });

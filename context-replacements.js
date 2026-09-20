@@ -619,7 +619,10 @@ function addReplacement(options) {
   return { ok: true, id: item.id, session: item.session, count: item.count, range_label: item.range_label, message: "已记录替换：" + item.count + " 条消息 → 替换正文" };
 }
 
-// 会话合并时复制压缩块到目标会话（target 时间线按 matched 内容锚点定位，range 仅用于展示，不依赖不迁移）。
+// 会话合并时复制压缩块到目标会话。目标时间线里的消息 id 与源会话不同，复制后先做一次
+// 「内容认亲」：按内容顺序在目标时间线里逐条回找 matched，命中率达 90% 才把 matched 重锚到
+// 目标消息 id（含 range 首尾 id）；达不到阈值保留原 matched（后续定位走内容匹配兜底 + 防错闸）。
+// 认亲是唯一合法的跨会话内容匹配场景，认完即落回 id 通路。
 // 多个源会话存在内容序列完全一致的块时合并为一个（matchedShareSig，与跨会话摘要复用的签名口径一致）。
 // 复制语义：源会话的块保留（源会话继续显示摘要），同时复制一份归属到目标会话。
 function migrateSessionBlocks(sourceIds, targetId) {
@@ -629,6 +632,19 @@ function migrateSessionBlocks(sourceIds, targetId) {
   const out = items.slice();
   const seenSig = new Set();
   let migrated = 0, skippedDup = 0, skippedNoMatch = 0;
+  // 目标会话可锚定序列（普通 user/assistant 对话，与分支继承的 real 口径一致）
+  const targetTl = loadTimeline(targetId) || [];
+  const anchorSeq = [];
+  (Array.isArray(targetTl) ? targetTl : []).forEach(function (m) {
+    if (!m || m.role === "system") return;
+    if (m.tool_calls) return;
+    if (isSpecialEvent(m)) return;
+    const text = contentToText(m);
+    if (m.role === "user" && String(text).trim().startsWith("<system>")) return;
+    if (m.role !== "user" && m.role !== "assistant") return;
+    anchorSeq.push(m);
+  });
+  const anchorKeys = anchorSeq.map(function (m) { return normalizedCompareKey(m); });
   items.forEach(function (it) {
     if (!it || it.removed) return;
     if (!it.session || !src.has(it.session)) return;
@@ -639,11 +655,42 @@ function migrateSessionBlocks(sourceIds, targetId) {
       if (seenSig.has(sig)) { skippedDup++; return; }
       seenSig.add(sig);
     }
-    out.push(Object.assign({}, it, {
+    // 内容认亲 + 重锚：顺序游标逐条回找，命中不足 90% 则放弃重锚（保留原 matched）
+    let cursor = 0, hits = 0, attempts = 0;
+    const reanchored = matched.map(function (m) {
+      if (!m || isSpecialEvent(m)) return m;
+      attempts++;
+      const k = normalizedCompareKey(m);
+      let p = -1;
+      for (let q = cursor; q < anchorKeys.length; q++) {
+        if (anchorKeys[q] === k) { p = q; break; }
+      }
+      if (p < 0) return Object.assign({}, m, { id: undefined });
+      cursor = p + 1;
+      hits++;
+      const nid = anchorSeq[p] && anchorSeq[p].id != null && anchorSeq[p].id !== "" ? String(anchorSeq[p].id) : undefined;
+      return Object.assign({}, m, { id: nid });
+    });
+    const copy = Object.assign({}, it, {
       session: targetId,
       id: "ctxrep_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8),
       created_at: nowIso()
-    }));
+    });
+    if (attempts > 0 && hits / attempts >= 0.9) {
+      copy.matched = reanchored;
+      // 源会话的存储编号在目标时间线无效，清掉走 id/内容定位；range 首尾换成重锚后的 id
+      const r = Object.assign({}, copy.range || {});
+      delete r.start_index;
+      delete r.end_index;
+      for (let i = 0; i < reanchored.length; i++) {
+        if (reanchored[i] && !isSpecialEvent(reanchored[i]) && reanchored[i].id) { r.start_id = reanchored[i].id; break; }
+      }
+      for (let i = reanchored.length - 1; i >= 0; i--) {
+        if (reanchored[i] && !isSpecialEvent(reanchored[i]) && reanchored[i].id) { r.end_id = reanchored[i].id; break; }
+      }
+      copy.range = r;
+    }
+    out.push(copy);
     migrated++;
   });
   saveItems(out);
@@ -689,6 +736,12 @@ function inheritSessionBlocks(srcSession, newSession, branchIndex, anchorId) {
     const k = normalizedCompareKey(e.msg);
     if (!keyToPos.has(k)) keyToPos.set(k, p);
   });
+  // id 反查表：分支时间线与源会话同源，消息 id 原样保留。块末条位置优先按 id 反查（唯一不撞键），
+  // 「哥哥」这类高频短语按内容首现会低估末条位置，把跨边界块误判成"分支点之前"而过度继承。
+  const idToPos = new Map();
+  real.forEach(function (e, p) {
+    if (e.msg && e.msg.id != null && e.msg.id !== "") idToPos.set(String(e.msg.id), p);
+  });
   let inherited = 0, skippedNoMatch = 0, skippedCross = 0;
   items.forEach(function (it) {
     if (!it || it.removed) return;
@@ -698,7 +751,10 @@ function inheritSessionBlocks(srcSession, newSession, branchIndex, anchorId) {
     let lastPos = -1;
     for (let i = matched.length - 1; i >= 0; i--) {
       if (isSpecialEvent(matched[i])) continue;
-      const p = keyToPos.get(normalizedCompareKey(matched[i]));
+      const mi = matched[i];
+      const pi = (mi && mi.id != null && mi.id !== "") ? idToPos.get(String(mi.id)) : undefined;
+      if (pi !== undefined) { lastPos = pi; break; }
+      const p = keyToPos.get(normalizedCompareKey(mi));
       if (p !== undefined) { lastPos = p; break; }
     }
     if (lastPos < 0) { skippedNoMatch++; return; }
@@ -754,6 +810,17 @@ function manualRecordAt(index) {
   const list = manualRecordsSorted();
   if (!Number.isInteger(index) || index < 0 || index >= list.length) return null;
   return { record: list[index], index: index };
+}
+
+// 按记录 id 取当前会话可见的手工块：id 全局唯一，操作不再依赖易变的列表序号
+// （预览到点击之间块增删/吞并会让序号错位）。与 manualRecordsSorted 同口径过滤，
+// 跨会话的 id 传进来也命中不了，防止误删别会话的块。
+function manualRecordById(id) {
+  const key = String(id == null ? "" : id);
+  if (!key) return null;
+  const cur = activeSessionOr() || "default";
+  const rec = loadItems().find(it => it && it.source === "manual" && !it.removed && it.id === key && (!it.session || it.session === cur));
+  return rec ? { record: rec } : null;
 }
 
 function buildManualRecord(start, end, enabled) {
@@ -822,6 +889,12 @@ function addManualRecord(start, end, enabled) {
 function removeManualRecord(index) {
   const found = manualRecordAt(index);
   if (!found) return { ok: false, message: "块不存在" };
+  return removeManualRecordById(found.record.id);
+}
+
+function removeManualRecordById(id) {
+  const found = manualRecordById(id);
+  if (!found) return { ok: false, message: "块不存在" };
   const items = loadItems();
   const filtered = items.filter(it => it.id !== found.record.id);
   if (filtered.length === items.length) return { ok: false, message: "块不存在" };
@@ -831,6 +904,12 @@ function removeManualRecord(index) {
 
 function toggleManualRecord(index, enabled) {
   const found = manualRecordAt(index);
+  if (!found) return { ok: false, message: "块不存在" };
+  return toggleManualRecordById(found.record.id, enabled);
+}
+
+function toggleManualRecordById(id, enabled) {
+  const found = manualRecordById(id);
   if (!found) return { ok: false, message: "块不存在" };
   const items = loadItems();
   const it = items.find(x => x.id === found.record.id);
@@ -844,6 +923,12 @@ function toggleManualRecord(index, enabled) {
 function setManualRecordHidden(index, hidden) {
   const found = manualRecordAt(index);
   if (!found) return { ok: false, message: "块不存在" };
+  return setManualRecordHiddenById(found.record.id, hidden);
+}
+
+function setManualRecordHiddenById(id, hidden) {
+  const found = manualRecordById(id);
+  if (!found) return { ok: false, message: "块不存在" };
   const items = loadItems();
   const it = items.find(x => x.id === found.record.id);
   if (!it) return { ok: false, message: "块不存在" };
@@ -854,6 +939,12 @@ function setManualRecordHidden(index, hidden) {
 
 function updateManualRecordRange(index, start, end) {
   const found = manualRecordAt(index);
+  if (!found) return { ok: false, message: "块不存在" };
+  return updateManualRecordRangeById(found.record.id, start, end);
+}
+
+function updateManualRecordRangeById(id, start, end) {
+  const found = manualRecordById(id);
   if (!found) return { ok: false, message: "块不存在" };
   const items = loadItems();
   const cur = items.find(function (x) { return x.id === found.record.id; });
@@ -1134,6 +1225,12 @@ function removeHistory(id, historyIndex) {
 // 给手工记录写入/更新替换正文（摘要生成后调用）
 function setManualRecordText(index, text) {
   const found = manualRecordAt(index);
+  if (!found) return { ok: false, message: "块不存在" };
+  return setManualRecordTextById(found.record.id, text);
+}
+
+function setManualRecordTextById(id, text) {
+  const found = manualRecordById(id);
   if (!found) return { ok: false, message: "块不存在" };
   const t = String(text || "").trim();
   if (!t) return { ok: false, message: "替换正文不能为空" };
@@ -2642,12 +2739,17 @@ module.exports = {
   // 手工记录管理
   addManualRecord,
   removeManualRecord,
+  removeManualRecordById,
   toggleManualRecord,
+  toggleManualRecordById,
   setManualRecordHidden,
+  setManualRecordHiddenById,
   updateManualRecordRange,
+  updateManualRecordRangeById,
   updateAiRecordRange,
   splitRangeByGaps,
   setManualRecordText,
+  setManualRecordTextById,
   restoreHistory,
   removeHistory,
   manualRecordsSorted,
