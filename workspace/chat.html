@@ -1537,12 +1537,13 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
     </div>
     <div id="vpForm" style="display:none">
       <div class="mcp-form-inner">
+        <div class="mcp-row"><label>类型</label><select id="vpType"><option value="doubao">豆包（火山 seed-tts）</option><option value="minimax">MiniMax（t2a_v2）</option><option value="openai">OpenAI 兼容（/audio/speech）</option></select></div>
         <div class="mcp-row"><label>名称</label><input type="text" id="vpName" placeholder="如 豆包"></div>
         <div class="mcp-row"><label>API Key</label><input type="password" id="vpKey" placeholder="ark-… / sk-…"></div>
-        <div class="mcp-row"><label>API 基址</label><input type="text" id="vpBase" placeholder="https://openspeech.bytedance.com/api/v3/plan/tts/unidirectional"></div>
+        <div class="mcp-row"><label>API 基址<span class="tag" id="vpBaseHint">openai 类型填完整 /audio/speech 地址</span></label><input type="text" id="vpBase" placeholder="https://openspeech.bytedance.com/api/v3/plan/tts/unidirectional"></div>
         <div class="mcp-row vp-doubao"><label>Resource-Id</label><input type="text" id="vpResourceId" placeholder="seed-tts-2.0"></div>
         <div class="mcp-row vp-doubao"><label>ASR Resource-Id</label><input type="text" id="vpAsrId" placeholder="volc.seedasr.sauc.duration"></div>
-        <div class="mcp-row vp-minimax"><label>TTS 模型</label><input type="text" id="vpModel" placeholder="speech-2.6-turbo"></div>
+        <div class="mcp-row vp-minimax vp-openai"><label>TTS 模型</label><input type="text" id="vpModel" placeholder="speech-2.6-turbo / moss-tts-1.5-flash"></div>
         <div class="mcp-row vp-minimax"><label>情感</label><input type="text" id="vpEmotion" placeholder="calm"></div>
         <div class="mcp-row"><label>采样率</label><input type="number" id="vpSampleRate" value="24000"></div>
         <div class="mcp-row"><label>音频格式</label><input type="text" id="vpAudioFmt" value="mp3"></div>
@@ -1947,6 +1948,7 @@ const provMsg=document.getElementById("provMsg");
 const vpList=document.getElementById("vpList");
 const vpAddBtn=document.getElementById("vpAddBtn");
 const vpForm=document.getElementById("vpForm");
+const vpType=document.getElementById("vpType");
 const vpNameEl=document.getElementById("vpName");
 const vpKey=document.getElementById("vpKey");
 const vpBase=document.getElementById("vpBase");
@@ -1974,7 +1976,7 @@ let _voiceActiveId="";                      // 当前生效供应商 id
 let _voiceEditingIndex=null;                // 模态编辑中的供应商下标（null=新增）
 let _voiceDraftVoices=[];                   // 编辑中的音色草稿 [{value,label}]
 let _voiceDraftActive="";                   // 编辑中选中的启用音色
-let _voiceDraftType="doubao";               // 编辑表单当前代表类型（豆包/MiniMax；新增默认豆包）
+let _voiceDraftType="doubao";               // 编辑表单当前类型（豆包/MiniMax/OpenAI 兼容；新增默认豆包）
 let _audioPlayer=null;
 let _ttsCacheMap=new Map();   // TTS 内存缓存：同文本+音色+参数不重复调供应商
 /* ---- 就地编辑 ---- */
@@ -4522,7 +4524,8 @@ function renderVoiceProviders(){
     const isAct=(p.id===_voiceActiveId);
     const rad='<input type="radio" name="vpActive" data-vact="'+i+'" '+(isAct?'checked':'')+' title="设为当前生效" style="margin:0">';
     const voice=(p.active_voice?p.active_voice:'默认');
-    const desc=escapeHtml(p.type||'豆包')+' · '+(p.api_key?('Key 已填'):('未填Key'))+' · 音色: '+escapeHtml(voice);
+    const tname={doubao:'豆包',minimax:'MiniMax',openai:'OpenAI兼容'}[p.type]||(p.type||'豆包');
+    const desc=tname+' · '+(p.api_key?('Key 已填'):('未填Key'))+' · 音色: '+escapeHtml(voice);
     return '<div class="mcp-item"><div class="mi"><div class="mn">'+rad+escapeHtml(p.name||p.type)+' '+st+'</div><div class="ms">'+desc+'</div></div><div class="mo">'+sw+'<button data-i="'+i+'" data-act="vedit">编辑</button><button data-i="'+i+'" data-act="vdel" title="删除" style="font-size:15px">&times;</button></div></div>';
   }).join("");
   vpList.querySelectorAll('.mo button').forEach(function(b){
@@ -4538,7 +4541,7 @@ function renderVoiceProviders(){
 function cleanVoiceProvider(p){
   return {
     id:p.id||("vp_"+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36)),
-    type:(p.type==="minimax")?"minimax":"doubao",
+    type:(p.type==="minimax"||p.type==="openai")?p.type:"doubao",
     name:String(p.name||""), enabled:p.enabled!==false,
     api_key:String(p.api_key||""), api_base:String(p.api_base||""),
     resource_id:String(p.resource_id||"seed-tts-2.0"), asr_resource_id:String(p.asr_resource_id||"volc.seedasr.sauc.duration"),
@@ -4585,10 +4588,13 @@ function vpSyncTypeRows(){
   const t=_voiceDraftType;
   document.querySelectorAll('.vp-doubao').forEach(function(el){ el.classList.toggle('vp-row-hide', t!=='doubao'); });
   document.querySelectorAll('.vp-minimax').forEach(function(el){ el.classList.toggle('vp-row-hide', t!=='minimax'); });
+  document.querySelectorAll('.vp-openai').forEach(function(el){ el.classList.toggle('vp-row-hide', t!=='openai'); });
   if(vpBase){
-    if(t==='doubao' && (!vpBase.value||/minimaxi\.com/.test(vpBase.value))) vpBase.value="https://openspeech.bytedance.com/api/v3/plan/tts/unidirectional";
-    if(t==='minimax' && (!vpBase.value||/openspeech|bytedance/.test(vpBase.value))) vpBase.value="https://api.minimaxi.com/v1";
+    if(t==='doubao' && (!vpBase.value||/minimaxi\.com|mosi\.cn/.test(vpBase.value))) vpBase.value="https://openspeech.bytedance.com/api/v3/plan/tts/unidirectional";
+    if(t==='minimax' && (!vpBase.value||/openspeech|bytedance|mosi\.cn/.test(vpBase.value))) vpBase.value="https://api.minimaxi.com/v1";
+    if(t==='openai' && (!vpBase.value||/openspeech|bytedance|minimaxi\.com/.test(vpBase.value))) vpBase.value="https://api.mosi.cn/v1/audio/speech";
   }
+  const hint=document.getElementById("vpBaseHint"); if(hint) hint.style.display=(t==='openai')?"":"none";
 }
 function renderVpDraftVoices(){
   if(!vpVoicesEl)return;
@@ -4631,13 +4637,14 @@ function openVoiceProvForm(i){
   const has=(i!=null && !isNaN(i)) && _voiceProviders[i];
   _voiceEditingIndex = has? i : null;
   const p=has? _voiceProviders[i] : null;
-  _voiceDraftType = p? (p.type||"doubao") : "doubao"; // 类型由供应商数据决定，新增默认豆包
+  _voiceDraftType = p? (p.type||"doubao") : "doubao"; // 编辑用数据自带类型；新增默认豆包
+  if(vpType) vpType.value=_voiceDraftType;
   vpNameEl.value = p? (p.name||"") : "";
   vpKey.value = p? (p.api_key||"") : "";
   vpBase.value = p? (p.api_base||"") : "";
   vpResourceId.value = p? (p.resource_id||"seed-tts-2.0") : "seed-tts-2.0";
   vpAsrId.value = p? (p.asr_resource_id||"volc.seedasr.sauc.duration") : "volc.seedasr.sauc.duration";
-  vpModelEl.value = p? (p.tts_model||"speech-2.6-turbo") : "speech-2.6-turbo";
+  vpModelEl.value = p? (p.tts_model||(_voiceDraftType==="openai"?"moss-tts-1.5-flash":"speech-2.6-turbo")) : (_voiceDraftType==="openai"?"moss-tts-1.5-flash":"speech-2.6-turbo");
   vpEmotion.value = p? (p.emotion||"calm") : "calm";
   vpSampleRate.value = p? (p.sample_rate||24000) : 24000;
   vpAudioFmt.value = p? (p.audio_format||"mp3") : "mp3";
@@ -4734,6 +4741,12 @@ async function playTTS(text, voiceOverride){
 }
 // 语音供应商表单事件
 if(vpAddBtn)vpAddBtn.addEventListener("click",function(){ openVoiceProvForm(null); });
+if(vpType)vpType.addEventListener("change",function(){
+  _voiceDraftType=vpType.value;
+  if(_voiceDraftType==="openai" && (!vpModelEl.value||vpModelEl.value==="speech-2.6-turbo")) vpModelEl.value="moss-tts-1.5-flash";
+  if(_voiceDraftType!=="openai" && /^moss-tts/.test(vpModelEl.value||"")) vpModelEl.value="speech-2.6-turbo";
+  vpSyncTypeRows();
+});
 if(vpCancelBtn)vpCancelBtn.addEventListener("click",closeVoiceProvForm);
 if(vpSaveBtn)vpSaveBtn.addEventListener("click",saveVoiceProvider);
 if(vpAddVoiceBtn)vpAddVoiceBtn.addEventListener("click",function(){

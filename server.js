@@ -4630,8 +4630,8 @@ app.put("/admin/voice-config", { preHandler: mcpManageAuth }, async (req, reply)
         }
         return {
           id: String(p.id || ("vp_" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36))),
-          type: (p.type === "minimax") ? "minimax" : "doubao",
-          name: String(p.name || (p.type === "minimax" ? "MiniMax" : "豆包")),
+          type: (p.type === "minimax" || p.type === "openai") ? p.type : "doubao",
+          name: String(p.name || (p.type === "minimax" ? "MiniMax" : (p.type === "openai" ? "OpenAI 兼容" : "豆包"))),
           enabled: p.enabled !== false,
           api_key: apiKey,
           api_base: String(p.api_base || ""),
@@ -4664,7 +4664,7 @@ app.put("/admin/voice-config", { preHandler: mcpManageAuth }, async (req, reply)
 });
 
 // 文字 → 语音（base64 mp3）。前端 POST JSON { text, speaker?, resource_id? }，返回 { ok, audio(base64), format }
-// 供应商双支持：默认走火山豆包（seed-tts-2.0，X-Api-Key 鉴权）；若 resource_id 为空且 api_base 指向 MiniMax，回退旧 t2a_v2 逻辑。
+// 供应商三支持：doubao=火山豆包（seed-tts，X-Api-Key）；minimax=t2a_v2；openai=OpenAI 兼容 /audio/speech（Bearer）。
 app.post("/admin/tts", { preHandler: mcpManageAuth }, async (req, reply) => {
   try {
     const cfg = loadVoiceConfig();
@@ -4718,6 +4718,30 @@ app.post("/admin/tts", { preHandler: mcpManageAuth }, async (req, reply) => {
       }
       // audio 已是拼接好的 base64
       reply.send({ ok: true, audio: audio, format: enc || "mp3", sample_rate: sampleRate, extra: null, provider: p.name });
+      return;
+    }
+
+    // ---- OpenAI 兼容 TTS（如 api.mosi.cn：POST {api_base}，Bearer 鉴权，体 {model,input,voice}，返回音频二进制）----
+    if (p.type === "openai") {
+      const url = String(p.api_base || "").replace(/\/$/, "");
+      if (!/^https?:\/\//.test(url)) return reply.code(400).send({ error: "OpenAI 兼容供应商未配置接口地址（api_base 应为完整 /audio/speech 地址）" });
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + p.api_key },
+        body: JSON.stringify({
+          model: p.tts_model || "moss-tts-1.5-flash",
+          input: text.slice(0, 1500),
+          voice: speaker,
+          response_format: p.audio_format || "mp3"
+        })
+      });
+      if (!r.ok) {
+        const errTxt = await r.text();
+        return reply.code(502).send({ error: "TTS失败: HTTP " + r.status + " " + String(errTxt).slice(0, 200) });
+      }
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (!buf.length) return reply.code(502).send({ error: "TTS 失败: 无音频返回" });
+      reply.send({ ok: true, audio: buf.toString("base64"), format: p.audio_format || "mp3", sample_rate: p.sample_rate || 24000, extra: null, provider: p.name });
       return;
     }
 
