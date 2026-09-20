@@ -95,13 +95,20 @@ def tool_diary_add(args):
         os.makedirs(target_dir, exist_ok=True)
         now = _diary_now()
         date_str = now.strftime("%Y-%m-%d")
-        diary_file = os.path.join(target_dir, date_str + ".md")
-        entry = "\n\n## %s\n\n%s\n" % (now.strftime("%Y-%m-%d %H:%M"), content)
-        with open(diary_file, "a", encoding="utf-8") as f:
-            f.write(entry)
+        # 每篇一个新文件（与网关 lib/diary.js 批6 同款）：文件名 = 日期_时分秒.md，wx 防覆盖（同秒重试 -1 后缀）
+        base = now.strftime("%Y-%m-%d_%H%M%S")
+        entry = "## %s\n\n%s\n" % (now.strftime("%Y-%m-%d %H:%M"), content)
+        diary_file = os.path.join(target_dir, base + ".md")
+        try:
+            with open(diary_file, "x", encoding="utf-8") as f:
+                f.write(entry)
+        except FileExistsError:
+            diary_file = os.path.join(target_dir, base + "-1.md")
+            with open(diary_file, "x", encoding="utf-8") as f:
+                f.write(entry)
         return {"success": True, "file": diary_file, "session": session_token or None,
                 "time": now.strftime("%Y-%m-%d %H:%M"),
-                "message": "已写入陪伴日记（会话 %s，追加到当天文件）" % (session_token or "共享")}
+                "message": "已写入陪伴日记（会话 %s，独立一篇）" % (session_token or "共享")}
     except Exception as e:
         return {"error": "写入陪伴日记失败: %s" % e}
 

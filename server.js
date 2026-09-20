@@ -2852,7 +2852,8 @@ function readDiaryEntries(limit) {
 // sessionId：日记所属会话目录名（2026-09-12 起日记分会话保存，编辑会话日记只同步该会话的时间线）；
 // 传 null/undefined = 共享层日记，沿用旧行为同步默认会话时间线。
 function syncDiarySpecialEvents(fileName, newContent, sessionId) {
-  const dateMatch = String(fileName || "").match(/^(\d{4}-\d{2}-\d{2})\.md$/i);
+  // 2026-09-20 拆篇迁移：文件名放开认批6「日期_时分秒.md」（原只认 日期.md，编辑新格式文件时事件静默不同步）
+  const dateMatch = String(fileName || "").match(/^(\d{4}-\d{2}-\d{2})(?:_\d{4,6})?\.md$/i);
   if (!dateMatch) return 0;
   const dateKey = dateMatch[1];
   const timeline = loadTimeline(sessionId || undefined);
@@ -2885,7 +2886,8 @@ function syncDiarySpecialEvents(fileName, newContent, sessionId) {
 // 删除日记时同步移除时间线里同日的「醒来写了日记」特殊事件（旧事件「自动写了日记」同样匹配）；
 // sessionId 语义同 syncDiarySpecialEvents：会话日记只动该会话，共享日记沿用旧行为。
 function removeDiarySpecialEvents(fileName, sessionId) {
-  const dateMatch = String(fileName || "").match(/^(\d{4}-\d{2}-\d{2})\.md$/i);
+  // 同步放开 _HHMMSS（与 syncDiarySpecialEvents 同口径）
+  const dateMatch = String(fileName || "").match(/^(\d{4}-\d{2}-\d{2})(?:_\d{4,6})?\.md$/i);
   if (!dateMatch) return 0;
   const dateKey = dateMatch[1];
   const timeline = loadTimeline(sessionId || undefined);
