@@ -1634,7 +1634,7 @@ function ccBuildSummaryStatsHtml(d, t){
            +'</div>'
          : ''))
        +'</div>'
-       +(hidden?'':'<div class="cc-swipe-del"><button class="cc-swipe-del-btn" onclick="removeSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">移除</button><button class="cc-swipe-del-btn cc-swipe-del-btn-hide" onclick="hideSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">隐藏</button></div>')
+       +(hidden?'':'<div class="cc-swipe-del"><button class="cc-swipe-del-btn" onclick="removeSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">移除</button><button class="cc-swipe-del-btn cc-swipe-del-btn-hide" onclick="hideSingleBlock('+c.index+','+blockIndex+','+(isAi?1:0)+')">隐藏</button><button class="cc-swipe-del-btn cc-swipe-del-btn-parse" onclick="reparseSingleBlock('+c.index+')">解析</button></div>')
        +'</div>';
    });
  
@@ -2122,11 +2122,9 @@ function updateCcStatusBar(d){
     if(!d) return;
     const c = (d.chunks || []).find(function(x){ return x.index === cid; });
     if(!c || c.enabled === false){ toast('该块未替换，无需隐藏'); return; }
-    if(!confirm('隐藏该块？隐藏后这块的摘要与原文都不再发给 AI；之后可在块上点「取消隐藏」恢复。')) return;
     try{
       await ccSetBlockHidden(c, blockIndex, isAi, true);
       toast('块 #' + cid + ' 已隐藏（不再进入上下文）');
-      if(confirm('是否顺便对该块做上下文解析（提取记忆候选）？')) await reparseSingleBlock(cid, true);
       loadCompactionPreview();
     }catch(e){
       toast('隐藏失败: ' + e.message);
@@ -2398,7 +2396,6 @@ function locateCcFromSearch(el){
 
  // 移除单块：手动块调 blocks/remove_at，AI块调 context-replacements/undo
 function removeSingleBlock(idx, blockIndex, isAi){
-   if(!confirm('移除这块？该块内容退回未覆盖区'+(isAi?'，AI 写的摘要将被撤销':'')+'。')) return;
    const msg=document.getElementById('compaction-msg');
    if(msg) msg.textContent='正在移除块 #'+idx+'...';
    if(isAi){
@@ -3510,7 +3507,7 @@ function ccNumLiveCheck(input, max){
    document.querySelector('.tab-item[data-tab="'+name+'"]').classList.add('active');
   if(name==='memory'){ if(!window.__memPoolInited){ initMemPoolView(); window.__memPoolInited=true; } loadReviewQueue(); }
   if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
-  if(name==='prompts'){loadWakePrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadReparsePrompt();loadJudgePrompt();}
+  if(name==='prompts'){loadWakePrompt();loadContextDigestPrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadReparsePrompt();loadJudgePrompt();}
   if(name==='config'){loadToolsConfig();}
   if(name==='system'){startLogsAutoRefresh();}
   if(name!=='system'){stopLogsAutoRefresh();}
@@ -3676,6 +3673,39 @@ function ccNumLiveCheck(input, max){
      const j=await r.json();
      if(j.ok) toast('已保存，下次唤醒生效');
      else toast('保存失败: '+(j.error||''));
+   }catch(e){toast('网络错误')}
+ }
+
+ // 摘要整理提示词（context_digest 工具）
+ async function loadContextDigestPrompt(){
+   const el=document.getElementById('context-digest-prompt-edit');
+   if(!el)return;
+   try{
+     const r=await fetch(ADMIN_API + '/logs/context-digest-prompt');
+     const j=await r.json();
+     el.value=j.text||'';
+   }catch(e){el.value='加载失败'}
+ }
+
+ async function saveContextDigestPrompt(){
+   const el=document.getElementById('context-digest-prompt-edit');
+   const text=el.value;
+   if(!text.trim()){toast('内容不能为空');return}
+   try{
+     const r=await fetch(ADMIN_API + '/logs/context-digest-prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+     const j=await r.json();
+     if(j.ok) toast('已保存，下次调用即生效');
+     else toast('保存失败: '+(j.error||''));
+   }catch(e){toast('网络错误')}
+ }
+
+ async function resetContextDigestPrompt(){
+   if(!confirm('确定恢复默认摘要整理提示词？自定义模板会被删除。'))return;
+   try{
+     const r=await fetch(ADMIN_API + '/logs/context-digest-prompt',{method:'DELETE'});
+     const j=await r.json();
+     if(j.ok){ toast('已恢复默认'); loadContextDigestPrompt(); }
+     else toast('操作失败: '+(j.error||''));
    }catch(e){toast('网络错误')}
  }
  
