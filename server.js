@@ -2050,7 +2050,7 @@ function diarySessionDirs() {
 // 2026-09-19 批6 D1 起日记每篇一个文件（YYYY-MM-DD_HHMMSS.md），隐藏/编辑/删除按篇操作。
 function resolveDiaryRelPath(relPath) {
   const s = String(relPath || "").trim().replace(/\\/g, "/");
-  const m = s.match(/^(?:([A-Za-z0-9_-]{1,64})\/)?(\d{4}-\d{2}-\d{2}(?:_\d{6})?)\.md$/i);
+  const m = s.match(/^(?:([A-Za-z0-9_-]{1,64})\/)?(\d{4}-\d{2}-\d{2}(?:_\d{4,6})?)\.md$/i);
   if (!m) return null;
   const root = path.resolve(__dirname, "diary");
   const full = path.resolve(root, m[1] ? m[1] + path.sep + m[2] + ".md" : m[2] + ".md");
@@ -2073,7 +2073,8 @@ function recentDiaryTextBefore(sessionId, count, createdIso) {
       const abs = relBase ? path.join(diaryDir, relBase) : diaryDir;
       for (const f of fs.readdirSync(abs)) {
         // 2026-09-19 批6 D1：兼容每篇一文件的 YYYY-MM-DD_HHMMSS.md（日期取前 10 位）
-        if (!/^\d{4}-\d{2}-\d{2}(_\d{6})?\.md$/.test(f)) continue;
+        // 2026-09-20 拆篇迁移：后缀放开 4-6 位（分钟精度 4 位 = 旧日记拆篇产物，秒精度 6 位 = 批6 原生）
+        if (!/^\d{4}-\d{2}-\d{2}(_\d{4,6})?\.md$/.test(f)) continue;
         files.push({ rel: relBase ? relBase + "/" + f : f, date: f.slice(0, 10) });
       }
     } catch (e) {}
@@ -2825,8 +2826,8 @@ function readDiaryEntries(limit) {
     let names = [];
     try { names = fs.readdirSync(abs); } catch (e) { return; }
     // 只读取 .md 日记文件，避免把任意路径内容暴露到 admin 页面
-    // 2026-09-19 批6 D1：兼容每篇一文件的 YYYY-MM-DD_HHMMSS.md
-    for (const name of names.filter(n => /^\d{4}-\d{2}-\d{2}(_\d{6})?\.md$/i.test(n))) {
+    // 2026-09-19 批6 D1：兼容每篇一文件的 YYYY-MM-DD_HHMMSS.md；2026-09-20 拆篇后缀 4-6 位都认
+    for (const name of names.filter(n => /^\d{4}-\d{2}-\d{2}(_\d{4,6})?\.md$/i.test(n))) {
       const filePath = path.join(abs, name);
       try {
         const stat = fs.statSync(filePath);
