@@ -7299,6 +7299,9 @@ body:has(#chat[data-layout="wx"]) [data-session-id].active{background:#F5F6F7!im
 body:has(#chat[data-layout="wx"]) .session-item .s-name .s-icon.pin.on{color:#111111!important;background:transparent!important}
 body:has(#chat[data-layout="wx"]) .session-item .s-name .s-icon.pin.on .ico{color:#111111!important;stroke:#111111!important;fill:none!important}
 body:has(#chat[data-layout="wx"]) .session-item .s-name .s-icon.pin:not(.on){color:#C9C9C9!important;background:transparent!important}
+/* 微信会话选中态：淡灰底去描边，左侧 3px 圆头绿条（#07C160）一眼锁定当前会话 */
+body:has(#chat[data-layout="wx"]) .session-item.active{background:rgba(0,0,0,.06)!important;border-color:transparent!important;position:relative}
+body:has(#chat[data-layout="wx"]) .session-item.active::before{content:"";position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:62%;border-radius:2px;background:#07C160}
 </style>
 <style id="wx-bubble-width-20260920-v1">
 /* 微信气泡：长消息延伸到对侧边缘前一点，保留少量呼吸空间 */
