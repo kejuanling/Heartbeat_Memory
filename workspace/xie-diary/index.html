@@ -58,23 +58,9 @@ h1{
 .day-date{font-size:0.95rem;font-weight:700;color:#b07a6a;letter-spacing:2px}
 .day-src{margin-left:auto;font-size:0.6rem;color:#d4bcb0;letter-spacing:1px;opacity:0.8}
 .day-body{font-size:0.82rem;line-height:1.95;color:#6a584a;letter-spacing:0.5px}
-.day-body .seg{margin-bottom:1rem}
-.day-body .seg:last-child{margin-bottom:0}
-.seg-time{
-  font-size:0.66rem;color:#b5837a;letter-spacing:2px;font-weight:600;
-  margin:0.7rem 0 0.35rem;padding-left:0.7rem;
-  border-left:2px solid rgba(181,131,122,0.25)
-}
-.seg:first-child .seg-time{margin-top:0}
-.seg-time:first-child{margin-top:0}
 .day-body p{margin-bottom:0.7em;text-indent:0}
 .day-body p:last-child{margin-bottom:0}
 .day-body mark{background:rgba(240,196,192,0.55);color:#a05a4a;border-radius:3px;padding:0 2px}
-.day-body.clip{max-height:9.5rem;overflow:hidden;position:relative}
-.day-body.clip::after{
-  content:'';position:absolute;left:0;right:0;bottom:0;height:3.5rem;
-  background:linear-gradient(180deg,transparent,rgba(255,255,255,0.95))
-}
 .expand-btn{
   display:inline-block;margin-top:0.45rem;font-size:0.68rem;color:#b5837a;
   background:none;border:none;font-family:inherit;cursor:pointer;letter-spacing:2px;padding:0
@@ -82,7 +68,7 @@ h1{
 .expand-btn:hover{text-decoration:underline}
 .empty{padding:3rem 0;text-align:center;color:#d4bcb0;font-size:0.75rem;letter-spacing:3px}
 .loading{padding:3rem 0;text-align:center;color:#d4bcb0;font-size:0.75rem;letter-spacing:3px}
-/* 按天分组（2026-09-19 批6 D2）：组头展开/收起 */
+/* 按天分组（2026-09-19 批6 D2；2026-09-20 起默认全部收起，搜索时全展开） */
 .day-group{margin-bottom:1rem}
 .group-head{display:flex;align-items:center;gap:0.6rem;padding:0.55rem 0.95rem;cursor:pointer;user-select:none;-webkit-user-select:none;background:rgba(255,255,255,0.4);border:1px solid rgba(255,255,255,0.35);border-radius:14px;transition:all 0.25s ease}
 .group-head:hover{background:rgba(255,255,255,0.65)}
@@ -122,7 +108,7 @@ h1{
 <script>
 (function(){
   var API='/xie-diary/api/list';
-  var entries=[];   // 每篇一卡：{date, time, week, src, text}
+  var writings=[];  // 每次书写一卡（文件按「##」分篇头拆开）：{date, time, src, text, relPath, hidden}
   var EXCERPT_LEN=340;
 
   function esc(s){
@@ -134,70 +120,97 @@ h1{
     var e=esc(kw).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
     return escapedHtml.replace(new RegExp(e,'gi'),function(m){return '<mark>'+m+'</mark>';});
   }
-  // 把一天的日记原文拆成「## 日期 时间」分段渲染
-  function renderDayHtml(raw, kw){
-    var text=String(raw||'').trim();
+  // 正文渲染：段落直出。「##」分篇头已在拆篇时剥掉，时间只在卡头出现一次
+  function renderParas(text, kw){
+    var paras=String(text||'').split(/\n{2,}/).map(function(p){return p.trim();}).filter(Boolean);
+    return paras.map(function(p){ return '<p>'+highlight(esc(p).replace(/\n/g,'<br>'),kw)+'</p>'; }).join('');
+  }
+  // 截断：到字数直接断文加省略号（不用渐变淡出）
+  function clipText(t){
+    return String(t||'').slice(0,EXCERPT_LEN).replace(/\s+$/,'')+'…';
+  }
+  // 把一个日记文件按「##」分篇头拆成多次书写：
+  //   「## 日期 时间 [附注]」「## 时间 [· 附注]」（日期取文件名）；无头文件整体算一次；
+  //   头行只取日期与时间（附注不显示），「###」及以下是正文不是分篇头。
+  function splitWritings(e){
+    var raw=String(e.content||'').replace(/\r\n/g,'\n').trim();
+    var fileDate=String(e.name||'').slice(0,10);
+    var re=/^##[ \t]+(.+?)[ \t]*$/gm, m, marks=[];
+    while((m=re.exec(raw))!==null){
+      var t=m[1];
+      var dm=t.match(/^(\d{4}-\d{2}-\d{2})(?:\s+(\d{1,2}:\d{2}))?/);
+      var tm=dm?null:t.match(/^(\d{1,2}:\d{2})/);
+      if(dm) marks.push({at:m.index,date:dm[1],time:dm[2]||''});
+      else if(tm) marks.push({at:m.index,date:fileDate,time:tm[1]});
+      else marks.push({at:m.index,date:fileDate,time:''});
+    }
     var segs=[];
-    var re=/^##\s*(.+)$/gm, m, idxs=[];
-    while((m=re.exec(text))!==null) idxs.push({at:m.index, title:m[1].trim()});
-    if(idxs.length===0){ segs.push({title:null, body:text}); }
+    if(!marks.length){ segs.push({date:fileDate,time:'',body:raw}); }
     else{
-      if(idxs[0].at>0) segs.push({title:null, body:text.slice(0,idxs[0].at)});
-      for(var i=0;i<idxs.length;i++){
-        var end=(i+1<idxs.length)?idxs[i+1].at:text.length;
-        segs.push({title:idxs[i].title, body:text.slice(idxs[i].at+3+idxs[i].title.length,end)});
+      if(marks[0].at>0) segs.push({date:fileDate,time:'',body:raw.slice(0,marks[0].at)});
+      for(var i=0;i<marks.length;i++){
+        var end=(i+1<marks.length)?marks[i+1].at:raw.length;
+        var lineEnd=raw.indexOf('\n',marks[i].at);
+        var bodyStart=(lineEnd===-1||lineEnd>=end)?end:lineEnd+1;
+        segs.push({date:marks[i].date,time:marks[i].time,body:raw.slice(bodyStart,end)});
       }
     }
-    var html='';
-    for(var j=0;j<segs.length;j++){
-      var sg=segs[j];
-      var paras=sg.body.split(/\n{2,}/).map(function(p){return p.trim();}).filter(Boolean);
-      if(!paras.length) continue;
-      html+='<div class="seg">';
-      if(sg.title) html+='<div class="seg-time">'+highlight(esc(sg.title),kw)+'</div>';
-      for(var k=0;k<paras.length;k++) html+='<p>'+highlight(esc(paras[k]).replace(/\n/g,'<br>'),kw)+'</p>';
-      html+='</div>';
-    }
-    return html;
+    return segs;
+  }
+  // 时间补零：「9:5」→「09:05」；空值原样返回
+  function normTime(t){
+    var p=String(t||'').split(':');
+    if(p.length!==2) return String(t||'');
+    var h=p[0],m=p[1];
+    if(h.length<2) h='0'+h;
+    if(m.length<2) m='0'+m;
+    return h+':'+m;
+  }
+  // 无分篇头时间时的兜底：文件名 _HHMMSS（日期对得上才用）→ 文件修改时间
+  function fallbackTime(e, date){
+    var fm=/^(\d{4}-\d{2}-\d{2})_(\d{2})(\d{2})/.exec(String(e.name||''));
+    if(fm&&fm[1]===date) return fm[2]+':'+fm[3];
+    return (e.updated_at||'').slice(11,16);
   }
 
   function render(kw){
     var list=document.getElementById('list');
     var meta=document.getElementById('metaLine');
     kw=String(kw||'').trim();
-    var shown=entries;
+    var shown=writings;
     if(kw){
       var k=kw.toLowerCase();
-      shown=entries.filter(function(d){
-        return d.date.indexOf(kw)!==-1 || d.src.toLowerCase().indexOf(k)!==-1 || d.text.toLowerCase().indexOf(k)!==-1;
+      shown=writings.filter(function(d){
+        return d.date.indexOf(kw)!==-1 || d.time.indexOf(kw)!==-1 || d.src.toLowerCase().indexOf(k)!==-1 || d.text.toLowerCase().indexOf(k)!==-1;
       });
     }
-    if(!entries.length){ list.innerHTML='<div class="empty">日记本还是空的</div>'; meta.textContent=''; return; }
+    if(!writings.length){ list.innerHTML='<div class="empty">日记本还是空的</div>'; meta.textContent=''; return; }
     if(!shown.length){ list.innerHTML='<div class="empty">没有匹配「'+esc(kw)+'」的日记</div>'; meta.textContent='0 篇 · 搜索中'; return; }
-    meta.textContent=(kw?('匹配 '+shown.length+' 篇 · '):('共 '+entries.length+' 篇 · '))+'最新 '+shown[0].date;
-    // 按天分组（批6 D2）：日期作组头，点组头展开/收起；搜索时全展开；默认最新一天展开
+    meta.textContent=(kw?('匹配 '+shown.length+' 篇 · '):('共 '+writings.length+' 篇 · '))+'最新 '+shown[0].date;
+    // 按天分组：日期作组头，点组头展开/收起；默认全部收起，搜索时全展开
     var groups=[];
     shown.forEach(function(d){
       var g=groups[groups.length-1];
       if(!g||g.date!==d.date){ g={date:d.date,items:[]}; groups.push(g); }
       g.items.push(d);
     });
+    var clipMap={};   // bodyId -> {text, expanded}：截断卡片的展开/收起状态
     list.innerHTML=groups.map(function(g,gi){
       var cards=g.items.map(function(d,i){
-        var fullHtml=renderDayHtml(d.text,kw);
-        var needClip=!kw && d.text.length>EXCERPT_LEN;
         var bodyId='db'+gi+'-'+i;
+        var needClip=!kw && d.text.length>EXCERPT_LEN;
+        if(needClip) clipMap[bodyId]={text:d.text,expanded:false};
         return '<div class="day-card'+(kw?' match':'')+(d.hidden?' diary-is-hidden':'')+'">'
-          +'<div class="day-head"><span class="day-time">'+esc(d.sortKey.slice(11)||d.date)+'</span>'
+          +'<div class="day-head"><span class="day-time">'+esc(d.time)+'</span>'
           +(d.src?'<span class="day-src">'+esc(d.src)+'</span>':'')
           +(d.hidden?'<span class="diary-hidden-tag">已隐藏</span>':'')
           +'<button class="diary-hide-btn" data-rel="'+esc(d.relPath)+'" data-hidden="'+(d.hidden?'1':'0')+'">'+(d.hidden?'显示':'隐藏')+'</button>'
           +'</div>'
-          +'<div class="day-body'+(needClip?' clip':'')+'" id="'+bodyId+'">'+fullHtml+'</div>'
+          +'<div class="day-body" id="'+bodyId+'">'+renderParas(needClip?clipText(d.text):d.text,kw)+'</div>'
           +(needClip?'<button class="expand-btn" data-for="'+bodyId+'">展开全文</button>':'')
           +'</div>';
       }).join('');
-      return '<div class="day-group'+((kw||gi===0)?' open':'')+'">'
+      return '<div class="day-group'+(kw?' open':'')+'">'
         +'<div class="group-head" data-g="'+gi+'"><span class="g-date">'+esc(g.date)+'</span>'
         +'<span class="g-count">'+g.items.length+' 篇</span>'
         +'<svg class="g-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>'
@@ -208,6 +221,7 @@ h1{
     Array.prototype.forEach.call(list.querySelectorAll('.group-head'),function(head){
       head.addEventListener('click',function(){ head.parentNode.classList.toggle('open'); });
     });
+    // 隐藏/恢复按文件粒度（隐藏=不注入给 AI）：同一文件拆出的多张卡共用一个状态
     Array.prototype.forEach.call(list.querySelectorAll('.diary-hide-btn'),function(btn){
       btn.addEventListener('click',function(){
         var rel=btn.getAttribute('data-rel');
@@ -217,52 +231,52 @@ h1{
           .then(function(r){return r.json();})
           .then(function(j){
             if(j&&j.success){
-              entries.forEach(function(d){ if(d.relPath===rel) d.hidden=toHidden; });
+              writings.forEach(function(d){ if(d.relPath===rel) d.hidden=toHidden; });
               render(document.getElementById('searchInput').value);
             } else { alert('操作失败：'+((j&&j.error)||'未知错误')); btn.disabled=false; }
           })
           .catch(function(e){ alert('操作失败：'+e.message); btn.disabled=false; });
       });
     });
+    // 展开/收起：截断文本与全文整段重渲染
     Array.prototype.forEach.call(list.querySelectorAll('.expand-btn'),function(btn){
       btn.addEventListener('click',function(){
-        var b=document.getElementById(btn.getAttribute('data-for'));
-        if(!b) return;
-        var open=btn.textContent.indexOf('收起')===-1;
-        b.classList.toggle('clip',!open);
-        btn.textContent=open?'收起':'展开全文';
+        var st=clipMap[btn.getAttribute('data-for')];
+        var body=document.getElementById(btn.getAttribute('data-for'));
+        if(!st||!body) return;
+        st.expanded=!st.expanded;
+        body.innerHTML=renderParas(st.expanded?st.text:clipText(st.text),'');
+        btn.textContent=st.expanded?'收起':'展开全文';
       });
     });
   }
 
   fetch(API).then(function(r){return r.json();}).then(function(j){
-    var list=(j&&j.entries)||[];
-    // 每篇一卡（窗口不合并）：服务端已按日记日期倒序；同一天多篇按「篇内最新写作时间」倒序，
-    // 取不到写作时间时退回文件修改时间，再退回相对路径。
-    function lastWriteTime(text){
-      var m, re=/^##\s*(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2})/gm, best='';
-      while((m=re.exec(text))!==null){
-        var hhmm=m[2]; if(hhmm.length<5) hhmm='0'+hhmm;
-        if(m[1]+' '+hhmm>best) best=m[1]+' '+hhmm;
-      }
-      return best;
-    }
-    entries=list.map(function(e){
-      var d=e.name.slice(0,10);
-      var lw=lastWriteTime(String(e.content||''));
-      var upd=(e.updated_at||'').slice(11,16);
-      return {
-        date:d,
-        src:e.session?('窗口 '+e.session):'',
-        sortKey:(lw || (e.updated_at||'').slice(0,16).replace('T',' ') || d),
-        text:String(e.content||'').trim(),
-        relPath:e.relPath||e.name,
-        hidden:!!e.hidden
-      };
+    var files=(j&&j.entries)||[];
+    // 每次书写一卡：文件按「##」分篇头拆开（旧的一天多篇文件也拆），时间取各篇头行，
+    // 取不到时退回文件名 _HHMMSS，再退回文件修改时间；空段丢弃；完全按时间倒序。
+    writings=[];
+    files.forEach(function(e){
+      var src=e.session?('窗口 '+e.session):'';
+      var rel=e.relPath||e.name;
+      var hidden=!!e.hidden;
+      splitWritings(e).forEach(function(s){
+        var text=String(s.body||'').trim();
+        if(!text) return;
+        writings.push({
+          date:s.date,
+          time:normTime(s.time)||fallbackTime(e,s.date),
+          src:src,
+          text:text,
+          relPath:rel,
+          hidden:hidden
+        });
+      });
     });
-    entries.sort(function(a,b){
+    writings.sort(function(a,b){
       if(a.date!==b.date) return a.date<b.date?1:-1;
-      return a.sortKey<b.sortKey?1:-1;
+      var ka=a.date+' '+a.time, kb=b.date+' '+b.time;
+      return ka<kb?1:-1;
     });
     render('');
   }).catch(function(e){
