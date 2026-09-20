@@ -4643,6 +4643,7 @@ function openVoiceProvForm(i){
   if(vpType) vpType.value=_voiceDraftType;
   vpNameEl.value = p? (p.name||"") : "";
   vpKey.value = p? (p.api_key||"") : "";
+  vpKey.placeholder = (p&&p.api_key_set)? "已保存（留空=不修改）" : "ark-… / sk-…";
   vpBase.value = p? (p.api_base||"") : "";
   vpResourceId.value = p? (p.resource_id||"seed-tts-2.0") : "seed-tts-2.0";
   vpAsrId.value = p? (p.asr_resource_id||"volc.seedasr.sauc.duration") : "volc.seedasr.sauc.duration";
@@ -4669,7 +4670,10 @@ function openVoiceProvForm(i){
 function closeVoiceProvForm(){ document.getElementById("mcpModal").classList.add("hidden"); _voiceEditingIndex=null; }
 async function saveVoiceProvider(){
   const name=vpNameEl.value.trim(); if(!name){ vpMsg.textContent="请填名称"; return; }
-  const key=vpKey.value.trim(); if(!key){ vpMsg.textContent="请填 API Key"; return; }
+  // GET 不回明文 key：编辑已存过 Key 的供应商允许留空（后端按 id 恢复旧值），新增才强制要求
+  const editingP=(_voiceEditingIndex!=null)? _voiceProviders[_voiceEditingIndex] : null;
+  const key=vpKey.value.trim();
+  if(!key && !(editingP&&editingP.api_key_set)){ vpMsg.textContent="请填 API Key"; return; }
   var existing=(_voiceEditingIndex!=null&&_voiceProviders[_voiceEditingIndex])?_voiceProviders[_voiceEditingIndex].id:("vp_"+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36));
   const params=cleanVoiceProvider({
     id:existing, type:_voiceDraftType, name:name, enabled:(_voiceEditingIndex!=null && _voiceProviders[_voiceEditingIndex])? (_voiceProviders[_voiceEditingIndex].enabled!==false) : true,
