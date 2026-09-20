@@ -988,6 +988,51 @@ TOOLS["context_search"] = {
 }
 
 
+def tool_context_digest(args):
+    q = (args.get("q") or "").strip()
+    if not q:
+        return {"error": "q 必填：一条明确的整理指令，如「整理我们最近两周关于她找工作的讨论」；指令里可直接带时间范围（最近/三天/上周/上个月等）"}
+    url = f"{BASE_URL}:3000/internal/context-digest"
+    body = json.dumps({"q": q}).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="POST",
+                                 headers={"Content-Type": "application/json", "x-internal-key": INTERNAL_KEY})
+    try:
+        with urllib.request.urlopen(req, timeout=75) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            data = json.loads(e.read().decode("utf-8"))
+        except Exception:
+            data = {"ok": False, "error": f"HTTP {e.code}"}
+    except Exception as e:
+        return {"error": str(e)}
+    if not data.get("ok"):
+        return {"error": data.get("error", "整理失败")}
+    if data.get("digest"):
+        out = {"digest": data["digest"], "sources": data.get("sources", [])}
+        if data.get("time_filtered"):
+            out["note"] = "已按指令中的时间范围先筛选语料"
+        return out
+    if data.get("fallback"):
+        # 整理模型本次不可用：降级返回召回块原文（带时间段），AI 仍可自行阅读
+        return {"note": "整理模型本次不可用，以下为检索到的原始摘要块（含时间段），请自行阅读后回答",
+                "blocks": data.get("matches", [])}
+    return {"note": data.get("message", "没找到相关历史摘要")}
+
+
+TOOLS["context_digest"] = {
+    "description": "回顾被压缩的历史对话：当需要某段往事的完整来龙去脉（比如她问起「我们之前聊的某事」、或要回答涉及较早前细节的问题）而当前上下文里只有一句摘要带过时调用。q=一条明确的整理指令（必填），如「整理我们最近两周关于她面试的讨论」；指令里可直接带时间范围（最近/三天/上周/上个月等）。返回按指令整理好的连贯叙述（以对你说话的口吻写就：资料中的「我/他/谢」都指你本人、已写成「你」，她保持「她」），并附来源时间段。与 context_search 的区别：那个返回原文碎片供你翻找，本工具把整段历史摘要消化成连贯叙述；与 memory_search 的区别：那个查长期记忆池，本工具查被压缩替换的历史对话摘要。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "q": {"type": "string", "description": "整理指令（必填）：想回顾什么、按什么整理；可含时间词如最近/N天/N周/上周/上个月"}
+        },
+        "required": ["q"]
+    },
+    "handler": tool_context_digest
+}
+
+
 def tool_memory_search(args):
     q = (args.get("q") or "").strip()
     category = (args.get("category") or "").strip()
@@ -1177,6 +1222,9 @@ def tool_memory_pin(args):
     if pinned is None:
         pinned = True
     data = {"id": mid, "pinned": bool(pinned)}
+    sunk = args.get("sunk")
+    if sunk is not None:
+        data["sunk"] = bool(sunk)
     url = f"{BASE_URL}:3000/internal/memory-pool/pin"
     req = urllib.request.Request(url,
         data=json.dumps(data).encode("utf-8"),
@@ -1195,27 +1243,80 @@ def tool_memory_pin(args):
     if out.get("success"):
         entry = out.get("entry") or {}
         is_pinned = bool(entry.get("pinned"))
-        return {
+        out = {
             "success": True,
             "id": entry.get("id"),
             "pinned": is_pinned,
             "content": (entry.get("content") or "")[:80],
             "message": "已置顶：这条记忆会固定注入每次对话的「相关记忆」区" if is_pinned else "已取消置顶"
         }
+        if sunk is not None:
+            out["sunk"] = bool(entry.get("sunk"))
+            out["message"] = "已沉底：不再参与检索与浮现" if sunk else "已恢复：重新参与检索与浮现"
+        return out
     return {"error": out.get("error", "操作失败")}
 
 
 TOOLS["memory_pin"] = {
-    "description": "置顶或取消置顶一条已经进入长期记忆池的记忆。先用 memory_search 找到它的 id，再传给本工具。置顶后会固定注入每次对话的「相关记忆」区，不再依赖检索命中；取消置顶则恢复普通记忆池状态。",
+    "description": "置顶/取消置顶或沉底/恢复一条已经进入长期记忆池的记忆。先用 memory_search 找到它的 id，再传给本工具。置顶后会固定注入每次对话的「相关记忆」区，不再依赖检索命中；sunk=true 沉底则彻底不参与检索与浮现（sunk=false 恢复）。两个开关可同时传。",
     "inputSchema": {
         "type": "object",
         "properties": {
             "id": {"type": "string", "description": "记忆 id（memory_search 返回的 id 字段，mp_ 开头）"},
-            "pinned": {"type": "boolean", "description": "true=置顶（默认），false=取消置顶"}
+            "pinned": {"type": "boolean", "description": "true=置顶（默认），false=取消置顶"},
+            "sunk": {"type": "boolean", "description": "可选：true=沉底（不再参与检索与浮现），false=从沉底恢复"}
         },
         "required": ["id"]
     },
     "handler": tool_memory_pin
+}
+
+
+def tool_memory_update(args):
+    mid = (args.get("id") or "").strip()
+    content = (args.get("content") or "").strip()
+    if not mid:
+        return {"error": "id 必填：记忆 id（memory_search 返回的 id 字段）"}
+    if not content:
+        return {"error": "content 必填：覆盖后的记忆正文"}
+    url = f"{BASE_URL}:3000/internal/memory-v2/update"
+    req = urllib.request.Request(url,
+        data=json.dumps({"id": mid, "content": content}).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-internal-key": INTERNAL_KEY},
+        method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            out = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            out = json.loads(e.read().decode("utf-8"))
+        except Exception:
+            out = {"error": f"HTTP {e.code}"}
+    except Exception as e:
+        return {"error": str(e)}
+    if out.get("success"):
+        entry = out.get("entry") or {}
+        return {
+            "success": True,
+            "id": entry.get("id"),
+            "content": (entry.get("content") or "")[:120],
+            "content_updated_at": entry.get("content_updated_at"),
+            "message": "已覆盖更新：正文已替换为新内容"
+        }
+    return {"error": out.get("error", "更新失败")}
+
+
+TOOLS["memory_update"] = {
+    "description": "直接覆盖更新一条长期记忆的正文。先用 memory_search 找到它的 id，再传 id 和新 content，正文被整体替换（不追加）。适用于：发现某条记忆内容过时/有误/需要补充修正，且新内容能完整替代旧内容时。如果只是想补充新事实，优先用 memory_add 新增一条，让流水线去重合并；本工具是「确认旧条目该被这句替换」时的直改通道。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string", "description": "记忆 id（memory_search 返回的 id 字段）"},
+            "content": {"type": "string", "description": "覆盖后的完整记忆正文（旧正文被整体替换，非追加）"}
+        },
+        "required": ["id", "content"]
+    },
+    "handler": tool_memory_update
 }
 
 

@@ -3598,13 +3598,45 @@ app.post("/internal/memory-pool/pin", async (req, reply) => {
     const b = req.body || {};
     const id = String(b.id || "").trim();
     if (!id) return reply.code(400).send({ error: "id 必填：记忆 id（memory_search 返回）" });
+    const store = require("./memory-v2").createStore({ config: {} });
+    // 0920 扩展：可选 sunk（true=沉底 archive，false=恢复 revive）；pinned 缺省 true 保持旧契约
+    if (b.sunk !== undefined) {
+      const r = store.updateStatus(id, b.sunk ? "archived" : "active", { reason: b.sunk ? "archived" : "revive" });
+      if (!r.ok) return reply.code(404).send({ error: "找不到这条记忆：id=" + id });
+      const e0 = r.entry;
+      let e = e0;
+      if (b.pinned !== undefined) {
+        const r2 = store.updateFields(id, { anchor: !!b.pinned });
+        if (r2.ok) e = r2.entry;
+      }
+      return reply.send({ success: true, entry: { id: e.id, content: e.text, pinned: e.anchor === true, sunk: e.status === "archived" } });
+    }
     const pinned = b.pinned === undefined ? true : !!b.pinned;
-    const r = require("./memory-v2").createStore({ config: {} }).updateFields(id, { anchor: pinned });
+    const r = store.updateFields(id, { anchor: pinned });
     if (!r.ok) return reply.code(404).send({ error: "找不到这条记忆：id=" + id });
     const e = r.entry;
-    reply.send({ success: true, entry: { id: e.id, content: e.text, pinned: e.anchor === true } });
+    reply.send({ success: true, entry: { id: e.id, content: e.text, pinned: e.anchor === true, sunk: e.status === "archived" } });
   } catch (err) {
     console.error("[POST /internal/memory-pool/pin] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 记忆池按 id 直接覆盖正文：MCP 工具 memory_update 用（x-internal-key 鉴权）
+// 0920 加：只改 text（content_updated_at 机制自动刷新）；不走 admission 流水线，直接落 V2 主集合
+app.post("/internal/memory-v2/update", async (req, reply) => {
+  try {
+    const b = req.body || {};
+    const id = String(b.id || "").trim();
+    const content = String(b.content || "").trim();
+    if (!id) return reply.code(400).send({ error: "id 必填：记忆 id（memory_search 返回）" });
+    if (!content) return reply.code(400).send({ error: "content 必填：覆盖后的记忆正文" });
+    const r = require("./memory-v2").createStore({ config: {} }).updateFields(id, { text: content });
+    if (!r.ok) return reply.code(404).send({ error: "找不到这条记忆：id=" + id });
+    const e = r.entry;
+    reply.send({ success: true, entry: { id: e.id, content: e.text, content_updated_at: e.content_updated_at } });
+  } catch (err) {
+    console.error("[POST /internal/memory-v2/update] error:", err.message);
     reply.code(500).send({ error: err.message });
   }
 });
