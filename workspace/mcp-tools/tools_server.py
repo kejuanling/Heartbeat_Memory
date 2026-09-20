@@ -108,7 +108,7 @@ def tool_diary_add(args):
                 f.write(entry)
         return {"success": True, "file": diary_file, "session": session_token or None,
                 "time": now.strftime("%Y-%m-%d %H:%M"),
-                "message": "已写入陪伴日记（会话 %s，独立一篇）" % (session_token or "共享")}
+                "message": "已写入陪伴日记"}
     except Exception as e:
         return {"error": "写入陪伴日记失败: %s" % e}
 
