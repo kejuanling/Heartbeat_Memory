@@ -23,6 +23,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { estimateTokens, buildContextBlocks } = require("./context-v2-builder");
+const { getDatePartsInTimeZone, resolveTimeZone } = require("./time_utils");
 
 const TARGETS = ["identity", "moments_anchor", "retire", "instructions"];
 
@@ -380,26 +381,56 @@ function appendFloatIds(file, sessionId, memIds) {
 // 生产输入组装（2026-09-19 自 routes/chat.js 抽出共享）
 // 主聊天（routes/chat.js）与跨窗口注入预览（server.js /admin/cross-window-inject）
 // 共用同一组装，后续唤醒切 V2 也走这里。全部只读，异常由调用点 try/catch 兜底。
-// 已知简化（观察口径，S3 观察期校准）：日记不做隐藏清单过滤、不做会话创建日边界过滤。
+// 已知简化（观察口径，S3 观察期校准）已于 2026-09-20 收敛：日记过滤见 assembleInput 内注释。
 // 未进 context_v2_pinned_map.json 的 pinned 条目按 retire 处理（不进任何注入块，报告可见）。
 // ============================================================
 
-/** 扫描 diary/ 全部日记（会话子目录收一层），按日期升序 */
+/** 扫描 diary/ 全部日记（会话子目录收一层），按日期升序；rel=相对 diary/ 的路径（隐藏清单键） */
 function readDiaryEntriesForShadow(baseDir) {
   const out = [];
-  const scan = (root, depth) => {
+  const scan = (relBase, depth) => {
+    const root = relBase ? path.join(baseDir, 'diary', relBase) : path.join(baseDir, 'diary');
     let entries = [];
     try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch (e) { return; }
     for (const ent of entries) {
       if (ent.isFile() && /^\d{4}-\d{2}-\d{2}(_\d{6})?\.md$/.test(ent.name)) {
-        try { out.push({ date: ent.name.slice(0, 10), content: fs.readFileSync(path.join(root, ent.name), 'utf8') }); } catch (e) {}
+        const rel = relBase ? relBase + '/' + ent.name : ent.name;
+        try { out.push({ rel, date: ent.name.slice(0, 10), content: fs.readFileSync(path.join(root, ent.name), 'utf8') }); } catch (e) {}
       } else if (ent.isDirectory() && depth < 1) {
-        scan(path.join(root, ent.name), depth + 1); // 会话子目录收一层
+        scan(relBase ? relBase + '/' + ent.name : ent.name, depth + 1); // 会话子目录收一层
       }
     }
   };
-  scan(path.join(baseDir, 'diary'), 0);
-  return out.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  scan('', 0);
+  return out.sort((a, b) => (a.date === b.date ? (a.rel < b.rel ? -1 : 1) : String(a.date).localeCompare(String(b.date))));
+}
+
+// 隐藏清单（data/diary_hidden.json，rel 路径数组）：隐藏篇不注入也不占份数（与旧版 recentDiaryTextBefore 同口径）
+function readDiaryHiddenSetForShadow(dataDir) {
+  try {
+    const arr = JSON.parse(fs.readFileSync(path.join(dataDir, 'diary_hidden.json'), 'utf8'));
+    if (Array.isArray(arr)) return new Set(arr.filter(x => typeof x === 'string' && x));
+  } catch (e) {}
+  return new Set();
+}
+
+// 会话创建日期（与旧版 server.js sessionCreatedAtOf + recentDiaryTextBefore 同口径）：
+// 创建时刻=时间线首条非 system 且带 time 的消息 → 时区化日期；无时间线=当前时刻；解析失败=空串（不注入日记）。
+function sessionDiaryCutoffDate(sessionId, loadTimeline) {
+  let createdIso = '';
+  try {
+    const tl = loadTimeline(sessionId || 'default') || [];
+    for (const m of tl) { if (m && m.role !== 'system' && m.time) { createdIso = m.time; break; } }
+  } catch (e) {}
+  if (!createdIso) createdIso = new Date().toISOString();
+  try {
+    const d = new Date(createdIso);
+    if (!isNaN(d.getTime())) {
+      const p = getDatePartsInTimeZone(d, resolveTimeZone());
+      return p.year + '-' + p.month + '-' + p.day;
+    }
+  } catch (e) {}
+  return '';
 }
 
 /**
@@ -449,7 +480,14 @@ function assembleInput(opts) {
   let diaryCount = 3;
   try { diaryCount = Number(JSON.parse(fs.readFileSync(path.join(dataDir, 'memory_pool_config.json'), 'utf8')).cross_inject_diary_count) || 3; } catch (e) {}
   // map 挂在 v2Input 上供 maybeObserve 取 mapVersion（builder 只读已知字段，多余键无害）
-  return { pinnedEntries, timeline, diaryEntries: readDiaryEntriesForShadow(opts.baseDir), memoriesV2, query, excludeIds, map: shadowMap, config: { diaryCount } };
+  // 日记过滤（2026-09-20 恢复旧注入边界，用户拍板）：只留「严格早于会话创建日期」且未被隐藏的篇，
+  // 创建之后写的日记由本会话时间线的日记特殊事件自然覆盖，不再跨窗口重复注入；边界缺失时不注入任何日记。
+  const hiddenDiary = readDiaryHiddenSetForShadow(dataDir);
+  const cutoffDate = sessionDiaryCutoffDate(opts.sessionId, opts.loadTimeline);
+  const diaryEntries = cutoffDate
+    ? readDiaryEntriesForShadow(opts.baseDir).filter(e => e.date < cutoffDate && !hiddenDiary.has(e.rel))
+    : [];
+  return { pinnedEntries, timeline, diaryEntries, memoriesV2, query, excludeIds, map: shadowMap, config: { diaryCount } };
 }
 
 module.exports = {
