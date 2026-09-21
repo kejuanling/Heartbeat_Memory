@@ -2,12 +2,12 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="谢意行">
 <meta name="theme-color" content="#fdf6ed">
-<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+<meta http-equiv="Cache-Control" content="no-cache">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>谢意行</title>
@@ -442,7 +442,7 @@ footer{
   background:var(--inputbar-bg);
   border:1px solid var(--inputbar-border);
   border-radius:var(--inputbar-radius,21px);padding:7px 8px 7px 15px;
-  box-shadow:0 1px 5px rgba(99,70,68,.025);
+  box-shadow:0 1px 4px rgba(0,0,0,.07),0 2px 10px rgba(0,0,0,.05);
   transition:border-color .25s ease,box-shadow .25s ease;
 }
 .inputbar:focus-within{border-color:var(--inputbar-focus-border,rgba(197,143,150,.35));box-shadow:var(--inputbar-focus-shadow,0 0 0 3px rgba(197,143,150,.07),0 4px 18px rgba(80,65,55,.06))}
@@ -3210,7 +3210,7 @@ async function request(finalMsgs, fromSend){
     finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,segments:streamedSegments||null,time:new Date().toISOString(),tokens:usage});
     if(SessionStore.getCurrentSession()===sidAtStart){
       msgs=finalMsgs;saveMsgs();
-      if(!flushStreamSegs){renderAll(autoScroll===false);}
+      if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
       autoNameSessionWhenUntitled(full);
     }
   }catch(err){
@@ -3220,7 +3220,7 @@ async function request(finalMsgs, fromSend){
     finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});}
     if(SessionStore.getCurrentSession()===sidAtStart){
       msgs=finalMsgs;saveMsgs();
-      if(!flushStreamSegs){renderAll(autoScroll===false);}
+      if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
       autoNameSessionWhenUntitled(full);
     }
     showError(err.message);
@@ -7203,198 +7203,60 @@ else{ initAdminCards(); }
 </script>
 <!-- C0 基建：仅加载 SessionStore 桥接（暴露 window.SessionStore），不接入任何业务逻辑 -->
 <script type="module" src="../shared-runtime/bridge/session-bridge.js"></script>
-</body>
-</html>
-<style>
-#chat[data-layout="wx"] .mrow .mav{box-shadow:none!important}
-#chat[data-layout="wx"] .inputbar #imgBtn{order:1}
-#chat[data-layout="wx"] .inputbar #micBtn{order:2}
-#chat[data-layout="wx"] .inputbar #input{order:3}
-#chat[data-layout="wx"] .inputbar #send{order:4}
-#chat[data-layout="wx"] .inputbar #imgBtn .ico{display:none}
-#chat[data-layout="wx"] .inputbar #imgBtn::before{content:"+";display:block;font-size:27px;font-weight:300;line-height:1;transform:translateY(-1px);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif}
-#chat[data-layout="wx"] .inputbar #imgBtn,#chat[data-layout="wx"] .inputbar #micBtn{width:32px;height:32px}
-body:has(#chat[data-layout="wx"]) header{background:#FFFFFF;border-bottom-color:rgba(0,0,0,.06);box-shadow:0 1px 4px rgba(0,0,0,.04);backdrop-filter:none;-webkit-backdrop-filter:none}
-</style>
-<style>
+<style id="wx-layout-consolidated-20260921">
+/* 微信布局：2026-09-21 由 21 个历史补丁块（wx-*-v1~v9 / wx-session-final / wx-live-gap-normalize 等）
+   按 CSS 层叠结果合并归一，单一真源。合并依据：
+     - 同优先级：后加载覆盖先加载；!important 高于普通声明；内联 important 样式最高。
+     - 输入栏实际位于 #chat 之外，作用域必须走 body:has(#chat[data-layout="wx"])；
+       原 "#chat[data-layout=wx] .inputbar ..." 系列选择器匹配不到，已作为死代码剔除。
+     - 输入框高度最终由下方 JS 驱动（40~120px），CSS 仅提供初值。 */
+/* 容器与背景 */
 #chat[data-layout="wx"]{padding-left:2%;padding-right:2%}
-body:has(#chat[data-layout="wx"]) footer{padding-left:2%;padding-right:2%}
-#chat[data-layout="wx"] .inputbar{display:grid;grid-template-columns:32px 32px minmax(0,1fr) 34px;align-items:center;gap:8px}
-#chat[data-layout="wx"] .inputbar #imgBtn{grid-column:1;grid-row:1}
-#chat[data-layout="wx"] .inputbar #micBtn{grid-column:2;grid-row:1}
-#chat[data-layout="wx"] .inputbar #input{grid-column:3;grid-row:1;width:100%;box-sizing:border-box}
-#chat[data-layout="wx"] .inputbar #send{grid-column:4;grid-row:1}
-</style>
-<style>
-#chat[data-layout="wx"] .msg,
-#chat[data-layout="wx"] .msg .bubble,
-#chat[data-layout="wx"] #input,
-#chat[data-layout="wx"] .inputbar,
-#chat[data-layout="wx"] .icon-btn{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue","PingFang SC","Noto Sans CJK SC",Arial,sans-serif;font-weight:400}
-body:has(#chat[data-layout="wx"]) header.hd-wx .hd-name{font-family:"Songti SC","STSong","SimSun","Noto Serif CJK SC",serif;font-weight:400}
-</style>
-<style>
-#chat[data-layout="wx"] .msg .bubble{padding:9px 14px}
-</style>
-<style>
-#chat[data-layout="wx"] .mrow{align-items:flex-start}
-#chat[data-layout="wx"] .mrow .mav{margin-top:0;align-self:flex-start}
-#chat[data-layout="wx"] .mcol{align-self:flex-start}
-</style>
-<style>
-#chat[data-layout="wx"] .msg .bubble{font-size:14px;padding:8px 14px;border-color:transparent;border-width:0;border-style:solid;border-radius:6px}
-</style>
-<style>
-#chat[data-layout="wx"] .mrow .mav{margin-top:2px}
-</style>
-<style>
-/* 微信输入区：参考原生微信的浅灰底＋独立白色文字输入框，保留当前项目的按钮顺序 */
-body:has(#chat[data-layout="wx"]) footer{background:#F5F6F7}
-#chat[data-layout="wx"] .inputbar{background:transparent;border:0;border-radius:0;padding:3px 0;box-shadow:none;display:grid;grid-template-columns:32px 32px minmax(0,1fr) 34px;gap:8px}
-#chat[data-layout="wx"] .inputbar:focus-within{border:0;box-shadow:none}
-#chat[data-layout="wx"] .inputbar #input{background:#FFFFFF;border:0;border-radius:6px;min-height:34px;padding:6px 10px;box-sizing:border-box;line-height:1.45;color:#111;outline:none}
-#chat[data-layout="wx"] .inputbar #input:focus{background:#FFFFFF;outline:none;box-shadow:none}
-#chat[data-layout="wx"] .inputbar #imgBtn{width:30px;height:30px;border:1.5px solid #555;border-radius:50%;background:transparent;color:#555;box-sizing:border-box}
-#chat[data-layout="wx"] .inputbar #imgBtn::before{font-size:24px;font-weight:300;transform:translateY(-1px)}
-#chat[data-layout="wx"] .inputbar #micBtn{width:32px;height:32px;background:transparent;color:#555;border-radius:6px}
-#chat[data-layout="wx"] .inputbar #send{width:32px;height:32px;background:#95EC69;color:#17320f;border-radius:6px;box-shadow:none}
-</style>
-<style>
-/* 微信输入栏实际位于 #chat 外部，因此用 body:has() 做主题作用域 */
-body:has(#chat[data-layout="wx"]) footer .inputbar{background:transparent!important;border:0!important;border-radius:0!important;padding:3px 0!important;box-shadow:none!important;transition:none!important;display:grid!important;grid-template-columns:32px 32px minmax(0,1fr) 34px!important;align-items:center!important;gap:8px!important}
+body:has(#chat[data-layout="wx"]) footer{background:#F5F6F7;padding-left:2%;padding-right:2%}
+body:has(#chat[data-layout="wx"]) header{background:#FFFFFF;border-bottom-color:rgba(0,0,0,.06);box-shadow:0 1px 4px rgba(0,0,0,.04);backdrop-filter:none;-webkit-backdrop-filter:none}
+/* 输入栏：3 列网格（+ 号 / 输入框 / 发送）；麦克风叠在输入框内右侧 */
+body:has(#chat[data-layout="wx"]) footer .inputbar{display:grid!important;grid-template-columns:30px minmax(0,1fr) 46px!important;align-items:center!important;gap:8px!important;position:relative!important;background:transparent!important;border:0!important;border-radius:0!important;padding:3px 0!important;box-shadow:none!important;transition:none!important}
 body:has(#chat[data-layout="wx"]) footer .inputbar:focus-within{border:0!important;box-shadow:none!important}
-body:has(#chat[data-layout="wx"]) footer .inputbar #imgBtn{grid-column:1;grid-row:1;order:initial;width:30px;height:30px;border:1.5px solid #555;border-radius:50%;background:transparent;color:#555;box-sizing:border-box}
-body:has(#chat[data-layout="wx"]) footer .inputbar #micBtn{grid-column:2;grid-row:1;order:initial;width:32px;height:32px;background:transparent;color:#555;border-radius:6px}
-body:has(#chat[data-layout="wx"]) footer .inputbar #input{grid-column:3;grid-row:1;order:initial;width:100%;min-height:34px;background:#FFF;border:0;border-radius:6px;padding:6px 10px;box-sizing:border-box;line-height:1.45;color:#111;outline:none;box-shadow:none}
-body:has(#chat[data-layout="wx"]) footer .inputbar #input:focus{background:#FFF;border:0;outline:none;box-shadow:none}
-body:has(#chat[data-layout="wx"]) footer .inputbar #send{grid-column:4;grid-row:1;order:initial;width:32px;height:32px;background:#95EC69;color:#17320f;border-radius:6px;box-shadow:none}
+/* 输入栏元素 */
+body:has(#chat[data-layout="wx"]) footer .inputbar #imgBtn{grid-column:1;grid-row:1;width:30px;height:30px;border:1.5px solid #555;border-radius:50%;background:transparent;color:#555;box-sizing:border-box}
 body:has(#chat[data-layout="wx"]) footer .inputbar #imgBtn .ico{display:none}
 body:has(#chat[data-layout="wx"]) footer .inputbar #imgBtn::before{content:"+";display:block;font-size:24px;font-weight:300;line-height:1;transform:translateY(-1px);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif}
-body:has(#chat[data-layout="wx"]) footer .inputbar .icon-btn:hover,body:has(#chat[data-layout="wx"]) footer .inputbar .icon-btn:active{background:transparent;color:#555}
-body:has(#chat[data-layout="wx"]) footer .inputbar #send:hover,body:has(#chat[data-layout="wx"]) footer .inputbar #send:active{background:#95EC69;color:#17320f}
-</style>
-
-
-
-
-
-
-<style id="wx-input-final-20260920-v7">
-/* 微信输入栏：恢复上一版结构 */
-body:has(#chat[data-layout="wx"]) footer .inputbar{grid-template-columns:30px minmax(0,1fr) 46px!important;align-items:center!important;position:relative!important}
-body:has(#chat[data-layout="wx"]) footer .inputbar #imgBtn{grid-column:1!important;grid-row:1!important;width:30px!important;height:30px!important}
-body:has(#chat[data-layout="wx"]) footer .inputbar #input{grid-column:2!important;grid-row:1!important;width:100%!important;height:34px!important;min-height:34px!important;padding-right:48px!important}
-body:has(#chat[data-layout="wx"]) footer .inputbar #micBtn{grid-column:2!important;grid-row:1!important;justify-self:end!important;z-index:2!important;width:30px!important;height:30px!important;border-radius:50%!important;background:transparent!important;border:0!important;box-shadow:none!important;color:#555!important;box-sizing:border-box!important;margin-right:4px!important}
-body:has(#chat[data-layout="wx"]) footer .inputbar #send{grid-column:3!important;grid-row:1!important;width:46px!important;height:34px!important}
+body:has(#chat[data-layout="wx"]) footer .inputbar #input{grid-column:2;grid-row:1;width:100%;height:40px;min-height:40px;max-height:120px;padding:6px 10px;padding-right:48px;overflow-y:auto;background:#FFF;border:0;border-radius:6px;box-sizing:border-box;line-height:1.45;color:#111;outline:none;box-shadow:none}
+body:has(#chat[data-layout="wx"]) footer .inputbar #input:focus{background:#FFF;border:0;outline:none;box-shadow:none}
+body:has(#chat[data-layout="wx"]) footer .inputbar #micBtn{grid-column:2;grid-row:1;justify-self:end;z-index:2;width:30px;height:30px;margin-right:4px;border:0;border-radius:50%;background:transparent;color:#555;box-shadow:none;box-sizing:border-box}
+body:has(#chat[data-layout="wx"]) footer .inputbar #send{grid-column:3;grid-row:1;width:46px;height:34px;background:#95EC69;color:#17320f;border-radius:6px;box-shadow:none}
 body:has(#chat[data-layout="wx"]) footer .inputbar #send .ico{display:none!important}
 body:has(#chat[data-layout="wx"]) footer .inputbar #send::before{content:"发送";display:block;font-size:13px;font-weight:300;line-height:1;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue","PingFang SC","Noto Sans CJK SC",Arial,sans-serif}
-body:has(#chat[data-layout="wx"]) #chat .mrow{margin-bottom:10px!important}
-</style>
-
-<style id="wx-session-final-20260920-v7">
-/* 微信会话列表：分割线 */
-body:has(#chat[data-layout="wx"]) .session-item,
-body:has(#chat[data-layout="wx"]) .session,
-body:has(#chat[data-layout="wx"]) [data-session-id]{border:0!important;border-bottom:1px solid #E5E5E5!important;border-radius:0!important;box-shadow:none!important}
-</style>
-
-<style id="wx-session-final-20260920-v8">
-body:has(#chat[data-layout="wx"]) .session-item,
-body:has(#chat[data-layout="wx"]) .session,
-body:has(#chat[data-layout="wx"]) [data-session-id]{background:transparent!important;box-shadow:none!important}
-</style>
-
-<style id="wx-session-final-20260920-v9">
-/* 微信会话列表：选中项与聊天背景一致 */
-body:has(#chat[data-layout="wx"]) .session-item.active,
-body:has(#chat[data-layout="wx"]) .session.active,
-body:has(#chat[data-layout="wx"]) [data-session-id].active{background:#F5F6F7!important;box-shadow:none!important}
-/* 微信会话列表：真正的置顶按钮是 .s-icon.pin.on */
+body:has(#chat[data-layout="wx"]) footer .inputbar .icon-btn:hover,body:has(#chat[data-layout="wx"]) footer .inputbar .icon-btn:active{background:transparent;color:#555}
+body:has(#chat[data-layout="wx"]) footer .inputbar #send:hover,body:has(#chat[data-layout="wx"]) footer .inputbar #send:active{background:#95EC69;color:#17320f}
+/* 消息气泡 */
+#chat[data-layout="wx"] .msg .bubble{font-size:14px;padding:8px 14px;border-color:transparent;border-width:0;border-style:solid;border-radius:6px}
+#chat[data-layout="wx"] .mrow{align-items:flex-start}
+#chat[data-layout="wx"] .mrow .mav{box-shadow:none!important;margin-top:2px;align-self:flex-start}
+#chat[data-layout="wx"] .mcol{align-self:flex-start}
+#chat[data-layout="wx"] .mcol>.bubble{max-width:calc(100% - 4px)!important}
+#chat[data-layout="wx"] .mrow .mcol>.bubble{max-width:calc(100% - 44px)!important}
+/* 消息间距：统一挂在消息级，避免流式分段时每个 mrow 叠加 */
+body:has(#chat[data-layout="wx"]) #chat .mrow{margin-bottom:0!important}
+body:has(#chat[data-layout="wx"]) #chat .msg{margin-bottom:10px!important}
+body:has(#chat[data-layout="wx"]) #chat .msg.stream-in{margin-bottom:6px!important}
+body:has(#chat[data-layout="wx"]) #chat .msg .mrow+.mrow{margin-top:10px!important}
+body:has(#chat[data-layout="wx"]) #chat .msg .mcol{gap:0!important}
+body:has(#chat[data-layout="wx"]) #chat .msg .mcol .bubble+.bubble{margin-top:0!important}
+/* 字体 */
+#chat[data-layout="wx"] .msg,#chat[data-layout="wx"] .msg .bubble,#chat[data-layout="wx"] #input,#chat[data-layout="wx"] .inputbar,#chat[data-layout="wx"] .icon-btn{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue","PingFang SC","Noto Sans CJK SC",Arial,sans-serif;font-weight:400}
+body:has(#chat[data-layout="wx"]) header.hd-wx .hd-name{font-family:"Songti SC","STSong","SimSun","Noto Serif CJK SC",serif;font-weight:400}
+/* 会话列表 */
+body:has(#chat[data-layout="wx"]) .session-item,body:has(#chat[data-layout="wx"]) .session,body:has(#chat[data-layout="wx"]) [data-session-id]{border:0!important;border-bottom:1px solid #E5E5E5!important;border-radius:0!important;box-shadow:none!important;background:transparent!important}
+body:has(#chat[data-layout="wx"]) .session-item.active,body:has(#chat[data-layout="wx"]) .session.active,body:has(#chat[data-layout="wx"]) [data-session-id].active{background:rgba(0,0,0,.06)!important;box-shadow:none!important}
+body:has(#chat[data-layout="wx"]) .session-item.active{border-color:transparent!important;border-radius:16px!important}
 body:has(#chat[data-layout="wx"]) .session-item .s-name .s-icon.pin.on{color:#111111!important;background:transparent!important}
 body:has(#chat[data-layout="wx"]) .session-item .s-name .s-icon.pin.on .ico{color:#111111!important;stroke:#111111!important;fill:none!important}
 body:has(#chat[data-layout="wx"]) .session-item .s-name .s-icon.pin:not(.on){color:#C9C9C9!important;background:transparent!important}
-/* 微信会话选中态：淡灰底去描边，圆角比常规项略大一档 */
-body:has(#chat[data-layout="wx"]) .session-item.active{background:rgba(0,0,0,.06)!important;border-color:transparent!important;border-radius:16px!important}
 </style>
-<style id="wx-bubble-width-20260920-v1">
-/* 微信气泡：长消息延伸到对侧边缘前一点，保留少量呼吸空间 */
-#chat[data-layout="wx"] .mcol>.bubble{max-width:calc(100% - 4px)!important}
-</style>
-
-<style id="wx-bubble-width-20260920-v2">
-/* 微信气泡：对侧气泡到对方头像内侧前一点，保留少量空隙 */
-#chat[data-layout="wx"] .mrow .mcol>.bubble{max-width:calc(100% - 44px)!important}
-</style>
-
-<style id="wx-input-auto-height-20260920-v1">
-/* 微信输入框：取消固定高度，随内容换行自动增高 */
-body:has(#chat[data-layout="wx"]) footer .inputbar #input{
-  height:auto!important;
-  min-height:34px!important;
-  max-height:120px!important;
-  overflow-y:auto!important;
-  box-sizing:border-box!important;
-}
-</style>
-
-<style id="wx-bubble-gap-fix-20260920-v1">
-/* 微信：间距统一挂在消息级，避免流式分段时每个 mrow 叠加间距 */
-body:has(#chat[data-layout="wx"]) #chat .mrow{margin-bottom:0!important}
-body:has(#chat[data-layout="wx"]) #chat .msg{margin-bottom:10px!important}
-</style>
-
-
-<style id="wx-live-gap-normalize-20260920-v2">
-/* 微信：实时分段与刷新后的历史分段统一为同一视觉间距；只控制消息层，不让内部 row/bubble 再叠加间距 */
-body:has(#chat[data-layout="wx"]) #chat .msg{margin-bottom:10px!important}
-body:has(#chat[data-layout="wx"]) #chat .msg .mrow+.mrow{margin-top:0!important}
-body:has(#chat[data-layout="wx"]) #chat .msg .mcol{gap:0!important}
-body:has(#chat[data-layout="wx"]) #chat .msg .mcol .bubble+.bubble{margin-top:0!important}
-</style>
-
-
-<style id="wx-live-gap-normalize-20260920-v3">
-/* 微信：历史多段保留 10px；实时独立 msg 也保持 10px，不再额外叠加 */
-body:has(#chat[data-layout="wx"]) #chat .msg{margin-bottom:10px!important}
-body:has(#chat[data-layout="wx"]) #chat .msg .mrow+.mrow{margin-top:10px!important}
-body:has(#chat[data-layout="wx"]) #chat .msg .mcol{gap:0!important}
-body:has(#chat[data-layout="wx"]) #chat .msg .mcol .bubble+.bubble{margin-top:0!important}
-</style>
-
-
-<style id="wx-live-gap-normalize-20260920-v4">
-/* 微信：只收窄实时分段，历史刷新后的多段间距保持 10px */
-body:has(#chat[data-layout="wx"]) #chat .msg.stream-in{margin-bottom:6px!important}
-body:has(#chat[data-layout="wx"]) #chat .msg .mrow+.mrow{margin-top:10px!important}
-</style>
-
-
-<style id="wx-input-height-20260920-v2">
-/* 微信输入框：单行高度与气泡 40px 对齐，多行仍由原有 JS 自动增高 */
-body:has(#chat[data-layout="wx"]) footer .inputbar #input{
-  min-height:40px!important;
-  height:40px!important;
-  box-sizing:border-box!important;
-}
-</style>
-<script>
-/* 微信输入框：允许多行时覆盖单行固定高度 */
-(function(){
-  var el=document.getElementById('input');
-  if(!el)return;
-  function wxAutoHeight(){
-    if(!document.getElementById('chat')||document.getElementById('chat').dataset.layout!=='wx')return;
-    el.style.height='auto';
-    el.style.height=Math.max(40,Math.min(el.scrollHeight,120))+'px';
-  }
-  el.addEventListener('input',wxAutoHeight);
-  window.addEventListener('load',wxAutoHeight);
-})();
-</script>
-
-
-<script id="wx-input-auto-grow-20260920-v3">
-/* 微信：高度由实际 scrollHeight 驱动；用 important 覆盖主题的固定高度规则 */
+<script id="wx-input-auto-grow-consolidated-20260921">
+/* 微信输入框自动增高：合并原 wx-input-auto-height-v1 与 wx-input-auto-grow-v3
+   （两者重复绑定 input 事件，取 v3 的 setProperty important 实现，避免固定高度被主题覆盖） */
 (function(){
   var el=document.getElementById('input');
   if(!el)return;
@@ -7407,6 +7269,9 @@ body:has(#chat[data-layout="wx"]) footer .inputbar #input{
   }
   el.addEventListener('input',wxGrow);
   el.addEventListener('keyup',wxGrow);
+  window.addEventListener('load',wxGrow);
   wxGrow();
 })();
 </script>
+</body>
+</html>
