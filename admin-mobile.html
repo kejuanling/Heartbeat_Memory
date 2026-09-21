@@ -220,6 +220,18 @@
          <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 wake_prompt.txt，下次唤醒即生效。</div>
      </div>
    </div>
+   <div class="card" data-collapse-id="context-digest-prompt" data-default="collapsed">
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>摘要整理提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-body">
+         <textarea id="context-digest-prompt-edit" rows="12" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;font-family:monospace;line-height:1.6;resize:vertical;"></textarea>
+         <div class="env-row" style="margin-top:8px;gap:8px;">
+           <button type="button" class="btn btn-primary" onclick="saveContextDigestPrompt()" style="flex:1;background:var(--accent)">保存</button>
+           <button type="button" class="btn btn-outline" onclick="loadContextDigestPrompt()" style="flex:1">重新载入</button>
+           <button type="button" class="btn btn-outline" onclick="resetContextDigestPrompt()" style="flex:1">恢复默认</button>
+         </div>
+         <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px;">context_digest 工具的整理提示词。模板须含 ${instruction}（AI 的整理指令）与 ${materials}（召回的摘要材料）两个占位符；保存后写入 data/context_digest_prompt.json，下次调用即生效。</div>
+     </div>
+   </div>
    <div class="card" data-collapse-id="cc-prompt" data-default="collapsed">
      <div class="card-title collapsible" onclick="toggleCard(this)"><span>压缩上下文提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
      <div class="card-body">
