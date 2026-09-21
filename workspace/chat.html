@@ -2313,7 +2313,6 @@ chatEl.addEventListener("scroll",function(){
   jumpHideTimer=setTimeout(function(){jumpBtn.style.display="none";},1600);
   lastScrollTop=st;
 },{passive:true});
-function newMsgId(){return (typeof crypto!=="undefined"&&crypto.randomUUID)?crypto.randomUUID():(Date.now()+"-"+Math.random().toString(36).slice(2));}   // 消息稳定 id：本地生成随请求/同步上行，服务端按 id 去重保留，落库前后一致
 function msgText(m){
   if(Array.isArray(m.content))return m.content.filter(x=>x.type==="text").map(x=>x.text).join("");
   return m.content||"";
@@ -2581,9 +2580,7 @@ function renderAiContent(msgEl, bubble, content, reasoning, tools, segments){
     [ -1, 999999 ].forEach(function(k){ const grp=bySeg[k]; if(grp&&grp.length){ grp.forEach(function(t){ const tc=document.createElement("div"); tc.innerHTML=renderToolCapsule(t); const card=tc.firstChild; host.insertBefore(card, anchor.nextSibling); card.addEventListener("click",function(){card.classList.toggle("open");}); anchor=card; }); } });
     bubble.style.display="none"; bubble.innerHTML="";
   }else if(toolEcho){
-    // 2026-09-21 审查 H1：正文段先转义再拼占位符（占位符 \u0001 无 HTML 特殊字符不受转义影响），
-    // 工具卡由 renderToolCapsule 内部自行转义，防 AI 内容经此分支注入脚本
-    let h=escapeHtml(toolEcho.html);
+    let h=toolEcho.html;
     toolEcho.capsules.forEach(function(cap){
       h=h.replace("\u0001TOOLCAP\u0001", renderToolCapsule({name:cap.name, result:cap.body, args:null, error:false}));
     });
@@ -3116,7 +3113,6 @@ async function request(finalMsgs, fromSend){
   if(!fromSend){ sending=true;setSendState(true); }
   aborter=new AbortController();
   const sidAtStart=SessionStore.getCurrentSession();   // 收尾时校验：请求期间切了会话就不回写（防旧会话消息写进新会话的缓存）
-  const _replyMid=newMsgId();   // 本条 AI 回复的稳定 id：随请求上行，服务端落盘沿用同一 id，回复落库前后端 id 一致（落库后立刻编辑可 diff 定点命中）
   appendTypingBox();
   let full="",reasoning="",usage=null,tools=[],reader=null,flushStreamSegs=null,_streamToolMode="live",streamedSegments=null;
   const syncToolSave=function(){
@@ -3132,8 +3128,7 @@ async function request(finalMsgs, fromSend){
       messages:buildMessages(slimForUpload(finalMsgs)),
       session_id:SessionStore.getCurrentSession(),
       stream_options:{include_usage:true},
-      client_msg_id:(Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,10)),
-      reply_msg_id:_replyMid
+      client_msg_id:(Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,10))
     };
     if(cfg.temperature!=null&&cfg.temperature!=="")payload.temperature=Number(cfg.temperature);
     if(cfg.top_p!=null&&cfg.top_p!=="")payload.top_p=Number(cfg.top_p);
@@ -3214,7 +3209,7 @@ async function request(finalMsgs, fromSend){
     if(flushStreamSegs){await flushStreamSegs();}
     if(typeof player!=="undefined" && player && typeof player.getSegments==="function") streamedSegments=player.getSegments();
     syncToolSave();
-    finalMsgs.push({id:_replyMid,role:"assistant",content:full,reasoning:reasoning,tools:tools,segments:streamedSegments||null,time:new Date().toISOString(),tokens:usage});   // 与请求里 reply_msg_id 同源：服务端落盘沿用该 id，落库后立刻编辑也能 diff 定点
+    finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,segments:streamedSegments||null,time:new Date().toISOString(),tokens:usage});
     if(SessionStore.getCurrentSession()===sidAtStart){
       msgs=finalMsgs;saveMsgs();
       if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
@@ -3224,7 +3219,7 @@ async function request(finalMsgs, fromSend){
     /* 2026-09-13 死代码清理：AbortError 分支已删——中断生成功能 2026-09-08 移除后 aborter.abort() 全文件无调用，该分支不可达 */
     try{if(flushStreamSegs){await flushStreamSegs();}}catch(e){}
     if(full){syncToolSave();
-    finalMsgs.push({id:_replyMid,role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});}
+    finalMsgs.push({role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});}
     if(SessionStore.getCurrentSession()===sidAtStart){
       msgs=finalMsgs;saveMsgs();
       if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
@@ -3309,7 +3304,7 @@ async function send(){
   }
   userContent=(_parts.length===1)?_parts[0].text:_parts;
   // 新消息赋稳定 id：用户连发两句完全相同的话会有不同 id，服务端按 id 防重不会并成一条（同句都保留）
-  const _newMid=newMsgId();
+  const _newMid=(typeof crypto!=="undefined"&&crypto.randomUUID)?crypto.randomUUID():(Date.now()+"-"+Math.random().toString(36).slice(2));
   msgs.push({id:_newMid,role:"user",content:userContent,time:new Date().toISOString(), _callB:(_call&&_call.open)?_call.batchId:undefined});
   inputEl.value="";inputEl.style.height="auto";imgData=[];fileData=[];renderPreviews();
   updateSelBar();
@@ -3812,8 +3807,8 @@ selDel.addEventListener("click",()=>{
     renderAll();
   }
   showToast("已删除 "+deleted+" 条");
-  // diff 删除：按 id 定点；有消息缺 id（导入等本地新消息）则回退整份，保证无 id 的删除也不同步漏掉
-  syncTimelineLocal(delIds.length===deleted? delIds.map(function(id){return {op:'delete', id:id};}) : null);
+  // diff 删除：按 id 定点；任一无 id（本地新消息）则回退整份
+  syncTimelineLocal(delIds.length? delIds.map(function(id){return {op:'delete', id:id};}) : null);
 });
 
 /* 会话命名辅助：新会话在 AI 首条回复到达后用回复开头命名（只动仍叫"会话id"的未命名会话） */
@@ -5031,7 +5026,7 @@ function callClose(){
   if(_call.open && _call.batchId){
     const initRole=(_call.initiator==="ai")?"assistant":"user";
     const text="【通话记录】语音通话 "+fmtClock(_call.active?Math.max(0,_call.seconds):0)+"，结束于 "+fmtTime(new Date())+"<call_id>"+_call.batchId+"</call_id>";
-    msgs.push({id:newMsgId(),role:initRole,content:text,time:new Date().toISOString(),_callFor:_call.batchId});
+    msgs.push({role:initRole,content:text,time:new Date().toISOString(),_callFor:_call.batchId});
     saveMsgs(); renderAll(); if(typeof scrollBottom==="function")scrollBottom();
     if(typeof syncTimelineLocal==="function")syncTimelineLocal();   // 把记录消息也同步到服务器时间线，否则刷新就没了
   }
@@ -6086,7 +6081,6 @@ async function importSession(file){
     // C1-e：importSession 特殊路径——persist:false 不写 localStorage（仅内存置位），刷新后应恢复导入前会话。
     SessionStore.setCurrentSession(newId, { persist: false });
     applyHeader();
-    items.forEach(function(m){ if(m&&!m.id)m.id=newMsgId(); });   // 导入消息就地补稳定 id：随整份同步上行按 id 落库，后续编辑/删除可直接 diff 定点
     msgs=items;saveMsgs();
     syncTimelineLocal();  // 导入即落盘：带导入消息的 time 一次性写进服务器时间线，建好会话文件（后续发消息走追加，不再整份重建）
     renderAll();

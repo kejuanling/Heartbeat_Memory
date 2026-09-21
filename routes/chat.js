@@ -635,8 +635,7 @@ module.exports = function registerChatRoutes(app, deps) {
 
     sseSubscribe(sessionId, reply);
     const heartbeat = setInterval(() => {
-      // 2026-09-21 审查 H13：心跳写失败除停心跳外还要摘除订阅，否则死连接滞留 sseSubscribers
-      try { reply.raw.write(': ping\n\n'); } catch (e) { clearInterval(heartbeat); sseUnsubscribe(sessionId, reply); }
+      try { reply.raw.write(': ping\n\n'); } catch (e) { clearInterval(heartbeat); }
     }, SSE_HEARTBEAT_MS);
     req.raw.on('close', () => {
       clearInterval(heartbeat);
@@ -748,11 +747,6 @@ app.post("/v1/chat/completions", async (req, reply) => {
     // 不再次调用上游、不重复写时间线。
     // ========================
     const clientMsgId = isClientChat ? String(body.client_msg_id || "").trim() : "";
-    // 自建前端预生成的本条回复稳定 id（chat.html reply_msg_id）：落盘沿用，保证落库前后端 id 一致，
-    // 回复刚落库、SSE 补拉之前的编辑也能被 /v1/timeline/sync 的 diff 分支定点命中。
-    // 第三方客户端不带此字段 → null → appendMessages 内部照旧生成 uuid，向后兼容。
-    const replyMsgId = (typeof body.reply_msg_id === "string" && body.reply_msg_id.trim())
-      ? body.reply_msg_id.trim().slice(0, 64) : null;
     if (clientMsgId) {
       const cached = recentReplies.get(clientMsgId);
       if (cached && isRecentReplyCacheable(cached) && (Date.now() - cached.ts) < IDEMPOTENCY_TTL_MS) {
@@ -894,8 +888,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
       messages: summarizeMessagesForLog(llmMessages)
     }));
 
-    // 2026-09-21 审查 H9：repair/replace/guard/convert/sanitize 五步收敛进统一管道
-    // prepareModelMessages（与唤醒侧同序），此处不再散装调用。repair 在管道内第一步执行。
+    // ---- 自动修复不完整的 tool 调用（双向清理，实现搬至 chat-context.js）----
+    llmMessages = chatCtx.repairToolCallPairs(llmMessages);
 
     // 统一模型解析（2026-09-08）：会话级设置 → 全局默认供应商 → env 兜底，与 MCP 路径同一口径
     const { provider: prov, model: resolvedModel } = deps.resolveChatModel(sessionId, body.model);
@@ -914,19 +908,32 @@ app.post("/v1/chat/completions", async (req, reply) => {
     // 对话时记忆浮现 / 时间注入：已随记忆池与摘要体系一起移除
     // ========================
 
+    // 上下文记忆替换：把已记录范围里的原文替换成 AI 自己写的记忆（源文件不动，只影响本次发送）
+    try {
+      const beforeCount = llmMessages.length;
+      llmMessages = contextReplacements.applyReplacements(llmMessages);
+      if (llmMessages.length !== beforeCount) {
+        console.log("[context-replacements] 发送前替换生效: 消息 " + beforeCount + " -> " + llmMessages.length);
+      }
+    } catch (repErr) {
+      console.warn("[context-replacements] 替换失败（按原样转发）:", repErr.message);
+    }
+
     // 历史图片裁剪已移除（2026-09-08）：图片原样透传，不做任何保留窗口
+
+    // 会话容量提醒：替换/裁剪后按最终发送量检测，超限塞一条隐藏提醒（AI 自己压缩）
+    ctxLimitGuard(llmMessages, sessionId, timeByKey);
 
     // 上下文压缩已统一进「上下文替换」：早期对话块摘要与 AI 记忆现在都是同一种替换记录，
     // 由 contextReplacements.applyReplacements 统一生效，旧压缩器发送路径已停用。
 
-    // 统一加工管道（2026-09-21 审查 H9）：repair→replace→guard→convert→sanitize
-    const sanitizedMessages = chatCtx.prepareModelMessages(llmMessages, {
-      applyReplacements: (m) => contextReplacements.applyReplacements(m),
-      ctxLimitGuard,
-      sessionId,
-      timeByKey,
-      logPrefix: "[context-replacements]"
-    });
+    // 工具调用记录回灌转换：把历史里 assistant 形态的「【工具调用记录】」还原成
+    // role=tool 消息组（带工具名/调用时间/状态标头），模型明确知道来源，不混入普通对话流。
+    // 必须在 applyReplacements 之后（压缩块匹配仍按 assistant 文本形态），转发前生效。
+    llmMessages = chatCtx.convertToolNotesToToolRole(llmMessages);
+
+    // 转发前只保留 OpenAI 兼容字段，剥离 Kelivo 自定义字段（position 等）
+    const sanitizedMessages = chatCtx.sanitizeForUpstream(llmMessages);
 
     // role 出口映射（2026-09-15）：内部 developer 块按供应商 profile 翻译后再发上游
     // （default：developer→system；claude：并顶层 system+tool 裹 user；gemini：assistant→model）。
@@ -1067,7 +1074,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
               }
               if (visibleContent) {
                 // 与流式路径同口径落富字段（2026-09-15：此前非流式丢思考链/token，刷新后不一致）
-                toAppend.push({ id: replyMsgId || undefined, role: "assistant", content: visibleContent, reasoning: aiThinking || "", tokens: (parsed && parsed.usage) || null });
+                toAppend.push({ role: "assistant", content: visibleContent, reasoning: aiThinking || "", tokens: (parsed && parsed.usage) || null });
               }
               if (toAppend.length) appendMessages(sessionId, toAppend);
             }
@@ -1215,7 +1222,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
             }
             if (visibleContent) {
               // 方案二增量：回复只追加一条（富字段 reasoning/tokens 一并落，跨设备刷新不丢）
-              toAppend.push({ id: replyMsgId || undefined, role: "assistant", content: visibleContent, reasoning: aiThinking || "", tokens: aiUsage || null });
+              toAppend.push({ role: "assistant", content: visibleContent, reasoning: aiThinking || "", tokens: aiUsage || null });
             }
             if (toAppend.length) appendMessages(sessionId, toAppend);
           }
