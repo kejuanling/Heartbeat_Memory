@@ -278,8 +278,8 @@ h1{
           .then(function(j){
             if(j&&j.success){
               writings= writings.filter(function(o){ return o.relPath!==rel; });
-              var card=btn.closest('.day-card');
-              if(card) card.remove();
+              // 同文件拆出的多张卡一并移除（删除是整文件粒度）
+              Array.prototype.forEach.call(document.querySelectorAll('.day-card[data-rel="'+rel.replace(/"/g,'\\"')+'"]'),function(c){ c.remove(); });
               var remain=writings.filter(function(o){return o.relPath===rel;}).length;
               if(!remain) load();
             } else { alert('删除失败：'+((j&&j.error)||'未知错误')); btn.disabled=false; }
@@ -291,7 +291,9 @@ h1{
     Array.prototype.forEach.call(root.querySelectorAll('.diary-edit-btn'),function(btn){
       btn.addEventListener('click',function(){
         var wid=btn.getAttribute('data-w');
-        var d=writings[+wid];
+        // 按 _wid 精确查找：删除会用 filter 重建数组，按下标取会错位打开别的篇
+        var d=null;
+        Array.prototype.forEach.call(writings,function(o){ if(!d && String(o._wid)===String(wid)) d=o; });
         if(!d) return;
         var card=btn.closest('.day-card');
         var body=card.querySelector('.day-body');
