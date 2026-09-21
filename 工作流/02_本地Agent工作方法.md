@@ -51,7 +51,7 @@ scp -i $key C:\deepseek\cloud\server.js root@120.76.99.224:/opt/dylan-heartbeat/
 ### 6.1 推送与重启
 - 改 `chat.html` 等静态前端不用 pm2 restart（nginx 静态直出，scp 即生效）。
 - 改业务代码（`server.js`/`lib/wake-scheduler.js` 等）务必 `pm2 restart gateway --update-env`，否则不生效（唤醒调度器同在 gateway 进程内）。
-- `cloud-push.ps1` 中文注释在本机 PowerShell 会因编码报错：别依赖它，改用 `scp -i $key` 单文件直推最稳。
+- 原 `cloud-push.ps1` 因中文注释在本机 PowerShell 编码报错且已被取代，2026-09-21 清理删除：推文件一律改用 `scp -i $key` 单文件直推最稳。拉取全量镜像用 `cloud-sync.ps1`（依赖同目录 `unpack_tree.py`，排除清单见脚本内）。
 - **踩坑（2026-09-04 实测）**：`scp -i $key 多文件... root@host:/opt/dylan-heartbeat/` 批量推送时，含子目录路径的源文件（如 `routes/chat.js`）会被**静默跳过**（退出码 0、无报错，其余文件正常），导致线上与本地不一致、改了半天不生效。强制做法：**每个文件单独 scp 一条命令**，推完立即 `md5sum <远端文件>` 与本地 `Get-FileHash -Algorithm MD5` 逐一对齐，不一致就是没推上。
 - **每日记录同步**：`agent每日工作记录\` 本地与服务器 `/opt/dylan-heartbeat/agent每日工作记录\`（与 `工作流\` 同级）**双向同步**——本地写完推服务器、服务器有新内容拉回本地；一律**单文件 `scp` + `md5sum` 复核**（遵守上面「每文件单独 scp」原则），含中文文件名可用 tar 打包规避编码/引号坑。
 
