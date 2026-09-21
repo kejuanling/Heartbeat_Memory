@@ -39,6 +39,7 @@ function apply(messages, blocks) {
 // 共享组装入口（聊天与唤醒唯一调用形态）：
 // opts: { baseDir, sessionId, messages, loadTimeline, normalizeContentToText }
 // 返回 { messages, relevantHits }；失败向上抛，由调用方 catch 回退旧上下文。
+let _vecScoreWarned = false;
 async function assembleAndApply(opts) {
   const input = shadow.assembleInput({
     baseDir: opts.baseDir,
@@ -50,10 +51,17 @@ async function assembleAndApply(opts) {
   // 0919 注入语义升级（聊天唤醒同款）：Relevant 打分用 bge 余弦；
   // embed 熔断等算分失败不传 vecScores，builder 回落字面，注入不致全灭。
   try {
-    const activeRows = require('../memory-v2').createStore({ config: {} }).list({ status: 'active' });
-    const rs = await require('../memory-v2-vectors').relevantScores(activeRows, input.query);
+    const activeRows = require('./memory-v2').createStore({ config: {} }).list({ status: 'active' });
+    const rs = await require('./memory-v2-vectors').relevantScores(activeRows, input.query);
     if (rs && rs.ok) input.vecScores = rs.scores;
-  } catch (_) { /* 语义算分失败按字面回落 */ }
+  } catch (e) {
+    // 语义算分失败按字面回落。仅首次告警：此前这里是空 catch，'../memory-v2' 的路径写错
+    // 被静默吞掉、V2 语义检索长期未生效却无人发现（2026-09-21 审查 R16）。
+    if (!_vecScoreWarned) {
+      _vecScoreWarned = true;
+      console.warn('[context-v2] 语义算分不可用，本次起回落字面检索（后续同类失败不再重复告警）:', e && e.message);
+    }
+  }
   const built = buildContextBlocks(input);
   return { messages: apply(opts.messages, built.blocks), relevantHits: built.relevantHits || [] };
 }
