@@ -9,6 +9,9 @@ const DATA_DIR = process.env.MEMORY_DATA_DIR || path.join(__dirname, "data");
 const CONFIG_FILE = path.join(DATA_DIR, "config.json");
 const PINNED_FILE = path.join(DATA_DIR, "pinned.json");
 const DELETED_PINS_FILE = path.join(DATA_DIR, "deleted_pins.json");
+// Context V2 pinned 归类表：0921 用户拍板不再人工维护——pin 变动后自动对齐，缺省归类一律 instructions
+const PINNED_MAP_FILE = path.join(DATA_DIR, "context_v2_pinned_map.json");
+const PINNED_MAP_DEFAULT_TARGET = "instructions";
 
 let config = {};
 let pinnedMemories = [];
@@ -46,6 +49,15 @@ async function init() {
     pinnedMemories = Array.isArray(rawPinned) ? rawPinned : [];
   } catch { pinnedMemories = []; }
   await loadDeletedSignatures();
+  // 启动自愈：把归类表对齐盘上 pinned 现状（补漏/清死引用），修掉人工维护期遗留的不一致
+  if (!READONLY) {
+    try {
+      await withPinnedLock(async function () {
+        pinnedMemories = await loadPinnedFromDisk();
+        await syncPinnedMapLocked();
+      });
+    } catch (e) { console.warn("[memory-engine] 启动归类表对齐失败:", e.message); }
+  }
   if (READONLY) {
     console.log("[memory-engine] 只读模式：pin/状态由 gateway 进程负责写盘");
     // 只读进程周期性从磁盘重载 pinned，避免写方进程更新 pinned.json 后本进程长期用旧缓存
@@ -108,6 +120,38 @@ async function saveDeletedSignatures() {
   await atomicWriteJson(DELETED_PINS_FILE, Array.from(deletedPinSignatures).slice(-400));
 }
 
+// pinned 归类表自动对齐（0921 用户拍板）：登记表缺的条目补 instructions，指向已删条目的死引用清掉，
+// 有变化才写盘并 version+1。必须持 withPinnedLock 且 pinnedMemories 已是盘上最新时调用；
+// 读写失败只吞掉（归类表退回人工/旧状态），不影响 pin 本体的增删。
+async function syncPinnedMapLocked() {
+  try {
+    let map = null;
+    try { map = await fs.readJson(PINNED_MAP_FILE); } catch (e) { map = null; }
+    if (!map || typeof map !== "object" || !Array.isArray(map.entries)) map = { version: 0, entries: [] };
+    const ids = new Set(pinnedMemories.map(function (m) { return m.id; }));
+    const byId = new Map(map.entries.map(function (e) { return [e.pinnedId, e]; }));
+    let changed = false;
+    const kept = map.entries.filter(function (e) {
+      const live = ids.has(e.pinnedId);
+      if (!live) changed = true;
+      return live;
+    });
+    pinnedMemories.forEach(function (m) {
+      if (!byId.has(m.id)) {
+        kept.push({ pinnedId: m.id, target: PINNED_MAP_DEFAULT_TARGET, reason: "auto: pin 新增默认 instructions（0921 拍板，取消人工归类）" });
+        changed = true;
+      }
+    });
+    if (!changed) return;
+    map.entries = kept;
+    map.version = (Number(map.version) || 0) + 1;
+    map.updatedAt = new Date().toISOString();
+    await atomicWriteJson(PINNED_MAP_FILE, map);
+  } catch (e) {
+    console.warn("[memory-engine] pinned 归类表同步失败（不影响 pin 本体）:", e.message);
+  }
+}
+
 // 新增 pin：内容签名去重 + 已删签名拦截；allowDeleted=true 放行曾删除的签名并清除记录
 //（编辑/恢复场景用）。锁内重读盘上真身再写，防并发丢条目。
 async function addPinnedMemory(entry, opts) {
@@ -130,6 +174,7 @@ async function addPinnedMemory(entry, opts) {
     fresh.push(mem);
     pinnedMemories = fresh;
     await atomicWriteJson(PINNED_FILE, fresh);
+    await syncPinnedMapLocked();
     return mem;
   });
 }
@@ -161,6 +206,7 @@ async function deletePinnedMemory(id) {
       removed.forEach(function(m) { deletedPinSignatures.add(contentSignature(m.content || '')); });
       await atomicWriteJson(PINNED_FILE, pinnedMemories);
       await saveDeletedSignatures();
+      await syncPinnedMapLocked();
       return true;
     }
     return false;
