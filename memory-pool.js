@@ -66,6 +66,12 @@ const CONFIG = {
   cross_inject_memory: true,
   cross_inject_diary_count: 3,
   // 压缩摘要再解析入库（LLM）：总开关 + 温暖风格
+  // ⚠️ 2026-09-21（审查 R17，用户拍板删除）起，下面 reparse_enabled / reparse_warm /
+  // reparse_max_chars / reparse_max_items 四个键**已无任何功能性读取点**，仅为管理台表单
+  // 往返兼容而保留。LLM 再解析分支已从 reparseSummaryViaLLM 删除；管理台「解析原文进 review」
+  // 实际走 server.js 的 extractMemoryCandidates() → memoryV2Admission.submitPromotion（全落 review），
+  // 其提示词由 reparse_system_prompt / reparse_user_prompt 驱动（这两个仍在用）。
+  // 调这个功能请改 extractMemoryCandidates，不要改上面四个开关——改了不起作用。
   reparse_enabled: true,
   reparse_warm: false,
   reparse_system_prompt: "",
@@ -833,80 +839,29 @@ function parseLlmArray(cleaned) {
 }
 
 function buildReparsePrompt() {
-  // 0918 promotion 接线：解析对象=压缩块覆盖区间的「时间线原文」（不再是压缩摘要文本），
-  // 产出走 V2 admission（R7 全落 review）。warm/fixedCategory 旧参数退役（签名保留兼容旧调用方）。
-  const system = "你是记忆提取器。从对话原文中提取值得长期记住的稳定信息，只输出 JSON 数组。" +
-    "提取标准：跨会话仍然成立才提取——她的偏好/习惯/身体/经历/性格（fact）、承诺与行为规则（rule）、她的重要原话逐字保留（quote）、关系节点（milestone）。" +
-    "当日心情、一次性事件、寒暄调侃、事件流水账一律不提取。每条独立成句（20~60 字），quote 类必须是原文引号内逐字内容。";
-  const user = "输出 JSON 数组，每项 {\"text\":\"记忆内容\",\"kind\":\"fact|rule|quote|milestone\"}。没有值得记的就输出 []。";
+  const system = "你是长期记忆提取器。你的任务不是总结对话，而是从对话原文中找出那些在未来再次交流时仍然有用、并且会改变你理解用户或处理方式的信息。宁可少记，也不要把聊天流水账写进长期记忆。\n" +
+    "只提取有证据支持的信息，不要根据一次行为猜测人格、心理、动机或身份；不要把你自己的解释当成用户事实。区分一次性事件与稳定倾向：‘今天吃了什么’通常不记，‘长期偏好什么’才记。\n" +
+    "优先提取：稳定偏好/习惯；用户明确要求以后遵守的交互规则；用户反复纠正并希望以后避免的行为；长期目标、项目背景和持续有效的约束；重要关系规则；只有在未来确实有用时才保留重要原话或里程碑。\n" +
+    "不要提取：当天情绪、一次性事件、普通寒暄、玩笑调侃、聊天流水账、已经明显过期的信息、单次行为推导出的性格标签、心理分析、模型自我叙事。\n" +
+    "特别注意：用户对助手的纠正、明确的‘以后不要……/以后要……/记住……’、以及会改变未来回应方式的要求，优先视为高价值规则。不要把这些规则写成对用户人格的判断。\n" +
+    "每条记忆必须独立、简洁、可执行或可验证；不要复述上下文，不要加入未出现的因果关系。quote 只有在原话本身具有长期价值时才保留，而且必须逐字来自原文，不能改写。";
+  const user = "从下面的对话原文中提取长期记忆候选。只输出 JSON 数组，不要输出解释。每项格式为 {\"text\":\"记忆内容\",\"kind\":\"fact|rule|quote|milestone\",\"importance\":0到1之间的小数}。没有真正值得长期记住的信息就输出 []。\n\n判断标准：如果删掉这条信息，未来再次与她交流时基本不会改变你的理解或行为，就不要提取。";
   return { system, user };
 }
 
-async function reparseSummaryViaLLM(text, cfg, fixedCategory) {
-  const apiUrl = cfg && cfg.api_url || process.env.TARGET_API_URL || "";
-  const apiKey = cfg && cfg.api_key || process.env.TARGET_API_KEY || "";
-  const model = cfg && cfg.model || process.env.MODEL_NAME || "";
-  const warm = cfg && cfg.warm !== undefined ? !!cfg.warm : CONFIG.reparse_warm !== false;
-  const maxChars = Math.max(5, Number(CONFIG.reparse_max_chars) || 30);
-  const maxItems = Math.max(1, Number(CONFIG.reparse_max_items) || 8);
-  const hasCustom = !!(String(CONFIG.reparse_system_prompt || "").trim() || String(CONFIG.reparse_user_prompt || "").trim());
-  if (CONFIG.reparse_enabled === false && !(cfg && cfg.forceLlm === true)) {
-    const fb = parseCategoryBlocks(text);
-    return { ok: true, fallback: true, disabled: true, memories: fb };
-  }
-  if (!apiUrl || !apiKey || !model) {
-    const fb = parseCategoryBlocks(text);
-    return { ok: true, fallback: true, memories: fb };
-  }
-  const def = buildReparsePrompt(warm, fixedCategory);
-  const defSystem = def.system;
-  const defUser = def.user;
-  const system = String(CONFIG.reparse_system_prompt || "").trim() || defSystem;
-  const user = (String(CONFIG.reparse_user_prompt || "").trim() || defUser) + "\n\n记忆文本：\n" + text;
-  try {
-    // 2026-09-13 审查修复：加超时——此前无 AbortController，本调用被 await 在 AI 回复链路上
-    // （tagParser.extractAndStore），上游挂起时用户回复被拖住至 undici 默认兜底（数百秒）
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), LLM_CALL_TIMEOUT_MS);
-    let resp, data;
-    try {
-      resp = await fetch(apiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
-        body: JSON.stringify({
-          model: model,
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user }
-          ],
-          temperature: 0.2,
-          response_format: { type: "json_object" }
-        }),
-        signal: controller.signal
-      });
-      if (!resp.ok) return { ok: false, error: "LLM HTTP " + resp.status };
-      data = await resp.json();
-    } finally { clearTimeout(timer); }
-    const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-    if (!content) return { ok: false, error: "LLM 空响应" };
-    const cleaned = String(content).replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
-    const arr = parseLlmArray(cleaned);
-    if (!Array.isArray(arr)) return { ok: false, error: "LLM 输出非数组" };
-    const out = [];
-    for (const it of arr) {
-      // 分类由调用方按来源固定（压缩链路=压缩摘要）；AI 标签路径由 LLM 从前三类里判，非法兜底「关于她」
-      const cat = fixedCategory || (AI_CATEGORIES.includes(it.category) ? it.category : "关于她");
-      let content2 = String(it.content || it.memory || "").trim();
-      content2 = content2.replace(/^(关于她|认账|拓本|压缩摘要|对话碎片|关于我们|锚点|信号|对话摘要)\s*[：:]\s*/, "");
-      if (!hasCustom && content2.length > maxChars) content2 = content2.slice(0, maxChars);
-      if (content2) out.push({ category: cat, content: content2, importance: Math.max(0, Math.min(1, Number(it.importance) || 0.5)) });
-    }
-    out.sort((a, b) => (Number(b.importance) || 0) - (Number(a.importance) || 0));
-    if (!hasCustom && out.length > maxItems) out.length = maxItems;
-    return { ok: true, memories: out };
-  } catch (e) {
-    return { ok: false, error: e.message, fallback: true, memories: parseCategoryBlocks(text) };
-  }
+// 2026-09-21 审查 R17 + 用户拍板 (c)：本函数内的「LLM 再解析」分支已整段删除。
+// 删除依据（三条同时成立才敢删）：
+//   ① 线上 data/memory_pool_config.json 的 reparse_enabled=false，原第 854 行即提前返回，
+//      下面整段 LLM 调用与结果解析在生产中从未执行；
+//   ② 管理台「解析原文进 review」走的是 server.js 的 extractMemoryCandidates()——另一份实现，
+//      按提示词约定的 {text,kind} 正确解析，产出经 memoryV2Admission.submitPromotion 全落 review
+//      队列人工把关（server.js:3801 路由；b.direct 直接入池已于 2026-09-18 停用并返回 403）；
+//   ③ 被删分支内的解析器读 it.content/it.category，而提示词 buildReparsePrompt 约定的字段是
+//      {text,kind}——两者对不上使该分支恒产出 0 条却仍返回 ok:true（R17 的根因）。
+// 保留函数名与调用签名（模块导出 reparseSummaryViaLLM 供外部引用），
+// 行为与「删除前线上的实际行为」逐字一致：直接按【分类】块解析。
+async function reparseSummaryViaLLM(text) {
+  return { ok: true, fallback: true, memories: parseCategoryBlocks(text) };
 }
 
 // 把一段压缩摘要「再解析 + 去重」进入记忆池；返回新增/合并统计
