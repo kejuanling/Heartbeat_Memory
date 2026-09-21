@@ -2580,7 +2580,9 @@ function renderAiContent(msgEl, bubble, content, reasoning, tools, segments){
     [ -1, 999999 ].forEach(function(k){ const grp=bySeg[k]; if(grp&&grp.length){ grp.forEach(function(t){ const tc=document.createElement("div"); tc.innerHTML=renderToolCapsule(t); const card=tc.firstChild; host.insertBefore(card, anchor.nextSibling); card.addEventListener("click",function(){card.classList.toggle("open");}); anchor=card; }); } });
     bubble.style.display="none"; bubble.innerHTML="";
   }else if(toolEcho){
-    let h=toolEcho.html;
+    // 2026-09-21 审查 H1：正文段先转义再拼占位符（占位符 \u0001 无 HTML 特殊字符不受转义影响），
+    // 工具卡由 renderToolCapsule 内部自行转义，防 AI 内容经此分支注入脚本
+    let h=escapeHtml(toolEcho.html);
     toolEcho.capsules.forEach(function(cap){
       h=h.replace("\u0001TOOLCAP\u0001", renderToolCapsule({name:cap.name, result:cap.body, args:null, error:false}));
     });
