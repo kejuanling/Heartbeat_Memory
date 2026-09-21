@@ -7232,8 +7232,15 @@ body:has(#chat[data-layout="wx"]) footer .inputbar #send:hover,body:has(#chat[da
 /* 消息气泡 */
 #chat[data-layout="wx"] .msg .bubble{font-size:14px;padding:8px 14px;border-color:transparent;border-width:0;border-style:solid;border-radius:6px}
 #chat[data-layout="wx"] .mrow{align-items:flex-start}
-#chat[data-layout="wx"] .mrow .mav{box-shadow:none!important;margin-top:2px;align-self:flex-start}
-#chat[data-layout="wx"] .mcol{align-self:flex-start}
+/* 头像与气泡顶部对齐（.mrow 用 flex-start）；气泡整体再上移 2px，即气泡顶部比头像顶部高 2px。
+   注：.mav 的 margin-top 由主样式 259 行 `#chat[data-layout] .mrow:not(:has(.mnm)) .mav{margin-top:0}`
+   以更高特异性(1,4,0)锁定为 0，无法在此覆盖，故偏移加在 .mcol 侧。
+   偏移加在 .mcol 而非 .bubble：wx 下单个 .mcol 内可能出现多段气泡，逐个上移会破坏 .bubble+.bubble 间距。
+   用 position:relative;top:-2px 而非 margin-top:-2px：负 margin 会压缩 .mrow 高度，
+   气泡比头像高时会使每条消息矮 2px 并逐条累积（实测第 3 条已偏移 4px、间距由 17 缩到 15）；
+   相对定位不参与布局流，高度与间距完全不变。 */
+#chat[data-layout="wx"] .mrow .mav{box-shadow:none!important;align-self:flex-start}
+#chat[data-layout="wx"] .mrow .mcol{align-self:flex-start;position:relative;top:-2px}
 #chat[data-layout="wx"] .mcol>.bubble{max-width:calc(100% - 4px)!important}
 #chat[data-layout="wx"] .mrow .mcol>.bubble{max-width:calc(100% - 44px)!important}
 /* 消息间距：统一挂在消息级，避免流式分段时每个 mrow 叠加 */
