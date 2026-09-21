@@ -6118,27 +6118,6 @@ app.post("/xie-diary/api/update", { preHandler: xieDiaryAuth }, async (req, repl
   }
 });
 
-// 谢的日记：删除整篇（前端「删除」按钮用；连时间线「醒来写了日记」特殊事件一起清）
-app.post("/xie-diary/api/delete", { preHandler: xieDiaryAuth }, async (req, reply) => {
-  try {
-    const { relPath } = req.body || {};
-    const r = resolveDiaryRelPath(relPath);
-    if (!r) {
-      return reply.code(400).send({ error: "日记路径格式不正确（应为 日期.md、日期_时分秒.md 或 会话目录/….md）" });
-    }
-    if (!fs.existsSync(r.full) || !fs.statSync(r.full).isFile()) {
-      return reply.code(404).send({ error: "日记文件不存在：" + r.rel });
-    }
-    fs.unlinkSync(r.full);
-    let syncedEvents = 0;
-    try { syncedEvents = removeDiarySpecialEvents(r.fileName, r.session); } catch (e) { console.warn("[xie-diary] 清时间线事件失败:", e.message); }
-    reply.send({ success: true, file: r.rel, syncedEvents });
-  } catch (err) {
-    console.error("[xie-diary] 删除日记失败:", err);
-    reply.code(500).send({ error: err.message });
-  }
-});
-
 // 移动端管理页面
 app.get("/admin/mobile", { preHandler: mobileAuth }, async (req, reply) => {
   const fss = require("fs");
