@@ -448,7 +448,9 @@ footer{
 .inputbar:focus-within{border-color:var(--inputbar-focus-border,rgba(197,143,150,.35));box-shadow:var(--inputbar-focus-shadow,0 0 0 3px rgba(197,143,150,.07),0 4px 18px rgba(80,65,55,.06))}
 #input{
   flex:1;min-width:0;border:none;outline:none;background:transparent;
-  font-size:15px;line-height:1.5;color:var(--input-text,var(--ink));
+  /* 字号 16px：iOS Safari 对 <16px 的表单控件聚焦时会自动放大整个页面（viewport 已允许缩放），
+     16px 是其不触发放大的阈值。行高写死 22.5px（= 原 15px × 1.5）以保证盒高与多行行距不变。 */
+  font-size:16px;line-height:22.5px;color:var(--input-text,var(--ink));
   resize:none;max-height:120px;font-family:inherit;
 }
 #input::placeholder{color:var(--input-placeholder,var(--ink3))}
@@ -580,7 +582,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .login-sub{font-size:12.5px;color:var(--ink2);margin-bottom:20px;}
 .login-field{margin-bottom:12px;}
 .login-field label{display:block;font-size:12px;color:var(--ink2);margin-bottom:6px;text-align:left;letter-spacing:.02em;}
-.login-field input{width:100%;border:1px solid var(--line);border-radius:var(--radius-sm);padding:12px 14px;font-size:15px;color:var(--ink);outline:none;background:var(--field-bg,#fff);transition:border .2s;}
+.login-field input{width:100%;border:1px solid var(--line);border-radius:var(--radius-sm);padding:12px 14px;font-size:16px;color:var(--ink);outline:none;background:var(--field-bg,#fff);transition:border .2s;}
 .login-field input:focus{border-color:rgba(var(--accent-rgb),.45);}
 .login-btn{width:100%;padding:13px 0;font-size:16px;letter-spacing:.3em;border:none;border-radius:var(--radius-sm);background:var(--accent-grad);color:#fff;font-weight:600;cursor:pointer;transition:opacity .2s;margin-top:6px;}
 .login-btn:active{opacity:.85;}
@@ -623,7 +625,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .field label .tag{color:var(--accent);font-size:10px;margin-left:5px}
 .field input,.field textarea{
   width:100%;border:1px solid var(--line);border-radius:var(--radius-sm);
-  padding:11px 12px;font-size:14px;color:var(--ink);outline:none;background:var(--field-bg,#fff);
+  padding:11px 12px;font-size:16px;color:var(--ink);outline:none;background:var(--field-bg,#fff);
   font-family:inherit;transition:border .2s;
 }
 .field input:focus,.field textarea:focus{border-color:var(--accent)}
@@ -659,7 +661,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .mcp-row{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
 .mcp-row label{width:auto;flex-shrink:0;font-size:12px;color:var(--ink2);text-align:left;letter-spacing:.3px}
 .mcp-row label .tag{margin-left:4px}
-.mcp-row input[type="text"],.mcp-row input[type="password"],.mcp-row select,.mcp-row textarea{width:100%;flex:1;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px;color:var(--ink);outline:none;background:var(--field-bg,#fff);font-family:inherit}
+.mcp-row input[type="text"],.mcp-row input[type="password"],.mcp-row select,.mcp-row textarea{width:100%;flex:1;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:16px;color:var(--ink);outline:none;background:var(--field-bg,#fff);font-family:inherit}
 .mcp-row input[type="checkbox"]{width:18px;height:18px}
 .mcp-row.single{align-items:center;flex-direction:row;gap:10px}
 .mcp-row.single label{margin-bottom:0}
@@ -1181,7 +1183,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .adm-badge{font-size:9px;font-weight:600;letter-spacing:1px;color:var(--accent-deep);border:1px solid var(--line-strong);padding:1px 6px;border-radius:8px}
 /* 会话搜索 */
 .session-search{display:flex;align-items:center;gap:6px;margin:10px 14px 8px;padding:8px 10px;border:1px solid var(--line);border-radius:18px;background:var(--field-bg,var(--chrome-item,rgba(255,255,255,.7)))}
-.session-search input{flex:1;min-width:0;border:none;outline:none;background:transparent;font-size:13px;color:var(--ink);font-family:inherit}
+.session-search input{flex:1;min-width:0;border:none;outline:none;background:transparent;font-size:16px;color:var(--ink);font-family:inherit}
 .session-search .si{color:var(--ink3);font-size:14px;flex-shrink:0}
 .sr-score{font-size:10px;color:var(--ink3);margin-left:auto;padding:1px 5px;background:var(--accent-faint);border-radius:4px}
 .session-results{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:4px 10px}
@@ -1209,7 +1211,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 #navDrawer .set-sec textarea,
 .adm-card-b input:not([type="checkbox"]):not([type="color"]):not([type="range"]):not([type="radio"]),
 .adm-card-b select,
-.adm-card-b textarea{border:1px solid var(--line);border-radius:var(--radius-sm);padding:9px 11px;font-size:13px;color:var(--ink);background:var(--field-bg,#fff);outline:none;font-family:inherit}
+.adm-card-b textarea{border:1px solid var(--line);border-radius:var(--radius-sm);padding:9px 11px;font-size:16px;color:var(--ink);background:var(--field-bg,#fff);outline:none;font-family:inherit}
 #navDrawer .set-sec input:focus,#navDrawer .set-sec textarea:focus,.adm-card-b input:focus,.adm-card-b textarea:focus{border-color:var(--accent)}
 /* 消息/编辑窗口统一居中 */
 #editMask{align-items:center;padding:16px}
@@ -1566,7 +1568,7 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
   <div class="modal-card">
     <h3 id="diaryModalTitle">编辑日记</h3>
     <div id="diaryModalName" style="font-size:12px;color:var(--ink2);margin-bottom:8px"></div>
-    <textarea id="diaryModalContent" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;color:var(--ink);background:var(--field-bg,#fff);min-height:200px;resize:vertical;font-family:inherit;line-height:1.6"></textarea>
+    <textarea id="diaryModalContent" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:16px;color:var(--ink);background:var(--field-bg,#fff);min-height:200px;resize:vertical;font-family:inherit;line-height:1.6"></textarea>
     <div style="display:flex;gap:8px;margin-top:12px"><button type="button" id="diaryModalDel" class="mcp-btn" style="font-weight:500">删除</button><button type="button" id="diaryModalSave" class="mcp-btn primary">保存</button></div>
     <div id="diaryModalMsg" class="mcp-msg"></div>
   </div>
@@ -4005,7 +4007,7 @@ function renderPromptBackups(){
       } else if(act==="edit"){
         openEditModal("编辑提示词备份",
           '<div class="field"><label>名称</label><input type="text" id="pb-ed-name" value="'+escapeHtml(b.name||"")+'" maxlength="30"></div>'
-          +'<div class="field"><label>内容</label><textarea id="pb-ed-content" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;color:var(--ink);background:var(--field-bg,#fff);min-height:260px;resize:vertical;font-family:inherit;line-height:1.6">'+escapeHtml(b.content||"")+'</textarea></div>',
+          +'<div class="field"><label>内容</label><textarea id="pb-ed-content" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:16px;color:var(--ink);background:var(--field-bg,#fff);min-height:260px;resize:vertical;font-family:inherit;line-height:1.6">'+escapeHtml(b.content||"")+'</textarea></div>',
           function(){
             const nv=document.getElementById("pb-ed-content").value;
             if(!nv.trim()){ showToast("内容不能为空"); return false; }
@@ -6759,7 +6761,7 @@ function renderNetease(body){
 }
 function editNetease(body){
   body.innerHTML='<div class="adm-item"><div class="adm-tip">MUSIC_U / __csrf 在 music.163.com 登录后从浏览器 Cookie 获取；留空表示不修改。</div>'
-    +'<textarea id="adm-net-mu" rows="3" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:11px;color:var(--ink);background:var(--field-bg,#fff);font-family:inherit;margin-bottom:8px" placeholder="MUSIC_U（必填）"></textarea>'
+    +'<textarea id="adm-net-mu" rows="3" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:16px;color:var(--ink);background:var(--field-bg,#fff);font-family:inherit;margin-bottom:8px" placeholder="MUSIC_U（必填）"></textarea>'
     +'<input id="adm-net-csrf" type="text" placeholder="__csrf（可选）" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:12px;color:var(--ink);background:var(--field-bg,#fff)">'
     +'<div class="adm-tr"><button class="p" id="adm-net-save">保存</button><button class="s" id="adm-net-back">返回</button></div>'
     +'<div class="adm-msg" id="adm-net-msg"></div></div>';
@@ -6848,7 +6850,7 @@ function bindMemPool(container, body){
 function addMemPool(body){
   openEditModal('新增记忆',
     '<div class="mcp-row"><label>分类</label><input id="em-cat" placeholder="分类" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;color:var(--ink);background:var(--field-bg,#fff)"></div>'
-    +'<div class="field"><label>内容</label><textarea id="em-content" rows="5" placeholder="记忆内容…" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;color:var(--ink);background:var(--field-bg,#fff);min-height:200px;resize:vertical;font-family:inherit"></textarea></div>',
+    +'<div class="field"><label>内容</label><textarea id="em-content" rows="5" placeholder="记忆内容…" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:16px;color:var(--ink);background:var(--field-bg,#fff);min-height:200px;resize:vertical;font-family:inherit"></textarea></div>',
     function(){
       var content=document.getElementById('em-content').value.trim(), cat=document.getElementById('em-cat').value;
       if(!content){ toast('内容不能为空'); return false; }
@@ -6860,7 +6862,7 @@ function editMemPool(id, body){
     var it=(d.items||[]).find(function(x){return String(x.id)===String(id);});
     openEditModal('编辑记忆',
       '<div class="mcp-row"><label>分类</label><input id="em-cat" value="'+esc(it?it.category:'')+'" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;color:var(--ink);background:var(--field-bg,#fff)"></div>'
-      +'<div class="field"><label>内容</label><textarea id="em-content" rows="5" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;color:var(--ink);background:var(--field-bg,#fff);min-height:200px;resize:vertical;font-family:inherit">'+esc(it?it.content:'')+'</textarea></div>',
+      +'<div class="field"><label>内容</label><textarea id="em-content" rows="5" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:16px;color:var(--ink);background:var(--field-bg,#fff);min-height:200px;resize:vertical;font-family:inherit">'+esc(it?it.content:'')+'</textarea></div>',
       function(){
         var content=document.getElementById('em-content').value.trim(), cat=document.getElementById('em-cat').value;
         if(!content){ toast('内容不能为空'); return false; }
@@ -6939,7 +6941,7 @@ function bindMarked(body){
       if(act==='unmark'){ if(confirm('取消标星该条消息？')){ admPost(BASE+'/context-compaction/mark',{key:key,marked:false}).then(function(){ if(it && it.parentNode) it.parentNode.removeChild(it); var _tip=body.querySelector('.adm-tip'); if(_tip) _tip.textContent='共 '+body.querySelectorAll('.adm-mark').length+' 条 ★ 取消标星，点「编辑」修改。'; }); } return; }
       if(act==='edit'){ openEditModal('编辑标星消息',
           '<div style="font-size:12px;color:var(--ink3);margin-bottom:6px">'+esc(btn.getAttribute('data-iidx')||'')+'</div>'
-          +'<textarea id="em-content" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;color:var(--ink);background:var(--field-bg,#fff);min-height:300px;resize:vertical;font-family:inherit;line-height:1.6">'+esc(it.getAttribute('data-full')||'')+'</textarea>',
+          +'<textarea id="em-content" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:16px;color:var(--ink);background:var(--field-bg,#fff);min-height:300px;resize:vertical;font-family:inherit;line-height:1.6">'+esc(it.getAttribute('data-full')||'')+'</textarea>',
           function(){ var v=document.getElementById('em-content').value.trim(); if(!v){ toast('正文内容不能为空'); return false; } admPost(BASE+'/context-compaction/marked/update',{key:key,content:v}).then(function(j){ if(j.error){ toast('保存失败:'+j.error); } else { toast('已保存'); if(it){ it.setAttribute('data-full', v); var _t=it.querySelector('.adm-mark-text'); if(_t) _t.textContent=v; } } }); });
         return; }
     });
@@ -6970,7 +6972,7 @@ function renderPin(body){
   document.getElementById('adm-pin-add').addEventListener('click', function(){
     openEditModal('新增永久上下文',
       '<div class="field"><label>标题（可选）</label><input id="ep-title" placeholder="标题（可选）" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;color:var(--ink);background:var(--field-bg,#fff)"></div>'
-      +'<div class="field"><label>内容</label><textarea id="ep-content" rows="5" placeholder="内容…" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;color:var(--ink);background:var(--field-bg,#fff)"></textarea></div>',
+      +'<div class="field"><label>内容</label><textarea id="ep-content" rows="5" placeholder="内容…" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:16px;color:var(--ink);background:var(--field-bg,#fff)"></textarea></div>',
       function(){
         var content=document.getElementById('ep-content').value.trim(), title=document.getElementById('ep-title').value.trim();
         if(!content){ toast('请输入内容'); return false; }
@@ -7015,7 +7017,7 @@ function openPinEdit(id, body){
     var m=((j&&j.list)||[]).find(function(x){return String(x.id)===String(id);});
     openEditModal('编辑永久上下文',
       '<div class="field"><label>标题（可选）</label><input id="ep-title" value="'+esc(m?m.title:'')+'" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;color:var(--ink);background:var(--field-bg,#fff)"></div>'
-      +'<div class="field"><label>内容</label><textarea id="ep-content" rows="6" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;color:var(--ink);background:var(--field-bg,#fff);min-height:220px;resize:vertical;font-family:inherit">'+esc(m?m.content:'')+'</textarea></div>',
+      +'<div class="field"><label>内容</label><textarea id="ep-content" rows="6" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:16px;color:var(--ink);background:var(--field-bg,#fff);min-height:220px;resize:vertical;font-family:inherit">'+esc(m?m.content:'')+'</textarea></div>',
       function(){
         var content=document.getElementById('ep-content').value.trim(), title=document.getElementById('ep-title').value.trim();
         if(!content){ toast('内容不能为空'); return false; }
@@ -7123,7 +7125,7 @@ function editPush(pos, body, isDel){
     }
     openEditModal('编辑推送',
       '<div class="mcp-row"><label>标题</label><input id="epush-title" value="'+esc(it.title||'')+'" placeholder="标题" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;color:var(--ink);background:var(--field-bg,#fff)"></div>'
-      +'<div class="mcp-row"><label>内容</label><textarea id="epush-body" rows="5" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;color:var(--ink);background:var(--field-bg,#fff);min-height:200px;resize:vertical;font-family:inherit">'+esc(it.body||'')+'</textarea></div>',
+      +'<div class="mcp-row"><label>内容</label><textarea id="epush-body" rows="5" style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:16px;color:var(--ink);background:var(--field-bg,#fff);min-height:200px;resize:vertical;font-family:inherit">'+esc(it.body||'')+'</textarea></div>',
       function(){
         var title=document.getElementById('epush-title').value.trim(), bodyV=document.getElementById('epush-body').value.trim();
         if(!bodyV){ toast('内容不能为空'); return false; }
