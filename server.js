@@ -1,5 +1,16 @@
 require("dotenv").config();
 
+// 2026-09-21 审查 H2：全局异常兜底。Node 15+ 未处理的 Promise rejection 默认杀进程，
+// 本进程承载 HTTP/SSE/唤醒定时器/流式回写，任一异步异常都会整体退出——记录后继续运行。
+process.on("unhandledRejection", (reason) => {
+  const detail = reason && reason.stack ? String(reason.stack).slice(0, 500) : String(reason).slice(0, 500);
+  console.error(JSON.stringify({ level: "error", event: "unhandled_rejection", detail }));
+});
+process.on("uncaughtException", (err) => {
+  const detail = err && err.stack ? String(err.stack).slice(0, 500) : String(err).slice(0, 500);
+  console.error(JSON.stringify({ level: "error", event: "uncaught_exception", detail }));
+});
+
 const Fastify = require("fastify");
 const fs = require("fs-extra");
 const path = require("path");
@@ -45,7 +56,8 @@ function sseNotify(sessionId) {
   if (!set || set.size === 0) return;
   const payload = JSON.stringify({ type: "history_update", session_id: sid, at: Date.now() });
   for (const reply of Array.from(set)) {
-    try { reply.raw.write("data: " + payload + "\n\n"); } catch (e) {}
+    try { reply.raw.write("data: " + payload + "\n\n"); }
+    catch (e) { set.delete(reply); } // 2026-09-21 审查 H13：写失败即摘除，死连接不再滞留 Set 反复遍历
   }
 }
 
@@ -55,7 +67,11 @@ const SSE_ZOMBIE_SCAN_MS = 60 * 1000;
 function sweepSseSubscribers() {
   for (const [sid, set] of sseSubscribers) {
     for (const reply of Array.from(set)) {
-      try { if (reply.raw && reply.raw.destroyed) set.delete(reply); }
+      // 2026-09-21 审查 H13：destroyed 之外补判 writableEnded/writableFinished（半开连接三选一命中即摘）
+      try {
+        const raw = reply.raw;
+        if (!raw || raw.destroyed || raw.writableEnded || raw.writableFinished) set.delete(reply);
+      }
       catch (e) { set.delete(reply); }
     }
     if (set.size === 0) sseSubscribers.delete(sid);
@@ -210,12 +226,8 @@ const TIMELINE_FILE = "enhanced_messages.json";
 // 多会话：按 sessionId 计算对应的时间线文件。
 // 空/缺省 sessionId 走默认主会话（enhanced_messages.json），100% 兼容旧行为。
 // 清洗后为空的会话ID（如纯中文）用哈希生成稳定文件名：否则不同会话会共用 enhanced_messages_.json 串数据。
-function safeSessionToken(sessionId) {
-  if (!sessionId || sessionId === "default") return "default";
-  // 只允许安全的会话ID字符，防止路径穿越
-  const safe = String(sessionId).replace(/[^A-Za-z0-9_-]/g, "");
-  return safe || ("h" + crypto.createHash("md5").update(String(sessionId)).digest("hex").slice(0, 12));
-}
+// 2026-09-21 审查 R20：实现收敛到 lib/session-token.js（diary.js / context-replacements.js 同源副本已一并收敛）
+const { safeSessionToken } = require("./lib/session-token");
 function timelineFileFor(sessionId) {
   const token = safeSessionToken(sessionId);
   if (token === "default") return TIMELINE_FILE;
@@ -764,7 +776,9 @@ async function releaseHeldMessages(sessionId) {
   const targetApiUrl = readEnvValue("TARGET_API_URL");
   const targetApiKey = readEnvValue("TARGET_API_KEY");
   const modelName = readEnvValue("MODEL_NAME");
-  if (!targetApiUrl || !targetApiKey || !modelName) { console.warn("[quiet] 缺少上游配置，无法生成总结"); return; }
+  // 2026-09-21 审查 H12：缺上游配置必须抛错——裸 return 会被调用方当成功并清掉调度，
+  // 扣住消息从此再无自动释放路径（静默丢失）。抛错让 releaseQuietOnce 进 60s 重试、保留调度。
+  if (!targetApiUrl || !targetApiKey || !modelName) { throw new Error("[quiet] 缺少上游配置 TARGET_API_URL/KEY/MODEL_NAME，无法生成总结（扣住消息保留待重试）"); }
   const timeline = loadTimeline(sid);
   const sp = timeline.find(m => m.role === "system");
   const cleanSP = sp ? String(normalizeContentToText(sp.content)).split("## search_web 工具使用说明")[0].trim() : "";
@@ -994,6 +1008,7 @@ function loadTimeline(sessionId) {
         fs.copySync(file, bak);
         _corruptBackupDone.add(file);
         console.error("[timeline] 时间线文件损坏，已备份到 " + bak + "，本次按空时间线处理；该文件的后续写入将被拒绝直至人工恢复:", err.message);
+        notifyTimelineWriteRejected("时间线文件损坏已备份(.corrupt-*)，该会话后续写入将被拒", sessionId);
       } catch (bakErr) {
         console.error("[timeline] 时间线文件损坏且备份失败（写入守卫仍会拒绝覆盖）:", err.message, "|", bakErr.message);
       }
@@ -1079,6 +1094,16 @@ function atomicWriteFileSync(file, content) {
 // ========================
 // 保存 timeline（保留 SP）
 // ========================
+// 2026-09-21 审查 H3②+H4：拒写/损坏对管理员必须可见——此前只有 console.error，
+// 调用方又不检查 saveTimeline 返回值，会话冻结/消息丢弃完全静默。Bark 推送 fire-and-forget。
+function notifyTimelineWriteRejected(reason, sessionId) {
+  try {
+    sendPushNotification({
+      title: "⚠️ 时间线写入被拒",
+      body: `会话 ${sessionId || "default"}：${reason}。该会话可能已冻结/消息未落盘，请尽快人工处理。`
+    }).catch(e => console.error("[timeline] 拒写告警推送失败:", e.message));
+  } catch (e) { console.error("[timeline] 拒写告警推送异常:", e.message); }
+}
 function saveTimeline(messages, sessionId) {
   const file = timelineFileFor(sessionId);
   // ── 写守卫（2026-09-19 审查 P1-2 配套）：两条拒写规则，先 corrupt 后过期快照。──
@@ -1086,6 +1111,7 @@ function saveTimeline(messages, sessionId) {
   //    否则一次普通 append 就把整份历史覆盖成「空 + 新消息」（原文件已有 .corrupt-* 备份）。
   if (messages && messages.__corrupt === true && fs.existsSync(file)) {
     console.error("[timeline] 拒绝写入：会话 " + (sessionId || "default") + " 的时间线文件此前读取损坏（.corrupt-* 已备份），本次写入已丢弃以保护原文件。请人工核对恢复后重试。");
+    notifyTimelineWriteRejected("时间线文件损坏，写入被拒（会话冻结中）", sessionId);
     return false;
   }
   // 2) 过期快照守卫：克隆数组带 __fp（load 时刻的盘上指纹）。盘上指纹已变＝load 与 save
@@ -1095,6 +1121,7 @@ function saveTimeline(messages, sessionId) {
     const curFp = timelineFingerprint(file);
     if (curFp && curFp !== messages.__fp) {
       console.error("[timeline] 拒绝写入：会话 " + (sessionId || "default") + " 的快照已过期（load 时指纹 " + messages.__fp + " ≠ 盘上当前 " + curFp + "，期间有其他写入）。本次写入已丢弃以避免覆盖新消息，请重新 loadTimeline 后再修改。");
+      notifyTimelineWriteRejected("快照过期冲突，写入被拒（本条修改未落盘）", sessionId);
       return false;
     }
   }
@@ -1102,6 +1129,7 @@ function saveTimeline(messages, sessionId) {
   if (!fs.existsSync(file)) {
     if (isSessionTombstoned(safeSessionToken(sessionId))) {
       console.error("[timeline] 拒绝写入：会话 " + (sessionId || "default") + " 已删除且在墓碑期内，本次写入已丢弃（防迟到写入复活已删会话）。");
+      notifyTimelineWriteRejected("会话已删除（墓碑期），迟到写入被拒", sessionId);
       return false;
     }
   }
@@ -1808,6 +1836,13 @@ function writeEnvUpdates(updates) {
     const lines = orderedKeys.map(key => `${key}=${serializeEnvValue(merged[key])}`);
     atomicWriteFileSync(ENV_FILE, lines.join("\n") + "\n");
     cachedEnv = { ...merged };
+    // 2026-09-21 审查 H8：同步 process.env，否则 isAuthorized/validSessionToken 仍读旧值，
+    // 管理台改完口令出现「新口令登不进、旧口令照样能进」直到 pm2 restart
+    for (const key of Object.keys(updates)) {
+      const v = updates[key];
+      if (v === undefined || v === null) delete process.env[key];
+      else process.env[key] = String(v);
+    }
   };
   envWriteChain = envWriteChain.then(task, task);
   return envWriteChain;
@@ -1826,14 +1861,17 @@ app.addHook("onRequest", (req, reply, done) => {
   const isInternalPath = req.url.startsWith("/internal/") || req.url.startsWith("/test-bark");
   if (isInternalPath) {
     const internalKey = readEnvValue("INTERNAL_API_KEY");
-    if (internalKey) {
-      const supplied = String(req.headers["x-internal-key"] || "").trim();
-      if (supplied !== internalKey) {
-        reply.code(401).send({ error: "Invalid internal key" });
-        return;
-      }
-      return done();
+    // 2026-09-21 审查 H6：fail-closed——未配置 INTERNAL_API_KEY 时直接拒绝（原为放行落到网络判断）
+    if (!internalKey) {
+      reply.code(403).send({ error: "INTERNAL_API_KEY 未配置，内部接口已封锁" });
+      return;
     }
+    const supplied = String(req.headers["x-internal-key"] || "").trim();
+    if (supplied !== internalKey) {
+      reply.code(401).send({ error: "Invalid internal key" });
+      return;
+    }
+    return done();
   }
   // 批注 2026-07-15：公网部署常经过反代，真实公网请求可能在 Node 侧显示为 127/10 网段；
   // 所以 ALLOW_PUBLIC_API=true 后必须先验 /v1 的网关 key，避免被云平台内网 IP 绕过。
@@ -1873,15 +1911,12 @@ app.addHook("onRequest", (req, reply, done) => {
   const isLocalPeer = directIp === "127.0.0.1" || directIp === "::1" || directIp === "localhost" || /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(directIp);
   let ip = directIp;
   if (isLocalPeer) {
+    // 2026-09-21 审查 H6：只信 X-Real-IP，弃用 X-Forwarded-For 末段兜底——
+    // 链路上多一跳未改写 XFF 的代理时，攻击者自造 XFF 首段即可伪造可信 IP。
+    // 线上 nginx 反代到 3000 的全部 location 均已设 X-Real-IP（2026-09-21 核实）。
     const realIp = String(req.headers["x-real-ip"] || "").trim();
     if (realIp) {
       ip = String(realIp).replace(/^::ffff:/i, "");
-    } else {
-      const xff = String(req.headers["x-forwarded-for"] || "").trim();
-      if (xff) {
-        const parts = xff.split(",").map(s => s.trim()).filter(Boolean);
-        if (parts.length > 0) ip = String(parts[parts.length - 1]).replace(/^::ffff:/i, "");
-      }
     }
   }
   const isTrustedNetwork = ip === "127.0.0.1" || ip === "::1" || ip === "localhost" || /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(ip);
@@ -2348,15 +2383,18 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
       reply.raw.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
       streamStarted = true;
     }
-    try {
-      reply.raw.write("data: " + JSON.stringify({
-        id: "chatcmpl-mcp",
-        object: "chat.completion.chunk",
-        created: Math.floor(Date.now() / 1000),
-        model,
-        choices: [{ index: 0, delta: deltaObj, finish_reason: null }]
-      }) + "\n\n");
-    } catch (e) {}
+    // 2026-09-21 审查 R7：写失败必须上抛（由 mcp-tool-loop 的 emit 捕获置 clientGone 中断工具循环），
+    // 否则客户端断开后工具循环与多轮上游调用照常跑完，白烧 token
+    if (reply.raw.destroyed || reply.raw.writableEnded || reply.raw.writableFinished) {
+      throw new Error("client gone");
+    }
+    reply.raw.write("data: " + JSON.stringify({
+      id: "chatcmpl-mcp",
+      object: "chat.completion.chunk",
+      created: Math.floor(Date.now() / 1000),
+      model,
+      choices: [{ index: 0, delta: deltaObj, finish_reason: null }]
+    }) + "\n\n");
   };
   const onEvent = (evt) => {
     if (!evt) return;
@@ -2464,6 +2502,12 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         ? kelivoMessages
         : (messages || body.messages || []);
       const syncRes = appendRequestMessages(sessionId, reqMsgs);
+      // 稳定 id 沿用（2026-09-22）：自建前端预生成 reply_msg_id 随请求上行，落盘沿用同一 id——
+      // 回复落库前后端 id 一致，落库后、SSE 补拉前的编辑/删除也能被 /v1/timeline/sync 的 diff 分支按 id 定点命中。
+      // 冲突兜底：盘上已存在同 id 则弃用客户端 id（appendMessages 回退服务端 uuid），防时间线出现重复 id。
+      let replyMsgId = (typeof body.reply_msg_id === "string" && body.reply_msg_id.trim())
+        ? body.reply_msg_id.trim().slice(0, 64) : null;
+      if (replyMsgId && loadTimeline(sessionId).some(function (m) { return m && m.id === replyMsgId; })) replyMsgId = null;
       // 工具结果已经由 assistant.tools 结构化保存，不再额外写入旧式「【工具调用记录】」assistant 消息。
       const toAppend = [];
       // 富字段一并落时间线：reasoning/tools/tokens，跨设备刷新不再丢（前端 /v1/history 读取这些字段）。
@@ -2472,12 +2516,13 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
       const storedText = stripToolEchoBlocks(r.text || aiClean);
       if (!tailHasReply(sessionId, storedText)) {
         toAppend.push({
+          id: replyMsgId || undefined,
           role: "assistant", content: storedText, reasoning: r.reasoning || "", tools: r.toolHistory || [], tokens: r.usage || null,
           segments: (r.toolHistory && r.toolHistory.length) ? (r.segments || []).map(function(s){ return stripToolEchoBlocks(tagParser.stripTags(s)); }) : undefined   // 方案2刷新：正文段结构（已剥标签/工具回声），供前端交错插工具卡
         });
       }
       if (toAppend.length) appendMessages(sessionId, toAppend);
-      console.log("[mcp] AI 回复已写回时间线 (session=" + (sessionId || "default") + ", chars=" + r.text.length + ", 补齐=" + syncRes.appended + ", 清尾=" + syncRes.removedTail + ", 追加=" + toAppend.length + ")");
+      console.log("[mcp] AI 回复已写回时间线 (session=" + (sessionId || "default") + ", chars=" + r.text.length + ", 补齐=" + syncRes.appended + ", 清尾=" + syncRes.removedTail + ", 追加=" + toAppend.length + ", rid=" + (replyMsgId ? replyMsgId.slice(0, 8) : "-") + ")");
     } catch (wr) {
       console.warn("[mcp] 写回时间线失败:", wr.message);
     }
@@ -3001,7 +3046,13 @@ function isAuthorized(req) {
   const colonIndex = decoded.indexOf(":");
   const user = decoded.substring(0, colonIndex);
   const password = decoded.substring(colonIndex + 1);
-  return user === process.env.ADMIN_USER && password === process.env.ADMIN_PASSWORD;
+  // 2026-09-21 审查 H7：改恒定时间比较，与 validSessionToken 同标准；长度不等先拒（长度本身不构成秘密）
+  const expUser = String(process.env.ADMIN_USER || "");
+  const expPass = String(process.env.ADMIN_PASSWORD || "");
+  const ok = user.length === expUser.length && password.length === expPass.length
+    && crypto.timingSafeEqual(Buffer.from(user), Buffer.from(expUser))
+    && crypto.timingSafeEqual(Buffer.from(password), Buffer.from(expPass));
+  return ok;
 }
 
 function basicAuth(req, reply, done) {
@@ -3009,6 +3060,11 @@ function basicAuth(req, reply, done) {
     ensureCsrfCookie(req, reply);
     done();
     return;
+  }
+  // 2026-09-21 审查 H7：带了凭据但错误才计失败（未带凭据的普通访问不计，避免浏览者把自己锁死）
+  const authHeader = String(req.headers.authorization || "");
+  if (authHeader.startsWith("Basic ") && authHeader.length > 6) {
+    loginFail();
   }
   reply.code(401).header("WWW-Authenticate", 'Basic realm="Admin"').send("Unauthorized");
 }

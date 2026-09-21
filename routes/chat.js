@@ -748,6 +748,12 @@ app.post("/v1/chat/completions", async (req, reply) => {
     // 不再次调用上游、不重复写时间线。
     // ========================
     const clientMsgId = isClientChat ? String(body.client_msg_id || "").trim() : "";
+    // 自建前端预生成的本条回复稳定 id（chat.html reply_msg_id）：落盘沿用，保证落库前后端 id 一致，
+    // 回复刚落库、SSE 补拉之前的编辑/删除也能被 /v1/timeline/sync 的 diff 分支定点命中。
+    // 第三方客户端不带此字段 → null → appendMessages 内部照旧生成 uuid，向后兼容。
+    // 注意：本文件的流式/非流式落盘出口仅在 MCP 关闭/循环异常回退时执行，主出口在 server.js MCP 写回段。
+    const replyMsgId = (typeof body.reply_msg_id === "string" && body.reply_msg_id.trim())
+      ? body.reply_msg_id.trim().slice(0, 64) : null;
     if (clientMsgId) {
       const cached = recentReplies.get(clientMsgId);
       if (cached && isRecentReplyCacheable(cached) && (Date.now() - cached.ts) < IDEMPOTENCY_TTL_MS) {
@@ -1062,7 +1068,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
               }
               if (visibleContent) {
                 // 与流式路径同口径落富字段（2026-09-15：此前非流式丢思考链/token，刷新后不一致）
-                toAppend.push({ role: "assistant", content: visibleContent, reasoning: aiThinking || "", tokens: (parsed && parsed.usage) || null });
+                toAppend.push({ id: replyMsgId || undefined, role: "assistant", content: visibleContent, reasoning: aiThinking || "", tokens: (parsed && parsed.usage) || null });
               }
               if (toAppend.length) appendMessages(sessionId, toAppend);
             }
@@ -1210,7 +1216,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
             }
             if (visibleContent) {
               // 方案二增量：回复只追加一条（富字段 reasoning/tokens 一并落，跨设备刷新不丢）
-              toAppend.push({ role: "assistant", content: visibleContent, reasoning: aiThinking || "", tokens: aiUsage || null });
+              toAppend.push({ id: replyMsgId || undefined, role: "assistant", content: visibleContent, reasoning: aiThinking || "", tokens: aiUsage || null });
             }
             if (toAppend.length) appendMessages(sessionId, toAppend);
           }
