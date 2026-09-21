@@ -1372,7 +1372,7 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
 </div>
 
 <header>
-  <div class="avatar" id="hdAvatar" title="会话列表" style="cursor:pointer">谢</div>
+  <div class="avatar" id="hdAvatar" title="会话列表" role="button" tabindex="0" aria-label="打开会话列表" style="cursor:pointer">谢</div>
   <div class="hd-mid">
     <div class="hd-name-row">
       <div class="hd-name" id="hdName">谢意行</div>
@@ -1383,9 +1383,9 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
     </div>
     <div class="hd-sub" id="hdSub">一直在 · 陪你说话</div>
   </div>
-  <button class="hd-btn" id="worldBtn" title="小世界"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/></svg></button>
-  <button class="hd-btn" id="voiceBtn" title="语音通话"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.6a2 2 0 0 1-.5 2.1L8 9.6a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.8.3 1.7.5 2.6.6a2 2 0 0 1 1.7 2z"/></svg></button>
-  <button class="hd-btn" id="navBtn" title="菜单"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+  <button class="hd-btn" id="worldBtn" title="小世界" aria-label="小世界"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/></svg></button>
+  <button class="hd-btn" id="voiceBtn" title="语音通话" aria-label="语音通话"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.6a2 2 0 0 1-.5 2.1L8 9.6a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.8.3 1.7.5 2.6.6a2 2 0 0 1 1.7 2z"/></svg></button>
+  <button class="hd-btn" id="navBtn" title="菜单" aria-label="菜单"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
   <div id="topLoading"><i></i></div>
 </header>
 
@@ -1395,7 +1395,7 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
   <div class="drawer-panel">
     <div class="drawer-head">
       <span>会话列表</span>
-      <button class="drawer-close" id="sessionClose"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      <button class="drawer-close" id="sessionClose" aria-label="关闭会话列表"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>
     <div class="drawer-actions">
       <button class="drawer-btn" id="newSessionBtn">＋ 新建</button>
@@ -1415,7 +1415,7 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
 <div id="settingsDrawer" class="drawer">
   <div class="drawer-backdrop" id="settingsBackdrop"></div>
   <div class="drawer-panel">
-    <div class="drawer-head"><span>设置</span><button class="drawer-close" id="settingsClose"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+    <div class="drawer-head"><span>设置</span><button class="drawer-close" id="settingsClose" aria-label="关闭设置"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
     <div class="settings-body" id="settingsBody"></div>
     <div class="settings-footer" id="settingsFooter"></div>
   </div>
@@ -1426,7 +1426,7 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
   <div class="drawer-panel cc-panel">
     <div class="drawer-head">
       <span id="ccDrawerTitle">压缩</span>
-      <button class="drawer-close" id="ccClose"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      <button class="drawer-close" id="ccClose" aria-label="关闭"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>
     <div id="ccBody" class="cc-body"><div class="adm-load">加载中…</div></div>
   </div>
@@ -1441,7 +1441,7 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
   <button class="sbtn del" id="selDel">删除</button>
 </div>
 
-<div id="chat">
+<div id="chat" role="log" aria-live="polite" aria-relevant="additions text" aria-atomic="false">
   <div id="chatSwitching"><span class="cs-spin"></span></div>
   <div id="empty">
     <div class="big"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.6L18 9.4l-4.2 1.8L12 16l-1.8-4.8L6 9.4l4.2-1.8z"/></svg></div>
@@ -1453,10 +1453,10 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
 <footer>
   <div class="previews" id="previews"></div>
   <div class="inputbar">
-    <button class="icon-btn" id="imgBtn" title="发图片"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+    <button class="icon-btn" id="imgBtn" title="发图片" aria-label="发图片"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
     <textarea id="input" rows="1" placeholder="说点什么…"></textarea>
-    <button class="icon-btn" id="micBtn" title="按住说话（向上滑取消）"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10.5V11a7 7 0 0 1-14 0v-.5"/><line x1="12" y1="18.5" x2="12" y2="21.5"/><line x1="8.5" y1="21.5" x2="15.5" y2="21.5"/></svg></button>
-    <button class="icon-btn" id="send" title="发送"><svg class="ico fill" viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" stroke="none"><path d="M3 20 L21 11 L3 2 L3 9 L14 11 L3 13 Z"/></svg></button>
+    <button class="icon-btn" id="micBtn" title="按住说话（向上滑取消）" aria-label="按住说话"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10.5V11a7 7 0 0 1-14 0v-.5"/><line x1="12" y1="18.5" x2="12" y2="21.5"/><line x1="8.5" y1="21.5" x2="15.5" y2="21.5"/></svg></button>
+    <button class="icon-btn" id="send" title="发送" aria-label="发送"><svg class="ico fill" viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" stroke="none"><path d="M3 20 L21 11 L3 2 L3 9 L14 11 L3 13 Z"/></svg></button>
   </div>
   <input type="file" id="fileInput" accept="image/*,application/pdf,text/plain" multiple><input type="file" id="avatarFile" accept="image/*" style="display:none">
 </footer>
@@ -1589,7 +1589,7 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
 <div id="callOverlay" class="call-overlay">
   <div class="call-backdrop"></div>
   <div class="call-ui">
-    <button class="call-collapse" id="callCollapseBtn" title="收起通话"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
+    <button class="call-collapse" id="callCollapseBtn" title="收起通话" aria-label="收起通话"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
     <div class="call-mist" id="callMist">
       <div class="call-mist-ball mist1"></div>
       <div class="call-mist-ball mist2"></div>
@@ -1615,7 +1615,7 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
 <div id="callRecordModal" class="cr-modal hidden">
   <div class="cr-backdrop" id="callRecordBackdrop"></div>
   <div class="cr-panel">
-    <div class="cr-panel-h"><span>通话记录</span><button class="cr-close" id="callRecordClose" title="关闭">&times;</button></div>
+    <div class="cr-panel-h"><span>通话记录</span><button class="cr-close" id="callRecordClose" title="关闭" aria-label="关闭通话记录">&times;</button></div>
     <div class="cr-body" id="callRecordBody"></div>
   </div>
 </div>
@@ -1623,7 +1623,7 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
 <div id="navDrawer" class="drawer">
   <div class="drawer-backdrop" id="navBackdrop"></div>
   <div class="drawer-panel">
-    <div class="drawer-head"><span><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg> 后台活动</span><span class="drawer-head-right"><button class="drawer-close" id="navClose"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></span></div>
+    <div class="drawer-head"><span><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg> 后台活动</span><span class="drawer-head-right"><button class="drawer-close" id="navClose" aria-label="关闭菜单"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></span></div>
     <ul class="mnav">
       <li id="admGroup" style="display:contents"></li>
 
@@ -1733,7 +1733,7 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
 
 <div id="featurePanel">
   <div class="feature-bar">
-    <button class="feature-back" id="featureBack"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg></button>
+    <button class="feature-back" id="featureBack" aria-label="返回"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg></button>
     <span class="feature-title" id="featureTitle">小世界</span>
   </div>
   <div class="feature-body" id="featureBody"></div>
@@ -4544,7 +4544,7 @@ function renderVoiceProviders(){
     const voice=(p.active_voice?p.active_voice:'默认');
     const tname={doubao:'豆包',minimax:'MiniMax',openai:'OpenAI兼容'}[p.type]||(p.type||'豆包');
     const desc=tname+' · '+(p.api_key?('Key 已填'):('未填Key'))+' · 音色: '+escapeHtml(voice);
-    return '<div class="mcp-item"><div class="mi"><div class="mn">'+rad+escapeHtml(p.name||p.type)+' '+st+'</div><div class="ms">'+desc+'</div></div><div class="mo">'+sw+'<button data-i="'+i+'" data-act="vedit">编辑</button><button data-i="'+i+'" data-act="vdel" title="删除" style="font-size:15px">&times;</button></div></div>';
+    return '<div class="mcp-item"><div class="mi"><div class="mn">'+rad+escapeHtml(p.name||p.type)+' '+st+'</div><div class="ms">'+desc+'</div></div><div class="mo">'+sw+'<button data-i="'+i+'" data-act="vedit">编辑</button><button data-i="'+i+'" data-act="vdel" title="删除" aria-label="删除" style="font-size:15px">&times;</button></div></div>';
   }).join("");
   vpList.querySelectorAll('.mo button').forEach(function(b){
     b.addEventListener('click',function(){ var i=+b.dataset.i; if(b.dataset.act==='vedit') openVoiceProvForm(i); else deleteVoiceProvider(i); });
@@ -4621,7 +4621,7 @@ function renderVpDraftVoices(){
     const isAct=(v.value===_voiceDraftActive);
     const rad='<input type="radio" class="vpi-r" name="vpDraftActive" data-vi="'+i+'" '+(isAct?'checked':'')+'>';
     const lab='<span class="vpi-v"><b>'+escapeHtml(v.label||v.value)+'</b>'+(v.value!==(v.label||v.value)?' · '+escapeHtml(v.value):'')+'</span>';
-    const del='<button class="vpi-del" data-vi="'+i+'" data-act="vdel" title="删除音色">&times;</button>';
+    const del='<button class="vpi-del" data-vi="'+i+'" data-act="vdel" title="删除音色" aria-label="删除音色">&times;</button>';
     return '<div class="mcp-item">'+rad+lab+del+'</div>';
   }).join("");
   vpVoicesEl.querySelectorAll('input[name="vpDraftActive"]').forEach(function(inp){
@@ -5142,7 +5142,7 @@ function initSettingsDrawer(){
     var page=document.createElement("div");
     page.className="settings-page";
     page.id="settingsPage-"+cat.key;
-    page.innerHTML='<div class="settings-page-head"><button type="button" class="settings-back" data-back="1"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button><span>'+cat.name+'</span></div><div class="settings-page-body"></div>';
+    page.innerHTML='<div class="settings-page-head"><button type="button" class="settings-back" data-back="1" aria-label="返回"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button><span>'+cat.name+'</span></div><div class="settings-page-body"></div>';
     body.appendChild(page);
     var pgBody=page.querySelector(".settings-page-body");
     (cat.accs||[]).forEach(function(a){
@@ -5342,7 +5342,7 @@ function renderSessionList(){
     const locked=isLocked(s.id);
     const meta=(locked?'<span class="s-dot lock" title="锁定唤醒"></span>':'')+escapeHtml((s.real!=null?(""+s.real+" 条"):"")+(s.last_time?(" · "+fmtTime(new Date(s.last_time))):""));
     const checkHtml=merging?('<span class="s-check'+(mergeSel.has(s.id)?' on':'')+'">'+(mergeSel.has(s.id)?'✓':'')+'</span>'):'';
-    item.innerHTML='<div class="s-name">'+checkHtml+'<button class="s-icon pin'+(pinned?' on':'')+'" data-op="pin" data-id="'+escapeHtml(s.id)+'" title="'+(pinned?"取消置顶":"置顶")+'"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/></svg></button>'+'<span class="s-title" title="'+escapeHtml(name)+'">'+escapeHtml(name)+'</span><button class="s-icon ren" data-op="rename" data-id="'+escapeHtml(s.id)+'" title="改名"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/><path d="m15 5 4 4"/></svg></button></div>'+
+    item.innerHTML='<div class="s-name">'+checkHtml+'<button class="s-icon pin'+(pinned?' on':'')+'" data-op="pin" data-id="'+escapeHtml(s.id)+'" title="'+(pinned?"取消置顶":"置顶")+'" aria-label="'+(pinned?"取消置顶":"置顶")+'"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/></svg></button>'+'<span class="s-title" title="'+escapeHtml(name)+'">'+escapeHtml(name)+'</span><button class="s-icon ren" data-op="rename" data-id="'+escapeHtml(s.id)+'" title="改名" aria-label="改名"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/><path d="m15 5 4 4"/></svg></button></div>'+
       '<div class="s-ops"><span class="s-meta">'+meta+'</span><button class="s-more" title="更多操作" aria-label="更多操作"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button></div>';
     // 删除入口已收进「…」菜单（防误触），行内不再放常驻删除按钮
     item.querySelectorAll(".s-name .s-icon").forEach(btn=>btn.addEventListener("click",e=>{
@@ -7186,7 +7186,7 @@ else{ initAdminCards(); }
     if(!img || !img.src || img.src === location.href) return;
     var lb = document.getElementById("imgLightbox");
     if(!lb){ lb=document.createElement("div"); lb.id="imgLightbox";
-      lb.innerHTML='<div class="lb-box"></div><button class="lb-close" title="关闭">&times;</button>';
+      lb.innerHTML='<div class="lb-box"></div><button class="lb-close" title="关闭" aria-label="关闭图片预览">&times;</button>';
       var hideLb=function(){ lb.style.display="none"; };
       lb.addEventListener("click", function(ev){
         if(ev.target===lb || (ev.target && ev.target.classList && ev.target.classList.contains("lb-close"))) hideLb();
