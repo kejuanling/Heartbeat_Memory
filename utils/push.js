@@ -74,7 +74,11 @@ function toEpoch(at) {
   const d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
   return isNaN(d.getTime()) ? null : d.getTime();
 }
-// 原子写时间线文件（tmp+rename，防半截 JSON）；缺省目标=项目根主会话时间线
+// 原子写时间线文件（tmp+rename，防半截 JSON）；缺省目标=项目根主会话时间线。
+// ⚠️ 2026-09-22 审查 R19 后**已无生产调用方**（原唯一调用方 routes/push-events.js 的两处写回
+// 已改走 server.js 的 loadTimeline/saveTimeline）。本函数绕过 saveTimeline 的四道守卫
+// （损坏/过期快照/墓碑/__corrupt）且用固定 .tmp 名（并发互相截断），**不要再用于时间线写入**；
+// 如需独立路径，请复用 server.js 的 atomicWriteJsonSync 并自行补守卫。
 function writeTimelineAtomic(list, filePath) {
   const fsx = require('fs-extra');
   const targetPath = filePath || path.join(__dirname, '..', 'enhanced_messages.json');

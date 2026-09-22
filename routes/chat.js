@@ -282,6 +282,12 @@ module.exports = function registerChatRoutes(app, deps) {
         const bak = path.join(bakDir, file + '.deleted-' + new Date().toISOString().replace(/[:.]/g, '-'));
         fsp.copySync(file, bak);
       }
+      // 删除墓碑（2026-09-20 审查 F-3）。2026-09-22 审查 M10：必须**先立墓碑、再删文件**——
+      // 原顺序是「removeSync → 清理周边 → 最后才写墓碑」，中间的窗口里迟到的写入
+      // （生成中回复收尾/唤醒事件等）因「文件不存在且无墓碑」被 saveTimeline 放行，
+      // 已删会话会以「空时间线+新消息」的残骸文件复活。墓碑守卫条件是「文件不存在 + 墓碑期内」，
+      // 故先立墓碑即关闭该窗口。记录删除时刻，24h 内迟到写入被拒；过期自动失效，同 id 重建不受影响。
+      try { if (typeof markSessionDeleted === 'function') markSessionDeleted(safe); } catch (e) {}
       fsp.removeSync(file);
       // 2026-09-13 审查修复：同步清理会话周边文件——此前只删时间线，跨窗口快照/会话配置/
       // 唤醒锁定槽位永久残留，同 id 重建会话会继承旧快照固化的 created_at 导致日记注入边界漂移
@@ -304,9 +310,6 @@ module.exports = function registerChatRoutes(app, deps) {
         }
       } catch (e) {}
       console.log(`[sessions] 会话 ${safe} 已删除，周边文件清理 ${cleaned} 处`);
-      // 删除墓碑（2026-09-20 审查 F-3）：记录删除时刻，24h 内迟到的写入（生成中回复收尾等）
-      // 在 saveTimeline 被拒，防止已删会话以残骸文件复活；过期自动失效，同 id 重建不受影响。
-      try { if (typeof markSessionDeleted === 'function') markSessionDeleted(safe); } catch (e) {}
       reply.send({ ok: true, deleted: true, cleaned });
     } catch (err) {
       console.error('[DELETE /v1/sessions/:id] error:', err.message);

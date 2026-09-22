@@ -1,20 +1,18 @@
 'use strict';
-// 推送回显管理路由（自 server.js 拆出；依赖 basicAuth + 项目根 baseDir）
+// 推送回显管理路由（自 server.js 拆出；依赖 basicAuth + baseDir + loadTimeline/saveTimeline）
 const path = require('path');
-const crypto = require('crypto');
 const fsx = require('fs-extra');
-const { parsePushEcho, parseWakeEcho, buildPushEcho, fmtLocalAt, pushEchoMeta, toEpoch, writeTimelineAtomic } = require('../utils/push');
+const { parsePushEcho, parseWakeEcho, buildPushEcho, fmtLocalAt, pushEchoMeta, toEpoch } = require('../utils/push');
 
 const TIMELINE_FILE = 'enhanced_messages.json';
 
-// 与 server.js safeSessionToken 同口径：清洗为空 → md5 哈希文件名，
-// 避免纯中文等非法字符 sid 被错误解析到主会话时间线（读错数据/改错会话）
+const { safeSessionToken } = require('../lib/session-token'); // 2026-09-22 审查 §四.7：收敛手抄副本
+
+// 时间线文件路径（走共享 safeSessionToken，与 gateway / diary / context-replacements 同口径）：
+// 清洗为空 → md5 哈希文件名，避免纯中文等非法字符 sid 被错误解析到主会话时间线（读错数据/改错会话）
 function timelinePathFor(baseDir, sessionId) {
-  if (!sessionId || sessionId === 'default') {
-    return path.join(baseDir, TIMELINE_FILE);
-  }
-  const safe = String(sessionId).replace(/[^A-Za-z0-9_-]/g, '');
-  const token = safe || ('h' + crypto.createHash('md5').update(String(sessionId)).digest('hex').slice(0, 12));
+  const token = safeSessionToken(sessionId);
+  if (token === 'default') return path.join(baseDir, TIMELINE_FILE);
   return path.join(baseDir, `enhanced_messages_${token}.json`);
 }
 
@@ -48,7 +46,7 @@ function extractPushItems(timeline, sessionId) {
     });
 }
 
-module.exports = function registerPushEventsRoutes(app, { basicAuth, baseDir }) {
+module.exports = function registerPushEventsRoutes(app, { basicAuth, baseDir, loadTimeline, saveTimeline }) {
 
   // 列出推送记录
   // - 传 session_id：只返回该会话的推送
@@ -102,7 +100,12 @@ module.exports = function registerPushEventsRoutes(app, { basicAuth, baseDir }) 
       if (!body) return reply.send({ error: '内容不能为空' });
       const tlPath = timelinePathFor(baseDir, sessionId);
       if (!fsx.existsSync(tlPath)) return reply.code(404).send({ error: '时间线不存在' });
-      const timeline = fsx.readJsonSync(tlPath);
+      // 2026-09-22 审查 R19：改走 gateway 的 loadTimeline/saveTimeline——原实现
+      // readJsonSync → 改 → writeTimelineAtomic 整份写回，绕过 saveTimeline 四道守卫
+      // （损坏 / 过期快照 / 墓碑 / __corrupt），且用固定 .tmp 名：读与写之间任何其它写入
+      // （生成中回复收尾、唤醒落库）都会被整份覆盖掉。loadTimeline 带 __fp 快照指纹，
+      // saveTimeline 据此拒写并发冲突，拒绝时回 409 让前端刷新重试而非静默丢数据。
+      const timeline = loadTimeline(sessionId);
       if (!Array.isArray(timeline)) return reply.send({ error: '时间线不可读' });
       const idx = timeline.findIndex(function (x) { return (x.role === 'assistant' || x.role === 'developer') && x.position === position; });
       if (idx < 0) return reply.code(404).send({ error: '记录不存在' });
@@ -113,7 +116,9 @@ module.exports = function registerPushEventsRoutes(app, { basicAuth, baseDir }) 
       msg.push_body = body;
       msg.push_tail = meta.tail || '';
       msg.updated_at = new Date().toISOString();
-      writeTimelineAtomic(timeline, tlPath);
+      if (saveTimeline(timeline, sessionId) === false) {
+        return reply.code(409).send({ error: '时间线已被其它写入更新（或已删除），请刷新后重试' });
+      }
       reply.send({ success: true, entry: Object.assign({}, pushEchoMeta(msg), { session_id: sessionId }), session_id: sessionId });
     } catch (err) { reply.code(500).send({ error: err.message }); }
   });
@@ -127,14 +132,17 @@ module.exports = function registerPushEventsRoutes(app, { basicAuth, baseDir }) 
       const content = String(b.content || '');
       const tlPath = timelinePathFor(baseDir, sessionId);
       if (!fsx.existsSync(tlPath)) return reply.code(404).send({ error: '时间线不存在' });
-      const timeline = fsx.readJsonSync(tlPath);
+      // 2026-09-22 审查 R19：同 update 路由，改走 loadTimeline/saveTimeline（守卫 + 快照指纹）
+      const timeline = loadTimeline(sessionId);
       if (!Array.isArray(timeline)) return reply.send({ error: '时间线不可读' });
       const idx = timeline.findIndex(function (x) { return (x.role === 'assistant' || x.role === 'developer') && x.position === position; });
       if (idx < 0) return reply.code(404).send({ error: '记录不存在' });
       const msg = timeline[idx];
       msg.deleted = true;
       msg.deleted_at = new Date().toISOString();
-      writeTimelineAtomic(timeline, tlPath);
+      if (saveTimeline(timeline, sessionId) === false) {
+        return reply.code(409).send({ error: '时间线已被其它写入更新（或已删除），请刷新后重试' });
+      }
       reply.send({ success: true, session_id: sessionId });
     } catch (err) { reply.code(500).send({ error: err.message }); }
   });

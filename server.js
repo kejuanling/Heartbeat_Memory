@@ -4055,7 +4055,8 @@ function isPushEchoContent(s) {
   return !!c && !c.includes("本次未发送") && /刚刚给.{1,24}发了.{1,24}?推送：/.test(c);
 }
 // 解析推送回显内容
-require("./routes/push-events")(app, { basicAuth, baseDir: __dirname });
+// 2026-09-22 审查 R19：注入 loadTimeline/saveTimeline，让推送编辑/删除走时间线四道守卫 + 快照指纹
+require("./routes/push-events")(app, { basicAuth, baseDir: __dirname, loadTimeline, saveTimeline });
 
 app.get("/admin/cross-window-inject", { preHandler: basicAuth }, async (req, reply) => {
   try {
