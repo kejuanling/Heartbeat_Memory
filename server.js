@@ -965,11 +965,13 @@ function createContentTagFilter() {
 const _timelineCache = new Map(); // sessionId -> { fp, data }
 const _TIMELINE_CACHE_MAX = 60;
 const _corruptBackupDone = new Set(); // 已做过 .corrupt-* 备份的文件：同一轮损坏只备份一次，防反复 load 堆积备份
-// 时间线文件指纹（size:mtimeMs）：读缓存失效与写守卫「过期快照拒写」共用
+// 时间线文件指纹（size:mtime:ctime:ino）：读缓存失效与写守卫「过期快照拒写」共用。
+// 2026-09-22 审查 M8：原只用 size:mtimeMs，同毫秒内等长编辑指纹不变 → 读缓存返回陈旧数据、
+// 写守卫失效。补 ctimeMs 与 ino（同一次 statSync 拿，零额外 IO）。
 function timelineFingerprint(file) {
   try {
     const st = fs.statSync(file);
-    return st.size + ":" + st.mtimeMs;
+    return st.size + ":" + st.mtimeMs + ":" + st.ctimeMs + ":" + st.ino;
   } catch (e) { return ""; }
 }
 // 时间线深拷贝（structuredClone 优先，退 JSON 往返）
@@ -1081,7 +1083,10 @@ function atomicWriteJsonSync(file, data) {
 function atomicWriteFileSync(file, content) {
   const tmp = file + "." + process.pid + "." + Date.now() + ".tmp";
   try {
-    fs.writeFileSync(tmp, content);
+    // 2026-09-22 审查 M3：rename 前补 fsync——否则数据可能仍在页缓存，掉电/断电后
+    // rename 已生效但内容截断（.env、时间线、墓碑等关键小文件都走这里）
+    const fd = fs.openSync(tmp, "w");
+    try { fs.writeFileSync(fd, content); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
     fs.renameSync(tmp, file);
   } finally {
     try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (e) {}
@@ -1819,7 +1824,25 @@ function loadEnvFileObject() {
 let cachedEnv = loadEnvFileObject();
 
 function serializeEnvValue(value) {
-  return String(value ?? "").replace(/\r?\n/g, "\\n");
+  const raw = String(value ?? "");
+  // 2026-09-22 审查 M4：原实现只把换行转成 \n——含 `#` 的值写入 .env 后会被 dotenv 当**行内注释截断**
+  // （如口令 p@ss#word 读回只剩 p@ss），首尾空白也会被 trim 掉。
+  // 实测 dotenv 17.4.2 规则：解析时**只还原 `\n`/`\r`，不还原 `\"` 与 `\\`**——所以「转义引号」无效，
+  // 唯一安全做法是加引号包裹。包裹策略：
+  //   ① 值不含单引号 → 用**单引号**包裹（dotenv 对单引号值不做任何还原，值可原样保留，含双引号也安全）；
+  //   ② 否则值不含双引号 → 用双引号包裹；
+  //   ③ 两者都含（或含换行）→ 无法安全包裹，按原样写入并告警。
+  // 其余情况保持原路径，行为与改动前逐字一致（含换行的值仍写为字面 \n，不改其语义）。
+  const needQuote = raw.indexOf("#") !== -1 || /^\s|\s$/.test(raw);
+  if (needQuote) {
+    const hasNl = raw.indexOf("\n") !== -1 || raw.indexOf("\r") !== -1;
+    if (!hasNl) {
+      if (raw.indexOf("'") === -1) return "'" + raw + "'";
+      if (raw.indexOf('"') === -1) return '"' + raw + '"';
+    }
+    console.warn("[env] 配置值含 # / 首尾空白，且同时含引号或换行，无法安全加引号包裹，按原样写入（回读可能被截断）");
+  }
+  return raw.replace(/\r?\n/g, "\\n");
 }
 
 // serialize .env read-merge-write to avoid concurrent /admin/save overwrite
@@ -1835,6 +1858,9 @@ function writeEnvUpdates(updates) {
     ];
     const lines = orderedKeys.map(key => `${key}=${serializeEnvValue(merged[key])}`);
     atomicWriteFileSync(ENV_FILE, lines.join("\n") + "\n");
+    // 2026-09-22 审查 M3：原子写经临时文件 rename，权限随 umask（实测线上 .env 为 0644，
+    // 任何本地用户可读全部密钥）。.env 强制 0600。
+    try { fs.chmodSync(ENV_FILE, 0o600); } catch (e) { console.warn("[env] chmod 0600 失败:", e.message); }
     cachedEnv = { ...merged };
     // 2026-09-21 审查 H8：同步 process.env，否则 isAuthorized/validSessionToken 仍读旧值，
     // 管理台改完口令出现「新口令登不进、旧口令照样能进」直到 pm2 restart
@@ -2009,7 +2035,8 @@ const wakeChatDeps = {
   setLastLLMCapture,
   splitMultimodalContent,
   isQuietActive,
-  prepareMessageForLLM
+  prepareMessageForLLM,
+  extractTimestampWithMemory   // 2026-09-22 审查 §3.5：唤醒侧时间反查与对话侧统一口径（原只认 tm.time）
 };
 wakeChatModule(app, wakeChatDeps);
 
@@ -3037,12 +3064,17 @@ function parseCookies(header) {
 function adminBasePath(req) {
   return req.url.startsWith("/heartbeat/admin") ? "/heartbeat/admin" : "/admin";
 }
+let _warnedNoAdminCred = false;
 function isAuthorized(req) {
   const cookies = parseCookies(req.headers.cookie);
   if (cookies.admin_session && validSessionToken(cookies.admin_session)) return true;
   const auth = req.headers.authorization || "";
-  const [scheme, encoded] = auth.split(" ");
-  if (scheme !== "Basic" || !encoded) return false;
+  const spIdx = auth.indexOf(" ");
+  const scheme = spIdx >= 0 ? auth.slice(0, spIdx) : auth;
+  const encoded = spIdx >= 0 ? auth.slice(spIdx + 1) : "";
+  // 2026-09-22 审查 M6：scheme 按 HTTP 规范大小写不敏感（原 `!== "Basic"` 会拒掉 "basic"/"BASIC"，
+  // 某些客户端/代理会改大小写）；同时改用 indexOf+slice 取凭据，不再依赖 split 的段数。
+  if (scheme.toLowerCase() !== "basic" || !encoded) return false;
   const decoded = Buffer.from(encoded, "base64").toString();
   const colonIndex = decoded.indexOf(":");
   const user = decoded.substring(0, colonIndex);
@@ -3050,6 +3082,15 @@ function isAuthorized(req) {
   // 2026-09-21 审查 H7：改恒定时间比较，与 validSessionToken 同标准；长度不等先拒（长度本身不构成秘密）
   const expUser = String(process.env.ADMIN_USER || "");
   const expPass = String(process.env.ADMIN_PASSWORD || "");
+  // 2026-09-22 审查 M6：口令未配置时 fail-closed。原实现两者皆空时 `timingSafeEqual("","")` 为真，
+  // 于是「空用户名 + 空密码」即可进入管理台（配置残缺的部署存在认证绕过）。
+  if (!expUser || !expPass) {
+    if (!_warnedNoAdminCred) {
+      _warnedNoAdminCred = true;
+      console.error("[auth] ADMIN_USER/ADMIN_PASSWORD 未配置，管理台已拒绝全部请求（fail-closed）");
+    }
+    return false;
+  }
   const ok = user.length === expUser.length && password.length === expPass.length
     && crypto.timingSafeEqual(Buffer.from(user), Buffer.from(expUser))
     && crypto.timingSafeEqual(Buffer.from(password), Buffer.from(expPass));
@@ -4361,7 +4402,7 @@ function estimateAlertTokens(timeline) {
       for (const part of c) {
         if (!part) continue;
         if (part.type === "text" && typeof part.text === "string") tok += contextCompactor.estimateTokens(part.text);
-        else if (part.type === "image" || part.type === "image_url") tok += (contextCompactor.EST_IMAGE_TOKENS || 1200);
+        else if (part.type === "image" || part.type === "image_url") tok += contextCompactor.EST_IMAGE_TOKENS;   // §3.5：去掉 `|| 1200` 兜底字面（EST_IMAGE_TOKENS 恒有值，两口径统一）
         else if (part.type === "file" && part.file && typeof part.file.name === "string") tok += contextCompactor.estimateTokens("[文件] " + part.file.name);
         else tok += 1;
       }

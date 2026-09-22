@@ -2148,7 +2148,9 @@ function renderMd(text){
       if(j<lines.length){
         flushBuf();
         const code=escapeHtml(lines.slice(i+1,j).join("\n").replace(/\n$/,""));
-        const wrap=' class="code-wrap"';
+        // 2026-09-22 审查 §3.1：原为写死的 ' class="code-wrap"'，配置项 cfg.code_wrap（移动端代码块自动换行）
+        // 从未参与判断 → 该开关完全失效。改为跟随配置。
+        const wrap=cfg.code_wrap?' class="code-wrap"':'';
         const copyBtn='<button type="button" class="code-copy-btn" aria-label="复制代码">复制</button>';
         if(cfg.fold_code){
           html+='<details class="code-fold"><summary>代码块</summary><div class="code-block">'+copyBtn+'<pre'+wrap+'><code>'+code+'</code></pre></div></details>';
@@ -2316,10 +2318,19 @@ function msgStarKeySync(m){
   return "x"+Math.abs(h).toString(16);
 }
 // 粗略估算 token（usage 缺失时兜底显示）：中日韩/全角字符约 1 token，其它约 1/4。
+// 2026-09-22 审查 M14：原实现对每个字符跑一次正则（长消息主线程可感知卡顿），改为码点区间判断；
+// 保留「代理对（emoji 等）按一个字符计」的语义，与原 `for...of` 完全等价。
 function estTokens(s){
   s=String(s||"");
   let t=0;
-  for(const ch of s){ if(/[\u4e00-\u9fff\u3000-\u303f\uff01-\uffef]/.test(ch))t+=1; else t+=0.25; }
+  for(let i=0;i<s.length;i++){
+    const c=s.charCodeAt(i);
+    if(c>=0xd800&&c<=0xdbff&&i+1<s.length){
+      const c2=s.charCodeAt(i+1);
+      if(c2>=0xdc00&&c2<=0xdfff){ i++; t+=0.25; continue; }
+    }
+    if((c>=0x4e00&&c<=0x9fff)||(c>=0x3000&&c<=0x303f)||(c>=0xff01&&c<=0xffef)) t+=1; else t+=0.25;
+  }
   return Math.round(t);
 }
 
@@ -3089,6 +3100,7 @@ async function request(finalMsgs, fromSend){
   const _replyMid=newMsgId();   // 本条 AI 回复的稳定 id：随请求 reply_msg_id 上行，服务端 MCP 写回段落盘沿用同一 id——落库前后端 id 一致，落库后立刻编辑/删除也能 diff 定点
   appendTypingBox();
   let full="",reasoning="",usage=null,tools=[],reader=null,flushStreamSegs=null,_streamToolMode="live",streamedSegments=null;
+  let _streamTimedOut=false,_silenceTimer=null;   // 2026-09-22 审查 M17：流式「静默超时」标志与计时器（try 外声明，catch/finally 都要用）
   const syncToolSave=function(){
     // 流式 tool_start/tool_end 才是最准确的工具时间线；旧 tool_trace 只有整组回放时才兜底。
     if(Object.keys(_toolCards).length || _streamToolMode!=="group") tools=_finalTools();
@@ -3134,7 +3146,8 @@ async function request(finalMsgs, fromSend){
       const msg=j.choices[0].message||{};
       full=typeof msg.content==="string"?msg.content:"";
       if((j.usage)){usage=j.usage;}
-      if(j.choices[0].finish_reason==="length"){/* 截断提示 */ }
+      // 2026-09-22 审查 §3.1：原为空块，回复被长度上限截断时用户看不到任何提示。补最小提示。
+      if(j.choices[0].finish_reason==="length"){ showToast("回复达到长度上限，可能被截断"); }
       if(full){
         const p=makeSegPlayer(null);p.feed(full);
         flushStreamSegs=function(){return p.flush(full);};
@@ -3143,6 +3156,15 @@ async function request(finalMsgs, fromSend){
     _streamActive=true; _streamAnchor=null; _streamSegAnchors=[]; _streamToolAnchors={}; _streamNextSegIndex=0; for(const _k in _toolCards)delete _toolCards[_k];   // 方案2：进入流式工具卡插入模式
     reader=resp.body.getReader();
     const dec=new TextDecoder();let buf="";
+    // 2026-09-22 审查 M17：读流加「90 秒无任何数据」静默超时。此前 aborter 创建后全文件无一处
+    // abort()，reader.read() 会永久挂起 → sending 永远为 true → 发送键永久灰化、只能刷新页面。
+    // 只对「静默」计时（不限制总时长），避免模型思考久、迟迟不出字被误杀。
+    const STREAM_SILENCE_MS=90000;
+    const _resetSilence=function(){
+      if(_silenceTimer)clearTimeout(_silenceTimer);
+      _silenceTimer=setTimeout(function(){ _streamTimedOut=true; try{aborter.abort();}catch(e){} },STREAM_SILENCE_MS);
+    };
+    _resetSilence();
     /* ===== QQ 式分段连播（流式）=====
        正文按分隔符拆段，每段内容收齐后整条弹出一个气泡（带头像/名称），一条接一条；
        不再做整条打字机。思考链/工具链不单独先显，第一条正文气泡弹出时并入显示（用户 2026-09-02 拍板）。
@@ -3156,6 +3178,7 @@ async function request(finalMsgs, fromSend){
     };
     while(true){
       const {done,value}=await reader.read();
+      _resetSilence();   // M17：收到任何数据（含流结束）即重置静默计时
       if(done)break;
       buf+=dec.decode(value,{stream:true});
       let idx;
@@ -3216,7 +3239,8 @@ async function request(finalMsgs, fromSend){
       autoNameSessionWhenUntitled(full);
     }
   }catch(err){
-    /* 2026-09-13 死代码清理：AbortError 分支已删——中断生成功能 2026-09-08 移除后 aborter.abort() 全文件无调用，该分支不可达 */
+    /* 2026-09-22 审查 M17：本分支不再是死代码——「静默超时」（90s 无数据）现在会主动 abort，
+       中断生成的功能仍未恢复（无用户主动停止按钮），仅超时自动中断。 */
     try{if(flushStreamSegs){await flushStreamSegs();}}catch(e){}
     if(full){syncToolSave();
     finalMsgs.push({id:_replyMid,role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});}
@@ -3225,8 +3249,10 @@ async function request(finalMsgs, fromSend){
       if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
       autoNameSessionWhenUntitled(full);
     }
-    showError(err.message);
+    if(_streamTimedOut) showError("响应超时（90 秒未收到数据），已中断。请检查网络后重试");
+    else showError(err.message);
   }finally{
+    if(_silenceTimer){clearTimeout(_silenceTimer);_silenceTimer=null;}   // M17：清理静默超时计时器
     sending=false;setSendState(false);aborter=null;
     _streamActive=false; _streamAnchor=null; _streamSegAnchors=[]; _streamToolAnchors={}; _streamNextSegIndex=0; _streamSealBeforeTool=null;   // 结束流式工具卡插入模式
     showHeaderTyping(false);
@@ -4315,7 +4341,9 @@ function scheduleMcpRetry(){
   if(__mcpRetryT) return;
   if(__mcpRetryN>=5){ return; }              // 最多重试 5 次，避免死循环
   const delay = Math.min(2000*Math.pow(2,__mcpRetryN), 30000); __mcpRetryN++;
-  __mcpRetryT = setTimeout(function(){ __mcpRetryT=null; loadMcpServers(); }, delay);
+  // 2026-09-22 审查 §3.1：原为 loadMcpServers() 未传 force——命中 __mcpCache 会直接 return，
+  // 退避重试从不重新拉取（只重渲染旧缓存），"未连接服务器自动退避重试"名存实亡。传 true 强制重拉。
+  __mcpRetryT = setTimeout(function(){ __mcpRetryT=null; loadMcpServers(true); }, delay);
 }
 function refreshMcpServers(){ __mcpRetryN=0; if(__mcpRetryT){ clearTimeout(__mcpRetryT); __mcpRetryT=null; } loadMcpServers(true); }
 async function saveMcpServers(){

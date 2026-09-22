@@ -102,16 +102,17 @@ async function runWakeCompletion(deps, opts) {
     }
 
     // 容量提醒建议段的时间反查表（role+content → Date）：从会话时间线构建，
-    // 与对话侧同口径（2026-09-15 补：此前传 null，提醒文本退化为无时间锚的默认描述）
+    // 与对话侧同口径。2026-09-22 审查 §3.5：此前只认 `tm.time` 字段（无则跳过），
+    // 而对话侧用的是 extractTimestampWithMemory 的多级降级（time 字段 → <current_time> 标签 →
+    // 行首/行尾日期），两侧对同一份历史会算出不同的时间区间。改为共用同一实现。
     const timeByKey = new Map();
     try {
       for (const tm of deps.loadTimeline(sessionId)) {
         if (!tm || tm.role === "system" || deps.isSpecialEvent(tm)) continue;
-        if (!tm.time) continue;
-        const d = new Date(tm.time);
-        if (isNaN(d.getTime())) continue;
         const key = tm.role + "\u0000" + deps.normalizeContentToText(tm.content);
-        if (!timeByKey.has(key)) timeByKey.set(key, d);
+        if (timeByKey.has(key)) continue;
+        const t = typeof deps.extractTimestampWithMemory === "function" ? deps.extractTimestampWithMemory(tm) : (tm.time ? new Date(tm.time) : null);
+        if (t && !isNaN(t.getTime())) timeByKey.set(key, t);
       }
     } catch (e) { /* 反查表失败不阻断，提醒退化为无时间锚 */ }
 

@@ -19,7 +19,7 @@ const TIME_ZONE = resolveTimeZone();
 const TIMELINE_FILE = path.join(__dirname, "enhanced_messages.json");
 const COMPACTION_PROMPT_FILE = path.join(DATA_DIR, "compaction_prompt.json");
 const CTX_LIMIT_PROMPT_FILE = path.join(DATA_DIR, "ctx_limit_prompt.json");
-const MARKS_FILE = path.join(DATA_DIR, "context_compaction_marks.json");
+// 2026-09-22 审查 §3.4：MARKS_FILE 随 contentKey/loadMarks 收敛到 context-replacements 后已无使用点，删除
 // 2026-09-13 死代码清理：CACHE_MAX_ENTRIES / SUMMARY_HISTORY_MAX 已删——声明后全仓无引用
 
 const DEFAULT_CONFIG = {
@@ -130,7 +130,10 @@ function loadPersona() {
 // 「记忆浮现」：记忆池注入的永久记忆事件，不参与摘要；被摘要时段内的会直接从上下文删除
 function isMemoryFlash(msg) {
   if (!msg || msg.role !== "assistant") return false;
-  return String(msg.content || "").indexOf("记忆浮现") !== -1;
+  // 2026-09-22 审查 §3.5：原只做 indexOf——正文里正常提到「记忆浮现」四个字的真实回复会被
+  // 误判成注入事件、被排除出摘要。改为先过 isSpecialEvent（结构化前缀识别），
+  // 与 context-replacements.js 的同名判定同口径（isSpecialEvent 在本文件下方定义，函数声明提升）。
+  return isSpecialEvent(msg) && String(msg.content || "").indexOf("记忆浮现") !== -1;
 }
 
 function isSpecialEvent(msg) {
@@ -233,6 +236,10 @@ function makeChunk(items, index, includeMsgs, manual) {
     head: snippet(texts[0], 40),
     tail: snippet(texts[texts.length - 1], 40),
     signature: sig,
+    // 2026-09-22 审查 §3.3：以下四项为历史预留字段（曾计划承载「是否已生成摘要 / 摘要正文 /
+    // 生成时间 / 生成方式」），本模块内**无任何读写点**、恒为初始值；已核实 admin-mobile 与
+    // server.js 读的是 preview 自己的 chunks（server.js 另行构造 cached），与本函数的 chunk 无关。
+    // 保留是为了不动 chunk 结构（改动需全链路回归），如需瘦身可整体删除这四行。
     cached: false,
     summary: null,
     generatedAt: null,
@@ -356,9 +363,9 @@ function buildCompactionPrompt(chunk, cfg) {
   const lines = targetMsgs.map(function (m) {
     const role = m.role === "user" ? (process.env.USER_DISPLAY_NAME || "对方") : "我";
     const body = contentToText(m);
-    const think = "";
-    const line = "[" + role + "] " + body + think;
-    return line;
+    // 2026-09-22 审查 §3.3：原此处有 `const think = ""` 死变量（思考链渲染移除后的残留）并拼进行尾，
+    // 恒为空串、无任何作用，已删。
+    return "[" + role + "] " + body;
   });
   let conversationText = lines.join("\n\n");
   if (usable.length > 0 && usable.length !== msgs.length) {
@@ -487,20 +494,12 @@ async function generateSummaryForRange(start, end) {
   return { ok: true, summary: summary, length: summary.length, count: chunk.count };
 }
 
-// 与 context-replacements.js 的 contentKey 同实现同口径（本模块独立副本，改动需两处同步）
-function contentKey(msg) {
-  const text = contentToText(msg);
-  return crypto.createHash("sha256").update((msg && msg.role ? msg.role : "") + "\u0000" + text).digest("hex").slice(0, 32);
-}
+// 2026-09-22 审查 §3.4：原为两份独立副本（注释自称「改动需两处同步」，实际已开始漂移——
+// 本副本每次裸 readFileSync 无缓存，context-replacements 那份走 readJson 的 mtime 缓存）。
+// 收敛为单一实现委托，杜绝第三处口径。
+function contentKey(msg) { return contextReplacements.contentKey(msg); }
 
-// 与 context-replacements.js 的 loadMarks 同实现（独立副本，改动需两处同步）
-function loadMarks() {
-  try {
-    const data = JSON.parse(fs.readFileSync(MARKS_FILE, "utf-8"));
-    if (data && data.marks && typeof data.marks === "object") return data.marks;
-  } catch (err) { /* 无标记 */ }
-  return {};
-}
+function loadMarks() { return contextReplacements.loadMarks(); }
 
 function rangePreview(start, end, opts) {
   const cfg = loadConfig();
