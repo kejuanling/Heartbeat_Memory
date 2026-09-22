@@ -3096,7 +3096,10 @@ async function request(finalMsgs, fromSend){
   const isStream=(cfg.send_mode||"stream")==="stream" || cfg.send_mode===undefined;
   try{
     const payload={
-      model:"deepseek-v4-flash-vision-exp",
+      // 2026-09-22 审查 M20：不再硬编码 model —— 原前端写死 "deepseek-v4-flash-vision-exp"，
+      // 与后端 resolveChatModel 的「会话级设置 → 全局默认供应商 → env」三层脱钩：该模型名不在
+      // 供应商模型列表时被静默回退（线上日志长期刷「请求模型不在默认供应商列表，回退供应商默认」），
+      // 管理台「AI 供应商 / 默认模型」整块 UI 因此形同虚设。改为不传，由后端统一解析。
       stream:isStream,
       messages:buildMessages(slimForUpload(finalMsgs)),
       session_id:SessionStore.getCurrentSession(),
@@ -3634,11 +3637,23 @@ actDel.addEventListener("click",()=>{
 
 // 单条删除：直接从 DOM 移除该节点并重排 data-idx，避免对大会话全量 renderAll
 // 导致卡顿（markdown 重渲染是大头）。数据层 splice 后逐个更新后续 data-idx（只改属性，不重渲染内容）。
+// 2026-09-22 审查 M21：轻量路径此前只改 DOM data-idx，未同步窗口边界 _from/_to 与多选集合 selectSet，
+// 导致窗口化渲染下边界偏移一条（后续补载漏/重）、多选导出与删除按错位索引取错消息。
 function deleteSingleMsg(idx){
   if(idx<0||idx>=msgs.length)return;
   const target=msgs[idx];
   const tid=target&&target.id;   // 删除前记住 id，用于 diff 定点同步
   msgs.splice(idx,1);
+  // 窗口边界同步：删除点位于窗口起点之前，起点整体前移；锁定窗口（_to 非 null）终点同理前移
+  if(idx<_from)_from=Math.max(0,_from-1);
+  if(_to!==null&&idx<_to)_to=Math.max(0,_to-1);
+  // 多选集合同步：索引 > idx 整体前移，被删那条自身从集合移除（就地改，不换引用）
+  if(selectSet.size){
+    const _old=[...selectSet];
+    selectSet.clear();
+    for(const _n of _old){ if(_n<idx)selectSet.add(_n); else if(_n>idx)selectSet.add(_n-1); }
+    updateSelBar();
+  }
   const el=chatEl.querySelector('.msg[data-idx="'+idx+'"]');
   if(el)el.remove();
   // 更新它之后所有消息的 data-idx（防止后续再按 idx 定位错乱）
@@ -3924,7 +3939,10 @@ async function saveSettingsAll(){
   cfg.user_name=(userNameInput&&userNameInput.value.trim())||"我";
   cfg.user_avatar=(userAvatarInput&&userAvatarInput.value.trim())||"";
   cfg.ai_avatar=(aiAvatarInput&&aiAvatarInput.value.trim())||"";
-  cfg.ai_sub=(aiSubInput && aiSubInput.value)? aiSubInput.value.trim() : "";
+  // 2026-09-22 审查 M22：aiSubInput 对应的输入框在 UI 中已不存在（getElementById 恒 null），
+  // 原写法每次都把 cfg.ai_sub 写成空串并同步云端 → 副标题被永久清空且覆盖云端备份。
+  // 改为仅在元素存在时更新；元素缺失则保留加载到的原值不动。
+  if(aiSubInput) cfg.ai_sub=aiSubInput.value.trim();
   cfg.temperature=tempInput.value!==""?Number(tempInput.value):null;
   cfg.top_p=topPInput.value!==""?Number(topPInput.value):null;
   cfg.max_tokens=maxTokInput.value!==""?Number(maxTokInput.value):null;

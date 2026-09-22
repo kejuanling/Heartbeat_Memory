@@ -54,7 +54,6 @@ async function runWithTools({
   top_p,
   max_tokens,
   maxToolRounds = DEFAULT_MAX_TOOL_ROUNDS,
-  maxToolsPerRound = 5,
   fetchFn = fetch,
   resume = null,
   onEvent = null,
@@ -64,7 +63,7 @@ async function runWithTools({
   const routes = await loadTools(serverClients);
   const allRoutes = routes || [];
   const openaiTools = toOpenAITools(allRoutes);
-  const toolCtx = { serverClients, routes, upstreamUrl, upstreamKey, model, maxToolsPerRound, sessionId };
+  const toolCtx = { serverClients, routes, upstreamUrl, upstreamKey, model, sessionId };
 
   let working = messages.slice();
   let totalUsage = null;
@@ -190,12 +189,12 @@ async function runWithTools({
 // 执行一批 tool_call：结果写入 working（供下一轮上游请求）与 toolHistory（供前端展示）
 // 方案2 onEvent/nextIndex 可选：开启时每个工具实时推 tool_start（执行前）/tool_end（执行后），
 // 前端据此渲染"执行中→已完成/失败"状态卡；index 用于配对 start/end。老调用不传则跳过（兼容）。
+// 2026-09-22 用户拍板：单轮工具数上限取消（AI 实际很少用工具，上限反而制造两份实现漂移）——
+// 本函数与 streamToolLoop 现在都不限额；轮数仍由 maxToolRounds 兜底。
 async function executeToolCalls(toolCalls, working, toolHistory, ctx, onEvent, nextIndex, afterSeg) {
   const { serverClients, routes, upstreamUrl, upstreamKey, model } = ctx;
-  const maxPerRound = ctx.maxToolsPerRound || 5;
   for (let _i = 0; _i < toolCalls.length; _i++) {
     const tc = toolCalls[_i];
-    const _isOverLimit = _i >= (ctx.maxToolsPerRound || 5);
     const fn = tc.function || {};
     const name = fn.name || "";
     const args = _parseArgs(fn.arguments);
@@ -207,11 +206,7 @@ async function executeToolCalls(toolCalls, working, toolHistory, ctx, onEvent, n
     let error = null;
     try {
       if (typeof onEvent === "function") onEvent({ type: "tool_start", index, id, name, args, afterSeg: (typeof afterSeg === "number") ? afterSeg : -1 });
-      if (_isOverLimit) {
-        result = { markdown: JSON.stringify({ type: "tool_skipped", error: "max_tools_per_round", message: `单轮工具调用数超过上限 ${ctx.maxToolsPerRound || 5}，该工具未执行。`, tool: name }) };
-      } else {
-        result = await callToolByExposedName(serverClients, routes, name, args);
-      }
+      result = await callToolByExposedName(serverClients, routes, name, args);
     } catch (e) {
       error = e.message || String(e);
       result = { markdown: JSON.stringify({ type: "tool_error", error: "mcp_service_error", message: error }) };
@@ -222,7 +217,7 @@ async function executeToolCalls(toolCalls, working, toolHistory, ctx, onEvent, n
       tool_call_id: id,
       // 来源标记：工具名+调用时间+状态（成功/失败/空返回显式），模型不必靠内容特征猜；
       // 截断超大工具结果：时间线/后续轮次上下文都不需要完整大结果，30k 字符足够模型引用
-      content: buildToolResultContent({ name, time: toolTime, error: error || (_isOverLimit ? `单轮工具调用数超过上限 ${ctx.maxToolsPerRound || 5}，该工具未执行。` : null), markdown: _truncateResult(result.markdown || "", MAX_TOOL_RESULT_CHARS) })
+      content: buildToolResultContent({ name, time: toolTime, error: error || null, markdown: _truncateResult(result.markdown || "", MAX_TOOL_RESULT_CHARS) })
     });
     toolHistory.push({
       name,
@@ -232,7 +227,7 @@ async function executeToolCalls(toolCalls, working, toolHistory, ctx, onEvent, n
       error,
       afterSeg: (typeof afterSeg === "number") ? afterSeg : -1   // 方案2刷新：该工具位于第 afterSeg 段正文之后（-1=最前）
     });
-    if (typeof onEvent === "function") onEvent({ type: "tool_end", index, id, name, args, result: resTrunc, error, ok: !error && !_isOverLimit, afterSeg: (typeof afterSeg === "number") ? afterSeg : -1 });
+    if (typeof onEvent === "function") onEvent({ type: "tool_end", index, id, name, args, result: resTrunc, error, ok: !error, afterSeg: (typeof afterSeg === "number") ? afterSeg : -1 });
   }
 }
 

@@ -25,11 +25,11 @@
 const { tokenize, similarity } = require("./context-v2-adapter");
 
 // ---- 默认配置（0918 修订值；input.config 可浅覆盖）----
+// 2026-09-22 审查 R23：budgets 只保留**实际被读取**的两项（conversation_continuity / relevant_memories）。
+// 删掉的 system_instructions / core_identity / meaningful_moments 全代码零读取点——注释说"预算"
+// 但从不参与截断（代码明确「超限不截断，交管理」，见 230/281 之外的块构造），留着只会让人误以为存在限额。
 const DEFAULT_CONFIG = {
   budgets: {
-    system_instructions: 1200,     // 超限=管理问题，代码不截断（同 Identity）
-    core_identity: 600,            // 超限=管理问题（报警人工清理），代码不截断
-    meaningful_moments: 200,       // anchor 层预算；条数上限兜底，超限照实输出
     conversation_continuity: 40000, // Earlier Days 封顶仅防异常（篇数由用户配置 diaryCount 决定，不在此静默丢篇）
     relevant_memories: 400,        // 超限从尾部减条
   },
@@ -40,7 +40,7 @@ const DEFAULT_CONFIG = {
   // Relevant 改混合打分——词面当门槛（无关闲聊的语义地板再高也进不来），混合分排序：
   // 0.55 语义 + 0.25 词面（语义为主，0920 二次拍板；重要级×衰减项已删），≥0.28 入选，最多 3 条。
   // 校准实测（旧公式口径）：相关命中 0.475-0.594、带门槛闲聊 ≤0.299；删项后相关命中约 ×0.8。vecScores 缺场回落字面（上行）。
-  relevantLitGate: 0.15,
+  relevantLitGate: 0.30,   // 0921 用户拍板 0.15→0.30：字面卡更紧宁缺毋滥；副作用=换说法的低词面记忆更易被第一道门挡掉
   relevantMinHybridScore: 0.28,   // 0920 删重要级×衰减项后等比换算（原 0.35/满分1.0 → ×0.8）
   relevantHybridTopK: 3,
 };

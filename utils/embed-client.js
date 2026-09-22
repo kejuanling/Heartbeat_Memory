@@ -26,7 +26,9 @@ async function embedBatch(texts, query, timeoutMs) {
       body: JSON.stringify({ texts: list, query: query === true }),
       signal: ctrl.signal
     });
-    clearTimeout(timer);
+    // 2026-09-22 审查 R4-③：此处原先头一到就 clearTimeout，body 读取裸奔——
+    // embed-server 回完头挂起时会拖到 undici 默认 bodyTimeout(300s)，且熔断器不上报。
+    // 改为让 timer 覆盖到 resp.json() 结束，由 finally 统一清理（与 server.js:796 同款修法）。
     if (!resp.ok) throw new Error("HTTP " + resp.status);
     const data = await resp.json();
     if (!data.ok || !Array.isArray(data.vectors)) throw new Error(data.error || "bad payload");
