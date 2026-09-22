@@ -1988,8 +1988,9 @@ require("./routes/chat")(app, {
 });
 
 // ========================
-// 统一唤醒调用器（2026-09-15 唤醒并入网关）：POST /internal/wake-completions
+// 统一唤醒调用器（2026-09-15 唤醒并入网关）：进程内直调 wakeChatModule.runWakeCompletion
 // 与对话侧同一套上下文加工（chat-context.js）；唤醒特有行为仍在调用方。
+// （原 POST /internal/wake-completions HTTP 端点零消费者，2026-09-21 审查清理删除）
 // ========================
 const wakeChatModule = require("./routes/wake-chat");
 const wakeChatDeps = {
@@ -4344,13 +4345,12 @@ app.get("/admin/tools", { preHandler: basicAuth }, async (req, reply) => {
 });
 
 // 批次4 C5：容量提醒 token 估算（与容量提醒守卫 countUncompressedTokens 同口径）
+// 2026-09-22 审查 H10：计入 system/developer 头部块与 tool/tool_calls 往返，避免守卫失效。
 function estimateAlertTokens(timeline) {
   let tok = 0;
   for (const m of timeline) {
     if (!m) continue;
-    if (m.role === "system" || m.role === "developer") continue;
-    if (m.role !== "user" && m.role !== "assistant") continue;
-    if (m._ctxRep || m._ccSummary || m.tool_calls || m.tool_call_id) continue;
+    if (m._ctxRep || m._ccSummary) continue;
     if (isSpecialEvent(m)) continue;
     const c = m.content;
     if (typeof c === "string") {
@@ -4363,6 +4363,15 @@ function estimateAlertTokens(timeline) {
         else if (part.type === "image" || part.type === "image_url") tok += (contextCompactor.EST_IMAGE_TOKENS || 1200);
         else if (part.type === "file" && part.file && typeof part.file.name === "string") tok += contextCompactor.estimateTokens("[文件] " + part.file.name);
         else tok += 1;
+      }
+    }
+    // tool_calls 本身也占 token（名称 + 参数 JSON）
+    if (Array.isArray(m.tool_calls)) {
+      for (const tc of m.tool_calls) {
+        if (!tc || !tc.function) continue;
+        if (tc.function.name) tok += contextCompactor.estimateTokens(tc.function.name);
+        if (typeof tc.function.arguments === "string") tok += contextCompactor.estimateTokens(tc.function.arguments);
+        else if (tc.function.arguments) tok += contextCompactor.estimateTokens(JSON.stringify(tc.function.arguments));
       }
     }
   }

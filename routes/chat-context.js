@@ -4,6 +4,7 @@
 // 新增：tool 配对修复提取、出口字段净化、developer 头部注入块构造。
 // 约束：只有这里的代码有权决定「发给模型的消息长什么样」，两条链路必须走同一套。
 
+const crypto = require('crypto');
 const { formatDateTimeInTimeZone } = require('../time_utils');
 
 // ---- 工具调用记录 → role=tool 消息组（发送模型前的内存转换，不落盘）----
@@ -64,9 +65,15 @@ function convertToolNotesToToolRole(msgs) {
     if (!entries.length) { out.push(m); continue; }
     const toolCalls = [];
     const toolMsgs = [];
-    const baseId = "call_hist_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
+    // 2026-09-22 审查 H11：tool_call_id 必须稳定，否则同一段历史每轮请求都不同，
+    // 前缀缓存彻底失效、成本翻倍。改为基于原始消息内容 + 条目索引 + 工具名/时间的稳定哈希。
+    const baseHash = crypto.createHash('sha256').update(String(m.content || '')).digest('hex').slice(0, 16);
+    const baseId = "call_hist_" + baseHash;
     entries.forEach((e, k) => {
-      const id = baseId + "_" + k;
+      const entryHash = crypto.createHash('sha256')
+        .update(String(k) + "\0" + String(e.name || '') + "\0" + String(e.time || '') + "\0" + String(e.body || '').slice(0, 400))
+        .digest('hex').slice(0, 12);
+      const id = baseId + "_" + k + "_" + entryHash;
       toolCalls.push({ id, type: "function", function: { name: e.name || "unknown", arguments: "{}" } });
       toolMsgs.push({ role: "tool", tool_call_id: id, content: toolEntryToContent(e) });
     });
@@ -193,14 +200,14 @@ function createCtxLimitReminderGuard(deps) {
     return c.startsWith('## Historical Summary') || c.startsWith('（回忆 · ') || c.startsWith('（对话摘要');
   }
 
-  // 容量提醒统计口径（2026-09-04 起）：按「未覆盖（未被压缩块替换）的对话原文」做 token 估算
+  // 容量提醒统计口径（2026-09-22 审查 H10）：按「发送给上游的完整消息流」做 token 估算。
+  // 此前漏算 system/developer 头部块与 tool/tool_calls 往返，导致工具密集/头部块大的会话实际超量也不触发提醒。
+  // 跳过项只保留：被压缩替换的替身、摘要占位、特殊事件。
   function countUncompressedTokens(messages) {
     let tokTotal = 0;
     for (const m of messages) {
       if (!m) continue;
-      if (m.role === 'system' || m.role === 'developer') continue;
-      if (m.role !== 'user' && m.role !== 'assistant') continue;
-      if (m._ctxRep || m._ccSummary || m.tool_calls || m.tool_call_id) continue;
+      if (m._ctxRep || m._ccSummary) continue;
       if (isSummaryPlaceholder(m)) continue;
       if (isSpecialEvent(m)) continue;
       if (typeof m.content === 'string') tokTotal += contextCompactor.estimateTokens(m.content);
@@ -211,6 +218,15 @@ function createCtxLimitReminderGuard(deps) {
           else if (part.type === 'image' || part.type === 'image_url') tokTotal += contextCompactor.EST_IMAGE_TOKENS;
           else if (part.type === 'file' && part.file && typeof part.file.name === 'string') tokTotal += contextCompactor.estimateTokens('[文件] ' + part.file.name);
           else tokTotal += 1; // 未知分片（附件/文件等）至少占位计 1，避免漏算致容量判定偏乐观（审查 2026-09-05 B2）
+        }
+      }
+      // tool_calls 本身也占 token（名称 + 参数 JSON）
+      if (Array.isArray(m.tool_calls)) {
+        for (const tc of m.tool_calls) {
+          if (!tc || !tc.function) continue;
+          if (tc.function.name) tokTotal += contextCompactor.estimateTokens(tc.function.name);
+          if (typeof tc.function.arguments === 'string') tokTotal += contextCompactor.estimateTokens(tc.function.arguments);
+          else if (tc.function.arguments) tokTotal += contextCompactor.estimateTokens(JSON.stringify(tc.function.arguments));
         }
       }
     }
@@ -394,6 +410,35 @@ function downgradeHistoryImages(m) {
   return changed ? { ...m, content: parts } : m;
 }
 
+// ---- 统一模型消息加工管道（2026-09-21 审查 H9）----
+// 此前 chat.js 与 wake-chat.js 各自散装调用 repair/replace/guard/convert，顺序不同
+// （聊天侧 repair→replace→guard→convert；唤醒侧 replace→guard→convert→repair），
+// 同一份历史两条入口产出不同结构，与文件头「两条链路必须同一套」的约束冲突。
+// 现在顺序在这里写死，两条链路只准调本函数：
+//   repair（先修残缺对）→ applyReplacements（上下文替换）→ ctxLimitGuard（容量提醒）
+//   → convertToolNotesToToolRole（工具记录回灌）→ sanitizeForUpstream（出口净化）
+// opts: { applyReplacements?, ctxLimitGuard?, sessionId?, timeByKey?, logPrefix? }
+function prepareModelMessages(messages, opts) {
+  const o = opts || {};
+  const logPrefix = o.logPrefix || "[context-replacements]";
+  let msgs = repairToolCallPairs(messages);
+  if (typeof o.applyReplacements === "function") {
+    try {
+      const before = msgs.length;
+      msgs = o.applyReplacements(msgs);
+      if (msgs.length !== before) console.log(logPrefix + " 发送前替换生效: 消息 " + before + " -> " + msgs.length);
+    } catch (repErr) {
+      console.warn(logPrefix + " 替换失败（按原样转发）:", repErr.message);
+    }
+  }
+  if (typeof o.ctxLimitGuard === "function") {
+    try { o.ctxLimitGuard(msgs, o.sessionId, o.timeByKey); }
+    catch (e) { console.warn(logPrefix + " 容量提醒检测失败（不影响转发）:", e.message); }
+  }
+  msgs = convertToolNotesToToolRole(msgs);
+  return sanitizeForUpstream(msgs);
+}
+
 module.exports = {
   parseToolNoteEntries,
   toolEntryToContent,
@@ -401,6 +446,7 @@ module.exports = {
   repairToolCallPairs,
   sanitizeForUpstream,
   buildDeveloperHeaderBlocks,
+  prepareModelMessages,
   createCtxLimitReminderGuard,
   createConversationBuilder
 };
