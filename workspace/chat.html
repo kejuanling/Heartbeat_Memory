@@ -129,12 +129,6 @@ header{
 }
 /* 顶部保持无头像：会话名称直接落在左侧，给页面留出更安静的呼吸感 */
 header .avatar{display:none!important}
-.avatar::after{
-  content:'';position:absolute;bottom:2px;right:2px;
-  width:9px;height:9px;border-radius:50%;
-  background:var(--ok);border:2px solid var(--surface-solid);
-  opacity:.85;
-}
 .hd-mid{flex:1;min-width:0;position:relative;left:var(--header-title-x,0px);top:var(--header-title-y,0px)}
 /* 会话名称以屏幕视口为基准居中，不受左右按钮宽度影响 */
 header.hd-wx{display:grid;grid-template-columns:36px 1fr 72px;align-items:center;gap:0} header.hd-wx .hd-mid{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:max-content;align-items:center;text-align:center} header.hd-wx .hd-name-row{display:flex;align-items:center;gap:6px;white-space:nowrap} header.hd-wx .hd-name{text-align:center} header.hd-wx .hd-sub{display:none} header.hd-wx #voiceBtn{grid-column:1;grid-row:1;justify-self:start} header.hd-wx #worldBtn{grid-column:3;grid-row:1;justify-self:end;margin-right:36px} header.hd-wx #navBtn{grid-column:3;grid-row:1;justify-self:end}
@@ -215,12 +209,11 @@ header.hd-sms .hd-sub{display:none}
 .msg.ai .mhead .mav{background:linear-gradient(135deg,var(--accent-deep),#9d8f8a)}
 .mhead .mnm{font-size:11px;color:var(--ink2);letter-spacing:.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .message-avatar{display:none}
-.tok{font-size:11px;color:var(--ink3);opacity:.75;padding:2px 8px}
 .tok .tok-c{background:var(--accent-faint);border-radius:6px;padding:1px 6px;margin-right:4px;display:inline-block}
 .act-tok{display:flex;flex-wrap:wrap;gap:6px;padding:10px 4px 4px;font-size:12px;color:var(--ink2);align-items:center}
 .act-tok .tok-c{background:var(--accent-faint);border-radius:6px;padding:2px 10px;display:inline-block}
 #editInput{min-height:340px;line-height:1.7}
-#editMask .sheet{width:100%;max-width:min(96vw,1100px);}
+#editMask .sheet{width:100%;}
 .msg .bubble{
   padding:var(--bubble-padding,11px 14px);border-radius:var(--radius);
   font-size:var(--bubble-font-size,15px);line-height:var(--bubble-line-height,1.72);word-break:break-word;
@@ -604,8 +597,6 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .set-sec{margin-bottom:18px}
 .set-sec-title{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--accent-deep);letter-spacing:.02em;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--line)}
 .set-sec-title .si{font-size:15px}
-.set-panel{display:none;padding:2px 2px 6px}
-.set-panel.active{display:block}
 /* 设置改为折叠分组：点标题收起/展开（不再切页） */
 .set-panel{display:block;border:1px solid var(--line);border-radius:var(--radius-sm);background:transparent;margin:0 10px 12px;overflow:hidden;padding:0}
 .set-panel .set-sec{display:none;padding:12px 14px}
@@ -707,7 +698,6 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .set-fold-h{font-size:12px;font-weight:600;color:var(--ink2)}
 .set-fold-b{padding:2px 14px 14px}
 /* 显示与行为 / 渲染设置：pick 分块更清晰 */
-.pick{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 4px}
 .pick button{border:1px solid var(--line-strong);background:var(--field-bg,#fff);color:var(--ink2);padding:7px 13px;border-radius:9px;font-size:12px;cursor:pointer;transition:all .15s}
 .pick button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
 /* 提示词备份（AI 设置内）：与保存主题同风格，列表纵向排布 */
@@ -741,7 +731,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .field .row{display:flex;gap:12px}
 .field .row>div{flex:1}
 .pick{
-  display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;
+  display:flex;gap:10px;flex-wrap:wrap;margin:4px 0;
 }
 .pick button{
   border:1px solid var(--line);background:var(--field-bg,#fff);color:var(--ink2);
@@ -1849,9 +1839,6 @@ function applySettingsToUI(){
   if(typeof topPInput!=="undefined" && topPInput) topPInput.value=cfg.top_p!=null?cfg.top_p:"";
   if(typeof maxTokInput!=="undefined" && maxTokInput) maxTokInput.value=cfg.max_tokens!=null?cfg.max_tokens:"";
   if(typeof thAiNameInput!=="undefined" && thAiNameInput) thAiNameInput.value=cfg.ai_name||"谢意行";
-  if(typeof bgImageInput!=="undefined" && bgImageInput) bgImageInput.value=cfg.bg_image||"";
-  if(typeof bgColorInput!=="undefined" && bgColorInput) bgColorInput.value=cfg.bg_color||"#FBFAF8";
-  if(typeof fontSizeInput!=="undefined" && fontSizeInput) fontSizeInput.value=cfg.font_size||15;
   if(typeof userNameInput!=="undefined" && userNameInput) userNameInput.value=cfg.user_name||"我";
   if(typeof userAvatarInput!=="undefined" && userAvatarInput) userAvatarInput.value=cfg.user_avatar||"";
   if(typeof aiAvatarInput!=="undefined" && aiAvatarInput) aiAvatarInput.value=cfg.ai_avatar||"";
@@ -1908,28 +1895,12 @@ const hdSub=document.getElementById("hdSub");
 const hdAvatar=document.getElementById("hdAvatar");
 const pickThinking=document.getElementById("pickThinking");
 const pickOthers=document.getElementById("pickOthers");
-const pickRender=document.getElementById("pickRender");
 const pickMode=document.getElementById("pickMode");
 
 /* ---- 主题设置输入 ---- */
 const userNameInput=document.getElementById("userNameInput");const userAvatarInput=document.getElementById("userAvatarInput");const thAiNameInput=document.getElementById("thAiNameInput");const aiAvatarInput=document.getElementById("aiAvatarInput");const avatarFile=document.getElementById("avatarFile");let avatarTarget="";function bindAvatarUpload(btnId,target){const b=document.getElementById(btnId);if(!b)return;b.addEventListener("click",function(){avatarTarget=target;if(avatarFile){avatarFile.value="";avatarFile.click();}});}if(avatarFile)avatarFile.addEventListener("change",async function(){const f=avatarFile.files[0];if(!f)return;if(f.size>1.5*1024*1024){showToast("头像图过大，请选小于1.5MB");avatarFile.value="";return;}const fr=new FileReader();fr.onload=async function(){const t=avatarTarget==="ai"?aiAvatarInput:userAvatarInput;if(!t)return;try{t.value=await uploadImageToServer(fr.result);}catch(e){t.value=fr.result;showToast("转存服务器失败，暂存本地");}};fr.readAsDataURL(f);});bindAvatarUpload("userAvatarUp","user");bindAvatarUpload("aiAvatarUp","ai");const bubbleDelimInput=document.getElementById("bubbleDelimInput");
 const uploadMaxMbInput=document.getElementById("uploadMaxMb");
 const thinkSendCountInput=document.getElementById("thinkSendCount");
-const pageTextInput=document.getElementById("pageTextInput");
-const accentColorInput=document.getElementById("accentColorInput");
-const chromeBgInput=document.getElementById("chromeBgInput");
-const pageText2Input=document.getElementById("pageText2Input");
-const pageText3Input=document.getElementById("pageText3Input");
-const headerTitleInput=document.getElementById("headerTitleInput");
-const inputbarBgInput=document.getElementById("inputbarBgInput");
-const inputbarBorderInput=document.getElementById("inputbarBorderInput");
-const inputTextInput=document.getElementById("inputTextInput");
-const sendBtnInput=document.getElementById("sendBtnInput");
-const sendIconInput=document.getElementById("sendIconInput");
-const avatarBgInput=document.getElementById("avatarBgInput");
-const iconBtnBgInput=document.getElementById("iconBtnBgInput");
-const iconBtnColorInput=document.getElementById("iconBtnColorInput");
-const bubbleShadowInput=document.getElementById("bubbleShadowInput");
 const mcpList=document.getElementById("mcpList");
 const mcpAddBtn=document.getElementById("mcpAddBtn");
 const mcpForm=document.getElementById("mcpForm");
@@ -1959,7 +1930,6 @@ const provEnabled=document.getElementById("provEnabled");
 const provName=document.getElementById("provName");
 const provUrl=document.getElementById("provUrl");
 const provKey=document.getElementById("provKey");
-const provModel=document.getElementById("provModel");
 const provSaveBtn=document.getElementById("provSaveBtn");
 const provCancelBtn=document.getElementById("provCancelBtn");
 const provModelFetchBtn=document.getElementById("provModelFetchBtn");
@@ -3121,8 +3091,7 @@ async function request(finalMsgs, fromSend){
   let full="",reasoning="",usage=null,tools=[],reader=null,flushStreamSegs=null,_streamToolMode="live",streamedSegments=null;
   const syncToolSave=function(){
     // 流式 tool_start/tool_end 才是最准确的工具时间线；旧 tool_trace 只有整组回放时才兜底。
-    if(Object.keys(_toolCards).length) tools=_finalTools();
-    else if(_streamToolMode!=="group") tools=_finalTools();
+    if(Object.keys(_toolCards).length || _streamToolMode!=="group") tools=_finalTools();
   };
   const isStream=(cfg.send_mode||"stream")==="stream" || cfg.send_mode===undefined;
   try{
@@ -3209,6 +3178,29 @@ async function request(finalMsgs, fromSend){
         }catch(e){}
       }
     }
+    }
+    // 2026-09-22 审查 M18：最后一帧可能不以换行结尾，循环结束后残留 buf 需再处理一次，否则回复末尾丢失。
+    if (buf.trim()) {
+      const line = buf.trim();
+      if (line.startsWith("data:")) {
+        const data = line.slice(5).trim();
+        if (data !== "[DONE]") {
+          try {
+            const json = JSON.parse(data);
+            if (json.usage) { usage = json.usage; }
+            const delta = json.choices && json.choices[0] && json.choices[0].delta;
+            const hasContent = delta && delta.content;
+            if (delta) {
+              if (delta.content) full += delta.content;
+              if (delta.reasoning_content) reasoning += delta.reasoning_content;
+              if (delta.tool_trace) { tools = delta.tool_trace; _streamToolMode = "group"; }
+              if (delta.tool_start) _onToolStart(delta.tool_start);
+              if (delta.tool_end) _onToolEnd(delta.tool_end);
+            }
+            if (hasContent) { player.feed(full); }
+          } catch (e) {}
+        }
+      }
     }
     // 入库（分段连播：先把剩余未弹的段一条条补弹完，再静默重建，不重播整块动画）
     if(flushStreamSegs){await flushStreamSegs();}
@@ -3887,9 +3879,6 @@ function renderPicks(){
     const k=b.dataset.k;
     b.classList.toggle("on",!!cfg[k]);
   });
-  if(pickRender)pickRender.querySelectorAll("button").forEach(b=>{
-    b.classList.toggle("on",!!cfg[b.dataset.k]);
-  });
   if(pickMode)pickMode.querySelectorAll("button").forEach(b=>{
     b.classList.toggle("on",b.dataset.m===(cfg.send_mode||"stream"));
   });
@@ -3947,7 +3936,7 @@ async function saveSettingsAll(){
     const _v=cfg[_fk];
     if(typeof _v==="string" && /^data:image\//.test(_v)){
       try{ const _u=await uploadImageToServer(_v); if(_u) cfg[_fk]=_u; }
-      catch(_e){ showToast("「"+_fk+"」图片未能上传服务器，已用原图",2000); }
+      catch(_e){ showToast("「"+_fk+"」图片未能上传服务器，已用原图"); }
     }
   }
   if(k){try{localStorage.setItem(LS_KEY,api_key);}catch(e){}}
@@ -4067,7 +4056,6 @@ loadPromptBackups();
 
 /* ===== 对话发送配置已移除（2026-09-08）：图片原样透传；残留空壳与调用点已于 2026-09-11 清理 ===== */
 
-function getCookieV(n){ try{ const m=document.cookie.match(new RegExp('(?:^|; )'+n.replace(/[.$?*|{}()[\]\\/+^]/g,'\\$&')+'=([^;]*)')); return m?decodeURIComponent(m[1]):''; }catch(e){ return ''; } }
 
 /* ===== 修改登录密码 ===== */
 if(typeof pwSaveBtn!=="undefined" && document.getElementById("pwSaveBtn")){
@@ -4080,7 +4068,7 @@ if(typeof pwSaveBtn!=="undefined" && document.getElementById("pwSaveBtn")){
     if(!newPw||newPw.length<4){ showToast("新密码至少 4 位"); return; }
     if(newPw!==newPw2){ showToast("两次新密码不一致"); return; }
     try{
-      const r=await fetch("/heartbeat/admin/change-password",{method:"POST",headers:{ "Content-Type":"application/json","X-CSRF-Token":getCookieV("admin_csrf") },body:JSON.stringify({old_password:oldPw,new_password:newPw}),credentials:"include"});
+      const r=await fetch("/heartbeat/admin/change-password",{method:"POST",headers:{ "Content-Type":"application/json","X-CSRF-Token":getCookie("admin_csrf") },body:JSON.stringify({old_password:oldPw,new_password:newPw}),credentials:"include"});
       const j=await r.json().catch(function(){return {};});
       if(j.ok){ showToast("密码已更新"); if(msg)msg.textContent="已生效，下次登录请用新密码。"; document.getElementById("pwOld").value=""; document.getElementById("pwNew").value=""; document.getElementById("pwNew2").value=""; }
       else{ if(msg)msg.textContent=(j.error||"修改失败"); }
@@ -4159,11 +4147,6 @@ pickThinking.addEventListener("click",e=>{
   saveCfg();renderPicks();
 });
 if(pickOthers)pickOthers.addEventListener("click",e=>{
-  const b=e.target.closest("button");if(!b)return;
-  if(b.dataset.k in cfg){cfg[b.dataset.k]=!cfg[b.dataset.k];}
-  saveCfg();renderPicks();renderAll();
-});
-if(pickRender)pickRender.addEventListener("click",e=>{
   const b=e.target.closest("button");if(!b)return;
   if(b.dataset.k in cfg){cfg[b.dataset.k]=!cfg[b.dataset.k];}
   saveCfg();renderPicks();renderAll();
