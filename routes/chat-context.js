@@ -240,11 +240,19 @@ function createCtxLimitReminderGuard(deps) {
     let onDisk = false;
     try {
       const timeline = loadTimeline(sessionId);
-      for (const m of timeline) {
-        if (m && m.kind === 'ctx_limit' && !m.deleted) { m.deleted = true; onDisk = true; }
-      }
-      if (onDisk) saveTimeline(timeline, sessionId);
-      if (!onDisk) _ctxLimitReminderSessions.delete(sessionId || 'default');
+      // 2026-09-22 审查 R12：原实现就地改 loadTimeline() 返回的元素（m.deleted = true）——
+      // readJson 命中缓存时那是进程级缓存里的**原对象**，一旦 saveTimeline 被守卫拒写
+      // （过期快照/损坏/墓碑），缓存就会停在「已删」而磁盘上仍是未删，后续请求读到假状态。
+      // 改为构造新数组（仅命中条目换新对象），__fp 指纹原样带上以保住「过期快照拒写」保护。
+      let hit = false;
+      for (const m of timeline) { if (m && m.kind === 'ctx_limit' && !m.deleted) { hit = true; break; } }
+      if (!hit) { _ctxLimitReminderSessions.delete(sessionId || 'default'); return false; }
+      const next = timeline.map(function (m) {
+        return (m && m.kind === 'ctx_limit' && !m.deleted) ? Object.assign({}, m, { deleted: true }) : m;
+      });
+      try { if (timeline.__fp !== undefined) next.__fp = timeline.__fp; } catch (e) {}
+      onDisk = true;
+      saveTimeline(next, sessionId);   // 返回值沿用原口径（不检查，失败由 saveTimeline 内部告警）
     } catch (cleanErr) {
       console.warn('[ctx-limit] 清理落盘容量提醒失败（不影响转发）:', cleanErr.message);
     }

@@ -49,7 +49,10 @@ function loadMaxActiveBlocks() {
 // ========================
 const REPLACE_LOG_FILE = path.join(DATA_DIR, "context_replace_log.json");
 const REPLACE_LOG_CAP = 10;
+const REPLACE_LOG_FLUSH_MS = 5000;
 let _replaceLogCache = null;
+let _replaceLogDirty = false;
+let _replaceLogTimer = null;
 
 function _ensureReplaceLog(force) {
   if (_replaceLogCache === null || force) {
@@ -59,30 +62,61 @@ function _ensureReplaceLog(force) {
   return _replaceLogCache;
 }
 
+// 2026-09-22 审查 R14：原实现每次 append 都同步写整份文件，而「无替换」的请求占大多数
+// （applyReplacements 三个分支各调一次 logNoReplace）→ 聊天高峰期每条消息一轮同步写盘。
+// 改为内存聚合 + 5s debounce 刷盘；读侧 getReplaceLog 先 flush 保证查询不失真；
+// 进程退出（含 pm2 重启）时在 exit 里兜底刷一次，最多丢最后 5s 的日志（日志用途，可接受）。
+function flushReplaceLog() {
+  if (!_replaceLogDirty) return;
+  try {
+    writeJsonAtomic(REPLACE_LOG_FILE, _ensureReplaceLog());
+    _replaceLogDirty = false;
+  } catch (e) {
+    console.warn("[context-replacements] 替换日志刷盘失败:", e.message);
+  }
+}
+
 function appendReplaceLog(entry) {
   try {
     const log = _ensureReplaceLog();
     log.push(entry);
     if (log.length > REPLACE_LOG_CAP) log.splice(0, log.length - REPLACE_LOG_CAP);
-    writeJsonAtomic(REPLACE_LOG_FILE, log);
+    _replaceLogDirty = true;
+    if (!_replaceLogTimer) {
+      _replaceLogTimer = setTimeout(function () { _replaceLogTimer = null; flushReplaceLog(); }, REPLACE_LOG_FLUSH_MS);
+      if (typeof _replaceLogTimer.unref === "function") _replaceLogTimer.unref();   // 不因这个定时器拖住进程退出
+    }
   } catch (e) {
-    console.warn("[context-replacements] 替换日志写入失败:", e.message);
+    console.warn("[context-replacements] 替换日志记录失败:", e.message);
   }
 }
 
 function getReplaceLog(cap) {
-  // 每次从磁盘重读，确保查询结果与持久化记录一致
+  // 读前先把内存里的待写条目落盘，确保查询结果与持久化记录一致
+  flushReplaceLog();
   const log = _ensureReplaceLog(true);
   const n = Math.max(0, Math.min(Number(cap) > 0 ? Number(cap) : 50, log.length));
   return log.slice(log.length - n).reverse();
 }
+
+// 进程退出兜底（pm2 restart / SIGINT / SIGTERM 均会触发 exit）：把 debounce 窗口内未刷的日志落盘
+try { process.on("exit", function () { try { flushReplaceLog(); } catch (e) {} }); } catch (e) {}
 
 // ========================
 // 基础工具
 // ========================
 // mtime 感知文件缓存：文件未变化（mtime+size 相同）时复用内存结果，避免对同一份大盘内容反复读盘
 const _readJsonCache = new Map();
-const READ_JSON_CACHE_MAX = 50; // 上限，防止长期运行缓存无限膨胀
+const READ_JSON_CACHE_MAX = 50;                     // 条数上限，防止长期运行缓存无限膨胀
+// 2026-09-22 审查 R11：原实现只有条数上限、不看体积——时间线单文件可达数 MB，几十个会话全读过后
+// 常驻内存轻松上百 MB（解析后的对象通常比磁盘 JSON 大 1.5–3 倍）。改为按「总字节预算」淘汰：
+// 单条大文件（如 18MB 的 context_replacements.json）仍可缓存，但累积超预算即按 LRU 丢最旧的。
+const READ_JSON_CACHE_BUDGET = 48 * 1024 * 1024;
+let _readJsonCacheBytes = 0;
+function _readJsonCacheDrop(file) {
+  const ev = _readJsonCache.get(file);
+  if (ev) { _readJsonCacheBytes -= (Number(ev.size) || 0); _readJsonCache.delete(file); }
+}
 function readJson(file, fallback) {
   try {
     if (!fs.existsSync(file)) return fallback;
@@ -96,11 +130,14 @@ function readJson(file, fallback) {
       return hit.data;
     }
     const data = JSON.parse(fs.readFileSync(file, "utf-8"));
-    _readJsonCache.set(file, { ck: ck, data: data });
-    // 超出上限：删掉 Map 头部（最久未使用）的一项
-    if (_readJsonCache.size > READ_JSON_CACHE_MAX) {
+    if (hit) _readJsonCacheDrop(file);   // 同文件旧版本先摘掉，避免字节计数重复累加
+    _readJsonCache.set(file, { ck: ck, data: data, size: st.size });
+    _readJsonCacheBytes += st.size;
+    // 超限淘汰：条数超上限 或 总字节超预算 → 删 Map 头部（最久未使用）；至少保留当前这一条
+    while ((_readJsonCache.size > READ_JSON_CACHE_MAX || _readJsonCacheBytes > READ_JSON_CACHE_BUDGET) && _readJsonCache.size > 1) {
       const oldest = _readJsonCache.keys().next().value;
-      if (oldest !== undefined) _readJsonCache.delete(oldest);
+      if (oldest === undefined) break;
+      _readJsonCacheDrop(oldest);
     }
     return data;
   } catch (err) {
@@ -837,8 +874,10 @@ function manualRecordById(id) {
   return rec ? { record: rec } : null;
 }
 
-function buildManualRecord(start, end, enabled) {
-  const items = compressibleItems();
+// 按 compressible 序号区间构造 range 字段（range/range_label/matched/count）——2026-09-22 审查 R13：
+// 此前 buildManualRecord 与 updateAiRecordRange 各写一份逐字相同的「slice → 首尾 id 锚点」构造
+// （后者还缩进错位、错误文案不同），已开始漂移。收敛到此单一实现，三处共用。
+function buildRangeFields(items, start, end) {
   if (start < 0 || end < start) return { ok: false, message: "无效的范围" };
   if (start >= items.length) return { ok: false, message: "起始编号超出当前消息总数" };
   const ee = Math.min(end, items.length - 1);
@@ -850,6 +889,28 @@ function buildManualRecord(start, end, enabled) {
   if (!startId || !endId) return { ok: false, message: "该区间消息缺少 id 字段，无法锚定（需要消息自带 id）" };
   return {
     ok: true,
+    range: { start_id: startId, end_id: endId },
+    range_label: rangeLabelOf(slice),
+    matched: slice.map(function (e) {
+      return {
+        role: e.msg.role,
+        content: typeof e.msg.content === "string" ? e.msg.content : contentToText(e.msg),
+        id: e.msg && e.msg.id ? String(e.msg.id) : undefined
+      };
+    }),
+    count: slice.length,
+    startIndex: start,
+    endIndex: ee,
+    slice: slice
+  };
+}
+
+function buildManualRecord(start, end, enabled) {
+  const items = compressibleItems();
+  const built = buildRangeFields(items, start, end);
+  if (!built.ok) return built;
+  return {
+    ok: true,
     record: {
       id: "ctxrep_manual_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8),
       created_at: nowIso(),
@@ -857,20 +918,16 @@ function buildManualRecord(start, end, enabled) {
       session: activeSessionOr() || "default",   // 多会话：记录归属当前会话，只在该会话内套用
       text: "",
       memory: "",
-      range: { start_id: startId, end_id: endId },
-      range_label: rangeLabelOf(slice),
-      matched: slice.map(e => ({
-        role: e.msg.role,
-        content: typeof e.msg.content === "string" ? e.msg.content : contentToText(e.msg),
-        id: e.msg && e.msg.id ? String(e.msg.id) : undefined
-      })),
-      count: slice.length,
+      range: built.range,
+      range_label: built.range_label,
+      matched: built.matched,
+      count: built.count,
       enabled: enabled === true,
       removed: false
     },
-    startIndex: start,
-    endIndex: ee,
-    slice: slice
+    startIndex: built.startIndex,
+    endIndex: built.endIndex,
+    slice: built.slice
   };
 }
 
@@ -983,16 +1040,16 @@ function updateManualRecordRangeById(id, start, end) {
       if (r.start < mergedStart) mergedStart = r.start;
     }
   }
-  const built = buildManualRecord(mergedStart, mergedEnd, cur.enabled !== false);
+  const built = buildRangeFields(compItems, mergedStart, mergedEnd);
   if (!built.ok) return built;
   // 摘要拼接：当前块 + 被吸收块（按原文位置顺序）
   absorbed.sort(function (a, b) { return a.r.start - b.r.start; });
   const parts = [recordText(cur)].concat(absorbed.map(function (a) { return recordText(a.it); })).filter(Boolean);
   const mergedText = parts.join("\n\n");
-  cur.range = built.record.range;
-  cur.range_label = built.record.range_label;
-  cur.matched = built.record.matched;
-  cur.count = built.record.count;
+  cur.range = built.range;
+  cur.range_label = built.range_label;
+  cur.matched = built.matched;
+  cur.count = built.count;
   cur.enabled = cur.enabled !== false;
   if (mergedText) { cur.text = mergedText; cur.memory = mergedText; }
   cur.updated_at = nowIso();
@@ -1002,9 +1059,9 @@ function updateManualRecordRangeById(id, start, end) {
 }
 
 
-  // AI 块：按消息 id 范围更新覆盖区间（前端管理台用，编号入参由路由层换算）。
-  // 保留 source=ai；只改自身，不吞并其他块。
-  function updateAiRecordRange(repId, startIdx, endIdx) {
+// AI 块：按消息 id 范围更新覆盖区间（前端管理台用，编号入参由路由层换算）。
+// 保留 source=ai；只改自身，不吞并其他块。
+function updateAiRecordRange(repId, startIdx, endIdx) {
   const items = compressibleItems();
   if (!repId) return { ok: false, message: '缺少记录 id' };
   const s = Math.floor(Number(startIdx));
@@ -1035,18 +1092,14 @@ function updateManualRecordRangeById(id, start, end) {
       if (r.start < mergedStart) mergedStart = r.start;
     }
   }
-  const slice = items.slice(mergedStart, mergedEnd + 1);
-  if (slice.length === 0) return { ok: false, message: '范围内没有可压缩消息' };
-  // 锚点=消息 id（2026-09-19 统一）：range 只存首尾消息 id
-  const startId = slice[0].msg && slice[0].msg.id ? String(slice[0].msg.id) : "";
-  const endId = slice[slice.length - 1].msg && slice[slice.length - 1].msg.id ? String(slice[slice.length - 1].msg.id) : "";
-  if (!startId || !endId) return { ok: false, message: '新范围区间消息缺少 id 字段，无法锚定' };
-  rec.range = { start_id: startId, end_id: endId };
-  rec.range_label = rangeLabelOf(slice);
-  rec.matched = slice.map(function (r) {
-    return { role: r.msg.role, content: typeof r.msg.content === 'string' ? r.msg.content : contentToText(r.msg), id: r.msg && r.msg.id ? String(r.msg.id) : undefined };
-  });
-  rec.count = slice.length;
+  // 2026-09-22 审查 R13：与手工块共用 buildRangeFields 单一实现（原为逐字重复的第二份，
+  // 且此处额外保留了「至少 1 条」与 id 锚点校验，语义与 helper 完全一致）
+  const built = buildRangeFields(items, mergedStart, mergedEnd);
+  if (!built.ok) return built;
+  rec.range = built.range;
+  rec.range_label = built.range_label;
+  rec.matched = built.matched;
+  rec.count = built.count;
   // 摘要拼接：当前块 + 被吸收块（按原文位置顺序）
   absorbed.sort(function (a, b) { return a.r.start - b.r.start; });
   const parts = [recordText(rec)].concat(absorbed.map(function (a) { return recordText(a.it); })).filter(Boolean);
@@ -1055,7 +1108,7 @@ function updateManualRecordRangeById(id, start, end) {
   rec.updated_at = nowIso();
   const filtered = list.filter(function (it) { return !absorbed.some(function (a) { return a.it.id === it.id; }); });
   saveItems(filtered);
-  return { ok: true, count: slice.length, record: publicItem(rec), removedCount: absorbed.length, merged: absorbed.map(function (a) { return a.it.id; }) };
+  return { ok: true, count: built.count, record: publicItem(rec), removedCount: absorbed.length, merged: absorbed.map(function (a) { return a.it.id; }) };
 }
 
 // 按时间间隔自动切分 [start,end]（1-based 转 0-based），生成多个手工块
