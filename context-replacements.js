@@ -345,12 +345,18 @@ function collectInjectionVisibleEvents(timeline) {
 let _eventVisCache = null;
 function eventInjectionVisibleKeys() {
   const cfg = loadEventInjectConfig();
+  // 2026-09-22 审查 R10：缓存键的 stat 必须用「当前活跃会话」自己的时间线文件，
+  // 而不是主会话 default 的 enhanced_messages.json。缓存值 collectInjectionVisibleEvents(loadTimeline())
+  // 是按 effectiveSession() 加载的当前会话时间线算的，键与值的失效源必须一致。
+  const sid = effectiveSession();
+  let timelineFile = TIMELINE_FILE;
+  if (sid && sid !== "default") {
+    const token = require("./lib/session-token").safeSessionToken(sid);
+    timelineFile = path.join(__dirname, "enhanced_messages_" + token + ".json");
+  }
   let stat;
-  try { stat = fs.statSync(TIMELINE_FILE); } catch (e) { stat = { mtimeMs: 0, size: 0 }; }
-  // 2026-09-13 审查修复：缓存键加入 ALS 当前会话——缓存值是按当前会话时间线算的，
-  // 此前键只含主时间线文件 stat，多会话交替请求时会话 B 直接命中会话 A 的可见事件集合，
-  // 导致压缩索引编号漂移、块窗口判定错位。
-  const sidSafe = String(getActiveSession() || "").replace(/[^A-Za-z0-9_-]/g, "");
+  try { stat = fs.statSync(timelineFile); } catch (e) { stat = { mtimeMs: 0, size: 0 }; }
+  const sidSafe = String(sid || "").replace(/[^A-Za-z0-9_-]/g, "");
   const ck = sidSafe + ":" + JSON.stringify(cfg) + ":" + stat.mtimeMs + ":" + stat.size;
   if (_eventVisCache && _eventVisCache.ck === ck) return _eventVisCache.keys;
   const keys = collectInjectionVisibleEvents(loadTimeline());
