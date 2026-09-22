@@ -79,7 +79,9 @@ async function runWithTools({
 
   // 方案2：逐轮即时回传。onEvent 把「本轮正文/思考 + 每个工具 start/end」实时推给调用方，
   // 供前端渲染工具卡与正文交错 + running→done 状态。落盘/缓存仍用 toolHistory（终态快照），不受影响。
-  const emit = (evt) => { try { if (typeof onEvent === "function") onEvent(evt); } catch (e) {} };
+  // 2026-09-21 审查 R7：onEvent 抛错（客户端断开）置 clientGone，工具循环随即中断，不再白烧 token
+  let clientGone = false;
+  const emit = (evt) => { try { if (typeof onEvent === "function") onEvent(evt); } catch (e) { clientGone = true; } };
   let toolSeq = 0;
 
   // 直通续跑模式（T-0922）：流式直通路径已把该 assistant 消息（含 tool_calls）透传给客户端，
@@ -91,6 +93,7 @@ async function runWithTools({
   }
 
   for (let round = 0; round < maxToolRounds + 1; round++) {
+    if (clientGone) { console.log("[mcp] 客户端已断开，工具循环提前结束"); break; }
     rounds = round;
     const body = {
       model,
@@ -312,9 +315,12 @@ async function streamToolLoop({
   const toolHistory = [];
   const contentParts = [];
   let toolSeq = 0;
-  const emit = (evt) => { try { if (typeof onEvent === "function") onEvent(evt); } catch (e) {} };
+  // 2026-09-21 审查 R7：客户端断开标志（onEvent 抛错即置位），读取与工具循环据此中断
+  let clientGone = false;
+  const emit = (evt) => { try { if (typeof onEvent === "function") onEvent(evt); } catch (e) { clientGone = true; } };
 
   for (let round = 0; round < maxToolRounds + 1; round++) {
+    if (clientGone) { console.log("[mcp] 客户端已断开，流式工具循环提前结束"); break; }
     rounds = round;
     const body = { model, messages: working, stream: true, temperature, top_p, max_tokens };
     if (round < maxToolRounds && openaiTools.length > 0) { body.tools = openaiTools; body.tool_choice = "auto"; }
@@ -356,6 +362,8 @@ async function streamToolLoop({
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      // 2026-09-21 审查 R7：客户端断开即取消上游流并结束本轮
+      if (clientGone) { try { await reader.cancel(); } catch (e) {} break; }
       buf += decoder.decode(value, { stream: true });
       let nl;
       while ((nl = buf.indexOf("\n")) !== -1) {
@@ -385,6 +393,8 @@ async function streamToolLoop({
     if (roundReasoning) reasoningParts.push(roundReasoning);
     if (seenContent) contentParts.push(roundContent);
 
+    // 2026-09-21 审查 R7：断开后不再执行本轮工具
+    if (clientGone) break;
     const toolCalls = toolCallAcc.filter(s => s && s.name).map(function (s, i) {
       return { id: s.id || ("call_" + Date.now() + "_" + i), type: "function", function: { name: s.name, arguments: s.args || "{}" } };
     });
@@ -394,6 +404,7 @@ async function streamToolLoop({
     // afterSeg：该轮工具位于「已流式正文」的最后一段之后（-1 在刷新重建时会被归到末尾，故钳到 >=0）
     const afterSeg = Math.max(0, _countSegs(contentParts.join("\n\n")) - 1);
     for (let i = 0; i < toolCalls.length; i++) {
+      if (clientGone) break; // 2026-09-21 审查 R7
       const tc = toolCalls[i];
       const fn = tc.function || {}; const name = fn.name || "";
       const args = _parseArgs(fn.arguments);
@@ -589,6 +600,8 @@ async function tryStreamPassthrough({
   // 发现工具调用：尚未写 header，交给流式工具循环接管（streamToolLoop，正文/工具均流式）
   if (sawToolCall) {
     console.log("[mcp] 流式直通检测到工具调用，回退流式工具循环");
+    // 2026-09-21 审查 R6：探测流不再消费，必须 cancel 释放上游连接，否则每个工具型请求泄漏一条
+    try { await reader.cancel(); } catch (e) {}
     return { ok: true, fellBackToTools: true };
   }
 
@@ -599,7 +612,9 @@ async function tryStreamPassthrough({
     "Cache-Control": "no-cache",
     Connection: "keep-alive"
   });
-  const emit = (str) => { try { reply.raw.write(str); } catch (e) {} };
+  // 2026-09-21 审查 R7：写失败置标志，透传读循环据此取消上游流
+  let clientGone = false;
+  const emit = (str) => { try { reply.raw.write(str); } catch (e) { clientGone = true; } };
   let fullText = "";
   let reasoning = "";
   let usage = null;
@@ -653,6 +668,8 @@ async function tryStreamPassthrough({
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      // 2026-09-21 审查 R7：客户端断开即取消上游流
+      if (clientGone) { try { await reader.cancel(); } catch (e) {} break; }
       const chunk = decoder.decode(value, { stream: true });
       emit(chunk);
       collectFeed(chunk);

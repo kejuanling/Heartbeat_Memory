@@ -409,45 +409,9 @@ module.exports = function registerChatRoutes(app, deps) {
       reply.code(500).send({ error: err.message });
     }
   });
-  // 已保存主题跨设备同步（存 data/saved-themes.json）
-  const SAVED_THEMES_FILE = path.join(baseDir, 'data', 'saved-themes.json');
-  app.get('/v1/themes', async (req, reply) => {
-    try {
-      let data = { themes: [], current: '' };
-      try { if (fsp.existsSync(SAVED_THEMES_FILE)) { const raw = JSON.parse(fsp.readFileSync(SAVED_THEMES_FILE, 'utf-8')) || []; if (Array.isArray(raw)) data = { themes: raw, current: '' }; else if (typeof raw === 'object' && Array.isArray(raw.themes)) data = { themes: raw.themes, current: String(raw.current || '') }; } } catch (e) {}
-      if (!Array.isArray(data.themes)) data.themes = [];
-      reply.send({ ok: true, themes: data.themes, current: data.current });
-    } catch (err) {
-      console.error('[GET /v1/themes] error:', err.message);
-      reply.code(500).send({ error: err.message });
-    }
-  });
-  app.put('/v1/themes', async (req, reply) => {
-    try {
-      const body = (req.body && typeof req.body === 'object') ? req.body : {};
-      const themes = Array.isArray(body.themes) ? body.themes : [];
-      const clean = themes.filter(t => t && typeof t === 'object').slice(0, 100);
-      const current = (typeof body.current === 'string') ? body.current : '';
-      let existingThemes = [];
-      try { if (fsp.existsSync(SAVED_THEMES_FILE)) { const raw = JSON.parse(fsp.readFileSync(SAVED_THEMES_FILE, 'utf-8')) || []; existingThemes = Array.isArray(raw) ? raw : (raw.themes || []); } } catch (e) {}
-      if (!Array.isArray(existingThemes)) existingThemes = [];
-      // 防止空覆盖：服务器已有主题却收到空数组时保留原数据，除非显式 replace
-      if (clean.length === 0 && existingThemes.length > 0 && !body.replace) {
-        reply.send({ ok: true, saved: false, skipped: 'empty', count: existingThemes.length });
-        return;
-      }
-      fsp.ensureDirSync(path.join(baseDir, 'data'));
-      fsp.writeFileSync(SAVED_THEMES_FILE, JSON.stringify({ current: current, themes: clean }, null, 2), 'utf-8');
-      reply.send({ ok: true, saved: true, count: clean.length, current: current });
-    } catch (err) {
-      console.error('[PUT /v1/themes] error:', err.message);
-      reply.code(500).send({ error: err.message });
-    }
-  });
-
-
-
-  // 系统提示词备份跨设备同步（存 data/prompt-backups.json，与 /v1/themes 同模式）
+  // 2026-09-21 审查清理：GET/PUT /v1/themes（主题云同步）已删除——chat.html 重构后全文件
+  // 零调用，两端均无消费者。历史数据 data/saved-themes.json（9 个主题）保留在盘，git 可恢复本接口。
+  // 系统提示词备份跨设备同步（存 data/prompt-backups.json）
   const PROMPT_BACKUPS_FILE = path.join(baseDir, 'data', 'prompt-backups.json');
   app.get('/v1/prompt-backups', async (req, reply) => {
     try {
@@ -476,7 +440,7 @@ module.exports = function registerChatRoutes(app, deps) {
       let existing = [];
       try { if (fsp.existsSync(PROMPT_BACKUPS_FILE)) existing = JSON.parse(fsp.readFileSync(PROMPT_BACKUPS_FILE, 'utf-8')) || []; } catch (e) {}
       if (!Array.isArray(existing)) existing = [];
-      // 防空覆盖：服务器已有备份却收到空数组时保留原数据，除非显式 replace（与 themes 一致）
+      // 防空覆盖：服务器已有备份却收到空数组时保留原数据，除非显式 replace（与已删的 /v1/themes 同模式）
       if (clean.length === 0 && existing.length > 0 && !body.replace) {
         reply.send({ ok: true, saved: false, skipped: 'empty', count: existing.length });
         return;

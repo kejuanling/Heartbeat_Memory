@@ -492,11 +492,9 @@ function effectiveSession(sessionId) { return activeSessionOr(sessionId) || rece
 function loadTimeline(sessionId) {
   const sid = effectiveSession(sessionId);
   if (sid && sid !== "default") {
-    // 2026-09-13 审查修复：与 server.js safeSessionToken 完全同口径——清洗后为空的会话 ID
-    // （如纯中文）用 md5 哈希兜底，否则这里读 enhanced_messages_.json 而落盘在
-    // enhanced_messages_h<md5>.json，该会话压缩索引恒为空、替换定位失败。
-    const safe = String(sid).replace(/[^A-Za-z0-9_-]/g, "");
-    const token = safe || ("h" + crypto.createHash("md5").update(String(sid)).digest("hex").slice(0, 12));
+    // 2026-09-21 审查 R20：token 计算收敛到 lib/session-token.js（与 server.js / diary.js 同一实现）。
+    // 原本地副本注释自称"与 safeSessionToken 完全同口径"，实际是第四份手抄，改一处漏三处。
+    const token = require("./lib/session-token").safeSessionToken(sid);
     return readJson(path.join(__dirname, "enhanced_messages_" + token + ".json"), []);
   }
   return readJson(TIMELINE_FILE, []);

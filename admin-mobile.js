@@ -210,7 +210,6 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    // 必须复位块消息缓存：ccMsgFetchDone 不复位的话，新会话的块原文会永远停在"消息加载中"
    try{ if(typeof resetCcMsgCache==='function') resetCcMsgCache(); }catch(e){}
    try{ loadCompactionPreview(); }catch(e){}
-   try{ if(typeof loadReplaceLog==='function') loadReplaceLog(); }catch(e){}
  }
 
  async function initApp(){
@@ -243,72 +242,7 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
  }
 
  // ---------- 留纸一览（2026-09-12）：AI 留的纸（故事/梦/创作），只读+删除 ----------
- let viewingPaperPath = null;
- async function loadPapers(){
-   try{
-     const r=await fetch(ADMIN_API+'/papers');
-     if(!r.ok){return;}
-     const j=await r.json();
-     AppState._papers=j.papers||[];
-     renderPapers(AppState._papers);
-   }catch(e){}
- }
- function renderPapers(list){
-   const el=document.getElementById('papers-list');
-   if(!el)return;
-   if(!list.length){el.innerHTML='<div class="empty">还没有留过纸</div>';return}
-   const groups=new Map();const order=[];
-   for(const e of list){
-     const k=e.session||'__shared__';
-     if(!groups.has(k)){groups.set(k,[]);order.push(k);}
-     groups.get(k).push(e);
-   }
-   order.sort((a,b)=>{if(a==='__shared__')return -1;if(b==='__shared__')return 1;return a<b?-1:1;});
-   el.innerHTML=order.map(k=>{
-     const g=groups.get(k);
-     const label=k==='__shared__'?'共享（未归属窗口）':((ADM_SESSION_NAMES[k]?ADM_SESSION_NAMES[k]+' · ':'')+'窗口 '+k);
-     return '<div style="margin:12px 0 6px;font-size:12px;font-weight:600;color:var(--text2);display:flex;align-items:center;gap:6px">'+escapeHtml(label)+'<em style="font-style:normal;font-weight:400;opacity:.7">'+g.length+' 张</em></div>'+g.map(e=>{
-       const key=e.relPath||'';
-       const title=e.title||String(e.content||'').replace(/^#.*\n/,'').replace(/^（[^）]*）\s*/,'').slice(0,40)||'(无标题)';
-       return '<div class="diary-item"><div class="diary-head"><span style="cursor:pointer" onclick="viewPaper(\''+escJsStr(key)+'\')">'+escapeHtml(title)+'</span><span style="display:flex;align-items:center;gap:8px"><em>'+escapeHtml(e.time||'')+'</em><button class="diary-hide-btn" onclick="deletePaper(\''+escJsStr(key)+'\')">删除</button></span></div></div>';
-     }).join('');
-   }).join('');
- }
- function paperFromList(relPath){
-   return (AppState._papers||[]).find(e=>e.relPath===relPath);
- }
- async function viewPaper(relPath){
-   try{
-     const r=await fetch(ADMIN_API+'/papers');
-     const j=await r.json();
-     AppState._papers=j.papers||[];
-     const e=paperFromList(relPath);
-     if(!e){toast('找不到这张纸');return;}
-     viewingPaperPath=relPath;
-     document.getElementById('paper-view-title').textContent=e.title||'留纸';
-     document.getElementById('paper-view-meta').textContent=(e.time||'')+(e.session?(' · 窗口 '+e.session):'');
-     document.getElementById('paper-view-content').textContent=e.content||'';
-     openModal('paperViewModal');
-   }catch(e){toast('加载失败: '+e.message);}
- }
- async function deletePaper(relPath){
-   if(!confirm('删除这张纸（'+relPath+'）？删除后不可恢复。'))return;
-   try{
-     const r=await fetch(ADMIN_API+'/papers/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:relPath})});
-     const j=await r.json();
-     if(j.success){
-       toast('已删除');
-       closeModal('paperViewModal');
-       loadPapers();
-     }else{
-       toast('删除失败: '+j.error);
-     }
-   }catch(e){toast('网络错误: '+e.message);}
- }
- async function deletePaperFromView(){
-   if(viewingPaperPath) await deletePaper(viewingPaperPath);
- }
- 
+
   // ---------- 摘要生成日志（悬浮球 + 弹窗，可拖动） ----------
  let lastLogId = null;
  let logPollTimer = null;
@@ -535,12 +469,10 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    if(document.hidden){
      stopUnreadPoll();
      stopLogPolling();
-     stopLogsAutoRefresh();
    }else{
      startUnreadPoll();
      if(AppState.logPanelOpen) startLogPolling();
      let cur=''; try{ cur=localStorage.getItem('adminTab')||''; }catch(e){}
-     if(cur==='system' && document.getElementById('tab-system')) startLogsAutoRefresh();
    }
  });
 
@@ -681,115 +613,16 @@ function toast(msg){
  
  // ============ 视觉模型 ============
  
- function renderVisionModels(){
-   const el=document.getElementById('vision-models-list');
-   const count=document.getElementById('vision-models-count');
-   if(!el)return;
-   el.innerHTML='<div class="empty">加载中…</div>';
-   fetch(ADMIN_API + '/vision-models').then(r=>r.json()).then(j=>{
-     if(!j.success){el.innerHTML='<div class="empty">加载失败</div>';return}
-     AppState.visionModels=Array.isArray(j.models)?j.models:[];
-     paintVisionModels(el,count);
-     renderCoView();
-     renderScreenshotStatus();
-   }).catch(e=>{el.innerHTML='<div class="empty">加载失败: '+escapeHtml(e.message)+'</div>'});
- }
  
- function paintVisionModels(el,count){
-   if(count)count.textContent=AppState.visionModels.length+' 个';
-   if(!AppState.visionModels.length){el.innerHTML='<div class="empty">还没有视觉模型，点「编辑视觉模型」添加</div>';return}
-   el.innerHTML=AppState.visionModels.map(m=>{
-     const ok=!!(m.api_key_set||(m.api_key&&String(m.api_key).trim()));
-     return '<div class="vm-row"><span class="vm-dot" style="background:'+(ok?'#2ecc71':'#bbb')+'"></span><span class="vm-name">'+escapeHtml(m.name||'未命名')+'</span><span class="vm-model">'+escapeHtml(m.model||'')+'</span></div>';
-   }).join('');
- }
  
- function openVisionModelsEditor(){
-   const el=document.getElementById('vision-models-edit-list');
-   if(!el)return;
-   paintVisionModelsEdit(el);
-   openModal('visionModelsModal');
- }
  
- function paintVisionModelsEdit(el){
-   if(!AppState.visionModels.length){el.innerHTML='<div class="empty">还没有视觉模型，点「新增视觉模型」添加</div>';return}
-   el.innerHTML=AppState.visionModels.map(m=>visionModelRow(m)).join('');
- }
  
- function visionModelRow(m){
-   const ok=!!(m.api_key&&String(m.api_key).trim());
-   return '<div class="vm-item'+(m._new?' expanded':'')+'" data-id="'+escapeHtml(m.id)+'">'
-     +'<div class="vm-head" onclick="toggleVisionModel(this)">'
-     +'<span class="vm-dot" style="background:'+(ok?'#2ecc71':'#bbb')+'"></span>'
-     +'<span class="vm-name">'+escapeHtml(m.name||'未命名')+'</span>'
-     +'<span class="vm-model">'+escapeHtml(m.model||'')+'</span>'
-     +'<span class="collapse-arrow">▾</span>'
-     +'</div>'
-     +'<div class="vm-body">'
-     +'<div class="form-group"><label>名称</label><input value="'+escapeHtml(m.name||'')+'" data-f="name"></div>'
-     +'<div class="form-group"><label>API 地址</label><input value="'+escapeHtml(m.api_url||'')+'" data-f="api_url" placeholder="https://…"></div>'
-     +'<div class="form-group"><label>API Key</label><input type="password" value="'+escapeHtml(m.api_key||'')+'" data-f="api_key" placeholder="留空 = 保持现有 Key（状态灯看是否已配置）"></div>'
-     +'<div class="form-group"><label>模型名</label><input value="'+escapeHtml(m.model||'')+'" data-f="model" placeholder="如 glm-4v-flash"></div>'
-     +'<button class="btn btn-outline vm-del" onclick="removeVisionModel(this)">删除</button>'
-     +'</div>'
-     +'</div>';
- }
  
- function toggleVisionModel(head){
-   head.parentElement.classList.toggle('expanded');
- }
  
- function addVisionModel(){
-   AppState.visionModels.push({id:'m'+Date.now(),name:'',api_url:'',api_key:'',model:'',_new:true});
-   const el=document.getElementById('vision-models-edit-list');
-   paintVisionModelsEdit(el);
-   const items=el.querySelectorAll('.vm-item');
-   const last=items[items.length-1];
-   if(last){last.classList.add('expanded');const inp=last.querySelector('input[data-f="name"]');if(inp)inp.focus();}
- }
  
- function removeVisionModel(btn){
-   const item=btn.closest('.vm-item');
-   if(!item)return;
-   const id=item.getAttribute('data-id');
-   AppState.visionModels=AppState.visionModels.filter(m=>m.id!==id);
-   paintVisionModelsEdit(document.getElementById('vision-models-edit-list'));
- }
  
- function collectVisionModels(){
-   document.querySelectorAll('#vision-models-edit-list .vm-item').forEach(item=>{
-     const id=item.getAttribute('data-id');
-     const m=AppState.visionModels.find(x=>x.id===id);
-     if(!m)return;
-     item.querySelectorAll('input[data-f]').forEach(inp=>{
-       m[inp.getAttribute('data-f')]=inp.value.trim();
-     });
-     delete m._new;
-   });
- }
  
- async function saveVisionModels(){
-   collectVisionModels();
-   const clean=AppState.visionModels.map(m=>({id:m.id,name:m.name,api_url:m.api_url,api_key:m.api_key,model:m.model}));
-   try{
-     const r=await apiRequest('POST', ADMIN_API + '/vision-models', {models:clean}, {busy:document.getElementById('vm-save-btn')});
-     if(!r.ok) return;
-     const j=r.data||{};
-     if(j.success){
-       toast('视觉模型已保存');
-       closeModal('visionModelsModal');
-       renderVisionModels();
-     }else toast('保存失败: '+(j.error||''));
-   }catch(e){toast('网络错误: '+e.message)}
- }
  
- function visionModelsOptionHtml(selId){
-   let s='<option value="">未选择</option>';
-   AppState.visionModels.forEach(m=>{
-     s+='<option value="'+escapeHtml(m.id)+'"'+(m.id===selId?' selected':'')+'>'+escapeHtml((m.name||'未命名')+(m.model?'（'+m.model+'）':''))+'</option>';
-   });
-   return s;
- }
  
  function selectedVisionModelName(id){
    const m=AppState.visionModels.find(x=>x.id===id);
@@ -838,59 +671,8 @@ function toast(msg){
  }
  
  // ============ 截图上传 ============
- function renderScreenshotStatus(){
-   const el=document.getElementById('screenshot-status');
-   if(!el)return;
-   el.innerHTML='<div class="empty">加载中…</div>';
-   fetch(ADMIN_API + '/config').then(r=>r.json()).then(cfg=>{
-     if(!cfg||typeof cfg!=='object'){el.innerHTML='<div class="empty">加载失败</div>';return}
-     const vm=AppState.visionModels.find(m=>m.id===cfg.screenshot_vision_model_id);
-   const ok=!!(vm&&(vm.api_key_set||(vm.api_key&&String(vm.api_key).trim())));
-     const wake=!!cfg.screenshot_wake_enabled;
-     const inject=!!(cfg.event_inject_types&&cfg.event_inject_types.includes&&cfg.event_inject_types.includes('screenshot'));
-     let rows='';
-     rows+='<div class="env-row"><span class="env-key">视觉模型</span><span class="env-val">'+escapeHtml(selectedVisionModelName(cfg.screenshot_vision_model_id))+'</span></div>';
-     rows+='<div class="env-row"><span class="env-key">截图唤醒</span><span class="env-val">'+(wake?'<span style="color:var(--accent)">已开启</span>':'<span style="color:var(--text3)">已关闭</span>')+'</span></div>';
-     rows+='<div class="env-row"><span class="env-key">注入上下文</span><span class="env-val">'+(inject?'<span style="color:var(--accent)">已开启</span>':'<span style="color:var(--text3)">已关闭</span>')+'</span></div>';
-     rows+='<div class="env-row"><span class="env-key">状态</span><span class="env-val">'+(ok?'<span style="color:var(--accent)">视觉模型已配置</span>':'<span style="color:#c0392b">视觉模型未配置或未选择</span>')+'</span></div>';
-     rows+='<div class="env-row"><span class="env-key">上传接口</span><span class="env-val" style="font-size:11px;font-family:monospace">/screenshot-api/wake</span></div>';
-     el.innerHTML=rows;
-   }).catch(e=>{el.innerHTML='<div class="empty">加载失败: '+escapeHtml(e.message)+'</div>'});
- }
  
- function openScreenshotEditor(){
-   document.getElementById('shot-model-select').innerHTML=visionModelsOptionHtml('');
-   document.getElementById('screenshot-wake-switch').checked=false;
-   document.getElementById('screenshot-inject-switch').checked=false;
-   fetch(ADMIN_API + '/config').then(r=>r.json()).then(cfg=>{
-     if(!cfg||typeof cfg!=='object')return;
-     document.getElementById('shot-model-select').innerHTML=visionModelsOptionHtml(cfg.screenshot_vision_model_id);
-     document.getElementById('screenshot-wake-switch').checked=!!cfg.screenshot_wake_enabled;
-     document.getElementById('screenshot-inject-switch').checked=!!(cfg.event_inject_types&&cfg.event_inject_types.includes&&cfg.event_inject_types.includes('screenshot'));
-     openModal('screenshotModal');
-   }).catch(e=>{toast('读取配置失败: '+e.message)});
- }
  
- async function saveScreenshotConfig(){
-   const updates={};
-   updates.screenshot_vision_model_id=document.getElementById('shot-model-select').value;
-   updates.screenshot_wake_enabled=document.getElementById('screenshot-wake-switch').checked;
-   try{
-     const cfgRes=await fetch(ADMIN_API + '/config');
-     const cfg=await cfgRes.json();
-     const types=Array.isArray(cfg.event_inject_types)?cfg.event_inject_types.slice():[];
-     const has=types.includes('screenshot');
-     const wantInject=document.getElementById('screenshot-inject-switch').checked;
-     if(wantInject&&!has)types.push('screenshot');
-     if(!wantInject&&has)types.splice(types.indexOf('screenshot'),1);
-     updates.event_inject_types=types;
-     const r=await apiRequest('POST', ADMIN_API + '/config', updates, {busy:document.getElementById('shot-save-btn')});
-     if(!r.ok) return;
-     const j=r.data||{};
-     if(j.success){toast('截图上传已保存');closeModal('screenshotModal');renderScreenshotStatus();}
-     else toast('保存失败: '+(j.error||''));
-   }catch(e){toast('网络错误: '+e.message)}
- }
 
   // ============ 记忆流水线·判定提示词（2026-09-19） ============
   async function loadJudgePrompt(){
@@ -978,9 +760,6 @@ function toast(msg){
 
       document.getElementById('mw-auto-pin-count').value=c.auto_pin_retrieval_count!=null?c.auto_pin_retrieval_count:5;
 
-       document.getElementById('mw-reparse-warm').checked=c.reparse_warm!==false;
-        document.getElementById('mw-reparse-maxchars').value=c.reparse_max_chars!=null?c.reparse_max_chars:30;
-        document.getElementById('mw-reparse-maxitems').value=c.reparse_max_items!=null?c.reparse_max_items:8;
         document.getElementById('mw-reparse-mergemaxchars').value=c.reparse_merge_max_chars!=null?c.reparse_merge_max_chars:8000;
       document.getElementById('mw-cross-enabled').checked=c.cross_inject_enabled!==false;
       document.getElementById('mw-cross-diary').checked=c.cross_inject_diary!==false;
@@ -1005,9 +784,6 @@ function toast(msg){
 
     up2.auto_pin_retrieval_count=Math.max(2, Number(document.getElementById('mw-auto-pin-count').value)||5);
 
-     up2.reparse_warm=document.getElementById('mw-reparse-warm').checked;
-      up2.reparse_max_chars=Number(document.getElementById('mw-reparse-maxchars').value)||30;
-      up2.reparse_max_items=Number(document.getElementById('mw-reparse-maxitems').value)||8;
       up2.reparse_merge_max_chars=Number(document.getElementById('mw-reparse-mergemaxchars').value)||8000;
     up2.cross_inject_enabled=document.getElementById('mw-cross-enabled').checked;
     up2.cross_inject_diary=document.getElementById('mw-cross-diary').checked;
@@ -1032,68 +808,6 @@ function toast(msg){
       toast('已清空 '+d.cleared+' 条记忆的检索次数');
     }catch(e){ if(msg)msg.textContent='网络错误: '+e.message; toast('网络错误: '+e.message); }
   }
-
- // 2026-09-13 死代码清理：loadSendConfig/saveSendConfig 空壳及其唯一调用点已删（功能 2026-09-08 移除后遗留）
-
- // ============ 日志页：截图提示词 ============
- async function loadScreenshotWakePromptLog(){
-   const pe=document.getElementById('log-screenshot-wake-prompt');
-   if(!pe)return;
-   try{
-     const r=await fetch(ADMIN_API + '/logs/screenshot-wake-prompt');
-     const j=await r.json();
-     pe.value=j.prompt||'';
-   }catch(e){pe.value='加载失败'}
- }
- async function saveScreenshotWakePromptLog(){
-   const pe=document.getElementById('log-screenshot-wake-prompt');
-   const v=pe.value.trim();
-   if(!v||v==='加载中...'||v==='加载失败'){toast('提示词还没加载出来，先点「重新载入」');return}
-   try{
-     const r=await fetch(ADMIN_API + '/logs/screenshot-wake-prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:pe.value})});
-     const j=await r.json();
-     if(j.ok) toast('已保存，截图唤醒时生效');
-     else toast('保存失败: '+(j.error||''));
-   }catch(e){toast('网络错误')}
- }
- async function resetScreenshotWakePromptLog(){
-   if(!confirm('恢复默认截图唤醒提示词？'))return;
-   try{
-     const r=await fetch(ADMIN_API + '/logs/screenshot-wake-prompt',{method:'DELETE'});
-     const j=await r.json();
-     if(j.ok){toast('已恢复默认');loadScreenshotWakePromptLog();}
-     else toast('失败: '+(j.error||''));
-   }catch(e){toast('网络错误')}
- }
- async function loadScreenshotVisionPromptLog(){
-   const pe=document.getElementById('log-screenshot-vision-prompt');
-   if(!pe)return;
-   try{
-     const r=await fetch(ADMIN_API + '/logs/screenshot-vision-prompt');
-     const j=await r.json();
-     pe.value=j.prompt||'';
-   }catch(e){pe.value='加载失败'}
- }
- async function saveScreenshotVisionPromptLog(){
-   const pe=document.getElementById('log-screenshot-vision-prompt');
-   const v=pe.value.trim();
-   if(!v||v==='加载中...'||v==='加载失败'){toast('提示词还没加载出来，先点「重新载入」');return}
-   try{
-     const r=await fetch(ADMIN_API + '/logs/screenshot-vision-prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:pe.value})});
-     const j=await r.json();
-     if(j.ok) toast('已保存，截图画面描述生效');
-     else toast('保存失败: '+(j.error||''));
-   }catch(e){toast('网络错误')}
- }
- async function resetScreenshotVisionPromptLog(){
-   if(!confirm('恢复默认画面描述提示词？'))return;
-   try{
-     const r=await fetch(ADMIN_API + '/logs/screenshot-vision-prompt',{method:'DELETE'});
-     const j=await r.json();
-     if(j.ok){toast('已恢复默认');loadScreenshotVisionPromptLog();}
-     else toast('失败: '+(j.error||''));
-   }catch(e){toast('网络错误')}
- }
  
  function escapeHtml(s){
    return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]});
@@ -1107,8 +821,7 @@ function toast(msg){
      .replace(/\\/g,'\\\\')
      .replace(/'/g,"\\'");
  }
- 
- let editingDiaryName = null;
+
  // 2026-09-12 日记按会话分开保存：分组渲染需要会话名（token→名称），异步加载后补渲染一次
  const ADM_SESSION_NAMES = {};
  async function loadDiarySessionNames(){
@@ -1118,98 +831,11 @@ function toast(msg){
      for(const s of ((j&&j.sessions)||[])){ if(s&&s.id) ADM_SESSION_NAMES[s.id]=s.name||''; }
    }catch(e){}
  }
- function renderDiary(){
-   const entries=AppState.INITIAL_DATA.diary||[];
-   const el=document.getElementById('diary-list');
-   if(!entries.length){el.innerHTML='<div class="empty">暂无日记</div>';return}
-   // 2026-09-13：去分组，完全按日记时间排（服务端已按文件名日期倒序平铺返回）；
-   // 同一天不同窗口各有日记时用小标注区分（有会话名显示会话名，否则显示窗口 id）
-   el.innerHTML=entries.map(e=>{
-     const key=e.relPath||e.name||'';
-     const label=e.name||'';
-     const hidden=e.hidden===true;
-     const tag=e.session?'<em style="font-style:normal;font-size:11px;opacity:.65;margin-left:6px">'+escapeHtml(ADM_SESSION_NAMES[e.session]||('窗口 '+e.session))+'</em>':'';
-     return '<div class="diary-item'+(hidden?' diary-is-hidden':'')+'"><div class="diary-head"><span>'+escapeHtml(label)+tag+(hidden?'<em class="diary-hidden-tag">已隐藏</em>':'')+'</span><span style="display:flex;align-items:center;gap:8px"><em>'+escapeHtml(e.time)+'</em><button class="diary-hide-btn" onclick="toggleDiaryHidden(\''+escJsStr(key)+'\')">'+(hidden?'显示':'隐藏')+'</button><button class="diary-edit-btn" onclick="openDiaryEditor(\''+escJsStr(key)+'\')">编辑</button></span></div></div>'
-   }).join('');
- }
 
- async function toggleDiaryHidden(relPath){
-   const entries=AppState.INITIAL_DATA.diary||[];
-   const entry=entries.find(e=>(e.relPath||e.name)===relPath);
-   const toHidden=!(entry&&entry.hidden===true);
-   if(toHidden&&!confirm('隐藏 '+relPath+' ？\n隐藏后：不参与新会话的跨窗口日记注入、不占注入份数（顺位补足）。\n日记文件与时间线记录保留，可随时点「显示」恢复。'))return;
-   try{
-     const r=await fetch(ADMIN_API+'/diary/hide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:relPath,hidden:toHidden})});
-     const j=await r.json();
-     if(j.success){
-       toast(toHidden?'已隐藏，不再参与跨窗口注入':'已恢复，重新参与跨窗口注入');
-       try{
-         const dr=await fetch(ADMIN_API+'/env');
-         if(dr.ok){const d=await dr.json();AppState.INITIAL_DATA=d;}
-       }catch(e){}
-       renderDiary();
-     }else{
-       toast('操作失败: '+j.error);
-     }
-   }catch(e){
-     toast('网络错误: '+e.message);
-   }
- }
- 
- function openDiaryEditor(relPath){
-   editingDiaryName=relPath;
-   const entries=AppState.INITIAL_DATA.diary||[];
-   const entry=entries.find(e=>(e.relPath||e.name)===relPath);
-   document.getElementById('diary-edit-name').textContent=relPath;
-   document.getElementById('diary-edit-content').value=entry?entry.content:'';
-   openModal('diaryEditModal');
- }
- 
- async function saveDiaryEditor(){
-   if(!editingDiaryName){closeModal('diaryEditModal');return}
-   const content=document.getElementById('diary-edit-content').value;
-   try{
-     const r=await fetch(ADMIN_API+'/diary/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:editingDiaryName,content})});
-     const j=await r.json();
-     if(j.success){
-       toast('已保存，同步 '+j.syncedEvents+' 条上下文特殊事件');
-       closeModal('diaryEditModal');
-       try{
-         const dr=await fetch(ADMIN_API+'/env');
-         if(dr.ok){const d=await dr.json();AppState.INITIAL_DATA=d;}
-       }catch(e){}
-       renderDiary();
-     }else{
-       toast('保存失败: '+j.error);
-     }
-   }catch(e){
-     toast('网络错误: '+e.message);
-   }
- }
  
  
- async function deleteDiaryEditor(){
-   if(!editingDiaryName){closeModal('diaryEditModal');return}
-   if(!confirm('确认删除 '+editingDiaryName+'？上下文里对应的特殊事件也会同步移除。'))return;
-   try{
-     const r=await fetch(ADMIN_API+'/diary/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:editingDiaryName})});
-     const j=await r.json();
-     if(j.success){
-       toast('已删除，移除 '+j.removedEvents+' 条上下文特殊事件');
-       closeModal('diaryEditModal');
-       editingDiaryName=null;
-       try{
-         const dr=await fetch(ADMIN_API+'/env');
-         if(dr.ok){const d=await dr.json();AppState.INITIAL_DATA=d;}
-       }catch(e){}
-       renderDiary();
-     }else{
-       toast('删除失败: '+j.error);
-     }
-   }catch(e){
-     toast('网络错误: '+e.message);
-   }
- }
+ 
+ 
  
  async function restartService(){
    if(!confirm('确认重启服务？服务将短暂中断。'))return;
@@ -1299,91 +925,11 @@ function toast(msg){
  }
 
  // 已标星消息卡片：加载列表
- async function loadMarkedList(){
-   const el=document.getElementById('cc-marked-list');
-   if(!el) return;
-   const info=document.getElementById('cc-marked-info');
-   if(info) info.textContent='加载中...';
-   try{
-     const r=await fetch(ADMIN_API + '/context-compaction/marked-list');
-     const j=await r.json();
-     const list=j.results||[];
-     window.__markedList=list;
-     el.innerHTML='';
-     if(info) info.textContent='共 ' + list.length + ' 条已标星消息';
-     if(!list.length){ el.innerHTML='<div class="empty">暂无标星消息（在上方原文搜索里点星可以标记）</div>'; return; }
-     el.innerHTML=list.map(function(x){
-       let tH=''; try{ tH=x.markedAt?new Date(x.markedAt).toLocaleString('zh-CN',{hour12:false}) : (x.time||''); }catch(err){}
-       const roleCls = x.role==='user' ? 'color:var(--accent)' : (x.role==='system' ? 'color:var(--tab-active)' : 'color:var(--text)');
-       // 进入上下文标记（替代原「未覆盖」标签）：绿=正文当前在发给模型的上下文中，灰=不在
-       const ctxTag = x.in_context
-         ? '<span class="mem-tag" style="background:#27ae60;color:#fff" title="该标星正文当前在发给模型的上下文中">已入上下文</span>'
-         : '<span class="mem-tag" style="background:#95a5a6;color:#fff" title="该标星正文当前不在发给模型的上下文中">未入上下文</span>';
-       return '<div style="padding:8px 0;border-bottom:1px dashed var(--border)">'
-         +'<div style="display:flex;align-items:center;gap:6px">'
-         +'<span style="font-size:11px;color:var(--text3)">第 '+x.index+' 条</span>'
-         +'<span style="font-size:11px;'+roleCls+'">'+escHtml2(x.role||'')+'</span>'
-         +ctxTag
-         +'<button type="button" onclick="openMarkEdit(this)" data-key="'+x.key+'" title="编辑正文" aria-label="编辑正文" style="flex-shrink:0;padding:2px 8px;border:1px solid var(--border);border-radius:6px;background:rgba(0,0,0,0.02);color:var(--text2);font-size:11px;cursor:pointer">编辑</button>'
-         +'<button style="margin-left:auto;flex-shrink:0" class="cc-msg-mark on" data-key="'+x.key+'" onclick="unmarkMsg(this)" title="取消标星：将后此消息可被摘要覆盖" aria-pressed="true" aria-label="取消标星">★</button>'
-         +'</div>'
-         +'<div style="font-size:11px;color:var(--text3);margin-top:2px">'+tH+'</div>'
-         +'<div style="font-size:12px;margin-top:2px;word-break:break-all">'+escHtml2(x.content)+'</div>'
-         +'</div>';
-     }).join('');
-   }catch(e){ el.innerHTML='<div class="empty">加载失败</div>'; if(info) info.textContent=''; }
- }
 
  // 取消标星（卡片内）
- function unmarkMsg(btn){
-   if(!btn) return;
-   if(!confirm('取消标星该条消息？取消后它可能会被压缩/替换为摘要。')) return;
-   const key=btn.getAttribute('data-key');
-   btn.disabled=true;
-   fetch(ADMIN_API + '/context-compaction/mark',{
-     method:'POST',headers:{'Content-Type':'application/json'},
-     body:JSON.stringify({key:key, marked:false})
-   }).then(function(r){return r.json()}).then(function(d){
-     if(d && d.error){ alert('取消失败: '+d.error); btn.disabled=false; return; }
-     loadMarkedList();
-   }).catch(function(e){ alert('取消失败: '+e.message); btn.disabled=false; });
- }
 
 
   // 编辑标星消息正文（管理台"已标星消息"）
-  function openMarkEdit(btn){
-    if(!btn) return;
-    const key=btn.getAttribute('data-key');
-    const list=window.__markedList||[];
-    const it=list.find(function(x){ return String(x.key)===String(key); });
-    if(!it){ toast('未找到该标星消息'); return; }
-    window.__markEditKey=key;
-    const mt=document.getElementById('mark-modal-title'); if(mt) mt.textContent='编辑标星消息';
-    const info=document.getElementById('mark-modal-info');
-    if(info){
-      let t=''; try{ t=it.markedAt?new Date(it.markedAt).toLocaleString('zh-CN',{hour12:false}):(it.time||''); }catch(err){}
-      info.textContent='第 '+it.index+' 条 · '+(it.role||'')+(t?(' · '+t):'');
-    }
-    const ce=document.getElementById('mark-edit-content'); if(ce) ce.value=it.content||'';
-    openModal('markEditModal');
-  }
-  async function saveMarkEdit(){
-    const key=window.__markEditKey;
-    if(!key){ toast('记录不存在'); return; }
-    const el=document.getElementById('mark-edit-content');
-    const content=(el?el.value:'').trim();
-    if(!content){ toast('正文内容不能为空'); return; }
-    const btn=document.getElementById('mark-save-btn');
-    try{
-      const r=await apiRequest('POST', ADMIN_API+'/context-compaction/marked/update', {key:key, content:content}, {busy:btn});
-      if(!r.ok) return;
-      const d=r.data||{};
-      if(d.error){ toast('保存失败: '+d.error); return; }
-      toast('已保存');
-      closeModal('markEditModal');
-      loadMarkedList();
-    }catch(e){ toast('网络错误: '+e.message); }
-  }
 
  let ccPreviewInflight=false;
 let ccPreviewDirty=false;
@@ -1689,9 +1235,12 @@ function ccNodeKey(n){
 function reconcileCcList(el, html){
   if(!el) return;
   if(AppState.ccLastRenderedHtml === html) return;
-  AppState.ccLastRenderedHtml = html;
+  // 2026-09-21 审查 R28：缓存必须在 DOM 真更新后才置——原实现先置缓存再判焦点早退，
+  // 用户正在输入框时本次 DOM 不更新，但缓存已置新值，后续同 HTML 被短路跳过，
+  // 压缩块的替换/隐藏/生成中徽标在界面上永久停在旧值
   const ae=document.activeElement;
   if(ae && el.contains(ae) && /^(TEXTAREA|INPUT)$/.test(ae.tagName)) return;
+  AppState.ccLastRenderedHtml = html;
   const tmp=document.createElement('div');
   tmp.innerHTML=html;
   const newKids=Array.prototype.slice.call(tmp.children);
@@ -2267,94 +1816,6 @@ function updateCcStatusBar(d){
     
 
 
-async function generateAllGapSummaries(){
-  const d=AppState.compactionPlan;
-  if(!d) return;
-  const gaps=(d.uncovered&&d.uncovered.gaps)||[];
-  if(!gaps.length){ toast('没有未覆盖区，无需生成'); return; }
-  if(!confirm('为全部 '+gaps.length+' 个未覆盖区依次生成摘要？会新建块并连续调用模型，可能耗时较长。')) return;
-  const btn=document.getElementById('cc-gen-all-btn');
-  if(btn) btn.disabled=true;
-  const msg=document.getElementById('compaction-msg');
-  const ranges=gaps.map(function(g){ return [g.startIdx,g.endIdx]; });
-  let done=0;
-  for(let i=0;i<ranges.length;i++){
-    const key=ranges[i][0]+'-'+ranges[i][1];
-    AppState.ccGapGenerating.add(key);
-    updateCcStatusBar();
-    if(msg) msg.textContent='正在为第 '+ranges[i][0]+'–'+ranges[i][1]+' 条生成摘要（第 '+(i+1)+'/'+ranges.length+' 个）…';
-    try{
-      const r=await fetch(ADMIN_API+'/context-compaction/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'gap',start:ranges[i][0],end:ranges[i][1]})});
-      const j=await r.json();
-      if(j.error) throw new Error(j.error);
-      if(j.ok===false) throw new Error(j.message||'生成失败');
-      done++;
-    }catch(e){
-      if(msg) msg.textContent='第 '+(i+1)+' 个生成失败：'+e.message;
-      toast('生成失败：'+e.message);
-      break;
-    }finally{
-      AppState.ccGapGenerating.delete(key);
-    }
-  }
-  resetCcMsgCache();
-  await loadCompactionPreview();
-  if(msg) msg.textContent='已生成 '+done+'/'+ranges.length+' 个摘要；点块上的「替换」后生效。';
-}
-async function replaceAllPendingBlocks(){
-  const d=AppState.compactionPlan;
-  if(!d) return;
-  const ccList=(d.chunks||[]).filter(function(x){return !x.aiRep;});
-  const pending=ccList.filter(function(c){ return c.cached && c.enabled===false; });
-  if(!pending.length){ toast('没有待替换块'); return; }
-  if(!confirm('一键替换 '+pending.length+' 个「待替换」块（把已生成摘要应用到上下文）？')) return;
-  const btn=document.getElementById('cc-replace-all-btn');
-  if(btn) btn.disabled=true;
-  const msg=document.getElementById('compaction-msg');
-  let done=0;
-  for(let i=0;i<pending.length;i++){
-    const c=pending[i];
-    if(msg) msg.textContent='正在替换块 #'+c.index+'（第 '+(i+1)+'/'+pending.length+'）…';
-    try{
-      // 按记录 id 精确命中，批量替换中途块增删也不会错位
-      const r=await fetch(ADMIN_API+'/context-compaction/blocks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'toggle',id:c.id||'',blockIndex:(typeof c.blockIndex==='number')?c.blockIndex:-1,enabled:true})});
-      const j=await r.json();
-      if(j.error||j.ok===false) throw new Error(j.message||j.error||'替换失败');
-      done++;
-    }catch(e){
-      if(msg) msg.textContent='块 #'+c.index+' 替换失败：'+e.message;
-      toast('替换失败：'+e.message);
-      break;
-    }
-  }
-  resetCcMsgCache();
-  await loadCompactionPreview();
-  if(msg) msg.textContent='已替换 '+done+'/'+pending.length+' 块。';
-}
-async function reparseAllFromCompaction(){
-  const d=AppState.compactionPlan;
-  if(!d) return;
-  const replaced=(d.chunks||[]).filter(function(c){ return c.enabled!==false; }).length;
-  if(!replaced){ toast('还没有已替换的块，请先「替换」后再解析'); return; }
-  if(!confirm('将已替换块的「时间线原文」交给 AI 提取记忆候选，全部进 review 队列人工把关？')) return;
-  const btn=document.getElementById('cc-reparse-btn');
-  if(btn) btn.disabled=true;
-  const msg=document.getElementById('compaction-msg');
-  if(msg) msg.textContent='正在解析时间线原文并提取记忆候选…';
-  try{
-    const r=await fetch(ADMIN_API+'/memory-pool/reparse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({all:true})});
-    const j=await r.json();
-    if(j.error) throw new Error(j.error);
-    const s='已解析 '+j.processed+' 块 -> 候选 '+j.reviewed+' 条进 review 队列 / 门卫拒 '+j.rejected+' / 失败 '+j.failed+'。请在记忆 review 页人工裁决。';
-    if(msg) msg.textContent=s;
-    toast(s);
-  }catch(e){
-    if(msg) msg.textContent='解析失败: '+e.message;
-    toast('解析失败: '+e.message);
-  }finally{
-    if(btn) btn.disabled=false;
-  }
-}
 function locateCcFromSearch(el){
   if(!el) return;
   const cid=el.getAttribute('data-chunk');
@@ -3499,20 +2960,8 @@ function ccNumLiveCheck(input, max){
   if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
   if(name==='prompts'){loadWakePrompt();loadContextDigestPrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadReparsePrompt();loadJudgePrompt();}
   if(name==='config'){loadToolsConfig();}
-  if(name==='system'){startLogsAutoRefresh();}
-  if(name!=='system'){stopLogsAutoRefresh();}
   }
  
- async function loadPushLog(){
-   const el=document.getElementById('push-log-list');
-   if(!el)return;
-   el.innerHTML='<div class="loading">加载中...</div>';
-   try{
-     const r=await fetch(ADMIN_API + '/push-events');
-     const d=await r.json();
-     renderPushLog(d);
-   }catch(e){ el.innerHTML='<div class="empty">加载失败: '+e.message+'</div>'; }
- }
    function renderPushLog(d){
     const items=d.items||[];
     window.__pushItems=items;
@@ -3595,54 +3044,10 @@ function ccNumLiveCheck(input, max){
       closeModal('pushEditModal');
     }catch(e){ toast('网络错误: '+e.message); }
   }
-  async function loadCrossWindowInject(){
-    const el=document.getElementById('cross-inject-view');
-    if(!el)return;
-    el.innerHTML='<div class="loading">加载中...</div>';
-    const info=document.getElementById('cross-inject-info');
-    try{
-      const sid=currentAdminSession();   // 统一入口，空会话兜底 'default' 而非空串
-      const r=await fetch(ADMIN_API + '/cross-window-inject?session_id='+encodeURIComponent(sid));
-      const d=await r.json();
-      if(d.error){ el.innerHTML='<div class="empty">加载失败: '+d.error+'</div>'; return; }
-      const txt=d.text||'';
-      if(!txt){ el.innerHTML='<div class="empty">当前没有可注入的跨窗口内容</div>'; if(info)info.textContent=''; return; }
-      el.innerHTML='<pre style="margin:0;white-space:pre-wrap;word-break:break-all">'+escapeHtml(txt)+'</pre>';
-      const modeTag=d.mode==='v2'?' · V2 实际注入':(d.mode==='legacy'?' · 旧版（V2 回滚态）':'');
-      if(info) info.textContent='共 '+txt.length+' 字'+modeTag;
-    }catch(e){ el.innerHTML='<div class="empty">加载失败: '+e.message+'</div>'; }
-  }
 
- function startLogsAutoRefresh(){
-   // J1：唤醒日志默认展开，切到系统页即拉并每 5s 刷新（折叠时暂停）；
-   // 其余卡片（永久上下文/推送/跨窗口/替换记录等）一律展开时懒加载，不轮询。
-   const wakeCard=document.querySelector('.card[data-collapse-id="wake-log"]');
-   if(wakeCard && !wakeCard.classList.contains('collapsed')) loadWakeLog();
-   if(logsRefreshTimer) clearInterval(logsRefreshTimer);
-   logsRefreshTimer = setInterval(() => {
-     const wc=document.querySelector('.card[data-collapse-id="wake-log"]');
-     if(wc && !wc.classList.contains('collapsed')) loadWakeLog();
-   }, 5000);
- }
  
  let logsRefreshTimer = null;
- function stopLogsAutoRefresh(){
-   if(logsRefreshTimer){clearInterval(logsRefreshTimer);logsRefreshTimer=null;}
- }
  
- async function loadWakeLog(){
-   const el=document.getElementById('wake-log');
-   if(!el)return;
-   try{
-     const r=await fetch(ADMIN_API + '/logs/wake-up?lines=100');
-     const j=await r.json();
-     if(!j.lines||!j.lines.length){el.innerHTML='<div class="empty">暂无日志</div>';return}
-     el.innerHTML=j.lines.slice(-50).map(l=>{
-       const esc=l.replace(/</g,'&lt;').replace(/>/g,'&gt;');
-       return '<div>'+esc+'</div>';
-     }).join('');
-   }catch(e){el.innerHTML='<div class="empty">加载失败</div>'}
- }
  
  async function loadWakePrompt(){
    const el=document.getElementById('wake-prompt-edit');
@@ -3831,14 +3236,6 @@ function ccNumLiveCheck(input, max){
  }
  
  // 后台页板块折叠
- const CARD_LOADERS={
-   'wake-log':function(){loadWakeLog()},
-   'cc-marked':function(){loadMarkedList()},
-   'cc-replacelog':function(){loadReplaceLog()},
-   'pinned':function(){loadPinned()},
-   'cross-window-inject':function(){loadCrossWindowInject()},
-   'push-log':function(){loadPushLog()}
- };
  function toggleCard(header){
    const card=header.closest('.card');
    if(!card)return;
@@ -3848,7 +3245,6 @@ function ccNumLiveCheck(input, max){
    if(id){try{localStorage.setItem('card-collapse-'+id,nowCollapsed?'open':'collapsed')}catch(e){}}
    if(header && header.setAttribute) header.setAttribute('aria-expanded', nowCollapsed ? 'true' : 'false');
    // 展开时拉取最新（折叠→展开瞬间 nowCollapsed=true）
-   if(nowCollapsed && id && CARD_LOADERS[id]){ try{ CARD_LOADERS[id](); }catch(e){} }
  }
  // 全局H2：问号图标说明弹窗（收集卡片内 .hint-body）
  function showHintCard(el){
@@ -4110,177 +3506,11 @@ function ccNumLiveCheck(input, max){
      loadServices();
    }catch(e){ toast('网络错误: '+e.message); }
  }
- 
- async function loadPinned(){
-   const el=document.getElementById('pinned-list');
-   if(!el)return;
-   try{
-     const r=await fetch(ADMIN_API + '/logs/pinned');
-     const j=await r.json();
-     const list=j.list||[];
-     if(!list.length){el.innerHTML='<div class="empty">暂无永久注入上下文</div>';return}
-     el.innerHTML=list.map((m,i)=>{
-       const mid=String(m.id||'').replace(/"/g,'&quot;');
-       const title=(m.title||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-       const content=(m.content||'').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
-       return '<div class="mem-item"><div class="mem-meta" style="justify-content:space-between">'+
-         '<div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1">'+
-         '<span class="mem-tag">#'+(i+1)+'</span>'+
-         (title?'<span class="mem-time" style="font-weight:500;color:var(--tab-active);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:0">'+title+'</span>':'')+
-         '</div>'+
-         "<div style=\"display:flex;gap:4px;flex-shrink:0\">"+
-         "<button class=\"btn btn-sm\" style=\"background:none;border:none;font-size:13px;color:var(--text2);cursor:pointer;padding:0 5px;line-height:1\" onclick=\"movePinned('" + mid + "','up')\" title=\"上移\">&#9650;</button>"+
-         "<button class=\"btn btn-sm\" style=\"background:none;border:none;font-size:13px;color:var(--text2);cursor:pointer;padding:0 5px;line-height:1\" onclick=\"movePinned('" + mid + "','down')\" title=\"下移\">&#9660;</button>"+
-         "<button class=\"btn btn-sm\" style=\"background:none;border:none;font-size:14px;color:var(--text3);cursor:pointer;padding:2px 6px;line-height:1\" onclick=\"openEditPinned('" + mid + "')\" title=\"编辑\">&#9998;</button>"+
-         "<button class=\"btn btn-sm\" style=\"background:none;border:none;font-size:16px;color:var(--text3);cursor:pointer;padding:2px 6px;line-height:1\" onclick=\"deletePinned('" + mid + "')\">&times;</button>"+
-         "</div>"+
-         '</div><div class="mem-content">'+content+'</div></div>';
-     }).join('');
-   }catch(e){el.innerHTML='<div class="empty">加载失败</div>'}
- }
- 
- async function addPinned(){
-   const title=document.getElementById('pin-title').value.trim();
-   const content=document.getElementById('pin-content').value.trim();
-   if(!content){toast('请输入内容');return}
-   try{
-     const r=await fetch(ADMIN_API + '/logs/pinned',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,content})});
-     const j=await r.json();
-     if(j.success){toast('已添加');document.getElementById('pin-title').value='';document.getElementById('pin-content').value='';loadPinned();}
-     else toast('添加失败');
-   }catch(e){toast('网络错误')}
- }
- 
- async function movePinned(id, dir){
-  if(dir!=='up'&&dir!=='down')return;
-  try{
-    const r=await fetch(ADMIN_API + '/logs/pinned');
-    const j=await r.json();
-    const list=j.list||[];
-    const idx=list.findIndex(m=>String(m.id)===String(id));
-    if(idx<0)return;
-    const tgt=dir==='up'?idx-1:idx+1;
-    if(tgt<0||tgt>=list.length){toast('已到边界，无法移动');return}
-    const tmp=list[idx];list[idx]=list[tgt];list[tgt]=tmp;
-    const rr=await fetch(ADMIN_API + '/logs/pinned/reorder',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:list.map(m=>m.id)})});
-    const jj=await rr.json();
-    if(jj.success){toast('已重排');loadPinned();}
-    else toast('重排失败：'+(jj.error||''));
-  }catch(e){toast('网络错误')}
-}
 
-async function deletePinned(id){
-   if(!confirm('确认删除？'))return;
-   try{
-     const r=await fetch(ADMIN_API + '/logs/pinned/'+id,{method:'DELETE'});
-     const j=await r.json();
-     if(j.success){toast('已删除');loadPinned();}
-     else toast('删除失败');
-   }catch(e){toast('网络错误')}
- }
- 
- async function openEditPinned(id){
-   AppState.editingPinnedId = id;
-   try{
-     const r=await fetch(ADMIN_API + '/logs/pinned');
-     const j=await r.json();
-     const item=(j.list||[]).find(m=>String(m.id)===String(id));
-     if(!item){toast('未找到');return}
-     document.getElementById('edit-pinned-title').value=item.title||'';
-     document.getElementById('edit-pinned-content').value=item.content||'';
-     openModal('editPinnedModal');
-   }catch(e){toast('加载失败')}
- }
- 
- async function saveEditPinned(){
-   if(!AppState.editingPinnedId){toast('未找到');return}
-   const title=document.getElementById('edit-pinned-title').value.trim();
-   const content=document.getElementById('edit-pinned-content').value.trim();
-   if(!content){toast('内容不能为空');return}
-   try{
-     const r=await fetch(ADMIN_API + '/logs/pinned/'+AppState.editingPinnedId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,content})});
-     const j=await r.json();
-     if(j.success){toast('已更新');closeModal('editPinnedModal');loadPinned();}
-     else toast('更新失败: '+(j.error||''));
-   }catch(e){toast('网络错误')}
- }
-
- async function loadReplaceLog(){
-   const el=document.getElementById('cc-replacelog-list');
-   if(!el)return;
-   const info=document.getElementById('cc-replacelog-info');
-   try{
-     const r=await fetch(ADMIN_API + '/context-replacements/logs?limit=10');
-     const j=await r.json();
-     const list=j.entries||[];
-     if(!list.length){el.innerHTML='<div class="empty">暂无记录（有对话请求发送后，每次都会留一条，包括未触发替换的情况）</div>';if(info)info.textContent='';return;}
-     if(info)info.textContent='共记录最近 '+list.length+' 次请求';
-     el.innerHTML=list.map(e=>{
-       let t='';try{t=new Date(e.time).toLocaleString('zh-CN',{hour12:false});}catch(err){}
-       const src=e.source||'对话';
-       const applied=(e.applied||[]).map(a=>{
-         const title=a.title?('【'+escHtml2(a.title)+'】'):'';
-         return title+'<span style="color:var(--text3)">范围['+((a.startIdx||0)+1)+'..'+((a.endIdx||0)+1)+'] '+a.contentLen+'字</span>';
-       }).join('；');
-       return '<div style="padding:8px 0;border-bottom:1px dashed var(--border)">'
-         +'<div style="font-size:11px;color:var(--text3)">'+t+' · '+escHtml2(src)+' · 消息 '+e.before+' → '+e.after+' 条 · 替换 '+e.replaced+' 块</div>'
-         +'<div style="font-size:12px;margin-top:2px;word-break:break-all">'+(applied||(e.replaced===0?'<i style="color:var(--text3)">本次未发生上下文替换</i>':'<i style="color:var(--text3)">(无明细)</i>'))+'</div></div>';
-     }).join('');
-   }catch(e){el.innerHTML='<div class="empty">加载失败</div>';}
- }
  
  let _llmCtxLoaded=false; // 是否已加载过一次(懒加载守卫)
  let _llmCtxInflight=false; // 防止并发重复请求
  let ctxLongTexts={}; // 超长消息全文暂存，点击「展开全文」时换入
- // 折叠卡片后点击标题展开时调用：由 toggleCard 里追加的 checkLazyLoadLLMContext() 触发
- function checkLazyLoadLLMContext(){
-   const card=document.querySelector('.card[data-collapse-id="llm-context"]');
-   if(card && !card.classList.contains('collapsed') && !_llmCtxLoaded && !_llmCtxInflight){
-     loadLLMContext(false);
-   }
- }
- async function loadLLMContext(forceRefresh){
-   const el=document.getElementById('llm-context');
-   if(!el)return;
-   // forceRefresh: 用户点"刷新"；否则仅在首次展开或尚未加载时加载
-   if(!forceRefresh && _llmCtxLoaded)return;
-   if(_llmCtxInflight)return;
-   _llmCtxInflight=true;
-   // 折叠状态下不渲染(点刷新但卡片是收起的也跳过)
-   const card=document.querySelector('.card[data-collapse-id="llm-context"]');
-   if(card && card.classList.contains('collapsed')){ _llmCtxInflight=false; return; }
-   try{
-     const r=await fetch(ADMIN_API + '/logs/context');
-     const j=await r.json();
-     if(!j.messages||!j.messages.length){el.innerHTML='<div class="empty">暂无上下文 (还未有对话)</div>';document.getElementById('ctx-time').textContent='';return}
-     const roleMap={system:'系统',user:'用户',assistant:'AI',tool:'工具',_divider:'---'};
-     const roleClass={system:'color:var(--tab-active);',user:'color:var(--accent);',assistant:'color:var(--text);',tool:'color:var(--accent2);',_divider:'color:var(--text3);text-align:center;'}
-     let html='<div style="font-size:11px;color:var(--text3);margin-bottom:8px">共 '+j.total+' 条消息</div>';
-     html+=j.messages.map((m,mi)=>{
-       const role=escapeHtml(roleMap[m.role]||m.role);
-       const c=(typeof m.content==='string')?m.content:(m.content?JSON.stringify(m.content):'');
-       let esc=escapeHtml(c);
-       if(m.images&&m.images.length){
-         const totalBytes=m.images.reduce((s,x)=>s+(Number(x.bytes)||0),0);
-         const sizeTxt=totalBytes?(' · 共约'+(totalBytes/1024/1024).toFixed(1)+'MB'):'';
-         esc+='\n\n[图片 '+m.images.length+' 张'+sizeTxt+']';
-       }
-       if(m.attachments)esc+='\n[附件 '+m.attachments+' 个]';
-       if(m.role==='_divider')return '<div style="padding:6px 0;border-top:1px dashed var(--border);margin:4px 0;">'+esc+'</div>';
-       let body=esc;
-       if(esc.length>30000){
-         const key='ctx'+mi;
-         ctxLongTexts[key]=esc;
-         body=esc.slice(0,30000)+' …（全文共 '+c.length+' 字）<a href="javascript:void(0)" onclick="expandCtxText(\''+key+'\',this)" style="color:var(--accent);text-decoration:underline">展开全文</a>';
-       }
-       return '<div style="margin-bottom:8px;"><span style="font-size:10px;font-weight:600;letter-spacing:1px;'+roleClass[m.role]+'">['+role+']</span><div style="font-size:12px;color:var(--text);margin-top:2px;white-space:pre-wrap;word-break:break-all;padding:6px 10px;background:rgba(0,0,0,0.02);border-radius:6px;">'+body+'</div></div>';
-     }).join('');
-     el.innerHTML=html;
-     document.getElementById('ctx-time').textContent=j.captureTime?'更新于: '+new Date(j.captureTime).toLocaleString('zh-CN'):'';
-     _llmCtxLoaded=true;
-   }catch(e){el.innerHTML='<div class="empty">加载失败</div>'}
-   finally{_llmCtxInflight=false;}
- }
 
  // 点击「展开全文」把超长消息全文换入（全文已转义，直接当 HTML 写入）
  function expandCtxText(key,link){

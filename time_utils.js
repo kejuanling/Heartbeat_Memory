@@ -149,6 +149,12 @@ function parseWakeTarget(raw, timeZone = resolveTimeZone()) {
         Number(parts.hour) === hour &&
         Number(parts.minute) === minute
       ) {
+        // 2026-09-21 审查 R2：远期日期拒设（不静默改短闹钟语义）。AI 一句 <wake>2027-06-01 10:00</wake>
+        // 曾可让 armTimedWake 挂出超 32 位上限的 setTimeout 形成热循环；30 天外的提醒本就不该由闹钟承担
+        if (date.getTime() - Date.now() > 30 * 24 * 60 * 60 * 1000) {
+          console.warn("[wake] 闹钟目标超过 30 天上限，拒绝设定: " + s);
+          return null;
+        }
         return { at: date };
       }
     }

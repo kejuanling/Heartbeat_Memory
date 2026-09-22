@@ -64,9 +64,6 @@
           <label class="cc-cfg-field">自动置顶检索次数<input type="number" id="mw-auto-pin-count" min="2" step="1"></label>
           <div class="cc-cfg-btns"><button type="button" class="cc-btn secondary" onclick="clearRetrievalStats()">一键清空检索次数（不影响已置顶）</button><span id="mw-clear-retrieval-msg" class="cc-cfg-msg"></span></div>
           <div class="cc-cfg-group-title">解析（压缩块原文 → 记忆候选）</div>
-          <label class="cc-cfg-field cc-cfg-check" style="opacity:.45">再解析·温暖风格<span style="font-size:9px;color:var(--text3)">已废弃</span><span class="cc-sw"><input type="checkbox" id="mw-reparse-warm"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
-          <label class="cc-cfg-field" style="opacity:.45">再解析·每条字数上限<span style="font-size:9px;color:var(--text3)">已废弃</span><input type="number" id="mw-reparse-maxchars" min="5" step="1"></label>
-          <label class="cc-cfg-field" style="opacity:.45">再解析·每段最多条数<span style="font-size:9px;color:var(--text3)">已废弃</span><input type="number" id="mw-reparse-maxitems" min="1" step="1"></label>
           <label class="cc-cfg-field">合并解析·总字数上限<input type="number" id="mw-reparse-mergemaxchars" min="0" step="100"></label>
           <div class="cc-cfg-group-title">跨窗口注入</div>
           <label class="cc-cfg-field cc-cfg-check">总开关<span class="cc-sw"><input type="checkbox" id="mw-cross-enabled"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
@@ -303,93 +300,7 @@
 </div>
 
 <!-- 编辑永久注入上下文 -->
-<div class="modal-overlay" id="editPinnedModal">
-  <div class="modal" style="max-width:min(94vw,760px)">
-    <h3 style="margin:0 0 12px;font-size:15px;color:var(--tab-active)">编辑永久上下文</h3>
-    <input type="text" id="edit-pinned-title" placeholder="标题 (可选)" style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:13px;margin-bottom:10px;">
-    <textarea id="edit-pinned-content" rows="12" placeholder="内容..." style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:13px;resize:vertical;margin-bottom:12px;"></textarea>
-    <div class="modal-actions">
-      <button type="button" class="btn btn-outline" onclick="closeModal('editPinnedModal')">取消</button>
-      <button type="button" class="btn btn-primary" onclick="saveEditPinned()">保存</button>
-    </div>
-  </div>
-</div>
 
-<!-- 2026-09-19 批次外改动：系统页整段下线（与聊天前端「后台活动」页功能重复）。恢复方法=去掉本段首尾的注释包并恢复底部「系统」标签按钮，另把 admin-mobile.js 里 tab 恢复白名单加回 'system' -->
-<!--
-<div class="tab-content" id="tab-system">
-   <div class="card" data-collapse-id="wake-log" data-default="open">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>唤醒原始日志</span><span class="collapse-arrow">▾</span></div>
-     <div class="card-body">
-         <div id="wake-log" style="max-height:200px;overflow-y:auto;overflow-x:hidden;word-break:break-all;font-family:monospace;font-size:11px;color:var(--text2);line-height:1.5;padding:10px;background:rgba(0,0,0,0.02);border-radius:8px;"><div class="loading">加载中...</div></div>
-         <button type="button" class="btn btn-outline" onclick="loadWakeLog()" style="margin-top:8px">刷新</button>
-     </div>
-   </div>
-   <div class="card" data-collapse-id="llm-context" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this);checkLazyLoadLLMContext()"><span>上下文 (发给LLM的完整消息)</span><span class="card-title-actions"><button type="button" class="icon-btn" onclick="event.stopPropagation();loadLLMContext(true)" title="刷新上下文" aria-label="刷新上下文"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button><span class="collapse-arrow">▾</span></span></div>
-     <div class="card-body">
-         <div id="llm-context" style="max-height:400px;overflow-y:auto;font-size:12px;"><div class="loading">加载中...</div></div>
-         <div style="margin-top:8px;text-align:right">
-           <span id="ctx-time" style="font-size:11px;color:var(--text3)"></span>
-         </div>
-     </div>
-   </div>
-   <div class="card" data-collapse-id="cc-marked" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>已标星消息</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="card-title-actions"><button type="button" class="icon-btn" onclick="event.stopPropagation();loadMarkedList()" title="刷新已标星" aria-label="刷新已标星"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button><span class="collapse-arrow">▾</span></span></div>
-     <div class="card-body">
-       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-         <span id="cc-marked-info" style="font-size:11px;color:var(--text3)" aria-live="polite"></span>
-       </div>
-       <div id="cc-marked-list" style="max-height:400px;overflow-y:auto;padding-right:4px"></div>
-       <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px">标星的消息会在压缩/替换时以原句保留在上下文中，不被摘要覆盖。点星可取消标记。</div>
-     </div>
-   </div>
-
-   <div class="card" data-collapse-id="cc-replacelog" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>每次请求的替换/压缩记录</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="card-title-actions"><button type="button" class="icon-btn" onclick="event.stopPropagation();loadReplaceLog()" title="刷新替换记录" aria-label="刷新替换记录"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button><span class="collapse-arrow">▾</span></span></div>
-     <div class="card-body">
-       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-         <span id="cc-replacelog-info" style="font-size:11px;color:var(--text3)"></span>
-       </div>
-       <div id="cc-replacelog-list" style="max-height:220px;overflow-y:auto;padding-right:4px"><div class="loading">加载中...</div></div>
-       <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px">记录每次请求发送给模型前实际发生上下文替换的情况：时间、来源、消息数与替换块数、每块覆盖的原文范围与新正文字数。</div>
-     </div>
-   </div>
-
-   <div class="card" data-collapse-id="pinned" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>永久注入上下文</span><span class="collapse-arrow">▾</span></div>
-     <div class="card-body">
-         <div class="env-row" style="margin-bottom:10px;">
-           <input type="text" id="pin-title" placeholder="标题 (可选)" style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;">
-         </div>
-         <div class="env-row" style="margin-bottom:10px;">
-           <textarea id="pin-content" rows="8" placeholder="内容..." style="flex:1;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:13px;line-height:1.5;resize:vertical;"></textarea>
-         </div>
-         <button type="button" class="btn btn-primary" onclick="addPinned()" style="margin-bottom:12px;background:var(--accent)">+ 新增</button>
-         <div id="pinned-list" style="max-height:300px;overflow-y:auto;"></div>
-     </div>
-   </div>
-    <div class="card" data-collapse-id="cross-window-inject" data-default="collapsed">
-      <div class="card-title collapsible" onclick="toggleCard(this)"><span>跨窗口注入</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="card-title-actions"><button type="button" class="icon-btn" onclick="event.stopPropagation();loadCrossWindowInject()" title="刷新预览" aria-label="刷新预览"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button><span class="collapse-arrow">▾</span></span></div>
-      <div class="card-body">
-        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:8px">预览=当前实际注入给 AI 的记忆内容：V2 开启时显示 Context Assembly 六块（相关记忆按当轮消息另算，不在预览内）；V2 回滚关闭时显示旧版跨窗口注入（置顶记忆 + 近期日记）。</div>
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-          <span id="cross-inject-info" style="font-size:11px;color:var(--text3)"></span>
-        </div>
-        <div id="cross-inject-view" style="max-height:360px;overflow-y:auto;font-size:12px;color:var(--text2);white-space:pre-wrap;word-break:break-all;padding:10px;background:rgba(0,0,0,0.02);border-radius:8px;font-family:monospace;line-height:1.5"><div class="loading">加载中...</div></div>
-      </div>
-    </div>
-    <div class="card" data-collapse-id="push-log" data-default="collapsed">
-      <div class="card-title collapsible" onclick="toggleCard(this)"><span>推送管理</span><span class="card-title-actions"><button type="button" class="icon-btn" onclick="event.stopPropagation();loadPushLog()" title="刷新推送" aria-label="刷新推送"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button><span class="collapse-arrow">▾</span></span></div>
-      <div class="card-body">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-          <span id="push-log-info" style="font-size:11px;color:var(--text3)"></span>
-        </div>
-        <div id="push-log-list" style="max-height:480px;overflow-y:auto;padding-right:4px"><div class="loading">加载中...</div></div>
-      </div>
-    </div>
-</div>
--->
 
 <div class="tab-bar">
   <button type="button" class="tab-item active" data-tab="status" onclick="switchTab('status')">
@@ -583,53 +494,9 @@
     </div>
   </div>
 
- <div class="modal-overlay" id="markEditModal">
-   <div class="modal modal-edit-mem" style="max-width:min(94vw,680px)">
-     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-shrink:0">
-       <h3 id="mark-modal-title" style="margin:0;font-size:16px">编辑标星消息</h3>
-       <button type="button" onclick="closeModal('markEditModal')" style="background:rgba(0,0,0,0.04);border:none;font-size:16px;color:var(--text2);cursor:pointer;padding:6px 10px;border-radius:8px;line-height:1">&times;</button>
-     </div>
-     <div id="mark-modal-info" style="font-size:12px;color:var(--text3);margin-bottom:10px"></div>
-     <textarea id="mark-edit-content" rows="10" placeholder="正文内容（保存后会同步影响跨窗口注入给AI的内容）..." style="width:100%;box-sizing:border-box;padding:12px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,0.85);font-size:13px;line-height:1.5;color:var(--text2);resize:vertical;font-family:inherit"></textarea>
-     <div style="display:flex;gap:10px;margin-top:12px">
-       <button type="button" class="btn btn-primary" id="mark-save-btn" onclick="saveMarkEdit()" style="flex:1;background:var(--accent)">保存</button>
-       <button type="button" class="btn btn-outline" onclick="closeModal('markEditModal')" style="flex:1">取消</button>
-     </div>
-   </div>
- </div>
 
 <!-- 留纸：全文查看弹窗 -->
- <div class="modal-overlay" id="paperViewModal">
-   <div class="modal modal-edit-mem" style="max-width:min(94vw,780px)">
-     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-shrink:0">
-       <h3 style="margin:0;font-size:18px" id="paper-view-title">留纸</h3>
-       <button type="button" onclick="closeModal('paperViewModal')" style="background:rgba(0,0,0,0.04);border:none;font-size:16px;color:var(--text2);cursor:pointer;padding:6px 10px;border-radius:8px;line-height:1">&times;</button>
-     </div>
-     <div id="paper-view-meta" style="font-size:12px;color:var(--text3);margin-bottom:10px;flex-shrink:0"></div>
-     <div id="paper-view-content" style="flex:1;min-height:0;overflow:auto;padding:12px;border-radius:8px;background:rgba(0,0,0,0.02);font-size:13px;line-height:1.6;color:var(--text2);white-space:pre-wrap;word-break:break-word"></div>
-     <div class="modal-actions" style="display:flex;gap:10px;margin-top:16px;flex-shrink:0">
-       <button type="button" class="btn btn-outline" onclick="deletePaperFromView()" style="flex:1;padding:9px 14px;font-size:13px;border-radius:10px">删除这张纸</button>
-       <button type="button" class="btn btn-primary" onclick="closeModal('paperViewModal')" style="flex:1;padding:9px 14px;font-size:13px;border-radius:10px">关闭</button>
-     </div>
-   </div>
- </div>
 
- <div class="modal-overlay" id="diaryEditModal">
-   <div class="modal modal-edit-mem" style="max-width:min(94vw,780px)">
-     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-shrink:0">
-       <h3 style="margin:0;font-size:18px">编辑日记</h3>
-       <button type="button" onclick="closeModal('diaryEditModal')" style="background:rgba(0,0,0,0.04);border:none;font-size:16px;color:var(--text2);cursor:pointer;padding:6px 10px;border-radius:8px;line-height:1">&times;</button>
-     </div>
-     <div id="diary-edit-name" style="font-size:12px;color:var(--text3);margin-bottom:10px;flex-shrink:0"></div>
-     <div style="flex:1;min-height:0;display:flex;flex-direction:column">
-       <textarea id="diary-edit-content" placeholder="修改日记内容…保存后会自动同步更新上下文里的对应特殊事件" style="width:100%;flex:1;min-height:46vh;padding:10px;border:none;border-radius:8px;background:rgba(0,0,0,0.02);font-family:'Noto Sans SC',sans-serif;font-size:13px;line-height:1.5;color:var(--text2);outline:none;resize:vertical;white-space:pre-wrap;word-break:break-all"></textarea>
-     </div>
-     <div class="modal-actions" style="display:flex;gap:10px;margin-top:16px;flex-shrink:0">
-       <button type="button" class="btn btn-outline" onclick="deleteDiaryEditor()" style="flex:1;padding:9px 14px;font-size:13px;border-radius:10px">删除</button>
-       <button type="button" class="btn btn-primary" onclick="saveDiaryEditor()" style="flex:1;padding:9px 14px;font-size:13px;border-radius:10px">保存</button>
-     </div>
-   </div>
- </div>
  
  
  <!-- 通用确认弹窗 -->

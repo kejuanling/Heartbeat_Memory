@@ -101,19 +101,6 @@ async function runWakeCompletion(deps, opts) {
       msgs.push({ role: "developer", content: blockContent });
     }
 
-    // 上下文记忆替换（与对话侧/共影侧同款，2026-09-15 补）：已记录范围的原文替换为 AI 记忆/摘要，
-    // 源文件不动。此前漏掉该步导致全时间线原文直发上游（3160 条/59.5 万字符）压垮模型。
-    try {
-      const beforeRep = msgs.length;
-      msgs = contextReplacements.applyReplacements(msgs);
-      if (msgs.length !== beforeRep) {
-        console.log("[wake-chat] 上下文替换生效: 消息 " + beforeRep + " -> " + msgs.length);
-      }
-    } catch (repErr) {
-      console.warn("[wake-chat] 上下文替换失败（按原样发送）:", repErr.message);
-    }
-
-    // 与对话侧同一套加工：容量提醒 → 工具记录全量转换（一条不滤）→ tool 配对修复 → 出口净化
     // 容量提醒建议段的时间反查表（role+content → Date）：从会话时间线构建，
     // 与对话侧同口径（2026-09-15 补：此前传 null，提醒文本退化为无时间锚的默认描述）
     const timeByKey = new Map();
@@ -127,10 +114,17 @@ async function runWakeCompletion(deps, opts) {
         if (!timeByKey.has(key)) timeByKey.set(key, d);
       }
     } catch (e) { /* 反查表失败不阻断，提醒退化为无时间锚 */ }
-    ensureGuard(deps)(msgs, sessionId, timeByKey);
-    let llmMessages = chatCtx.convertToolNotesToToolRole(msgs);
-    llmMessages = chatCtx.repairToolCallPairs(llmMessages);
-    const sanitized = chatCtx.sanitizeForUpstream(llmMessages);
+
+    // 2026-09-21 审查 H9：替换/容量提醒/工具转换/配对修复/出口净化全部收敛进统一管道
+    // prepareModelMessages，顺序与聊天侧逐字一致（此前本侧是 replace→guard→convert→repair，与 chat.js 相反）。
+    // 上下文记忆替换（2026-09-15 补）在管道内执行：此前漏掉该步曾致全时间线原文直发上游压垮模型。
+    const sanitized = chatCtx.prepareModelMessages(msgs, {
+      applyReplacements: (m) => contextReplacements.applyReplacements(m),
+      ctxLimitGuard: ensureGuard(deps),
+      sessionId,
+      timeByKey,
+      logPrefix: "[wake-chat]"
+    });
 
     const { provider: prov, model: resolvedModel } = deps.resolveChatModel(sessionId, null);
     const model = resolvedModel || deps.readEnvValue("MODEL_NAME") || "";
@@ -254,22 +248,11 @@ function ensureGuard(deps) {
   return ctxLimitGuard;
 }
 
+// 2026-09-21 审查清理：POST /internal/wake-completions 零消费者已删除——
+// 唤醒调度（lib/wake-scheduler.js）在 gateway 进程内直调 runWakeCompletion，
+// HTTP 自环端点自独立唤醒进程退役后即无调用方。runWakeCompletion 仍经下方导出供进程内使用。
 module.exports = function registerWakeChatRoutes(app, deps) {
   ensureGuard(deps);
-
-  // 内部接口：主唤醒（独立进程期）/ 未来其他调用方经 HTTP 使用统一唤醒链路。
-  // 注（2026-09-19 复核）：当前全仓无调用方——唤醒调度已在 gateway 内直调 runWakeCompletion，本端点预留。
-  // 鉴权走全局 /internal/ 钩子（x-internal-key）。
-  app.post("/internal/wake-completions", async (req, reply) => {
-    try {
-      const body = req.body || {};
-      const res = await runWakeCompletion(deps, body);
-      reply.send({ ok: true, text: res.text, tool_history: res.toolHistory, model: res.model, wake_block_id: res.wakeBlockId });
-    } catch (err) {
-      console.error("[wake-completions] error:", err.message);
-      reply.code(500).send({ ok: false, error: err.message });
-    }
-  });
 };
 
 module.exports.runWakeCompletion = runWakeCompletion;
