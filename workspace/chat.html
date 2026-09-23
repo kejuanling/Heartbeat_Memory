@@ -2003,10 +2003,15 @@ let liveDebounce=null;
 let _lastHistoryPull=0;           // 上次实际全量拉取时刻
 let _histPullPending=null;        // 节流到点后的待拉定时器（至多一个，重复事件自动合并）
 let _histReloadWhenVisible=false; // 页面隐藏期间错过刷新：回前台补拉
+let _histMissedWhileBusy=false;   // 2026-09-23：发送/连播期间错过刷新：本轮结束后补拉（见 request 的 finally）
 const HIST_PULL_MIN_INTERVAL=2000;// 两次全量拉取最小间隔
 async function _doHistoryPull(){
   if(document.hidden){ _histReloadWhenVisible=true; return; }  // 后台标签页不拉，回前台补
-  if(sending||_segBusy) return;  // 定时器到点时可能已进入发送/连播：跳过，由既有兜底补拉
+  // 2026-09-23 修复：原注释称「由既有兜底补拉」，但实测**并无该兜底**——request() 结束时
+  // 从未调用补拉（liveReloadNow 仅 3 个调用点：连播后/回前台/SSE 事件）。故流式或连播期间
+  // 到达的 history_update 会被静默丢弃，其他设备在这段时间发来的消息要等下一次 SSE 事件
+  // 或用户操作才出现。改为置位标记，由 request 的 finally 在 sending 复位后统一补拉一次。
+  if(sending||_segBusy){ _histMissedWhileBusy=true; return; }
   _lastHistoryPull=Date.now();
   const sidAtStart=SessionStore.getCurrentSession();   // 会话快照校验：await 期间切了会话就丢弃，防旧会话历史写进新会话缓存
   const localMsgs=loadMsgs();
@@ -3435,6 +3440,11 @@ async function request(finalMsgs, fromSend){
     _streamActive=false; _streamToolMode="live"; _streamRenderModel=[]; _streamRenderCursor=0; _streamModelDraining=false; if(_streamDrainTimer){clearTimeout(_streamDrainTimer);_streamDrainTimer=null;}   // 结束统一响应模型
     showHeaderTyping(false);
     try{ if(reader && reader.cancel) reader.cancel(); }catch(e){}
+    // 2026-09-23 修复（B2）：补拉本轮「发送/连播期间」被 _doHistoryPull 丢弃的 history_update。
+    // 必须放在 sending=false 之后——_doHistoryPull 首行会按 sending 拦截，早于此调用等于白调。
+    // 仅当本轮确实错过事件才补（_histMissedWhileBusy 由 _doHistoryPull 置位），且 liveReloadNow
+    // 自带 250ms 防抖 + 2s 节流，不会额外加重渲染负担。
+    if(_histMissedWhileBusy){ _histMissedWhileBusy=false; liveReloadNow(); }
     // 来电：AI 回复完成 → 解析 <phone> 表态，yes 则自动进通话并播报开场
     if(_callPending){
       _callPending=false;
