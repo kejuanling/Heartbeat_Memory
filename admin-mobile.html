@@ -57,19 +57,13 @@
      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆与唤醒参数</span><span class="collapse-arrow">▾</span></div>
      <div class="card-body">
                <div class="cc-cfg-grid">
-          <div class="cc-cfg-group-title">唤醒</div>
-          <label class="cc-cfg-field">唤醒历史最大条数(0=不裁剪)<input type="number" id="mw-wake-history-max" min="0" step="10"></label>
           <div class="cc-cfg-group-title">记忆池</div>
           <label class="cc-cfg-field">去重阈值<input type="number" id="mw-dedup" min="0" max="1" step="0.05"></label>
-          <label class="cc-cfg-field">自动置顶检索次数<input type="number" id="mw-auto-pin-count" min="2" step="1"></label>
-          <div class="cc-cfg-btns"><button type="button" class="cc-btn secondary" onclick="clearRetrievalStats()">一键清空检索次数（不影响已置顶）</button><span id="mw-clear-retrieval-msg" class="cc-cfg-msg"></span></div>
-          <div class="cc-cfg-group-title">解析（压缩块原文 → 记忆候选）</div>
-          <label class="cc-cfg-field">合并解析·总字数上限<input type="number" id="mw-reparse-mergemaxchars" min="0" step="100"></label>
-          <div class="cc-cfg-group-title">跨窗口注入</div>
+          <div class="cc-cfg-group-title">跨窗口注入（新会话自动带上：置顶记忆 + 近期日记）</div>
           <label class="cc-cfg-field cc-cfg-check">总开关<span class="cc-sw"><input type="checkbox" id="mw-cross-enabled"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
-          <label class="cc-cfg-field cc-cfg-check">日记<span class="cc-sw"><input type="checkbox" id="mw-cross-diary"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
-          <label class="cc-cfg-field cc-cfg-check">高重要记忆<span class="cc-sw"><input type="checkbox" id="mw-cross-memory"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
-          <label class="cc-cfg-field">日记份数<input type="number" id="mw-cross-days" min="1" step="1"></label>
+          <label class="cc-cfg-field cc-cfg-check">近期日记<span class="cc-sw"><input type="checkbox" id="mw-cross-diary"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
+          <label class="cc-cfg-field cc-cfg-check">置顶记忆<span class="cc-sw"><input type="checkbox" id="mw-cross-memory"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
+          <label class="cc-cfg-field">近期日记篇数<input type="number" id="mw-cross-days" min="1" step="1"></label>
         </div>
        <div class="cc-cfg-btns">
          <button type="button" class="cc-btn primary" onclick="saveMemoryWakeConfig()">保存参数</button>

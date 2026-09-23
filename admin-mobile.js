@@ -749,18 +749,9 @@ function toast(msg){
   async function loadMemoryWakeConfig(){
     const msg=document.getElementById('memory-wake-config-msg');
     try{
-      const r=await fetch(ADMIN_API + '/config');
-      const c=await r.json();
-      document.getElementById('mw-wake-history-max').value=c.wake_history_max_messages!=null?c.wake_history_max_messages:80;
-    }catch(e){ if(msg)msg.textContent='读取记忆参数失败: '+e.message; }
-    try{
       const r=await fetch(ADMIN_API + '/memory-pool/config');
       const c=await r.json();
       document.getElementById('mw-dedup').value=c.dedup_threshold!=null?c.dedup_threshold:0.78;
-
-      document.getElementById('mw-auto-pin-count').value=c.auto_pin_retrieval_count!=null?c.auto_pin_retrieval_count:5;
-
-        document.getElementById('mw-reparse-mergemaxchars').value=c.reparse_merge_max_chars!=null?c.reparse_merge_max_chars:8000;
       document.getElementById('mw-cross-enabled').checked=c.cross_inject_enabled!==false;
       document.getElementById('mw-cross-diary').checked=c.cross_inject_diary!==false;
       document.getElementById('mw-cross-memory').checked=c.cross_inject_memory!==false;
@@ -771,20 +762,8 @@ function toast(msg){
   async function saveMemoryWakeConfig(){
     const msg=document.getElementById('memory-wake-config-msg');
     if(msg)msg.textContent='保存中...';
-    const up={};
-    up.wake_history_max_messages=Number(document.getElementById('mw-wake-history-max').value)||0;
-    let saved=true;
-    try{
-      const r=await fetch(ADMIN_API+'/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(up)});
-      const d=await r.json();
-      if(d.error){ saved=false; if(msg)msg.textContent='记忆参数保存失败: '+d.error; }
-    }catch(e){ saved=false; if(msg)msg.textContent='记忆参数保存失败: '+e.message; }
     const up2={};
     up2.dedup_threshold=Number(document.getElementById('mw-dedup').value)||0.78;
-
-    up2.auto_pin_retrieval_count=Math.max(2, Number(document.getElementById('mw-auto-pin-count').value)||5);
-
-      up2.reparse_merge_max_chars=Number(document.getElementById('mw-reparse-mergemaxchars').value)||8000;
     up2.cross_inject_enabled=document.getElementById('mw-cross-enabled').checked;
     up2.cross_inject_diary=document.getElementById('mw-cross-diary').checked;
     up2.cross_inject_memory=document.getElementById('mw-cross-memory').checked;
@@ -796,20 +775,7 @@ function toast(msg){
     }catch(e){ saved=false; if(msg)msg.textContent='记忆池参数保存失败: '+e.message; }
     if(saved){ toast('记忆与唤醒参数已保存'); if(msg)msg.textContent='已保存，下次请求/重启生效（跨窗口注入即时生效）。'; }
   }
-  async function clearRetrievalStats(){
-    if(!confirm('确定清空所有记忆的检索次数？\n计数归零后要重新检索满「自动置顶检索次数」才会自动置顶；已置顶的记忆保持不变。'))return;
-    const msg=document.getElementById('mw-clear-retrieval-msg');
-    if(msg)msg.textContent='清空中...';
-    try{
-      const r=await fetch(ADMIN_API+'/memory-pool/clear-retrieval',{method:'POST'});
-      const d=await r.json();
-      if(d.error){ if(msg)msg.textContent='清空失败: '+d.error; toast('清空失败: '+d.error); return; }
-      if(msg)msg.textContent='已清空 '+d.cleared+' 条';
-      toast('已清空 '+d.cleared+' 条记忆的检索次数');
-    }catch(e){ if(msg)msg.textContent='网络错误: '+e.message; toast('网络错误: '+e.message); }
-  }
- 
- function escapeHtml(s){
+function escapeHtml(s){
    return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]});
  }
  function escJsStr(v){
