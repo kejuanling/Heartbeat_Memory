@@ -182,14 +182,20 @@ header.hd-sms .hd-sub{display:none}
 .msg.ev-diary .bubble{background:rgba(255,255,255,.25);border:1px dashed var(--line);color:var(--ink3)}
 .msg{
   width:100%;padding:0;display:flex;flex-direction:column;gap:0;
-  animation:msgIn .18s ease-out;
+  animation:none;
   position:relative;
 }
 /* 让消息行占满列后，非气泡富内容(头像行/工具/思考/语音/操作行)保持自身宽度、不被拉满 */
 .msg .mhead,.msg .act-tok,.msg .vmsg,.msg .tok{align-self:flex-start}
 /* 多段历史消息：完全静态显示（只有新消息才逐条弹出，打开页面不播动画） */
 .msg.multi{animation:none}
-@keyframes msgIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+@keyframes msgIn{
+  0%{opacity:0;transform:translateY(14px) scale(.94)}
+  55%{opacity:1;transform:translateY(-3px) scale(1.035)}
+  75%{transform:translateY(1px) scale(.995)}
+  100%{opacity:1;transform:none}
+}
+.msg.stream-in:not(.multi){animation:msgIn .3s cubic-bezier(.22,.8,.3,1.15)}
 .msg.user{align-self:flex-end;align-items:flex-end}
 .msg.ai{align-self:flex-start;align-items:flex-start}
 .msg .meta{align-self:center;text-align:center;font-size:10.5px;color:var(--ink3);padding:2px 12px;letter-spacing:1px;margin:3px 0;min-height:0}
@@ -273,7 +279,7 @@ header.hd-sms .hd-sub{display:none}
 #chat[data-layout="sms"] .msg.user .bubble{background:var(--bubble-user1);color:var(--user-font-color,#4A3F3F);box-shadow:0 2px 10px rgba(130,90,90,.07);border-bottom-right-radius:5px}
 #chat[data-layout="sms"] .msg .bubble::after{content:none}
 #chat[data-layout="sms"] .msg .meta{display:none}
-.msg.ai.stream-in .bubble{animation:msgIn .18s ease-out both}
+.msg.ai.stream-in .bubble{animation:msgIn .3s cubic-bezier(.22,.8,.3,1.15) both}
 /* ===== 独立语音播放条（QQ 语音条：圆形播放键 + 居中心跳波 + 秒数；内容另起一行显示） ===== */
 .vmsg{
   display:inline-flex;align-items:center;gap:11px;
