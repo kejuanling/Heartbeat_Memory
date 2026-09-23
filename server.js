@@ -4207,6 +4207,20 @@ app.get("/admin/tools", { preHandler: basicAuth }, async (req, reply) => {
   }
 });
 
+// 2026-09-24：优先取最近一轮上游真实返回的 prompt_tokens（routes/chat.js 落盘 assistant.tokens=usage），
+// 这才是"实际发给上游的 token"；老会话/没跑过一轮的才 fallback 到 estimateAlertTokens 估算。
+function latestActualPromptTokens(timeline) {
+  for (let i = timeline.length - 1; i >= 0; i--) {
+    const m = timeline[i];
+    if (!m || m.role !== "assistant" || m.deleted) continue;
+    const u = m.tokens;
+    if (u && typeof u === "object" && Number.isFinite(u.prompt_tokens) && u.prompt_tokens > 0) {
+      return u.prompt_tokens;
+    }
+  }
+  return null;
+}
+
 // 批次4 C5：容量提醒 token 估算（与容量提醒守卫 countUncompressedTokens 同口径）
 // 2026-09-22 审查 H10：计入 system/developer 头部块与 tool/tool_calls 往返，避免守卫失效。
 function estimateAlertTokens(timeline) {
@@ -4274,10 +4288,11 @@ app.get("/admin/alerts", { preHandler: basicAuth }, async (req, reply) => {
         try {
           const tl = JSON.parse(fs.readFileSync(path.join(__dirname, f), "utf-8"));
           if (!Array.isArray(tl)) continue;
-          const used = estimateAlertTokens(tl);
+          const actual = latestActualPromptTokens(tl);
+          const used = actual != null ? actual : estimateAlertTokens(tl);
           if (used < limit) continue; // 用量达到上限才提醒（不依赖是否已塞容量提醒；降回上限以下自动消失）
           const sid = f === TIMELINE_FILE ? "default" : f.replace(/^enhanced_messages_/, "").replace(/\.json$/, "");
-          alerts.push({ type: "capacity", level: "warn", title: "会话 token 达提醒上限", session_id: sid, session_name: sessNames[sid] || null, token_used: used, token_limit: limit, desc: "仅提醒，AI 不会自动整理" });
+          alerts.push({ type: "capacity", level: "warn", title: "会话 token 达提醒上限", session_id: sid, session_name: sessNames[sid] || null, token_used: used, token_limit: limit, token_source: actual != null ? "actual" : "estimate", desc: actual != null ? "最近一轮上游实际 prompt_tokens" : "估算（无最近 usage 记录）" });
         } catch (e) {}
       }
     }
