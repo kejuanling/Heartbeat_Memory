@@ -4198,7 +4198,7 @@ chatEl.addEventListener("contextmenu",e=>{
 
 /* ================= 设置 ================= */
 function renderPicks(){
-  pickThinking.querySelectorAll("button").forEach(b=>{
+  if(pickThinking) pickThinking.querySelectorAll("button").forEach(b=>{
     const k=b.dataset.k;
     b.classList.toggle("on",k==="show"?cfg.show_thinking:(k==="send"?cfg.send_thinking:false));
   });
@@ -4467,8 +4467,8 @@ document.querySelectorAll(".set-acc-h").forEach(function(h){
     }
   });
 });
-// 开关按钮
-pickThinking.addEventListener("click",e=>{
+// 开关按钮（pickThinking DOM 已删，守卫空操作）
+if(pickThinking) pickThinking.addEventListener("click",e=>{
   const b=e.target.closest("button");if(!b)return;
   if(b.dataset.k==="show"){cfg.show_thinking=!cfg.show_thinking;}
   else if(b.dataset.k==="send"){cfg.send_thinking=!cfg.send_thinking;}
