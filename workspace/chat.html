@@ -3209,11 +3209,28 @@ function appendTypingBox(){
   // 不再显示气泡内三个点，只在顶部显示输入状态
   return null;
 }
+let _claudeTypingEl=null;
 function showHeaderTyping(show){
   const el=document.getElementById("hdTyping");
-  if(!el) return;
-  // 输入中只替换会话名称本身，保持顶部布局和副标题位置不跳动
   const name=document.getElementById("hdName");
+  const isClaude=chatEl && chatEl.dataset.layout==="claude";
+  if(isClaude){
+    // claude 主题：顶部不动，消息区底部显示呼吸圈
+    if(el) el.style.display="none";
+    if(name) name.style.display="";
+    if(show){
+      if(!_claudeTypingEl){
+        _claudeTypingEl=document.createElement("div");
+        _claudeTypingEl.className="claude-typing";
+        _claudeTypingEl.innerHTML='<div class="claude-typing-dot"></div>';
+      }
+      if(!_claudeTypingEl.parentNode && chatEl){ chatEl.appendChild(_claudeTypingEl); if(autoScroll)scrollBottom(); }
+    }else{
+      if(_claudeTypingEl && _claudeTypingEl.parentNode) _claudeTypingEl.parentNode.removeChild(_claudeTypingEl);
+    }
+    return;
+  }
+  if(!el) return;
   el.style.display = show ? "inline-flex" : "none";
   if(name) name.style.display = show ? "none" : "";
 }
@@ -7736,6 +7753,10 @@ body:has(#chat[data-layout="claude"]) footer .inputbar:focus-within{box-shadow:0
 body:has(#chat[data-layout="claude"]) footer .inputbar #input{background:transparent!important;border:none!important;outline:none!important;box-shadow:none!important;color:#1a1a1a;font-size:16px}
 body:has(#chat[data-layout="claude"]) footer .inputbar #send{background:#1a1a1a!important;color:#fff!important;border-radius:50%!important;width:36px!important;height:36px!important}
 body:has(#chat[data-layout="claude"]) footer .inputbar #micBtn,body:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn{color:#6b6b6b!important}
+/* claude 主题：呼吸圆圈 typing 指示器 */
+.claude-typing{display:flex;align-items:center;padding:8px 0;margin-bottom:8px}
+.claude-typing-dot{width:10px;height:10px;border-radius:50%;background:#999;animation:claudeBreathe 1.2s ease-in-out infinite}
+@keyframes claudeBreathe{0%,100%{transform:scale(.6);opacity:.4}50%{transform:scale(1.2);opacity:1}}
 /* 思考链/工具链：claude 主题下完全隐藏 */
 #chat[data-layout="claude"] .rw-wrap,#chat[data-layout="claude"] .tool-trace,#chat[data-layout="claude"] .think-cap,#chat[data-layout="claude"] .tool-cap{display:none!important}
 /* 会话列表 */
