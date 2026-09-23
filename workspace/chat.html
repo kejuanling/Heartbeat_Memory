@@ -5525,7 +5525,9 @@ function initSettingsDrawer(){
   }
   // 4) 分类 + 子页（方案A 2026-09-11：按用途重排，高频在前）
   var CATS=[
-    {key:"chat",       name:"对话与 AI",  accs:["ai","behav","prov"],     icon:'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'},
+    {key:"chat",       name:"对话与 AI",  accs:["ai","behav"],            icon:'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'},
+    {key:"providers",  name:"模型供应商", accs:["prov"],                  icon:'<rect x="4" y="8" width="16" height="11" rx="2"/><path d="M12 8V4"/><circle cx="12" cy="3" r="1"/><line x1="9" y1="13" x2="9" y2="15"/><line x1="15" y1="13" x2="15" y2="15"/>'},
+    {key:"roles",      name:"默认模型",   accs:["roles"],                 icon:'<path d="M4 6h16M4 12h16M4 18h10"/><circle cx="19" cy="18" r="2"/>'},
     {key:"appearance", name:"外观与主题", accs:["theme","render"],        icon:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/>'},
     {key:"voice",      name:"语音服务",   accs:["voice"],                 icon:'<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>'},
     {key:"mcp",        name:"MCP 管理",   accs:["mcp"],                   icon:'<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4L15 12l-3-3z"/>'},
@@ -5578,7 +5580,9 @@ function settingsShowPage(key, acc){
   });
   // 懒加载（原由手风琴打开触发，现改到子页打开时）
   if(key==="mcp"){ if(typeof loadMcpServers==="function") loadMcpServers(); }
-  if(key==="chat"){ if(typeof loadProviders==="function") loadProviders(); if(typeof loadModelRoles==="function") loadModelRoles(); }   // AI 供应商面板 + 默认模型（按用途）已并入「对话与 AI」
+  if(key==="chat"){ /* AI 设置/行为 */ }
+  if(key==="providers"){ if(typeof loadProviders==="function") loadProviders(); }
+  if(key==="roles"){ if(typeof loadModelRoles==="function") loadModelRoles(); }
   // 底部保存按钮：只在含「由 saveSettingsAll 统一保存」输入框的页显示（对话与AI / 外观与主题 / 账号与数据）
   var ssb=document.getElementById("settingsSaveBtn"); if(ssb) ssb.style.display=(key==="chat"||key==="appearance"||key==="account")?"":"none";
 }
