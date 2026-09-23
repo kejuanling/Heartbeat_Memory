@@ -759,7 +759,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
     if (kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0) {
       // 方案二增量：落盘改为以盘上为基同步差量（新消息补齐/人设同步/重生成清尾），
       // 不再拿请求全量重建覆盖；通知由同步函数按需发出。
-      appendRequestMessages(sessionId, kelivoMessages);
+      // 2026-09-23：透传重生成锚点 id（前端「重新生成」时上报），服务端按 id 截断锚点 user 之后的全部内容
+      appendRequestMessages(sessionId, kelivoMessages, { regenAnchorId: body.regen_anchor_id });
     } else {
       console.log("[timeline] 跳过时间线保存 (真实消息=" + kelivoMessages.some(isRealMessageForTimeline) + ")");
     }

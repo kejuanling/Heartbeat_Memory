@@ -1521,7 +1521,8 @@ function stripFrontendToolNote(content) {
 
 // 以盘上为基同步「请求消息」：人设同步 + 去重补齐 + 尾部对齐，替代拿请求全量重建覆盖。
 // 用于发消息首保存 / MCP 写回：盘上永远是完整历史，请求里缺的补、多的（重生成换掉的旧回复）按覆盖语义清尾。
-function appendRequestMessages(sessionId, reqMsgs) {
+function appendRequestMessages(sessionId, reqMsgs, opts) {
+  opts = opts || {};
   const existing = loadTimeline(sessionId);
   const reqList = Array.isArray(reqMsgs) ? reqMsgs : [];
   const keyOf = function (m) { return m.role + "\u0000" + normalizeContentToText(m.content); };
@@ -1535,6 +1536,32 @@ function appendRequestMessages(sessionId, reqMsgs) {
   const reqKeys = new Set(reqReal.map(keyOf));
   const reqLastReal = reqReal.length ? reqReal[reqReal.length - 1] : null;
   let changed = false;
+
+  // 0) 重生成锚点截断（2026-09-23 新增）
+  //    语义：移除锚点 user 消息**之后的全部时间线内容**（含特殊事件，用户拍板），保留锚点本身。
+  //    为什么必须新增：下方第 2 步的「尾部对齐」按内容键匹配且**遇到 user 就停**
+  //    （原设计是为防止局部窗口请求误删历史——请求只带尾部 UPLOAD_WINDOW 条时，
+  //     前面消息都不在 reqKeys 里，一路清到底会误删）。副作用是**从中间重生成清不干净**：
+  //    盘上会残留被移除的旧回复及其后的 user 消息，刷新/SSE 补拉时它们会「复活」并插到新回复之后。
+  //    改为由前端显式上报锚点 id、服务端按 id 硬截断：边界明确、与上传窗口无关、不会误删历史。
+  //    防御：锚点须存在、须是 user（只删「该 user 之后的回复」）、且不能在盘尾（无内容可删则跳过）。
+  //    不传该参数时行为与改动前**完全一致**（旧客户端/第三方客户端不受影响）。
+  const _anchorId = String(opts.regenAnchorId || "").trim();
+  if (_anchorId) {
+    const _ai = existing.findIndex(function (m) { return m && m.id === _anchorId; });
+    if (_ai >= 0 && _ai < existing.length - 1 && existing[_ai].role === "user") {
+      const _removed = existing.length - (_ai + 1);
+      existing.splice(_ai + 1);
+      changed = true;
+      console.log("[regen] 按锚点 id 截断时间线: session=" + (sessionId || "default") +
+        " anchor=" + _anchorId.slice(0, 8) + " 移除=" + _removed);
+    } else if (_ai >= 0) {
+      console.warn("[regen] 锚点不合法，忽略截断（回退原尾部对齐）: idx=" + _ai +
+        " role=" + (existing[_ai] && existing[_ai].role) + " len=" + existing.length);
+    } else {
+      console.warn("[regen] 锚点 id 未在盘上找到，忽略截断: " + _anchorId.slice(0, 8));
+    }
+  }
 
   // 1) 人设同步：请求最新 system 与盘上不同则原地替换，盘上没有则补到首位（saveTimeline 兜底置顶）
   const reqSPs = reqList.filter(function (m) { return m && m.role === "system"; });
@@ -2525,7 +2552,9 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
       const reqMsgs = Array.isArray(kelivoMessages) && kelivoMessages.length
         ? kelivoMessages
         : (messages || body.messages || []);
-      const syncRes = appendRequestMessages(sessionId, reqMsgs);
+      // 2026-09-23：透传重生成锚点 id（前端点「重新生成」时上报），服务端据此按 id 截断
+      // 该 user 消息之后的全部时间线内容，替代原先「按内容尾部对齐」在中间重生成时清不干净的问题
+      const syncRes = appendRequestMessages(sessionId, reqMsgs, { regenAnchorId: body.regen_anchor_id });
       // 稳定 id 沿用（2026-09-22）：自建前端预生成 reply_msg_id 随请求上行，落盘沿用同一 id——
       // 回复落库前后端 id 一致，落库后、SSE 补拉前的编辑/删除也能被 /v1/timeline/sync 的 diff 分支按 id 定点命中。
       // 冲突兜底：盘上已存在同 id 则弃用客户端 id（appendMessages 回退服务端 uuid），防时间线出现重复 id。

@@ -3240,7 +3240,7 @@ function buildMessages(list){
   });
   return out;
 }
-async function request(finalMsgs, fromSend){
+async function request(finalMsgs, fromSend, regenAnchorId){
   // send() 已提前置位 sending（防连点入列），fromSend 放行；其余入口（重新生成）仍受重入保护
   if(sending&&!fromSend)return;
   if(!fromSend){ sending=true;setSendState(true); }
@@ -3267,7 +3267,12 @@ async function request(finalMsgs, fromSend){
       session_id:SessionStore.getCurrentSession(),
       stream_options:{include_usage:true},
       client_msg_id:(Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,10)),
-      reply_msg_id:_replyMid
+      reply_msg_id:_replyMid,
+      // 2026-09-23：重生成锚点 id（仅「重新生成」「重试」入口传入，其余为空串）。
+      // 服务端据此按 id 截断锚点 user 消息之后的**全部**时间线内容（含特殊事件），
+      // 避免从中间重生成时旧回复残留在盘上、刷新后被 SSE 补拉「复活」并插到新回复之后。
+      // 不传（空串）时服务端行为与改动前完全一致，第三方客户端不受影响。
+      regen_anchor_id:regenAnchorId||""
     };
     if(cfg.temperature!=null&&cfg.temperature!=="")payload.temperature=Number(cfg.temperature);
     if(cfg.top_p!=null&&cfg.top_p!=="")payload.top_p=Number(cfg.top_p);
@@ -3941,11 +3946,15 @@ actRegen.addEventListener("click",()=>{
   let ui=-1;
   for(let i=idx-1;i>=0;i--){if(msgs[i].role==="user"){ui=i;break;}}
   if(ui<0){showToast("前面没有可参考的消息");closeAct();return;}
-  if(!confirm("确定重新生成这条回复？该回复及之后的消息会被移除并重新生成。"))return;
+  // 2026-09-23：文案补明删除范围——服务端现在按锚点 id 硬截断，范围比此前更彻底
+  // （此前从中间重生成其实清不干净，现在会连特殊事件一并删除），用户需知情后再确认。
+  if(!confirm("确定重新生成这条回复？\n\n注意：该回复及其之后的全部内容都会被删除（包含唤醒记录、日记等），此操作不可撤销，然后重新生成。"))return;
   const base=msgs.slice(0,ui+1);
+  // 2026-09-23：把锚点（这条回复对应的那条 user 消息）的 id 一并上报，服务端据此按 id 精确截断
+  const _anchorId=(base[base.length-1]&&base[base.length-1].id)||"";
   msgs=base;saveMsgs();renderAll();
   updateSelBar();
-  request(base);
+  request(base,false,_anchorId);
   closeAct();
 });
 
