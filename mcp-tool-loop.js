@@ -540,7 +540,9 @@ function buildSSE(text, {
   finishReason = "stop",
   usage = null,
   reasoning = "",
-  toolHistory = []
+  toolHistory = [],
+  finalContent = null,      // 2026-09-24 B3：最终落盘版 content（含标签 storedText 口径），结尾帧以 final_content 下发
+  finalTimeline = null      // 2026-09-24 B3：最终落盘版精简 timeline，结尾帧以 final_stream_timeline 下发
 } = {}) {
   const enc = new TextEncoder();
   const events = [];
@@ -582,7 +584,12 @@ function buildSSE(text, {
   push({
     ...base(),
     choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
-    usage
+    usage,
+    // 2026-09-24 B3：最终落盘版数据随流下发——自建前端据此落盘，与服务器时间线字节级一致，
+    // 补拉不再触发数据替换。顶层字段（与 usage 平级），第三方客户端忽略未知字段，向后兼容；
+    // 未提供时不下发（前端退回自己的映射，行为同旧版）。
+    ...(finalContent != null ? { final_content: finalContent } : {}),
+    ...(finalTimeline != null ? { final_stream_timeline: finalTimeline } : {})
   });
   events.push("data: [DONE]\n\n");
 

@@ -342,6 +342,9 @@ module.exports = function registerChatRoutes(app, deps) {
           if (m.reasoning !== undefined) clean.reasoning = m.reasoning;
           if (m.tools !== undefined) clean.tools = m.tools;
           if (m.segments !== undefined) clean.segments = m.segments;
+          // 2026-09-24 B3 探针发现：9-23 落盘加了 stream_timeline，但本接口白名单漏同步——
+          // 前端刷新后一直收不到服务端这份真实时间线（靠 localStorage 自存补回）。补上。
+          if (m.stream_timeline !== undefined) clean.stream_timeline = m.stream_timeline;
           if (m.tokens !== undefined) clean.tokens = m.tokens;
           return clean;
         });
@@ -732,7 +735,11 @@ app.post("/v1/chat/completions", async (req, reply) => {
     const _replayCachedReply = async function (cached) {
       console.log("[idempotency] 命中同 client_msg_id 的已生成回复，直接回放");
       if (body.stream === true) {
-        const stream = mcp.buildSSE(cached.text, { model: body.model || cached.model || "", usage: cached.usage, reasoning: cached.reasoning, toolHistory: cached.tools });
+        // 2026-09-24 B3（M2）：回放同样下发 final 字段——cached.storedText（含标签，与时间线同源）
+        // 专供前端落盘对齐（回放落盘=时间线 → 补拉不再校准）；正文仍用 cached.text（剥标签版，
+        // 与实时下行口径一致）。重启前生成的旧缓存无这两个字段 → undefined → buildSSE 不下发
+        // → 前端退回自己的映射，向后兼容。
+        const stream = mcp.buildSSE(cached.text, { model: body.model || cached.model || "", usage: cached.usage, reasoning: cached.reasoning, toolHistory: cached.tools, finalContent: cached.storedText, finalTimeline: cached.streamTimeline });
         reply.raw.writeHead(200, {
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",

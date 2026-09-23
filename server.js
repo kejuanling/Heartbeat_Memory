@@ -2607,6 +2607,20 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
   // 剥离工具回声（权威结果走 toolHistory，避免模型重复抄写/刷屏）
   aiClean = stripToolEchoBlocks(aiClean);
 
+  // 2026-09-24 B3（M1 提级）：最终落盘版数据在函数级构造一次——时间线写回（下方 if 块内）
+  // 与 SSE 终止帧（块外，try-catch 包裹）必须共用同一份。此前 storedText/timeline 映射都在
+  // if 块内，终止帧直接引用会 ReferenceError 且被终止帧的 try-catch 静默吞掉
+  // → 表现为"字段永远不下发、前端静默退回旧行为"，测试还可能假通过。
+  const finalStoredText = (r && r.text) ? stripToolEchoBlocks(r.text || aiClean) : "";
+  const finalTimelinePayload = (r && Array.isArray(r.streamTimeline))
+    ? r.streamTimeline.map(function (n) {
+        if (!n || !n.type) return null;
+        if (n.type === "text") return { type: "text", text: String(n.text || "") };
+        if (n.type === "tool" && n.tool) return { type: "tool", tool: n.tool };
+        return null;
+      }).filter(Boolean)
+    : undefined;   // runWithTools 回退无 streamTimeline → 不下发，前端退回自己的映射
+
   // 修复：MCP 分支此前拦截了主流程的"AI 回复写回时间线"，导致刷新后回复丢失。
   // 这里把最终回复也写回当前会话的时间线。
   if (r && r.text) {
@@ -2630,18 +2644,14 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
       // 富字段一并落时间线：reasoning/tools/tokens，跨设备刷新不再丢（前端 /v1/history 读取这些字段）。
       // 盘尾已有同内容回复（重试/重复写回）则跳过，不重复追写。
       // 存储用原始文本但去工具回声：保留 <wake>/<memory> 等标签作为上下文一部分；下发/回放仍用 aiClean。
-      const storedText = stripToolEchoBlocks(r.text || aiClean);
+      // 2026-09-24 B3：storedText/timeline 映射提级为函数级 finalStoredText/finalTimelinePayload（与终止帧共用）
+      const storedText = finalStoredText;
       if (!tailHasReply(sessionId, storedText)) {
         toAppend.push({
           id: replyMsgId || undefined,
           role: "assistant", content: storedText, reasoning: r.reasoning || "", tools: r.toolHistory || [], tokens: r.usage || null,
           segments: (r.toolHistory && r.toolHistory.length) ? (r.segments || []).map(function(s){ return stripToolEchoBlocks(tagParser.stripTags(s)); }) : undefined,
-          stream_timeline: Array.isArray(r.streamTimeline) ? r.streamTimeline.map(function(n){
-            if (!n || !n.type) return null;
-            if (n.type === "text") return { type: "text", text: String(n.text || "") };
-            if (n.type === "tool" && n.tool) return { type: "tool", tool: n.tool };
-            return null;
-          }).filter(Boolean) : undefined   // 真实事件时间线：刷新时按 text/tool 原顺序重建
+          stream_timeline: finalTimelinePayload   // 真实事件时间线：刷新时按 text/tool 原顺序重建（与终止帧下发同一份）
         });
       }
       if (toAppend.length) appendMessages(sessionId, toAppend);
@@ -2654,7 +2664,12 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
   // 缓存本次已生成的回复，供同 client_msg_id 的重复请求直接回放。
   if (aiClean && body && body.client_msg_id) {
     setRecentReply(String(body.client_msg_id).trim(), {
-      text: aiClean, model, reasoning: r.reasoning || "", tools: r.toolHistory || [], usage: r.usage || null, ts: Date.now()
+      text: aiClean, model, reasoning: r.reasoning || "", tools: r.toolHistory || [], usage: r.usage || null, ts: Date.now(),
+      // 2026-09-24 B3（M2）：回放时 final 字段的数据源。text 保持 aiClean（剥标签版，回放下行
+      // 正文与实时口径一致）；storedText（含标签，与时间线同源）单独存、专供 final_content——
+      // 否则回放落盘=剥标签版 ≠ 时间线含标签版 → 补拉照样校准（回放是重试/断线重发的高频场景）。
+      storedText: finalStoredText,
+      streamTimeline: finalTimelinePayload || null
     });
   }
 
@@ -2670,14 +2685,21 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
           created: Math.floor(Date.now() / 1000),
           model,
           choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-          usage: (r && r.usage) || null
+          usage: (r && r.usage) || null,
+          // 2026-09-24 B3：最终落盘版随流下发（与时间线写回共用 finalStoredText/finalTimelinePayload，
+          // 见上方 M1 提级注释），自建前端据此落盘、与服务器时间线字节级一致。
+          // 顶层字段第三方客户端忽略；空/undefined 时不下发，前端退回自己的映射（向后兼容）。
+          ...(finalStoredText ? { final_content: finalStoredText } : {}),
+          ...(finalTimelinePayload ? { final_stream_timeline: finalTimelinePayload } : {})
         }) + "\n\n");
         reply.raw.write("data: [DONE]\n\n");
       } catch {}
       try { reply.raw.end(); } catch {}
       return true;
     }   // 方案2：已用 onEvent 逐轮流式回传，避免 buildSSE 重复
-    const stream = mcp.buildSSE(aiClean, { model, usage: r.usage, reasoning: r.reasoning, toolHistory: r.toolHistory });
+    // 2026-09-24 B3：runWithTools 回退出口（未发过 SSE 才会走到）同样下发 final——与上方时间线
+    // 写回共用同一份（runWithTools 无 streamTimeline → finalTimelinePayload 为 undefined 不下发）
+    const stream = mcp.buildSSE(aiClean, { model, usage: r.usage, reasoning: r.reasoning, toolHistory: r.toolHistory, finalContent: finalStoredText || undefined, finalTimeline: finalTimelinePayload || undefined });
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",

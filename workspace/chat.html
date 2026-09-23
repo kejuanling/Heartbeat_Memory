@@ -3320,6 +3320,7 @@ async function request(finalMsgs, fromSend, regenAnchorId){
   const _replyMid=newMsgId();   // 本条 AI 回复的稳定 id：随请求 reply_msg_id 上行，服务端 MCP 写回段落盘沿用同一 id——落库前后端 id 一致，落库后立刻编辑/删除也能 diff 定点
   appendTypingBox();
   let full="",reasoning="",usage=null,tools=[],reader=null,flushStreamSegs=null,streamedSegments=null,streamedTimeline=null,buf="";
+  let _finalContent=null,_finalTimeline=null;   // 2026-09-24 B3：服务端终止帧下发的最终落盘版（含标签 storedText + 精简 timeline）
   let _chunkErrCount=0;   // 2026-09-23：本轮流式 chunk 解析失败计数（收尾据此提示，见下方 catch）
   let _streamTimedOut=false,_silenceTimer=null;   // 2026-09-22 审查 M17：流式「静默超时」标志与计时器（try 外声明，catch/finally 都要用）
   const syncToolSave=function(){
@@ -3425,6 +3426,8 @@ async function request(finalMsgs, fromSend, regenAnchorId){
         try{
           const json=JSON.parse(data);
           if(json.usage){usage=json.usage;}
+          if(json.final_content!=null)_finalContent=json.final_content;   // B3：权威落盘版（含标签，与时间线同源）
+          if(json.final_stream_timeline!=null)_finalTimeline=json.final_stream_timeline;
           const delta=json.choices&&json.choices[0]&&json.choices[0].delta;
           const hasContent = delta && delta.content;
           if(delta){
@@ -3456,6 +3459,8 @@ async function request(finalMsgs, fromSend, regenAnchorId){
           try {
             const json = JSON.parse(data);
             if (json.usage) { usage = json.usage; }
+            if (json.final_content != null) _finalContent = json.final_content;   // B3：同主循环（尾部残留 buf 处理）
+            if (json.final_stream_timeline != null) _finalTimeline = json.final_stream_timeline;
             const delta = json.choices && json.choices[0] && json.choices[0].delta;
             const hasContent = delta && delta.content;
             if (delta) {
@@ -3480,12 +3485,19 @@ async function request(finalMsgs, fromSend, regenAnchorId){
     if(_chunkErrCount>0) showToast("部分内容未完整接收，回复可能不完整");
     if(typeof player!=="undefined" && player && typeof player.getSegments==="function") streamedSegments=player.getSegments();
     // 直接保存真实渲染模型，刷新时按 text/tool/text 原顺序重建，不再依赖 afterSeg 猜位置。
-    streamedTimeline=_streamRenderModel.map(function(n){
-      if(!n)return null;
-      if(n.type==="text")return {type:"text",text:String(n.text||""),first:!!n.first,reasoning:n.first?_streamNodeReasoning(n):"",time:n.time||null};
-      if(n.type==="tool"&&n.tool)return {type:"tool",tool:n.tool};
-      return null;
-    }).filter(Boolean);
+    // 2026-09-24 B3：服务端终止帧下发了最终落盘版（final_content 含标签 storedText + final_stream_timeline
+    // 精简版）→ 优先采用，本地缓存与服务器时间线字节级一致，补拉不再触发数据替换（连无感校准也不再发生）；
+    // 拿不到（直连透传/旧服务端/回放缓存过期）→ 退回自己的映射，行为同旧版。
+    if(_finalContent!=null)full=_finalContent;
+    if(_finalTimeline!=null){streamedTimeline=_finalTimeline;}
+    else{
+      streamedTimeline=_streamRenderModel.map(function(n){
+        if(!n)return null;
+        if(n.type==="text")return {type:"text",text:String(n.text||""),first:!!n.first,reasoning:n.first?_streamNodeReasoning(n):"",time:n.time||null};
+        if(n.type==="tool"&&n.tool)return {type:"tool",tool:n.tool};
+        return null;
+      }).filter(Boolean);
+    }
     syncToolSave();
     finalMsgs.push({id:_replyMid,role:"assistant",content:full,reasoning:reasoning,tools:tools,segments:streamedSegments||null,stream_timeline:streamedTimeline||null,time:new Date().toISOString(),tokens:usage});
     if(SessionStore.getCurrentSession()===sidAtStart){
@@ -3499,12 +3511,17 @@ async function request(finalMsgs, fromSend, regenAnchorId){
     try{if(flushStreamSegs){await flushStreamSegs();}}catch(e){}
     if(full){
       syncToolSave();
-      streamedTimeline=_streamRenderModel.map(function(n){
-        if(!n)return null;
-        if(n.type==="text")return {type:"text",text:String(n.text||""),first:!!n.first,reasoning:n.first?_streamNodeReasoning(n):"",time:n.time||null};
-        if(n.type==="tool"&&n.tool)return {type:"tool",tool:n.tool};
-        return null;
-      }).filter(Boolean);
+      // B3（2026-09-24）：同成功路径——超时/中断时若已收到 final 字段则与服务器对齐，否则退回自己的映射
+      if(_finalContent!=null)full=_finalContent;
+      if(_finalTimeline!=null){streamedTimeline=_finalTimeline;}
+      else{
+        streamedTimeline=_streamRenderModel.map(function(n){
+          if(!n)return null;
+          if(n.type==="text")return {type:"text",text:String(n.text||""),first:!!n.first,reasoning:n.first?_streamNodeReasoning(n):"",time:n.time||null};
+          if(n.type==="tool"&&n.tool)return {type:"tool",tool:n.tool};
+          return null;
+        }).filter(Boolean);
+      }
       finalMsgs.push({id:_replyMid,role:"assistant",content:full,reasoning:reasoning,tools:tools,segments:streamedSegments||null,stream_timeline:streamedTimeline||null,time:new Date().toISOString(),tokens:usage});
     }
     if(SessionStore.getCurrentSession()===sidAtStart){
