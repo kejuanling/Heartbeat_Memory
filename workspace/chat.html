@@ -1453,11 +1453,11 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
   <div class="act-tok" id="actTok" style="display:none"></div>
   <button class="act-item" id="actCopy" style="display:none"><span class="ai-lg"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg></span>复制</button>
   <button class="act-item" id="actEdit" style="display:none"><span class="ai-lg"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>️</span>编辑</button>
-  <button class="act-item" id="actRegen" style="display:none"><span class="ai-lg"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 8 7 8"/></svg></span>重新生成</button>
-  <button class="act-item" id="actBranch" style="display:none"><span class="ai-lg"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12a6 6 0 0 0 12 0v-2"/><circle cx="18" cy="5" r="2"/><circle cx="6" cy="18" r="2"/><path d="M18 7v3"/></svg></span>开启分支</button>
   <button class="act-item" id="actStar" style="display:none"><span class="ai-lg"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>️</span><span id="actStarTxt">标星</span></button>
   <button class="act-item" id="actPool" style="display:none"><span class="ai-lg"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg></span>入池</button>
   <button class="act-item" id="actMulti" style="display:none"><span class="ai-lg"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><polyline points="8 12 11 15 16 8"/></svg>️</span>多选</button>
+  <button class="act-item" id="actRegen" style="display:none"><span class="ai-lg"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 8 7 8"/></svg></span>重新生成</button>
+  <button class="act-item" id="actBranch" style="display:none"><span class="ai-lg"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12a6 6 0 0 0 12 0v-2"/><circle cx="18" cy="5" r="2"/><circle cx="6" cy="18" r="2"/><path d="M18 7v3"/></svg></span>开启分支</button>
   <button class="act-item danger" id="actDel" style="display:none"><span class="ai-lg"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></span>删除</button>
 </div>
 
@@ -3192,6 +3192,32 @@ function showError(msg){
   removeTyping();
   const d=document.createElement("div");d.className="msg ev-silent";
   d.innerHTML='<div class="ev-silent" style="color:var(--bad);background:rgba(201,112,112,.10);border:1px dashed rgba(201,112,112,.25)">连接时遇到一点问题：'+escapeHtml(msg)+'</div>';
+  // 2026-09-23（F5-A）：错误提示条上加「重试」入口，点击直接重发最后一条 user 消息。
+  // 按用户要求**不弹确认**（重试是明确的用户意图）；防连点靠 sending 判定 + 按钮自禁用。
+  // 复用与「重新生成」相同的锚点语义：把该 user 消息 id 作为 regen_anchor_id 上报，
+  // 服务端会先按 id 截断其后的残缺回复再生成，避免残留（见 server.js appendRequestMessages 第 0 步）。
+  const _box=d.firstElementChild;
+  const _hasUser=msgs.some(function(m){return m&&m.role==="user";});
+  if(_box&&_hasUser){
+    const btn=document.createElement("button");
+    btn.type="button"; btn.className="btn-ghost"; btn.textContent="重试";
+    btn.style.cssText="display:block;margin:10px 0 0;padding:5px 20px;font-size:13px";
+    btn.addEventListener("click",function(){
+      if(sending)return;
+      // 先取局部变量，避免异步期间 msgs 被改动
+      let k=-1;
+      for(let i=msgs.length-1;i>=0;i--){ if(msgs[i]&&msgs[i].role==="user"){k=i;break;} }
+      if(k<0){ showToast("没有可重试的消息"); return; }
+      const base=msgs.slice(0,k+1);
+      const anchorId=(base[base.length-1]&&base[base.length-1].id)||"";
+      btn.disabled=true; btn.textContent="重试中…";
+      d.remove();                       // 移除该错误条，避免与新回复并存
+      msgs=base; saveMsgs(); renderAll();
+      request(base,false,anchorId);
+      updateSelBar();
+    });
+    _box.appendChild(btn);
+  }
   chatEl.appendChild(d);scrollBottom();
 }
 
@@ -3946,9 +3972,9 @@ actRegen.addEventListener("click",()=>{
   let ui=-1;
   for(let i=idx-1;i>=0;i--){if(msgs[i].role==="user"){ui=i;break;}}
   if(ui<0){showToast("前面没有可参考的消息");closeAct();return;}
-  // 2026-09-23：文案补明删除范围——服务端现在按锚点 id 硬截断，范围比此前更彻底
-  // （此前从中间重生成其实清不干净，现在会连特殊事件一并删除），用户需知情后再确认。
-  if(!confirm("确定重新生成这条回复？\n\n注意：该回复及其之后的全部内容都会被删除（包含唤醒记录、日记等），此操作不可撤销，然后重新生成。"))return;
+  // 2026-09-23：原生 confirm 的按钮文案无法自定义（只能是「确定 / 取消」），故在问句里
+  // 显式引导用户点哪个按钮。用户明确要求不展示「删除范围」提示文案，故不再赘述。
+  if(!confirm("重新生成这条回复？\n\n▶ 点「确定」＝立即重新生成\n▶ 点「取消」＝放弃，不做任何改动"))return;
   const base=msgs.slice(0,ui+1);
   // 2026-09-23：把锚点（这条回复对应的那条 user 消息）的 id 一并上报，服务端据此按 id 精确截断
   const _anchorId=(base[base.length-1]&&base[base.length-1].id)||"";
