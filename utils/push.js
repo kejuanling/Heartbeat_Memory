@@ -1,6 +1,5 @@
 'use strict';
-// 推送回显 / 时间 纯工具(自 server.js 抽出, 逻辑零改动; writeTimelineAtomic 目标路径改为项目根)
-const path = require('path');
+// 推送回显 / 时间 纯工具(自 server.js 抽出, 逻辑零改动)
 
 // 解析「成功推送回显」正文：格式=（时间 刚刚给某人了某渠道推送：标题｜正文）尾缀
 // → { at, user, channel, title, body, tail }；非回显格式返回 null
@@ -74,16 +73,8 @@ function toEpoch(at) {
   const d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
   return isNaN(d.getTime()) ? null : d.getTime();
 }
-// 原子写时间线文件（tmp+rename，防半截 JSON）；缺省目标=项目根主会话时间线。
-// ⚠️ 2026-09-22 审查 R19 后**已无生产调用方**（原唯一调用方 routes/push-events.js 的两处写回
-// 已改走 server.js 的 loadTimeline/saveTimeline）。本函数绕过 saveTimeline 的四道守卫
-// （损坏/过期快照/墓碑/__corrupt）且用固定 .tmp 名（并发互相截断），**不要再用于时间线写入**；
-// 如需独立路径，请复用 server.js 的 atomicWriteJsonSync 并自行补守卫。
-function writeTimelineAtomic(list, filePath) {
-  const fsx = require('fs-extra');
-  const targetPath = filePath || path.join(__dirname, '..', 'enhanced_messages.json');
-  const tmp = targetPath + '.tmp';
-  fsx.writeJsonSync(tmp, list, { spaces: 2 });
-  fsx.renameSync(tmp, targetPath);
-}
-module.exports = { parsePushEcho, parseWakeEcho, buildPushEcho, fmtLocalAt, pushEchoMeta, toEpoch, writeTimelineAtomic };
+// 2026-09-23 审查清理：原 writeTimelineAtomic（tmp+rename 原子写时间线）已删除——
+// 它绕过 saveTimeline 的四道守卫（损坏/过期快照/墓碑/__corrupt）且用固定 .tmp 名（并发互相截断），
+// 唯一调用方 routes/push-events.js 已于 2026-09-22（46a60e5）改走 loadTimeline/saveTimeline。
+// 全仓 grep 确认零调用方（仅剩注释提及）后删除，避免后人误用。时间线写入请一律走 server.js saveTimeline。
+module.exports = { parsePushEcho, parseWakeEcho, buildPushEcho, fmtLocalAt, pushEchoMeta, toEpoch };

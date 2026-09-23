@@ -236,14 +236,9 @@ function makeChunk(items, index, includeMsgs, manual) {
     head: snippet(texts[0], 40),
     tail: snippet(texts[texts.length - 1], 40),
     signature: sig,
-    // 2026-09-22 审查 §3.3：以下四项为历史预留字段（曾计划承载「是否已生成摘要 / 摘要正文 /
-    // 生成时间 / 生成方式」），本模块内**无任何读写点**、恒为初始值；已核实 admin-mobile 与
-    // server.js 读的是 preview 自己的 chunks（server.js 另行构造 cached），与本函数的 chunk 无关。
-    // 保留是为了不动 chunk 结构（改动需全链路回归），如需瘦身可整体删除这四行。
-    cached: false,
-    summary: null,
-    generatedAt: null,
-    mode: null,
+    // 2026-09-23 审查清理：原 cached/summary/generatedAt/mode 四个历史预留字段已删除——
+    // 全仓 grep 确认零消费者（admin-mobile.js 与 server.js 读的是 preview 自行构造的 chunks，
+    // 与本函数的 chunk 无关），保留只会让维护者误以为这里承载摘要状态。
     manual: !!manual
   };
   if (includeMsgs) {
