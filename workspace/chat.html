@@ -1702,8 +1702,10 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
             <div class="theme-section-title">主题预设</div>
             <div class="theme-grid" id="themeGrid"><button type="button" class="theme-choice active" data-theme="warm"><span class="theme-swatch warm"><i></i><b></b></span><span><strong>暖白</strong><small>暖白 · 短信式</small></span></button><button type="button" class="theme-choice" data-theme="wx"><span class="theme-swatch wx"><i></i><b></b></span><span><strong>微信</strong><small>微信绿 · 微信式</small></span></button><button type="button" class="theme-choice" data-theme="claude"><span class="theme-swatch claude"><i></i><b></b></span><span><strong>极简</strong><small>灰白 · Claude 风</small></span></button></div>
             <div class="theme-section-title">聊天背景</div>
-            <div class="theme-field theme-inline-field"><label>背景图片</label><div class="theme-row"><input type="text" id="bgImageInput" placeholder="上传后自动填URL" readonly><button type="button" class="mcp-btn" id="bgImageUp">上传</button><button type="button" class="mcp-btn danger" id="bgImageClear">清空</button></div></div>
-            <div class="theme-field theme-inline-field"><label>透明度</label><div class="theme-row"><input type="range" id="bgOpacityRange" min="0" max="100" value="100" style="flex:1"><span id="bgOpacityVal">100%</span></div></div>
+            <div class="theme-profile-block">
+              <div class="theme-field theme-inline-field"><label>背景图片</label><div class="theme-row"><input type="text" id="bgImageInput" placeholder="上传后自动填URL" readonly><button type="button" class="mcp-btn" id="bgImageUp">上传</button><button type="button" class="mcp-btn danger" id="bgImageClear">清空</button></div></div>
+              <div class="theme-field theme-inline-field"><label>透明度</label><div class="theme-row"><input type="range" id="bgOpacityRange" min="0" max="100" value="100" style="flex:1"><span id="bgOpacityVal">100%</span></div></div>
+            </div>
             <div class="theme-section-title">我的资料</div>
             <div class="theme-profile-grid">
               <div class="theme-profile-block"><div class="theme-field theme-inline-field"><label>我的名称</label><div class="theme-row"><input type="text" id="userNameInput" placeholder="我"></div></div><div class="theme-field theme-inline-field"><label>我的头像</label><div class="theme-row"><input type="text" id="userAvatarInput" placeholder="留空用名字首字"><button type="button" class="mcp-btn" id="userAvatarUp">上传</button></div></div></div>
