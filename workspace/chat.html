@@ -4593,7 +4593,7 @@ const THEME_PRESETS={warm:{name:"暖白",layout:"sms",vars:{"--bg1":"#FCF9F7","-
 "--send-size":"36px","--send-radius":"50%","--send-font-size":"16px","--send-shadow":"none",
 "--send-hover-bg":"#333333",
 "--theme-dur":"0ms","--bg-blur":"0px",
-"--user-font-color":"#1a1a1a","--ai-font-color":"#1a1a1a"
+"--user-font-color":"#1a1a1a","--ai-font-color":"#1a1a1a"},dark:{name:"黑夜",layout:"claude",vars:{"--bg1":"#1a1a1a","--bg2":"#1a1a1a","--bg3":"#1a1a1a","--ink":"#e8e8e8","--ink2":"#999","--ink3":"#666","--surface":"#2a2a2a","--card":"#2a2a2a","--sheet-bg":"#2a2a2a","--bubble-user":"#2d2d2d","--bubble-user1":"#2d2d2d","--bubble-user2":"#2d2d2d","--inputbar-bg":"#2d2d2d","--input-text":"#e8e8e8","--send-bg":"#e8e8e8","--send-icon":"#1a1a1a","--field-bg":"#2a2a2a","--menu-bg":"#2a2a2a","--code-bg":"#333","--code-ink":"#aaa","--header-bg":"#1a1a1a","--header-title-color":"#e8e8e8","--header-btn-bg":"#2d2d2d","--header-btn-color":"#ccc","--session-active-bg":"#333","--session-title-color":"#e8e8e8","--session-meta-color":"#666","--user-font-color":"#e8e8e8","--ai-font-color":"#e8e8e8"}
 }}};
 function applyTheme(){const name=THEME_PRESETS[cfg.theme]?cfg.theme:"warm";cfg.theme=name;const root=document.documentElement.style;Object.keys(THEME_PRESETS[name].vars).forEach(function(k){root.setProperty(k,THEME_PRESETS[name].vars[k]);});document.body.setAttribute("data-theme",name);document.body.setAttribute("data-style","classic");document.body.setAttribute("data-bgblur","0");document.body.style.fontFamily="";document.body.style.background="";
   if(cfg.bg_image){
