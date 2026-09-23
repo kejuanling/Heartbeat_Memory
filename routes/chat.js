@@ -1144,6 +1144,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
       let aiFullContent = "";
       let aiThinking = "";
       let aiUsage = null;
+      // 2026-09-23：单帧解析失败计数（原 catch 静默吞掉，落盘回复残缺且无线索）
+      let _streamParseErrors = 0;
       const lines = fullText.split("\n");
       for (const line of lines) {
         if (line.startsWith("data: ") && line !== "data: [DONE]") {
@@ -1156,9 +1158,17 @@ app.post("/v1/chat/completions", async (req, reply) => {
             const finishContent = evt.choices?.[0]?.message?.content;
             if (finishContent) aiFullContent = finishContent;
             if (evt.usage) { aiUsage = evt.usage; console.log("[usage] " + JSON.stringify(evt.usage)); }
-          } catch {}
+          } catch (e) {
+            // 2026-09-23 修复：原为静默 `catch {}`。这里是「流结束后从 fullRawSse 重解析完整正文」
+            // 的内层循环，单帧解析失败会让该帧内容不计入 aiFullContent —— 落盘的回复残缺，
+            // 且日志中毫无线索。改为计数 + 限次告警（不限次会刷屏，故只记前 3 条 + 总数）。
+            _streamParseErrors++;
+            if (_streamParseErrors <= 3) console.warn("[stream] 流后重解析单帧失败:", e && e.message);
+          }
         }
       }
+      // 2026-09-23：汇总本轮解析失败帧数（单帧已限次告警，此处补总数便于日志追溯）
+      if (_streamParseErrors > 0) console.warn("[stream] 本轮共 " + _streamParseErrors + " 帧解析失败，落盘回复可能不完整");
       if (aiFullContent) {
         // 解析 <wake> 闹钟标签并写入调度（标签随后被剥离，不显示给用户）
         parseWakeTagAndSchedule(aiFullContent, sessionId);

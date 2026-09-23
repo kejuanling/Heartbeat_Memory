@@ -2346,7 +2346,6 @@ function renderToolCapsules(tools){
 let _streamActive=false;
 let _streamRenderModel=[];       // 规范化响应模型：text / tool 按事件顺序排列
 let _streamRenderCursor=0;        // 已消费的 model node
-let _streamPendingText="";       // 当前尚未封口的正文区间
 let _streamDrainTimer=null;        // 正文气泡播放间隔计时器；tool event 到来时可立即打断
 const _toolCards={};              // index -> {node, el, tool}
 function _finalTools(){
@@ -3241,6 +3240,7 @@ async function request(finalMsgs, fromSend){
   const _replyMid=newMsgId();   // 本条 AI 回复的稳定 id：随请求 reply_msg_id 上行，服务端 MCP 写回段落盘沿用同一 id——落库前后端 id 一致，落库后立刻编辑/删除也能 diff 定点
   appendTypingBox();
   let full="",reasoning="",usage=null,tools=[],reader=null,flushStreamSegs=null,streamedSegments=null,streamedTimeline=null,buf="";
+  let _chunkErrCount=0;   // 2026-09-23：本轮流式 chunk 解析失败计数（收尾据此提示，见下方 catch）
   let _streamTimedOut=false,_silenceTimer=null;   // 2026-09-22 审查 M17：流式「静默超时」标志与计时器（try 外声明，catch/finally 都要用）
   const syncToolSave=function(){
     // 流式 tool_start/tool_end 才是最准确的工具时间线；旧 tool_trace 只有整组回放时才兜底。
@@ -3294,7 +3294,8 @@ async function request(finalMsgs, fromSend){
         flushStreamSegs=function(){return p.flush(full);};
       }
     } else {
-    _streamActive=true; _streamToolMode="live"; _streamRenderModel=[]; _streamRenderCursor=0; _streamModelDraining=false; _streamPendingText=""; for(const _k in _toolCards)delete _toolCards[_k];   // 统一响应模型：进入事件驱动渲染
+    // 2026-09-23：_streamPendingText 已删（声明后从未被读取）；_chunkErrCount 为本轮 chunk 解析失败计数
+    _streamActive=true; _streamToolMode="live"; _streamRenderModel=[]; _streamRenderCursor=0; _streamModelDraining=false; _chunkErrCount=0; for(const _k in _toolCards)delete _toolCards[_k];   // 统一响应模型：进入事件驱动渲染
     reader=resp.body.getReader();
     const dec=new TextDecoder();
     // 2026-09-22 审查 M17：读流加「90 秒无任何数据」静默超时。此前 aborter 创建后全文件无一处
@@ -3351,7 +3352,13 @@ async function request(finalMsgs, fromSend){
           }
           // 正文：每凑齐一段（分隔符出现）就整条弹出，一条接一条；思考链/工具链随第一段带入
           if(hasContent){ player.feed(full); }
-        }catch(e){}
+        }catch(e){
+          // 2026-09-23 修复：原为静默吞掉。单帧解析/处理失败时该帧的 full、reasoning 都不累加，
+          // 用户看到并落库的是**残缺回复且毫无感知**，事后也无法追溯。改为计数 + 限次告警，
+          // 收尾处（flushStreamSegs 之后）按计数给用户一次提示。
+          _chunkErrCount++;
+          if(_chunkErrCount<=3) console.warn("[stream] chunk 解析失败:", e && e.message);
+        }
       }
     }
     }
@@ -3383,6 +3390,9 @@ async function request(finalMsgs, fromSend){
     if(_streamTimedOut) throw new Error("STREAM_SILENCE_TIMEOUT");
     // 入库（分段连播：先把剩余未弹的段一条条补弹完，再静默重建，不重播整块动画）
     if(flushStreamSegs){await flushStreamSegs();}
+    // 2026-09-23：本轮若有 chunk 解析失败，明确告知用户——此前完全静默，残缺回复无从察觉。
+    // 只提示不阻断：内容已尽力渲染并落库，用户可自行决定是否重发。
+    if(_chunkErrCount>0) showToast("部分内容未完整接收，回复可能不完整");
     if(typeof player!=="undefined" && player && typeof player.getSegments==="function") streamedSegments=player.getSegments();
     // 直接保存真实渲染模型，刷新时按 text/tool/text 原顺序重建，不再依赖 afterSeg 猜位置。
     streamedTimeline=_streamRenderModel.map(function(n){
