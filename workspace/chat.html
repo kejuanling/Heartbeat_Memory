@@ -7803,11 +7803,11 @@ body:has(#chat[data-layout="claude"]) footer .inputbar #micBtn{color:#6b6b6b!imp
 .cma-btn:active{background:rgba(0,0,0,.06);color:#555}
 /* claude 主题：隐藏顶栏，浮动按钮 */
 body:has(#chat[data-layout="claude"]) header{display:none!important}
-.claude-fab-left{position:fixed;top:calc(env(safe-area-inset-top) + 12px);left:12px;z-index:50;width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.6);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:none;box-shadow:0 1px 3px rgba(0,0,0,.06);display:none;align-items:center;justify-content:center;cursor:pointer;color:#555}
+.claude-fab-left{position:fixed;top:calc(env(safe-area-inset-top) + 12px);left:12px;z-index:50;width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,.6);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:none;box-shadow:0 1px 3px rgba(0,0,0,.06);display:none;align-items:center;justify-content:center;cursor:pointer;color:#555}
 .claude-fab-right{position:fixed;top:calc(env(safe-area-inset-top) + 12px);right:12px;z-index:50;display:none;align-items:center;gap:8px}
 body:has(#chat[data-layout="claude"]) .claude-fab-left,
 body:has(#chat[data-layout="claude"]) .claude-fab-right{display:flex}
-.claude-fab-right .fab-btn{width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.6);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:none;box-shadow:0 1px 3px rgba(0,0,0,.06);display:flex;align-items:center;justify-content:center;cursor:pointer;color:#555}
+.claude-fab-right .fab-btn{width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,.6);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:none;box-shadow:0 1px 3px rgba(0,0,0,.06);display:flex;align-items:center;justify-content:center;cursor:pointer;color:#555}
 .claude-fab-right .fab-btn.expandable{transition:all .2s ease;opacity:0;transform:translateX(10px) scale(.8);pointer-events:none;position:absolute;right:0}
 .claude-fab-right.open .fab-btn.expandable{opacity:1;transform:translateX(0) scale(1);pointer-events:auto;position:relative}
 .claude-fab-right.open .fab-btn.expandable:nth-child(2){transition-delay:.05s}
