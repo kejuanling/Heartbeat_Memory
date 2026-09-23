@@ -3073,11 +3073,10 @@ function segPopOne(text,srcMsg,first){   // 弹出单条气泡 DOM（复用 make
   el.classList.add("stream-in");
   removeEmpty();
   chatEl.appendChild(el);
-  if(_streamActive){
-    const _si=_streamNextSegIndex++;
-    _streamSegAnchors[_si]=el;
-    _streamAnchor=el;
-  }
+  // 2026-09-23 修复：原 if(_streamActive){ ... } 块引用 _streamNextSegIndex / _streamSegAnchors
+  // / _streamAnchor 三个变量——它们在「afterSeg → stream_timeline」重构中已被删除，全文件无声明，
+  // 只要该路径被走到就抛 ReferenceError。渲染顺序现由 _streamRenderModel + _streamRenderCursor
+  // 统一管理（流式走 _streamPushText，非流式走本函数），此块无存在必要，删除。
   if(autoScroll)scrollBottom();
 }
 function segEnqueueMsg(m){   // 把一条消息拆段全部入队（user 消息整条入队，AI 消息按分隔符拆段）；间隔按每段字数
@@ -3125,8 +3124,24 @@ function makeSegPlayer(srcMsg){
   function seal(full){ scan(full,true); }
   async function flush(full){
     scan(full,true);
-    if(_streamActive){ while(_streamModelDraining||_streamRenderCursor<_streamRenderModel.length) await new Promise(function(r){setTimeout(r,60);}); }
-    else await SEGQ.drained();
+    if(!_streamActive){ await SEGQ.drained(); return; }
+    // 2026-09-23 修复：原为**无超时的 while 等待**——drain 一旦卡死（_streamModelDraining 未复位
+    // 或 cursor 推不动），本函数永不返回，调用方 await flushStreamSegs() 随之挂起，
+    // 入库与 sending=false 全部不执行 → 发送键永久灰化、只能刷新页面
+    // （与 M17 修复的「90s 静默超时」是同一症状的另一入口）。
+    // 改为带总时长上限：超时强制复位 draining 标志并放弃剩余未弹节点，保证收尾流程继续。
+    // 注意：放弃只影响屏幕上未弹出的气泡；落盘用的 streamedTimeline 由 _streamRenderModel
+    // 整体映射（见 request 收尾），不依赖是否已渲染，故数据不丢。
+    const FLUSH_WAIT_MS=3000, _t0=Date.now();
+    while(_streamModelDraining||_streamRenderCursor<_streamRenderModel.length){
+      if(Date.now()-_t0>FLUSH_WAIT_MS){
+        console.warn("[stream] flush 等待渲染模型超时(3s)，强制复位收尾；剩余气泡可能未弹出");
+        _streamModelDraining=false;
+        if(_streamDrainTimer){clearTimeout(_streamDrainTimer);_streamDrainTimer=null;}
+        break;
+      }
+      await new Promise(function(r){setTimeout(r,60);});
+    }
   }
   return {feed:feed,seal:seal,flush:flush,getSegments:function(){return playedSegments.slice();}};
 }
