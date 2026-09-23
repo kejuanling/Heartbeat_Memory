@@ -976,9 +976,9 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .session-item .s-op:hover{background:var(--accent-faint)}
 .session-item .s-more{margin-left:auto;border:none;background:none;color:var(--ink3);cursor:pointer;padding:3px 6px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;transition:all .12s}
 .session-item .s-more:hover{color:var(--session-action-hover-color,var(--accent-deep));background:var(--session-action-hover-bg,var(--accent-faint))}
-.sess-menu{position:fixed;z-index:999;min-width:104px;background:var(--menu-bg,#fff);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 22px rgba(var(--shadow-rgb),.14);padding:4px;display:flex;flex-direction:column}
+.sess-menu{position:fixed;z-index:999;min-width:128px;background:var(--menu-bg,#fff);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 22px rgba(var(--shadow-rgb),.14);padding:5px;display:flex;flex-direction:column}
 .sess-menu.hidden{display:none}
-.sess-menu-item{border:none;background:none;text-align:left;padding:7px 12px;font-size:12px;color:var(--ink);border-radius:7px;cursor:pointer;display:flex;align-items:center;gap:7px;transition:background .12s,color .12s;white-space:nowrap}
+.sess-menu-item{border:none;background:none;text-align:left;padding:9px 14px;font-size:13px;color:var(--ink);border-radius:7px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:background .12s,color .12s;white-space:nowrap}
 .sess-menu-item:hover{background:var(--accent-faint);color:var(--accent-deep)}
 .sess-menu-item.on{color:var(--info)}
 .sess-menu-item.danger{color:var(--bad)}
@@ -5729,11 +5729,11 @@ function openSessMenu(sid, anchorEl){
   const el=ensureSessMenu();
   const lockOn=(SessionStore.getWakeLocked()||[]).indexOf(sid)>=0;
   el.innerHTML='<button class="sess-menu-item" data-op="cc">压缩</button>'
-    +'<button class="sess-menu-item" data-op="export">导出</button>'
     +'<button class="sess-menu-item'+(lockOn?' on':'')+'" data-op="lock">唤醒'+(lockOn?' ✓':'')+'</button>'
     +'<button class="sess-menu-item" data-op="persona">设定</button>'
     +'<button class="sess-menu-item" data-op="cross">跨窗口</button>'
     +'<button class="sess-menu-item" data-op="provider">模型</button>'
+    +'<button class="sess-menu-item" data-op="export">导出</button>'
     +'<button class="sess-menu-item danger" data-op="del">归档</button>';
   Array.prototype.forEach.call(el.querySelectorAll(".sess-menu-item"),function(btn){
     btn.addEventListener("click",function(e){
