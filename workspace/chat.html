@@ -2878,13 +2878,17 @@ function makeMsgEl(m,idx,grpCls){
     let parts=splitBubbleText(full);
     if(parts.length<=1){parts=[full];}
     if(parts.length>1)d.classList.add("multi");
-    // 工具卡按 afterSeg 映射到分段下标后插入（-1/超界 → 末尾段之后）；方案2 不再在 renderAiContent 里触发
+    // 工具卡映射到分段下标后插入。注意：新数据不会走到这里（上方 stream_timeline 分支优先返回），
+    // 本段只服务「本次重构之前生成的旧消息」——它们的 tools 不含 afterSeg（后端已移除该字段）。
+    // 2026-09-23 用户拍板：旧数据一律放在**首段之后**（即思考链的下方）。依据是 AI 多数场景
+    // 先调工具、再给结论，放开头更贴近真实时序；此前的 fallback 是「末尾段之后」，
+    // 会让旧消息的工具卡全部堆在结尾，与当时看到的交错顺序明显不符。
     const _mTools=(cfg.show_tools!==false&&Array.isArray(m.tools))?m.tools.filter(function(_t){return _t&&_t.name;}):[];
     const _cardsBySeg={};
     _mTools.forEach(function(_t){
-      const _a=(typeof _t.afterSeg==="number")?_t.afterSeg:-1;
+      const _a=(typeof _t.afterSeg==="number")?_t.afterSeg:0;   // 无 afterSeg（旧数据）→ 首段之后
       let _idx=_a;
-      if(_idx<0||_idx>=parts.length)_idx=parts.length-1;
+      if(_idx<0||_idx>=parts.length)_idx=0;                      // 负数/超界同样归首段之后
       (_cardsBySeg[_idx]=_cardsBySeg[_idx]||[]).push(_t);
     });
     parts.forEach(function(p,pi){
@@ -2894,7 +2898,7 @@ function makeMsgEl(m,idx,grpCls){
       // host 子节点而抛 NotFoundError，导致带 reasoning/tools 的 AI 消息整条不渲染。
       host.appendChild(b);
       renderAiContent(host,b,p,(pi===0?m.reasoning:""),[],null);
-      // 工具卡：afterSeg 等于当前分段下标时紧跟该段插入（-1/超界 → 最后一段之后），
+      // 工具卡：紧跟 _cardsBySeg 指定的那一段之后插入（旧数据统一落在首段＝思考链下方），
       // 与流式（QQ 分段）视觉一致；不再走 renderAiContent 的"方案2"整条重排（会与每段独立气泡冲突）
       const _grp=_cardsBySeg[pi];
       if(_grp&&_grp.length){
