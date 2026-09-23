@@ -2442,8 +2442,20 @@ function _streamPushText(text,reasoningSrc){
   if(last&&last.type==="text"&&!last.sealed){
     last.text+=t;
     if(last.el&&last.el.parentNode){
-      // 每段 emit 的就是完整气泡内容，直接整段重渲染（不需要 timer 攒）
-      _streamFillBubble(last);
+      var _isClaude=(chatEl && chatEl.dataset.layout==="claude");
+      if(_isClaude){
+        // claude 主题：打字机效果——60ms 节流逐字渲染
+        last._dirty=true;
+        if(!_streamTextRerenderTimer){
+          _streamTextRerenderTimer=setTimeout(function(){
+            _streamTextRerenderTimer=null;
+            _streamRenderModel.forEach(function(n){if(n&&n.type==="text"&&n._dirty){n._dirty=false;_streamFillBubble(n);}});
+          },60);
+        }
+      }else{
+        // 其他主题：每段是完整气泡内容，直接整段重渲染
+        _streamFillBubble(last);
+      }
     }else _streamRenderModelDrain();
     return;
   }
@@ -3129,7 +3141,10 @@ function makeSegPlayer(srcMsg){
     if(!t.trim())return;
     const out=t;
     playedSegments.push(out);
-    if(_streamActive){ SEGQ.push(function(){ _streamPushText(out,srcMsg||null); }, segGapFor(out)); }
+    if(_streamActive){
+      if(chatEl && chatEl.dataset.layout==="claude"){ _streamPushText(out,srcMsg||null); }
+      else{ SEGQ.push(function(){ _streamPushText(out,srcMsg||null); }, segGapFor(out)); }
+    }
     else { const first=playedSegments.length===1; SEGQ.push(function(){segPopOne(t,srcMsg,first);},segGapFor(t)); }
   }
   function scan(full,forceTail){
@@ -3149,7 +3164,7 @@ function makeSegPlayer(srcMsg){
     if(forceTail){ emitText(tail.slice(pos)); cursor=clean.length; }
     else if(pos>0) cursor+=pos;
   }
-  function feed(full){ scan(full,false); }   // 流式中只在扫到分隔符时吐整段，尾部不攒不吐；flush 时 forceTail 吐最后一段
+  function feed(full){ scan(full, !!(chatEl && chatEl.dataset.layout==="claude")); }   // claude=打字机实时吐尾部；其他主题=只在分隔符处吐整段
   function seal(full){ scan(full,true); }
   async function flush(full){
     scan(full,true);
@@ -7721,8 +7736,8 @@ body:has(#chat[data-layout="claude"]) footer .inputbar:focus-within{box-shadow:0
 body:has(#chat[data-layout="claude"]) footer .inputbar #input{background:transparent!important;border:none!important;outline:none!important;box-shadow:none!important;color:#1a1a1a;font-size:16px}
 body:has(#chat[data-layout="claude"]) footer .inputbar #send{background:#1a1a1a!important;color:#fff!important;border-radius:50%!important;width:36px!important;height:36px!important}
 body:has(#chat[data-layout="claude"]) footer .inputbar #micBtn,body:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn{color:#6b6b6b!important}
-/* 操作栏图标灰色细线 */
-#chat[data-layout="claude"] .rw-wrap,#chat[data-layout="claude"] .tool-trace{opacity:.5}
+/* 思考链/工具链：claude 主题下完全隐藏 */
+#chat[data-layout="claude"] .rw-wrap,#chat[data-layout="claude"] .tool-trace,#chat[data-layout="claude"] .think-cap,#chat[data-layout="claude"] .tool-cap{display:none!important}
 /* 会话列表 */
 body:has(#chat[data-layout="claude"]) .session-item,body:has(#chat[data-layout="claude"]) .session{background:transparent!important;border:0!important;border-radius:12px!important}
 body:has(#chat[data-layout="claude"]) .session-item.active,body:has(#chat[data-layout="claude"]) .session.active{background:#e8e8e8!important}
