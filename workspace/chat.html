@@ -2372,14 +2372,31 @@ function _streamModelPush(node){
   }
   _streamRenderModelDrain();
 }
-function _streamRenderTextNode(node){
-  const el=makeMsgEl({role:"assistant",content:node.text,reasoning:node.first?_streamNodeReasoning(node):"",tools:[],time:node.time},-1,"");
-  if(!el)return null;
-  el.classList.add("stream-in");
+// ===== B4 容器模型（2026-09-24）：整条流式回复住一个 .msg.ai.multi 容器 =====
+// 实时结构与收尾 renderAllNoAnim 重建出的结构一致（buildAiUnitRow 同源）；工具卡也进容器
+// （原 chatEl 直挂的「两套 DOM」消失，P1-3 根治）。收尾重建时容器随 chatEl 清空自然移除。
+let _streamRoot=null;
+function _streamEnsureRoot(){
+  if(_streamRoot&&_streamRoot.parentNode)return _streamRoot;
+  _streamRoot=document.createElement("div");
+  _streamRoot.className="msg ai multi stream-in";
   removeEmpty();
-  chatEl.appendChild(el);
+  chatEl.appendChild(_streamRoot);
+  return _streamRoot;
+}
+// 增量填充：只重写该节点自己的气泡内容（60ms 节流内高频调用），头像行不动，不再整段重建（P3-10 根治）
+function _streamFillBubble(node){
+  const unit=node.unit;
+  if(!unit||!unit.bubble||!unit.bubble.parentNode)return;
+  renderAiContent(unit.host,unit.bubble,node.text,_streamNodeReasoning(node));
+}
+function _streamRenderTextNode(node){
+  const root=_streamEnsureRoot();
+  node.unit=buildAiUnitRow(root);
+  if(node.unit.row)node.unit.row.classList.add("stream-in");   // 每段弹出保留进场动画（原每条 .msg stream-in 的等效）
+  _streamFillBubble(node);
   if(autoScroll)scrollBottom();
-  return el;
+  return node.unit.bubble;
 }
 function _streamRenderToolNode(node){
   if(cfg.show_tools===false)return null;
@@ -2388,8 +2405,9 @@ function _streamRenderToolNode(node){
   if(!card)return null;
   card.classList.add("stream-in");
   card.addEventListener("click",function(){card.classList.toggle("open");});
-  removeEmpty();
-  chatEl.appendChild(card);
+  // B4（2026-09-24）：进整条消息容器（原 chatEl 直挂是「两套 DOM」的根源，P1-3 根治）
+  const root=_streamEnsureRoot();
+  root.appendChild(card);
   if(autoScroll)scrollBottom();
   return card;
 }
@@ -2445,10 +2463,7 @@ function _streamPushText(text,reasoningSrc){
           _streamRenderModel.forEach(function(n){
             if(n&&n.type==="text"&&n._dirty){
               n._dirty=false;
-              if(n.el&&n.el.parentNode){
-                const next=_streamRenderTextNode(n);
-                if(next){n.el.replaceWith(next);n.el=next;}
-              }
+              _streamFillBubble(n);   // B4：只重写该节点自己的气泡（内部自检 parentNode），不再整段重建
             }
           });
         },60);
@@ -2799,6 +2814,70 @@ function openCallRecord(m){
   if(!shown){ box.innerHTML='<div style="text-align:center;color:var(--ink3);padding:22px">(无对话内容)</div>'; }
   modal.classList.remove("hidden");
 }
+// ===== B 档第一步（2026-09-24）：timeline → 渲染单元列表（结构解释器，全文件唯一出处）=====
+// 四条渲染路径（实时流式/收尾重建/刷新补拉/旧数据合成）共用本函数推导「一条 AI 消息长什么样」；
+// DOM 构建仍由调用方完成（renderAiContent 等依赖 cfg/主题全局，不强行纯化）。
+// 规则内聚（此前散在 makeMsgEl 两分支 + 实时模型三处）：
+//   a) 拆段是 UI 规则、与有无工具无关：每个 text 节点统一过 splitBubbleText；
+//   b) 无 timeline 的旧消息：从 content+tools 合成等价 timeline（工具统一首段之后＝思考链下方，2026-09-23 用户拍板）；
+//   c) timeline 无 tool 节点但 m.tools 有值（旧回放/直连降级落盘）：工具卡补在尾部（P1-4 兜底）。
+// 返回 [{kind:"text",text,reasoning},{kind:"tool",tool}]；reasoning 只挂首个 text 单元。
+function buildTimelineUnits(timeline, m){
+  let tl=(Array.isArray(timeline)&&timeline.length)?timeline:null;
+  const fromTimeline=!!tl;
+  if(!tl){
+    // b) 旧消息合成：content 按分隔符拆段为 text 节点序列；有工具则统一插到首段之后
+    const full=stripCurrentTime(stripInnerTags(msgText(m))).clean;
+    let ps=splitBubbleText(full);
+    if(ps.length<=1)ps=[full];
+    tl=ps.map(function(_p){return {type:"text",text:_p};});
+    const _mTools=(cfg.show_tools!==false&&Array.isArray(m.tools))?m.tools.filter(function(_t){return _t&&_t.name;}):[];
+    if(_mTools.length){
+      tl=tl.slice(0,1).concat(_mTools.map(function(_t){return {type:"tool",tool:_t};}), tl.slice(1));
+    }
+  } else {
+    // c) P1-4 兜底：timeline 无 tool 节点但 m.tools 有值 → 补尾部
+    const _tlHasTool=tl.some(function(_x){return _x&&_x.type==="tool"&&_x.tool&&_x.tool.name;});
+    if(!_tlHasTool&&cfg.show_tools!==false&&Array.isArray(m.tools)){
+      m.tools.forEach(function(_t){ if(_t&&_t.name) tl.push({type:"tool",tool:_t}); });
+    }
+  }
+  const units=[];
+  let reasoningAssigned=false;
+  tl.forEach(function(_part){
+    if(!_part||!_part.type)return;
+    if(_part.type==="text"){
+      const _txt=String(_part.text==null?"":_part.text);
+      if(_txt==="")return;
+      // a) 拆段：分隔符在此统一消费（2026-09-24 P0-2 语义），工具卡位置由 timeline 顺序决定
+      const _ps=splitBubbleText(_txt);
+      (_ps.length?_ps:[_txt]).forEach(function(_p){
+        units.push({kind:"text",text:_p,reasoning:(!reasoningAssigned)?(m&&m.reasoning||""):""});
+        reasoningAssigned=true;
+      });
+    }else if(_part.type==="tool"&&_part.tool&&_part.tool.name&&cfg.show_tools!==false){
+      units.push({kind:"tool",tool:_part.tool});
+    }
+  });
+  return {units:units,fromTimeline:fromTimeline};
+}
+// AI 消息的「头像+名称行 + 气泡」渲染单元 DOM 工厂（makeMsgEl 重建路径与实时容器共用）。
+// 返回 {host,bubble}：host 是气泡应挂的列容器，bubble 已挂好（renderAiContent 要求先挂再渲染）。
+function buildAiUnitRow(hostMsg){
+  const layout=(THEME_PRESETS[cfg&&cfg.theme]&&THEME_PRESETS[cfg.theme].layout)||((cfg.bubble_style)||"qq");
+  if(layout==="sms"){
+    // 短信：无头像无名称，气泡直接挂消息根
+    const b=document.createElement("div");b.className="bubble";hostMsg.appendChild(b);
+    return {host:hostMsg,bubble:b,row:null};
+  }
+  const row=document.createElement("div");row.className="mrow";
+  if((cfg.show_avatar!==false)||layout==="wx"){const av=document.createElement("span");av.className="mav";fillMav(av,true);row.appendChild(av);}
+  const mc=document.createElement("div");mc.className="mcol";
+  if(layout!=="wx" && cfg.show_name!==false){const nm=document.createElement("span");nm.className="mnm";nm.textContent=cfg.ai_name||"谢意行";mc.appendChild(nm);}
+  row.appendChild(mc);hostMsg.appendChild(row);
+  const b=document.createElement("div");b.className="bubble";mc.appendChild(b);
+  return {host:mc,bubble:b,row:row};
+}
 function makeMsgEl(m,idx,grpCls){
   const d=document.createElement("div");
   // 工具调用记录：保留在 msgs 里供模型跨轮参考，但界面上不渲染成气泡
@@ -2851,87 +2930,31 @@ function makeMsgEl(m,idx,grpCls){
     }
     return host;
   }
-  // AI 多气泡：按分隔符拆，每个气泡独立带头像+名称
+  // AI 消息：统一经 buildTimelineUnits 推导渲染单元（四路径共用解释器，2026-09-24 B 档第一步）。
+  // 原「stream_timeline 分支 + 旧数据 afterSeg fallback」两套实现已合并——结构推导全文件只此一处。
   if(isAI){
-    // 新版：按真实流式事件时间线重建。正文/工具各自是一级节点，不能再靠 afterSeg 猜工具位置。
-    // 这样即使气泡分隔符被改成自定义字符串，工具也不会因为刷新而移动。
-    if(Array.isArray(m.stream_timeline)&&m.stream_timeline.length){
-      d.classList.add("multi");
-      const _timelineHasTool=m.stream_timeline.some(function(_x){return _x&&_x.type==="tool"&&_x.tool&&_x.tool.name;});
-      const _timelineTextSeenState={seen:false};
-      m.stream_timeline.forEach(function(_part){
-        if(!_part||!_part.type)return;
-        if(_part.type==="text"){
-          const _txt=String(_part.text==null?"":_part.text);
-          if(_txt==="")return;
-          // 2026-09-24 P0-2：拆段是 UI 规则，与有无工具无关（旧版「有工具不拆」导致实时多条小泡、
-          // 结束/刷新后合并成大泡的形态跳变）。timeline text node 统一按 bubble_delim 拆气泡，
-          // 工具卡位置由 timeline 事件顺序决定，不再影响拆段。
-          const _ps=splitBubbleText(_txt);
-          (_ps.length?_ps:[_txt]).forEach(function(_p){
-            const host=buildUnit();
-            const b=document.createElement("div");b.className="bubble";host.appendChild(b);
-            renderAiContent(host,b,_p,(!_timelineTextSeenState.seen?m.reasoning:""));
-            _timelineTextSeenState.seen=true;
-          });
-        }else if(_part.type==="tool"&&_part.tool&&_part.tool.name&&cfg.show_tools!==false){
-          const _tmp=document.createElement("div");_tmp.innerHTML=renderToolCapsule(_part.tool);
+    const _hasTl=(Array.isArray(m.stream_timeline)&&m.stream_timeline.length)?true:false;
+    const _btu=buildTimelineUnits(_hasTl?m.stream_timeline:null,m);
+    if(_btu.units.length){
+      // multi 语义保持：真实 timeline 恒 multi（禁进场动画，重建无感）；合成（旧数据）多段才禁
+      if(_hasTl||_btu.units.length>1)d.classList.add("multi");
+      _btu.units.forEach(function(_u){
+        if(_u.kind==="text"){
+          const _unit=buildAiUnitRow(d);
+          // bubble 已由工厂挂好再渲染：renderAiContent 里 insertBefore(pre, bubble) 依赖父子关系
+          renderAiContent(_unit.host,_unit.bubble,_u.text,_u.reasoning);
+        }else{
+          const _tmp=document.createElement("div");_tmp.innerHTML=renderToolCapsule(_u.tool);
           const _card=_tmp.firstChild;
           if(_card){_card.addEventListener("click",function(){_card.classList.toggle("open");});d.appendChild(_card);}
         }
       });
-      // 2026-09-24 P1-4 兜底：timeline 里没有 tool 节点、但 m.tools 有值（旧回放数据/直连降级落盘）
-      // → 补渲染工具卡，避免这类消息刷新后工具卡永久消失。
-      if(!_timelineHasTool&&cfg.show_tools!==false&&Array.isArray(m.tools)){
-        m.tools.forEach(function(_t){
-          if(!_t||!_t.name)return;
-          const _tmp=document.createElement("div");_tmp.innerHTML=renderToolCapsule(_t);
-          const _card=_tmp.firstChild;
-          if(_card){_card.addEventListener("click",function(){_card.classList.toggle("open");});d.appendChild(_card);}
-        });
-      }
-      // 时间线存在但没有可见正文/工具时，继续走空消息兜底。
-      if(_timelineTextSeenState.seen||d.querySelector(".tool-capsule")){
-        const check=document.createElement("span");check.className="check";check.textContent="✓";d.appendChild(check);
-        const meta=document.createElement("div");meta.className="meta";meta.textContent=(cfg.show_time?fmtTime(mt):"");d.appendChild(meta);
-        return d;
-      }
+    }else{
+      // 无可见单元（旧消息纯空白 content / timeline 全空）→ 与原行为一致渲染空气泡，
+      // 落到 makeMsgEl 尾部公共 check/meta，防消息凭空消失
+      const _unit=buildAiUnitRow(d);
+      renderAiContent(_unit.host,_unit.bubble,"","");
     }
-    const full=stripCurrentTime(stripInnerTags(msgText(m))).clean;
-    let parts=splitBubbleText(full);
-    if(parts.length<=1){parts=[full];}
-    if(parts.length>1)d.classList.add("multi");
-    // 工具卡映射到分段下标后插入。注意：新数据不会走到这里（上方 stream_timeline 分支优先返回），
-    // 本段只服务「本次重构之前生成的旧消息」——它们的 tools 不含 afterSeg（后端已移除该字段）。
-    // 2026-09-23 用户拍板：旧数据一律放在**首段之后**（即思考链的下方）。依据是 AI 多数场景
-    // 先调工具、再给结论，放开头更贴近真实时序；此前的 fallback 是「末尾段之后」，
-    // 会让旧消息的工具卡全部堆在结尾，与当时看到的交错顺序明显不符。
-    const _mTools=(cfg.show_tools!==false&&Array.isArray(m.tools))?m.tools.filter(function(_t){return _t&&_t.name;}):[];
-    const _cardsBySeg={};
-    _mTools.forEach(function(_t){
-      const _a=(typeof _t.afterSeg==="number")?_t.afterSeg:0;   // 无 afterSeg（旧数据）→ 首段之后
-      let _idx=_a;
-      if(_idx<0||_idx>=parts.length)_idx=0;                      // 负数/超界同样归首段之后
-      (_cardsBySeg[_idx]=_cardsBySeg[_idx]||[]).push(_t);
-    });
-    parts.forEach(function(p,pi){
-      const host=buildUnit();
-      const b=document.createElement("div");b.className="bubble";
-      // 必须先挂到 host，否则 renderAiContent 里 insertBefore(pre, bubble) 因 bubble 不是
-      // host 子节点而抛 NotFoundError，导致带 reasoning/tools 的 AI 消息整条不渲染。
-      host.appendChild(b);
-      renderAiContent(host,b,p,(pi===0?m.reasoning:""));
-      // 工具卡：紧跟 _cardsBySeg 指定的那一段之后插入（旧数据统一落在首段＝思考链下方），
-      // 与流式（QQ 分段）视觉一致；不再走 renderAiContent 的"方案2"整条重排（会与每段独立气泡冲突）
-      const _grp=_cardsBySeg[pi];
-      if(_grp&&_grp.length){
-        _grp.forEach(function(_t){
-          const _tmp=document.createElement("div");_tmp.innerHTML=renderToolCapsule(_t);
-          const _card=_tmp.firstChild;_card.addEventListener("click",function(){_card.classList.toggle("open");});
-          host.appendChild(_card);
-        });
-      }
-    });
   } else {
     const host=buildUnit();
     const st=stripCurrentTime(stripInnerTags(msgText(m)));
@@ -3494,7 +3517,7 @@ async function request(finalMsgs, fromSend, regenAnchorId){
   }finally{
     if(_silenceTimer){clearTimeout(_silenceTimer);_silenceTimer=null;}   // M17：清理静默超时计时器
     sending=false;setSendState(false);aborter=null;
-    _streamActive=false; _streamToolMode="live"; _streamRenderModel=[]; _streamRenderCursor=0; _streamModelDraining=false; if(_streamDrainTimer){clearTimeout(_streamDrainTimer);_streamDrainTimer=null;} if(_streamTextRerenderTimer){clearTimeout(_streamTextRerenderTimer);_streamTextRerenderTimer=null;}   // 结束统一响应模型（P3-10 节流 timer 一并清）
+    _streamActive=false; _streamToolMode="live"; _streamRenderModel=[]; _streamRenderCursor=0; _streamModelDraining=false; if(_streamDrainTimer){clearTimeout(_streamDrainTimer);_streamDrainTimer=null;} if(_streamTextRerenderTimer){clearTimeout(_streamTextRerenderTimer);_streamTextRerenderTimer=null;} _streamRoot=null;   // 结束统一响应模型（节流 timer 清、容器引用释放——DOM 由 renderAll 重建接管）
     showHeaderTyping(false);
     try{ if(reader && reader.cancel) reader.cancel(); }catch(e){}
     // 2026-09-23 修复（B2）：补拉本轮「发送/连播期间」被 _doHistoryPull 丢弃的 history_update。
