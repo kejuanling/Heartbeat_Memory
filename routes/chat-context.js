@@ -159,8 +159,15 @@ function sanitizeForUpstream(msgs) {
     if (msg.name !== undefined) clean.name = msg.name;
     if (msg.tool_calls !== undefined) clean.tool_calls = msg.tool_calls;
     if (msg.tool_call_id !== undefined) clean.tool_call_id = msg.tool_call_id;
-    // 多轮对话时可回传思考链（前端若开"回传思考链"会带 reasoning_content），透传给上游而非丢弃
-    if (msg.role === "assistant" && msg.reasoning_content !== undefined) clean.reasoning_content = msg.reasoning_content;
+    // 多轮对话回传思考链（2026-09-24 修复）：
+    // - timeline 落盘时字段叫 reasoning（chat.js toAppend.push 写的是 reasoning: aiThinking）
+    // - 工具循环/前端透传时字段叫 reasoning_content
+    // DeepSeek thinking 模式要求历史 assistant 必须带 reasoning_content，否则 400。
+    // 两个名字都认，统一映射成 reasoning_content 发出去；空串不带（跟随 mcp-tool-loop 口径）。
+    if (msg.role === "assistant") {
+      const rc = msg.reasoning_content !== undefined ? msg.reasoning_content : msg.reasoning;
+      if (rc !== undefined && rc !== null && String(rc).length > 0) clean.reasoning_content = rc;
+    }
     return clean;
   });
 }
