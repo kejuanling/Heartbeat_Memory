@@ -3504,6 +3504,16 @@ async function request(finalMsgs, fromSend, regenAnchorId){
       msgs=finalMsgs;saveMsgs();
       if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
       autoNameSessionWhenUntitled(full);
+      // 页面切到后台时，AI 回复结束弹 Bark 通知
+      try{
+        if(document.hidden && full && full.trim()){
+          fetch("/v1/notify/reply-done",{
+            method:"POST",
+            headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key},
+            body:JSON.stringify({preview:String(full).replace(/[#*`>\n]/g," ").trim().slice(0,80)})
+          });
+        }
+      }catch(e){}
     }
     if(_streamTimedOut) showError("响应超时（90 秒未收到数据），已中断。请检查网络后重试");
     else showError(err.message);

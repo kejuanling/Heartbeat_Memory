@@ -6753,6 +6753,16 @@ async function sendPushNotification({ title, body }) {
   }
 }
 
+// 前端在聊天页切后台时，AI 回复结束后调这个接口弹 Bark 通知
+app.post("/v1/notify/reply-done", async (req, reply) => {
+  try {
+    const preview = String((req.body && req.body.preview) || "").trim();
+    if (!preview) return reply.send({ ok: false, reason: "empty" });
+    const r = await sendPushNotification({ title: "AI 回复了", body: preview.slice(0, 200) });
+    reply.send(r);
+  } catch (e) { reply.code(500).send({ error: e.message }); }
+});
+
 // 截图唤醒提示词（AI 决定说不说）
 const SCREENSHOT_WAKE_PROMPT_FILE = path.join(__dirname, "data", "screenshot_wake_prompt.json");
 const DEFAULT_SCREENSHOT_WAKE_PROMPT = `## 最高优先级规则
