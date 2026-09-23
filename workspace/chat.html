@@ -7764,11 +7764,14 @@ body:has(#chat[data-layout="claude"]) header{background:transparent;border-botto
 #chat[data-layout="claude"] .msg{margin-bottom:20px}
 /* 输入栏：白色大圆角卡片悬浮底部 */
 body:has(#chat[data-layout="claude"]) footer{background:transparent;padding-left:4%;padding-right:4%;padding-bottom:calc(env(safe-area-inset-bottom) + 8px)}
-body:has(#chat[data-layout="claude"]) footer .inputbar{background:#ffffff!important;border:none!important;border-radius:24px!important;padding:10px 14px!important;box-shadow:0 1px 3px rgba(0,0,0,.06)!important}
-body:has(#chat[data-layout="claude"]) footer .inputbar:focus-within{box-shadow:0 1px 3px rgba(0,0,0,.06)!important}
+body:has(#chat[data-layout="claude"]) footer .inputbar{background:#ffffff!important;border:1px solid rgba(0,0,0,.06)!important;border-radius:18px!important;padding:8px 12px!important;box-shadow:0 2px 12px rgba(0,0,0,.06),0 1px 3px rgba(0,0,0,.04)!important}
+body:has(#chat[data-layout="claude"]) footer .inputbar:focus-within{box-shadow:0 2px 16px rgba(0,0,0,.08),0 1px 3px rgba(0,0,0,.04)!important}
 body:has(#chat[data-layout="claude"]) footer .inputbar #input{background:transparent!important;border:none!important;outline:none!important;box-shadow:none!important;color:#1a1a1a;font-size:16px}
 body:has(#chat[data-layout="claude"]) footer .inputbar #send{background:#1a1a1a!important;color:#fff!important;border-radius:50%!important;width:36px!important;height:36px!important}
-body:has(#chat[data-layout="claude"]) footer .inputbar #micBtn,body:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn{color:#6b6b6b!important}
+body:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn{background:#f0f0f0!important;border-radius:50%!important;width:36px!important;height:36px!important;display:flex!important;align-items:center;justify-content:center;color:#6b6b6b!important}
+body:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn .ico{display:none!important}
+body:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn::before{content:"+";display:block;font-size:22px;font-weight:300;line-height:1;color:#6b6b6b}
+body:has(#chat[data-layout="claude"]) footer .inputbar #micBtn{color:#6b6b6b!important;border-radius:50%!important;width:36px!important;height:36px!important}
 /* claude 主题：消息下方操作图标行 */
 .claude-msg-actions{display:none;align-items:center;gap:14px;margin-top:6px;padding-left:2px}
 #chat[data-layout="claude"] .claude-msg-actions{display:flex}
