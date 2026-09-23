@@ -87,7 +87,13 @@ async function runWithTools({
   // 从"执行其工具"开始接续；其 content 客户端已见过，不进 contentParts（避免重复显示）
   if (resume && resume.assistantMsg) {
     const am = resume.assistantMsg;
-    working.push({ role: "assistant", content: am.content || "", tool_calls: am.tool_calls });
+    // 同主循环：续跑起点若带思考链也必须回传，否则 thinking mode 上游仍会 400。
+    working.push({
+      role: "assistant",
+      content: am.content || "",
+      reasoning_content: am.reasoning_content || undefined,
+      tool_calls: am.tool_calls
+    });
     await executeToolCalls(am.tool_calls || [], working, toolHistory, toolCtx);
   }
 
@@ -156,7 +162,17 @@ async function runWithTools({
     }
 
     // 记录这一轮 assistant 消息（含 tool_calls 则保留）
-    working.push({ role: "assistant", content: msg.content || "", tool_calls: msg.tool_calls });
+    // 2026-09-23 修复：thinking mode 下必须把本轮思考链原样回传给上游，否则下一轮请求会被拒：
+    //   HTTP 400 "The `reasoning_content` in the thinking mode must be passed back to the API"
+    // 此前只 push 了 content/tool_calls，唤醒侧（wake-chat.js 走本函数）每轮都 400 失败、
+    // 退化为「无工具直连」，工具能力实际失效（日志实测 35 次）。
+    // 与 streamToolLoop 同口径：无思考链时传 undefined，让 JSON.stringify 省略该键。
+    working.push({
+      role: "assistant",
+      content: msg.content || "",
+      reasoning_content: rtext || undefined,
+      tool_calls: msg.tool_calls
+    });
 
     // 没有 tool_calls -> 结束
     const toolCalls = msg.tool_calls;
