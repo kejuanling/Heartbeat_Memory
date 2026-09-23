@@ -7774,7 +7774,7 @@ body:has(#chat[data-layout="wx"]) .session-item .s-name .s-icon.pin:not(.on){col
 
 /* ===== 极简 Claude 风主题 ===== */
 #chat[data-layout="claude"]{padding-left:4%;padding-right:4%;padding-bottom:12px}
-body:has(#chat[data-layout="claude"]){background:linear-gradient(180deg,#faf9f7 0%,#f0efec 100%)!important;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Noto Sans CJK SC","Microsoft YaHei",sans-serif}
+body:has(#chat[data-layout="claude"]){background:linear-gradient(180deg,#faf9f7 0%,#f0efec 100%)!important;font-family:Georgia,-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Noto Sans CJK SC","Microsoft YaHei",serif}
 body:has(#chat[data-layout="claude"]) header{background:transparent;border-bottom:none;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
 /* AI 消息：无气泡纯文字左对齐，无头像无名称 */
 #chat[data-layout="claude"] .msg.ai .bubble{background:transparent!important;box-shadow:none!important;border:none!important;padding:0!important;border-radius:0!important;color:#1a1a1a;max-width:100%!important}
@@ -7814,6 +7814,7 @@ body:has(#chat[data-layout="claude"]) footer .inputbar #micBtn{color:#6b6b6b!imp
 .cma-btn:active{background:rgba(0,0,0,.06);color:#555}
 /* claude 主题：隐藏顶栏，浮动按钮 */
 body:has(#chat[data-layout="claude"]) header{display:none!important}
+#chat[data-layout="claude"] ~ #empty .big, body:has(#chat[data-layout="claude"]) #empty .big{display:none!important}
 .claude-fab-left{position:fixed;top:calc(env(safe-area-inset-top) + 12px);left:12px;z-index:50;width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,.85);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:none;box-shadow:0 1px 3px rgba(0,0,0,.08);display:none;align-items:center;justify-content:center;cursor:pointer;color:#555}
 .claude-fab-right{position:fixed;top:calc(env(safe-area-inset-top) + 12px);right:12px;z-index:50;display:none;align-items:center;gap:8px}
 body:has(#chat[data-layout="claude"]) .claude-fab-left,
