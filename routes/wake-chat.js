@@ -164,7 +164,18 @@ async function runWakeCompletion(deps, opts) {
     const clients = withTools ? getWakeMcpClients(deps.baseDir) : [];
     if (clients.length) {
       try {
-        const r = await mcp.runWithTools({
+        // 2026-09-23：工具循环由 runWithTools（非流式）改为 streamToolLoop（流式），
+        // 与对话侧（server.js handleMcpRequest）**统一为同一条实现**。
+        // 动因：此前两条链路各有一套工具循环，唯独唤醒侧只走非流式 runWithTools——
+        // 这正是「同一批工具调用，只有 [wake-chat] 反复报 reasoning_content 400、
+        // 对话侧从不报」的结构性原因（口径漂移）。项目既有约束是「两条链路必须同一套」
+        // （见 routes/chat-context.js 文件头），工具循环层是最后一个未收敛的环节。
+        // 唤醒没有 SSE 输出需求，故 onEvent 传 null（对话侧非流式请求同样如此，代码内
+        // 有 `onEvent: (body.stream === true) ? onEvent : null` 的判空，安全）。
+        // 返回字段兼容：本处只消费 r.text 与 r.toolHistory，streamToolLoop 两者都返回；
+        // maxToolRounds 默认值两者同为 DEFAULT_MAX_TOOL_ROUNDS。
+        // 回滚：把下面 streamToolLoop 改回 runWithTools 即可（一行）。
+        const r = await mcp.streamToolLoop({
           upstreamUrl: url,
           upstreamKey: key,
           model,
@@ -172,7 +183,8 @@ async function runWakeCompletion(deps, opts) {
           serverClients: clients,
           sessionId,
           temperature,
-          top_p: topP
+          top_p: topP,
+          onEvent: null
         });
         if (r && typeof r.text === "string" && deps.normalizeContentToText(r.text).trim()) {
           text = r.text;
