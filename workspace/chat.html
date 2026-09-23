@@ -5578,7 +5578,7 @@ function settingsShowPage(key, acc){
   });
   // 懒加载（原由手风琴打开触发，现改到子页打开时）
   if(key==="mcp"){ if(typeof loadMcpServers==="function") loadMcpServers(); }
-  if(key==="chat"){ if(typeof loadProviders==="function") loadProviders(); }   // AI 供应商面板已并入「对话与 AI」
+  if(key==="chat"){ if(typeof loadProviders==="function") loadProviders(); if(typeof loadModelRoles==="function") loadModelRoles(); }   // AI 供应商面板 + 默认模型（按用途）已并入「对话与 AI」
   // 底部保存按钮：只在含「由 saveSettingsAll 统一保存」输入框的页显示（对话与AI / 外观与主题 / 账号与数据）
   var ssb=document.getElementById("settingsSaveBtn"); if(ssb) ssb.style.display=(key==="chat"||key==="appearance"||key==="account")?"":"none";
 }
