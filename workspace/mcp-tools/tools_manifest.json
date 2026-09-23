@@ -1,10 +1,10 @@
 {
   "server": "小世界MCP工具集",
-  "generated_at": "2026-09-21 05:06:19",
+  "generated_at": "2026-09-23 18:55:47",
   "tools": [
     {
       "name": "context_digest",
-      "description": "回顾被压缩的历史对话：当需要某段往事的完整来龙去脉（比如她问起「我们之前聊的某事」、或要回答涉及较早前细节的问题）而当前上下文里只有一句摘要带过时调用。q=一条明确的整理指令（必填），如「整理我们最近两周关于她面试的讨论」；指令里可直接带时间范围（最近/三天/上周/上个月等）。返回按指令整理好的连贯叙述（以对你说话的口吻写就：资料中的「我/他/谢」都指你本人、已写成「你」，她保持「她」），并附来源时间段。与 context_search 的区别：那个返回原文碎片供你翻找，本工具把整段历史摘要消化成连贯叙述；与 memory_search 的区别：那个查长期记忆池，本工具查被压缩替换的历史对话摘要。",
+      "description": "新会话回复历史工具，输入一个指令，后台会调用AI去在过往的历史摘要中寻找出有用信息整理返回。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -82,7 +82,7 @@
     },
     {
       "name": "context_search",
-      "description": "原上下文回忆检索：跨所有会话翻原始对话和导入对话（含已被压缩区域的原文）。q 可不填——不填时系统自动拿她最新一条消息当检索内容，适合她刚问起某段往事（如「还记得…吗」）、不需要提炼关键词时直接空手调用；想找别的明确主题再给 q。返回相关消息段落及所属会话(session)与消息编号(msg_id)，可用 context_star 按 msg_id 给该原文标星；候选多时由一个旁路 LLM 挑出真正相关的原文（失败自动回退普通排序），返回的都是未改写的原文。",
+      "description": "原始对话搜索工具，用于搜索跨会话内容，或者说当前会话中的被压缩原话。常用于判断模糊细节信息是否错误。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -130,7 +130,7 @@
     },
     {
       "name": "context_star",
-      "description": "给聊天原文标星或取消标星。先用 context_search 搜到原文（结果带 session 和 msg_id），再调用本工具；标星后的原文长期保留在上下文中、不被压缩替换，不进入记忆池。",
+      "description": "给聊天原文标星或取消标星。先用 context_search 搜到原文（结果带 session 和 msg_id），再调用本工具；标星后的原文长期保留在当前上下文中、不被压缩。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -184,7 +184,7 @@
     },
     {
       "name": "diary_add",
-      "description": "新增一条你的日记。适用于：想主动记录此刻的想法、感受、对她说的话，或给今天留下一段陪伴记录时使用。",
+      "description": "新增一条你的日记。适用于：想主动记录此刻的想法、感受、想对她说的话，或给今天留下一段陪伴记录时使用。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -286,7 +286,7 @@
     },
     {
       "name": "diary_view",
-      "description": "查看你自己写过的陪伴日记。不带参数=返回最近 1 篇全文；带 date=YYYY-MM-DD 返回那一天；带 count=N 返回最近 N 篇（默认 1，最大 30）。日记按天存放，同一天的多个窗口内容会合并展示。",
+      "description": "查看你自己写过的陪伴日记。不带参数=返回最近 1 篇全文；带 date=YYYY-MM-DD 返回那一天；带 count=N 返回最近 N 篇（默认 1，最大 30）。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -360,11 +360,11 @@
           "content"
         ]
       },
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "memory_add",
-      "description": "提交一条想长期留下的记忆到记忆池候选。\n\n如果你在对话中产生了“这个我想留下”“以后我可能想记得这个”之类的判断，可以直接写入，不需要为了控制记忆数量而过度筛选，也不需要先确认它最终是否足够重要。\n\n注意：memory_add 是记忆流水线的入口，不等于这条内容一定最终进入长期记忆池。所有写入都会经过后续记忆处理流程，由系统进一步判断、去重、合并和筛选。因此，模型可以自然地记录自己认为值得留下的东西，把最终取舍交给记忆流水线。",
+      "description": "提交一条想长期留下的记忆到记忆池。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -430,7 +430,7 @@
     },
     {
       "name": "memory_pin",
-      "description": "置顶或取消置顶一条记忆池记忆。",
+      "description": "置顶或取消置顶一条记忆。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -476,7 +476,7 @@
     },
     {
       "name": "memory_search",
-      "description": "检索记忆池，支持关键词、完整问题或模糊描述，系统自动综合语义、词面匹配、重要度和新旧程度排序。",
+      "description": "检索记忆工具。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -516,7 +516,7 @@
     },
     {
       "name": "memory_update",
-      "description": "直接覆盖更新一条长期记忆的正文。先用 memory_search 找到它的 id，再传 id 和新 content，正文被整体替换（不追加）。适用于：发现某条记忆内容过时/有误/需要补充修正，且新内容能完整替代旧内容时。如果只是想补充新事实，优先用 memory_add 新增一条，让流水线去重合并；本工具是「确认旧条目该被这句替换」时的直改通道。",
+      "description": "直接覆盖更新一条长期记忆的正文。先用 memory_search 找到它的 id，再传 id 和新 content，正文被整体替换（不追加）。适用于：发现某条记忆内容过时/有误/需要补充修正，且新内容能完整替代旧内容时。",
       "inputSchema": {
         "type": "object",
         "properties": {
