@@ -1453,8 +1453,8 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
   <div id="chatSwitching"><span class="cs-spin"></span></div>
   <div id="empty">
     <div class="big"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.6L18 9.4l-4.2 1.8L12 16l-1.8-4.8L6 9.4l4.2-1.8z"/></svg></div>
-    <div class="t1">跟我说说话吧</div>
-    <div class="t2">无论此刻是开心还是难过，我都在这里。</div>
+    <div class="t1" id="emptyT1">Hello</div>
+    <div class="t2" id="emptyT2"></div>
   </div>
 </div>
 
@@ -1858,6 +1858,17 @@ async function syncSettingsFromCloud(){
 /* ================= 元素 ================= */
 const chatEl=document.getElementById("chat");
 const emptyEl=document.getElementById("empty");
+(function(){
+  var greetings=[
+    ["Hello",""],
+    ["How's your day?",""],
+    ["I'm here",""],
+    ["Are you okay?",""]
+  ];
+  var g=greetings[Math.floor(Math.random()*greetings.length)];
+  document.getElementById("emptyT1").textContent=g[0];
+  document.getElementById("emptyT2").textContent=g[1];
+})();
 const inputEl=document.getElementById("input");
 const sendBtn=document.getElementById("send");
 const imgBtn=document.getElementById("imgBtn");
