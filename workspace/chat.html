@@ -1701,6 +1701,9 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
             </div></div><div class="set-panel" data-acc="theme"><div class="set-acc-h" data-acc="theme">主题<span class="ar">▾</span></div><div class="set-sec">
             <div class="theme-section-title">主题预设</div>
             <div class="theme-grid" id="themeGrid"><button type="button" class="theme-choice active" data-theme="warm"><span class="theme-swatch warm"><i></i><b></b></span><span><strong>暖白</strong><small>暖白 · 短信式</small></span></button><button type="button" class="theme-choice" data-theme="wx"><span class="theme-swatch wx"><i></i><b></b></span><span><strong>微信</strong><small>微信绿 · 微信式</small></span></button><button type="button" class="theme-choice" data-theme="claude"><span class="theme-swatch claude"><i></i><b></b></span><span><strong>极简</strong><small>灰白 · Claude 风</small></span></button></div>
+            <div class="theme-section-title">聊天背景</div>
+            <div class="theme-field theme-inline-field"><label>背景图片</label><div class="theme-row"><input type="text" id="bgImageInput" placeholder="上传后自动填URL" readonly><button type="button" class="mcp-btn" id="bgImageUp">上传</button><button type="button" class="mcp-btn danger" id="bgImageClear">清空</button></div></div>
+            <div class="theme-field theme-inline-field"><label>背景透明度</label><div class="theme-row"><input type="range" id="bgOpacityRange" min="0" max="100" value="100" style="flex:1"><span id="bgOpacityVal">100%</span></div></div>
             <div class="theme-section-title">我的资料</div>
             <div class="theme-profile-grid">
               <div class="theme-profile-block"><div class="theme-field theme-inline-field"><label>我的名称</label><div class="theme-row"><input type="text" id="userNameInput" placeholder="我"></div></div><div class="theme-field theme-inline-field"><label>我的头像</label><div class="theme-row"><input type="text" id="userAvatarInput" placeholder="留空用名字首字"><button type="button" class="mcp-btn" id="userAvatarUp">上传</button></div></div></div>
@@ -1905,7 +1908,42 @@ const hdName=document.getElementById("hdName");
 const hdSub=document.getElementById("hdSub");
 
 /* ---- 主题设置输入 ---- */
-const userNameInput=document.getElementById("userNameInput");const userAvatarInput=document.getElementById("userAvatarInput");const thAiNameInput=document.getElementById("thAiNameInput");const aiAvatarInput=document.getElementById("aiAvatarInput");const avatarFile=document.getElementById("avatarFile");let avatarTarget="";function bindAvatarUpload(btnId,target){const b=document.getElementById(btnId);if(!b)return;b.addEventListener("click",function(){avatarTarget=target;if(avatarFile){avatarFile.value="";avatarFile.click();}});}if(avatarFile)avatarFile.addEventListener("change",async function(){const f=avatarFile.files[0];if(!f)return;if(f.size>1.5*1024*1024){showToast("头像图过大，请选小于1.5MB");avatarFile.value="";return;}const fr=new FileReader();fr.onload=async function(){const t=avatarTarget==="ai"?aiAvatarInput:userAvatarInput;if(!t)return;try{t.value=await uploadImageToServer(fr.result);}catch(e){t.value=fr.result;showToast("转存服务器失败，暂存本地");}};fr.readAsDataURL(f);});bindAvatarUpload("userAvatarUp","user");bindAvatarUpload("aiAvatarUp","ai");const bubbleDelimInput=document.getElementById("bubbleDelimInput");
+const userNameInput=document.getElementById("userNameInput");const userAvatarInput=document.getElementById("userAvatarInput");const thAiNameInput=document.getElementById("thAiNameInput");const aiAvatarInput=document.getElementById("aiAvatarInput");const avatarFile=document.getElementById("avatarFile");let avatarTarget="";function bindAvatarUpload(btnId,target){const b=document.getElementById(btnId);if(!b)return;b.addEventListener("click",function(){avatarTarget=target;if(avatarFile){avatarFile.value="";avatarFile.click();}});}if(avatarFile)avatarFile.addEventListener("change",async function(){const f=avatarFile.files[0];if(!f)return;if(f.size>1.5*1024*1024){showToast("头像图过大，请选小于1.5MB");avatarFile.value="";return;}const fr=new FileReader();fr.onload=async function(){const t=avatarTarget==="ai"?aiAvatarInput:userAvatarInput;if(!t)return;try{t.value=await uploadImageToServer(fr.result);}catch(e){t.value=fr.result;showToast("转存服务器失败，暂存本地");}};fr.readAsDataURL(f);});bindAvatarUpload("userAvatarUp","user");bindAvatarUpload("aiAvatarUp","ai");
+// 聊天背景上传
+const bgFile=document.createElement("input");bgFile.type="file";bgFile.accept="image/*";bgFile.style.display="none";document.body.appendChild(bgFile);
+document.getElementById("bgImageUp").addEventListener("click",function(){bgFile.value="";bgFile.click();});
+bgFile.addEventListener("change",async function(){
+  const f=bgFile.files[0];if(!f)return;
+  if(f.size>3*1024*1024){showToast("背景图过大，请选小于3MB");bgFile.value="";return;}
+  const fr=new FileReader();
+  fr.onload=async function(){
+    try{
+      const url=await uploadImageToServer(fr.result);
+      cfg.bg_image=url;
+      saveCfg();applyTheme();
+      document.getElementById("bgImageInput").value=url;
+      showToast("背景已设置");
+    }catch(e){showToast("上传失败:"+e.message);}
+  };
+  fr.readAsDataURL(f);
+});
+document.getElementById("bgImageClear").addEventListener("click",function(){
+  delete cfg.bg_image;
+  saveCfg();applyTheme();
+  document.getElementById("bgImageInput").value="";
+  showToast("已恢复默认背景");
+});
+const bgOpacityRange=document.getElementById("bgOpacityRange");
+const bgOpacityVal=document.getElementById("bgOpacityVal");
+if(bgOpacityRange){
+  bgOpacityRange.value=cfg.bg_opacity!=null?cfg.bg_opacity:100;
+  bgOpacityVal.textContent=bgOpacityRange.value+"%";
+  bgOpacityRange.addEventListener("input",function(){
+    bgOpacityVal.textContent=this.value+"%";
+    cfg.bg_opacity=parseInt(this.value);
+    saveCfg();applyTheme();
+  });
+}const bubbleDelimInput=document.getElementById("bubbleDelimInput");
 const uploadMaxMbInput=document.getElementById("uploadMaxMb");
 const mcpList=document.getElementById("mcpList");
 const mcpAddBtn=document.getElementById("mcpAddBtn");
@@ -4555,8 +4593,17 @@ const THEME_PRESETS={warm:{name:"暖白",layout:"sms",vars:{"--bg1":"#FCF9F7","-
 "--theme-dur":"0ms","--bg-blur":"0px",
 "--user-font-color":"#1a1a1a","--ai-font-color":"#1a1a1a"
 }}};
-function applyTheme(){const name=THEME_PRESETS[cfg.theme]?cfg.theme:"warm";cfg.theme=name;const root=document.documentElement.style;Object.keys(THEME_PRESETS[name].vars).forEach(function(k){root.setProperty(k,THEME_PRESETS[name].vars[k]);});document.body.setAttribute("data-theme",name);document.body.setAttribute("data-style","classic");document.body.setAttribute("data-bgblur","0");document.body.style.fontFamily="";document.body.style.background="";if(chatEl)chatEl.setAttribute("data-layout",THEME_PRESETS[name].layout||"sms");cfg.show_avatar=(name==="wx"||name==="claude");try{applyHeader();}catch(e){}const grid=document.getElementById("themeGrid");if(grid)grid.querySelectorAll(".theme-choice").forEach(function(b){b.classList.toggle("active",b.dataset.theme===name);});}
+function applyTheme(){const name=THEME_PRESETS[cfg.theme]?cfg.theme:"warm";cfg.theme=name;const root=document.documentElement.style;Object.keys(THEME_PRESETS[name].vars).forEach(function(k){root.setProperty(k,THEME_PRESETS[name].vars[k]);});document.body.setAttribute("data-theme",name);document.body.setAttribute("data-style","classic");document.body.setAttribute("data-bgblur","0");document.body.style.fontFamily="";document.body.style.background="";
+  if(cfg.bg_image){
+    var op=cfg.bg_opacity!=null?cfg.bg_opacity/100:1;
+    document.body.style.backgroundImage="url('"+cfg.bg_image+"')";
+    document.body.style.backgroundSize="cover";
+    document.body.style.backgroundPosition="center";
+    document.body.style.backgroundAttachment="fixed";
+    document.body.style.backgroundColor="rgba(245,245,245,"+(1-op)+")";
+  }if(chatEl)chatEl.setAttribute("data-layout",THEME_PRESETS[name].layout||"sms");cfg.show_avatar=(name==="wx"||name==="claude");try{applyHeader();}catch(e){}const grid=document.getElementById("themeGrid");if(grid)grid.querySelectorAll(".theme-choice").forEach(function(b){b.classList.toggle("active",b.dataset.theme===name);});}
 applyTheme();
+if(cfg.bg_image){document.getElementById("bgImageInput").value=cfg.bg_image;}
 const themeGrid=document.getElementById("themeGrid");if(themeGrid)themeGrid.addEventListener("click",function(e){const b=e.target.closest(".theme-choice");if(!b)return;cfg.theme=b.dataset.theme||"warm";saveCfg();applyTheme();renderAll();});
 populateSettings();
 // 设置分组：点折叠头展开对应组、其余收起（一屏内折叠，不单独成页）
