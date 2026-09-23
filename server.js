@@ -83,24 +83,84 @@ setInterval(sweepSseSubscribers, SSE_ZOMBIE_SCAN_MS).unref();
 // 幂等回放：同一 client_msg_id 的重复请求直接回放上次已生成的回复，
 // 避免网络重发导致上游重复生成 + 时间线重复写入。
 // ========================
-const recentReplies = new Map(); // client_msg_id -> {text, reasoning, tools, usage, ts}
+// client_msg_id -> {text, reasoning, tools, usage, ts}
+//                或 {pending:true, ts, waiters:[fn]}（生成中的占位，2026-09-23 F8）
+const recentReplies = new Map();
 const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000; // 10 分钟内重复请求视为同一条
 const RECENT_REPLIES_MAX = 200; // 上限，防止长期运行膨胀（配合 TTL 过期仍会残留，故再加硬上限）
+// 2026-09-23 审查 F8：pending 占位的等待上限。首个请求失败/崩溃时要靠它兜底降级，
+// 否则重入请求会一直挂到连接超时。取 90s，与客户端「静默超时」同量级。
+const IDEMPOTENCY_PENDING_WAIT_MS = 90 * 1000;
 function isRecentReplyCacheable(r) {
   return r && typeof r.text === "string" && r.text.length > 0;
 }
-// 写入并做「按 ts 淘汰最旧」的硬上限：超出 200 条时删时间最早的一条。
+// 唤醒某占位的全部等待者（payload=null 表示「降级为新请求处理」）
+function _wakeReplyWaiters(entry, payload) {
+  if (!entry || !Array.isArray(entry.waiters)) return;
+  const ws = entry.waiters;
+  entry.waiters = [];
+  for (const w of ws) { try { w(payload); } catch (e) {} }
+}
+// 按 ts 淘汰最旧一条（超上限时）；被淘汰者若是 pending 占位，一并唤醒其等待者
+function _evictOldestReply() {
+  if (recentReplies.size <= RECENT_REPLIES_MAX) return;
+  let oldestKey = null, oldestTs = Infinity;
+  for (const [k, v] of recentReplies) {
+    if (v && typeof v.ts === "number" && v.ts < oldestTs) { oldestTs = v.ts; oldestKey = k; }
+  }
+  if (oldestKey === null) return;
+  const victim = recentReplies.get(oldestKey);
+  recentReplies.delete(oldestKey);
+  _wakeReplyWaiters(victim, null);
+}
+// 写入结果并做「按 ts 淘汰最旧」的硬上限；若同 id 存在 pending 占位，唤醒其等待者。
 function setRecentReply(id, entry) {
   if (!id) return;
+  const prev = recentReplies.get(id);
   recentReplies.set(id, entry);
-  if (recentReplies.size > RECENT_REPLIES_MAX) {
-    let oldestKey = null;
-    let oldestTs = Infinity;
-    for (const [k, v] of recentReplies) {
-      if (v.ts < oldestTs) { oldestTs = v.ts; oldestKey = k; }
-    }
-    if (oldestKey !== null) recentReplies.delete(oldestKey);
-  }
+  _evictOldestReply();
+  // 2026-09-23（F8）：唤醒等待同 client_msg_id 的重入请求，让它们回放本次结果而非重复调上游
+  if (prev && prev.pending) _wakeReplyWaiters(prev, entry);
+}
+// 2026-09-23（F8）：请求开始登记 pending 占位。
+// 返回 true = 登记成功（本请求负责生成）；false = 已有同 id 的处理中或已有可回放结果，
+// 调用方应走「回放」或「等待」分支，不要重复调用上游。
+function beginPendingReply(id) {
+  if (!id) return false;
+  const cur = recentReplies.get(id);
+  // 已有未过期的真实结果 → 不是 pending，交给上层原回放分支
+  if (cur && !cur.pending && isRecentReplyCacheable(cur) && (Date.now() - cur.ts) < IDEMPOTENCY_TTL_MS) return false;
+  // 已有未超时的 pending → 交给上层等待
+  if (cur && cur.pending && (Date.now() - cur.ts) < IDEMPOTENCY_PENDING_WAIT_MS) return false;
+  recentReplies.set(id, { pending: true, ts: Date.now(), waiters: [] });
+  _evictOldestReply();
+  return true;
+}
+// 等待同 id 的首个请求产出结果；超时或占位消失则返回 null（调用方降级为新请求处理）。
+function waitPendingReply(id, timeoutMs) {
+  return new Promise(function (resolve) {
+    const cur = recentReplies.get(id);
+    if (!cur || !cur.pending) { resolve(cur || null); return; }
+    let done = false;
+    const timer = setTimeout(function () {
+      if (done) return; done = true;
+      // 超时：清掉占位，避免后续请求继续等一个已死的占位
+      const now = recentReplies.get(id);
+      if (now && now.pending) recentReplies.delete(id);
+      resolve(null);
+    }, Math.max(1000, Number(timeoutMs) || IDEMPOTENCY_PENDING_WAIT_MS));
+    cur.waiters.push(function (entry) {
+      if (done) return; done = true;
+      clearTimeout(timer);
+      resolve(entry || null);
+    });
+  });
+}
+// 2026-09-23（F8）：生成失败时释放占位，让后续重试能立刻重新开始（不必等满 90s）。
+function clearPendingReply(id) {
+  if (!id) return;
+  const cur = recentReplies.get(id);
+  if (cur && cur.pending) { recentReplies.delete(id); _wakeReplyWaiters(cur, null); }
 }
 
 // ---- 模型供应商（多供应商路由）----
@@ -2025,7 +2085,11 @@ require("./routes/chat")(app, {
   recentReplies,
   isRecentReplyCacheable,
   IDEMPOTENCY_TTL_MS,
+  IDEMPOTENCY_PENDING_WAIT_MS,
   setRecentReply,
+  beginPendingReply,
+  waitPendingReply,
+  clearPendingReply,
   buildCrossMemorySnapshot,
   sessionCrossInjectOverride,
   saveSessionCrossInjectOverride,

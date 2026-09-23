@@ -146,7 +146,11 @@ module.exports = function registerChatRoutes(app, deps) {
     recentReplies,
     isRecentReplyCacheable,
     IDEMPOTENCY_TTL_MS,
+    IDEMPOTENCY_PENDING_WAIT_MS,
     setRecentReply,
+    beginPendingReply,
+    waitPendingReply,
+    clearPendingReply,
     buildCrossMemorySnapshot,
     sessionCrossInjectOverride,
     saveSessionCrossInjectOverride,
@@ -687,6 +691,8 @@ module.exports = function registerChatRoutes(app, deps) {
   // /v1/chat/completions（从 server.js 拆出）
   // ========================
 app.post("/v1/chat/completions", async (req, reply) => {
+  // 2026-09-23（F8）：提到 try 外声明——catch 中需要用它释放 pending 占位
+  let clientMsgId = "";
   try {
     const body = req.body;
     // 批注 2026-07-15：公开部署时日志不能默认写入完整上下文；
@@ -714,41 +720,61 @@ app.post("/v1/chat/completions", async (req, reply) => {
     // 幂等回放：同一 client_msg_id 的重复请求（如浏览器断连重发）直接回放上次已生成的回复，
     // 不再次调用上游、不重复写时间线。
     // ========================
-    const clientMsgId = isClientChat ? String(body.client_msg_id || "").trim() : "";
+    clientMsgId = isClientChat ? String(body.client_msg_id || "").trim() : "";
     // 自建前端预生成的本条回复稳定 id（chat.html reply_msg_id）：落盘沿用，保证落库前后端 id 一致，
     // 回复刚落库、SSE 补拉之前的编辑/删除也能被 /v1/timeline/sync 的 diff 分支定点命中。
     // 第三方客户端不带此字段 → null → appendMessages 内部照旧生成 uuid，向后兼容。
     // 注意：本文件的流式/非流式落盘出口仅在 MCP 关闭/循环异常回退时执行，主出口在 server.js MCP 写回段。
     const replyMsgId = (typeof body.reply_msg_id === "string" && body.reply_msg_id.trim())
       ? body.reply_msg_id.trim().slice(0, 64) : null;
+    // 2026-09-23（F8）：把「回放已生成结果」抽成局部函数，供两种情形复用——
+    //   ① 命中已完成的缓存结果（原有逻辑）；② 等待首轮请求完成之后（新增）。
+    const _replayCachedReply = async function (cached) {
+      console.log("[idempotency] 命中同 client_msg_id 的已生成回复，直接回放");
+      if (body.stream === true) {
+        const stream = mcp.buildSSE(cached.text, { model: body.model || cached.model || "", usage: cached.usage, reasoning: cached.reasoning, toolHistory: cached.tools });
+        reply.raw.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive"
+        });
+        const reader = stream.getReader();
+        try {
+          while (true) { const { done, value } = await reader.read(); if (done) break; reply.raw.write(value); }
+          reply.raw.end();
+        } catch (e) { try { reply.raw.end(); } catch {} }
+        return true;
+      }
+      reply.send({
+        id: "chatcmpl-idem",
+        object: "chat.completion",
+        created: Math.floor(Date.now() / 1000),
+        model: cached.model || body.model || "",
+        choices: [{ index: 0, message: { role: "assistant", content: cached.text }, finish_reason: "stop" }],
+        usage: cached.usage || null
+      });
+      return true;
+    };
     if (clientMsgId) {
       const cached = recentReplies.get(clientMsgId);
-      if (cached && isRecentReplyCacheable(cached) && (Date.now() - cached.ts) < IDEMPOTENCY_TTL_MS) {
-        console.log("[idempotency] 命中同 client_msg_id 的已生成回复，直接回放");
-        if (body.stream === true) {
-          const stream = mcp.buildSSE(cached.text, { model: body.model || cached.model || "", usage: cached.usage, reasoning: cached.reasoning, toolHistory: cached.tools });
-          reply.raw.writeHead(200, {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            Connection: "keep-alive"
-          });
-          const reader = stream.getReader();
-          try {
-            while (true) { const { done, value } = await reader.read(); if (done) break; reply.raw.write(value); }
-            reply.raw.end();
-          } catch (e) { try { reply.raw.end(); } catch {} }
-          return;
-        }
-        reply.send({
-          id: "chatcmpl-idem",
-          object: "chat.completion",
-          created: Math.floor(Date.now() / 1000),
-          model: cached.model || body.model || "",
-          choices: [{ index: 0, message: { role: "assistant", content: cached.text }, finish_reason: "stop" }],
-          usage: cached.usage || null
-        });
-        return;
+      // ① 已有未过期的完整结果 → 直接回放（原逻辑；多一个 !cached.pending 判断以免把占位当结果）
+      if (cached && !cached.pending && isRecentReplyCacheable(cached) && (Date.now() - cached.ts) < IDEMPOTENCY_TTL_MS) {
+        if (await _replayCachedReply(cached)) return;
       }
+      // ② 2026-09-23（F8）：同 client_msg_id 的请求**仍在生成中** → 挂起等待首轮结果再回放。
+      //    典型触发：前端网络层失败后 600ms 自动重发（chat.html 的 doFetch catch），而首轮仍在生成——
+      //    此时缓存里还没有结果，旧实现会把它当新请求再调一次上游（双份 token，且可能重复落盘）。
+      //    改为等待首轮产出后回放，用户无感且不重复烧 token；等待上限见 IDEMPOTENCY_PENDING_WAIT_MS。
+      if (cached && cached.pending) {
+        console.log("[idempotency] 同 client_msg_id 请求仍在处理中，挂起等待首轮结果（不重复调上游）");
+        const waited = await waitPendingReply(clientMsgId, IDEMPOTENCY_PENDING_WAIT_MS);
+        if (waited && isRecentReplyCacheable(waited)) {
+          if (await _replayCachedReply(waited)) return;
+        }
+        console.warn("[idempotency] 等待超时或首轮未产出结果，本轮降级按新请求处理");
+      }
+      // ③ 登记 pending 占位，声明本请求负责生成（供后续重入请求等待）
+      beginPendingReply(clientMsgId);
     }
 
     const oldTimeline = loadTimeline(sessionId);
@@ -1213,6 +1239,9 @@ app.post("/v1/chat/completions", async (req, reply) => {
     }
   } catch (err) {
     console.error(err);
+    // 2026-09-23（F8）：生成失败时释放 pending 占位，让用户的「重试」能立即重新开始，
+    // 不必等满 90s 等待上限；同时唤醒可能有的一同等待的重入请求（它们会降级为新请求处理）。
+    if (clientMsgId) clearPendingReply(clientMsgId);
     reply.code(500).send({ error: err.message });
   }
 });
