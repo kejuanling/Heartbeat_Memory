@@ -2442,22 +2442,8 @@ function _streamPushText(text,reasoningSrc){
   if(last&&last.type==="text"&&!last.sealed){
     last.text+=t;
     if(last.el&&last.el.parentNode){
-      last._dirty=true;
-      // 按句刷新：碰到句末标点（。！？；换行）立即整段弹出；没碰到就攒着，1.5s 兜底防长句卡死
-      var endsAtSentence=/[。！？；\n.!?;]$/.test(t);
-      if(endsAtSentence){
-        if(_streamTextRerenderTimer){clearTimeout(_streamTextRerenderTimer);_streamTextRerenderTimer=null;}
-        _streamRenderModel.forEach(function(n){
-          if(n&&n.type==="text"&&n._dirty){n._dirty=false;_streamFillBubble(n);}
-        });
-      }else if(!_streamTextRerenderTimer){
-        _streamTextRerenderTimer=setTimeout(function(){
-          _streamTextRerenderTimer=null;
-          _streamRenderModel.forEach(function(n){
-            if(n&&n.type==="text"&&n._dirty){n._dirty=false;_streamFillBubble(n);}
-          });
-        },1500);
-      }
+      // 每段 emit 的就是完整气泡内容，直接整段重渲染（不需要 timer 攒）
+      _streamFillBubble(last);
     }else _streamRenderModelDrain();
     return;
   }
@@ -3163,7 +3149,7 @@ function makeSegPlayer(srcMsg){
     if(forceTail){ emitText(tail.slice(pos)); cursor=clean.length; }
     else if(pos>0) cursor+=pos;
   }
-  function feed(full){ scan(full,!!_streamActive); }
+  function feed(full){ scan(full,false); }   // 流式中只在扫到分隔符时吐整段，尾部不攒不吐；flush 时 forceTail 吐最后一段
   function seal(full){ scan(full,true); }
   async function flush(full){
     scan(full,true);
