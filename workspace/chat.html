@@ -532,12 +532,12 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .act-mask.show{opacity:1;pointer-events:auto}
 .act-sheet{
   position:fixed;left:0;right:0;bottom:0;z-index:61;
-  background:rgba(255,253,249,.94);
+  background:rgba(255,253,249,.82);
   border-radius:20px 20px 0 0;
   border:1px solid rgba(92,76,66,.08);
   padding:8px 12px calc(env(safe-area-inset-bottom) + 14px);
-  box-shadow:0 -8px 30px rgba(80,65,55,.08);
-  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  box-shadow:0 -8px 30px rgba(80,65,55,.12);
+  backdrop-filter:blur(24px) saturate(1.4);-webkit-backdrop-filter:blur(24px) saturate(1.4);
   transform:translateY(100%);transition:transform .25s ease;
 }
 .act-sheet.show{transform:translateY(0)}
@@ -7798,8 +7798,6 @@ body:has(#chat[data-layout="claude"]) footer .inputbar #micBtn{color:#6b6b6b!imp
 #chat[data-layout="claude"] .msg.stream-in .claude-msg-actions{display:none}
 .cma-btn{background:none;border:none;padding:4px;cursor:pointer;color:#999;display:flex;align-items:center;line-height:1;border-radius:6px}
 .cma-btn:active{background:rgba(0,0,0,.06);color:#555}
-/* claude 主题：顶部渐变模糊过渡 */
-body:has(#chat[data-layout="claude"])::before{content:"";position:fixed;top:0;left:0;right:0;height:60px;background:linear-gradient(to bottom,rgba(245,245,245,.9),rgba(245,245,245,0));pointer-events:none;z-index:40;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
 /* claude 主题：隐藏顶栏，浮动按钮 */
 body:has(#chat[data-layout="claude"]) header{display:none!important}
 .claude-fab-left{position:fixed;top:calc(env(safe-area-inset-top) + 12px);left:12px;z-index:50;width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.6);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:none;box-shadow:0 1px 3px rgba(0,0,0,.06);display:none;align-items:center;justify-content:center;cursor:pointer;color:#555}
