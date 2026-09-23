@@ -2442,19 +2442,21 @@ function _streamPushText(text,reasoningSrc){
   if(last&&last.type==="text"&&!last.sealed){
     last.text+=t;
     if(last.el&&last.el.parentNode){
-      // P3-10：每 chunk 都整段 makeMsgEl 重建是 O(n²)；60ms 内的多次追加合并为一次重建。
-      // 节点先标脏——timer 触发时 last 未必还是队尾，必须按 node 本身过滤。
       last._dirty=true;
-      if(!_streamTextRerenderTimer){
+      // 按句刷新：碰到句末标点（。！？；换行）立即整段弹出；没碰到就攒着，1.5s 兜底防长句卡死
+      var endsAtSentence=/[。！？；\n.!?;]$/.test(t);
+      if(endsAtSentence){
+        if(_streamTextRerenderTimer){clearTimeout(_streamTextRerenderTimer);_streamTextRerenderTimer=null;}
+        _streamRenderModel.forEach(function(n){
+          if(n&&n.type==="text"&&n._dirty){n._dirty=false;_streamFillBubble(n);}
+        });
+      }else if(!_streamTextRerenderTimer){
         _streamTextRerenderTimer=setTimeout(function(){
           _streamTextRerenderTimer=null;
           _streamRenderModel.forEach(function(n){
-            if(n&&n.type==="text"&&n._dirty){
-              n._dirty=false;
-              _streamFillBubble(n);   // B4：只重写该节点自己的气泡（内部自检 parentNode），不再整段重建
-            }
+            if(n&&n.type==="text"&&n._dirty){n._dirty=false;_streamFillBubble(n);}
           });
-        },300);
+        },1500);
       }
     }else _streamRenderModelDrain();
     return;
