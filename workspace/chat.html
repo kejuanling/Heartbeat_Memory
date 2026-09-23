@@ -1491,7 +1491,6 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
     <div id="mcpBasePanel">
     <div id="mcpForm">
       <div class="mcp-form-inner">
-        <div class="mcp-row single"><label>启用</label><label class="mcp-sw"><input type="checkbox" id="mcpEnabled" checked><i></i></label></div>
         <div class="mcp-row"><label>名称</label><input type="text" id="mcpName" placeholder="如 小世界工具集"></div>
         <div class="mcp-row"><label>传输类型</label>
           <select id="mcpType">
@@ -1512,7 +1511,6 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
     <div id="mcpToolsPanel" style="display:none;padding:2px 0 8px"><div id="mcpToolsList" class="mcp-tools-view"></div><div id="mcpToolsMsg" class="mcp-msg"></div></div>
     <div id="provForm" style="display:none">
       <div class="mcp-form-inner">
-        <div class="mcp-row single"><label>启用</label><label class="mcp-sw"><input type="checkbox" id="provEnabled" checked><i></i></label></div>
         <div class="mcp-row"><label>名称</label><input type="text" id="provName" placeholder="如 DeepSeek 官方"></div>
         <div class="mcp-row"><label>API 链接</label><input type="text" id="provUrl" placeholder="https://…/v1/chat/completions"></div>
         <div class="mcp-row"><label>API Key</label><input type="password" id="provKey" placeholder="sk-…"></div>
@@ -4536,7 +4534,7 @@ function openMcpForm(i, tab){
   const has=(i!=null && !isNaN(i)) && _mcpServers[i];
   window.__mcpEditingIndex = has? i : null;
   const s=has? _mcpServers[i] : null;
-  mcpEnabled.checked = s? (s.enabled!==false) : true;
+
   mcpName.value = s? (s.name||"") : "";
   mcpType.value = s? (s.type||"custom-jsonrpc") : "custom-jsonrpc";
   mcpUrl.value = s? (s.url||s.command||"") : "";
@@ -4636,7 +4634,8 @@ async function saveMcpServers(){
   const headersObj=(function(){ try{ const h=JSON.parse(mcpHeaders.value||"{}"); return (h&&typeof h==="object")? h: {}; }catch(e){ return null; } })();
   if(headersObj===null){ mcpMsg.textContent="请求头不是合法 JSON"; return; }
   const body={ servers: _mcpServers.map(function(s){ return { id:s.id, name:s.name, type:s.type, url:s.url, command:s.command, args:s.args||[], headers:s.headers||{}, allowTools:s.allowTools, blockTools:s.blockTools, enabled:s.enabled!==false }; }) };
-  const params={ type: type, enabled: mcpEnabled.checked, headers: headersObj };
+  const ei0=window.__mcpEditingIndex;
+  const params={ type: type, enabled: (ei0!=null && _mcpServers[ei0]) ? (_mcpServers[ei0].enabled!==false) : true, headers: headersObj };
   if(type==="stdio"){ params.command=urlOrCmd; params.url=undefined; params.args=mcpArgs.value.trim()? mcpArgs.value.trim().split(/\s+/): []; }
   else { params.url=urlOrCmd; params.command=undefined; }
   const ei=window.__mcpEditingIndex;
@@ -4750,7 +4749,7 @@ function openProvForm(i){
   const has=(i!=null && !isNaN(i)) && _providers[i];
   window.__provEditingIndex = has? i : null;
   const p=has? _providers[i] : null;
-  provEnabled.checked = p? (p.enabled!==false) : true;
+
   provName.value = p? (p.name||"") : "";
   provUrl.value = p? (p.api_url||"") : "";
   provKey.value = p? (p.api_key||"") : "";
@@ -4773,7 +4772,8 @@ async function saveProviders(){
   const body={ providers: _providers.map(function(p){ return { id:p.id, name:p.name, api_url:p.api_url, api_key:p.api_key||"", model:p.model||"", models:(Array.isArray(p.models)?p.models:[]), enabled:p.enabled!==false, is_default:!!p.is_default }; }) };
   const rawModels=__provModels.slice();
   if(!rawModels.length){ provMsg.textContent="请至少添加一个模型"; return; }
-  const params={ name:name, api_url:url, api_key:provKey.value.trim(), model:(__provDefaultModel||rawModels[0]), models:rawModels, enabled:provEnabled.checked };
+  const ei0=window.__provEditingIndex;
+  const params={ name:name, api_url:url, api_key:provKey.value.trim(), model:(__provDefaultModel||rawModels[0]), models:rawModels, enabled:(ei0!=null && _providers[ei0]) ? (_providers[ei0].enabled!==false) : true };
   const ei=window.__provEditingIndex;
   if(ei!=null && _providers[ei]){ body.providers[ei]=Object.assign({},body.providers[ei],params); }
   else { body.providers.push(Object.assign({ id:"p_"+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36) },params)); }
