@@ -7679,9 +7679,15 @@ app.get("/admin/logs/wake-up", { preHandler: basicAuth }, async (req, reply) => 
       } catch (e) {
         raw = fs.readFileSync(logPath, "utf-8");
       }
+      // 2026-09-23:前端唤醒日志去噪--白名单保留唤醒相关行,再剔除重复/内部确认行
       const allLines = raw.split("\n").filter(l => l.trim());
-      const tailLines = allLines.slice(-lines);
-      reply.send({ lines: tailLines, total: allLines.length });
+      const KEEP = ["开始自动唤醒", "====", "[wake-scheduler]", "[wake-chat]", "[diary]"];
+      const DROP = ["块已落盘", "直连完成", "已设定定时唤醒", "唤醒周期已重置",
+        "唤醒调度器已在 gateway 内启动", "wake_completion_forward", "Wake Result",
+        "[tag-parser]", "[wake-event]"];
+      const filtered = allLines.filter(l => KEEP.some(k => l.includes(k)) && !DROP.some(k => l.includes(k)));
+      const tailLines = filtered.slice(-lines);
+      reply.send({ lines: tailLines, total: filtered.length });
     } catch {
       reply.send({ lines: [], total: 0, error: "日志文件不存在" });
     }
