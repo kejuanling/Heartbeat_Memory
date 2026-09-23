@@ -2962,6 +2962,22 @@ function makeMsgEl(m,idx,grpCls){
     }
     host.appendChild(bubble);
   }
+  // claude 主题：AI 消息下方加一排操作图标（复制/编辑/三点）
+  if(isAI){
+    const actRow=document.createElement("div");
+    actRow.className="claude-msg-actions";
+    actRow.innerHTML='<button type="button" class="cma-btn" data-cma="copy" title="复制"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>'
+      +'<button type="button" class="cma-btn" data-cma="edit" title="编辑"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>'
+      +'<button type="button" class="cma-btn" data-cma="more" title="更多"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>';
+    actRow.addEventListener("click",function(e){
+      const b=e.target.closest(".cma-btn"); if(!b)return;
+      const op=b.dataset.cma;
+      if(op==="copy"){ copyText(msgText(m)); showToast("已复制"); }
+      else if(op==="edit"){ startEdit(idx); }
+      else if(op==="more"){ openAct(idx); }
+    });
+    d.appendChild(actRow);
+  }
   // 多选勾选 + 时间
   const check=document.createElement("span");check.className="check";check.textContent="✓";
   d.appendChild(check);
@@ -7753,6 +7769,12 @@ body:has(#chat[data-layout="claude"]) footer .inputbar:focus-within{box-shadow:0
 body:has(#chat[data-layout="claude"]) footer .inputbar #input{background:transparent!important;border:none!important;outline:none!important;box-shadow:none!important;color:#1a1a1a;font-size:16px}
 body:has(#chat[data-layout="claude"]) footer .inputbar #send{background:#1a1a1a!important;color:#fff!important;border-radius:50%!important;width:36px!important;height:36px!important}
 body:has(#chat[data-layout="claude"]) footer .inputbar #micBtn,body:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn{color:#6b6b6b!important}
+/* claude 主题：消息下方操作图标行 */
+.claude-msg-actions{display:none;align-items:center;gap:14px;margin-top:6px;padding-left:2px}
+#chat[data-layout="claude"] .claude-msg-actions{display:flex}
+#chat[data-layout="claude"] .msg.stream-in .claude-msg-actions{display:none}
+.cma-btn{background:none;border:none;padding:4px;cursor:pointer;color:#999;display:flex;align-items:center;line-height:1;border-radius:6px}
+.cma-btn:active{background:rgba(0,0,0,.06);color:#555}
 /* claude 主题：呼吸圆圈 typing 指示器 */
 .claude-typing{display:flex;align-items:center;padding:8px 0;margin-bottom:8px}
 .claude-typing-dot{width:10px;height:10px;border-radius:50%;background:#999;animation:claudeBreathe 1.2s ease-in-out infinite}
