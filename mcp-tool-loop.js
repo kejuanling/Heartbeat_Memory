@@ -138,6 +138,20 @@ async function runWithTools({
 
     if (!resp.ok) {
       const t = await resp.text().catch(() => "");
+      // 2026-09-23 诊断（reasoning_content 400 定位用）：记录出错轮次与上下文中
+      // 「带 tool_calls 的 assistant」及其 reasoning_content 覆盖情况——
+      // 用于区分「首轮上下文问题」还是「后续轮回传问题」。定位到根因后可移除或降级。
+      try {
+        const _tcA = working.filter(function (m) { return m && m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length; });
+        const _tcRc = _tcA.filter(function (m) { return typeof m.reasoning_content === "string" && m.reasoning_content.length > 0; });
+        console.warn("[mcp-diag] runWithTools 上游失败: status=" + resp.status +
+          " round=" + round + "/" + maxToolRounds +
+          " model=" + model +
+          " working=" + working.length +
+          " assistantWithToolCalls=" + _tcA.length +
+          " ofWhichHasRc=" + _tcRc.length +
+          " tail3=" + working.slice(-3).map(function (m) { return (m && m.role) || "?"; }).join("/"));
+      } catch (e) {}
       throw new Error(`上游请求失败 HTTP ${resp.status}: ${t.slice(0, 300)}`);
     }
 
@@ -344,7 +358,21 @@ async function streamToolLoop({
         signal: controller.signal
       });
     } finally { clearTimeout(timer); }
-    if (!resp.ok) { const t = await resp.text().catch(() => ""); throw new Error(`上游请求失败 HTTP ${resp.status}: ${t.slice(0, 300)}`); }
+    if (!resp.ok) {
+      const t = await resp.text().catch(() => "");
+      // 2026-09-23 诊断：同 runWithTools，记录轮次与带 tool_calls 的 assistant 的 rc 覆盖情况
+      try {
+        const _tcA = working.filter(function (m) { return m && m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length; });
+        const _tcRc = _tcA.filter(function (m) { return typeof m.reasoning_content === "string" && m.reasoning_content.length > 0; });
+        console.warn("[mcp-diag] streamToolLoop 上游失败: status=" + resp.status +
+          " round=" + round + "/" + maxToolRounds +
+          " model=" + model +
+          " working=" + working.length +
+          " assistantWithToolCalls=" + _tcA.length +
+          " ofWhichHasRc=" + _tcRc.length);
+      } catch (e) {}
+      throw new Error(`上游请求失败 HTTP ${resp.status}: ${t.slice(0, 300)}`);
+    }
     if (!resp.body) throw new Error("上游无响应体");
 
     // 流式读取：正文/思考链实时 emit；tool_calls 分片聚合成整轮工具
