@@ -405,59 +405,12 @@ def _moment_brief(m):
     }
 
 
-# ── 心动时刻 moments_list(2026-08-31 重定义为“记忆碎片/标星池”) ──
-# 背景:旧 moments_* 工具查询 unified_server 的旧心动时刻数据,本日起整体弃用并关闭注册。
-#      将“标星消息(记忆碎片)”作为新的心动时刻来源,moments_list 改为直接读取
-#      data/context_compaction_marks.json,按保存时间倒序(最新在前)返回。
-# 设计:工具名沿用“心动时刻”,让 AI 无缝沿用旧习惯;底层数据实为标星记忆池。
-# 互补:server.js 的窗口注入取较早连贯片段,本工具随时拉取最新记忆碎片。
-# 注意:下方 tool_moments_search/count/delete/edit 旧函数体仍保留,但已不注册
-#      (不暴露给 AI),仅在需要回滚/参考时使用。
-
-def tool_moments_list(args):
-    "查看心动时刻：最近被保存的珍贵对话片段（即标星内容/记忆碎片），按保存时间倒序（最新在前）返回。"
-    try:
-        limit = int(args.get("limit") or 50)
-    except Exception:
-        limit = 50
-    if limit <= 0:
-        limit = 50
-    if limit > 200:
-        limit = 200
-    path = args.get("file") or "/opt/dylan-heartbeat/data/context_compaction_marks.json"
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        return {"error": "读取标星文件失败: " + str(e)}
-    marks = data.get("marks", {}) if isinstance(data, dict) else {}
-    items = []
-    for key, entry in marks.items():
-        if not entry or not entry.get("content"):
-            continue
-        role = entry.get("role") or ""
-        name = "涵" if role == "user" else "谢"
-        items.append({
-            "key": key,
-            "role": role,
-            "markedAt": entry.get("markedAt", ""),
-            "text": "【" + name + "】 " + entry.get("content")
-        })
-    items.sort(key=lambda x: x.get("markedAt") or "", reverse=True)
-    items = items[:limit]
-    return {"moments": items, "count": len(items)}
-
-# 已停用：moments 工具不再暴露给 AI，函数体保留供参考/回滚。
-# TOOLS["moments_list"] = {
-#     "description": "查看心动时刻：最近被保存的珍贵对话片段（即标星内容/记忆碎片），最近在前。当你想了解这段关系里刚沉淀/被标星的重要内容时使用。",
-#     "inputSchema": {
-#         "type": "object",
-#         "properties": {
-#             "limit": {"type": "integer", "description": "返回条数，默认200；<=0取全部"}
-#         }
-#     },
-#     "handler": tool_moments_list
-# }
+# ── 心动时刻 moments_list：2026-09-23 已删除 ──
+# 原 tool_moments_list 及其 TOOLS 注册（本就处于注释停用状态，未暴露给 AI）已整体删除，
+# 不改变任何运行时行为。心动时刻的数据来源已改为标星记忆池
+# （data/context_compaction_marks.json），AI 侧改由 context_star / context_search 承担。
+# 下方 tool_moments_search/count/delete/edit 属更早期的旧实现，同样未注册，
+# 本次一并保留（见下一段注释），如需清理请单独确认。
 
 
 # ↓↓↓ 旧心动时刻工具:2026-08-31 已关闭注册,函数体保留供参考/回滚,勿再注册 ↓↓↓
