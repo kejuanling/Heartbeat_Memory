@@ -235,6 +235,8 @@ function createCtxLimitReminderGuard(deps) {
 
   // 疑似有落盘 ctx_limit 提醒的会话（进程内存）：低于上限时据此跳过全量读盘清理。
   const _ctxLimitReminderSessions = new Set();
+  // 2026-09-23 审查 M7：本进程已对该会话做过一次「历史提醒清理扫描」的标记（见 maybeInject 的开关关闭分支）。
+  const _ctxLimitCleanSwept = new Set();
 
   function clearDiskCtxLimitReminder(sessionId) {
     let onDisk = false;
@@ -252,7 +254,14 @@ function createCtxLimitReminderGuard(deps) {
       });
       try { if (timeline.__fp !== undefined) next.__fp = timeline.__fp; } catch (e) {}
       onDisk = true;
-      saveTimeline(next, sessionId);   // 返回值沿用原口径（不检查，失败由 saveTimeline 内部告警）
+      // 2026-09-23 修正（M7 配套）：原先此处不检查 saveTimeline 返回值、也没有把会话移出
+      // 「疑似有提醒」集合，导致「清理成功」与「下一轮可早退」两件事脱节——会话留在集合里，
+      // 早退条件 !has(_sid) 永不成立，优化对该会话失效到下一次 !hit 为止。
+      // 这里改为按落盘结果决策：只有真正写盘成功才停止跟踪；
+      // saveTimeline 被守卫拒写（损坏 / 过期快照 / 墓碑）时盘上提醒仍在，必须保留跟踪继续重试，
+      // 否则下轮早退会跳过扫描，落盘提醒永远留在时间线里。
+      const _saved = saveTimeline(next, sessionId);
+      if (_saved) _ctxLimitReminderSessions.delete(sessionId || 'default');
     } catch (cleanErr) {
       console.warn('[ctx-limit] 清理落盘容量提醒失败（不影响转发）:', cleanErr.message);
     }
@@ -263,8 +272,18 @@ function createCtxLimitReminderGuard(deps) {
     const cfg = contextCompactor.loadConfig();
     const limit = Number(cfg.compaction_context_limit_chars) || 0;
     if (!cfg.compaction_context_remind_enabled) {
+      // 2026-09-23 审查 M7：原实现每次请求都无条件跑 clearDiskCtxLimitReminder——而它内部
+      // loadTimeline 即便命中缓存也要 cloneTimeline 深拷贝（线上实测主会话 4034 条 / 2.6MB，
+      // 单次 7.75ms 同步阻塞）。开关关闭是当前常态，等于每个聊天请求白付一次深拷贝。
+      // 改早退（与下方 282 行同款语义）：本进程已扫过且未见过该会话有提醒落盘 → 直接跳过。
+      //   · 进程重启后首次请求会扫一次（清理重启前遗留的落盘提醒）；
+      //   · 之后常态跳过；开关「开→关」时集合里仍有该会话 → 再扫一次完成清理，
+      //     clearDiskCtxLimitReminder 仅在**落盘成功**时把该会话移出集合（被守卫拒写则保留跟踪继续重试）。
+      const _sid = sessionId || 'default';
+      if (_ctxLimitCleanSwept.has(_sid) && !_ctxLimitReminderSessions.has(_sid)) return;
       const cleaned = clearDiskCtxLimitReminder(sessionId);
-      if (cleaned) console.log(`[ctx-limit] 容量提醒开关已关闭，已清理会话 ${sessionId || 'default'} 落盘的历史容量提醒`);
+      _ctxLimitCleanSwept.add(_sid);
+      if (cleaned) console.log(`[ctx-limit] 容量提醒开关已关闭，已清理会话 ${_sid} 落盘的历史容量提醒`);
       return;
     }
     if (limit <= 0) return;
