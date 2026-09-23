@@ -58,6 +58,7 @@ async function runWakeCompletion(deps, opts) {
   const temperature = Number(opts.temperature) || 0.8;
   const topP = Number(opts.top_p) || 0.95;
   const withTools = opts.with_tools !== false;
+  let reasoning = "";   // 2026-09-24 P3-3：思考链透出（默认空串，直连兜底路径无思考链）
   const persistWakeBlock = opts.persist_wake_block !== false;
 
   // 让替换/压缩按当前会话时间线工作（onResponse 钩子复位由 HTTP 层兜底，这里手动收口）
@@ -189,6 +190,9 @@ async function runWakeCompletion(deps, opts) {
         if (r && typeof r.text === "string" && deps.normalizeContentToText(r.text).trim()) {
           text = r.text;
           toolHistory = r.toolHistory || [];
+          // 2026-09-24 P3-3：透出思考链（streamToolLoop 已收集 reasoning），供 applyWakeEventV2 落盘——
+          // 否则唤醒回复刷新后无思考链区块，与聊天链路不一致
+          reasoning = r.reasoning || "";
           console.log(`[wake-chat] 工具循环完成：调用工具 ${toolHistory.length} 个，正文 ${text.length} 字`);
         }
       } catch (e) {
@@ -223,7 +227,7 @@ async function runWakeCompletion(deps, opts) {
       if (text) console.log(`[wake-chat] 直连完成：正文 ${text.length} 字`);
     }
 
-    return { text, toolHistory, model, wakeBlockId };
+    return { text, toolHistory, reasoning, model, wakeBlockId };
   } finally {
     try { contextReplacements.setActiveSession(null); } catch (e) {}
   }

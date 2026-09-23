@@ -2814,7 +2814,7 @@ function normalizeDiaryForStore(raw) {
 // 幂等去重只在 HTTP 入口做（调度器进程内调用无重试路径）。
 function applyWakeEventV2(body) {
   try {
-    const { session_id, speak, diary, push, event, tools, wake_block_id } = body || {};
+    const { session_id, speak, diary, push, event, tools, wake_block_id, reasoning } = body || {};
     const evSession = typeof session_id === "string" && session_id.trim() ? String(session_id).trim() : null;
     const speakRaw = String(speak || "").trim();
     const diaryRaw = normalizeDiaryForStore(diary);
@@ -2833,6 +2833,9 @@ function applyWakeEventV2(body) {
       if (/^\[NO_ACTION\]/i.test(speakRaw)) msg.kind = "noaction";
       if (pushMeta) msg.push = pushMeta;
       if (wakeTools.length) msg.tools = wakeTools;
+      // 2026-09-24 P3-3：唤醒思考链落盘（聊天链路 MCP 路径同样落 reasoning），前端刷新后可见思考链区块
+      const wakeReasoning = typeof reasoning === "string" && reasoning.trim() ? String(reasoning).trim() : "";
+      if (wakeReasoning) msg.reasoning = wakeReasoning;
       appended.push(msg);
     }
     // 2026-09-20 恢复判定回写：event=唤醒判定记录（发推/未发/失败，沿用文本格式，推送管理读端直接解析）

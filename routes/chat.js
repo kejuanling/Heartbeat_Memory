@@ -1098,6 +1098,26 @@ app.post("/v1/chat/completions", async (req, reply) => {
       return reply.code(response.status).send({ error: "上游 API 没有返回可读取的响应体" });
     }
 
+    // 2026-09-24 P3-2A：SSE 全文解析函数（正常路径与中断路径共用同一实现，杜绝口径漂移）
+    const _parseSseFull = function (rawSse) {
+      let content = "", thinking = "", usage = null, parseErrors = 0;
+      const _ls = String(rawSse || "").split("\n");
+      for (const _l of _ls) {
+        if (_l.startsWith("data: ") && _l !== "data: [DONE]") {
+          try {
+            const _evt = JSON.parse(_l.slice(6));
+            const _d = _evt.choices?.[0]?.delta?.content;
+            if (_d) content += _d;
+            const _dt = _evt.choices?.[0]?.delta?.reasoning_content || _evt.choices?.[0]?.delta?.reasoning;
+            if (_dt) thinking += (typeof _dt === "string" ? _dt : (_dt.text || ""));
+            const _fc = _evt.choices?.[0]?.message?.content;
+            if (_fc) content = _fc;
+            if (_evt.usage) { usage = _evt.usage; }
+          } catch (e) { parseErrors++; }
+        }
+      }
+      return { content: content, thinking: thinking, usage: usage, parseErrors: parseErrors };
+    };
     reply.raw.writeHead(response.status, {
       "Content-Type": upstreamContentType || "text/event-stream",
       "Cache-Control": "no-cache",
@@ -1107,6 +1127,9 @@ app.post("/v1/chat/completions", async (req, reply) => {
     const reader = response.body.getReader();
     // 2026-09-08：不再累积上游原始字节数组（长回复会双份内存），改为流内累积解码后的 SSE 全文，供流结束提取 AI 回复/记忆标签。
     let fullRawSse = "";
+    let aiFullContent = "";   // 2026-09-24 P3-2A：提升到 while 循环外（正常路径赋值 + 中断路径兜底解析共用）
+    let aiThinking = "";
+    let aiUsage = null;
     try {
     // Streaming tag filter: 上游会把 <memory>/<pin> 拆成 <、memory、> 等多个事件，
     // 字节层匹配不到完整标签，必须在 content 文本层过滤后再重组 SSE 事件。
@@ -1156,6 +1179,33 @@ app.post("/v1/chat/completions", async (req, reply) => {
         }
       }
     }
+    // 2026-09-24 P3-2A：直通降级路径（MCP 关/工具循环回退）此前只透传上游 SSE、不下发 final_content——
+    // 前端本地合成 content 与服务器落盘 visibleContent 口径不一致，补拉时 added 恒空、新消息不逐条弹出。
+    // 此处先解析完整正文，再与 MCP 主路径（server.js B3）同款协议下发终止帧；解析结果提升为外层变量，
+    // 下方落盘块直接复用（解析只跑一次，不再各自解析）。
+    const _pp = _parseSseFull(fullRawSse);
+    aiFullContent = _pp.content;
+    aiThinking = _pp.thinking;
+    aiUsage = _pp.usage;
+    if (_pp.parseErrors > 0) console.warn("[stream] 本轮共 " + _pp.parseErrors + " 帧解析失败，落盘回复可能不完整");
+    if (aiUsage) console.log("[usage] " + JSON.stringify(aiUsage));
+    if (aiFullContent) {
+      const _diaryR = diaryLib.extractDiaryFromResponse(aiFullContent);
+      const _vis = _diaryR.diaryContent ? _diaryR.remainingText : aiFullContent;
+      if (_vis) {
+        // 直通终止帧：final_content = 可见内容（剥日记块，与时间线落盘同口径），
+        // 前端 _finalContent 优先采用，本地缓存与服务器字节级一致（顶层字段第三方客户端忽略，向后兼容）
+        reply.raw.write("data: " + JSON.stringify({
+          id: "chatcmpl-direct",
+          object: "chat.completion.chunk",
+          created: Math.floor(Date.now() / 1000),
+          model: (body && body.model) || "",
+          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+          usage: aiUsage || null,
+          final_content: _vis
+        }) + "\n\n");
+      }
+    }
     // 收尾：丢弃未闭合标签/残留前缀，转发剩余行，结束响应
     contentFilter.flush();
     if (sseBuffer) emitRawLine(sseBuffer.replace(/\n+$/, ""));
@@ -1171,38 +1221,18 @@ app.post("/v1/chat/completions", async (req, reply) => {
       clearTimeout(upstreamTimer);
     }
 
-    // 流结束后解析 AI 回复
+    // 流结束后解析 AI 回复（完整正文/思考链/usage 解析已在直通终止帧处完成，此处直接复用，
+    // 2026-09-24 P3-2A：原解析循环前移，避免重复解析与口径漂移）
     try {
-      const fullText = fullRawSse;
-      // 从 SSE 中提取完整的 AI 回复文本
-      let aiFullContent = "";
-      let aiThinking = "";
-      let aiUsage = null;
-      // 2026-09-23：单帧解析失败计数（原 catch 静默吞掉，落盘回复残缺且无线索）
-      let _streamParseErrors = 0;
-      const lines = fullText.split("\n");
-      for (const line of lines) {
-        if (line.startsWith("data: ") && line !== "data: [DONE]") {
-          try {
-            const evt = JSON.parse(line.slice(6));
-            const delta = evt.choices?.[0]?.delta?.content;
-            if (delta) aiFullContent += delta;
-            const deltaThink = evt.choices?.[0]?.delta?.reasoning_content || evt.choices?.[0]?.delta?.reasoning;
-            if (deltaThink) aiThinking += (typeof deltaThink === "string" ? deltaThink : (deltaThink.text || ""));
-            const finishContent = evt.choices?.[0]?.message?.content;
-            if (finishContent) aiFullContent = finishContent;
-            if (evt.usage) { aiUsage = evt.usage; console.log("[usage] " + JSON.stringify(evt.usage)); }
-          } catch (e) {
-            // 2026-09-23 修复：原为静默 `catch {}`。这里是「流结束后从 fullRawSse 重解析完整正文」
-            // 的内层循环，单帧解析失败会让该帧内容不计入 aiFullContent —— 落盘的回复残缺，
-            // 且日志中毫无线索。改为计数 + 限次告警（不限次会刷屏，故只记前 3 条 + 总数）。
-            _streamParseErrors++;
-            if (_streamParseErrors <= 3) console.warn("[stream] 流后重解析单帧失败:", e && e.message);
-          }
-        }
+      // 中断路径兜底：while 循环抛错会跳过上方终止帧块（aiFullContent 仍为空），
+      // 保留原「中断后仍落盘部分回复」语义（tailHasReply 保证重试时不重复写）
+      if (!aiFullContent && fullRawSse) {
+        const _pp2 = _parseSseFull(fullRawSse);
+        aiFullContent = _pp2.content;
+        aiThinking = _pp2.thinking;
+        aiUsage = _pp2.usage;
+        if (_pp2.parseErrors > 0) console.warn("[stream] 中断路径共 " + _pp2.parseErrors + " 帧解析失败，落盘回复可能不完整");
       }
-      // 2026-09-23：汇总本轮解析失败帧数（单帧已限次告警，此处补总数便于日志追溯）
-      if (_streamParseErrors > 0) console.warn("[stream] 本轮共 " + _streamParseErrors + " 帧解析失败，落盘回复可能不完整");
       if (aiFullContent) {
         // 解析 <wake> 闹钟标签并写入调度（标签随后被剥离，不显示给用户）
         parseWakeTagAndSchedule(aiFullContent, sessionId);

@@ -2028,10 +2028,13 @@ async function _doHistoryPull(){
     let added=[];
     if(localMsgs.length&&hist.length>localMsgs.length){
       let same=true;
+      // 2026-09-24 P3-2B：前缀比较改「角色+剥标签归一化正文」键（与 mergeEnrichment 同一口径），
+      // 消除前后端 content 口径差异（工具回声/标签剥离）导致的误判——否则直通降级路径下 added 恒空、新消息永远无法逐条弹出
+      const nk=function(m){ let c=typeof m.content==="string"?m.content:""; c=c.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim(); return (m.role||"")+"\u0000"+c; };
       for(let i=0;i<localMsgs.length;i++){
-        const a=hist[i]&&hist[i].content,b=localMsgs[i]&&localMsgs[i].content;
-        const av=(typeof a==="string")?a:JSON.stringify(a),bv=(typeof b==="string")?b:JSON.stringify(b);
-        if(av!==bv){same=false;break;}
+        const a=hist[i],b=localMsgs[i];
+        if(!a||!b){same=false;break;}
+        if(nk(a)!==nk(b)){same=false;break;}
       }
       if(same)added=hist.slice(localMsgs.length);
     }
@@ -2039,7 +2042,8 @@ async function _doHistoryPull(){
     // 完全无变化就不重建（避免每次 SSE 都把整列多段气泡的进场动画重播一遍）
     if(!added.length&&hist.length===localMsgs.length){
       let sameAll=true;
-      for(let i=0;i<hist.length;i++){ const a=hist[i]&&hist[i].content,b=localMsgs[i]&&localMsgs[i].content; const av=(typeof a==="string")?a:JSON.stringify(a),bv=(typeof b==="string")?b:JSON.stringify(b); if(av!==bv){sameAll=false;break;} }
+      const nk2=function(m){ let c=typeof m.content==="string"?m.content:""; c=c.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim(); return (m.role||"")+"\u0000"+c; };
+      for(let i=0;i<hist.length;i++){ const a=hist[i],b=localMsgs[i]; if(!a||!b){sameAll=false;break;} if(nk2(a)!==nk2(b)){sameAll=false;break;} }
       if(sameAll) return;
     }
     // 以服务器为准，但把本地富字段(思考链/工具/token)补回匹配的助手消息（兼容旧数据）
@@ -2065,8 +2069,9 @@ async function _doHistoryPull(){
   }
 }
 function liveReloadNow(){
-  // 正在发送/流式中不打断（自身的回复正实时渲染）；等待下一次事件或在发送结束后由调用方补拉
-  if(sending) return;
+  // 正在发送/流式中不打断（自身的回复正实时渲染）；置位标记，由 request 的 finally 在 sending 复位后统一补拉一次，
+  // 否则发送期间到达的他端消息/唤醒消息会被静默丢弃（2026-09-24 P2 修复：原直接 return，标记永远到不了 finally）
+  if(sending){ _histMissedWhileBusy=true; return; }
   if(_segBusy) return;   // 分段连播中：本轮跳过，结束后自动补拉一次兜底
   if(liveDebounce) clearTimeout(liveDebounce);
   liveDebounce=setTimeout(()=>{
@@ -2509,10 +2514,10 @@ function _onToolStart(ts){
   _toolCards[tool.index]={node:node,el:null,tool:tool};
 }
 function _onToolArgsDelta(td){
-  const cur=_toolCards[td.index];
-  if(!cur||!cur.node)return;
-  const tool=cur.node.tool||cur.tool;
-  tool.argsText=String(tool.argsText||"")+String(td.delta||"");
+  // 2026-09-24 P3-4：argsText 累积是死代码（全文件只写不读，渲染始终用 start 快照 + tool_end 终态 args）。
+  // 参数实时显示收益低、节流渲染成本高，按决策 B 删除累积；参数以 tool_end 的完整 args 为准。
+  // 若日后要做「执行中参数流式显示」，需在此节流重渲染 renderToolCapsule，并同步更新 _toolCards 里的 tool.args。
+  void td;
 }
 function _onToolEnd(te){
   const cur=_toolCards[te.index];
