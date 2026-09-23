@@ -5756,6 +5756,8 @@ function openSessMenu(sid, anchorEl){
   let top=r.bottom+6;
   if(top+mh>window.innerHeight-8) top=r.top-mh-6;
   el.style.left=left+"px"; el.style.top=top+"px";
+  // 同步勾：本会话是否单独设了人设（不跟随全局）
+  try{ const _pm=getSessionPromptMap(); if(_pm && _pm[sid]){ markIf('[data-op="persona"]',"设定"); } }catch(e){}
   // 异步补勾（参考「锁定唤醒 ✓」）：跨窗口=实际生效（显式开启，或跟随全局且全局开关开着）；模型=单独指定过供应商
   const seq=++_sessMenuSeq;
   const alive=function(){ return seq===_sessMenuSeq && _sessMenuEl && !_sessMenuEl.classList.contains("hidden"); };
