@@ -1630,7 +1630,10 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
               <div class="mcp-h"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="11" rx="2"/><path d="M12 8V4"/><circle cx="12" cy="3" r="1"/><line x1="9" y1="13" x2="9" y2="15"/><line x1="15" y1="13" x2="15" y2="15"/></svg> AI 供应商管理</div>
               <div id="provList" class="mcp-list"><div class="mcp-empty">加载中…</div></div>
               <button type="button" class="mcp-add" id="provAddBtn">＋ 添加供应商</button>
-            </div></div></div><div class="set-panel" data-acc="voice"><div class="set-acc-h" data-acc="voice">语音服务<span class="ar">▾</span></div><div class="set-sec"><div class="mcp-block">
+            </div></div></div><div class="set-panel" data-acc="roles"><div class="set-acc-h" data-acc="roles">默认模型（按用途分配）<span class="ar">▾</span></div><div class="set-sec">
+              <div class="np-tip" style="margin-bottom:10px">后台任务可各自指定模型；选「跟随聊天模型」则用全局默认。下拉改动即时生效，无需重启。</div>
+              <div id="roleList"><div class="mcp-empty">加载中…</div></div>
+            </div></div><div class="set-panel" data-acc="voice"><div class="set-acc-h" data-acc="voice">语音服务<span class="ar">▾</span></div><div class="set-sec"><div class="mcp-block">
               <div class="mcp-h"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg> 语音服务（TTS 朗读 / 通话 / 语音输入）</div>
               <div id="vpList" class="mcp-list"><div class="mcp-empty">加载中…</div></div>
               <button type="button" class="mcp-add" id="vpAddBtn">＋ 添加语音供应商</button>
@@ -4477,7 +4480,7 @@ document.querySelectorAll(".set-acc-h").forEach(function(h){
       document.querySelectorAll(".set-panel").forEach(function(p){p.classList.remove("open");});
       panel.classList.add("open");
       if(tab==='conn'||tab==='mcp'){ loadMcpServers(); }
-      if(tab==='conn'||tab==='prov'){ loadProviders(); }
+      if(tab==='conn'||tab==='prov'){ loadProviders(); if(typeof loadModelRoles==='function') loadModelRoles(); }
     }
   });
 });
@@ -4802,6 +4805,66 @@ async function setDefaultProv(i){
   const p=_providers[i]; if(!p)return;
   const body={ providers: _providers.map(function(x){ return { id:x.id, name:x.name, api_url:x.api_url, api_key:x.api_key||"", model:x.model||"", models:(Array.isArray(x.models)?x.models:[]), enabled:x.enabled!==false, is_default:(x.id===p.id) }; }) };
   fetch("/heartbeat/admin/ai-providers",{method:"PUT",headers:mcpAuthHeaders(),body:JSON.stringify(body),credentials:"include"}).then(function(r){return r.json();}).then(function(){ chatToast("已设为默认供应商"); renderProviders(); });
+
+// ===== 默认模型（按用途路由）=====
+let _roleProviders=[];
+async function loadModelRoles(){
+  try{
+    const r=await fetch("/heartbeat/admin/model-roles",{headers:mcpAuthHeaders(),credentials:"include"});
+    const j=await r.json();
+    if(!j||!j.ok){ document.getElementById("roleList").innerHTML='<div class="mcp-empty">加载失败</div>'; return; }
+    _roleProviders=j.providers||[];
+    renderModelRoles(j.roles||{});
+  }catch(e){ document.getElementById("roleList").innerHTML='<div class="mcp-empty">加载失败</div>'; }
+}
+function renderModelRoles(roles){
+  const el=document.getElementById("roleList"); if(!el) return;
+  const desc={
+    compaction:"把旧对话压成摘要，推荐快且便宜的模型",
+    memory_admit:"判断一条对话值不值得入记忆",
+    memory_pool:"从对话里提炼记忆入库",
+    reparse:"压缩块原文提炼入记忆池",
+    digest:"整理已替换历史供回看",
+    rerank:"检索记忆时给候选排序",
+    co_chat:"共影场景对话"
+  };
+  const rows=Object.keys(roles).map(function(role){
+    const r=roles[role];
+    let opts='<option value="">跟随聊天模型</option>';
+    _roleProviders.forEach(function(p){
+      const list=(Array.isArray(p.models)&&p.models.length)?p.models:(p.model?[p.model]:[]);
+      opts+='<optgroup label="'+escapeHtml(p.name||"未命名")+'">';
+      if(!list.length) opts+='<option value="'+escapeHtml(p.id)+'::">（'+escapeHtml(p.name||"默认")+'）</option>';
+      list.forEach(function(m){
+        const v=p.id+"::"+m;
+        opts+='<option value="'+escapeHtml(v)+'"'+(r.provider_id===p.id&&r.model===m?' selected':'')+'>'+escapeHtml(m)+'</option>';
+      });
+      opts+='</optgroup>';
+    });
+    return '<div class="role-row" style="padding:10px 0;border-bottom:1px solid var(--line,#eee)">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:10px">'
+      +'<div style="flex:1"><div style="font-size:14px;font-weight:600;color:var(--ink,#222)">'+escapeHtml(r.label||role)+'</div>'
+      +'<div style="font-size:12px;color:var(--ink2,#888);margin-top:2px">'+escapeHtml(desc[role]||"")+'</div></div>'
+      +'<select data-role="'+escapeHtml(role)+'" style="max-width:200px">'+opts+'</select>'
+      +'</div></div>';
+  }).join('');
+  el.innerHTML=rows||'<div class="mcp-empty">暂无用途</div>';
+  el.querySelectorAll("select[data-role]").forEach(function(sel){
+    sel.addEventListener("change",async function(){
+      const role=sel.getAttribute("data-role");
+      const val=sel.value||"";
+      let pid="",mdl="";
+      if(val){ const i=val.indexOf("::"); pid=val.slice(0,i); mdl=val.slice(i+2); }
+      sel.disabled=true;
+      try{
+        const r=await fetch("/heartbeat/admin/model-roles/"+encodeURIComponent(role),{method:"PUT",headers:mcpAuthHeaders(),credentials:"include",body:JSON.stringify({provider_id:pid,model:mdl})});
+        const j=await r.json();
+        if(r.ok&&j.ok) chatToast("已生效"); else chatToast((j&&j.error)||"保存失败");
+      }catch(e){ chatToast("保存失败"); }
+      sel.disabled=false;
+    });
+  });
+}
 }
 async function deleteProv(i){
   if(!confirm("删除该 AI 供应商？")) return;
@@ -6100,30 +6163,58 @@ async function switchSession(id){
 }
 
 // 新建会话：先弹下拉框选本会话提示词（默认=跟随全局人设；选备份=仅本会话生效），取消则不创建
-function newSession(){
+async function newSession(){
   try{
     const opts='<option value="">默认（跟随全局人设）</option>'+promptBackups.map(function(b){
       return '<option value="'+escapeHtml(b.id)+'">'+escapeHtml(b.name||'未命名')+'</option>';
     }).join('');
+    // 拉可用供应商列表（与 openSessionProvider 同口径）
+    let providers=[];
+    try{
+      const r2=await fetch("/heartbeat/admin/ai-providers",{headers: mcpAuthHeaders(), credentials:"include"});
+      const j2=await r2.json();
+      if(j2&&Array.isArray(j2.providers)) providers=j2.providers.filter(function(p){ return p.enabled!==false && (p.api_url||p.base_url) && (p.api_key || p.api_key_set===true); });
+    }catch(e){}
+    let provOpts='<option value="">默认（跟随全局模型）</option>';
+    providers.forEach(function(p){ provOpts+='<option value="'+escapeHtml(p.id)+'">'+escapeHtml(p.name||"未命名")+'</option>'; });
+    const modelOptsFor=function(pid){
+      if(!pid) return '<option value="">（跟随供应商默认）</option>';
+      const p=providers.filter(function(x){return x.id===pid;})[0];
+      if(!p) return '<option value="">（跟随供应商默认）</option>';
+      const list=(Array.isArray(p.models)&&p.models.length)?p.models:(p.model?[p.model]:[]);
+      if(!list.length) return '<option value="">（跟随供应商默认）</option>';
+      return '<option value="">（跟随供应商默认）</option>'+list.map(function(m){return '<option value="'+escapeHtml(m)+'">'+escapeHtml(m)+'</option>';}).join('');
+    };
     openEditModal("新建会话",
       '<div class="field"><label>本会话使用的提示词</label><select class="np-sel" id="np-prompt">'+opts+'</select>'
       +'<div class="np-tip">选择的备份仅对这个会话生效；「默认」跟随设置里的全局人设。点取消则不创建。</div></div>'
+      +'<div class="field" style="margin-top:12px"><label>本会话使用的模型</label><select class="np-sel" id="np-provider">'+provOpts+'</select></div>'
+      +'<div class="field" style="margin-top:8px"><label>模型</label><select class="np-sel" id="np-model">'+modelOptsFor("")+'</select>'
+      +'<div class="np-tip">选定后这个会话单独走该供应商；「默认」跟随全局。供应商停用或删除会自动回退全局。</div></div>'
       +'<div class="field" style="margin-top:12px"><label>注入跨窗口记忆</label><select class="np-sel" id="np-cross"><option value="">跟随全局</option><option value="1">开启</option><option value="0">关闭</option></select>'
       +'<div class="np-tip">该会话是否注入其它会话的置顶记忆 / 近期日记。「跟随全局」则按设置页跨窗口注入总开关生效。</div></div>',
-      function(){ try{ createSessionWithPrompt((document.getElementById("np-prompt")||{}).value||""); }catch(err){ showToast("新建失败:"+(err&&err.message||err)); } },
+      function(){ try{
+        const pid=(document.getElementById("np-provider")||{}).value||"";
+        const mdl=(document.getElementById("np-model")||{}).value||"";
+        createSessionWithPrompt((document.getElementById("np-prompt")||{}).value||"", pid, mdl);
+      }catch(err){ showToast("新建失败:"+(err&&err.message||err)); } },
       "创建");
+    const npProv=document.getElementById("np-provider");
+    const npMdl=document.getElementById("np-model");
+    if(npProv&&npMdl){ npProv.addEventListener("change",function(){ npMdl.innerHTML=modelOptsFor(npProv.value); }); }
   }catch(err){
     console.error("[newSession]",err);
     showToast("新建会话出错:"+(err&&err.message||err));
   }
 }
-function createSessionWithPrompt(backupId){
+function createSessionWithPrompt(backupId, providerId, modelName){
   // 回复/连播进行中新建会话会让收尾逻辑把旧会话消息写进新会话缓存，先挡下
   if(sending||_segBusy){ showToast("回复进行中，等这轮结束再新建会话"); return; }
   const sid=genSessionId();
   SessionStore.setCurrentSession(sid);
   pushCurrentSession();   // 跨设备同步：新会话也上报
   setSessionPrompt(sid, backupId);
+  if(providerId){ saveSessionProvider(sid, providerId, modelName, sid); }
   // 会话级跨窗口注入覆盖：选「开启/关闭」则写入服务端；选「跟随全局」不提交（默认跟随全局总开关）
   const crossInj=(document.getElementById("np-cross")||{}).value;
   if(crossInj==="1"||crossInj==="0"){

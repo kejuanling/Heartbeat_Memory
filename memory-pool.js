@@ -951,10 +951,10 @@ function buildCleanPrompt() {
 }
 
 async function cleanPoolViaLLM(system, user) {
-  const apiUrl = process.env.TARGET_API_URL || "";
-  const apiKey = process.env.TARGET_API_KEY || "";
-  const model = process.env.MODEL_NAME || "";
-  if (!apiUrl || !apiKey || !model) return { ok: false, error: "LLM 未配置（TARGET_API_URL / TARGET_API_KEY / MODEL_NAME）" };
+  const { provider, model } = require("./model-router").resolveRoleModel("memory_pool");
+  const apiUrl = (provider && (provider.api_url || provider.base_url)) || "";
+  const apiKey = (provider && provider.api_key) || "";
+  if (!apiUrl || !apiKey || !model) return { ok: false, error: "模型未配置（role=memory_pool：请在设置里给「记忆提炼」选模型或启用默认供应商）" };
   try {
     // 2026-09-13 审查修复：加超时（同 reparseSummaryViaLLM），上游挂起不再无限等待
     const controller = new AbortController();

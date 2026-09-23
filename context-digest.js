@@ -390,7 +390,15 @@ async function digest(q, opts) {
   });
 
   // LLM 整理；失败降级返回召回块原文列表
-  const provider = resolveRerankProvider();
+  // 2026-09-24：优先按用途路由（设置里给「回看摘要」指定的模型），未指定回退原 rerank 供应商
+  let provider = null;
+  try {
+    const rp = require("./model-router").resolveRoleModel("digest");
+    if (rp.provider && rp.model) {
+      provider = { api_url: (rp.provider.api_url || rp.provider.base_url || "").trim(), api_key: rp.provider.api_key || "", model: rp.model };
+    }
+  } catch (e) {}
+  if (!provider) provider = resolveRerankProvider();
   if (!provider) {
     return { ok: true, digest: null, fallback: true, reason: "无可用供应商（ai-providers.json）", matches: matches };
   }

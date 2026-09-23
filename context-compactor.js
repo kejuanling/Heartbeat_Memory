@@ -417,11 +417,11 @@ function resetCompactionPromptConfig() {
 
 // 调用上游模型生成摘要文本（不含落盘）：手动块与未覆盖区生成共用
 async function callCompactionLLM(built, label) {
-  const targetUrl = process.env.TARGET_API_URL;
-  const targetKey = process.env.TARGET_API_KEY;
-  const model = process.env.MODEL_NAME;
+  const { provider, model } = require("./model-router").resolveRoleModel("compaction");
+  const targetUrl = provider && (provider.api_url || provider.base_url);
+  const targetKey = provider && provider.api_key;
   if (!targetUrl || !targetKey || !model) {
-    throw new Error("TARGET_API_URL / TARGET_API_KEY / MODEL_NAME 未配置");
+    throw new Error("模型未配置（role=compaction：请在设置里给「压缩摘要」选模型或启用一个默认供应商）");
   }
   const outputBudgets = [16000, 32000, 50000];
   let lastErr = null;

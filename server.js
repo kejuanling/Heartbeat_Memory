@@ -172,8 +172,50 @@ function loadAiProviders() {
     return Array.isArray(cfg) ? cfg : (Array.isArray(cfg.providers) ? cfg.providers : []);
   } catch (e) { return []; }
 }
-function saveAiProviders(list) {
-  writeJsonFileAtomic(AI_PROVIDERS_CONFIG, { providers: list || [] });
+function saveAiProviders(list, roleModels) {
+  // role_models 随 providers 同文件保存：调用方传入则用传入值，否则保留盘上现值
+  let rm = (roleModels && typeof roleModels === "object") ? roleModels : loadRoleModelsRaw();
+  writeJsonFileAtomic(AI_PROVIDERS_CONFIG, { providers: list || [], role_models: rm || {} });
+}
+// 按用途路由模型（2026-09-24）：抽到独立 model-router.js，server.js API 与后台任务模块共用同一份解析
+const {
+  KNOWN_MODEL_ROLES,
+  loadRoleModelsRaw,
+  saveRoleModel,
+  resolveRoleModel
+} = require("./model-router");
+
+// ---- 人设权威（2026-09-24 B 方案）：服务端自己决定该会话该用哪个人设，前端请求带的 system 不再决定盘上存什么 ----
+// 解析顺序：data/session-prompts.json(sid->backupId) -> data/prompt-backups.json 内容 -> chat-settings.json 全局 system_prompt
+function resolveSessionSystemPrompt(sessionId) {
+  try {
+    const sid = String(sessionId || "default").trim() || "default";
+    // 1) 会话级映射
+    let backupId = "";
+    try {
+      const spFile = path.join(__dirname, "data", "session-prompts.json");
+      if (fs.existsSync(spFile)) {
+        const j = JSON.parse(fs.readFileSync(spFile, "utf-8"));
+        if (j && j.prompts && typeof j.prompts[sid] === "string") backupId = j.prompts[sid];
+      }
+    } catch (e) {}
+    if (backupId) {
+      try {
+        const pbFile = path.join(__dirname, "data", "prompt-backups.json");
+        if (fs.existsSync(pbFile)) {
+          const arr = JSON.parse(fs.readFileSync(pbFile, "utf-8"));
+          const hit = Array.isArray(arr) ? arr.find(function (b) { return b && b.id === backupId && typeof b.content === "string"; }) : null;
+          if (hit && hit.content && hit.content.trim()) return hit.content.trim();
+        }
+      } catch (e) {}
+    }
+  } catch (e) {}
+  // 2) 全局人设（chat-settings.json）
+  try {
+    const cs = JSON.parse(fs.readFileSync(path.join(__dirname, "chat-settings.json"), "utf-8"));
+    if (cs && typeof cs.system_prompt === "string" && cs.system_prompt.trim()) return cs.system_prompt.trim();
+  } catch (e) {}
+  return "";
 }
 // 取「标记为默认」或第一个已启用的供应商（未配置则回退 TARGET_API_*）
 function resolveActiveProvider() {
@@ -580,344 +622,6 @@ function parseWakeTagAndSchedule(text, sessionId) {
   return cleaned;
 }
 
-// ========================
-// 消息扣住（免打扰）时段：与 <wake> 闹钟完全独立。
-// AI 在对话里写 <quiet>数值</quiet>（分钟）或 <quiet>22:30</quiet>（到点结束）开启。
-// 扣住期间新用户消息被网关拦截（不转发、不回复）；到点一次性打包给 AI 做总结回复。
-// 与 wake_schedule.json 无关，功能完全独立。
-// ========================
-const QUIET_SCHEDULE_PATH = path.join(__dirname, "data", "quiet_schedule.json");
-const HELD_MESSAGES_PATH = path.join(__dirname, "data", "held_messages.json");
-let quietReleaseTimer = null;
-
-function readQuietScheduleRaw() {
-  try {
-    if (!fs.existsSync(QUIET_SCHEDULE_PATH)) return null;
-    return JSON.parse(fs.readFileSync(QUIET_SCHEDULE_PATH, "utf-8"));
-  } catch (err) {
-    console.warn("[quiet] 读取扣住时段失败:", err.message);
-    return null;
-  }
-}
-function writeQuietScheduleRaw(data) {
-  fs.mkdirSync(path.dirname(QUIET_SCHEDULE_PATH), { recursive: true });
-  const tmp = QUIET_SCHEDULE_PATH + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
-  fs.renameSync(tmp, QUIET_SCHEDULE_PATH);
-}
-function quietSid(sessionId) { return String(sessionId || "default").trim() || "default"; }
-// v2 按会话分槽。兼容旧全局单条格式（无 sessions 结构时映射到 default）。
-function readQuietScheduleFor(sessionId) {
-  const sid = quietSid(sessionId);
-  const d = readQuietScheduleRaw();
-  if (!d) return null;
-  const sessions = (d.sessions && typeof d.sessions === "object") ? d.sessions : null;
-  if (!sessions) {
-    if (sid !== "default") return null;
-    return d.end_at ? { end_at: d.end_at, updated_at: d.updated_at || "", session: "default" } : null;
-  }
-  const e = sessions[sid];
-  if (!e || !e.end_at) return null;
-  const t = new Date(e.end_at);
-  return isNaN(t.getTime()) ? null : { end_at: e.end_at, updated_at: e.updated_at || "", session: sid };
-}
-function saveQuietSchedule(endAtIso, sessionId) {
-  const sid = quietSid(sessionId);
-  let data = {};
-  try { const cur = readQuietScheduleRaw(); if (cur) data = cur; } catch {}
-  if (!data || typeof data !== "object") data = {};
-  const sessions = (data.sessions && typeof data.sessions === "object") ? data.sessions : {};
-  sessions[sid] = { end_at: endAtIso, updated_at: new Date().toISOString() };
-  data.version = 2;
-  data.sessions = sessions;
-  writeQuietScheduleRaw(data);
-}
-function clearQuietSchedule(sessionId) {
-  if (sessionId === undefined || sessionId === null || String(sessionId).trim() === "") {
-    try { if (fs.existsSync(QUIET_SCHEDULE_PATH)) writeQuietScheduleRaw({ version: 2, sessions: {} }); }
-    catch (err) { console.warn("[quiet] 清理全部扣住时段失败:", err.message); }
-    if (quietReleaseTimer) { clearTimeout(quietReleaseTimer); quietReleaseTimer = null; }
-    return;
-  }
-  const sid = quietSid(sessionId);
-  let changed = false;
-  try {
-    const data = readQuietScheduleRaw();
-    if (data && data.sessions && data.sessions[sid]) {
-      delete data.sessions[sid]; writeQuietScheduleRaw(data); changed = true;
-    } else if (data && !data.sessions && sid === "default" && data.end_at) {
-      writeQuietScheduleRaw({ version: 2, sessions: {} }); changed = true;
-    }
-  } catch (err) { console.warn("[quiet] 清理扣住时段失败:", err.message); }
-  if (changed) armQuietRelease();
-}
-// 已到点（end_at <= now）的 quiet 会话 id 列表（用于释放定时器清理前定位）
-function getDueQuietSessionIds() {
-  const d = readQuietScheduleRaw();
-  if (!d) return [];
-  const sessions = d.sessions || {};
-  const now = Date.now();
-  const out = [];
-  for (const sid of Object.keys(sessions)) {
-    const e = sessions[sid];
-    const t = e && e.end_at ? new Date(e.end_at) : null;
-    if (t && !isNaN(t.getTime()) && t.getTime() <= now) out.push(sid);
-  }
-  return out;
-}
-// 所有会话里最近一个未来 quiet 结束时间（用于挂释放定时器）；无 → null
-function nextQuietEndFromAnySession() {
-  const d = readQuietScheduleRaw();
-  if (!d) return null;
-  const sessions = d.sessions || {};
-  let best = null;
-  for (const sid of Object.keys(sessions)) {
-    const e = sessions[sid];
-    if (!e || !e.end_at) continue;
-    const t = new Date(e.end_at);
-    if (isNaN(t.getTime())) continue;
-    if (!best || t.getTime() < best.getTime()) best = t;
-  }
-  return best;
-}
-// 当前会话是否处于扣住时段（现在早于该会话结束时间）
-function isQuietActive(sessionId) {
-  const entry = readQuietScheduleFor(sessionId);
-  if (!entry) return false;
-  const t = new Date(entry.end_at);
-  return !isNaN(t.getTime()) && t.getTime() > Date.now();
-}
-function readHeldMessagesRaw() {
-  try {
-    if (!fs.existsSync(HELD_MESSAGES_PATH)) return null;
-    return JSON.parse(fs.readFileSync(HELD_MESSAGES_PATH, "utf-8"));
-  } catch (err) { return null; }
-}
-function readHeldMessages(sessionId) {
-  const sid = quietSid(sessionId);
-  const d = readHeldMessagesRaw();
-  if (!d) return [];
-  // 旧格式为全局数组：迁移视作 default 会话的扣住消息
-  if (Array.isArray(d)) return sid === "default" ? d : [];
-  const sessions = (d.sessions && typeof d.sessions === "object") ? d.sessions : {};
-  return Array.isArray(sessions[sid]) ? sessions[sid] : [];
-}
-function writeHeldMessagesContent(perSession) {
-  fs.mkdirSync(path.dirname(HELD_MESSAGES_PATH), { recursive: true });
-  const tmp = HELD_MESSAGES_PATH + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(perSession, null, 2), "utf-8");
-  fs.renameSync(tmp, HELD_MESSAGES_PATH);
-}
-// 写某会话的扣住消息（读到旧全局数组格式时自动迁移成 v2 per-session 结构再写）
-function writeHeldMessages(arr, sessionId) {
-  const sid = quietSid(sessionId);
-  const d = readHeldMessagesRaw();
-  let perSession;
-  if (Array.isArray(d)) {
-    perSession = { version: 2, sessions: {} };
-    if (d.length) perSession.sessions["default"] = d;
-  } else if (d && typeof d === "object") {
-    perSession = { version: 2, sessions: (d.sessions && typeof d.sessions === "object") ? d.sessions : {} };
-  } else {
-    perSession = { version: 2, sessions: {} };
-  }
-  perSession.sessions[sid] = Array.isArray(arr) ? arr : [];
-  writeHeldMessagesContent(perSession);
-}
-
-// 解析 <quiet> 标签并写入调度（标签随后被剥离，不显示给用户）。按会话隔离：写入的是该会话自己的扣住时段。
-function parseQuietTagAndSchedule(text, sessionId) {
-  const cleaned = String(text || "").replace(/<quiet>[\s\S]*?<\/quiet>/gi, "").trim();
-  const m = String(text || "").match(/<quiet>([\s\S]*?)<\/quiet>/i);
-  if (!m) return cleaned;
-  const target = parseWakeTarget(m[1], TIME_ZONE);
-  if (!target) { console.log("[quiet] <quiet> 内容无效（忽略）:", m[1]); return cleaned; }
-  const endAt = target.at || new Date(Date.now() + target.minutes * 60 * 1000);
-  if (endAt.getTime() <= Date.now()) { console.log("[quiet] <quiet> 时间已过（忽略）:", m[1]); return cleaned; }
-  const sid = quietSid(sessionId);
-  try {
-    saveQuietSchedule(endAt.toISOString(), sid);
-    console.log(`[quiet] 设置会话 ${sid} 扣住时段到：${formatDateTimeInTimeZone(endAt, TIME_ZONE)}（${endAt.toISOString()}）`);
-    armQuietRelease();
-  } catch (err) { console.warn("[quiet] 保存扣住时段失败:", err.message); }
-  return cleaned;
-}
-
-// 挂释放定时器：到点把到期的会话各自扣住的消息打包给 AI 做总结回复（按会话隔离）
-function armQuietRelease() {
-  if (quietReleaseTimer) { clearTimeout(quietReleaseTimer); quietReleaseTimer = null; }
-  const end = nextQuietEndFromAnySession();
-  if (!end) return;
-  const delayMs = end.getTime() - Date.now();
-  if (delayMs <= 0) {
-    releaseQuietOnce();
-    return;
-  }
-  quietReleaseTimer = setTimeout(releaseQuietOnce, delayMs);
-  console.log(`[quiet] 已挂扣住释放定时器：${formatDateTimeInTimeZone(end, TIME_ZONE)}（${Math.round(delayMs / 60000)} 分钟后）`);
-}
-
-// 释放一次：把所有已到点的会话各自释放；成功的清其调度，失败的保留调度并 60 秒后退避重试，
-// 否则释放失败仍清掉调度后，滞留的扣住消息从此再无自动释放路径
-async function releaseQuietOnce() {
-  quietReleaseTimer = null;
-  const due = getDueQuietSessionIds();
-  let anyFailed = false;
-  for (const sid of due) {
-    try {
-      await releaseHeldMessages(sid);
-      clearQuietSchedule(sid);
-      console.log(`[quiet] 会话 ${sid} 扣住消息已释放`);
-    } catch (err) {
-      anyFailed = true;
-      console.error(`[quiet] 会话 ${sid} 释放失败，60 秒后重试:`, err.message);
-    }
-  }
-  if (anyFailed) {
-    if (quietReleaseTimer) clearTimeout(quietReleaseTimer);
-    quietReleaseTimer = setTimeout(releaseQuietOnce, 60000);
-  } else {
-    armQuietRelease();
-  }
-}
-
-function quietMsgSignature(m) {
-  return (m.role || "") + "\u0000" + normalizeContentToText(m.content);
-}
-// 扣住期间收集新来的用户消息（按内容去重，避免重复扣住同一条历史）
-// 收集请求末尾尚未被回答的用户消息（直到遇到 assistant 回复为止）
-function collectTrailingUnansweredUserMessages(msgs) {
-  if (!Array.isArray(msgs)) return [];
-  const out = [];
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    const m = msgs[i];
-    if (!m || !isRealMessageForTimeline(m)) continue;
-    if (m.role === "assistant") break;
-    if (m.role === "user") out.unshift(m);
-  }
-  return out;
-}
-
-function holdNewUserMessages(kelivoMessages, sessionId) {
-  const sid = quietSid(sessionId);
-  const held = readHeldMessages(sid);
-  // 按签名计数一一对应：签名相同的消息，已扣住几条就跳过几条，剩下的照常扣住。
-  // 原来的 Set 去重会把免打扰期间重复发送的相同文本（如连发两条"好的"）整条吞掉。
-  const heldCount = {};
-  for (const m of held) {
-    const sig = quietMsgSignature(m);
-    heldCount[sig] = (heldCount[sig] || 0) + 1;
-  }
-  const seen = {};
-  let added = 0;
-  for (const m of kelivoMessages) {
-    if (!isRealMessageForTimeline(m) || m.role !== "user") continue;
-    const sig = quietMsgSignature(m);
-    seen[sig] = (seen[sig] || 0) + 1;
-    if (seen[sig] <= (heldCount[sig] || 0)) continue;
-    held.push({
-      role: "user",
-      content: normalizeContentToText(m.content),
-      held_at: new Date().toISOString()
-    });
-    heldCount[sig] = (heldCount[sig] || 0) + 1;
-    added++;
-  }
-  if (added > 0) writeHeldMessages(held, sid);
-  return added;
-}
-
-// 扣住到点：把该会话扣住的消息一次性打包给 AI，只生成一条总结回复；推 Bark（按会话隔离）
-async function releaseHeldMessages(sessionId) {
-  const sid = quietSid(sessionId);
-  const held = readHeldMessages(sid);
-  if (!held.length) { console.log(`[quiet] 会话 ${sid} 释放：无扣住消息`); return; }
-  console.log(`[quiet] 会话 ${sid} 释放：共扣住 ${held.length} 条消息，打包给 AI 做总结`);
-  const targetApiUrl = readEnvValue("TARGET_API_URL");
-  const targetApiKey = readEnvValue("TARGET_API_KEY");
-  const modelName = readEnvValue("MODEL_NAME");
-  // 2026-09-21 审查 H12：缺上游配置必须抛错——裸 return 会被调用方当成功并清掉调度，
-  // 扣住消息从此再无自动释放路径（静默丢失）。抛错让 releaseQuietOnce 进 60s 重试、保留调度。
-  if (!targetApiUrl || !targetApiKey || !modelName) { throw new Error("[quiet] 缺少上游配置 TARGET_API_URL/KEY/MODEL_NAME，无法生成总结（扣住消息保留待重试）"); }
-  const timeline = loadTimeline(sid);
-  const sp = timeline.find(m => m.role === "system");
-  const cleanSP = sp ? String(normalizeContentToText(sp.content)).split("## search_web 工具使用说明")[0].trim() : "";
-  // 被扣消息发来时已落时间线（appendRequestMessages），从历史侧剔除，
-  // 避免同批消息在上下文出现两份（历史一份+提示词列表一份）（2026-09-15 修复）
-  const heldSigs = new Set(held.map(m => quietMsgSignature(m)));
-  const historyMsgs = timeline
-    .filter(m => m.role !== "system" && !isSpecialEvent(m) && m.role !== "tool" && !m.tool_calls && !m.tool_call_id)
-    .filter(m => !heldSigs.has(quietMsgSignature(m)))
-    .slice(-50)
-    .map(m => ({ role: m.role, content: normalizeContentToText(m.content) }));
-  const heldText = held.map((m, i) => `${i + 1}. ${normalizeContentToText(m.content)}`).join("\n");
-  const quietPrompt = `（系统提示：以下内容仅你可见）有 ${held.length} 条消息在免打扰时段被系统拦截扣住，现在一并交给你。请把它们当作对方在此期间的留言，做一条自然、简洁的总结回复。不需要逐条复述，若有需要回应的点可以点到，语气自然贴切。\n\n被扣住的消息：\n${heldText}`;
-  const messages = [
-    { role: "system", content: cleanSP },
-    ...historyMsgs,
-    { role: "system", content: quietPrompt }
-  ];
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
-  let responseText;
-  try {
-    const response = await fetch(targetApiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${targetApiKey}` },
-      body: JSON.stringify({ model: modelName, messages, temperature: 0.8, top_p: 0.95, stream: false }),
-      signal: controller.signal
-    });
-    // body 读取也必须在超时窗口内：上游回完头再挂起时，读 body 同样会卡住整个释放流程
-    responseText = await response.text();
-    var _respStatus = response.status;
-  } finally { clearTimeout(timer); }
-  let data;
-  try { data = JSON.parse(responseText); } catch (err) { throw new Error("模型返回非 JSON: " + responseText.slice(0, 200)); }
-  if (_respStatus !== 200) throw new Error("模型请求失败 HTTP " + _respStatus + ": " + responseText.slice(0, 200));
-  const aiText = String(normalizeContentToText(data?.choices?.[0]?.message?.content) || "").trim();
-  let delivered = false;
-  if (aiText) {
-    const clean = stripInternalTags(aiText) || aiText;
-    // 2026-09-13 审查修复：总结回复落时间线并通知前端——此前只推送不落盘，
-    // 时间线里被扣住的消息永远没有配对回复，且在线前端看不到这条回复
-    appendMessages(sid, [{ role: "assistant", content: clean }]);
-    const pushResult = await sendPushNotification({ title: "扣住消息已处理", body: clean.slice(0, 300) });
-    delivered = pushResult.ok;
-    console.log(`[quiet] 会话 ${sid} 总结回复已生成${pushResult.ok ? "并推送" : "（推送失败：" + pushResult.reason + "）"}`);
-  }
-  // 释放后清空该会话：重新读取，剔除刚释放的那批，保留「释放期间」新扣住的消息，
-  // 避免 read → await(LLM) → write([]) 的竞态把新到的扣住消息一并清掉。
-  // 2026-09-13 审查修复：仅总结已送达（推送成功）才清空；模型空回复/推送失败时
-  // 保留扣住消息待下次释放，避免用户消息静默丢失。
-  if (delivered) {
-    const releasedSigs = new Set(held.map(m => quietMsgSignature(m)));
-    writeHeldMessages(readHeldMessages(sid).filter(m => !releasedSigs.has(quietMsgSignature(m))), sid);
-  } else {
-    console.warn(`[quiet] 会话 ${sid} 总结未送达（${aiText ? "推送失败" : "模型空回复"}），扣住消息保留待重试`);
-  }
-}
-
-// 扣住期间返回给客户端的响应：内容为空，让客户端不显示 AI 回复（此时消息只是被扣住）
-// 批注 2026-09-13（审查 B4）：stream 客户端按 SSE 解析，此前一律回普通 JSON 会导致
-// Kelivo 等流式客户端解析出 0 个事件而空转/报错——按请求的 stream 参数返回对应格式。
-function buildQuietHeldReply(reply, stream) {
-  if (stream === true) {
-    const chunk = {
-      id: "chatcmpl-quiet-held",
-      object: "chat.completion.chunk",
-      created: Math.floor(Date.now() / 1000),
-      model: "quiet-held",
-      choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: "stop" }]
-    };
-    return reply.code(200).header("Content-Type", "text/event-stream; charset=utf-8")
-      .header("Cache-Control", "no-cache").header("Connection", "keep-alive")
-      .send(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`);
-  }
-  return reply.code(200).send({
-    choices: [{ index: 0, message: { role: "assistant", content: "" }, finish_reason: "stop" }],
-    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
-  });
-}
 
 function createContentTagFilter() {
   let buf = "";
@@ -1623,16 +1327,18 @@ function appendRequestMessages(sessionId, reqMsgs, opts) {
     }
   }
 
-  // 1) 人设同步：请求最新 system 与盘上不同则原地替换，盘上没有则补到首位（saveTimeline 兜底置顶）
-  const reqSPs = reqList.filter(function (m) { return m && m.role === "system"; });
-  if (reqSPs.length) {
-    const cleanedSP = normalizeMessageForTimeline(reqSPs[reqSPs.length - 1]);
+  // 1) 人设同步（2026-09-24 B 方案）：以服务端权威 system 为准写盘上，忽略请求里带的 system。
+  //    旧逻辑拿前端拼的 system 覆盖盘上，前端异步加载/换设备/备份缺失时会把会话专属人设冲成全局。
+  //    现在权威来源是 session-prompts.json -> prompt-backups.json -> chat-settings.json，前端带什么都不再改盘上。
+  const authoritativeSP = (typeof resolveSessionSystemPrompt === "function")
+    ? (resolveSessionSystemPrompt(sessionId) || "") : "";
+  if (authoritativeSP.trim()) {
     const diskSP = existing.find(function (m) { return m && m.role === "system"; });
     if (!diskSP) {
-      existing.unshift({ ...cleanedSP, position: 0 });
+      existing.unshift({ role: "system", content: authoritativeSP, position: 0 });
       changed = true;
-    } else if (normalizeContentToText(diskSP.content) !== normalizeContentToText(cleanedSP.content)) {
-      diskSP.content = cleanedSP.content;
+    } else if (normalizeContentToText(diskSP.content) !== authoritativeSP) {
+      diskSP.content = authoritativeSP;
       changed = true;
     }
   }
@@ -2094,10 +1800,6 @@ require("./routes/chat")(app, {
   sessionCrossInjectOverride,
   saveSessionCrossInjectOverride,
   prepareMessageForLLM,
-  isQuietActive,
-  collectTrailingUnansweredUserMessages,
-  holdNewUserMessages,
-  buildQuietHeldReply,
   normalizeContentToText,
   isSpecialEvent,
   stripInternalTags,
@@ -2108,6 +1810,7 @@ require("./routes/chat")(app, {
   resolveActiveProvider,
   resolveSessionProvider,
   resolveChatModel,
+  resolveSessionSystemPrompt,
   sessionModelProviderOverride,
   saveSessionModelProviderOverride,
   sessionModelNameOverride,
@@ -2118,7 +1821,6 @@ require("./routes/chat")(app, {
   splitMultimodalContent,
   extractAssistantThinking,
   parseWakeTagAndSchedule,
-  parseQuietTagAndSchedule,
   createContentTagFilter,
   appendSpecialEvent,
   MCP_ENABLED,
@@ -2143,11 +1845,11 @@ const wakeChatDeps = {
   stripPosition,
   buildCrossMemorySnapshot,
   resolveChatModel,
+  resolveSessionSystemPrompt,
   readEnvValue,
   UPSTREAM_TIMEOUT_MS,
   setLastLLMCapture,
   splitMultimodalContent,
-  isQuietActive,
   prepareMessageForLLM,
   extractTimestampWithMemory   // 2026-09-22 审查 §3.5：唤醒侧时间反查与对话侧统一口径（原只认 tm.time）
 };
@@ -2593,9 +2295,8 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
     // 对话内闹钟/免打扰静默失效（2026-09-11 修复），与非 MCP 路径（routes/chat.js）同口径。
     try {
       parseWakeTagAndSchedule(aiClean, sessionId);
-      parseQuietTagAndSchedule(aiClean, sessionId);
     } catch (e) {
-      console.warn("[mcp] 闹钟/免打扰调度解析失败:", e.message);
+      console.warn("[mcp] 闹钟调度解析失败:", e.message);
     }
     try {
       const cleaned = await tagParser.extractAndStore(aiClean, { sessionId });
@@ -4123,10 +3824,10 @@ function sliceTimelineOriginal(sessionId, range) {
 
 // LLM 候选提取：从对话原文提取值得长期记住的稳定信息（简短风格 prompt，JSON 数组输出）
 async function extractMemoryCandidates(sourceText) {
-  const apiUrl = readEnvValue("TARGET_API_URL");
-  const apiKey = readEnvValue("TARGET_API_KEY");
-  const model = readEnvValue("MODEL_NAME");
-  if (!apiUrl || !apiKey || !model) throw new Error("LLM 未配置（TARGET_API_URL/KEY/MODEL_NAME）");
+  const { provider, model } = resolveRoleModel("reparse");
+  const apiUrl = provider && (provider.api_url || provider.base_url);
+  const apiKey = provider && provider.api_key;
+  if (!apiUrl || !apiKey || !model) throw new Error("模型未配置（role=reparse：请在设置里给「摘要解析」选模型或启用默认供应商）");
   // 提示词接入管理台配置（0918）：reparse_system_prompt/user_prompt 自定义覆盖，内置默认=buildReparsePrompt（原文提取版）
   const pcfg = memoryPool.getConfig();
   const pdef = memoryPool.buildReparsePrompt();
@@ -4833,6 +4534,54 @@ app.put("/admin/ai-providers", { preHandler: mcpManageAuth }, async (req, reply)
     reply.send({ ok: true, restart: "hot-reload", count: clean.length });
   } catch (err) {
     console.error("[PUT /admin/ai-providers] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// ---- 按用途路由模型：列出所有用途当前选择 + 可用供应商/模型（供设置页渲染） ----
+app.get("/admin/model-roles", { preHandler: mcpManageAuth }, async (req, reply) => {
+  try {
+    const providers = loadAiProviders().filter(function (p) {
+      return p && p.enabled !== false && (p.api_url || p.base_url) && p.api_key;
+    }).map(function (p) {
+      return {
+        id: p.id, name: p.name, is_default: p.is_default === true,
+        models: Array.isArray(p.models) && p.models.length ? p.models : (p.model ? [p.model] : [])
+      };
+    });
+    const rm = loadRoleModelsRaw();
+    const out = {};
+    Object.keys(KNOWN_MODEL_ROLES).forEach(function (role) {
+      const e = rm[role] || {};
+      const prov = e.provider_id ? providers.find(function (x) { return x.id === e.provider_id; }) : null;
+      out[role] = {
+        label: KNOWN_MODEL_ROLES[role],
+        provider_id: e.provider_id || "",
+        model: e.model || "",
+        provider_name: prov ? prov.name : "",
+        model_display: (prov && e.model) ? e.model : "（跟随聊天模型）"
+      };
+    });
+    reply.send({ ok: true, roles: out, providers: providers });
+  } catch (err) {
+    console.error("[GET /admin/model-roles] error:", err.message);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 设置单个用途的模型（provider_id/model 均空 = 跟随全局聊天模型）
+app.put("/admin/model-roles/:role", { preHandler: mcpManageAuth }, async (req, reply) => {
+  try {
+    const role = String(req.params.role || "");
+    if (!KNOWN_MODEL_ROLES[role]) return reply.code(400).send({ error: "unknown role: " + role });
+    const providerId = String((req.body && req.body.provider_id) || "").trim();
+    const modelName = String((req.body && req.body.model) || "").trim();
+    if (!saveRoleModel(role, { provider_id: providerId, model: modelName })) {
+      return reply.code(400).send({ error: "save failed" });
+    }
+    reply.send({ ok: true, restart: "hot-reload" });
+  } catch (err) {
+    console.error("[PUT /admin/model-roles] error:", err.message);
     reply.code(500).send({ error: err.message });
   }
 });
@@ -6767,10 +6516,11 @@ function splitMultimodalContent(content) {
 
 // 调上游聊天模型（TARGET_API_URL / MODEL_NAME 配置的上游；共影 chat/wake 用）
 async function callCoLLM(messages, temperature) {
-  const targetUrl = readEnvValue("TARGET_API_URL");
-  const targetKey = readEnvValue("TARGET_API_KEY");
-  if (!targetUrl || !targetKey) throw new Error("上游聊天模型未配置（TARGET_API_URL / TARGET_API_KEY）");
-  const model = readEnvValue("MODEL_NAME") || "deepseek-chat";
+  const { provider, model: resolvedModel } = resolveRoleModel("co_chat");
+  const targetUrl = provider && (provider.api_url || provider.base_url);
+  const targetKey = provider && provider.api_key;
+  if (!targetUrl || !targetKey) throw new Error("上游聊天模型未配置（role=co_chat：请在设置里给「共影对话」选模型或启用默认供应商）");
+  const model = resolvedModel || "deepseek-chat";
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
   try {
@@ -7847,8 +7597,6 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err, address) => {
     process.exit(1);
   }
   console.log(`✅ Gateway 运行在 ${address}`);
-  // 启动重挂「消息扣住」释放定时器（若曾有未到点的扣住时段）
-  try { armQuietRelease(); } catch (e) { console.warn("[quiet] 启动重挂释放定时器失败:", e.message); }
   // 消息向量后台预热（embed-server 就绪通常更快，等 15s 避开启动高峰；失败由检索时惰性补算兜底）
   setTimeout(() => {
     try { contextReplacements.startMsgVectorWarmup(); } catch (e) { console.warn("[context-search] 向量预热启动失败:", e.message); }

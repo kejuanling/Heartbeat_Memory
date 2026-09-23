@@ -155,10 +155,6 @@ module.exports = function registerChatRoutes(app, deps) {
     sessionCrossInjectOverride,
     saveSessionCrossInjectOverride,
     prepareMessageForLLM,
-    isQuietActive,
-    collectTrailingUnansweredUserMessages,
-    holdNewUserMessages,
-    buildQuietHeldReply,
     normalizeContentToText,
     isSpecialEvent,
     stripInternalTags,
@@ -169,6 +165,7 @@ module.exports = function registerChatRoutes(app, deps) {
     resolveActiveProvider,
     resolveSessionProvider,
     resolveChatModel,
+    resolveSessionSystemPrompt,
     sessionModelProviderOverride,
     saveSessionModelProviderOverride,
     readEnvValue,
@@ -177,7 +174,6 @@ module.exports = function registerChatRoutes(app, deps) {
     splitMultimodalContent,
     extractAssistantThinking,
     parseWakeTagAndSchedule,
-    parseQuietTagAndSchedule,
     createContentTagFilter,
     appendSpecialEvent,
     MCP_ENABLED,
@@ -202,7 +198,8 @@ module.exports = function registerChatRoutes(app, deps) {
     prepareMessageForLLM,
     buildCrossMemorySnapshot,
     stripPosition,
-    memoryEngine
+    memoryEngine,
+    resolveSessionSystemPrompt
   });
 
   // 日记共享模块（2026-09-16）：日常聊天 [DIARY] 提取与保存（与唤醒共用 lib/diary.js）
@@ -813,27 +810,6 @@ app.post("/v1/chat/completions", async (req, reply) => {
     });
 
     // ========================
-    // 消息扣住（免打扰）：扣住时段内新用户消息待处理，不转发给模型。
-    // 设计口径：<quiet> 调度按会话隔离——扣住的是「AI 写入该标签的会话」自己的消息，
-    // 其他会话不受影响；释放流程也只针对该会话。
-    // ========================
-    if (isQuietActive(sessionId)) {
-      const trailing = collectTrailingUnansweredUserMessages(kelivoMessages);
-      if (trailing.length > 0) {
-        const newest = normalizeContentToText(trailing[trailing.length - 1].content) || "";
-        const urgent = /紧急|急事|加急|急用|很急|马上回/.test(newest);
-        if (urgent) {
-          console.log("[quiet] 检测到紧急关键词，本次放行");
-        } else {
-          const addedHeld = holdNewUserMessages(trailing, sessionId);
-          console.log(`[quiet] 扣住 ${addedHeld} 条新用户消息，本次不转发给模型`);
-          // 批注 2026-09-13（审查 B4）：按请求的 stream 参数返回 SSE 或普通 JSON
-          return buildQuietHeldReply(reply, body?.stream === true);
-        }
-      }
-    }
-
-    // ========================
     // 统一对话构建器（2026-09-15 批3核心）：聊天与唤醒同源同前缀。
     // 服务端从时间线重建上下文（role 法全量：日记/历史[唤醒]块/工具记录齐全）；
     // 客户端窗口仅用于上方增量同步（appendRequestMessages），不再作为上下文底稿。
@@ -1047,7 +1023,6 @@ app.post("/v1/chat/completions", async (req, reply) => {
         if (aiContent) {
           // 解析 <wake> 闹钟标签并写入调度（标签随后被剥离，不显示给用户）
           parseWakeTagAndSchedule(aiContent, sessionId);
-          parseQuietTagAndSchedule(aiContent, sessionId);
           // 提取并存储记忆，同时拿到清洗后的文本
           const cleanText = await tagParser.extractAndStore(aiContent, { sessionId });
           // 用清洗后的文本替换 JSON 中的 content
@@ -1236,7 +1211,6 @@ app.post("/v1/chat/completions", async (req, reply) => {
       if (aiFullContent) {
         // 解析 <wake> 闹钟标签并写入调度（标签随后被剥离，不显示给用户）
         parseWakeTagAndSchedule(aiFullContent, sessionId);
-        parseQuietTagAndSchedule(aiFullContent, sessionId);
         // 提取并存储记忆，并拿到清洗后的文本
         const cleanFull = await tagParser.extractAndStore(aiFullContent, { sessionId }).catch(err => {
           console.warn("[memory] 流式标签解析失败:", err.message);

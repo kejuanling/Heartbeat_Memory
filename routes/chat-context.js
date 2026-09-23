@@ -391,14 +391,21 @@ function createCtxLimitReminderGuard(deps) {
 // 图片规则（两侧对称）：历史图片降级为「（图片）」占位（附件正文由 prepareMessageForLLM 读入文本，
 // 与聊天侧同口径）；仅时间线末尾的连续 user 消息（本轮待回复）图片保真。
 function createConversationBuilder(deps) {
-  const { loadTimeline, prepareMessageForLLM, buildCrossMemorySnapshot, stripPosition, memoryEngine } = deps;
+  const { loadTimeline, prepareMessageForLLM, buildCrossMemorySnapshot, stripPosition, memoryEngine, resolveSessionSystemPrompt } = deps;
   return function buildConversation(sessionId) {
     const timeline = loadTimeline(sessionId);
     const msgs = [];
-    // system 人设：时间线里最后一条未删除 system（客户端每轮「人设同步」维护），与聊天侧同口径清洗
+    // system 人设（2026-09-24 B 方案）：服务端权威解析优先（会话级备份 -> 全局），
+    // 盘上时间线里的 system 仅作兜底。前端请求带什么 system 都不再决定这里发什么。
     let systemRaw = null;
-    for (const m of timeline) {
-      if (m && m.role === "system" && !m.deleted) systemRaw = m;
+    const authoritativeSP = (typeof resolveSessionSystemPrompt === "function")
+      ? (resolveSessionSystemPrompt(sessionId) || "") : "";
+    if (authoritativeSP.trim()) {
+      systemRaw = { role: "system", content: authoritativeSP };
+    } else {
+      for (const m of timeline) {
+        if (m && m.role === "system" && !m.deleted) systemRaw = m;
+      }
     }
     if (systemRaw) {
       const sysPrep = prepareMessageForLLM(systemRaw);

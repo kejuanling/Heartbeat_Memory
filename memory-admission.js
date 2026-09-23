@@ -74,10 +74,10 @@ function readEnvValue(key) {
 }
 
 async function defaultCallLLM(prompt) {
-  const apiUrl = readEnvValue("TARGET_API_URL");
-  const apiKey = readEnvValue("TARGET_API_KEY");
-  const model = readEnvValue("MODEL_NAME");
-  if (!apiUrl || !apiKey || !model) throw new Error("LLM 未配置（TARGET_API_URL/KEY/MODEL_NAME）");
+  const { provider, model } = require("./model-router").resolveRoleModel("memory_admit");
+  const apiUrl = provider && (provider.api_url || provider.base_url);
+  const apiKey = provider && provider.api_key;
+  if (!apiUrl || !apiKey || !model) throw new Error("模型未配置（role=memory_admit：请在设置里给「记忆准入」选模型或启用默认供应商）");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 45000);
   try {

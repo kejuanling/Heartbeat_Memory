@@ -56,6 +56,13 @@ function pickProvidersFromConfig(parsed) {
 }
 
 function resolveRerankProvider() {
+  // 2026-09-24：优先按用途路由（设置里给「记忆重排」指定的模型），未指定则回退原自选逻辑
+  try {
+    const { provider, model } = require("./model-router").resolveRoleModel("rerank");
+    if (provider && model) {
+      return { api_url: String(provider.api_url || provider.base_url || "").trim(), api_key: provider.api_key || "", model: model };
+    }
+  } catch (e) {}
   let parsed = null;
   try {
     parsed = JSON.parse(fs.readFileSync(PROVIDERS_FILE, "utf-8"));

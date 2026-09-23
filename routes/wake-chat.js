@@ -242,7 +242,8 @@ function ensureBuilder(deps) {
       prepareMessageForLLM: deps.prepareMessageForLLM,
       buildCrossMemorySnapshot: deps.buildCrossMemorySnapshot,
       stripPosition: deps.stripPosition,
-      memoryEngine
+      memoryEngine,
+      resolveSessionSystemPrompt: deps.resolveSessionSystemPrompt
     });
   }
   return buildConversation;
