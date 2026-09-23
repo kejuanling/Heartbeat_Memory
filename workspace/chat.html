@@ -2454,7 +2454,7 @@ function _streamPushText(text,reasoningSrc){
               _streamFillBubble(n);   // B4：只重写该节点自己的气泡（内部自检 parentNode），不再整段重建
             }
           });
-        },60);
+        },300);
       }
     }else _streamRenderModelDrain();
     return;
