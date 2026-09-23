@@ -333,7 +333,7 @@ module.exports = function registerChatRoutes(app, deps) {
       const items = timeline
         .filter(m => isRealMessageForTimeline(m) || (m && !m.deleted && isPushEchoLike(m)))
         // role 法（2026-09-15）：developer 块（[唤醒]等）与日记（kind=diary）只落盘不对前端展示
-        .filter(m => !(m && (m.role === 'developer' || m.role === 'tool' || m.kind === 'diary')))
+        .filter(m => !(m && (m.role === 'developer' || m.role === 'tool' || m.kind === 'diary' || m.kind === 'noaction')))
         .map(m => {
           const clean = { role: m.role };
           if (m.id !== undefined) clean.id = m.id;
@@ -386,7 +386,7 @@ module.exports = function registerChatRoutes(app, deps) {
           // 2026-09-15 修复：此前只按 isRealMessageForTimeline 计数，推送回显不入列、v2 日记误入列，
           // 主会话实测 3059 条可搜消息中 2302 条错位（偏差最多 19 条），搜索跳转落在错误消息上。
           arr.filter(m => (isRealMessageForTimeline(m) || (m && !m.deleted && isPushEchoLike(m)))
-            && !(m && (m.role === 'developer' || m.role === 'tool' || m.kind === 'diary')))
+            && !(m && (m.role === 'developer' || m.role === 'tool' || m.kind === 'diary' || m.kind === 'noaction')))
             .forEach((m, i) => {
               const text = normalizeContentToText(m.content) || '';
               if (!text) return;

@@ -2823,15 +2823,17 @@ function applyWakeEventV2(body) {
     const wakeTools = Array.isArray(tools) ? tools.filter(t => t && t.name) : [];
     const appended = [];
     if (diaryRaw) appended.push({ role: "assistant", content: diaryRaw, kind: "diary" });
-    // 2026-09-20：AI 完整输出原样落时间线（[DIARY] 等标签内联保留）。
-    // [NO_ACTION] 是唤醒侧的静默标记：只保留 developer event 判定，不把它作为 assistant 气泡落库。
-    if (speakRaw && !/^\[NO_ACTION\]/i.test(speakRaw)) {
+    // 2026-09-24（用户拍板 B 案）：时间线是流水账记录层，AI 所有输出原样入库不可改写（0920 拍板核心）。
+    // [NO_ACTION] 开头的静默输出同样原样落 assistant 行、打 kind=noaction——
+    // /v1/history 与 sidx 下发层按 kind 过滤（与 kind=diary 同款机制），前端不显示；
+    // 服务端上下文重建（buildConversation 读盘上全量）仍能看到，AI 不再"失忆"上次的静默决定。
+    // （旧拦截"跳过 [NO_ACTION] 原文"是 0829 加的，0920 拍板时漏撤，导致该类输出实际未入库。）
+    if (speakRaw) {
       const msg = { role: "assistant", content: speakRaw };
+      if (/^\[NO_ACTION\]/i.test(speakRaw)) msg.kind = "noaction";
       if (pushMeta) msg.push = pushMeta;
       if (wakeTools.length) msg.tools = wakeTools;
       appended.push(msg);
-    } else if (speakRaw) {
-      console.log("[wake-event] v2 跳过 [NO_ACTION] 原文，不写入时间线");
     }
     // 2026-09-20 恢复判定回写：event=唤醒判定记录（发推/未发/失败，沿用文本格式，推送管理读端直接解析）
     // → developer 系统层消息落时间线，前端不显示（与 [唤醒] 块同层）
@@ -2858,7 +2860,8 @@ app.post("/internal/wake-event", async (req, reply) => {
     //（原 wake_up.js；现为 gateway 内调度器经共享模块 lib/diary.js，口径一致）
     // push  = 推送元数据（Bark 成功时），结构化挂 assistant.push 字段，不再生成「刚刚给X发了推送」回显行
     // event  = 唤醒判定记录（2026-09-20 恢复回写：发推/未发/失败）→ developer 系统层消息（前端不显示），推送管理读端按文本口径解析
-    // noaction = [NO_ACTION] 原始输出 → assistant(kind=noaction) 落时间线（前端不显示）：所有输出标签都保留
+    // noaction = [NO_ACTION] 原始输出 → 2026-09-24 起 assistant(kind=noaction) 原样落时间线（记录层完整流水），
+    //   /v1/history 与 sidx 下发层按 kind 过滤（前端不显示）；上下文重建可见。旧 body.noaction 字段已废弃。
     // tools = 唤醒工具调用记录 → 挂 speak 消息 tools 字段；静默无消息时回填到 [唤醒] 块
     if (body.v2 === true) {
       const { session_id, speak, diary, push } = body;
@@ -2933,25 +2936,22 @@ app.post("/internal/wake-event", async (req, reply) => {
       // 解析记忆标签仅用于入库副作用（记忆/钉选），存储仍保留原始含标签文本作为上下文一部分；
       // 气泡显示由前端 stripInnerTags 剥掉。不再用 cleaned 覆盖 stored。
       const trimmedContent = String(content).trim();
-      // [NO_ACTION] 是"未发送推送"的静默标记：AI 决定不主动联系用户。
-      // 不应把带 [NO_ACTION] 前缀的原文写入时间线（否则前端会把它当成普通 AI 消息显示成气泡），
-      // 只保留上方 event 分支那条正常摘要（"XX 自动唤醒：本次未发送推送..."）。
-      if (/^\[NO_ACTION\]/.test(trimmedContent)) {
-        console.log("[wake-event] 跳过 [NO_ACTION] 原文，不写入时间线");
-      } else {
-        let stored = stripDiaryBlocks(trimmedContent);
-        try {
-          await tagParser.extractAndStore(content, { sessionId: evSession });
-        } catch (e) {
-          console.warn("[wake-event] 标签解析失败:", e.message);
-        }
-        if (stored && !isPushEcho) {
-          // 唤醒侧工具卡（0913-03）：tools 随消息落时间线，前端复用聊天侧工具卡渲染
-          const wakeTools = Array.isArray(tools) ? tools.filter(function(t){ return t && t.name; }) : [];
-          appendSpecialEvent(stored, wakeTools.length ? { tools: wakeTools } : null, evSession);
-        } else if (isPushEcho) {
-          console.log(`[wake-event] 推送正文已含于回显，跳过正文单独落库 (chars=${stored.length})`);
-        }
+      // 2026-09-24：与 v2 同口径（用户拍板 B 案）——[NO_ACTION] 开头原样入库、打 kind=noaction，
+      // /v1/history 与 sidx 下发层过滤（与 kind=diary 同款）；不再整条跳过（0829 旧拦截，0920 拍板时漏撤）。
+      let stored = stripDiaryBlocks(trimmedContent);
+      try {
+        await tagParser.extractAndStore(content, { sessionId: evSession });
+      } catch (e) {
+        console.warn("[wake-event] 标签解析失败:", e.message);
+      }
+      if (stored && !isPushEcho) {
+        // 唤醒侧工具卡（0913-03）：tools 随消息落时间线，前端复用聊天侧工具卡渲染
+        const wakeTools = Array.isArray(tools) ? tools.filter(function(t){ return t && t.name; }) : [];
+        const extra = wakeTools.length ? { tools: wakeTools } : {};
+        if (/^\[NO_ACTION\]/.test(trimmedContent)) extra.kind = "noaction";
+        appendSpecialEvent(stored, Object.keys(extra).length ? extra : null, evSession);
+      } else if (isPushEcho) {
+        console.log(`[wake-event] 推送正文已含于回显，跳过正文单独落库 (chars=${stored.length})`);
       }
     }
     reply.send({ success: true });
