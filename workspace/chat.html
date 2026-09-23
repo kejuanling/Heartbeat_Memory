@@ -119,16 +119,9 @@ header{
   box-shadow:0 2px 7px rgba(80,65,55,.025);
   backdrop-filter:blur(20px) saturate(110%);-webkit-backdrop-filter:blur(20px) saturate(110%);
 }
-.avatar{
-  width:36px;height:36px;border-radius:50%;flex-shrink:0;
-  background:var(--avatar-bg,var(--accent));
-  display:flex;align-items:center;justify-content:center;
-  color:#fff;font-size:17px;font-family:var(--title-font);
-  box-shadow:0 4px 12px rgba(151,91,101,.18);
-  position:relative;
-}
-/* 顶部保持无头像：会话名称直接落在左侧，给页面留出更安静的呼吸感 */
-header .avatar{display:none!important}
+/* 2026-09-23 审查 M23：`.avatar{...}` 与 `header .avatar{display:none!important}` 两条规则已删——
+   它们唯一的使用者是已整体删除的 hdAvatar 元素（本就被 JS/CSS 双重 display:none，从未可见），属死样式。
+   注意：消息气泡头像走的是 .mav/.message-avatar，与 .avatar 无关，不受影响。 */
 .hd-mid{flex:1;min-width:0;position:relative;left:var(--header-title-x,0px);top:var(--header-title-y,0px)}
 /* 会话名称以屏幕视口为基准居中，不受左右按钮宽度影响 */
 header.hd-wx{display:grid;grid-template-columns:36px 1fr 72px;align-items:center;gap:0} header.hd-wx .hd-mid{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:max-content;align-items:center;text-align:center} header.hd-wx .hd-name-row{display:flex;align-items:center;gap:6px;white-space:nowrap} header.hd-wx .hd-name{text-align:center} header.hd-wx .hd-sub{display:none} header.hd-wx #voiceBtn{grid-column:1;grid-row:1;justify-self:start} header.hd-wx #worldBtn{grid-column:3;grid-row:1;justify-self:end;margin-right:36px} header.hd-wx #navBtn{grid-column:3;grid-row:1;justify-self:end}
@@ -1364,7 +1357,8 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
 </div>
 
 <header>
-  <div class="avatar" id="hdAvatar" title="会话列表" role="button" tabindex="0" aria-label="打开会话列表" style="cursor:pointer">谢</div>
+  <!-- 2026-09-23 审查 M23：左上角头像 hdAvatar 已整体删除——applyHeader() 无条件 display:none
+       且点击绑定 2026-09-13 已移除，是「永远不可见、无交互」的死元素（保留 role/tabindex/aria 也无意义）。 -->
   <div class="hd-mid">
     <div class="hd-name-row">
       <div class="hd-name" id="hdName">谢意行</div>
@@ -1892,7 +1886,6 @@ const actBranch=document.getElementById("actBranch");
 const toastEl=document.getElementById("toast");
 const hdName=document.getElementById("hdName");
 const hdSub=document.getElementById("hdSub");
-const hdAvatar=document.getElementById("hdAvatar");
 const pickThinking=document.getElementById("pickThinking");
 const pickOthers=document.getElementById("pickOthers");
 const pickMode=document.getElementById("pickMode");
@@ -2351,62 +2344,149 @@ function renderToolCapsules(tools){
 }
 // ===== 方案2：工具卡与正文交错 + running→done 状态（流式）=====
 // 把工具作为聊流里的独立块，紧跟所属正文段插入；running 卡执行完就地更新为 done/failed。
-let _streamActive=false;        // 当前是否处于"流式工具卡插入"模式
-let _streamAnchor=null;         // 当前聊流末尾锚点（chatEl 直接子元素）
-let _streamSegAnchors=[];       // 正文段下标 -> 对应气泡 DOM
-let _streamToolAnchors={};      // afterSeg -> 该位置最后一个工具卡
-let _streamNextSegIndex=0;
-let _streamSealBeforeTool=null; // 工具事件到来时，先封口当前尚未因空行而弹出的正文段
-const _toolCards={};            // index -> {el, tool}
+let _streamActive=false;
+let _streamRenderModel=[];       // 规范化响应模型：text / tool 按事件顺序排列
+let _streamRenderCursor=0;        // 已消费的 model node
+let _streamPendingText="";       // 当前尚未封口的正文区间
+let _streamDrainTimer=null;        // 正文气泡播放间隔计时器；tool event 到来时可立即打断
+const _toolCards={};              // index -> {node, el, tool}
 function _finalTools(){
   return Object.keys(_toolCards).map(function(k){return _toolCards[k].tool;})
     .sort(function(a,b){return (a.index||0)-(b.index||0);});
 }
-function _insertStreamToolCard(tool){
-  // 工具的位置由后端 afterSeg 决定：插在对应正文段之后，而不是当前输出末尾。
-  const a=(typeof tool.afterSeg==="number")?tool.afterSeg:-1;
-  let anchor=null;
-  if(_streamToolAnchors[a]&&chatEl.contains(_streamToolAnchors[a])) anchor=_streamToolAnchors[a];
-  else if(a>=0&&_streamSegAnchors[a]&&chatEl.contains(_streamSegAnchors[a])) anchor=_streamSegAnchors[a];
-  else if(a<0) anchor=null;
-  else if(_streamAnchor&&chatEl.contains(_streamAnchor)) anchor=_streamAnchor;
-  else anchor=lastAIBubble()||chatEl.lastElementChild;
-
-  const tmp=document.createElement("div"); tmp.innerHTML=renderToolCapsule(tool);
-  const card=tmp.firstChild; card.classList.add("stream-in");
-  if(anchor&&anchor.nextSibling){ chatEl.insertBefore(card,anchor.nextSibling); }
-  else { chatEl.appendChild(card); }
-  card.addEventListener("click",function(){card.classList.toggle("open");});
-  _streamToolAnchors[a]=card;
-  _streamAnchor=card; _toolCards[tool.index]={el:card,tool:tool};
+function _streamModelPush(node){
+  _streamRenderModel.push(node);
+  // tool 是事件级边界：前一个正文气泡已经落 DOM 后，如果只是卡在播放间隔，
+  // 不应该让工具继续等。只打断“等待下一节点”的 timer，不打断正文本身的渲染。
+  if(node.type==="tool" && _streamDrainTimer){
+    clearTimeout(_streamDrainTimer);
+    _streamDrainTimer=null;
+    // drain 正处于“等待正文间隔”的状态，timer 被取消后必须重新唤醒，
+    // 否则 _streamModelDraining 仍为 true，工具节点会永久停在队列里。
+    _streamModelDraining=false;
+  }
+  _streamRenderModelDrain();
+}
+function _streamRenderTextNode(node){
+  const el=makeMsgEl({role:"assistant",content:node.text,reasoning:node.first?node.reasoning:"",tools:[],time:node.time},-1,"");
+  if(!el)return null;
+  el.classList.add("stream-in");
+  removeEmpty();
+  chatEl.appendChild(el);
   if(autoScroll)scrollBottom();
+  return el;
 }
-function _updateStreamToolCard(tool){
-  const cur=_toolCards[tool.index];
-  if(cur&&cur.el){
-    const tmp=document.createElement("div"); tmp.innerHTML=renderToolCapsule(tool);
-    const card=tmp.firstChild; cur.el.replaceWith(card);
-    card.addEventListener("click",function(){card.classList.toggle("open");});
-    _toolCards[tool.index]={el:card,tool:tool};
-    // replaceWith 会让旧 anchor 脱离 DOM；如果它就是当前流锚点，必须把锚点迁移到新卡，
-    // 否则连续多个工具调用时，后一个工具可能被插到前一个工具之前。
-    if(_streamAnchor===cur.el) _streamAnchor=card;
-    const _ta=(typeof tool.afterSeg==="number")?tool.afterSeg:-1;
-    if(_streamToolAnchors[_ta]===cur.el) _streamToolAnchors[_ta]=card;
-    if(autoScroll)scrollBottom();
-  } else { _insertStreamToolCard(tool); }
+function _streamRenderToolNode(node){
+  if(cfg.show_tools===false)return null;
+  const tmp=document.createElement("div"); tmp.innerHTML=renderToolCapsule(node.tool);
+  const card=tmp.firstChild;
+  if(!card)return null;
+  card.classList.add("stream-in");
+  card.addEventListener("click",function(){card.classList.toggle("open");});
+  removeEmpty();
+  chatEl.appendChild(card);
+  if(autoScroll)scrollBottom();
+  return card;
 }
-function _onToolStart(ts){
-  const tool={index:ts.index,name:ts.name,args:ts.args,status:"running",result:"",error:null,afterSeg:(typeof ts.afterSeg==="number")?ts.afterSeg:-1};
-  // 工具发生在本轮正文之后。若正文还没遇到空行、尚未形成气泡，先把这一段封口，
-  // 再把工具事件排到它后面；这样“调用位置”不会被后续气泡播放队列推走。
-  if(typeof _streamSealBeforeTool==="function") _streamSealBeforeTool();
-  SEGQ.push(function(){ if(cfg.show_tools)_insertStreamToolCard(tool); },0);
+function _streamRenderModelDrain(){
+  if(_streamModelDraining)return;
+  _streamModelDraining=true;
+  const run=function(){
+    const node=_streamRenderModel[_streamRenderCursor];
+    if(!node){_streamModelDraining=false;return;}
+    if(node.rendered){_streamRenderCursor++;run();return;}
+    if(node.type==="tool"){
+      node.el=_streamRenderToolNode(node);
+      node.rendered=true;
+      if(node.tool&&node.tool.index!=null){
+        const cur=_toolCards[node.tool.index];
+        if(cur){cur.node=node;cur.el=node.el;cur.tool=node.tool;}
+        else _toolCards[node.tool.index]={node:node,el:node.el,tool:node.tool};
+      }
+      _streamRenderCursor++;
+      run();
+      return;
+    }
+    node.el=_streamRenderTextNode(node);
+    node.rendered=true;
+    _streamRenderCursor++;
+    const wait=segGapFor(node.text);
+    _streamDrainTimer=setTimeout(function(){_streamDrainTimer=null;run();},wait);
+  };
+  run();
+}
+let _streamModelDraining=false;
+let _streamToolMode="live";
+function _streamPushText(text,reasoningText){
+  const t=String(text==null?"":text);
+  if(t==="")return;
+  let last=_streamRenderModel.length?_streamRenderModel[_streamRenderModel.length-1]:null;
+  if(last&&last.type==="text"&&!last.sealed){
+    last.text+=t;
+    if(last.el&&last.el.parentNode){
+      const next=_streamRenderTextNode(last);
+      if(next){last.el.replaceWith(next);last.el=next;}
+    }else _streamRenderModelDrain();
+    return;
+  }
+  const first=!_streamRenderModel.some(function(x){return x.type==="text";});
+  _streamModelPush({type:"text",text:t,first:first,reasoning:first?String(reasoningText||""): "",time:new Date().toISOString(),rendered:false,sealed:false});
+}
+function _streamSealCurrentText(){
+  const last=_streamRenderModel.length?_streamRenderModel[_streamRenderModel.length-1]:null;
+  if(last&&last.type==="text")last.sealed=true;
+}
+function _streamPushTool(tool){
+  const node={type:"tool",tool:tool,el:null,rendered:false};
+  _streamModelPush(node);
+  return node;
+}
+function _streamEnterToolMode(currentFull){
+  // 工具一旦出现，本轮从这一刻起确定为“工具模式”。此前若因未知工具而按 bubble_delim
+  // 暂时拆成了多个 text node，这里立即回收为一个连续正文节点；分隔符及其中空行全部保留。
+  if(_streamToolMode==="tool")return;
+  _streamToolMode="tool";
+  const texts=_streamRenderModel.filter(function(n){return n&&n.type==="text";});
+  if(!texts.length)return;
+  const merged=String(currentFull==null?texts.map(function(n){return String(n.text==null?"":n.text);}).join(""):currentFull);
+  const first=texts[0];
+  texts.forEach(function(n){if(n.el&&n.el.parentNode)n.el.remove();});
+  _streamRenderModel=[{type:"text",text:merged,first:true,reasoning:first.reasoning||"",time:first.time||new Date().toISOString(),rendered:false,sealed:true}];
+  _streamRenderCursor=0;
+  _streamModelDraining=false;
+  if(_streamDrainTimer){clearTimeout(_streamDrainTimer);_streamDrainTimer=null;}
+}
+function _onToolStart(ts,currentFull){
+  // Tool event 是一级 boundary：一旦确认有工具，立即切换本轮为工具模式。
+  _streamEnterToolMode(currentFull);
+  const tool={index:ts.index,name:ts.name,args:ts.args,status:"running",result:"",error:null};
+  const node=_streamPushTool(tool);
+  // start 到达时就登记 node；不能等它真正渲染后再登记。
+  // 否则正文播放间隔期间收到 tool_end，会误判为“没有 start”，再追加一张重复工具卡。
+  _toolCards[tool.index]={node:node,el:null,tool:tool};
+}
+function _onToolArgsDelta(td){
+  const cur=_toolCards[td.index];
+  if(!cur||!cur.node)return;
+  const tool=cur.node.tool||cur.tool;
+  tool.argsText=String(tool.argsText||"")+String(td.delta||"");
 }
 function _onToolEnd(te){
-  const tool={index:te.index,name:te.name,args:te.args,result:te.result,error:te.error,status:te.ok?"done":"failed",afterSeg:(typeof te.afterSeg==="number")?te.afterSeg:-1};
-  // 完成事件也排队，但只更新原卡，不改变它已经占据的位置。
-  SEGQ.push(function(){ if(cfg.show_tools)_updateStreamToolCard(tool); },0);
+  const cur=_toolCards[te.index];
+  const tool={index:te.index,name:te.name,args:te.args,result:te.result,error:te.error,status:te.ok?"done":"failed"};
+  // tool_end 只更新同一个 model node；绝不新增一个渲染位置。
+  if(cur&&cur.node){
+    cur.node.tool=tool; cur.tool=tool;
+    if(cur.el&&cur.el.parentNode){
+      const tmp=document.createElement("div"); tmp.innerHTML=renderToolCapsule(tool);
+      const card=tmp.firstChild;
+      if(card){card.addEventListener("click",function(){card.classList.toggle("open");});cur.el.replaceWith(card);cur.el=card;}
+    }
+  }else{
+    // 极端情况下 end 先于 start 的容错：补一个同 index 的 tool node，不改变主模型顺序。
+    _streamPushTool(tool);
+  }
+  if(autoScroll)scrollBottom();
 }
 // 把模型抄进正文的「【工具 · NAME】 {...JSON...}」块抽出来，转成折叠胶囊（复用 renderToolCapsule）。
 // 因为这些块本质是工具返回，直接当 markdown 会渲染成一坨巨大 JSON 文本。
@@ -2514,11 +2594,17 @@ function bindVoiceMsg(el, text){
   });
   el.addEventListener("contextmenu", function(ev){ ev.preventDefault(); });
 }
+function splitBubbleText(text){
+  const s=String(text||"").replace(/\r\n/g,"\n");
+  const delim=String(cfg&&cfg.bubble_delim||"").trim();
+  if(!delim) return s.split(/\n\s*\n+/).map(function(p){return p.trim();}).filter(Boolean);
+  const esc=delim.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+  return s.split(new RegExp("\\n\\s*"+esc+"\\s*\n")).map(function(p){return p.trim();}).filter(Boolean);
+}
 function renderAiContent(msgEl, bubble, content, reasoning, tools, segments){
   content=stripInnerTags(content);   // 保证 <memory>/<pin>/<wake>/<quiet> 不显示给用户
   content=stripCurrentTime(content).clean;   // 保证 <current_time> 标签也不显示（流式/最终都剥掉）
   // 个别流向把气泡分隔符整串带进正文，此处置换成换行，避免当字面字符显示
-  if(typeof content==="string" && cfg.bubble_delim){const _de=cfg.bubble_delim.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");content=content.replace(new RegExp("\\n\\s*"+_de+"\\s*\\n","g"),"\n\n");}
   // 语音气泡：<voice>…</voice> 渲染成独立语音条（QQ 风格），与正文分开显示
   const hasVoice=typeof content==="string" && /<voice/i.test(content);
   // 模型可能把工具结果抄进正文：抽成折叠胶囊，避免大块 JSON 直接显示
@@ -2543,7 +2629,7 @@ function renderAiContent(msgEl, bubble, content, reasoning, tools, segments){
       }
     });
     bubble.style.display="none"; bubble.innerHTML="";
-  }else if(Array.isArray(segments)&&segments.length&&Array.isArray(tools)&&tools.length){
+  }else if(Array.isArray(tools)&&tools.length){
     // 方案2刷新：正文按段渲染，工具卡按 afterSeg 插到对应段之后（与流式交错一致）
     const host=bubble.parentNode||msgEl;
     let sib=bubble.nextSibling;
@@ -2551,7 +2637,8 @@ function renderAiContent(msgEl, bubble, content, reasoning, tools, segments){
     let anchor=bubble;
     const bySeg={};
     tools.forEach(function(t){ const a=(typeof t.afterSeg==="number")?t.afterSeg:-1; (bySeg[a]=bySeg[a]||[]).push(t); });
-    segments.forEach(function(seg,i){
+    const renderSegments=splitBubbleText(content);
+    renderSegments.forEach(function(seg,i){
       const cleanSeg=stripTtsCtl(stripCurrentTime(stripInnerTags(seg)).clean);
       const elb=document.createElement("div"); elb.className="bubble"; elb.innerHTML=(cfg.ai_md?renderMd(cleanSeg):escapeHtml(cleanSeg));
       host.insertBefore(elb, anchor.nextSibling); anchor=elb;
@@ -2751,13 +2838,41 @@ function makeMsgEl(m,idx,grpCls){
   }
   // AI 多气泡：按分隔符拆，每个气泡独立带头像+名称
   if(isAI){
+    // 新版：按真实流式事件时间线重建。正文/工具各自是一级节点，不能再靠 afterSeg 猜工具位置。
+    // 这样即使气泡分隔符被改成自定义字符串，工具也不会因为刷新而移动。
+    if(Array.isArray(m.stream_timeline)&&m.stream_timeline.length){
+      d.classList.add("multi");
+      const _timelineHasTool=m.stream_timeline.some(function(_x){return _x&&_x.type==="tool"&&_x.tool&&_x.tool.name;});
+      const _timelineTextSeenState={seen:false};
+      m.stream_timeline.forEach(function(_part){
+        if(!_part||!_part.type)return;
+        if(_part.type==="text"){
+          const _txt=String(_part.text==null?"":_part.text);
+          if(_txt==="")return;
+          // 有工具时：一个 timeline text node 就是一个气泡；内部空行属于文本内容，不再经过 bubble_delim。
+          // 无工具时：保留原有 bubble_delim 语义。
+          const _ps=_timelineHasTool?[_txt]:splitBubbleText(_txt);
+          (_ps.length?_ps:[_txt]).forEach(function(_p){
+            const host=buildUnit();
+            const b=document.createElement("div");b.className="bubble";host.appendChild(b);
+            renderAiContent(host,b,_p,(!_timelineTextSeenState.seen?m.reasoning:""),[],null);
+            _timelineTextSeenState.seen=true;
+          });
+        }else if(_part.type==="tool"&&_part.tool&&_part.tool.name&&cfg.show_tools!==false){
+          const _tmp=document.createElement("div");_tmp.innerHTML=renderToolCapsule(_part.tool);
+          const _card=_tmp.firstChild;
+          if(_card){_card.addEventListener("click",function(){_card.classList.toggle("open");});d.appendChild(_card);}
+        }
+      });
+      // 时间线存在但没有可见正文/工具时，继续走空消息兜底。
+      if(_timelineTextSeenState.seen||d.querySelector(".tool-capsule")){
+        const check=document.createElement("span");check.className="check";check.textContent="✓";d.appendChild(check);
+        const meta=document.createElement("div");meta.className="meta";meta.textContent=(cfg.show_time?fmtTime(mt):"");d.appendChild(meta);
+        return d;
+      }
+    }
     const full=stripCurrentTime(stripInnerTags(msgText(m))).clean;
-    const delim=cfg.bubble_delim;
-    const esc=delim.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
-    const splitRe=new RegExp("\\n\\s*"+esc+"\\s*\\n");   // 仅当分隔符独立成行（前后是换行）才分气泡
-    let parts=Array.isArray(m.segments)&&m.segments.length
-      ? m.segments.map(function(p){return String(p||"").trim();}).filter(function(p){return p;})
-      : full.split(splitRe).map(p=>p.trim()).filter(p=>p);
+    let parts=splitBubbleText(full);
     if(parts.length<=1){parts=[full];}
     if(parts.length>1)d.classList.add("multi");
     // 工具卡按 afterSeg 映射到分段下标后插入（-1/超界 → 末尾段之后）；方案2 不再在 renderAiContent 里触发
@@ -2977,30 +3092,42 @@ function segEnqueueMsg(m){   // 把一条消息拆段全部入队（user 消息�
     SEGQ.push(function(){segPopOne(t,src,i===0);},segGapFor(t));
   });
 }
-function makeSegPlayer(srcMsg){   // 流式喂入式播放器：feed 喂当前全文，seal 封口当前段，flush 补弹最后一段
-  let done=0, playedSegments=[];
-  function enqueueUntil(full,count){
-    const ps=segSplitText(full);
-    const target=Math.min(count,ps.length);
-    while(done<target){
-      const t=ps[done];done++;const first=(done===1); playedSegments.push(t);
-      SEGQ.push(function(){segPopOne(t,srcMsg,first);},segGapFor(t));
+function makeSegPlayer(srcMsg){
+  // 两级分段：tool event 负责切区间；区间内部的空行负责切 bubble。
+  let cursor=0, playedSegments=[];
+  function cleanFull(full){ return (stripCurrentTime(stripInnerTags(full)).clean)||""; }
+  function emitText(text){
+    const t=String(text==null?"":text);
+    if(!t.trim())return;
+    const out=t;
+    playedSegments.push(out);
+    if(_streamActive){ _streamPushText(out,srcMsg&&srcMsg.reasoning); }
+    else { const first=playedSegments.length===1; SEGQ.push(function(){segPopOne(t,srcMsg,first);},segGapFor(t)); }
+  }
+  function scan(full,forceTail){
+    const clean=cleanFull(full);
+    if(clean.length<cursor)return;
+    const tail=clean.slice(cursor);
+    // 有工具后，工具事件本身就是唯一的结构边界；bubble_delim 在本轮完全失效，
+    // 包括工具之后的新正文，内部空行/分隔符都必须作为同一个 text node 保留。
+    if(_streamToolMode==="tool"){
+      if(tail)emitText(tail);
+      cursor=clean.length;
+      return;
     }
+    const de=(cfg.bubble_delim||"").replace(/[.*+?^()|[\]\\]/g,"\\$&");
+    const re=new RegExp("\\n\\s*"+de+"\\s*\\n","g");
+    let pos=0,m;
+    while((m=re.exec(tail))){ emitText(tail.slice(pos,m.index)); pos=m.index+m[0].length; }
+    if(forceTail){ emitText(tail.slice(pos)); cursor=clean.length; }
+    else if(pos>0) cursor+=pos;
   }
-  function feed(full){
-    const ps=segSplitText(full);
-    // 常规流式：只有确认出现下一段分隔符时，才自动弹出前一段。
-    while(done<ps.length-1) enqueueUntil(full,done+1);
-  }
-  function seal(full){
-    // 工具事件是一个明确的“轮次边界”：即使当前正文没有空行，也必须先把它显示出来。
-    const ps=segSplitText(full);
-    if(done<ps.length) enqueueUntil(full,done+1);
-  }
+  function feed(full){ scan(full,!!_streamActive); }
+  function seal(full){ scan(full,true); }
   async function flush(full){
-    const ps=segSplitText(full);
-    while(done<ps.length) enqueueUntil(full,done+1);
-    await SEGQ.drained();
+    scan(full,true);
+    if(_streamActive){ while(_streamModelDraining||_streamRenderCursor<_streamRenderModel.length) await new Promise(function(r){setTimeout(r,60);}); }
+    else await SEGQ.drained();
   }
   return {feed:feed,seal:seal,flush:flush,getSegments:function(){return playedSegments.slice();}};
 }
@@ -3099,7 +3226,7 @@ async function request(finalMsgs, fromSend){
   const sidAtStart=SessionStore.getCurrentSession();   // 收尾时校验：请求期间切了会话就不回写（防旧会话消息写进新会话的缓存）
   const _replyMid=newMsgId();   // 本条 AI 回复的稳定 id：随请求 reply_msg_id 上行，服务端 MCP 写回段落盘沿用同一 id——落库前后端 id 一致，落库后立刻编辑/删除也能 diff 定点
   appendTypingBox();
-  let full="",reasoning="",usage=null,tools=[],reader=null,flushStreamSegs=null,_streamToolMode="live",streamedSegments=null;
+  let full="",reasoning="",usage=null,tools=[],reader=null,flushStreamSegs=null,streamedSegments=null,streamedTimeline=null,buf="";
   let _streamTimedOut=false,_silenceTimer=null;   // 2026-09-22 审查 M17：流式「静默超时」标志与计时器（try 外声明，catch/finally 都要用）
   const syncToolSave=function(){
     // 流式 tool_start/tool_end 才是最准确的工具时间线；旧 tool_trace 只有整组回放时才兜底。
@@ -3153,16 +3280,25 @@ async function request(finalMsgs, fromSend){
         flushStreamSegs=function(){return p.flush(full);};
       }
     } else {
-    _streamActive=true; _streamAnchor=null; _streamSegAnchors=[]; _streamToolAnchors={}; _streamNextSegIndex=0; for(const _k in _toolCards)delete _toolCards[_k];   // 方案2：进入流式工具卡插入模式
+    _streamActive=true; _streamToolMode="live"; _streamRenderModel=[]; _streamRenderCursor=0; _streamModelDraining=false; _streamPendingText=""; for(const _k in _toolCards)delete _toolCards[_k];   // 统一响应模型：进入事件驱动渲染
     reader=resp.body.getReader();
-    const dec=new TextDecoder();let buf="";
+    const dec=new TextDecoder();
     // 2026-09-22 审查 M17：读流加「90 秒无任何数据」静默超时。此前 aborter 创建后全文件无一处
     // abort()，reader.read() 会永久挂起 → sending 永远为 true → 发送键永久灰化、只能刷新页面。
     // 只对「静默」计时（不限制总时长），避免模型思考久、迟迟不出字被误杀。
     const STREAM_SILENCE_MS=90000;
+    let _streamToolRunning=0;
+    const _clearSilence=function(){
+      if(_silenceTimer){clearTimeout(_silenceTimer);_silenceTimer=null;}
+    };
     const _resetSilence=function(){
-      if(_silenceTimer)clearTimeout(_silenceTimer);
-      _silenceTimer=setTimeout(function(){ _streamTimedOut=true; try{aborter.abort();}catch(e){} },STREAM_SILENCE_MS);
+      _clearSilence();
+      if(_streamToolRunning>0)return;
+      _silenceTimer=setTimeout(function(){
+        _streamTimedOut=true;
+        try{ if(reader) reader.cancel(); }catch(e){}
+        try{ if(aborter) aborter.abort(); }catch(e){}
+      },STREAM_SILENCE_MS);
     };
     _resetSilence();
     /* ===== QQ 式分段连播（流式）=====
@@ -3170,9 +3306,8 @@ async function request(finalMsgs, fromSend){
        不再做整条打字机。思考链/工具链不单独先显，第一条正文气泡弹出时并入显示（用户 2026-09-02 拍板）。
        flushStreamSegs：收尾补弹剩余段（含最后一段），供正常结束/停止/出错三处共用。 */
     // reasoning/tools 在流式过程中持续累积，用 getter 让第一段弹出时取到当前值
-    const playerSrc={role:"assistant",get reasoning(){return reasoning;},get tools(){return _streamToolMode==="group"?tools:[];},time:null};
+    const playerSrc={role:"assistant",get reasoning(){return reasoning;},get tools(){return [];},time:null};
     const player=makeSegPlayer(playerSrc);
-    _streamSealBeforeTool=function(){ player.seal(full); };
     flushStreamSegs=async function(){
       await player.flush(full);
     };
@@ -3196,8 +3331,9 @@ async function request(finalMsgs, fromSend){
             if(delta.content)full+=delta.content;
             if(delta.reasoning_content)reasoning+=delta.reasoning_content;
             if(delta.tool_trace){tools=delta.tool_trace;_streamToolMode="group";}   // 旧整组（幂等回放）走 rw-wrap 兜底
-            if(delta.tool_start)_onToolStart(delta.tool_start);
-            if(delta.tool_end)_onToolEnd(delta.tool_end);
+            if(delta.tool_start){ _streamToolRunning++; _clearSilence(); _onToolStart(delta.tool_start,full); }
+            if(delta.tool_args_delta)_onToolArgsDelta(delta.tool_args_delta);
+            if(delta.tool_end){ _onToolEnd(delta.tool_end); _streamToolRunning=Math.max(0,_streamToolRunning-1); if(_streamToolRunning===0)_resetSilence(); }
           }
           // 正文：每凑齐一段（分隔符出现）就整条弹出，一条接一条；思考链/工具链随第一段带入
           if(hasContent){ player.feed(full); }
@@ -3220,19 +3356,29 @@ async function request(finalMsgs, fromSend){
               if (delta.content) full += delta.content;
               if (delta.reasoning_content) reasoning += delta.reasoning_content;
               if (delta.tool_trace) { tools = delta.tool_trace; _streamToolMode = "group"; }
-              if (delta.tool_start) _onToolStart(delta.tool_start);
-              if (delta.tool_end) _onToolEnd(delta.tool_end);
+              if (delta.tool_start) { _streamToolRunning++; _clearSilence(); _onToolStart(delta.tool_start,full); }
+              if (delta.tool_args_delta) _onToolArgsDelta(delta.tool_args_delta);
+              if (delta.tool_end) { _onToolEnd(delta.tool_end); _streamToolRunning=Math.max(0,_streamToolRunning-1); if(_streamToolRunning===0)_resetSilence(); }
             }
             if (hasContent) { player.feed(full); }
           } catch (e) {}
         }
       }
     }
+    // cancel() 可能让 reader.read() 正常返回 done=true，因此不能只依赖 catch 判断超时。
+    if(_streamTimedOut) throw new Error("STREAM_SILENCE_TIMEOUT");
     // 入库（分段连播：先把剩余未弹的段一条条补弹完，再静默重建，不重播整块动画）
     if(flushStreamSegs){await flushStreamSegs();}
     if(typeof player!=="undefined" && player && typeof player.getSegments==="function") streamedSegments=player.getSegments();
+    // 直接保存真实渲染模型，刷新时按 text/tool/text 原顺序重建，不再依赖 afterSeg 猜位置。
+    streamedTimeline=_streamRenderModel.map(function(n){
+      if(!n)return null;
+      if(n.type==="text")return {type:"text",text:String(n.text||""),first:!!n.first,reasoning:n.first?String(n.reasoning||""):"",time:n.time||null};
+      if(n.type==="tool"&&n.tool)return {type:"tool",tool:n.tool};
+      return null;
+    }).filter(Boolean);
     syncToolSave();
-    finalMsgs.push({id:_replyMid,role:"assistant",content:full,reasoning:reasoning,tools:tools,segments:streamedSegments||null,time:new Date().toISOString(),tokens:usage});
+    finalMsgs.push({id:_replyMid,role:"assistant",content:full,reasoning:reasoning,tools:tools,segments:streamedSegments||null,stream_timeline:streamedTimeline||null,time:new Date().toISOString(),tokens:usage});
     if(SessionStore.getCurrentSession()===sidAtStart){
       msgs=finalMsgs;saveMsgs();
       if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
@@ -3242,8 +3388,16 @@ async function request(finalMsgs, fromSend){
     /* 2026-09-22 审查 M17：本分支不再是死代码——「静默超时」（90s 无数据）现在会主动 abort，
        中断生成的功能仍未恢复（无用户主动停止按钮），仅超时自动中断。 */
     try{if(flushStreamSegs){await flushStreamSegs();}}catch(e){}
-    if(full){syncToolSave();
-    finalMsgs.push({id:_replyMid,role:"assistant",content:full,reasoning:reasoning,tools:tools,time:new Date().toISOString(),tokens:usage});}
+    if(full){
+      syncToolSave();
+      streamedTimeline=_streamRenderModel.map(function(n){
+        if(!n)return null;
+        if(n.type==="text")return {type:"text",text:String(n.text||""),first:!!n.first,reasoning:n.first?String(n.reasoning||""):"",time:n.time||null};
+        if(n.type==="tool"&&n.tool)return {type:"tool",tool:n.tool};
+        return null;
+      }).filter(Boolean);
+      finalMsgs.push({id:_replyMid,role:"assistant",content:full,reasoning:reasoning,tools:tools,segments:streamedSegments||null,stream_timeline:streamedTimeline||null,time:new Date().toISOString(),tokens:usage});
+    }
     if(SessionStore.getCurrentSession()===sidAtStart){
       msgs=finalMsgs;saveMsgs();
       if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
@@ -3254,7 +3408,7 @@ async function request(finalMsgs, fromSend){
   }finally{
     if(_silenceTimer){clearTimeout(_silenceTimer);_silenceTimer=null;}   // M17：清理静默超时计时器
     sending=false;setSendState(false);aborter=null;
-    _streamActive=false; _streamAnchor=null; _streamSegAnchors=[]; _streamToolAnchors={}; _streamNextSegIndex=0; _streamSealBeforeTool=null;   // 结束流式工具卡插入模式
+    _streamActive=false; _streamToolMode="live"; _streamRenderModel=[]; _streamRenderCursor=0; _streamModelDraining=false; if(_streamDrainTimer){clearTimeout(_streamDrainTimer);_streamDrainTimer=null;}   // 结束统一响应模型
     showHeaderTyping(false);
     try{ if(reader && reader.cancel) reader.cancel(); }catch(e){}
     // 来电：AI 回复完成 → 解析 <phone> 表态，yes 则自动进通话并播报开场
@@ -3941,8 +4095,6 @@ function applyHeader(){
   }
   // 副标题：QQ/微信/短信都默认隐藏（保持简洁；只保留名称主视觉）
   if(hdSub) hdSub.style.display='none';
-  // 头像：默认为轻头像（左上），供短信/QQ 等看需求；用户已选择不显示左上角头像
-  if(hdAvatar) hdAvatar.style.display='none';
 }
 if(hdName) hdName.addEventListener('click', openDrawer);
 function populateSettings(){
@@ -5126,7 +5278,8 @@ function genSessionId(){return "s_"+Date.now().toString(36)+"_"+Math.random().to
 // 打开/关闭侧边栏
 function openDrawer(){document.getElementById("sessionDrawer").classList.add("open");loadSessions();}
 function closeDrawer(){document.getElementById("sessionDrawer").classList.remove("open");}
-// 2026-09-13 死代码清理：hdAvatar 点击绑定已删——applyHeader() 无条件隐藏该元素，绑定在永远点不到的元素上
+// 2026-09-23 审查 M23：原 hdAvatar（左上角头像）元素已整体删除——其点击绑定 2026-09-13 即已移除、
+// applyHeader() 又无条件 display:none，留着的是个「不可见且无交互」的死元素（role/tabindex/aria 均无意义）。
 document.getElementById("sessionClose").onclick=closeDrawer;
 document.getElementById("sessionBackdrop").onclick=closeDrawer;
 // 会话侧边栏：退出登录（二次确认，防止误触）

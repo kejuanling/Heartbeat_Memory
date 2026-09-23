@@ -275,11 +275,6 @@ function buildToolResultContent({ name, time, error, markdown }) {
   return lines.join("\n");
 }
 
-// 安全地统计「按空行分段的段数」（与前端 makeMsgEl / runWithTools 的 _segCount 口径一致）
-function _countSegs(txt) {
-  return String(txt || "").split(/\n\s*\n/).map(function (s) { return s.trim(); }).filter(Boolean).length;
-}
-
 /**
  * 流式工具循环（2026-09-09，修复「用工具慢 + 工具卡堆末尾」）：
  * 全程以 stream:true 请求上游，正文/思考链增量实时回传，工具参数在某轮齐了就就地执行
@@ -308,6 +303,7 @@ async function streamToolLoop({
   let rounds = 0;
   const reasoningParts = [];
   const toolHistory = [];
+  const streamTimeline = [];
   const contentParts = [];
   let toolSeq = 0;
   // 2026-09-21 审查 R7：客户端断开标志（onEvent 抛错即置位），读取与工具循环据此中断
@@ -341,17 +337,31 @@ async function streamToolLoop({
     let buf = "";
     let roundContent = "";
     let roundReasoning = "";
-    let firstContentOfRound = true;
     let seenContent = false;
     const toolCallAcc = [];
     const accToolCall = (tcs) => {
       for (const tc of (tcs || [])) {
         if (!tc) continue;
         const idx = typeof tc.index === "number" ? tc.index : 0;
-        let slot = toolCallAcc[idx]; if (!slot) slot = toolCallAcc[idx] = { id: "", name: "", args: "" };
+        let slot = toolCallAcc[idx];
+        if (!slot) {
+          slot = toolCallAcc[idx] = { id: "", name: "", args: "", eventIndex: null, startSent: false };
+        }
         if (tc.id) slot.id = tc.id;
         if (tc.function && tc.function.name) slot.name += tc.function.name;
-        if (typeof tc.function.arguments === "string") slot.args += tc.function.arguments;
+        if (typeof tc.function.arguments === "string") {
+          const deltaArgs = tc.function.arguments;
+          slot.args += deltaArgs;
+          if (slot.eventIndex !== null) emit({ type: "tool_args_delta", index: slot.eventIndex, id: slot.id, delta: deltaArgs });
+        }
+        // 第一次拿到工具名时分配最终全局 index；start/end 永远复用它。
+        if (slot.name && slot.eventIndex === null) {
+          slot.eventIndex = toolSeq++;
+          slot.startSent = true;
+          const toolNode = { type: "tool", tool: { index: slot.eventIndex, id: slot.id, name: slot.name, args: slot.args || "", status: "running", result: "", error: null } };
+          streamTimeline.push(toolNode);
+          emit({ type: "tool_start", index: slot.eventIndex, id: slot.id, name: slot.name, args: slot.args || "" });
+        }
       }
     };
     while (true) {
@@ -375,14 +385,45 @@ async function streamToolLoop({
           emit({ type: "reasoning", text: delta.reasoning_content });
         }
         if (typeof delta.content === "string" && delta.content.length) {
-          // 跨轮补空行分隔，保证前端流式拼接 full 与最终 text(contentParts.join("\n\n")) 一致（空行粒度分段）
-          if (firstContentOfRound && contentParts.length > 0) emit({ type: "text", text: "\n\n" });
-          firstContentOfRound = false; seenContent = true;
+          // 不在后端注入任何“气泡分隔符”。气泡分隔符属于前端配置，工具/正文顺序由事件时间线保存。
+          seenContent = true;
           roundContent += delta.content;
+          const lastTimeline = streamTimeline.length ? streamTimeline[streamTimeline.length - 1] : null;
+          if (lastTimeline && lastTimeline.type === "text") lastTimeline.text += delta.content;
+          else streamTimeline.push({ type: "text", text: delta.content });
           emit({ type: "text", text: delta.content });
         }
         if (Array.isArray(delta.tool_calls) && delta.tool_calls.length) accToolCall(delta.tool_calls);
         if (evt.usage) totalUsage = evt.usage;
+      }
+    }
+    // 上游最后一帧可能没有换行；把残留 SSE 行补处理。
+    buf += decoder.decode();
+    if (buf.trim()) {
+      const trimmed = buf.endsWith("\r") ? buf.slice(0, -1) : buf;
+      if (trimmed.startsWith("data:")) {
+        const payload = trimmed.slice(5).replace(/^\s+/, "");
+        if (payload && payload !== "[DONE]") {
+          let evt; try { evt = JSON.parse(payload); } catch { evt = null; }
+          const choice = evt && evt.choices && evt.choices[0];
+          if (choice) {
+            const delta = choice.delta || {};
+            if (typeof delta.reasoning_content === "string" && delta.reasoning_content.length) {
+              roundReasoning += delta.reasoning_content;
+              emit({ type: "reasoning", text: delta.reasoning_content });
+            }
+            if (typeof delta.content === "string" && delta.content.length) {
+              seenContent = true;
+              roundContent += delta.content;
+              const lastTimeline = streamTimeline.length ? streamTimeline[streamTimeline.length - 1] : null;
+              if (lastTimeline && lastTimeline.type === "text") lastTimeline.text += delta.content;
+              else streamTimeline.push({ type: "text", text: delta.content });
+              emit({ type: "text", text: delta.content });
+            }
+            if (Array.isArray(delta.tool_calls) && delta.tool_calls.length) accToolCall(delta.tool_calls);
+            if (evt.usage) totalUsage = evt.usage;
+          }
+        }
       }
     }
     if (roundReasoning) reasoningParts.push(roundReasoning);
@@ -390,30 +431,46 @@ async function streamToolLoop({
 
     // 2026-09-21 审查 R7：断开后不再执行本轮工具
     if (clientGone) break;
-    const toolCalls = toolCallAcc.filter(s => s && s.name).map(function (s, i) {
-      return { id: s.id || ("call_" + Date.now() + "_" + i), type: "function", function: { name: s.name, arguments: s.args || "{}" } };
-    });
-    working.push({ role: "assistant", content: roundContent || "", tool_calls: toolCalls.length ? toolCalls : undefined });
+    const toolCalls = toolCallAcc.map(function (s, i) {
+      if (!s || !s.name) return null;
+      return { _sourceIndex: i, id: s.id || ("call_" + Date.now() + "_" + i), type: "function", function: { name: s.name, arguments: s.args || "{}" } };
+    }).filter(Boolean);
+    working.push({ role: "assistant", content: roundContent || "", reasoning_content: roundReasoning || undefined, tool_calls: toolCalls.length ? toolCalls : undefined });
     if (!toolCalls.length) break;
 
-    // afterSeg：该轮工具位于「已流式正文」的最后一段之后（-1 在刷新重建时会被归到末尾，故钳到 >=0）
-    const afterSeg = Math.max(0, _countSegs(contentParts.join("\n\n")) - 1);
     for (let i = 0; i < toolCalls.length; i++) {
       if (clientGone) break; // 2026-09-21 审查 R7
       const tc = toolCalls[i];
       const fn = tc.function || {}; const name = fn.name || "";
       const args = _parseArgs(fn.arguments);
       _injectSessionArg(name, args, sessionId);
-      const index = toolSeq++; const id = tc.id;
+      const slot = toolCallAcc[typeof tc._sourceIndex === "number" ? tc._sourceIndex : i] || null;
+      const index = slot && slot.eventIndex !== null ? slot.eventIndex : toolSeq++;
+      const id = tc.id;
       const toolTime = _toolCallTime();   // 调用时间=执行起点
-      emit({ type: "tool_start", index, id, name, args, afterSeg });
+      // tool_start 已在上游流中实时发出；只有异常情况下没拿到名字的才补发。
+      if (!slot || !slot.startSent) {
+        streamTimeline.push({ type: "tool", tool: { index, id, name, args: "", status: "running", result: "", error: null } });
+        emit({ type: "tool_start", index, id, name, args: "" });
+      }
       let result, error = null;
       try { result = await callToolByExposedName(serverClients, routes, name, args); }
       catch (e) { error = e.message || String(e); result = { markdown: JSON.stringify({ type: "tool_error", error: "mcp_service_error", message: error }) }; }
       const resTrunc = _truncateResult(result.markdown || "", error ? 0 : 20000);
       // 来源标记：与 executeToolCalls 同一格式（工具名+调用时间+状态+结果，空/失败显式）
       working.push({ role: "tool", tool_call_id: id, content: buildToolResultContent({ name, time: toolTime, error, markdown: _truncateResult(result.markdown || "", MAX_TOOL_RESULT_CHARS) }) });
-      toolHistory.push({ name, args, time: toolTime, result: resTrunc, error, afterSeg });
+      toolHistory.push({ name, args, time: toolTime, result: resTrunc, error });
+      const timelineTool = streamTimeline.find(function (n) { return n && n.type === "tool" && n.tool && n.tool.index === index; });
+      if (timelineTool && timelineTool.tool) {
+        // 工具名/ID 可能在流的早期尚未到齐；终态必须把完整身份回填到 canonical timeline。
+        timelineTool.tool.id = id;
+        timelineTool.tool.name = name;
+        timelineTool.tool.args = args;
+        timelineTool.tool.time = toolTime;
+        timelineTool.tool.result = resTrunc;
+        timelineTool.tool.error = error;
+        timelineTool.tool.status = error ? "failed" : "done";
+      }
       emit({ type: "tool_end", index, id, name, args, result: resTrunc, error, ok: !error });
     }
   }
@@ -423,7 +480,7 @@ async function streamToolLoop({
   const reasoning = reasoningParts.join("\n\n").slice(0, MAX_REASONING_CHARS);
   const segs = String(text || "").split(/\n\s*\n/).map(function (s) { return s.trim(); }).filter(Boolean);
   if (!segs.length) segs.push(text || "");
-  return { text, rounds, usage: totalUsage, routes, reasoning, toolHistory, segments: segs.slice(), finalMessages: working.slice() };
+  return { text, rounds, usage: totalUsage, routes, reasoning, toolHistory, streamTimeline: streamTimeline.slice(), segments: segs.slice(), finalMessages: working.slice() };
 }
 
 
@@ -494,248 +551,11 @@ function buildSSE(text, {
   });
 }
 
-/**
- * 流式直通快速路径（普通聊天用）：
- * 直接以 stream:true 请求上游，逐块透传给客户端；同时解析每个 chunk，
- * 一旦发现 delta.tool_calls（模型想调工具）就中止透传，返回 { fellBackToTools: true }，
- * 由调用方回退到 runWithTools 工具循环。全程无工具调用则直接透传到底。
- *
- * 判定时机：deepseek 等模型若要调用工具，首个含内容/工具声明的 chunk 即会有 tool_calls
- * （先于任何 content 输出）。因此只读到"第一个决定性 chunk"即可判定：
- *   - 先出现 content  → 无工具调用，立即 writeHead + 回放已缓冲 + 继续透传（首字立即出）
- *   - 先出现 tool_calls → 不写 header（此时 reply.raw 仍干净），回退 runWithTools 接管
- * 这样既拿到真流式，又保证"headers already sent"不会发生。
- *
- * @returns {Promise<{ok:boolean, fellBackToTools?:boolean}>}
- */
-async function tryStreamPassthrough({
-  upstreamUrl,
-  upstreamKey,
-  model,
-  messages,
-  serverClients,
-  body,
-  reply,
-  temperature,
-  top_p,
-  max_tokens,
-  sessionId = null
-}) {
-  // 加载工具定义并注入 requests：让模型"有能力"调用工具，才能检测到 tool_calls。
-  const routes = await loadTools(serverClients);
-  const allRoutes = routes || [];
-  const openaiTools = toOpenAITools(allRoutes);
-
-  const payload = {
-    model,
-    messages,
-    stream: true,
-    temperature,
-    top_p,
-    max_tokens,
-    ...(openaiTools.length ? { tools: openaiTools, tool_choice: "auto" } : {}),
-    ...(body && body.stream_options ? { stream_options: body.stream_options } : {})
-  };
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
-  let resp;
-  try {
-    resp = await fetch(upstreamUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${upstreamKey}` },
-      body: JSON.stringify(payload),
-      signal: controller.signal
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-  if (!resp.ok || !resp.body) {
-    return { ok: false, fellBackToTools: false };
-  }
-
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder("utf-8");
-  let buffer = "";
-  let head = "";             // 阶段一判定"是 content"时那一行被 break 吞掉，需存起来供阶段二回放，否则回复开头丢 content
-  let decided = false;       // 是否已确立"无工具/有工具"
-  let sawToolCall = false;
-  let sawContent = false;
-
-  const analyzeLine = (rawLine) => {
-    if (!rawLine.startsWith("data:")) return false;
-    const payloadLine = rawLine.slice(5).replace(/^\s+/, "");
-    if (!payloadLine || payloadLine === "[DONE]") return false;
-    let evt;
-    try { evt = JSON.parse(payloadLine); } catch (e) { return false; }
-    const delta = evt && evt.choices && evt.choices[0] && evt.choices[0].delta;
-    if (delta && delta.tool_calls && delta.tool_calls.length) { sawToolCall = true; return true; }
-    if (delta && typeof delta.content === "string" && delta.content.length > 0) { sawContent = true; return true; }
-    return false;
-  };
-
-  // ---- 阶段一：读到第一个"决定性"chunk（content 或 tool_calls），期间只缓存不写头 ----
-  while (!decided && !sawToolCall) {
-    const { done, value } = await reader.read();
-    if (done) break; // 流自然结束且无决定性事件：视为无工具，正常透传
-    buffer += decoder.decode(value, { stream: true });
-    let nl;
-    while ((nl = buffer.indexOf("\n")) !== -1) {
-      const rawLine = buffer.slice(0, nl);
-      buffer = buffer.slice(nl + 1);
-      // 阶段一从 buffer 切走的每一行（role / reasoning_content / 首个 content 等）必须记入 head 回放，
-      // 否则客户端流会缺这些事件——"回复开头缺字"正是首个 content 行被吞（analyzeLine 返回布尔，
-      // 无法区分类型，故无条件全量回放，与上游字节一致）。
-      head += rawLine + "\n";
-      if (analyzeLine(rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine)) { decided = true; break; }
-    }
-    if (decided || sawToolCall) break;
-  }
-
-  // 发现工具调用：尚未写 header，交给流式工具循环接管（streamToolLoop，正文/工具均流式）
-  if (sawToolCall) {
-    console.log("[mcp] 流式直通检测到工具调用，回退流式工具循环");
-    // 2026-09-21 审查 R6：探测流不再消费，必须 cancel 释放上游连接，否则每个工具型请求泄漏一条
-    try { await reader.cancel(); } catch (e) {}
-    return { ok: true, fellBackToTools: true };
-  }
-
-  // ---- 阶段二：确认无工具，开始真正透传（写头 + 回放缓冲 + 继续读剩余流）----
-  console.log("[mcp] 流式直通: 本请求无工具调用，直接透传");
-  reply.raw.writeHead(resp.status, {
-    "Content-Type": resp.headers.get("content-type") || "text/event-stream",
-    "Cache-Control": "no-cache",
-    Connection: "keep-alive"
-  });
-  // 2026-09-21 审查 R7：写失败置标志，透传读循环据此取消上游流
-  let clientGone = false;
-  const emit = (str) => { try { reply.raw.write(str); } catch (e) { clientGone = true; } };
-  let fullText = "";
-  let reasoning = "";
-  let usage = null;
-  // T-0922 修复：聚合流式 tool_calls（模型"先说话后调工具"时，阶段一判定被首个 content 骗过、
-  // 走了透传，标准 delta.tool_calls 事件被原样发给前端但前端不消费、工具未执行）。
-  // 流式 tool_calls 是分片增量：按 index 聚合，id/name 首片给全、arguments 逐片拼接。
-  const toolCallAcc = [];
-  const accToolCall = (tcs) => {
-    for (const tc of tcs) {
-      if (!tc) continue;
-      const idx = typeof tc.index === "number" ? tc.index : 0;
-      let slot = toolCallAcc[idx];
-      if (!slot) slot = toolCallAcc[idx] = { id: "", name: "", args: "" };
-      if (tc.id) slot.id = tc.id;
-      if (tc.function) {
-        if (tc.function.name) slot.name += tc.function.name;
-        if (typeof tc.function.arguments === "string") slot.args += tc.function.arguments;
-      }
-    }
-  };
-  // 继续解析并采集全文（供调用方写时间线 / 提取 <memory> 等标签）
-  const collect = (rawLine) => {
-    if (!rawLine.startsWith("data:")) return;
-    const payloadLine = rawLine.slice(5).replace(/^\s+/, "");
-    if (!payloadLine || payloadLine === "[DONE]") return;
-    let evt;
-    try { evt = JSON.parse(payloadLine); } catch (e) { return; }
-    const choice = evt && evt.choices && evt.choices[0];
-    if (!choice) return;
-    const delta = choice.delta || {};
-    if (typeof delta.content === "string") fullText += delta.content;
-    if (delta.reasoning_content) reasoning += delta.reasoning_content;
-    if (Array.isArray(delta.tool_calls) && delta.tool_calls.length) accToolCall(delta.tool_calls);
-    if (evt.usage) usage = evt.usage;
-  };
-  try {
-    // 采集 buffer / chunk 里的 SSE data 行喂给 collect，让 fullText/reasoning/usage 真正累积。
-    // 透传字节流仍由 emit 原样写给客户端，这里只做旁路采集，绝不改动发给浏览器的内容。
-    let sseBuf = ""; // collect 只认单行 "data:"，chunk 可能含多行/半行，需按行切分
-    const collectFeed = (text) => {
-      sseBuf += text;
-      let nl;
-      while ((nl = sseBuf.indexOf("\n")) !== -1) {
-        const line = sseBuf.slice(0, nl);
-        sseBuf = sseBuf.slice(nl + 1);
-        collect(line.replace(/\r$/, ""));
-      }
-    };
-    if (head) { emit(head); collectFeed(head); }
-    if (buffer) { emit(buffer); collectFeed(buffer); }
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      // 2026-09-21 审查 R7：客户端断开即取消上游流
-      if (clientGone) { try { await reader.cancel(); } catch (e) {} break; }
-      const chunk = decoder.decode(value, { stream: true });
-      emit(chunk);
-      collectFeed(chunk);
-    }
-    // 上游流结束时若尾巴残留一条未换行的 data 行，补采一次，避免最后一条 content 丢失
-    if (sseBuf) collect(sseBuf.replace(/\r$/, ""));
-    // T-0922 修复：模型"先说话后调工具"被直通误判后，漏掉的工具调用在此补上——
-    // 客户端流尚未 end：补执行工具循环（resume 断点续跑），把后续回复续写进同一轮流。
-    // 客户端体验：先看到流式文本（真流式），工具执行完后继续收到补充内容，接近主流"边说边查再补充"。
-    const pending = toolCallAcc.filter(s => s && s.name).map((s, i) => ({
-      id: s.id || ("call_pt_" + Date.now() + "_" + i),
-      type: "function",
-      function: { name: s.name, arguments: s.args || "{}" }
-    }));
-    if (pending.length) {
-      try {
-        console.log("[mcp] 流式直通发现后置工具调用（先文本后工具），补执行并续写: " + pending.map(t => t.function.name).join(","));
-        const fullSegs = String(fullText || "").split(/\n\s*\n/).map(function(s){return s.trim();}).filter(Boolean);
-        const r2 = await runWithTools({
-          upstreamUrl, upstreamKey, model, messages, serverClients,
-          temperature, top_p, max_tokens,
-          resume: { assistantMsg: { role: "assistant", content: fullText, tool_calls: pending } },
-          sessionId
-        });
-        // 续写（伪流式）：思考链 → 工具记录 → 后续正文；直通阶段的 fullText 已发给客户端，不重发。
-        // 直通文本若不以空行结尾则先补一个空行分隔，保证客户端流式拼接 full 与最终 text 一致（空行粒度分段）
-        const _needSep = !/[\r\n]{2,}\s*$/.test(String(fullText || ""));
-        const sse = buildSSE((_needSep ? "\n\n" : "") + (r2.text || ""), { model, reasoning: r2.reasoning || "", toolHistory: r2.toolHistory || [], usage: r2.usage || null });
-        const rd = sse.getReader();
-        while (true) {
-          const { done, value } = await rd.read();
-          if (done) break;
-          emit(value);
-        }
-        try { reply.raw.end(); } catch {}
-        // 方案2刷新：segments 按空行粒度拆（与前端 makeMsgEl 一致）；工具 afterSeg 对齐同一分段下标。
-        // r2 内部轮次工具 afterSeg 以 r2.text 为基准 → 偏移 fullSegs 段数；直通续跑工具(afterSeg=-1) → 直通文本末段之后
-        const finalText = [fullText, r2.text].filter(t => t && String(t).trim()).join("\n\n");
-        const segs = String(finalText || "").split(/\n\s*\n/).map(function(s){return s.trim();}).filter(Boolean);
-        if (!segs.length) segs.push(finalText || "");
-        const th = (r2.toolHistory || []).map(function(t){
-          if (t && typeof t.afterSeg === "number" && t.afterSeg >= 0) return Object.assign({}, t, { afterSeg: t.afterSeg + fullSegs.length });
-          return Object.assign({}, t, { afterSeg: fullSegs.length ? fullSegs.length - 1 : -1 });
-        });
-        return {
-          ok: true, fellBackToTools: false,
-          text: finalText,
-          reasoning: [reasoning, r2.reasoning].filter(t => t && String(t).trim()).join("\n\n"),
-          usage: r2.usage || usage,
-          toolHistory: th,
-          rounds: r2.rounds,
-          segments: segs
-        };
-      } catch (resumeErr) {
-        // 续跑失败：客户端已收到直通文本，正常收尾返回已透传内容（仅工具结果缺失）
-        console.warn("[mcp] 直通后置工具续跑失败（客户端已收到文本）:", resumeErr.message);
-      }
-    }
-  } catch (e) {
-    try { reply.raw.end(); } catch {}
-    return { ok: false, fellBackToTools: false };
-  }
-  try { reply.raw.end(); } catch {}
-  return { ok: true, fellBackToTools: false, text: fullText, reasoning, usage };
-}
 
 module.exports = {
   runWithTools,
   streamToolLoop,
   buildSSE,
-  tryStreamPassthrough,
   DEFAULT_MAX_TOOL_ROUNDS,
   _toolCallTime,
   buildToolResultContent

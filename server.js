@@ -978,6 +978,22 @@ function timelineFingerprint(file) {
 function cloneTimeline(data) {
   try { return structuredClone(data); } catch (e) { return JSON.parse(JSON.stringify(data)); }
 }
+// 盘上是否已存在与该文件**内容相同**的 .corrupt-* 备份（2026-09-23 审查 M9）：
+// 内存去重集 _corruptBackupDone 在进程重启后清空，若文件仍损坏会再备份一份、逐次堆积；
+// 改为比对最近一份备份的内容哈希——同内容跳过，内容不同（新损坏）仍会新建备份。
+function hasSameCorruptBackup(file) {
+  try {
+    const dir = path.dirname(file);
+    const prefix = path.basename(file) + ".corrupt-";
+    const cands = fs.readdirSync(dir).filter(n => n.startsWith(prefix)).sort();   // 名字含 ISO 时间戳，字典序＝时间序
+    if (!cands.length) return false;
+    const last = path.join(dir, cands[cands.length - 1]);
+    const h = f => crypto.createHash("md5").update(fs.readFileSync(f)).digest("hex");
+    return h(file) === h(last);
+  } catch (e) {
+    return false;   // 异常按「没有同内容备份」处理——宁可多备一份，也不漏掉损坏现场
+  }
+}
 // 守卫标记（2026-09-19 审查 P1-2 配套）：loadTimeline 返回的克隆统一在「clone 之后」挂 __fp
 // （load 时刻的盘上指纹），因此 structuredClone 与 JSON fallback 两条克隆路径拿到的快照都带
 // 标记。数组自定义属性不进 JSON.stringify，不会落盘污染文件；saveTimeline 据此识别过期快照。
@@ -1006,11 +1022,17 @@ function loadTimeline(sessionId) {
     // saveTimeline 见标记且原文件仍在即拒写，绝不能用空数组覆盖损坏的历史文件。
     if (!_corruptBackupDone.has(file)) {
       try {
-        const bak = file + ".corrupt-" + new Date().toISOString().replace(/[:.]/g, "-");
-        fs.copySync(file, bak);
-        _corruptBackupDone.add(file);
-        console.error("[timeline] 时间线文件损坏，已备份到 " + bak + "，本次按空时间线处理；该文件的后续写入将被拒绝直至人工恢复:", err.message);
-        notifyTimelineWriteRejected("时间线文件损坏已备份(.corrupt-*)，该会话后续写入将被拒", sessionId);
+        // 2026-09-23 审查 M9：去重集只在内存，进程重启后清空 → 文件仍损坏时会重复备份、
+        // .corrupt-* 逐次堆积。补一层「盘上已有同内容备份则跳过」（比对最近一份的 md5）。
+        if (!hasSameCorruptBackup(file)) {
+          const bak = file + ".corrupt-" + new Date().toISOString().replace(/[:.]/g, "-");
+          fs.copySync(file, bak);
+          console.error("[timeline] 时间线文件损坏，已备份到 " + bak + "，本次按空时间线处理；该文件的后续写入将被拒绝直至人工恢复:", err.message);
+          notifyTimelineWriteRejected("时间线文件损坏已备份(.corrupt-*)，该会话后续写入将被拒", sessionId);
+        } else {
+          console.error("[timeline] 时间线文件损坏，盘上已有同内容 .corrupt-* 备份，跳过重复备份；本次按空时间线处理:", err.message);
+        }
+        _corruptBackupDone.add(file);   // 本轮已处理（同内容备份已存在时也标记，避免反复扫盘）
       } catch (bakErr) {
         console.error("[timeline] 时间线文件损坏且备份失败（写入守卫仍会拒绝覆盖）:", err.message, "|", bakErr.message);
       }
@@ -2371,44 +2393,13 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
   const targetApiKey = (prov && prov.api_key) || readEnvValue("TARGET_API_KEY");
   if (!targetApiUrl || !targetApiKey) return false;
 
-  // === 流式直通快速路径（普通聊天提速）===
-  // 多数用户提问并不会触发工具调用，此前却一律走 runWithTools 非流式等完整生成（首字 30s+）。
-  // 这里先尝试流式直通：逐块透传且检测 tool_calls；无工具调用就透传到底（首字立即出），
-  // 发现工具调用则回退到下方 runWithTools 多轮循环（工具能力零损失）。
-  // 仅在"非流式回放请求"或"请求里已带工具调用历史"时不尝试，交给原逻辑确保多轮工具对话稳定。
-  const requestHasToolHistory = Array.isArray(messages) && messages.some(m => m && (m.tool_calls || m.tool_call_id));
-  let directResult = null; // 流式直通成功(无工具)时的结果，与 runWithTools 返回结构兼容，供底部统一收尾
-  if (body.stream === true && !requestHasToolHistory) {
-    try {
-      const pass = await mcp.tryStreamPassthrough({
-        upstreamUrl: targetApiUrl,
-        upstreamKey: targetApiKey,
-        model,
-        messages: messages || body.messages || [],
-        serverClients: clients,
-        body,
-        reply,
-        temperature: body.temperature,
-        top_p: body.top_p,
-        max_tokens: body.max_tokens,
-        sessionId
-      });
-      if (pass && pass.ok && !pass.fellBackToTools) {
-        // T-0922：直通可能带后置工具续跑（先文本后工具），toolHistory 有值时随收尾写时间线/前端工具胶囊
-        directResult = { text: pass.text || "", reasoning: pass.reasoning || "", usage: pass.usage || null, toolHistory: pass.toolHistory || [], rounds: pass.rounds || 0, segments: pass.segments || [] };
-      }
-      // fellBackToTools=true：直通已识别到工具调用，让下方 runWithTools 接管
-    } catch (streamErr) {
-      console.warn("[mcp] 流式直通快速路径失败，回退工具循环:", streamErr.message);
-    }
-  }
-
   // 方案2：工具循环逐轮即时回传。onEvent 把「本轮正文/思考 + 每工具 start/end」实时写成 SSE，
   // 前端据此渲染工具卡与正文交错 + running→done 状态。仅流式请求启用；落盘/缓存仍用 r.toolHistory（终态）。
   let streamStarted = false;
   const streamDelta = (deltaObj) => {
     if (!streamStarted) {
-      reply.raw.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+      reply.raw.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no", Connection: "keep-alive" });
+      try { reply.raw.flushHeaders(); } catch (e) {}
       streamStarted = true;
     }
     // 2026-09-21 审查 R7：写失败必须上抛（由 mcp-tool-loop 的 emit 捕获置 clientGone 中断工具循环），
@@ -2437,18 +2428,21 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         for (let i = 0; i < clean.length; i += 60) streamDelta({ reasoning_content: clean.slice(i, i + 60) });
       } else if (evt.type === "tool_start") {
         const p = { index: evt.index, id: evt.id, name: evt.name, args: evt.args };
-        if (typeof evt.afterSeg === "number") p.afterSeg = evt.afterSeg;   // 2026-09-08：对齐前端工具卡按正文段交错
         streamDelta({ tool_start: p });
+      } else if (evt.type === "tool_args_delta") {
+        streamDelta({ tool_args_delta: { index: evt.index, id: evt.id, delta: evt.delta || "" } });
       } else if (evt.type === "tool_end") {
         const p = { index: evt.index, id: evt.id, name: evt.name, args: evt.args, result: evt.result, error: evt.error, ok: evt.ok };
-        if (typeof evt.afterSeg === "number") p.afterSeg = evt.afterSeg;
         streamDelta({ tool_end: p });
       }
-    } catch (e) {}
+    } catch (e) {
+      // streamDelta 把客户端断开作为异常抛出；必须继续上抛给 streamToolLoop.emit，
+      // 由其将 clientGone 置位并停止后续工具/上游请求。
+      throw e;
+    }
   };
 
-  let r = directResult;
-  if (!r) {
+  let r;
     // 2026-09-09 工具路径改流式：优先走 streamToolLoop（全程 stream:true，正文/思考链实时回传，
     // 工具就地执行并继续流式），避免「检测到工具就整轮非流式等待」导致的慢。失败则回退 runWithTools（非流式兜底）。
     try {
@@ -2465,6 +2459,9 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         sessionId
       });
     } catch (toolLoopErr) {
+      // 一旦已经向客户端发出 SSE，就不能再从头跑一遍 runWithTools：
+      // 否则客户端会收到两套事件，正文/工具卡可能重复或顺序损坏。
+      if (streamStarted) throw toolLoopErr;
       console.warn("[mcp] 流式工具循环失败，回退 runWithTools (非流式):", toolLoopErr.message);
       r = await mcp.runWithTools({
         upstreamUrl: targetApiUrl,
@@ -2476,7 +2473,6 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         sessionId
       });
     }
-  }
 
   // 工具循环跑完后，把「完整消息序列」捕获进 lastLLMMessages，
   // 让「当前请求上下文」如实展示带 tool_calls / tool 结果的真实链路（而非基础上下文）。
@@ -2546,7 +2542,13 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         toAppend.push({
           id: replyMsgId || undefined,
           role: "assistant", content: storedText, reasoning: r.reasoning || "", tools: r.toolHistory || [], tokens: r.usage || null,
-          segments: (r.toolHistory && r.toolHistory.length) ? (r.segments || []).map(function(s){ return stripToolEchoBlocks(tagParser.stripTags(s)); }) : undefined   // 方案2刷新：正文段结构（已剥标签/工具回声），供前端交错插工具卡
+          segments: (r.toolHistory && r.toolHistory.length) ? (r.segments || []).map(function(s){ return stripToolEchoBlocks(tagParser.stripTags(s)); }) : undefined,
+          stream_timeline: Array.isArray(r.streamTimeline) ? r.streamTimeline.map(function(n){
+            if (!n || !n.type) return null;
+            if (n.type === "text") return { type: "text", text: String(n.text || "") };
+            if (n.type === "tool" && n.tool) return { type: "tool", tool: n.tool };
+            return null;
+          }).filter(Boolean) : undefined   // 真实事件时间线：刷新时按 text/tool 原顺序重建
         });
       }
       if (toAppend.length) appendMessages(sessionId, toAppend);
@@ -2564,10 +2566,7 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
   }
 
   // 把最终文本转成 OpenAI 兼容 SSE 流（工具轮次已结束，这里流式回传最终结果）
-  // 注意：若走的是上方"流式直通快速路径"，reply.raw 已经 writeHead 并透传/结束完毕，
-  // 不能再回传（否则二次 writeHead 报错）；此时仅保留副作用收尾（时间线/幂等缓存已在上方完成）。
   if (body.stream === true) {
-    if (directResult) return true;   // 已直通透传完毕，无需再回传
     if (streamStarted) {
       // 2026-09-13 审查修复：onEvent 逐轮流式回传后补终止 chunk——此前裸 end 无
       // finish_reason/usage/[DONE]，与 buildSSE 收尾口径不一致，依赖终止事件的客户端会卡住、usage 丢失
@@ -2709,12 +2708,15 @@ function applyWakeEventV2(body) {
     const wakeTools = Array.isArray(tools) ? tools.filter(t => t && t.name) : [];
     const appended = [];
     if (diaryRaw) appended.push({ role: "assistant", content: diaryRaw, kind: "diary" });
-    // 2026-09-20：AI 完整输出原样落时间线（[DIARY] 等标签内联保留，不再剥除——时间线=完整真实流水账）
-    if (speakRaw) {
+    // 2026-09-20：AI 完整输出原样落时间线（[DIARY] 等标签内联保留）。
+    // [NO_ACTION] 是唤醒侧的静默标记：只保留 developer event 判定，不把它作为 assistant 气泡落库。
+    if (speakRaw && !/^\[NO_ACTION\]/i.test(speakRaw)) {
       const msg = { role: "assistant", content: speakRaw };
       if (pushMeta) msg.push = pushMeta;
       if (wakeTools.length) msg.tools = wakeTools;
       appended.push(msg);
+    } else if (speakRaw) {
+      console.log("[wake-event] v2 跳过 [NO_ACTION] 原文，不写入时间线");
     }
     // 2026-09-20 恢复判定回写：event=唤醒判定记录（发推/未发/失败，沿用文本格式，推送管理读端直接解析）
     // → developer 系统层消息落时间线，前端不显示（与 [唤醒] 块同层）
