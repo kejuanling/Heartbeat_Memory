@@ -1660,7 +1660,6 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
               </div>
               <div style="margin-top:10px"><label>max_tokens<span class="tag">可选</span></label><input type="number" min="1" id="maxTokInput" placeholder="留空不限制"></div>
             </div>
-            <button type="button" class="mcp-btn primary" id="aiSaveBtn" style="margin-top:12px" onclick="saveSettingsAll()">保存 AI 设置</button>
             </div></div><div class="set-panel" data-acc="password"><div class="set-acc-h" data-acc="password">修改登录密码<span class="ar">▾</span></div><div class="set-sec">
             <div class="field">
               <label>旧密码</label>
@@ -1678,22 +1677,6 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
             <button type="button" class="mcp-btn primary" id="pwSaveBtn">保存密码</button>
             <div style="font-size:11px;color:var(--ink3);margin-top:6px">修改后用于聊天页登录与管理台，保存即生效（下次登录用新密码）。</div>
             </div></div><div class="set-panel" data-acc="behav"><div class="set-acc-h" data-acc="behav">显示与行为<span class="ar">▾</span></div><div class="set-sec">
-              <div class="set-sec-label">思考链</div>
-              <div class="pick" id="pickThinking">
-                <button data-k="show" class="on">显示思考链</button>
-                <button data-k="send">回传思考链</button>
-              </div>
-              <div class="field" style="margin-top:8px"><label>回传思考条数<span class="tag">回传思考链开启时生效</span></label><input type="number" id="thinkSendCount" step="1" min="0" max="99" value="1"><div style="font-size:11px;color:var(--ink3);margin-top:4px">只带最近 N 条 AI 回复的思考链进请求；0=全部（历史思考全发，token 会翻倍，不建议）。</div></div>
-              <div class="set-sec-label">其它显示</div>
-              <div class="pick" id="pickOthers">
-                <button data-k="show_token" class="on">token</button>
-                <button data-k="show_tools" class="on">工具痕迹</button>
-                <button data-k="show_time">时间显示</button>
-              </div>
-              <div class="set-sec-label">发送方式</div>
-              <div class="pick" id="pickMode">
-                <button data-m="stream" class="on">流式</button>
-              </div>
               <div class="field"><label>附件大小上限 (MB，1~30)<span class="tag">图片/文件通用</span></label><input type="number" id="uploadMaxMb" step="0.5" min="1" max="30" value="2"><div style="font-size:11px;color:var(--ink3);margin-top:4px">聊天窗口发图片/PDF/文本等附件的转存上限，保存后即生效。</div></div>
               <div class="field" style="margin-top:10px">
                 <label>气泡分隔符<span class="tag">AI 回复拆多个气泡</span></label>
