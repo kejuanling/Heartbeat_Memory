@@ -742,137 +742,14 @@ TOOLS["phone_state"] = {
 }
 
 
-# ── 永久注入上下文（pin）：与记忆池工具分开 ──
-# pin 写入 data/pinned.json，随每次对话/唤醒注入 system prompt，跨窗口永久生效；
-# 记忆池（memories_*）是按需浮现的长期记忆库，两者用途不同。
-
-def _pin_call(method, path, data=None):
-    url = f"{BASE_URL}:3000{path}"
-    headers = {"x-internal-key": INTERNAL_KEY}
-    body = None
-    if data is not None:
-        body = json.dumps(data).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=body, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        try:
-            return json.loads(e.read().decode("utf-8"))
-        except Exception:
-            return {"error": "HTTP " + str(e.code)}
-    except Exception as e:
-        return {"error": str(e)}
-
-def _find_pin_by_title(title):
-    title = (title or "").strip()
-    if not title:
-        return None, "请提供要定位的条目标题"
-    data = _pin_call("GET", "/internal/pin")
-    if data.get("error"):
-        return None, data["error"]
-    for p in data.get("pins", []):
-        if (p.get("title") or "").strip() == title:
-            return p, None
-    return None, "没有找到标题为「" + title + "」的永久上下文条目"
-
-def tool_pin_add(args):
-    content = (args.get("content") or "").strip()
-    if not content:
-        return {"error": "content 必填：要永久钉住的具体内容"}
-    data = _pin_call("POST", "/internal/pin", {"title": (args.get("title") or "").strip(), "content": content})
-    if data.get("error"):
-        return {"error": data["error"]}
-    pin = data.get("pin", {}) or {}
-    return {
-        "success": True,
-        "pin_id": pin.get("id"),
-        "title": pin.get("title") or "",
-        "content": pin.get("content") or "",
-        "message": "已写入永久上下文：从下一次对话/唤醒起随 system prompt 注入，跨窗口永久生效，不会被摘要压缩。"
-    }
-
-def tool_pin_update(args):
-    pid = (args.get("id") or "").strip()
-    title = (args.get("title") or "").strip()
-    if not pid:
-        pin, err = _find_pin_by_title(title)
-        if err:
-            return {"error": err}
-        pid = pin["id"]
-    updates = {}
-    if args.get("new_title") is not None:
-        updates["title"] = str(args["new_title"]).strip()
-    if args.get("content") is not None:
-        content = str(args["content"]).strip()
-        if not content:
-            return {"error": "content 不能为空"}
-        updates["content"] = content
-    if not updates:
-        return {"error": "请至少提供 new_title 或 content 作为新内容"}
-    data = _pin_call("PUT", "/internal/pin/" + urllib.parse.quote(pid, safe=""), updates)
-    if data.get("error"):
-        return {"error": data["error"]}
-    pin = data.get("pin", {}) or {}
-    return {"success": True, "pin_id": pin.get("id"), "title": pin.get("title") or "", "content": pin.get("content") or "",
-            "message": "永久上下文已更新，下一次请求生效。"}
-
-def tool_pin_delete(args):
-    pid = (args.get("id") or "").strip()
-    title = (args.get("title") or "").strip()
-    if not pid:
-        pin, err = _find_pin_by_title(title)
-        if err:
-            return {"error": err}
-        pid = pin["id"]
-    data = _pin_call("DELETE", "/internal/pin/" + urllib.parse.quote(pid, safe=""))
-    if data.get("error"):
-        return {"error": data["error"]}
-    return {"success": True, "message": "已删除永久上下文条目（id=" + pid + "），下一次请求起不再注入。"}
+# ── 永久注入上下文（pin）：2026-09-23 已整体移除 ──
+# 原 pin_add / pin_update / pin_delete 三个 MCP 工具，连同其专属辅助函数
+# _pin_call / _find_pin_by_title 一并删除。三者的 TOOLS 注册早在 2026-09 初即被注释停用
+# （未暴露给 AI），本次删除不改变任何运行时行为，仅为清理残留函数体。
+# 替代路径：AI 侧新增 pin 走 <pin> 标签（gateway tag-parser.js → memoryEngine.addPinnedMemory）；
+#          pin 的改/删由管理台 /heartbeat/admin/logs/pinned 承担。
 
 
-# 已停用：永久上下文 pin 工具不再暴露给 AI，函数体保留供参考/回滚。
-# TOOLS["pin_add"] = {
-#     "description": "写入一条「永久注入上下文」（钉选 pin）。注意区分：记忆池工具（memories_*）是长期记忆检索库、按需浮现；而 pin 会随每一次对话和唤醒直接注入 system prompt，跨窗口永久生效，不会被时间线切换或摘要压缩弄丢。只用于真正不能丢的原则、关系要点、结论性内容，宁少勿滥。",
-#     "inputSchema": {
-#         "type": "object",
-#         "properties": {
-#             "title": {"type": "string", "description": "条目标题（简短，方便以后用标题定位修改/删除；可留空）"},
-#             "content": {"type": "string", "description": "要永久钉住的具体内容（第一人称，写清结论/原则，避免模糊）"}
-#         },
-#         "required": ["content"]
-#     },
-#     "handler": tool_pin_add
-# }
-
-# 已停用：永久上下文 pin 工具不再暴露给 AI。
-# TOOLS["pin_update"] = {
-#     "description": "修改一条「永久注入上下文」的内容或标题。按 pin_id（pin_add 返回）精确定位，或按标题 title 定位。",
-#     "inputSchema": {
-#         "type": "object",
-#         "properties": {
-#             "id": {"type": "string", "description": "条目 id（pin_add 返回的 pin_id）；id 和 title 至少填一个"},
-#             "title": {"type": "string", "description": "不填 id 时，用条目标题精确定位要改哪一条"},
-#             "new_title": {"type": "string", "description": "新的标题（可选）"},
-#             "content": {"type": "string", "description": "新的内容（可选）"}
-#         }
-#     },
-#     "handler": tool_pin_update
-# }
-
-# 已停用：永久上下文 pin 工具不再暴露给 AI。
-# TOOLS["pin_delete"] = {
-#     "description": "删除一条「永久注入上下文」。按 pin_id 或标题 title 定位。删除后从下一次请求起不再注入。",
-#     "inputSchema": {
-#         "type": "object",
-#         "properties": {
-#             "id": {"type": "string", "description": "条目 id；id 和 title 至少填一个"},
-#             "title": {"type": "string", "description": "不填 id 时，用条目标题精确定位"}
-#         }
-#     },
-#     "handler": tool_pin_delete
-# }
 
 # ── 上下文记忆替换 ──
 def tool_context_replace(args):
