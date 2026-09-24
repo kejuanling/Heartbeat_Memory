@@ -3462,11 +3462,12 @@ function showHeaderTyping(show){
         _claudeTypingEl.innerHTML='<div class="claude-typing-dot"></div>';
       }
       if(!_claudeTypingEl.parentNode && chatEl){
-        // 优先插在思考链(.rw-wrap)后面，否则 append 到末尾
+        // 如果已有思考链(.rw-wrap)，呼吸圈不显示——思考链就是占位符
         var rw=chatEl.querySelector(".rw-wrap:last-of-type");
-        if(rw && rw.nextSibling){ chatEl.insertBefore(_claudeTypingEl, rw.nextSibling); }
-        else { chatEl.appendChild(_claudeTypingEl); }
-        if(autoScroll)scrollBottom();
+        if(!rw){
+          chatEl.appendChild(_claudeTypingEl);
+          if(autoScroll)scrollBottom();
+        }
       }
     }else{
       if(_claudeTypingEl && _claudeTypingEl.parentNode) _claudeTypingEl.parentNode.removeChild(_claudeTypingEl);
