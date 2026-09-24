@@ -2822,10 +2822,43 @@ function renderAiContent(msgEl, bubble, content, reasoning){   // 2026-09-24 P2-
       ph+='<div class="rw"><span class="rw-h"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1 0-2-.2-2.9-.5L4 21l1.5-5.6A8.5 8.5 0 1 1 21 11.5z"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="13" x2="14" y2="13"/></svg> 思考过程 <span class="rw-a">▾</span></span><div class="rw-c">'+rc+'</div></div>';
     }
     pre.innerHTML=ph;
-    pre.querySelectorAll(".rw").forEach(rw=>rw.addEventListener("click",()=>rw.classList.toggle("open")));
+    pre.querySelectorAll(".rw").forEach(rw=>rw.addEventListener("click",function(){
+      if(chatEl && chatEl.dataset.layout==="claude"){
+        // claude 主题：打开底部抽屉
+        var body=rw.querySelector(".rw-c");
+        if(body) openThinkSheet(body.innerHTML);
+      } else {
+        rw.classList.toggle("open");
+      }
+    }));
   }
   // 来自正文的工具胶囊（模型抄进 content 的【工具 · name】块）也需要绑定点击折叠
   if(toolEcho) bubble.querySelectorAll(".tool-trace").forEach(tt=>tt.addEventListener("click",()=>tt.classList.toggle("open")));
+}
+// claude 主题思考链抽屉
+function openThinkSheet(html){
+  var sheet=document.getElementById("thinkSheet");
+  var mask=document.getElementById("thinkSheetMask");
+  var body=document.getElementById("thinkSheetBody");
+  if(!sheet||!mask||!body) return;
+  body.innerHTML=html;
+  sheet.style.display="flex";
+  mask.style.display="block";
+  document.body.style.overflow="hidden";
+}
+document.addEventListener("DOMContentLoaded",function(){
+  var close=document.getElementById("thinkSheetClose");
+  var mask=document.getElementById("thinkSheetMask");
+  if(close) close.addEventListener("click",closeThinkSheet);
+  if(mask) mask.addEventListener("click",closeThinkSheet);
+});
+function closeThinkSheet(){
+  var sheet=document.getElementById("thinkSheet");
+  var mask=document.getElementById("thinkSheetMask");
+  if(!sheet||!mask) return;
+  sheet.style.display="none";
+  mask.style.display="none";
+  document.body.style.overflow="";
 }
 // 把 [图片]/[文件] 占位转成 chip
 function chips(html){
@@ -8019,6 +8052,11 @@ body[data-theme="dark"] .drawer-close{color:#999!important}
 /* dark 下工具卡/思考链颜色 */
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) .tool-trace .tt-name,
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) .rw-wrap .rw-h{color:#888!important}
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheet{background:rgba(30,30,30,.85)!important;color:#e8e8e8!important}
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheet span{color:#e8e8e8!important}
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheetClose{background:rgba(255,255,255,.1)!important;color:#ccc!important}
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheetBody{color:#e8e8e8!important}
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheetMask{background:rgba(0,0,0,.4)!important}
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) .tool-trace::before,
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) .tool-trace .tt-a::after{color:#666!important}
 /* 会话列表 */
@@ -8044,5 +8082,14 @@ body:has(#chat[data-layout="claude"]) .session-item.active,body:has(#chat[data-l
   wxGrow();
 })();
 </script>
+<!-- claude 主题思考链抽屉 -->
+<div id="thinkSheet" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;max-height:70vh;border-radius:20px 20px 0 0;background:rgba(255,255,255,.85);backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);box-shadow:0 -4px 30px rgba(0,0,0,.1);flex-direction:column;overflow:hidden">
+  <div style="display:flex;align-items:center;justify-content:center;padding:12px 0 8px;position:relative">
+    <span style="font-size:15px;font-weight:600;color:#333">Thought</span>
+    <div id="thinkSheetClose" style="position:absolute;left:16px;width:32px;height:32px;border-radius:50%;background:rgba(0,0,0,.06);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;color:#666">✕</div>
+  </div>
+  <div id="thinkSheetBody" style="padding:8px 20px 40px;overflow-y:auto;-webkit-overflow-scrolling:touch;font-size:15px;line-height:1.7;color:#333;white-space:pre-wrap"></div>
+</div>
+<div id="thinkSheetMask" style="display:none;position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.2);backdrop-filter:blur(2px)"></div>
 </body>
 </html>
