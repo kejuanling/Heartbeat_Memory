@@ -1322,6 +1322,9 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 #chat[data-layout="wx"] .mrow .mav{display:flex!important}
 #chat[data-layout="wx"] .mcol{align-self:center}
 #chat[data-layout="wx"] .mcol>.bubble{min-height:40px;box-sizing:border-box;display:flex;align-items:center}
+/* 2026-09-25：上面那条 display:flex 是行方向——气泡内出现 2 个以上子块（如"说明文字 + 紧邻代码块"这类没有空行分隔的渲染）
+   会被排成一行并互相挤压。多子块时退回普通块流；单子块仍走上面的居中逻辑。 */
+#chat[data-layout="wx"] .mcol>.bubble:has(> * + *){display:block}
 #chat[data-layout="wx"] .rw-wrap,#chat[data-layout="wx"] .tool-trace{display:none!important}
 #chat[data-layout="wx"]{--bubble-ai:#FFFFFF;--bubble-user1:#95EC69;--bubble-user2:#95EC69;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue",Arial,sans-serif}
 body:has(#chat[data-layout="wx"]){background:#F5F6F7;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue",Arial,sans-serif}
@@ -2454,6 +2457,8 @@ function _streamUpdateThink(text){
   if(!chatEl || chatEl.dataset.layout!=="claude") return;
   var root=_streamEnsureRoot();
   if(!_streamThinkEl || !_streamThinkEl.parentNode){
+    // 2026-09-25：思考链 shimmer 就是 claude 的"正在输入"占位 → 让呼吸圈让位，避免两个指示同时出现
+    showClaudeTyping(false);
     _streamThinkEl=document.createElement("div");
     _streamThinkEl.className="rw-wrap";
     root.appendChild(_streamThinkEl);
@@ -2646,6 +2651,15 @@ function _streamNodeReasoning(node){
   const src=node&&node.reasoningSrc;
   return String((src&&src.reasoning)||node.reasoning||"");
 }
+// 2026-09-25 ⑩：正文气泡重渲染节流（60ms）。非 claude 主题下每个 chunk 都会整段重渲染 markdown，
+// 长回复时是主要开销；_streamTextRerenderTimer 此前只有声明与收尾清理、从未被赋值（注释所述节流未实现）。
+function _scheduleStreamTextRerender(node){
+  if(_streamTextRerenderTimer) clearTimeout(_streamTextRerenderTimer);
+  _streamTextRerenderTimer=setTimeout(function(){
+    _streamTextRerenderTimer=null;
+    if(node&&node.el&&node.el.parentNode) _streamFillBubble(node);
+  },60);
+}
 function _streamPushText(text,reasoningSrc){
   const t=String(text==null?"":text);
   if(t==="")return;
@@ -2659,8 +2673,8 @@ function _streamPushText(text,reasoningSrc){
         if(last.shownCount===undefined) last.shownCount=0;
         if(!_twTimer) _twStart();
       }else{
-        // 其他主题：每段是完整气泡内容，直接整段重渲染
-        _streamFillBubble(last);
+        // 其他主题：每段是完整气泡内容，整段重渲染；高频 chunk 合并到 60ms 一次（见 _scheduleStreamTextRerender）
+        _scheduleStreamTextRerender(last);
       }
     }else _streamRenderModelDrain();
     return;
@@ -2896,24 +2910,16 @@ function renderAiContent(msgEl, bubble, content, reasoning){   // 2026-09-24 P2-
   }else{
     bubble.innerHTML=(typeof content==="string"&&content)?(cfg.ai_md?renderMd(stripTtsCtl(content)):escapeHtml(stripTtsCtl(content))):"";
   }
-  // AI 消息若带图片（image_url），作为独立于气泡的缩略图卡片置于气泡上方
-  if(Array.isArray(content)){
-    const _imgs=content.filter(function(x){ return x&&x.type==="image_url"&&x.image_url&&x.image_url.url; });
-    if(_imgs.length){
-      const wrap=document.createElement("div");wrap.className="bubble-imgs";
-      _imgs.forEach(function(x){ const img=document.createElement("img"); img.src=x.image_url.url; img.alt=""; img.onerror=function(){this.style.display="none";}; wrap.appendChild(img); });
-      msgEl.insertBefore(wrap, bubble);
-    }
-    const _files=content.filter(function(x){ return x&&x.type==="file"&&x.file&&x.file.url; });
-    if(_files.length){
-      const wrap=document.createElement("div");wrap.className="bubble-files";
-      _files.forEach(function(x){ wrap.appendChild(fileCardEl(x.file)); });
-      msgEl.insertBefore(wrap, bubble);
-    }
-  }
+  // 2026-09-25 ⑨：原「if(Array.isArray(content)) → 渲染 AI 侧图片/文件卡片」分支已删。
+  // 理由：renderAiContent 的三个调用点（_streamFillBubble / makeMsgEl 两个 unit 分支）传入的 content 恒为字符串，
+  // 且本函数开头已把 content 归一成字符串（stripInnerTags），该分支永远不可达（死代码）；
+  // 用户侧图片/文件走 makeMsgEl 用户分支的另一套实现。若日后 AI 侧真会产出 image_url/file，需在此重新接线。
   // 思考过程：作为气泡外单独的块（不放进气泡），置于气泡上方独立一行
   // （工具痕迹不再顶部堆叠，统一走正文章节的穿插胶囊，避免与正文内工具胶囊重复）
-  const showThink=!!reasoning && cfg.show_thinking;
+  // 2026-09-25：claude(极简/黑夜) 流式期间思考链由 _streamUpdateThink 的占位行统一代表，
+  // 本处不再另建 rw-wrap——否则同一条消息上会同时出现"占位一行 + 内容一行"两行 Thought。
+  const _twOwnsThink=_streamActive && chatEl && chatEl.dataset.layout==="claude";
+  const showThink=!!reasoning && cfg.show_thinking && !_twOwnsThink;
   let pre=bubble.previousElementSibling;
   if(pre && !(pre.classList&&pre.classList.contains("rw-wrap"))) pre=null;
   if(!pre){
@@ -2961,7 +2967,7 @@ document.addEventListener("click",function(e){
     var body=tt.querySelector(".tt-body");
     var nameText=name?name.textContent.trim():"Tool";
     var bodyHtml=body?body.innerHTML:"（无详情）";
-    openThinkSheet('<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><span style="font-size:15px;font-weight:500">'+nameText+'</span></div><div style="white-space:pre-wrap;font-size:14px;color:#555">'+bodyHtml+'</div>',"Summary");
+    openThinkSheet('<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><span style="font-size:15px;font-weight:500">'+nameText+'</span></div><div style="white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;font-size:14px;color:#555">'+bodyHtml+'</div>',"Summary");
     return;
   }
   var rw=e.target.closest(".rw-wrap .rw");
@@ -3049,7 +3055,9 @@ function fillMav(av,isAI){
 function callRecordBubble(m){
   const d=document.createElement("div"); d.className="msg "+(m.role==="user"?"user":"ai")+" call-record";
   // 与普通消息一致的「头像+名称」结构，保证位置正常（用户靠右/AI 靠左），而不是一条全宽、无头像的横条
-  const layout=(cfg.bubble_style||"qq");
+  // 2026-09-25：布局来源与 buildAiUnitRow/makeMsgEl/applyHeader 统一为 THEME_PRESETS[cfg.theme].layout。
+  // 原用 cfg.bubble_style（默认 "sms"、applyTheme 从不写它）→ 通话记录在微信/极简/黑夜下永远走短信式（无头像无名称）。
+  const layout=(THEME_PRESETS[cfg&&cfg.theme]&&THEME_PRESETS[cfg.theme].layout)||((cfg.bubble_style)||"sms");
   let host=d;
   if(layout!=="sms"){
     const isAI=(m.role!=="user");
@@ -3125,7 +3133,9 @@ function buildTimelineUnits(timeline, m){
       const _txt=String(_part.text==null?"":_part.text);
       if(_txt==="")return;
       // a) 拆段：分隔符在此统一消费（2026-09-24 P0-2 语义），工具卡位置由 timeline 顺序决定
-      const _ps=splitBubbleText(_txt);
+      // 2026-09-25 ⑥：claude(极简/黑夜) 是"连续文本"设计（实时 feed 也不拆段）→ 重建同样不拆，
+      // 否则同一回复会出现"实时一整块、刷新后分段"的差异（段间还会多出 mrow 间距）。
+      const _ps=(chatEl && chatEl.dataset.layout==="claude")?[_txt]:splitBubbleText(_txt);
       (_ps.length?_ps:[_txt]).forEach(function(_p){
         units.push({kind:"text",text:_p,reasoning:(!reasoningAssigned)?(m&&m.reasoning||""):""});
         reasoningAssigned=true;
@@ -3533,23 +3543,33 @@ function appendTypingBox(){
   return null;
 }
 let _claudeTypingEl=null;
+// 2026-09-25：claude(极简/黑夜) 的"正在输入"指示 = 消息区底部呼吸圈。
+// 模型开始吐思考链时由 _streamUpdateThink 让位给 shimmer（避免两者同时出现）。
+function showClaudeTyping(show){
+  if(!chatEl) return;
+  if(show){
+    if(_claudeTypingEl && _claudeTypingEl.parentNode) return;
+    _claudeTypingEl=document.createElement("div");
+    _claudeTypingEl.className="claude-typing";
+    _claudeTypingEl.innerHTML='<span class="claude-typing-dot"></span>';
+    chatEl.appendChild(_claudeTypingEl);
+  }else if(_claudeTypingEl && _claudeTypingEl.parentNode){
+    _claudeTypingEl.parentNode.removeChild(_claudeTypingEl);
+  }
+}
 function showHeaderTyping(show){
   const el=document.getElementById("hdTyping");
   const name=document.getElementById("hdName");
   const isClaude=chatEl && chatEl.dataset.layout==="claude";
   if(isClaude){
-    // claude 主题：顶部不动，消息区底部显示呼吸圈
+    // claude 主题：顶部不动，消息区底部显示呼吸圈（2026-09-25 恢复：不吐思考链的模型也要有等待反馈）
     if(el) el.style.display="none";
     if(name) name.style.display="";
-    if(show){
-      // claude 主题：呼吸圆去掉，思考链 shimmer 就是占位符
-    }else{
-      if(_claudeTypingEl && _claudeTypingEl.parentNode) _claudeTypingEl.parentNode.removeChild(_claudeTypingEl);
-      // 去掉思考链光效
-      if(chatEl) chatEl.querySelectorAll(".rw-h.shimmer").forEach(function(el){ el.classList.remove("shimmer"); });
-    }
+    showClaudeTyping(!!show);
+    if(!show && chatEl) chatEl.querySelectorAll(".rw-h.shimmer").forEach(function(el){ el.classList.remove("shimmer"); });
     return;
   }
+  showClaudeTyping(false);   // 非 claude 布局下清掉可能残留的呼吸圈（流式中途切主题时会留下）
   if(!el) return;
   el.style.display = show ? "inline-flex" : "none";
   if(name) name.style.display = show ? "none" : "";
@@ -4264,16 +4284,10 @@ function saveEdit(){
   }else{
     m.content=v;
   }
-  // 同步更新 stream_timeline 里的文本节点，否则 renderAll 会用旧 timeline 渲染
-  if(Array.isArray(m.stream_timeline)&&m.stream_timeline.length){
-    var _firstTextFound=false;
-    m.stream_timeline.forEach(function(u){
-      if(u&&u.type==="text"){
-        if(!_firstTextFound){ u.text=v; _firstTextFound=true; }
-        else { u.text=""; }
-      }
-    });
-  }
+  // 2026-09-25 ⑦：编辑后不再改写旧 timeline——原实现把全文塞进首个 text 节点、其余 text 段置空，
+  // 会把工具卡前后的正文顺序打乱（工具后的正文被搬到工具前）。改为丢弃 timeline，让渲染走
+  // buildTimelineUnits 的「旧数据合成」口径（content 拆段 + 工具统一补在首段之后），行为可预期。
+  if(Array.isArray(m.stream_timeline)&&m.stream_timeline.length){ m.stream_timeline=null; }
   saveMsgs();renderAll();
   closeEdit();
   showToast("已保存");
@@ -4562,7 +4576,7 @@ function applyHeader(){
   // 给 header 加 layout 类，CSS 按模板控制样式（名称位置/头像/副标题）
   const hd=document.querySelector("header");
   if(hd){
-    ["qq","wx","sms","custom"].forEach(function(c){hd.classList.remove("hd-"+c);});
+    ["qq","wx","sms","custom","claude"].forEach(function(c){hd.classList.remove("hd-"+c);});   // 2026-09-25 ⑩：补 claude（原列表漏它，切走极简后残留 hd-claude）
     hd.classList.add("hd-"+layout);
   }
   // 副标题：QQ/微信/短信都默认隐藏（保持简洁；只保留名称主视觉）
@@ -4850,13 +4864,13 @@ function applyTheme(){const name=THEME_PRESETS[cfg.theme]?cfg.theme:"warm";cfg.t
     document.body.style.backgroundPosition="center";
     document.body.style.backgroundAttachment="fixed";
     document.body.style.backgroundColor="rgba(245,245,245,"+(1-op)+")";
-  }if(chatEl)chatEl.setAttribute("data-layout",THEME_PRESETS[name].layout||"sms");if(name==="wx")cfg.show_avatar=true;
+  }if(chatEl)chatEl.setAttribute("data-layout",THEME_PRESETS[name].layout||"sms");   // 2026-09-25 ⑩：不再在此改写 cfg.show_avatar（渲染函数不该写配置）——wx 的头像由三处 `layout==="wx"` 兜底创建
   // 2026-09-24 P0：不再对 claude 静默改写全局配置——claude 布局 CSS 已强制隐藏 .mav（L7969）；
   // wx 布局有 layout==="wx" 兜底创建头像；切回其他主题不再被置 false
   try{applyHeader();}catch(e){}const grid=document.getElementById("themeGrid");if(grid)grid.querySelectorAll(".theme-choice").forEach(function(b){b.classList.toggle("active",b.dataset.theme===name);});}
 applyTheme();
 if(cfg.bg_image){document.getElementById("bgImageInput").value=cfg.bg_image;}
-const themeGrid=document.getElementById("themeGrid");if(themeGrid)themeGrid.addEventListener("click",function(e){const b=e.target.closest(".theme-choice");if(!b)return;cfg.theme=b.dataset.theme||"warm";saveCfg();applyTheme();renderAll();});
+const themeGrid=document.getElementById("themeGrid");if(themeGrid)themeGrid.addEventListener("click",function(e){const b=e.target.closest(".theme-choice");if(!b)return;cfg.theme=b.dataset.theme||"warm";saveCfg();applyTheme();renderAllNoAnim(true);});   // 2026-09-25：切主题保留滚动位置与已补载窗口（原 renderAll() 会重置窗口并跳到底部）
 populateSettings();
 // 设置分组：点折叠头展开对应组、其余收起（一屏内折叠，不单独成页）
 document.querySelectorAll(".set-acc-h").forEach(function(h){
@@ -8224,7 +8238,8 @@ body[data-theme="dark"] .drawer-close{color:#999!important}
 #chat[data-layout="claude"] .rw-wrap .rw-h{
   font-size:14px!important;letter-spacing:0!important;color:#999!important;cursor:pointer;
 }
-#chat[data-layout="claude"] .rw-wrap .rw-body{display:none!important}
+/* 2026-09-25 ⑩：原「#chat[data-layout="claude"] .rw-wrap .rw-body{display:none!important}」已删——
+   该类名不存在（实际是 .rw-c），思考链的折叠由基础规则 `.rw .rw-c{display:none}` 负责。 */
 #chat[data-layout="claude"] .rw-wrap .rw{
   background:transparent!important;border:0!important;border-radius:0!important;
   padding:0!important;box-shadow:none!important;
@@ -8242,9 +8257,22 @@ body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheetBody{color:#
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheetMask{background:rgba(0,0,0,.4)!important}
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) .tool-trace .tt-name,
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) .rw-wrap .rw-h{color:#888!important}
+/* 2026-09-25 ③：黑夜反色补漏——以下元素底色原是写死的浅色蒙层（rgba(255,255,255,.25~.7)），
+   与跟随主题变浅的文字叠加后在黑夜下对比度约 1~2.5:1，几乎不可读；极简下不受影响。 */
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .file-card{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.12)}
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .file-card .fc-name{color:#e8e8e8}
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .file-card .fc-meta{color:#888}
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .file-card .fc-ico{background:rgba(255,255,255,.08);color:#ccc}
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .ev-silent{background:rgba(255,255,255,.08);color:#999}
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .msg.ev-diary .bubble{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.12);color:#999}
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .ev-bubble.ev-push .ev-tag{background:#555;color:#e8e8e8}
 /* 会话列表 */
 body:has(#chat[data-layout="claude"]) .session-item,body:has(#chat[data-layout="claude"]) .session{background:transparent!important;border:0!important;border-radius:12px!important}
 body:has(#chat[data-layout="claude"]) .session-item.active,body:has(#chat[data-layout="claude"]) .session.active{background:#e8e8e8!important}
+/* claude 抽屉内容强制换行（pre/参数/内容 div 压掉 UA 的 white-space:pre，防长串出屏截断；2026-09-25） */
+body:has(#chat[data-layout="claude"]) #thinkSheetBody pre,
+body:has(#chat[data-layout="claude"]) #thinkSheetBody .tt-arg,
+body:has(#chat[data-layout="claude"]) #thinkSheetBody div{white-space:pre-wrap!important;word-break:break-word!important;overflow-wrap:anywhere!important}
 </style>
 <script id="wx-input-auto-grow-consolidated-20260921">
 /* 微信输入框自动增高：合并原 wx-input-auto-height-v1 与 wx-input-auto-grow-v3
