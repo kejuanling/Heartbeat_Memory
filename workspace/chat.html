@@ -2449,6 +2449,19 @@ function _streamModelPush(node){
 // 实时结构与收尾 renderAllNoAnim 重建出的结构一致（buildAiUnitRow 同源）；工具卡也进容器
 // （原 chatEl 直挂的「两套 DOM」消失，P1-3 根治）。收尾重建时容器随 chatEl 清空自然移除。
 let _streamRoot=null;
+let _streamThinkEl=null;
+function _streamUpdateThink(text){
+  if(!chatEl || chatEl.dataset.layout!=="claude") return;
+  var root=_streamEnsureRoot();
+  if(!_streamThinkEl || !_streamThinkEl.parentNode){
+    _streamThinkEl=document.createElement("div");
+    _streamThinkEl.className="rw-wrap";
+    root.appendChild(_streamThinkEl);
+  }
+  var isActive=_streamActive;
+  _streamThinkEl.innerHTML='<div class="rw-h'+(isActive?' shimmer':'')+'" style="cursor:pointer"><span>Thought</span><span class="rw-arrow"> ›</span></div>';
+  if(autoScroll)scrollBottom();
+}
 function _streamEnsureRoot(){
   if(_streamRoot&&_streamRoot.parentNode)return _streamRoot;
   _streamRoot=document.createElement("div");
@@ -3749,7 +3762,7 @@ async function request(finalMsgs, fromSend, regenAnchorId){
           const hasContent = delta && delta.content;
           if(delta){
             if(delta.content)full+=delta.content;
-            if(delta.reasoning_content)reasoning+=delta.reasoning_content;
+            if(delta.reasoning_content){reasoning+=delta.reasoning_content;_streamUpdateThink(reasoning);}
             if(delta.tool_trace){tools=delta.tool_trace;_streamToolMode="group";if(Array.isArray(delta.tool_trace))delta.tool_trace.forEach(function(t){if(t&&t.name)_streamPushTool(Object.assign({status:"done"},t));});}   // 旧整组（幂等回放）：2026-09-24 P1-4 前只存变量不渲染→工具卡实时全丢、落盘 timeline 无 tool 节点；现逐个推进渲染模型
             if(delta.tool_start){ _streamToolRunning++; _clearSilence(); _onToolStart(delta.tool_start); }
             if(delta.tool_args_delta)_onToolArgsDelta(delta.tool_args_delta);
