@@ -2860,6 +2860,9 @@ function splitBubbleText(text){
   return s.split(new RegExp("\\n\\s*"+esc+"\\s*\n")).map(function(p){return p.trim();}).filter(Boolean);
 }
 function renderAiContent(msgEl, bubble, content, reasoning){   // 2026-09-24 P2-8：tools/segments 参数随死分支删除（两调用点恒传 []/null）
+  // 2026-09-25 ④：数组型 content 先取文本部分——否则下面的 stripInnerTags(String(content)) 会把它归一成
+  // "[object Object]" 这种垃圾文本（现无触发路径，属防御性归一；AI 侧图片/文件不在渲染范围内）。
+  if(Array.isArray(content)) content=msgText({content:content});
   content=stripInnerTags(content);   // 保证 <memory>/<pin>/<wake>/<quiet> 不显示给用户
   content=stripCurrentTime(content).clean;   // 保证 <current_time> 标签也不显示（流式/最终都剥掉）
   // 2026-09-24 P2-8：下行注释声称的「分隔符整串置换成换行」此前只有注释、没有实现（历史遗留），
@@ -3163,7 +3166,7 @@ function buildAiUnitRow(hostMsg){
   const b=document.createElement("div");b.className="bubble";mc.appendChild(b);
   return {host:mc,bubble:b,row:row};
 }
-function makeMsgEl(m,idx,grpCls){
+function makeMsgEl(m,idx){
   const d=document.createElement("div");
   // 工具调用记录：保留在 msgs 里供模型跨轮参考，但界面上不渲染成气泡
   if(typeof m.content==="string" && m.content.indexOf("【工具调用记录】")===0){ return null; }
@@ -3173,7 +3176,7 @@ function makeMsgEl(m,idx,grpCls){
   if(m._callB){ return null; }
   const evt=classifyTimelineEvent(m);
   if(evt){
-    d.className="msg ev-"+evt+(grpCls?" "+grpCls:"");
+    d.className="msg ev-"+evt;
     d.dataset.idx=idx;
     const mt=msgTime(m);
     const t=fmtTime(mt);
@@ -3192,7 +3195,7 @@ function makeMsgEl(m,idx,grpCls){
     return d;
   }
   const roleCls=(m.role==="assistant"?"ai":m.role);
-  d.className="msg "+roleCls+(grpCls?" "+grpCls:"");
+  d.className="msg "+roleCls;
   d.dataset.idx=idx;
   if(selectMode){d.classList.add("selectable");if(selectSet.has(idx))d.classList.add("selected");}
   const mt=msgTime(m);
@@ -3309,11 +3312,21 @@ function _ensureIO(){
 }
 function _buildBatch(fromIdx,toIdx,insertBeforeEl){
   const frag=document.createDocumentFragment();
+  // 2026-09-25 ②：时间分隔线改为「以窗口外的相邻消息为基准」判断，不再对每批首条强制出线。
+  // 原实现以 lastShownTs=null 起算 → 每批首条必出分隔线，于是"加载更早/加载更新"后每个批次边界
+  // 都多一条时间行（即使前后两条只差几秒）。现首条也走同一条规则：跨天 或 间隔 ≥5 分钟 才出。
+  const _isSkipped=function(x){ return !x || x._callB || (typeof x.content==="string" && x.content.indexOf("【工具调用记录】")===0); };
   let lastShownTs=null,lastDay="";
+  for(let k=fromIdx-1;k>=0;k--){   // 向前找最近一条可渲染消息，用它的时间作为"上一行"基准
+    const pm=msgs[k];
+    if(_isSkipped(pm)) continue;
+    const pt=msgTime(pm);
+    if(pt&&!isNaN(pt.getTime())){ lastShownTs=pt.getTime(); lastDay=dayDivider(pt); }
+    break;
+  }
   for(let i=fromIdx;i<toIdx;i++){
     const m=msgs[i];
-    if(!m) continue;
-    if(m._callB||typeof m.content==="string"&&m.content.indexOf("【工具调用记录】")===0) continue;
+    if(_isSkipped(m)) continue;
     const mt=msgTime(m); const tmt=mt?mt.getTime():0;
     const day=dayDivider(mt);
     if(mt){
@@ -3325,7 +3338,7 @@ function _buildBatch(fromIdx,toIdx,insertBeforeEl){
       }
     }
     if(day&&day!==lastDay) lastDay=day;
-    const mel=makeMsgEl(m,i,""); if(mel) frag.appendChild(mel);
+    const mel=makeMsgEl(m,i); if(mel) frag.appendChild(mel);
   }
   return frag;
 }
@@ -3424,7 +3437,7 @@ function segPopOne(text,srcMsg,first){   // 弹出单条气泡 DOM（复用 make
     reasoning:(first&&(srcMsg&&srcMsg.reasoning))||"",
     tools:(first&&(srcMsg&&srcMsg.tools))||[],
     time:(srcMsg&&srcMsg.time)||new Date().toISOString()};
-  const el=makeMsgEl(fake,-1,"");
+  const el=makeMsgEl(fake,-1);
   if(!el)return;
   el.classList.add("stream-in");
   // 2026-09-24 P0：动画播完即移除类（animationend 一次性；.multi 无动画不触发 → 600ms 兜底）。
@@ -8255,8 +8268,7 @@ body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheet{background:
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheet span{color:#e8e8e8!important}
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheetBody{color:#e8e8e8!important}
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheetMask{background:rgba(0,0,0,.4)!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .tool-trace .tt-name,
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .rw-wrap .rw-h{color:#888!important}
+/* 2026-09-25 ①：此处原有第二份完全相同的 tt-name/rw-h dark 规则（历史遗留重复），已删。 */
 /* 2026-09-25 ③：黑夜反色补漏——以下元素底色原是写死的浅色蒙层（rgba(255,255,255,.25~.7)），
    与跟随主题变浅的文字叠加后在黑夜下对比度约 1~2.5:1，几乎不可读；极简下不受影响。 */
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) .file-card{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.12)}
