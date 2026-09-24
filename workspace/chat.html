@@ -2441,11 +2441,49 @@ function _streamEnsureRoot(){
   chatEl.appendChild(_streamRoot);
   return _streamRoot;
 }
-// 增量填充：只重写该节点自己的气泡内容（60ms 节流内高频调用），头像行不动，不再整段重建（P3-10 根治）
+// claude 主题打字机引擎：逐字吐出累积文本
+var _twTimer=null;
+function _twStart(){
+  if(_twTimer) return;
+  _twTimer=setInterval(_twTick, 30);
+}
+function _twStop(){
+  if(_twTimer){ clearInterval(_twTimer); _twTimer=null; }
+}
+function _twTick(){
+  // 找到当前最后一个未封口的 text node
+  var last=null;
+  for(var i=_streamRenderModel.length-1;i>=0;i--){
+    var n=_streamRenderModel[i];
+    if(n&&n.type==="text"){ last=n; break; }
+  }
+  if(!last||last.sealed){ _twStop(); return; }
+  if(last.shownCount===undefined) last.shownCount=0;
+  // 每次吐 1-2 个字符（标点后稍慢）
+  var total=last.text.length;
+  if(last.shownCount>=total){ _twStop(); return; }
+  var chunk=1;
+  var ch=last.text[last.shownCount];
+  if(/[，。！？；：、\n]/.test(ch)) chunk=2; // 标点后快一点追上
+  last.shownCount=Math.min(total, last.shownCount+chunk);
+  // 只渲染已吐出的部分
+  _streamFillBubblePartial(last);
+}
+function _streamFillBubblePartial(node){
+  var unit=node.unit;
+  if(!unit||!unit.bubble||!unit.bubble.parentNode) return;
+  var partial=node.text.slice(0,node.shownCount||node.text.length);
+  renderAiContent(unit.host,unit.bubble,partial,_streamNodeReasoning(node));
+}
+// 增量填充：只重写该节点自己的气泡内容，头像行不动
 function _streamFillBubble(node){
   const unit=node.unit;
   if(!unit||!unit.bubble||!unit.bubble.parentNode)return;
-  renderAiContent(unit.host,unit.bubble,node.text,_streamNodeReasoning(node));
+  var text = node.text;
+  if(chatEl && chatEl.dataset.layout==="claude" && node.shownCount!==undefined && !node.sealed){
+    text = node.text.slice(0,node.shownCount);
+  }
+  renderAiContent(unit.host,unit.bubble,text,_streamNodeReasoning(node));
 }
 function _streamRenderTextNode(node){
   const root=_streamEnsureRoot();
@@ -2513,14 +2551,9 @@ function _streamPushText(text,reasoningSrc){
     if(last.el&&last.el.parentNode){
       var _isClaude=(chatEl && chatEl.dataset.layout==="claude");
       if(_isClaude){
-        // claude 主题：打字机效果——60ms 节流逐字渲染
-        last._dirty=true;
-        if(!_streamTextRerenderTimer){
-          _streamTextRerenderTimer=setTimeout(function(){
-            _streamTextRerenderTimer=null;
-            _streamRenderModel.forEach(function(n){if(n&&n.type==="text"&&n._dirty){n._dirty=false;_streamFillBubble(n);}});
-          },60);
-        }
+        // claude 主题：真正的逐字打字机——累积 fullText，定时器逐字吐
+        if(last.shownCount===undefined) last.shownCount=0;
+        if(!_twTimer) _twStart();
       }else{
         // 其他主题：每段是完整气泡内容，直接整段重渲染
         _streamFillBubble(last);
@@ -2529,11 +2562,24 @@ function _streamPushText(text,reasoningSrc){
     return;
   }
   const first=!_streamRenderModel.some(function(x){return x.type==="text";});
-  _streamModelPush({type:"text",text:t,first:first,reasoning:"",reasoningSrc:first?(reasoningSrc||null):null,time:new Date().toISOString(),rendered:false,sealed:false});
+  var node={type:"text",text:t,first:first,reasoning:"",reasoningSrc:first?(reasoningSrc||null):null,time:new Date().toISOString(),rendered:false,sealed:false};
+  if(chatEl && chatEl.dataset.layout==="claude"){
+    node.shownCount=0;
+    if(!_twTimer) _twStart();
+  }
+  _streamModelPush(node);
 }
 function _streamSealCurrentText(){
   const last=_streamRenderModel.length?_streamRenderModel[_streamRenderModel.length-1]:null;
-  if(last&&last.type==="text")last.sealed=true;
+  if(last&&last.type==="text"){
+    last.sealed=true;
+    if(chatEl && chatEl.dataset.layout==="claude" && last.shownCount!==undefined){
+      // 封口时把剩余文字一次性渲染完
+      last.shownCount=last.text.length;
+      _streamFillBubble(last);
+    }
+  }
+  _twStop();
 }
 function _streamPushTool(tool){
   const node={type:"tool",tool:tool,el:null,rendered:false};
