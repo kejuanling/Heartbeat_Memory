@@ -8,6 +8,7 @@ const mcp = require('../mcp-tool-loop');
 const memoryPool = require('../memory-pool');
 const memoryEngine = require('../memory-engine');
 const tagParser = require('../tag-parser');
+const wakeSchedule = require('../lib/wake-schedule');
 const contextReplacements = require('../context-replacements');
 const contextCompactor = require('../context-compactor');
 const { imageAbsUrl } = require('./imgurl');
@@ -791,6 +792,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
       // 不再拿请求全量重建覆盖；通知由同步函数按需发出。
       // 2026-09-23：透传重生成锚点 id（前端「重新生成」时上报），服务端按 id 截断锚点 user 之后的全部内容
       appendRequestMessages(sessionId, kelivoMessages, { regenAnchorId: body.regen_anchor_id });
+      // 用户主动聊天 → 取消 AI 之前设的定时唤醒
+      try { wakeSchedule.clearSlot(sessionId); } catch(e) {}
     } else {
       console.log("[timeline] 跳过时间线保存 (真实消息=" + kelivoMessages.some(isRealMessageForTimeline) + ")");
     }
