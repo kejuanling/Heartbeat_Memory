@@ -3295,7 +3295,17 @@ function makeSegPlayer(srcMsg){
     if(forceTail){ emitText(tail.slice(pos)); cursor=clean.length; }
     else if(pos>0) cursor+=pos;
   }
-  function feed(full){ scan(full, !!(chatEl && chatEl.dataset.layout==="claude")); }   // claude=打字机实时吐尾部；其他主题=只在分隔符处吐整段
+  function feed(full){
+    if(chatEl && chatEl.dataset.layout==="claude"){
+      // claude 主题：不拆分隔符，整段连续进同一个 node，打字机逐字吐
+      const clean=cleanFull(full);
+      const tail=clean.slice(cursor);
+      cursor=clean.length;
+      if(tail.trim()) emitText(tail);
+    } else {
+      scan(full, false);   // 其他主题：只在分隔符处吐整段
+    }
+  }
   function seal(full){ scan(full,true); }
   async function flush(full){
     scan(full,true);
