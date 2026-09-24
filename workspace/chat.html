@@ -8041,8 +8041,11 @@ body[data-theme="dark"] .drawer-close{color:#999!important}
 }
 #chat[data-layout="claude"] .tool-trace .tt-h{
   font-size:14px!important;letter-spacing:0!important;color:#999!important;
-  padding:0!important;cursor:pointer;align-items:center;gap:6px;
+  padding:4px 0!important;cursor:pointer;align-items:center;gap:6px;
+  width:100%;
 }
+#chat[data-layout="claude"] .tool-trace{cursor:pointer}
+#chat[data-layout="claude"] .rw-wrap{cursor:pointer}
 #chat[data-layout="claude"] .tool-trace .tt-icon{display:none!important}
 #chat[data-layout="claude"] .tool-trace .tt-name{
   font-family:inherit!important;font-weight:400!important;color:#999!important;
@@ -8053,7 +8056,10 @@ body[data-theme="dark"] .drawer-close{color:#999!important}
 #chat[data-layout="claude"] .tool-trace .tt-run,
 #chat[data-layout="claude"] .tool-trace .tt-ok,
 #chat[data-layout="claude"] .tool-trace .tt-err{display:none!important}
-/* claude 工具卡：纯灰色文字，无图标 */
+/* claude 工具卡：纯灰色文字+箭头 */
+#chat[data-layout="claude"] .tool-trace .tt-h::after{
+  content:" ›";margin-left:4px;color:#bbb;font-size:16px;
+}
 /* claude 主题：思考链——折叠成一行，点击展开 */
 #chat[data-layout="claude"] .rw-wrap{
   background:transparent!important;border:0!important;border-radius:0!important;
@@ -8069,7 +8075,9 @@ body[data-theme="dark"] .drawer-close{color:#999!important}
   padding:0!important;box-shadow:none!important;
 }
 #chat[data-layout="claude"] .rw-wrap .rw .rw-a{display:none!important}
-/* claude 思考链：不额外加箭头，rw-h 里的 ▾ 已隐藏 */
+#chat[data-layout="claude"] .rw-wrap .rw-h::after{
+  content:" ›";margin-left:4px;color:#bbb;font-size:16px;
+}
 /* dark 下工具卡/思考链颜色 */
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) .tool-trace .tt-name,
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) .rw-wrap .rw-h{color:#888!important}
