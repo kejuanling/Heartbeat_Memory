@@ -4188,6 +4188,16 @@ function saveEdit(){
   }else{
     m.content=v;
   }
+  // 同步更新 stream_timeline 里的文本单元，否则 renderAll 会用旧 timeline 渲染
+  if(Array.isArray(m.stream_timeline)&&m.stream_timeline.length){
+    var _firstTextFound=false;
+    m.stream_timeline.forEach(function(u){
+      if(u&&u.kind==="text"){
+        if(!_firstTextFound){ u.text=v; _firstTextFound=true; }
+        else { u.text=""; }  // 后续文本单元清空（编辑只保留一段正文）
+      }
+    });
+  }
   saveMsgs();renderAll();
   closeEdit();
   showToast("已保存");
