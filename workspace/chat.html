@@ -2945,7 +2945,7 @@ function renderAiContent(msgEl, bubble, content, reasoning){   // 2026-09-24 P2-
     var body=tt.querySelector(".tt-body");
     var nameText=name?name.textContent.trim():"Tool";
     var bodyHtml=body?body.innerHTML:"";
-    openThinkSheet('<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><span style="font-size:18px">⏱</span><span style="font-size:15px;font-weight:500">'+nameText+'</span></div><div style="white-space:pre-wrap">'+bodyHtml+'</div>',"Summary");
+    openThinkSheet('<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><span style="font-size:15px;font-weight:500">'+nameText+'</span></div><div style="white-space:pre-wrap;word-break:break-word;overflow-wrap:break-word">'+bodyHtml+'</div>',"Summary");
   } else {
     tt.classList.toggle("open");
   }
@@ -2961,7 +2961,7 @@ document.addEventListener("click",function(e){
     var body=tt.querySelector(".tt-body");
     var nameText=name?name.textContent.trim():"Tool";
     var bodyHtml=body?body.innerHTML:"（无详情）";
-    openThinkSheet('<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><span style="font-size:18px">⏱</span><span style="font-size:15px;font-weight:500">'+nameText+'</span></div><div style="white-space:pre-wrap;font-size:14px;color:#555">'+bodyHtml+'</div>',"Summary");
+    openThinkSheet('<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><span style="font-size:15px;font-weight:500">'+nameText+'</span></div><div style="white-space:pre-wrap;font-size:14px;color:#555">'+bodyHtml+'</div>',"Summary");
     return;
   }
   var rw=e.target.closest(".rw-wrap .rw");
@@ -8271,7 +8271,7 @@ body:has(#chat[data-layout="claude"]) .session-item.active,body:has(#chat[data-l
     <span id="thinkSheetTitle" style="font-size:15px;font-weight:600;color:#333">Thought</span>
     
   </div>
-  <div id="thinkSheetBody" style="padding:8px 20px 40px;overflow-y:auto;-webkit-overflow-scrolling:touch;font-size:15px;line-height:1.7;color:#333;white-space:pre-wrap"></div>
+  <div id="thinkSheetBody" style="padding:8px 20px 40px;overflow-y:auto;-webkit-overflow-scrolling:touch;font-size:15px;line-height:1.7;color:#333;white-space:pre-wrap;word-break:break-word;overflow-wrap:break-word"></div>
 </div>
 <div id="thinkSheetMask" style="display:none;position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.2);backdrop-filter:blur(2px)"></div>
 </body>
