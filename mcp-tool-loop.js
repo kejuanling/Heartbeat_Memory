@@ -341,7 +341,7 @@ async function streamToolLoop({
   const emit = (evt) => { try { if (typeof onEvent === "function") onEvent(evt); } catch (e) { clientGone = true; } };
 
   for (let round = 0; round < maxToolRounds + 1; round++) {
-    if (clientGone) { console.log("[mcp] 客户端已断开，流式工具循环提前结束"); break; }
+    // 客户端断开不中断循环——继续跑完上游请求
     rounds = round;
     const body = { model, messages: working, stream: true, temperature, top_p, max_tokens };
     if (round < maxToolRounds && openaiTools.length > 0) { body.tools = openaiTools; body.tool_choice = "auto"; }
@@ -411,8 +411,7 @@ async function streamToolLoop({
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      // 2026-09-21 审查 R7：客户端断开即取消上游流并结束本轮
-      if (clientGone) { try { await reader.cancel(); } catch (e) {} break; }
+      // 客户端断开不取消上游流——网关继续跑完，结果存时间线，前端重连后可见
       buf += decoder.decode(value, { stream: true });
       let nl;
       while ((nl = buf.indexOf("\n")) !== -1) {
@@ -473,8 +472,7 @@ async function streamToolLoop({
     if (roundReasoning) reasoningParts.push(roundReasoning);
     if (seenContent) contentParts.push(roundContent);
 
-    // 2026-09-21 审查 R7：断开后不再执行本轮工具
-    if (clientGone) break;
+    // 客户端断开后继续执行工具——结果要攒下来写入时间线
     const toolCalls = toolCallAcc.map(function (s, i) {
       if (!s || !s.name) return null;
       return { _sourceIndex: i, id: s.id || ("call_" + Date.now() + "_" + i), type: "function", function: { name: s.name, arguments: s.args || "{}" } };
@@ -483,7 +481,6 @@ async function streamToolLoop({
     if (!toolCalls.length) break;
 
     for (let i = 0; i < toolCalls.length; i++) {
-      if (clientGone) break; // 2026-09-21 审查 R7
       const tc = toolCalls[i];
       const fn = tc.function || {}; const name = fn.name || "";
       const args = _parseArgs(fn.arguments);
