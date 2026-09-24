@@ -2820,7 +2820,8 @@ function renderAiContent(msgEl, bubble, content, reasoning){   // 2026-09-24 P2-
     if(showThink){
       const rc=cfg.thinking_md?renderMd(reasoning):escapeHtml(reasoning);
       var thinkLabel = (chatEl && chatEl.dataset.layout==="claude") ? "Thought" : "思考过程";
-      ph+='<div class="rw"><span class="rw-h">'+(chatEl && chatEl.dataset.layout==="claude" ? '' : '<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1 0-2-.2-2.9-.5L4 21l1.5-5.6A8.5 8.5 0 1 1 21 11.5z"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="13" x2="14" y2="13"/></svg> ')+thinkLabel+'<span class="rw-a">▾</span></span><div class="rw-c">'+rc+'</div></div>';
+      var rwCls = chatEl && chatEl.dataset.layout==="claude" && showThink ? "rw-h shimmer" : "rw-h";
+      ph+='<div class="rw"><span class="'+rwCls+'">'+(chatEl && chatEl.dataset.layout==="claude" ? '' : '<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1 0-2-.2-2.9-.5L4 21l1.5-5.6A8.5 8.5 0 1 1 21 11.5z"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="13" x2="14" y2="13"/></svg> ')+thinkLabel+'<span class="rw-a">▾</span></span><div class="rw-c">'+rc+'</div></div>';
     }
     pre.innerHTML=ph;
     pre.querySelectorAll(".rw").forEach(rw=>rw.addEventListener("click",function(){
@@ -3432,9 +3433,17 @@ function showHeaderTyping(show){
         _claudeTypingEl.className="claude-typing";
         _claudeTypingEl.innerHTML='<div class="claude-typing-dot"></div>';
       }
-      if(!_claudeTypingEl.parentNode && chatEl){ chatEl.appendChild(_claudeTypingEl); if(autoScroll)scrollBottom(); }
+      if(!_claudeTypingEl.parentNode && chatEl){
+        // 优先插在思考链(.rw-wrap)后面，否则 append 到末尾
+        var rw=chatEl.querySelector(".rw-wrap:last-of-type");
+        if(rw && rw.nextSibling){ chatEl.insertBefore(_claudeTypingEl, rw.nextSibling); }
+        else { chatEl.appendChild(_claudeTypingEl); }
+        if(autoScroll)scrollBottom();
+      }
     }else{
       if(_claudeTypingEl && _claudeTypingEl.parentNode) _claudeTypingEl.parentNode.removeChild(_claudeTypingEl);
+      // 去掉思考链光效
+      if(chatEl) chatEl.querySelectorAll(".rw-h.shimmer").forEach(function(el){ el.classList.remove("shimmer"); });
     }
     return;
   }
@@ -8041,6 +8050,18 @@ body[data-theme="dark"] #settingsDrawer .drawer-panel,body[data-theme="dark"] .d
 body[data-theme="dark"] .drawer-head{color:#ccc!important}
 body[data-theme="dark"] .drawer-close{color:#999!important}
 /* claude 主题：呼吸圆圈 typing 指示器 */
+/* claude 思考链光效 */
+@keyframes thoughtShimmer{
+  0%{background-position:-200% 0}
+  100%{background-position:200% 0}
+}
+#chat[data-layout="claude"] .rw-wrap .rw-h.shimmer{
+  background:linear-gradient(90deg,#999 0%,#ccc 50%,#999 100%);
+  background-size:200% 100%;
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;
+  animation:thoughtShimmer 1.5s linear infinite;
+}
 .claude-typing{display:flex;align-items:center;padding:8px 0;margin-bottom:8px}
 .claude-typing-dot{width:10px;height:10px;border-radius:50%;background:#999;animation:claudeBreathe 1.2s ease-in-out infinite}
 @keyframes claudeBreathe{0%,100%{transform:scale(.6);opacity:.4}50%{transform:scale(1.2);opacity:1}}
