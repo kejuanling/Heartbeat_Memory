@@ -2027,7 +2027,17 @@ let fileData=[];
 function loadMsgs(){
   try{return JSON.parse(localStorage.getItem(LS_MSGS+"_"+SessionStore.getCurrentSession())||"[]");}catch(e){return [];}
 }
-function saveMsgs(){ try{ localStorage.setItem(LS_MSGS+"_"+SessionStore.getCurrentSession(),JSON.stringify(msgs)); }catch(e){ /* 配额满或超限时忽略，避免中断发送/流式 */ } }
+let _saveMsgsFailed=false;   // 2026-09-24 P0：本地缓存写入失败可观测——配额满时静默失败会让本地永久落后于服务器，_doHistoryPull 会把整段历史当新增逐条重播
+function saveMsgs(){
+  try{ localStorage.setItem(LS_MSGS+"_"+SessionStore.getCurrentSession(),JSON.stringify(msgs)); _saveMsgsFailed=false; }
+  catch(e){
+    // 配额满或超限：不再完全静默。置位后仅首次提示一次（防刷屏），避免中断发送/流式
+    if(!_saveMsgsFailed){
+      _saveMsgsFailed=true;
+      try{ if(typeof showToast==="function") showToast("本地缓存已满，历史同步降级，请清理浏览器存储"); }catch(_e){}
+    }
+  }
+}
 
 /* 顶部加载指示：in-flight 计数，超过 250ms 才显示，防快速请求闪烁 */
 let _topLoadCnt=0,_topLoadTimer=null;
@@ -2082,7 +2092,13 @@ async function _doHistoryPull(){
         if(!a||!b){same=false;break;}
         if(nk(a)!==nk(b)){same=false;break;}
       }
-      if(same)added=hist.slice(localMsgs.length);
+      if(same){
+        added=hist.slice(localMsgs.length);
+        // 2026-09-24 P0：本地落后护栏——多出的条数过多（>=10 或占 hist 一半）时视为「本地缓存落后于服务器」
+        // （配额满/旧快照/服务器多条目）而非真·新增消息：放弃逐条弹出（否则整段历史被当新增重播一遍），
+        // 改走下方 renderAllNoAnim 静默校准。
+        if(added.length>=10||added.length*2>=hist.length)added=[];
+      }
     }
     const playables=added.filter(function(m){return m&&(m.role==="user"||m.role==="assistant"||m.role==="ai");});
     // 完全无变化就不重建（避免每次 SSE 都把整列多段气泡的进场动画重播一遍）
@@ -2488,7 +2504,9 @@ function _streamFillBubble(node){
 function _streamRenderTextNode(node){
   const root=_streamEnsureRoot();
   node.unit=buildAiUnitRow(root);
-  if(node.unit.row)node.unit.row.classList.add("stream-in");   // 每段弹出保留进场动画（原每条 .msg stream-in 的等效）
+  // 2026-09-24 P0：删原「给 .mrow 加 stream-in 保留段级进场动画」——动画选择器是 .msg.stream-in:not(.multi)，
+  // .mrow 不匹配且全文件无 .mrow.stream-in 规则，该行从未生效（死逻辑）。流式整条回复住 .msg.ai.multi
+  // 容器（_streamEnsureRoot），multi 本就被禁动画；段级进场动画不再有实现意图。
   _streamFillBubble(node);
   if(autoScroll)scrollBottom();
   return node.unit.bubble;
@@ -2820,7 +2838,7 @@ function renderAiContent(msgEl, bubble, content, reasoning){   // 2026-09-24 P2-
     if(showThink){
       const rc=cfg.thinking_md?renderMd(reasoning):escapeHtml(reasoning);
       var thinkLabel = (chatEl && chatEl.dataset.layout==="claude") ? "Thought" : "思考过程";
-      var rwCls = chatEl && chatEl.dataset.layout==="claude" && showThink ? "rw-h shimmer" : "rw-h";
+      var rwCls = (chatEl && chatEl.dataset.layout==="claude" && showThink && _streamActive) ? "rw-h shimmer" : "rw-h";
       ph+='<div class="rw"><span class="'+rwCls+'">'+(chatEl && chatEl.dataset.layout==="claude" ? '' : '<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1 0-2-.2-2.9-.5L4 21l1.5-5.6A8.5 8.5 0 1 1 21 11.5z"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="13" x2="14" y2="13"/></svg> ')+thinkLabel+'<span class="rw-a">▾</span></span><div class="rw-c">'+rc+'</div></div>';
     }
     pre.innerHTML=ph;
@@ -3280,9 +3298,10 @@ function loadMoreNewer(){
     try{ const io=_ensureIO(); if(io) io.observe(_sentBtm); }catch(e){}
   }
 }
-// 置位时渲染不加气泡进场动画：流式分段逐条弹出后收尾重建用，避免整块动画重播
-let _noAnim=false;
-function renderAllNoAnim(keepPos){ _noAnim=true; try{renderAll(keepPos);}finally{_noAnim=false;} }
+// 2026-09-24 P0：renderAllNoAnim 不再置位（原 _noAnim 全文件零读取，是死变量）。
+// 重建路径本就无进场动画：.msg 默认 animation:none（CSS）+ makeMsgEl 批量重建不加 stream-in，
+// 动画只发生在 segPopOne/流式实时路径。保留函数名供调用点语义不变。
+function renderAllNoAnim(keepPos){ renderAll(keepPos); }
 /* ===== AI 消息 QQ 式分段连播（三条入口共用）=====
    页面流式发送(逐chunk喂) / 非流式发送(整段一次喂) / SSE补拉新消息(整条喂)。
    每段内容收齐后整条弹出一个气泡，一条接一条；连发时限速，贴近真人发消息节奏。 */
@@ -3312,6 +3331,10 @@ function segPopOne(text,srcMsg,first){   // 弹出单条气泡 DOM（复用 make
   const el=makeMsgEl(fake,-1,"");
   if(!el)return;
   el.classList.add("stream-in");
+  // 2026-09-24 P0：动画播完即移除类（animationend 一次性；.multi 无动画不触发 → 600ms 兜底）。
+  // 原实现类永久残留：claude 主题 CSS `#chat[data-layout="claude"] .msg.stream-in .claude-msg-actions{display:none}`
+  // 会让连播弹出的 AI 消息操作行（复制/编辑/更多）永久隐藏，而重建后正常 → 实时/重建不一致。
+  (function(){ var _clean=function(){ el.classList.remove("stream-in"); }; el.addEventListener("animationend",_clean,{once:true}); setTimeout(_clean,600); })();
   removeEmpty();
   chatEl.appendChild(el);
   // 2026-09-23 修复：原 if(_streamActive){ ... } 块引用 _streamNextSegIndex / _streamSegAnchors
@@ -4730,7 +4753,7 @@ const THEME_PRESETS={warm:{name:"暖白",layout:"sms",vars:{"--bg1":"#FCF9F7","-
 "--send-size":"36px","--send-radius":"50%","--send-font-size":"16px","--send-shadow":"none",
 "--send-hover-bg":"#333333",
 "--theme-dur":"0ms","--bg-blur":"0px",
-"--user-font-color":"#1a1a1a","--ai-font-color":"#1a1a1a"}},dark:{name:"黑夜",layout:"claude",vars:{"--bg1":"#1a1a1a","--bg2":"#1a1a1a","--bg3":"#1a1a1a","--ink":"#e8e8e8","--ink2":"#999","--ink3":"#666","--surface":"#2a2a2a","--card":"#2a2a2a","--sheet-bg":"#2a2a2a","--bubble-user":"#2d2d2d","--bubble-user1":"#2d2d2d","--bubble-user2":"#2d2d2d","--inputbar-bg":"#2d2d2d","--input-text":"#e8e8e8","--send-bg":"#e8e8e8","--send-icon":"#1a1a1a","--field-bg":"#2a2a2a","--menu-bg":"#2a2a2a","--code-bg":"#333","--code-ink":"#aaa","--header-bg":"#1a1a1a","--header-title-color":"#e8e8e8","--header-btn-bg":"#2d2d2d","--header-btn-color":"#ccc","--session-active-bg":"#333","--session-title-color":"#e8e8e8","--session-meta-color":"#666","--user-font-color":"#e8e8e8","--ai-font-color":"#e8e8e8"}
+"--user-font-color":"#1a1a1a","--ai-font-color":"#1a1a1a"}},dark:{name:"黑夜",layout:"claude",vars:{"--bg1":"#1a1a1a","--bg2":"#1a1a1a","--bg3":"#1a1a1a","--ink":"#e8e8e8","--ink2":"#999","--ink3":"#666","--surface":"#2a2a2a","--surface-solid":"#2a2a2a","--card":"#2a2a2a","--card-solid":"#2a2a2a","--sheet-bg":"#2a2a2a","--chrome-rgb":"45,45,45","--chrome-item":"rgba(45,45,45,.8)","--chrome-item-hover":"rgba(58,58,58,.92)","--accent":"#a0a0a0","--accent-deep":"#cfcfcf","--accent-soft":"rgba(160,160,160,.14)","--accent-faint":"rgba(160,160,160,.07)","--accent-grad":"linear-gradient(135deg,#666,#333)","--accent-rgb":"160,160,160","--border":"rgba(255,255,255,.08)","--border-strong":"rgba(255,255,255,.16)","--line":"rgba(255,255,255,.08)","--line-strong":"rgba(255,255,255,.16)","--shadow-soft":"0 2px 10px rgba(0,0,0,.25)","--shadow-float":"0 10px 30px rgba(0,0,0,.45)","--shadow-rgb":"0,0,0","--mask-rgb":"0,0,0","--bubble-shadow":"none","--bubble-ai":"#2a2a2a","--bubble-user":"#2d2d2d","--bubble-user1":"#2d2d2d","--bubble-user2":"#2d2d2d","--radius":"20px","--radius-sm":"12px","--panel-radius":"24px","--bg-img":"none","--bubble-opacity":"1","--bubble-blur":"0px","--cap-think-border":"#333","--cap-think-bg":"#222","--cap-think-text":"#999","--cap-tool-border":"#333","--cap-tool-bg":"#222","--cap-tool-text":"#888","--hd-title":"#e8e8e8","--inputbar-bg":"#2d2d2d","--inputbar-border":"rgba(255,255,255,.08)","--input-text":"#e8e8e8","--send-bg":"#e8e8e8","--send-icon":"#1a1a1a","--icon-btn-bg":"transparent","--icon-btn-color":"#999","--ok":"#6fae86","--ok-deep":"#5a9470","--ok-soft":"rgba(111,174,134,.15)","--ok-rgb":"111,174,134","--warn":"#c9a05e","--warn-deep":"#a8843f","--warn-soft":"rgba(201,160,94,.15)","--warn-rgb":"201,160,94","--bad":"#d08078","--bad-deep":"#b5655d","--bad-soft":"rgba(208,128,120,.15)","--bad-rgb":"208,128,120","--bad-grad":"#d06f66","--info":"#7d8a99","--info-rgb":"125,138,153","--field-bg":"#2a2a2a","--menu-bg":"#2a2a2a","--code-bg":"#333","--code-ink":"#aaa","--glass":"10px","--font-family":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--font-size":"16px","--line-height":"1.7","--font-weight":"400","--letter-spacing":"0em","--font-family-mono":"ui-monospace,\"SF Mono\",Menlo,Consolas,monospace","--title-font":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",sans-serif","--header-padding":"calc(env(safe-area-inset-top) + 12px) 16px 10px","--header-gap":"12px","--header-bg":"#1a1a1a","--header-border":"1px solid rgba(255,255,255,.06)","--header-shadow":"none","--header-blur":"0px","--header-saturate":"100%","--header-title-x":"0px","--header-title-y":"0px","--header-title-size":"16px","--header-title-weight":"600","--header-title-letter-spacing":"normal","--header-title-color":"#e8e8e8","--header-title-font":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",sans-serif","--header-sub-size":"11px","--header-sub-color":"#666","--header-sub-letter-spacing":".02em","--header-sub-gap":"2px","--header-btn-size":"36px","--header-btn-radius":"50%","--header-btn-bg":"#2d2d2d","--header-btn-color":"#ccc","--header-btn-font-size":"17px","--header-btn-shadow":"none","--header-btn-transition":"background .2s,color .2s,transform .15s","--header-btn-hover-bg":"#3a3a3a","--header-btn-hover-color":"#fff","--header-btn-active-bg":"#333","--header-btn-active-color":"#fff","--session-padding":"10px 14px","--session-margin":"3px 8px","--session-radius":"12px","--session-transition":"background .15s,border-color .15s","--session-bg":"rgba(42,42,42,.6)","--session-hover-bg":"#333","--session-active-bg":"#333","--session-active-border":"rgba(255,255,255,.12)","--session-title-size":"14px","--session-title-weight":"500","--session-title-color":"#e8e8e8","--session-meta-size":"11px","--session-meta-color":"#666","--session-action-hover-color":"#ccc","--session-action-hover-bg":"#333","--call-bg":"linear-gradient(165deg,#1a1a1a,#242424)","--bubble-font-size":"16px","--bubble-line-height":"1.7","--bubble-font-weight":"400","--bubble-letter-spacing":"0em","--bubble-para-gap":"10px","--msg-gap":"20px","--bubble-max-width":"75%","--bubble-padding":"0","--avatar-size":"34px","--avatar-radius":"50%","--inputbar-radius":"24px","--inputbar-gap":"8px","--inputbar-padding":"10px 14px","--inputbar-shadow":"0 1px 3px rgba(0,0,0,.3)","--inputbar-focus-border":"transparent","--inputbar-focus-shadow":"none","--input-font-size":"16px","--input-line-height":"1.5","--input-max-height":"120px","--input-placeholder":"#666","--icon-btn-size":"36px","--icon-btn-radius":"50%","--icon-btn-font-size":"18px","--send-size":"36px","--send-radius":"50%","--send-font-size":"16px","--send-shadow":"none","--send-hover-bg":"#cfcfcf","--theme-dur":"0ms","--bg-blur":"0px","--user-font-color":"#e8e8e8","--ai-font-color":"#e8e8e8"}
 }};
 function applyTheme(){const name=THEME_PRESETS[cfg.theme]?cfg.theme:"warm";cfg.theme=name;const root=document.documentElement.style;Object.keys(THEME_PRESETS[name].vars).forEach(function(k){root.setProperty(k,THEME_PRESETS[name].vars[k]);});document.body.setAttribute("data-theme",name);document.body.setAttribute("data-style","classic");document.body.setAttribute("data-bgblur","0");document.body.style.fontFamily="";document.body.style.background="";
   if(cfg.bg_image){
@@ -4740,7 +4763,10 @@ function applyTheme(){const name=THEME_PRESETS[cfg.theme]?cfg.theme:"warm";cfg.t
     document.body.style.backgroundPosition="center";
     document.body.style.backgroundAttachment="fixed";
     document.body.style.backgroundColor="rgba(245,245,245,"+(1-op)+")";
-  }if(chatEl)chatEl.setAttribute("data-layout",THEME_PRESETS[name].layout||"sms");cfg.show_avatar=(name==="wx"||name==="claude");try{applyHeader();}catch(e){}const grid=document.getElementById("themeGrid");if(grid)grid.querySelectorAll(".theme-choice").forEach(function(b){b.classList.toggle("active",b.dataset.theme===name);});}
+  }if(chatEl)chatEl.setAttribute("data-layout",THEME_PRESETS[name].layout||"sms");if(name==="wx")cfg.show_avatar=true;
+  // 2026-09-24 P0：不再对 claude 静默改写全局配置——claude 布局 CSS 已强制隐藏 .mav（L7969）；
+  // wx 布局有 layout==="wx" 兜底创建头像；切回其他主题不再被置 false
+  try{applyHeader();}catch(e){}const grid=document.getElementById("themeGrid");if(grid)grid.querySelectorAll(".theme-choice").forEach(function(b){b.classList.toggle("active",b.dataset.theme===name);});}
 applyTheme();
 if(cfg.bg_image){document.getElementById("bgImageInput").value=cfg.bg_image;}
 const themeGrid=document.getElementById("themeGrid");if(themeGrid)themeGrid.addEventListener("click",function(e){const b=e.target.closest(".theme-choice");if(!b)return;cfg.theme=b.dataset.theme||"warm";saveCfg();applyTheme();renderAll();});
@@ -7960,7 +7986,8 @@ body:has(#chat[data-layout="wx"]) .session-item .s-name .s-icon.pin:not(.on){col
 
 /* ===== 极简 Claude 风主题 ===== */
 #chat[data-layout="claude"]{padding-left:4%;padding-right:4%;padding-bottom:12px}
-body:has(#chat[data-layout="claude"]){background:linear-gradient(180deg,#faf9f7 0%,#f0efec 100%)!important;font-family:Georgia,-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Noto Sans CJK SC","Microsoft YaHei",serif}
+/* 2026-09-24 P0：claude 背景规则去 !important——原 !important 会压掉 applyTheme 设置的用户背景图（内联 backgroundImage 优先于样式表），切到极简后背景图静默失效 */
+body:has(#chat[data-layout="claude"]){background:linear-gradient(180deg,#faf9f7 0%,#f0efec 100%);font-family:Georgia,-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Noto Sans CJK SC","Microsoft YaHei",serif}
 body:has(#chat[data-layout="claude"]) header{background:transparent;border-bottom:none;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
 /* AI 消息：无气泡纯文字左对齐，无头像无名称 */
 #chat[data-layout="claude"] .msg.ai .bubble{background:transparent!important;box-shadow:none!important;border:none!important;padding:0!important;border-radius:0!important;color:#1a1a1a;max-width:100%!important}
@@ -8016,7 +8043,8 @@ body:has(#chat[data-layout="claude"]) .claude-fab-right{display:flex}
 .claude-fab-right.open .fab-btn.expandable:nth-child(3){transition-delay:.1s}
 #chat[data-layout="claude"] .msg.ai .bubble{max-width:100%!important}
 /* dark 主题（黑夜）反色 */
-body[data-theme="dark"]:has(#chat[data-layout="claude"]){background:#1a1a1a!important}
+/* 2026-09-24 P0：dark 布局同样去 !important，让用户背景图在黑夜主题也能生效；无背景图时 #1a1a1a 兜底 */
+body[data-theme="dark"]:has(#chat[data-layout="claude"]){background:#1a1a1a}
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) .msg.ai{color:#e8e8e8!important}
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) .msg.ai .bubble{color:#e8e8e8!important}
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) .msg.user .bubble{background:#2d2d2d!important;color:#e8e8e8!important}
