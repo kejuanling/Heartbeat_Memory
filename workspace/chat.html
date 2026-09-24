@@ -2499,17 +2499,20 @@ function _streamRenderToolNode(node){
   const card=tmp.firstChild;
   if(!card)return null;
   card.classList.add("stream-in");
-  card.addEventListener("click",function(){
+  card.addEventListener("click",function(e){
+    e.stopPropagation();
     if(chatEl && chatEl.dataset.layout==="claude"){
       var name=card.querySelector(".tt-name");
       var body=card.querySelector(".tt-body");
       var nameText=name?name.textContent.trim():"Tool";
-      var bodyHtml=body?body.innerHTML:"";
-      openThinkSheet('<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><span style="font-size:18px">⏱</span><span style="font-size:15px;font-weight:500">'+nameText+'</span></div><div style="white-space:pre-wrap">'+bodyHtml+'</div>',"Summary");
+      var bodyHtml=body?body.innerHTML:"（无详情）";
+      openThinkSheet('<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><span style="font-size:18px">⏱</span><span style="font-size:15px;font-weight:500">'+nameText+'</span></div><div style="white-space:pre-wrap;font-size:14px;color:#555">'+bodyHtml+'</div>',"Summary");
     } else {
       card.classList.toggle("open");
     }
   });
+  card.style.pointerEvents="auto";
+  card.style.cursor="pointer";
   // B4（2026-09-24）：进整条消息容器（原 chatEl 直挂是「两套 DOM」的根源，P1-3 根治）
   const root=_streamEnsureRoot();
   root.appendChild(card);
@@ -8036,8 +8039,8 @@ body[data-theme="dark"] .drawer-close{color:#999!important}
 /* claude 主题：工具卡——简洁灰色文字+图标+箭头，无卡片背景 */
 #chat[data-layout="claude"] .tool-trace{
   background:transparent!important;border:0!important;border-radius:0!important;
-  padding:0!important;margin:4px 0!important;width:100%!important;max-width:100%!important;
-  box-shadow:none!important;overflow:visible!important;
+  padding:6px 0!important;margin:4px 0!important;width:100%!important;max-width:100%!important;
+  box-shadow:none!important;overflow:visible!important;pointer-events:auto!important;
 }
 #chat[data-layout="claude"] .tool-trace .tt-h{
   font-size:14px!important;letter-spacing:0!important;color:#999!important;
