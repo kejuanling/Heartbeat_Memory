@@ -2457,39 +2457,108 @@ function _streamEnsureRoot(){
   chatEl.appendChild(_streamRoot);
   return _streamRoot;
 }
-// claude 主题打字机引擎：逐字吐出累积文本
+// claude 主题打字机引擎：逐字吐出累积文本（2026-09-25 优化：匀速/后台完成/未渲染不吐/收尾追赶/reduced-motion）
 var _twTimer=null;
+var _twReducedMotion=false;   // 系统减弱动态偏好（prefers-reduced-motion）命中时不打字机，直接完整渲染
+var _twScrollLast=0;          // 打字机帧滚动跟随节流（200ms）
+function _twPendingNodes(){
+  var out=[];
+  for(var i=0;i<_streamRenderModel.length;i++){
+    var n=_streamRenderModel[i];
+    if(n&&n.type==="text"&&n.rendered&&n.shownCount!==undefined&&n.shownCount<n.text.length) out.push(n);
+  }
+  return out;
+}
+function _twLastNode(){
+  // 找"最早未吐完"的 text node：工具边界封口后若还有剩余，打字机先吐完它再吐新节点，
+  // 避免"正文→工具→正文"时上一段正文停在半截（原实现只取最后一个节点）。
+  var pending=_twPendingNodes();
+  if(pending.length)return pending[0];
+  // 全部吐完：回退到最后一个 text node（_twTick 见 shownCount>=total 会 stop）
+  for(var i=_streamRenderModel.length-1;i>=0;i--){
+    var n=_streamRenderModel[i];
+    if(n&&n.type==="text")return n;
+  }
+  return null;
+}
 function _twStart(){
   if(_twTimer) return;
+  // 系统减弱动态偏好：不启动打字机，节点渲染时直接完整显示（见 _streamRenderTextNode）
+  if(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches){ _twReducedMotion=true; return; }
   _twTimer=setInterval(_twTick, 30);
 }
 function _twStop(){
   if(_twTimer){ clearInterval(_twTimer); _twTimer=null; }
 }
+function _twNeedContinue(){
+  if(_twReducedMotion) return false;
+  return _twPendingNodes().length>0;
+}
+// 后台 tab：直接完成所有未吐完节点（省 CPU；回到前台后新 chunk 会重新 _twStart）
+function _twCompleteLast(){
+  _twPendingNodes().forEach(function(n){
+    if(n.el&&n.el.parentNode){ n.shownCount=n.text.length; _streamFillBubblePartial(n); }
+  });
+  _twStop();
+}
 function _twTick(){
-  // 找到当前最后一个未封口的 text node
-  var last=null;
-  for(var i=_streamRenderModel.length-1;i>=0;i--){
-    var n=_streamRenderModel[i];
-    if(n&&n.type==="text"){ last=n; break; }
-  }
-  if(!last||last.sealed){ _twStop(); return; }
+  // 后台 tab：直接完成（2026-09-25 建议5，省 CPU）
+  if(document.hidden){ _twCompleteLast(); return; }
+  var last=_twLastNode();
+  if(!last){ _twStop(); return; }
+  if(!last.rendered){ return; }   // 节点未渲染不吐（2026-09-25：根治"DOM 未就绪时空转累加 shownCount"）
   if(last.shownCount===undefined) last.shownCount=0;
-  // 每次吐 1-2 个字符（标点后稍慢）
   var total=last.text.length;
   if(last.shownCount>=total){ _twStop(); return; }
-  var chunk=1;
-  var ch=last.text[last.shownCount];
-  if(/[，。！？；：、\n]/.test(ch)) chunk=2; // 标点后快一点追上
-  last.shownCount=Math.min(total, last.shownCount+chunk);
-  // 只渲染已吐出的部分
+  last.shownCount=Math.min(total, last.shownCount+1);   // 匀速 1 字符/帧（2026-09-25 可选6：去掉原"标点 chunk=2"反直觉加速）
   _streamFillBubblePartial(last);
+}
+// 收尾追赶（2026-09-25 必做1）：drain 完成后、renderAllNoAnim 重建前，把剩余文字快速吐完，
+// 避免打字机吐一半被整体重建截断（跳变）。10ms/批 +40 字符，800ms 超时兜底（不阻塞落盘）。
+function _twCatchUp(){
+  return new Promise(function(res){
+    var pending=_twPendingNodes();
+    if(!pending.length){ res(); return; }
+    var t0=Date.now();
+    (function step(){
+      var left=_twPendingNodes();
+      if(!left.length||Date.now()-t0>800){
+        left.forEach(function(n){ n.shownCount=n.text.length; if(n.el&&n.el.parentNode)_streamFillBubblePartial(n); });
+        res(); return;
+      }
+      left.forEach(function(n){ n.shownCount=Math.min(n.text.length,n.shownCount+40); if(n.el&&n.el.parentNode)_streamFillBubblePartial(n); });
+      setTimeout(step,10);
+    })();
+  });
+}
+// 打字机帧轻量渲染（2026-09-25 方案B）：已完整行正常 markdown，最后未写完的半行纯文本；
+// 检测未闭合代码块（``` 出现奇数次）→ 整段纯文本（避免未闭合语法渲染成怪样/闪烁）。
+function partialToHtml(partial,cfg){
+  var s=String(partial||"");
+  if(!s)return "";
+  var md=!!(cfg&&cfg.ai_md);
+  var fence=s.split("```").length-1;
+  if(fence%2===1)return escapeHtml(s).replace(/\n/g,"<br>");
+  var lines=s.split("\n");
+  var last=lines.pop();   // 最后一行视为"正在写"的半行
+  var done=lines.join("\n");
+  var h="";
+  if(done){ h+= md?renderMd(done):escapeHtml(done).replace(/\n/g,"<br>"); }
+  if(last!==undefined && last!==""){ h+=(h?'\n':'')+escapeHtml(last); }
+  return h;
 }
 function _streamFillBubblePartial(node){
   var unit=node.unit;
   if(!unit||!unit.bubble||!unit.bubble.parentNode) return;
   var partial=node.text.slice(0,node.shownCount||node.text.length);
-  renderAiContent(unit.host,unit.bubble,partial,_streamNodeReasoning(node));
+  // 方案B：只更新正文气泡（轻量渲染），思考链/工具胶囊由首帧 _streamFillBubble 渲染，此处不再每帧重建
+  unit.bubble.innerHTML=partialToHtml(partial,cfg);
+  // 打字机帧滚动跟随（2026-09-25 建议4）：autoScroll 由 chatEl scroll 事件维护（用户上滑即 false），
+  // 跟随仅看 autoScroll（内容增长会让 nearBottom() 误判为"不在底部"，不可用）；节流 ~200ms；后台不滚
+  if(!document.hidden && autoScroll){
+    var now=Date.now();
+    if(now-_twScrollLast>=200){ _twScrollLast=now; scrollBottom(); }
+  }
 }
 // 增量填充：只重写该节点自己的气泡内容，头像行不动
 function _streamFillBubble(node){
@@ -2504,9 +2573,10 @@ function _streamFillBubble(node){
 function _streamRenderTextNode(node){
   const root=_streamEnsureRoot();
   node.unit=buildAiUnitRow(root);
-  // claude 主题：DOM 建好后才从 0 开始逐字吐——避免打字机在 DOM 未就绪时空转累加 shownCount
+  // claude 主题：DOM 建好后打字机才真正开始吐（_twTick 对未渲染节点不吐，此处复位 shownCount 双保险；
+  // reduced-motion 命中时直接完整显示，不打字机）
   if(chatEl && chatEl.dataset.layout==="claude" && node.shownCount!==undefined){
-    node.shownCount=0;
+    node.shownCount=_twReducedMotion?node.text.length:0;
   }
   _streamFillBubble(node);
   if(autoScroll)scrollBottom();
@@ -2547,7 +2617,9 @@ function _streamRenderModelDrain(){
     node.el=_streamRenderTextNode(node);
     node.rendered=true;
     _streamRenderCursor++;
-    const wait=segGapFor(node.text);
+    // 2026-09-25 必做3：claude 主题下节点间隔交给打字机节奏（drain 不阻塞）——消除"工具后正文首字延迟"
+    // 以及 drain 间隔与打字机脱节导致的"长回复被收尾重建截断"。其他主题保持 segGapFor 连播节奏。
+    const wait=(chatEl && chatEl.dataset.layout==="claude") ? 0 : segGapFor(node.text);
     _streamDrainTimer=setTimeout(function(){_streamDrainTimer=null;run();},wait);
   };
   run();
@@ -2593,12 +2665,12 @@ function _streamSealCurrentText(){
   if(last&&last.type==="text"){
     last.sealed=true;
     if(chatEl && chatEl.dataset.layout==="claude" && last.shownCount!==undefined){
-      // 封口时把剩余文字一次性渲染完
-      last.shownCount=last.text.length;
-      _streamFillBubble(last);
+      // 2026-09-25：封口不再拉满——sealed 节点由打字机继续吐完剩余（_twTick 对 sealed 照常吐），
+      // 避免"正文→工具"边界把正文剩余文字瞬间全出（跳变）；吐完自然 _twStop。
+      if(_twNeedContinue() && !_twTimer) _twStart();
     }
   }
-  _twStop();
+  if(!_twNeedContinue()) _twStop();
 }
 function _streamPushTool(tool){
   const node={type:"tool",tool:tool,el:null,rendered:false};
@@ -3630,7 +3702,7 @@ async function request(finalMsgs, fromSend, regenAnchorId){
     // 2026-09-22 审查 M17：读流加「90 秒无任何数据」静默超时。此前 aborter 创建后全文件无一处
     // abort()，reader.read() 会永久挂起 → sending 永远为 true → 发送键永久灰化、只能刷新页面。
     // 只对「静默」计时（不限制总时长），避免模型思考久、迟迟不出字被误杀。
-    const STREAM_SILENCE_MS=90000;
+    const STREAM_SILENCE_MS=180000;
     let _streamToolRunning=0;
     const _clearSilence=function(){
       if(_silenceTimer){clearTimeout(_silenceTimer);_silenceTimer=null;}
@@ -3654,6 +3726,8 @@ async function request(finalMsgs, fromSend, regenAnchorId){
     const player=makeSegPlayer(playerSrc);
     flushStreamSegs=async function(){
       await player.flush(full);
+      // 2026-09-25 必做1：claude 下 drain 完成后先追完打字机，再让外层 renderAllNoAnim 重建（避免长回复跳变）
+      if(chatEl && chatEl.dataset.layout==="claude"){ await _twCatchUp(); }
     };
     while(true){
       const {done,value}=await reader.read();
@@ -3782,12 +3856,12 @@ async function request(finalMsgs, fromSend, regenAnchorId){
         }
       }catch(e){}
     }
-    if(_streamTimedOut) showError("响应超时（90 秒未收到数据），已中断。请检查网络后重试");
+    if(_streamTimedOut) showError("响应超时（180 秒未收到数据），已中断。请检查网络后重试");
     else showError(err.message);
   }finally{
     if(_silenceTimer){clearTimeout(_silenceTimer);_silenceTimer=null;}   // M17：清理静默超时计时器
     sending=false;setSendState(false);aborter=null;
-    _streamActive=false; _streamToolMode="live"; _streamRenderModel=[]; _streamRenderCursor=0; _streamModelDraining=false; if(_streamDrainTimer){clearTimeout(_streamDrainTimer);_streamDrainTimer=null;} if(_streamTextRerenderTimer){clearTimeout(_streamTextRerenderTimer);_streamTextRerenderTimer=null;} _streamRoot=null;   // 结束统一响应模型（节流 timer 清、容器引用释放——DOM 由 renderAll 重建接管）
+    _streamActive=false; _streamToolMode="live"; _streamRenderModel=[]; _streamRenderCursor=0; _streamModelDraining=false; if(_streamDrainTimer){clearTimeout(_streamDrainTimer);_streamDrainTimer=null;} if(_streamTextRerenderTimer){clearTimeout(_streamTextRerenderTimer);_streamTextRerenderTimer=null;} _streamRoot=null; _twStop();   // 结束统一响应模型（节流 timer 清、容器引用释放——DOM 由 renderAll 重建接管；打字机 timer 显式停）
     showHeaderTyping(false);
     try{ if(reader && reader.cancel) reader.cancel(); }catch(e){}
     // 2026-09-23 修复（B2）：补拉本轮「发送/连播期间」被 _doHistoryPull 丢弃的 history_update。
