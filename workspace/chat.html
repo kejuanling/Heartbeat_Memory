@@ -2499,7 +2499,17 @@ function _streamRenderToolNode(node){
   const card=tmp.firstChild;
   if(!card)return null;
   card.classList.add("stream-in");
-  card.addEventListener("click",function(){card.classList.toggle("open");});
+  card.addEventListener("click",function(){
+    if(chatEl && chatEl.dataset.layout==="claude"){
+      var name=card.querySelector(".tt-name");
+      var body=card.querySelector(".tt-body");
+      var nameText=name?name.textContent.trim():"Tool";
+      var bodyHtml=body?body.innerHTML:"";
+      openThinkSheet('<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><span style="font-size:18px">⏱</span><span style="font-size:15px;font-weight:500">'+nameText+'</span></div><div style="white-space:pre-wrap">'+bodyHtml+'</div>',"Summary");
+    } else {
+      card.classList.toggle("open");
+    }
+  });
   // B4（2026-09-24）：进整条消息容器（原 chatEl 直挂是「两套 DOM」的根源，P1-3 根治）
   const root=_streamEnsureRoot();
   root.appendChild(card);
@@ -8038,9 +8048,6 @@ body[data-theme="dark"] .drawer-close{color:#999!important}
   white-space:normal!important;overflow:visible!important;text-overflow:clip!important;
 }
 #chat[data-layout="claude"] .tool-trace .tt-a{display:none!important}
-#chat[data-layout="claude"] .tool-trace .tt-a::after{
-  content:"›";margin-left:4px;font-size:16px;color:#bbb;
-}
 #chat[data-layout="claude"] .tool-trace .tt-body{display:none!important}
 #chat[data-layout="claude"] .tool-trace .tt-run,
 #chat[data-layout="claude"] .tool-trace .tt-ok,
@@ -8058,6 +8065,11 @@ body[data-theme="dark"] .drawer-close{color:#999!important}
   font-size:14px!important;letter-spacing:0!important;color:#999!important;cursor:pointer;
 }
 #chat[data-layout="claude"] .rw-wrap .rw-body{display:none!important}
+#chat[data-layout="claude"] .rw-wrap .rw{
+  background:transparent!important;border:0!important;border-radius:0!important;
+  padding:0!important;box-shadow:none!important;
+}
+#chat[data-layout="claude"] .rw-wrap .rw .rw-a{display:none!important}
 #chat[data-layout="claude"] .rw-wrap::after{
   content:" ›";margin-left:4px;color:#bbb;font-size:16px;
 }
@@ -8066,7 +8078,6 @@ body[data-theme="dark"]:has(#chat[data-layout="claude"]) .tool-trace .tt-name,
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) .rw-wrap .rw-h{color:#888!important}
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheet{background:rgba(30,30,30,.85)!important;color:#e8e8e8!important}
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheet span{color:#e8e8e8!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheetClose{background:rgba(255,255,255,.1)!important;color:#ccc!important}
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheetBody{color:#e8e8e8!important}
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheetMask{background:rgba(0,0,0,.4)!important}
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) .tool-trace::before,
@@ -8098,7 +8109,7 @@ body:has(#chat[data-layout="claude"]) .session-item.active,body:has(#chat[data-l
 <div id="thinkSheet" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;max-height:70vh;border-radius:20px 20px 0 0;background:rgba(255,255,255,.85);backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);box-shadow:0 -4px 30px rgba(0,0,0,.1);flex-direction:column;overflow:hidden">
   <div style="display:flex;align-items:center;justify-content:center;padding:12px 0 8px;position:relative">
     <span id="thinkSheetTitle" style="font-size:15px;font-weight:600;color:#333">Thought</span>
-    <div id="thinkSheetClose" style="position:absolute;left:16px;width:32px;height:32px;border-radius:50%;background:rgba(0,0,0,.06);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;color:#666">✕</div>
+    
   </div>
   <div id="thinkSheetBody" style="padding:8px 20px 40px;overflow-y:auto;-webkit-overflow-scrolling:touch;font-size:15px;line-height:1.7;color:#333;white-space:pre-wrap"></div>
 </div>
