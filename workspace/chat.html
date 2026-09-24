@@ -3326,6 +3326,11 @@ function segEnqueueMsg(m){   // 把一条消息拆段全部入队（user 消息�
   if(!isAI){ const t=msgText(m); SEGQ.push(function(){segPopOne(t,m,false);},segGapFor(t)); return; }
   if(m._callB||typeof m.content==="string"&&m.content.indexOf("【工具调用记录】")===0||typeof m.content==="string"&&m.content.indexOf("【通话记录】")===0){ return; }   // 界面不渲染的消息不播
   const src=m;
+  // claude 主题：整条一次性弹出，不分段
+  if(chatEl && chatEl.dataset.layout==="claude"){
+    SEGQ.push(function(){segPopOne(typeof m.content==="string"?m.content:"",src,true);},0);
+    return;
+  }
   const ps=segSplitText(typeof m.content==="string"?m.content:"");
   ps.forEach(function(t,i){
     SEGQ.push(function(){segPopOne(t,src,i===0);},segGapFor(t));
