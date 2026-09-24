@@ -2504,9 +2504,10 @@ function _streamFillBubble(node){
 function _streamRenderTextNode(node){
   const root=_streamEnsureRoot();
   node.unit=buildAiUnitRow(root);
-  // 2026-09-24 P0：删原「给 .mrow 加 stream-in 保留段级进场动画」——动画选择器是 .msg.stream-in:not(.multi)，
-  // .mrow 不匹配且全文件无 .mrow.stream-in 规则，该行从未生效（死逻辑）。流式整条回复住 .msg.ai.multi
-  // 容器（_streamEnsureRoot），multi 本就被禁动画；段级进场动画不再有实现意图。
+  // claude 主题：DOM 建好后才从 0 开始逐字吐——避免打字机在 DOM 未就绪时空转累加 shownCount
+  if(chatEl && chatEl.dataset.layout==="claude" && node.shownCount!==undefined){
+    node.shownCount=0;
+  }
   _streamFillBubble(node);
   if(autoScroll)scrollBottom();
   return node.unit.bubble;
