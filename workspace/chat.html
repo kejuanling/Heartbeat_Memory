@@ -8042,6 +8042,9 @@ body:has(#chat[data-layout="claude"]) .claude-fab-right{display:flex}
 .claude-fab-right.open .fab-btn.expandable:nth-child(2){transition-delay:.05s}
 .claude-fab-right.open .fab-btn.expandable:nth-child(3){transition-delay:.1s}
 #chat[data-layout="claude"] .msg.ai .bubble{max-width:100%!important}
+#chat[data-layout="claude"] .msg.ai .bubble p{margin:0 0 8px 0;text-indent:0!important}
+#chat[data-layout="claude"] .msg.ai .bubble p:first-child{margin-top:0}
+#chat[data-layout="claude"] .msg.ai .bubble p:last-child{margin-bottom:0}
 /* dark 主题（黑夜）反色 */
 /* 2026-09-24 P0：dark 布局同样去 !important，让用户背景图在黑夜主题也能生效；无背景图时 #1a1a1a 兜底 */
 body[data-theme="dark"]:has(#chat[data-layout="claude"]){background:#1a1a1a}
