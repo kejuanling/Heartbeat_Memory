@@ -1,0 +1,15 @@
+{
+  "name": "谢意行",
+  "short_name": "谢意行",
+  "description": "谢意行聊天",
+  "start_url": "/chat",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#FCF9F7",
+  "theme_color": "#fdf6ed",
+  "icons": [
+    { "src": "/push-icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/push-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/push-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

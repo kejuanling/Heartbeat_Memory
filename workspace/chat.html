@@ -6,6 +6,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="谢意行">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/push-icon-192.png">
 <meta name="theme-color" content="#fdf6ed">
 <meta http-equiv="Cache-Control" content="no-cache">
 <meta http-equiv="Pragma" content="no-cache">
@@ -185,8 +187,8 @@ header.hd-sms .hd-sub{display:none}
   animation:none;
   position:relative;
 }
-/* 让消息行占满列后，非气泡富内容(头像行/工具/思考/语音/操作行)保持自身宽度、不被拉满 */
-.msg .mhead,.msg .act-tok,.msg .vmsg,.msg .tok{align-self:flex-start}
+/* 让消息行占满列后，非气泡富内容(工具/思考/语音/操作行)保持自身宽度、不被拉满 */
+.msg .act-tok,.msg .vmsg,.msg .tok{align-self:flex-start}
 /* 多段历史消息：完全静态显示（只有新消息才逐条弹出，打开页面不播动画） */
 .msg.multi{animation:none}
 @keyframes msgIn{
@@ -201,11 +203,6 @@ header.hd-sms .hd-sub{display:none}
 .msg .meta{align-self:center;text-align:center;font-size:10.5px;color:var(--ink3);padding:2px 12px;letter-spacing:1px;margin:3px 0;min-height:0}
 .msg.user .meta{display:none}
 .msg.ai .meta{display:none} /* 时间统一走居中时间线(renderAll), 不再贴气泡 */
-.mhead{display:flex;align-items:center;gap:7px;padding:0 3px;margin-bottom:5px;max-width:100%}
-.mhead .mav{width:26px;height:26px;border-radius:50%;background:var(--accent-grad);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-family:var(--title-font);box-shadow:0 1px 4px rgba(var(--shadow-rgb),.2)}
-.mhead .mav img{width:100%;height:100%;object-fit:contain;border-radius:50%;background:var(--field-bg,#fff)}
-.msg.ai .mhead .mav{background:linear-gradient(135deg,var(--accent-deep),#9d8f8a)}
-.mhead .mnm{font-size:11px;color:var(--ink2);letter-spacing:.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .message-avatar{display:none}
 .tok .tok-c{background:var(--accent-faint);border-radius:6px;padding:1px 6px;margin-right:4px;display:inline-block}
 .act-tok{display:flex;flex-wrap:wrap;gap:6px;padding:10px 4px 4px;font-size:12px;color:var(--ink2);align-items:center}
@@ -235,8 +232,8 @@ header.hd-sms .hd-sub{display:none}
   color:var(--ai-font-color,#000000);
   border:1px solid var(--line);
 }
-/* ---- 聊天布局切换：QQ / 微信 / 短信 / 自定义 ---- */
-/* 布局级：QQ=微信=短信 用一体尾巴（颜色跟主题联动）；自定义=纯 CSS 无尾。 */
+/* ---- 聊天布局切换：微信 / 短信(暖白在用) / 极简 ---- */
+/* 布局级：微信用一体尾巴（颜色跟主题联动）；短信=露一角收小；极简=纯 CSS 无尾。 */
 #chat .msg{margin-bottom:var(--msg-gap,12px)}
 /* 通用：侧边头像结构（自定义也用一个干净的位置） */
 #chat[data-layout] .mrow{display:flex;align-items:flex-start;gap:7px;width:100%;max-width:100%}
@@ -249,10 +246,7 @@ header.hd-sms .hd-sub{display:none}
 #chat[data-layout] .mrow .mav{margin-top:16px}
 #chat[data-layout] .mrow:not(:has(.mnm)) .mav{margin-top:0}
 #chat[data-layout] .mrow .mcol{display:flex;flex-direction:column;gap:3px;flex:1;min-width:0;max-width:100%;align-items:flex-start}
-/* 气泡自然取内容宽（短消息不竖排，长消息自动换行） */
-#chat[data-layout] .mrow .mcol .bubble{max-width:var(--bubble-max-width,84%)}
-/* 气泡最大宽度(参考微信~72%): 短消息自然宽, 长消息不超容器 75% */
-/* 气泡最大宽度(参考微信~72%): 对所有布局生效(含 custom), 长消息自动换行不再撑满 */
+/* 气泡最大宽度(参考微信~72%): 对所有布局生效, 长消息自动换行不再撑满 */
 #chat .mrow .mcol .bubble{max-width:var(--bubble-max-width,84%)}
 #chat[data-layout] .msg.user .mrow .mcol{align-items:flex-end}
 #chat[data-layout] .mcol .mnm{font-size:10.5px;color:var(--ink2);margin:0 3px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -262,17 +256,14 @@ header.hd-sms .hd-sub{display:none}
 .msg .mcol .bubble+.bubble{margin-top:8px}
 #chat[data-layout] .msg .meta{margin-top:2px}
 #chat[data-layout] .msg .bubble{position:relative}
-/* === 微信：历史备份中的完整布局规则 === */
+/* === 微信布局规则 === */
 #chat[data-layout="wx"] .msg .bubble{border-radius:4px;box-shadow:none;padding:7px 12px;line-height:1.55;min-height:40px}
 #chat[data-layout="wx"] .msg .bubble::after{content:'';position:absolute;top:8px;width:0;height:0;border-top:6px solid transparent;border-bottom:6px solid transparent}
 #chat[data-layout="wx"] .msg.ai .bubble::after{left:-6px;border-right:6px solid var(--bubble-ai)}
 #chat[data-layout="wx"] .msg.user .bubble::after{right:-6px;border-left:6px solid var(--bubble-user1)}
 #chat[data-layout="wx"] .mrow .mav{width:40px;height:40px;border-radius:6px}
-/* === 短信（唯一布局）：无消息头像、无尾巴、露一角收小 === */
+/* === 短信布局（暖白主题在用）：无消息头像、无尾巴、露一角收小 === */
 #chat[data-layout="sms"] .msg{gap:8px}
-#chat[data-layout="sms"] .msg .mhead{display:none}
-#chat[data-layout="sms"] .msg .mav{display:none!important}
-#chat[data-layout="sms"] .msg .mnm{display:none!important}
 #chat[data-layout="sms"] .msg .bubble+.bubble{margin-top:4px}
 #chat[data-layout="sms"] .msg .bubble{border-radius:var(--radius);border:none;box-shadow:none}
 #chat[data-layout="sms"] .msg.ai .bubble{background:var(--bubble-ai);color:var(--ai-font-color,#000000);border:1px solid rgba(92,76,66,.055);box-shadow:0 2px 10px rgba(80,65,55,.035);border-bottom-left-radius:5px}
@@ -425,7 +416,6 @@ footer{
   padding:8px 14px calc(env(safe-area-inset-bottom) + 10px);
   background:transparent;
   border-top:1px solid transparent;
-  backdrop-filter:blur(14px) saturate(108%);-webkit-backdrop-filter:blur(14px) saturate(108%);
 }
 .inputbar{
   display:flex;align-items:center;gap:8px;
@@ -805,9 +795,6 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 /* 思考过程 / 工具痕迹：气泡外的独立容器（单独成行，不塞进气泡） */
 .rw-wrap{width:fit-content;max-width:84%!important;max-width:min(84%,640px);margin-bottom:6px;display:flex;flex-direction:column;gap:6px}
 .rw-wrap .rw,.rw-wrap .tool-trace{margin-bottom:0}
-.msg.user .mhead{flex-direction:row-reverse}
-.msg.user .mhead .mnm{padding-left:0;padding-right:2px}
-
 /* 工具胶囊（API 工具调用痕迹） */
 .tool-trace{
   width:fit-content;max-width:84%;max-width:min(84%,640px);margin-bottom:8px;border:1px solid var(--cap-tool-border);
@@ -1718,6 +1705,11 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
                 <div class="set-sec-label">默认渲染</div>
                 <div style="font-size:11px;color:var(--ink3);line-height:1.6">消息与代码块使用系统默认渲染方式。</div>
               </div></div>
+          <div class="set-panel" data-acc="notify"><div class="set-acc-h" data-acc="notify">系统通知（iPhone 推送）<span class="ar">▾</span></div><div class="set-sec">
+            <div id="pushStatus" style="font-size:12px;color:var(--ink2);line-height:1.7">检测中…</div>
+            <div class="mcp-btns" style="margin-top:8px"><button type="button" class="mcp-btn primary" id="pushEnableBtn">开启系统通知</button></div>
+            <div class="data-tip">先在 Safari 里把本页「添加到主屏幕」，再从主屏幕图标打开，在此开启通知。开启后：AI 主动唤醒、页面切到后台时的回复，都会以系统通知提醒并点回对应会话。</div>
+            </div></div>
           <div class="set-panel" data-acc="data"><div class="set-acc-h" data-acc="data">数据管理<span class="ar">▾</span></div><div class="set-sec">
             <div class="set-sec-label">本机数据</div>
             <div class="data-actions">
@@ -2453,18 +2445,44 @@ function _streamModelPush(node){
 // （原 chatEl 直挂的「两套 DOM」消失，P1-3 根治）。收尾重建时容器随 chatEl 清空自然移除。
 let _streamRoot=null;
 let _streamThinkEl=null;
+let _streamThinkCAt=0;   // 批6：.rw-c 思考内容写入的节流时刻
+// claude 思考链头部：箭头由 CSS `.rw-wrap .rw-h::after{content:" ›"}` 提供（另有 `.rw-a` 被 CSS 隐藏），
+// shimmer 只在"思考阶段"亮
+function _streamThinkHeader(shimmer){
+  if(!_streamThinkEl) return;
+  var h=_streamThinkEl.querySelector(".rw-h");
+  if(h) h.classList.toggle("shimmer", !!shimmer);
+}
+// 批6：正文起头 = 思考阶段结束 → 呼吸圈退场 + 思考链熄光效（同一时刻只留一个"忙"信号）
+function _streamThinkHandoffToText(){
+  _streamThinkHeader(false);
+  showClaudeTyping(false);
+}
 function _streamUpdateThink(text){
   if(!chatEl || chatEl.dataset.layout!=="claude") return;
   var root=_streamEnsureRoot();
-  if(!_streamThinkEl || !_streamThinkEl.parentNode){
-    // 2026-09-25：思考链 shimmer 就是 claude 的"正在输入"占位 → 让呼吸圈让位，避免两个指示同时出现
-    showClaudeTyping(false);
+  // 批6：用 chatEl.contains 判活。收尾重建后旧占位会随容器一起脱离 chatEl（innerHTML="" 只摘下容器，
+  // 容器内部结构仍在 → 旧判断 parentNode 依旧为真），不判活会让下一条回复沿用脱离的旧节点 → 占位不再出现。
+  if(!_streamThinkEl || !chatEl.contains(_streamThinkEl)){
+    showClaudeTyping(false);   // 思考链在场时呼吸圈让位
     _streamThinkEl=document.createElement("div");
     _streamThinkEl.className="rw-wrap";
+    // 与重建版（renderAiContent/makeMsgEl 那条）同构：.rw > .rw-h(+.rw-a) + .rw-c
+    // —— 这样流式期间点一下就能由全局事件委托打开底部抽屉、看正在滚动的思考内容；
+    // 箭头只保留一个（CSS ::after 提供，原来的占位行自带 " ›" 会变成两个）。
+    _streamThinkEl.innerHTML='<div class="rw"><span class="rw-h shimmer">Thought<span class="rw-a">▾</span></span><div class="rw-c"></div></div>';
     root.appendChild(_streamThinkEl);
+    _streamThinkCAt=0;
   }
-  var isActive=_streamActive;
-  _streamThinkEl.innerHTML='<div class="rw-h'+(isActive?' shimmer':'')+'" style="cursor:pointer"><span>Thought</span><span class="rw-arrow"> ›</span></div>';
+  // 批6：shimmer 只在思考阶段亮——正文一开始就熄（思考链本身保留，仍可点开）
+  _streamThinkHeader(_streamActive && !_streamRenderModel.some(function(x){return x&&x.type==="text";}));
+  // 批6：思考内容实时写入 .rw-c（节流 250ms；只改内容，不动头部）
+  var now=Date.now();
+  if(now-_streamThinkCAt>=250){
+    _streamThinkCAt=now;
+    var c=_streamThinkEl.querySelector(".rw-c");
+    if(c) c.innerHTML=(cfg.thinking_md?renderMd(String(text||"")):escapeHtml(String(text||"")));
+  }
   if(autoScroll)scrollBottom();
 }
 function _streamEnsureRoot(){
@@ -2478,7 +2496,6 @@ function _streamEnsureRoot(){
 // claude 主题打字机引擎：逐字吐出累积文本（2026-09-25 优化：匀速/后台完成/未渲染不吐/收尾追赶/reduced-motion）
 var _twTimer=null;
 var _twReducedMotion=false;   // 系统减弱动态偏好（prefers-reduced-motion）命中时不打字机，直接完整渲染
-var _twScrollLast=0;          // 打字机帧滚动跟随节流（200ms）
 function _twPendingNodes(){
   var out=[];
   for(var i=0;i<_streamRenderModel.length;i++){
@@ -2528,7 +2545,12 @@ function _twTick(){
   if(last.shownCount===undefined) last.shownCount=0;
   var total=last.text.length;
   if(last.shownCount>=total){ _twStop(); return; }
-  last.shownCount=Math.min(total, last.shownCount+1);   // 匀速 1 字符/帧（2026-09-25 可选6：去掉原"标点 chunk=2"反直觉加速）
+  // 2026-09-25 批6：自适应速率（系数 10 / 30ms 一帧）——按积压成比例吐出，稳态滞后≈0.3 秒：
+  // 模型吐得快就快吐、慢就慢吐。原实现固定 1 字/帧（≈33 字/秒）→ 模型更快时积压线性增长，
+  // 收尾只能靠 _twCatchUp 猛吐（表现为"先一个字一个字、最后一下子全出来"）。
+  // 单帧上限 40 字防大跳（模型整段突发时约 0.3 秒内追平）。
+  var step=Math.max(1,Math.min(40,Math.ceil((total-last.shownCount)/10)));
+  last.shownCount=Math.min(total, last.shownCount+step);
   _streamFillBubblePartial(last);
 }
 // 收尾追赶（2026-09-25 必做1）：drain 完成后、renderAllNoAnim 重建前，把剩余文字快速吐完，
@@ -2571,12 +2593,10 @@ function _streamFillBubblePartial(node){
   var partial=node.text.slice(0,node.shownCount||node.text.length);
   // 方案B：只更新正文气泡（轻量渲染），思考链/工具胶囊由首帧 _streamFillBubble 渲染，此处不再每帧重建
   unit.bubble.innerHTML=partialToHtml(partial,cfg);
-  // 打字机帧滚动跟随（2026-09-25 建议4）：autoScroll 由 chatEl scroll 事件维护（用户上滑即 false），
-  // 跟随仅看 autoScroll（内容增长会让 nearBottom() 误判为"不在底部"，不可用）；节流 ~200ms；后台不滚
-  if(!document.hidden && autoScroll){
-    var now=Date.now();
-    if(now-_twScrollLast>=200){ _twScrollLast=now; scrollBottom(); }
-  }
+  // 打字机帧滚动跟随（2026-09-25 批6）：每帧都跟随、不再 200ms 节流——自适应速率下每帧只是
+  // 几个字符的小位移，视觉上就是"随输出自然上移"；节流会把位移攒成一段段，看起来一顿一顿地跳。
+  // autoScroll 由 chatEl scroll 事件维护（内容增长会让 nearBottom() 误判，不能用）；后台不滚。
+  if(!document.hidden && autoScroll) scrollBottom();
 }
 // 增量填充：只重写该节点自己的气泡内容，头像行不动
 function _streamFillBubble(node){
@@ -2680,6 +2700,7 @@ function _streamPushText(text,reasoningSrc){
     return;
   }
   const first=!_streamRenderModel.some(function(x){return x.type==="text";});
+  if(first) _streamThinkHandoffToText();   // 批6：正文起头 → 呼吸圈退场 + 思考链熄光效
   var node={type:"text",text:t,first:first,reasoning:"",reasoningSrc:first?(reasoningSrc||null):null,time:new Date().toISOString(),rendered:false,sealed:false};
   if(chatEl && chatEl.dataset.layout==="claude"){
     node.shownCount=0;
@@ -2921,7 +2942,11 @@ function renderAiContent(msgEl, bubble, content, reasoning){   // 2026-09-24 P2-
   // （工具痕迹不再顶部堆叠，统一走正文章节的穿插胶囊，避免与正文内工具胶囊重复）
   // 2026-09-25：claude(极简/黑夜) 流式期间思考链由 _streamUpdateThink 的占位行统一代表，
   // 本处不再另建 rw-wrap——否则同一条消息上会同时出现"占位一行 + 内容一行"两行 Thought。
-  const _twOwnsThink=_streamActive && chatEl && chatEl.dataset.layout==="claude";
+  // 2026-09-25 回归修复：条件必须加「占位行仍挂在聊天区」。流式收尾的静默重建发生在 _streamActive
+  // 复位（finally）之前，只判 _streamActive 会把重建后的思考链整块吞掉（表现为"发完就不显示、刷新又有"）。
+  // 注意不能用 parentNode 判活：chatEl.innerHTML="" 只把旧容器从 chatEl 摘下，容器内部结构仍在，
+  // _streamThinkEl.parentNode 依旧为真；必须用 chatEl.contains()。
+  const _twOwnsThink=_streamActive && chatEl && chatEl.dataset.layout==="claude" && !!(_streamThinkEl && _streamThinkEl.parentNode && chatEl.contains(_streamThinkEl));
   const showThink=!!reasoning && cfg.show_thinking && !_twOwnsThink;
   let pre=bubble.previousElementSibling;
   if(pre && !(pre.classList&&pre.classList.contains("rw-wrap"))) pre=null;
@@ -3152,7 +3177,7 @@ function buildTimelineUnits(timeline, m){
 // AI 消息的「头像+名称行 + 气泡」渲染单元 DOM 工厂（makeMsgEl 重建路径与实时容器共用）。
 // 返回 {host,bubble}：host 是气泡应挂的列容器，bubble 已挂好（renderAiContent 要求先挂再渲染）。
 function buildAiUnitRow(hostMsg){
-  const layout=(THEME_PRESETS[cfg&&cfg.theme]&&THEME_PRESETS[cfg.theme].layout)||((cfg.bubble_style)||"qq");
+  const layout=(THEME_PRESETS[cfg&&cfg.theme]&&THEME_PRESETS[cfg.theme].layout)||((cfg.bubble_style)||"sms");
   if(layout==="sms"){
     // 短信：无头像无名称，气泡直接挂消息根
     const b=document.createElement("div");b.className="bubble";hostMsg.appendChild(b);
@@ -3200,7 +3225,7 @@ function makeMsgEl(m,idx){
   if(selectMode){d.classList.add("selectable");if(selectSet.has(idx))d.classList.add("selected");}
   const mt=msgTime(m);
   const isAI=(m.role==="ai"||m.role==="assistant");
-  const layout=(THEME_PRESETS[cfg&&cfg.theme]&&THEME_PRESETS[cfg.theme].layout)||((cfg.bubble_style)||"qq");
+  const layout=(THEME_PRESETS[cfg&&cfg.theme]&&THEME_PRESETS[cfg.theme].layout)||((cfg.bubble_style)||"sms");
   // 为一个气泡段落构建「头像+名称」单元，返回该段落气泡应挂载的容器。
   // QQ=微信 都是头像贴气泡侧边（.mrow）；短信=无头像无名称。
   function buildUnit(){
@@ -3891,13 +3916,13 @@ async function request(finalMsgs, fromSend, regenAnchorId){
       msgs=finalMsgs;saveMsgs();
       if(flushStreamSegs){renderAllNoAnim(autoScroll===false);}else{renderAll(autoScroll===false);}
       autoNameSessionWhenUntitled(full);
-      // 页面切到后台时，AI 回复结束弹 Bark 通知
+      // 页面切到后台时，AI 回复结束弹系统通知（WebPush/Bark）
       try{
         if(document.hidden && full && full.trim()){
           fetch("/v1/notify/reply-done",{
             method:"POST",
             headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key},
-            body:JSON.stringify({preview:String(full).replace(/[#*`>\n]/g," ").trim().slice(0,80)})
+            body:JSON.stringify({preview:String(full).replace(/[#*`>\n]/g," ").trim().slice(0,80),session_id:sidAtStart})
           });
         }
       }catch(e){}
@@ -3907,7 +3932,7 @@ async function request(finalMsgs, fromSend, regenAnchorId){
   }finally{
     if(_silenceTimer){clearTimeout(_silenceTimer);_silenceTimer=null;}   // M17：清理静默超时计时器
     sending=false;setSendState(false);aborter=null;
-    _streamActive=false; _streamToolMode="live"; _streamRenderModel=[]; _streamRenderCursor=0; _streamModelDraining=false; if(_streamDrainTimer){clearTimeout(_streamDrainTimer);_streamDrainTimer=null;} if(_streamTextRerenderTimer){clearTimeout(_streamTextRerenderTimer);_streamTextRerenderTimer=null;} _streamRoot=null; _twStop();   // 结束统一响应模型（节流 timer 清、容器引用释放——DOM 由 renderAll 重建接管；打字机 timer 显式停）
+    _streamActive=false; _streamToolMode="live"; _streamRenderModel=[]; _streamRenderCursor=0; _streamModelDraining=false; if(_streamDrainTimer){clearTimeout(_streamDrainTimer);_streamDrainTimer=null;} if(_streamTextRerenderTimer){clearTimeout(_streamTextRerenderTimer);_streamTextRerenderTimer=null;} _streamRoot=null; _streamThinkEl=null; _streamThinkCAt=0; _twStop();   // 结束统一响应模型（节流 timer 清、容器/思考链引用释放——DOM 由 renderAll 重建接管；打字机 timer 显式停）
     showHeaderTyping(false);
     try{ if(reader && reader.cancel) reader.cancel(); }catch(e){}
     // 2026-09-23 修复（B2）：补拉本轮「发送/连播期间」被 _doHistoryPull 丢弃的 history_update。
@@ -4582,7 +4607,7 @@ function applyHeader(){
   // 顶部显示会话名称；先设名称，再按聊天布局(模板)控制名称位置与头像/副标题是否显示
   hdName.textContent=sessionDisplayName();
   document.title=sessionDisplayName();
-  const layout=(THEME_PRESETS[cfg&&cfg.theme]&&THEME_PRESETS[cfg.theme].layout)||((cfg&&cfg.bubble_style)||"qq");
+  const layout=(THEME_PRESETS[cfg&&cfg.theme]&&THEME_PRESETS[cfg.theme].layout)||((cfg&&cfg.bubble_style)||"sms");
   if(hdName){ hdName.style.cursor='pointer'; hdName.title='会话列表'; }
   const mt=document.querySelector('meta[name="apple-mobile-web-app-title"]');
   if(mt)mt.setAttribute("content",sessionDisplayName());
@@ -6994,6 +7019,84 @@ function clearLocalCache(){
 }
 document.getElementById("importFile").addEventListener("change",e=>{const f=e.target.files[0];if(f)importSession(f);e.target.value="";});
 
+/* ================= 系统通知（Web Push / iOS 桌面 PWA） =================
+   仅对「已添加到主屏幕」的 PWA 生效（iOS 16.4+）；通知点击恢复现场靠 URL：
+   sw.js 点通知打开 /chat?from_push=1&session_id=xxx，initChat 读参数落进目标会话，
+   页面起来后自己 re-fetch 服务器状态——不依赖 SW postMessage。 */
+let _pushVapidKey=null;
+function pushSupported(){ return ("serviceWorker" in navigator)&&("PushManager" in window)&&("Notification" in window); }
+function urlBase64ToUint8Array(b64){
+  const pad="=".repeat((4-b64.length%4)%4).replace(/=/g,"");
+  const base=(b64+pad).replace(/-/g,"+").replace(/_/g,"/");
+  const raw=atob(base); const out=new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++) out[i]=raw.charCodeAt(i);
+  return out;
+}
+function pushUploadSubscription(sub){
+  return fetch("/v1/push/subscribe",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key},
+    body:JSON.stringify({session_id:SessionStore.getCurrentSession(),subscription:sub.toJSON()})});
+}
+async function pushEnsureSubscribed(){
+  // 已授权时的自动重同步：订阅存在就重新上报（刷新会话绑定）；不存在就静默新建（权限已授予，不会再弹窗）
+  const reg=await navigator.serviceWorker.ready;
+  let sub=await reg.pushManager.getSubscription();
+  if(!sub){
+    if(!_pushVapidKey){
+      const r=await fetch("/v1/push/vapid-public-key",{headers:{"Authorization":"Bearer "+api_key}});
+      const j=await r.json().catch(function(){return {};});
+      if(!j.publicKey) throw new Error("服务器未配置 VAPID 公钥");
+      _pushVapidKey=j.publicKey;
+    }
+    sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlBase64ToUint8Array(_pushVapidKey)});
+  }
+  await pushUploadSubscription(sub);
+  return sub;
+}
+async function updatePushUI(){
+  const st=document.getElementById("pushStatus"), btn=document.getElementById("pushEnableBtn");
+  if(!st) return;
+  if(!pushSupported()){
+    st.innerHTML="此环境不支持系统通知（需 iOS 16.4+ 且从主屏幕图标打开）。";
+    if(btn) btn.style.display="none";
+    return;
+  }
+  if(Notification.permission==="denied"){
+    st.innerHTML="通知权限已被拒绝：请在 iOS 设置 → 通知里允许后回来刷新。";
+    if(btn) btn.disabled=true;
+    return;
+  }
+  let has=false;
+  try{ const reg=await navigator.serviceWorker.ready; has=!!(await reg.pushManager.getSubscription()); }catch(e){}
+  if(Notification.permission==="granted"){
+    st.innerHTML=has?"系统通知已开启 ✓（唤醒消息、后台回复会推送到手机）":"已授权但还没有订阅，点下面按钮完成开启。";
+  }else{
+    st.innerHTML="未开启。点下面按钮，iOS 会弹出授权确认。";
+  }
+  if(btn){ btn.style.display=""; btn.disabled=false; }
+}
+async function enableWebPush(){
+  try{
+    if(!pushSupported()){ showToast("此环境不支持系统通知"); return; }
+    const perm=await Notification.requestPermission();   // 必须在用户点击的同步链路里触发
+    if(perm!=="granted"){ updatePushUI(); return; }
+    await pushEnsureSubscribed();
+    showToast("系统通知已开启");
+  }catch(e){ showToast("开启失败："+(e.message||e)); }
+  updatePushUI();
+}
+async function initPushClient(){
+  if(!pushSupported()) return;
+  try{ await navigator.serviceWorker.register("/sw.js"); }catch(e){ console.warn("[push] SW 注册失败",e); }
+  try{
+    if(Notification.permission==="granted"){ await pushEnsureSubscribed(); }
+  }catch(e){ console.warn("[push] 订阅同步失败",e); }
+  updatePushUI();
+}
+(function bindPushUI(){
+  const btn=document.getElementById("pushEnableBtn");
+  if(btn) btn.addEventListener("click",enableWebPush);
+})();
+
 /* ================= 初始化 ================= */
 try{applyHeader();}catch(e){}
 /* ---- 密码登录（管理台账号密码） ---- */
@@ -7141,8 +7244,19 @@ async function initChat(){
   const local = localStorage.getItem("han_current_session") || "default";
   const remoteCur = await pullCurrentSession();   // 跨设备同步：以服务器"最后打开的会话"优先
   await loadSessions();
+  // 通知冷启动恢复（WebPush 点开）：URL 带 from_push=1&session_id=xxx 且会话存在 → 直接落到目标会话；
+  // 落地后把参数从地址栏清掉，避免之后手动刷新总跳回推送来源会话。
+  let pushSeed;
+  try{
+    const usp=new URLSearchParams(location.search);
+    const sid=usp.get("session_id");
+    if(usp.get("from_push")==="1"&&sid&&SessionStore.getSessionList().some(s=>s.id===sid)){
+      pushSeed=sid;
+      history.replaceState(null,"",location.pathname);
+    }
+  }catch(e){}
   // 主会话(default)已废弃：恢复到 default 或已不存在的会话时，自动落到列表里最后活跃的会话
-  const preliminary = remoteCur || local;   // local→remote 后用于触发 best 的判定值
+  const preliminary = pushSeed || remoteCur || local;   // local→remote 后用于触发 best 的判定值
   let bestSeed;
   if((preliminary==="default"||!SessionStore.getSessionList().some(s=>s.id===preliminary))&&SessionStore.getSessionList().length){
     const best=SessionStore.getSessionList().slice().sort((a,b)=>((b.last_time||"")>(a.last_time||"")?1:((b.last_time||"")<(a.last_time||"")?-1:0)))[0];
@@ -7151,7 +7265,7 @@ async function initChat(){
     }
   }
   // 一次 bootstrap：best 命中则采用并落盘；否则 remote 优先于 local（remote 仅 truthy 覆盖，均不落盘）
-  SessionStore.bootstrap({ local, remote: remoteCur || undefined, best: bestSeed });
+  SessionStore.bootstrap({ local, remote: pushSeed || remoteCur || undefined, best: bestSeed });
   if(bestSeed){   // best 命中时补刷列表 active（loadSessions 渲染时 active 还是旧值）
     renderSessionList();
   }
@@ -7184,6 +7298,7 @@ async function init(){
   // 否则首屏 fetchHistory 用的是本地可能为空的 api_key，导致 401 拉不到另一台设备的新消息。
   await syncSettingsFromCloud();
   await initChat();          // 拉完 key 后再拉历史，保证能带正确 Authorization
+  initPushClient();          // Service Worker 注册 + 已授权时静默重同步订阅（不阻塞首屏）
 }
 // SessionStore 由末尾 module script 挂载（deferred），
 // 必须等 DOMContentLoaded（module 已执行完、window.SessionStore 就绪）后再启动，否则 init->applyHeader->sessionDisplayName 会抛 ReferenceError。
@@ -8099,37 +8214,39 @@ body:has(#chat[data-layout="wx"]) .session-item .s-name .s-icon.pin.on .ico{colo
 body:has(#chat[data-layout="wx"]) .session-item .s-name .s-icon.pin:not(.on){color:#C9C9C9!important;background:transparent!important}
 
 /* ===== 极简 Claude 风主题 ===== */
-#chat[data-layout="claude"]{padding-left:4%;padding-right:4%;padding-bottom:12px}
+#chat[data-layout="claude"]{padding-left:4%;padding-right:4%;padding-bottom:calc(env(safe-area-inset-bottom) + 84px)}
+/* 全页内阴影画框：上下边缘压影、四角自然最暗；盖在聊天内容与输入卡之上，不拦截点击 */
+/* 全页上下边缘淡出罩：单条线性渐变只压上下、中间全净、左右无暗角（参考用户确认的结构）；颜色用主题背景色 */
+body:has(#chat[data-layout="claude"])::after{content:"";position:fixed;inset:0;z-index:20;pointer-events:none;background:linear-gradient(to bottom,rgba(250,249,247,.95),rgba(250,249,247,0) 15%,rgba(240,239,236,0) 85%,rgba(240,239,236,.95))}
+body[data-theme="dark"]:has(#chat[data-layout="claude"])::after{background:linear-gradient(to bottom,rgba(26,26,26,.95),rgba(26,26,26,0) 15%,rgba(26,26,26,0) 85%,rgba(26,26,26,.95))}
 /* 2026-09-24 P0：claude 背景规则去 !important——原 !important 会压掉 applyTheme 设置的用户背景图（内联 backgroundImage 优先于样式表），切到极简后背景图静默失效 */
 body:has(#chat[data-layout="claude"]){background:linear-gradient(180deg,#faf9f7 0%,#f0efec 100%);font-family:Georgia,-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Noto Sans CJK SC","Microsoft YaHei",serif}
 body:has(#chat[data-layout="claude"]) header{background:transparent;border-bottom:none;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
 /* AI 消息：无气泡纯文字左对齐，无头像无名称 */
 #chat[data-layout="claude"] .msg.ai .bubble{background:transparent!important;box-shadow:none!important;border:none!important;padding:0!important;border-radius:0!important;color:#1a1a1a;max-width:100%!important}
 #chat[data-layout="claude"] .msg.ai .bubble::after{content:none}
-#chat[data-layout="claude"] .msg.ai .mhead{display:none}
 #chat[data-layout="claude"] .msg.ai .mav{display:none!important}
 #chat[data-layout="claude"] .msg.ai .mnm{display:none!important}
 /* 用户消息：浅灰大圆角气泡右对齐 */
 #chat[data-layout="claude"] .msg.user .bubble{background:#ececec!important;color:#1a1a1a;border:none;border-radius:20px;padding:10px 16px;box-shadow:none;max-width:85%}
 #chat[data-layout="claude"] .msg.user .bubble::after{content:none}
-#chat[data-layout="claude"] .msg.user .mhead{display:none}
 #chat[data-layout="claude"] .msg.user .mav{display:none!important}
 #chat[data-layout="claude"] .msg.user .mnm{display:none!important}
 #chat[data-layout="claude"] .msg.user .mrow{flex-direction:row-reverse}
 /* 消息间距 */
 #chat[data-layout="claude"] .msg{margin-bottom:20px}
 /* 输入栏：白色大圆角卡片悬浮底部 */
-body:has(#chat[data-layout="claude"]) footer{background:transparent;padding-left:4%;padding-right:4%;padding-bottom:calc(env(safe-area-inset-bottom) + 8px)}
-body:has(#chat[data-layout="claude"]) footer .inputbar{background:rgba(255,255,255,.7)!important;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(0,0,0,.06)!important;border-radius:20px!important;padding:8px 12px!important;box-shadow:0 2px 12px rgba(0,0,0,.06),0 1px 3px rgba(0,0,0,.04)!important}
-body:has(#chat[data-layout="claude"]) footer .inputbar:focus-within{box-shadow:0 2px 16px rgba(0,0,0,.08),0 1px 3px rgba(0,0,0,.04)!important}
+body:has(#chat[data-layout="claude"]) footer{position:fixed;left:0;right:0;bottom:0;z-index:30;background:transparent;padding-left:4%;padding-right:4%;padding-bottom:calc(env(safe-area-inset-bottom) + 8px)}
+body:has(#chat[data-layout="claude"]) footer .inputbar{background:rgba(255,255,255,.62)!important;backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);border:1px solid rgba(0,0,0,.07)!important;border-radius:20px!important;padding:8px 12px!important;box-shadow:0 8px 32px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.05)!important}
+body:has(#chat[data-layout="claude"]) footer .inputbar:focus-within{box-shadow:0 8px 36px rgba(0,0,0,.10),0 1px 2px rgba(0,0,0,.05)!important}
 body:has(#chat[data-layout="claude"]) footer .inputbar #input{background:transparent!important;border:none!important;outline:none!important;box-shadow:none!important;color:#1a1a1a;font-size:16px}
 #chat[data-layout="claude"] .msg.ai{font-size:16px;line-height:1.6;color:#1a1a1a}
 #chat[data-layout="claude"] .msg.user .bubble{border-radius:20px!important;font-size:15px!important}
-body:has(#chat[data-layout="claude"]) footer .inputbar #send{background:#1a1a1a!important;color:#fff!important;border-radius:50%!important;width:36px!important;height:36px!important}
-body:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn{background:#f0f0f0!important;border-radius:50%!important;width:36px!important;height:36px!important;display:flex!important;align-items:center;justify-content:center;color:#6b6b6b!important}
+body:has(#chat[data-layout="claude"]) footer .inputbar #send{background:rgba(26,26,26,.82)!important;color:#fff!important;border-radius:50%!important;width:36px!important;height:36px!important}
+body:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn{background:rgba(255,255,255,.55)!important;border:1px solid rgba(0,0,0,.08)!important;border-radius:50%!important;width:36px!important;height:36px!important;display:flex!important;align-items:center;justify-content:center;color:#3c3c43!important;box-sizing:border-box}
 body:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn .ico{display:none!important}
-body:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn::before{content:"+";display:block;font-size:22px;font-weight:300;line-height:1;color:#6b6b6b}
-body:has(#chat[data-layout="claude"]) footer .inputbar #micBtn{color:#6b6b6b!important;border-radius:50%!important;width:36px!important;height:36px!important}
+body:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn::before{content:"+";display:block;font-size:22px;font-weight:300;line-height:1;color:#3c3c43!important}
+body:has(#chat[data-layout="claude"]) footer .inputbar #micBtn{background:rgba(255,255,255,.55)!important;border:1px solid rgba(0,0,0,.08)!important;box-sizing:border-box;color:#3c3c43!important;border-radius:50%!important;width:36px!important;height:36px!important}
 /* 设置页滑动条美化 */
 input[type="range"]{-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;background:#e0e0e0;outline:none}
 input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.2);cursor:pointer}
@@ -8146,11 +8263,11 @@ input[type="range"]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;b
 /* claude 主题：隐藏顶栏，浮动按钮 */
 body:has(#chat[data-layout="claude"]) header{display:none!important}
 #chat[data-layout="claude"] ~ #empty .big, body:has(#chat[data-layout="claude"]) #empty .big{display:none!important}
-.claude-fab-left{position:fixed;top:calc(env(safe-area-inset-top) + 12px);left:12px;z-index:50;width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,.85);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:none;box-shadow:0 1px 3px rgba(0,0,0,.08);display:none;align-items:center;justify-content:center;cursor:pointer;color:#555}
+.claude-fab-left{position:fixed;top:calc(env(safe-area-inset-top) + 12px);left:12px;z-index:50;width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,.66);backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);border:1px solid rgba(0,0,0,.07);box-shadow:0 4px 16px rgba(0,0,0,.10);display:none;align-items:center;justify-content:center;cursor:pointer;color:#555}
 .claude-fab-right{position:fixed;top:calc(env(safe-area-inset-top) + 12px);right:12px;z-index:50;display:none;align-items:center;gap:8px}
 body:has(#chat[data-layout="claude"]) .claude-fab-left,
 body:has(#chat[data-layout="claude"]) .claude-fab-right{display:flex}
-.claude-fab-right .fab-btn{width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,.85);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:none;box-shadow:0 1px 3px rgba(0,0,0,.08);display:flex;align-items:center;justify-content:center;cursor:pointer;color:#555}
+.claude-fab-right .fab-btn{width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,.66);backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);border:1px solid rgba(0,0,0,.07);box-shadow:0 4px 16px rgba(0,0,0,.10);display:flex;align-items:center;justify-content:center;cursor:pointer;color:#555}
 .claude-fab-right .fab-btn.expandable{transition:all .2s ease;opacity:0;transform:translateX(10px) scale(.8);pointer-events:none;position:absolute;right:0}
 .claude-fab-right.open .fab-btn.expandable{opacity:1;transform:translateX(0) scale(1);pointer-events:auto;position:relative}
 .claude-fab-right.open .fab-btn.expandable:nth-child(2){transition-delay:.05s}
@@ -8165,15 +8282,15 @@ body[data-theme="dark"]:has(#chat[data-layout="claude"]){background:#1a1a1a}
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) .msg.ai{color:#e8e8e8!important}
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) .msg.ai .bubble{color:#e8e8e8!important}
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) .msg.user .bubble{background:#2d2d2d!important;color:#e8e8e8!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar{background:rgba(45,45,45,.8)!important;border:1px solid rgba(255,255,255,.06)!important;box-shadow:0 2px 12px rgba(0,0,0,.3)!important}
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar{background:rgba(44,44,46,.62)!important;border:1px solid rgba(255,255,255,.10)!important;box-shadow:0 8px 32px rgba(0,0,0,.35),0 1px 2px rgba(0,0,0,.3)!important}
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #input{color:#e8e8e8!important}
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #input::placeholder{color:#666!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #send{background:#e8e8e8!important;color:#1a1a1a!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn{background:#333!important;color:#999!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn::before{color:#999!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #micBtn{color:#999!important}
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #send{background:rgba(235,235,240,.85)!important;color:#1a1a1a!important}
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn{background:rgba(255,255,255,.12)!important;border-color:rgba(255,255,255,.12)!important;color:#d1d1d6!important}
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn::before{color:#d1d1d6!important}
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #micBtn{background:rgba(255,255,255,.12)!important;border-color:rgba(255,255,255,.12)!important;color:#d1d1d6!important}
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) .claude-fab-left,
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .claude-fab-right .fab-btn{background:rgba(45,45,45,.85)!important;color:#ccc!important;box-shadow:0 1px 3px rgba(0,0,0,.3)!important}
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .claude-fab-right .fab-btn{background:rgba(44,44,46,.66)!important;border-color:rgba(255,255,255,.10)!important;color:#ccc!important;box-shadow:0 4px 16px rgba(0,0,0,.4)!important}
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) .claude-msg-actions .cma-btn{color:#777!important}
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) .claude-msg-actions .cma-btn:active{background:rgba(255,255,255,.1)!important;color:#ccc!important}
 body[data-theme="dark"]:has(#chat[data-layout="claude"]) .claude-typing-dot{background:#777!important}

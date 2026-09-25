@@ -2703,7 +2703,7 @@ function normalizeBooleanString(value, key, fallback) {
 
 function normalizePushProvider(value) {
   const raw = String(value || "").trim().toLowerCase();
-  if (raw === "bark" || raw === "ntfy") return raw;
+  if (raw === "bark" || raw === "ntfy" || raw === "webpush") return raw;
   return readEnvValueOrDefault("PUSH_PROVIDER", "bark");
 }
 
@@ -6709,13 +6709,19 @@ app.post("/internal/co/wake", async (req, reply) => {
 // ========================
 
 
-// 推送（Bark / ntfy，与唤醒系统同一套配置）
-async function sendPushNotification({ title, body }) {
+// 推送（Bark / ntfy / WebPush，与唤醒系统同一套配置）
+// sessionId：目标会话（WebPush 通道按会话定向订阅；bark/ntfy 忽略此字段）。
+// 唤醒/告警类调用方必须传；后台回复类由 /v1/notify/reply-done 带入。
+async function sendPushNotification({ title, body, sessionId } = {}) {
   // 15s 超时：Bark/ntfy 对端挂起时不能卡住免打扰释放等调用方
   const pushController = new AbortController();
   const pushTimer = setTimeout(() => pushController.abort(), 15000);
   try {
     const provider = (readEnvValue("PUSH_PROVIDER") || "bark").trim().toLowerCase();
+    if (provider === "webpush") {
+      clearTimeout(pushTimer);
+      return await require("./lib/webpush").sendToSession({ title, body, sessionId });
+    }
     if (provider === "ntfy") {
       const topic = String(readEnvValue("NTFY_TOPIC") || "").trim();
       if (!topic) return { ok: false, reason: "NTFY_TOPIC 未配置" };
@@ -6758,9 +6764,22 @@ app.post("/v1/notify/reply-done", async (req, reply) => {
   try {
     const preview = String((req.body && req.body.preview) || "").trim();
     if (!preview) return reply.send({ ok: false, reason: "empty" });
-    const r = await sendPushNotification({ title: "AI 回复了", body: preview.slice(0, 200) });
+    const sessionId = String((req.body && req.body.session_id) || "").trim() || "default";
+    const r = await sendPushNotification({ title: "AI 回复了", body: preview.slice(0, 200), sessionId });
     reply.send(r);
   } catch (e) { reply.code(500).send({ error: e.message }); }
+});
+
+// iOS 桌面 PWA 系统通知（WebPush 通道）：VAPID 公钥下发 + 订阅上报
+// 鉴权走全局 /v1 hook（公网需 GATEWAY_API_KEY 或管理员登录态），与聊天页其他 /v1 接口同口径
+app.get("/v1/push/vapid-public-key", async (req, reply) => {
+  reply.send({ ok: true, publicKey: require("./lib/webpush").getPublicKey() });
+});
+app.post("/v1/push/subscribe", async (req, reply) => {
+  const body = req.body || {};
+  const r = require("./lib/webpush").upsertSubscription(body.session_id, body.subscription);
+  if (!r.ok) return reply.code(400).send(r);
+  reply.send(r);
 });
 
 // 截图唤醒提示词（AI 决定说不说）
