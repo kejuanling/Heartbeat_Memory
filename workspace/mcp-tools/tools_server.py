@@ -645,28 +645,8 @@ TOOLS["period_set"] = {
 
 # ── 12. 今日总结（AI写）──
 
-# ── 12. 手机app使用记录 ──
-
-def tool_phone_records(args):
-    limit = args.get("limit", 20)
-    import urllib.request
-    try:
-        with urllib.request.urlopen(f"http://localhost:8084/today_records?limit={limit}", timeout=5) as resp:
-            data = json.loads(resp.read())
-        return {"records": data if isinstance(data, list) else data, "date": datetime.date.today().isoformat()}
-    except Exception as e:
-        return {"error": str(e)}
-
-TOOLS["phone_records"] = {
-    "description": "查看今天手机 App 使用的详细记录（来自手机端记录服务），默认返回最近 20 条",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "limit": {"type": "integer", "description": "返回条数，默认20"}
-        }
-    },
-    "handler": tool_phone_records
-}
+# ── 手机app使用记录（phone_records 工具）2026-09-26 删除：其数据已并入 phone_state
+#    查岗工具的返回（app_records 字段，读 8080 /summary）；8084 phone-records-api 服务同步下线。──
 
 # ── 12. 手机状态快照（2026-09-26 查岗改造：一键触发手机上报再读结果）──
 _PHONE_REPORT_TOKEN = os.environ.get("PHONE_STATE_TOKEN", "")  # 对应 phone-report-api(8080) systemd unit 的 AUTH_TOKEN，值在 .env
