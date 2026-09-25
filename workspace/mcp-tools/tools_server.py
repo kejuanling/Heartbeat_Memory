@@ -668,28 +668,128 @@ TOOLS["phone_records"] = {
     "handler": tool_phone_records
 }
 
-# ── 12. 手机状态快照（han 手机：电池/当前App/位置，来自 8080 phone-report-api）──
+# ── 12. 手机状态快照（2026-09-26 查岗改造：一键触发手机上报再读结果）──
 _PHONE_REPORT_TOKEN = os.environ.get("PHONE_STATE_TOKEN", "")  # 对应 phone-report-api(8080) systemd unit 的 AUTH_TOKEN，值在 .env
 _OWNER = "han"  # 这是唯一的主人，即 han 本人的手机；没有"别的用户"
+_CHAGANG_MAIL_TO = os.environ.get("CHAGANG_MAIL_TO", "1365126894@qq.com")  # 手机上登录的收件邮箱
+_CHAGANG_SUBJECT = "查岗"  # 手机自动化按此主题触发
+_EMAIL_ADDR = os.environ.get("EMAIL_ADDR", "")   # AI 发件邮箱（与 email_server.py 同一账号，值配在 mcp-tools systemd 环境）
+_EMAIL_PASS = os.environ.get("EMAIL_PASS", "")   # 对应 SMTP 授权码
+_SMTP_SERVER = "smtp.qq.com"
+_SMTP_PORT = 465
+
+
+def _send_chagang_mail(screenshot: bool, weather: bool, location: bool):
+    """发「查岗」触发邮件；三个开关逐行写进正文，手机快捷指令解析后按需取值。"""
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.header import Header
+    body = "screenshot=%s\nweather=%s\nlocation=%s" % (
+        "true" if screenshot else "false",
+        "true" if weather else "false",
+        "true" if location else "false",
+    )
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = Header(_CHAGANG_SUBJECT, "utf-8")
+    msg["From"] = _EMAIL_ADDR
+    msg["To"] = _CHAGANG_MAIL_TO
+    conn = smtplib.SMTP_SSL(_SMTP_SERVER, _SMTP_PORT, timeout=15)
+    try:
+        conn.login(_EMAIL_ADDR, _EMAIL_PASS)
+        conn.sendmail(_EMAIL_ADDR, [_CHAGANG_MAIL_TO], msg.as_string())
+    finally:
+        conn.quit()
+
+
+def _read_phone_state():
+    """读 8080 phone-report-api 的最新快照。"""
+    url = "http://localhost:8080/state/latest?user_id=" + urllib.parse.quote(_OWNER)
+    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + _PHONE_REPORT_TOKEN})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        return json.loads(resp.read()).get("state")
+
+
+def _state_is_fresh(created_at, sent_ts):
+    """快照 created_at（服务器本地时区）晚于发信时刻-5s 视为本次查岗的新上报。"""
+    try:
+        t = datetime.datetime.strptime(str(created_at).strip(), "%Y-%m-%d %H:%M:%S")
+        return t.timestamp() >= sent_ts - 5
+    except (ValueError, TypeError):
+        return False
+
 
 def tool_phone_state(args):
-    # 固定读 han 自己的手机；不接受任意"用户"参数，避免误会成多账号
-    user_id = _OWNER
-    import urllib.request, urllib.parse
-    url = "http://localhost:8080/state/latest?user_id=" + urllib.parse.quote(user_id)
-    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + _PHONE_REPORT_TOKEN})
+    def _flag(name):
+        v = args.get(name, True)
+        if isinstance(v, str):
+            v = v.strip().lower() not in ("false", "0", "no", "off")
+        return bool(v)
+
+    screenshot = _flag("screenshot")
+    weather = _flag("weather")
+    location = _flag("location")
     try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read())
-        return {"owner": user_id, "state": data.get("state")}
+        n_app = int(args.get("app_records", 5))
+    except (TypeError, ValueError):
+        n_app = 5
+    n_app = max(0, n_app)
+
+    if not _EMAIL_ADDR or not _EMAIL_PASS:
+        return {"error": "邮箱凭证未配置（mcp-tools 环境变量 EMAIL_ADDR / EMAIL_PASS）"}
+
+    sent_ts = time.time()
+    try:
+        _send_chagang_mail(screenshot=screenshot, weather=weather, location=location)
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": "查岗邮件发送失败: " + str(e)}
+
+    # 等手机收邮件→跑快捷指令→上报：8s 起等，没等到新快照再补 5s
+    state = None
+    for wait_s in (8, 5):
+        time.sleep(wait_s)
+        try:
+            state = _read_phone_state()
+        except Exception as e:
+            return {"error": "读取手机状态失败: " + str(e)}
+        if state and _state_is_fresh(state.get("created_at"), sent_ts):
+            break
+
+    if not state:
+        return {"error": "查岗邮件已发送，但等待后未读到手机上报（手机可能没收到邮件或快捷指令未触发）"}
+
+    result = {
+        "battery": state.get("battery"),
+        "weather": state.get("weather"),
+        "location": state.get("location"),
+        "created_at": state.get("created_at"),
+    }
+    if not _state_is_fresh(state.get("created_at"), sent_ts):
+        result["note"] = "未等到本次新上报，以上为上次查岗的旧快照"
+
+    if n_app > 0:
+        try:
+            url = "http://localhost:8080/summary?user_id=" + urllib.parse.quote(_OWNER) + "&days=1"
+            req = urllib.request.Request(url, headers={"Authorization": "Bearer " + _PHONE_REPORT_TOKEN})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read())
+            result["app_records"] = (data.get("records") or [])[:n_app]
+        except Exception as e:
+            result["app_records"] = [{"error": "读取App记录失败: " + str(e)}]
+
+    if screenshot and state.get("screenshot_url"):
+        result["screenshot_url"] = state.get("screenshot_url")
+    return result
 
 TOOLS["phone_state"] = {
-    "description": "读 han 本人手机最近一次主动上报的状态快照：电池电量、当前正在用的 App、位置（地点）。这是 han 自己手机的信息，只有一份、没有其他用户。若还没上报过则返回 state=None。",
+    "description": "看她现在在做什么：电池电量、天气、位置、最近App记录、最新屏幕截图。调用后会自动发「查岗」邮件触发手机立即上报，稍等几秒返回最新快照；截图以图片形式直接随本工具结果附上，可直接看。",
     "inputSchema": {
         "type": "object",
-        "properties": {}
+        "properties": {
+            "screenshot": {"type": "boolean", "description": "是否看屏幕截图，默认 true，false=不看屏幕"},
+            "weather": {"type": "boolean", "description": "是否要天气，默认 true"},
+            "location": {"type": "boolean", "description": "是否要位置，默认 true"},
+            "app_records": {"type": "integer", "description": "附带最近App记录条数，默认 5，0=不带"}
+        }
     },
     "handler": tool_phone_state
 }

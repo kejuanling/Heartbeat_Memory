@@ -138,6 +138,12 @@ async function runWithTools({
 
     if (!resp.ok) {
       const t = await resp.text().catch(() => "");
+      // 2026-09-26：上游拉不到图片时整包 400，去图重试一次（与聊天侧图片降级同源保护）
+      if (resp.status === 400 && /failed to download image/i.test(t) && stripImagePartsForDegrade(working)) {
+        console.warn("[mcp] runWithTools 上游拉取图片失败(400)，去图后重试本轮");
+        round--;
+        continue;
+      }
       // 2026-09-23 诊断（reasoning_content 400 定位用）：记录出错轮次与上下文中
       // 「带 tool_calls 的 assistant」及其 reasoning_content 覆盖情况——
       // 用于区分「首轮上下文问题」还是「后续轮回传问题」。定位到根因后可移除或降级。
@@ -249,6 +255,25 @@ async function executeToolCalls(toolCalls, working, toolHistory, ctx, onEvent, n
       // 截断超大工具结果：时间线/后续轮次上下文都不需要完整大结果，30k 字符足够模型引用
       content: buildToolResultContent({ name, time: toolTime, error: error || null, markdown: _truncateResult(result.markdown || "", MAX_TOOL_RESULT_CHARS) })
     });
+    // 2026-09-26 查岗图片注入：工具结果带 screenshot_url（如 phone_state）时，紧跟 tool 结果
+    // 补一条带 image_url 的 user 消息——上游约定 tool 消息只收纯文本，模型看图必须走普通
+    // 消息的图片部件，下一轮请求模型即可真正看到截图。注入只进当轮 working，不落时间线。
+    let _injectImgUrl = null;
+    try {
+      const _parsed = JSON.parse(result.markdown || "");
+      if (_parsed && typeof _parsed.screenshot_url === "string" && /^https:\/\//.test(_parsed.screenshot_url)) {
+        _injectImgUrl = _parsed.screenshot_url;
+      }
+    } catch (e) { /* markdown 不是 JSON 的工具照常，无注入 */ }
+    if (_injectImgUrl) {
+      working.push({
+        role: "user",
+        content: [
+          { type: "text", text: "（phone_state 返回的最新手机截图）" },
+          { type: "image_url", image_url: { url: _injectImgUrl } }
+        ]
+      });
+    }
     toolHistory.push({
       name,
       args,
@@ -259,6 +284,23 @@ async function executeToolCalls(toolCalls, working, toolHistory, ctx, onEvent, n
     });
     if (typeof onEvent === "function") onEvent({ type: "tool_end", index, id, name, args, result: resTrunc, error, ok: !error, afterSeg: (typeof afterSeg === "number") ? afterSeg : -1 });
   }
+}
+
+// 2026-09-26 查岗截图配套：上游拉不到图片（CDN 拦截/文件失效）会整包 400。与聊天侧同款
+// 保护——把消息里的 image_url 部件换成占位文本，调用方重试一次。返回是否发生了降级。
+function stripImagePartsForDegrade(working) {
+  let degraded = false;
+  for (const m of working) {
+    if (!m || !Array.isArray(m.content)) continue;
+    for (let i = 0; i < m.content.length; i++) {
+      const p = m.content[i];
+      if (p && p.type === "image_url") {
+        m.content[i] = { type: "text", text: "（图片暂时无法读取，本轮已省略）" };
+        degraded = true;
+      }
+    }
+  }
+  return degraded;
 }
 
 // 解析 function 的 arguments（可能是字符串或对象）
@@ -360,6 +402,12 @@ async function streamToolLoop({
     } finally { clearTimeout(timer); }
     if (!resp.ok) {
       const t = await resp.text().catch(() => "");
+      // 2026-09-26：上游拉不到图片时整包 400，去图重试一次（与聊天侧图片降级同源保护）
+      if (resp.status === 400 && /failed to download image/i.test(t) && stripImagePartsForDegrade(working)) {
+        console.warn("[mcp] streamToolLoop 上游拉取图片失败(400)，去图后重试本轮");
+        round--;
+        continue;
+      }
       // 2026-09-23 诊断：同 runWithTools，记录轮次与带 tool_calls 的 assistant 的 rc 覆盖情况
       try {
         const _tcA = working.filter(function (m) { return m && m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length; });
