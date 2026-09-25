@@ -2457,6 +2457,11 @@ function _streamThinkHeader(shimmer){
 function _streamThinkHandoffToText(){
   _streamThinkHeader(false);
   showClaudeTyping(false);
+  // 2026-09-26：思考链输出完（正文起头）→ 展开中的流式思考块自动收起（用户要求）
+  if(_streamThinkEl){
+    var _rwOpen=_streamThinkEl.querySelector(".rw.open");
+    if(_rwOpen) _rwOpen.classList.remove("open");
+  }
 }
 function _streamUpdateThink(text){
   if(!chatEl || chatEl.dataset.layout!=="claude") return;
@@ -2464,7 +2469,7 @@ function _streamUpdateThink(text){
   // 批6：用 chatEl.contains 判活。收尾重建后旧占位会随容器一起脱离 chatEl（innerHTML="" 只摘下容器，
   // 容器内部结构仍在 → 旧判断 parentNode 依旧为真），不判活会让下一条回复沿用脱离的旧节点 → 占位不再出现。
   if(!_streamThinkEl || !chatEl.contains(_streamThinkEl)){
-    showClaudeTyping(false);   // 思考链在场时呼吸圈让位
+    // 呼吸圆让位改由 _streamEnsureRoot 统一处理（根容器插到呼吸圆原位），此处不再单独摘
     _streamThinkEl=document.createElement("div");
     _streamThinkEl.className="rw-wrap";
     // 与重建版（renderAiContent/makeMsgEl 那条）同构：.rw > .rw-h(+.rw-a) + .rw-c
@@ -2481,7 +2486,13 @@ function _streamUpdateThink(text){
   if(now-_streamThinkCAt>=250){
     _streamThinkCAt=now;
     var c=_streamThinkEl.querySelector(".rw-c");
-    if(c) c.innerHTML=(cfg.thinking_md?renderMd(String(text||"")):escapeHtml(String(text||"")));
+    if(c){
+      // 2026-09-26 B 方案：展开态跟随直播滚动；用户上滑阅读（离底>48px）则不打扰
+      var _rw=c.parentElement;
+      var _stick=(!_rw||!_rw.classList.contains("open"))||(c.scrollHeight-c.scrollTop-c.clientHeight<48);
+      c.innerHTML=(cfg.thinking_md?renderMd(String(text||"")):escapeHtml(String(text||"")));
+      if(_rw&&_rw.classList.contains("open")&&_stick) c.scrollTop=c.scrollHeight;
+    }
   }
   if(autoScroll)scrollBottom();
 }
@@ -2490,7 +2501,9 @@ function _streamEnsureRoot(){
   _streamRoot=document.createElement("div");
   _streamRoot.className="msg ai multi stream-in";
   removeEmpty();
-  chatEl.appendChild(_streamRoot);
+  // 呼吸圆重合替换：内容根容器插到呼吸圆原位并把它摘掉——思考链/正文/工具卡都从同一槽位开始
+  if(_claudeTypingEl&&_claudeTypingEl.parentNode===chatEl){chatEl.insertBefore(_streamRoot,_claudeTypingEl);_claudeTypingEl.parentNode.removeChild(_claudeTypingEl);}
+  else chatEl.appendChild(_streamRoot);
   return _streamRoot;
 }
 // claude 主题打字机引擎：逐字吐出累积文本（2026-09-25 优化：匀速/后台完成/未渲染不吐/收尾追赶/reduced-motion）
@@ -3001,6 +3014,14 @@ document.addEventListener("click",function(e){
   var rw=e.target.closest(".rw-wrap .rw");
   if(rw){
     e.preventDefault();
+    // 2026-09-26 B 方案：流式占位行点击=就地展开/收起（.rw-c 由 _streamUpdateThink 250ms 直播写入），
+    // 不再开快照抽屉；收尾重建后的思考块仍走快照抽屉
+    if(_streamActive && _streamThinkEl && _streamThinkEl.contains(rw)){
+      rw.classList.toggle("open");
+      var _c=rw.querySelector(".rw-c");
+      if(_c&&rw.classList.contains("open")) _c.scrollTop=_c.scrollHeight;
+      return;
+    }
     var body2=rw.querySelector(".rw-c");
     if(body2) openThinkSheet(body2.innerHTML,"Thought");
     return;
@@ -8215,11 +8236,10 @@ body:has(#chat[data-layout="wx"]) .session-item .s-name .s-icon.pin.on .ico{colo
 body:has(#chat[data-layout="wx"]) .session-item .s-name .s-icon.pin:not(.on){color:#C9C9C9!important;background:transparent!important}
 
 /* ===== 极简 Claude 风主题 ===== */
-#chat[data-layout="claude"]{padding-left:4%;padding-right:4%;padding-bottom:calc(env(safe-area-inset-bottom) + 84px)}
-/* 全页内阴影画框：上下边缘压影、四角自然最暗；盖在聊天内容与输入卡之上，不拦截点击 */
+#chat[data-layout="claude"]{padding-left:4%;padding-right:4%;padding-bottom:calc(env(safe-area-inset-bottom) + 35vh)}
 /* 全页上下边缘淡出罩：单条线性渐变只压上下、中间全净、左右无暗角（参考用户确认的结构）；颜色用主题背景色 */
-body:has(#chat[data-layout="claude"])::after{content:"";position:fixed;inset:0;z-index:20;pointer-events:none;background:linear-gradient(to bottom,rgba(250,249,247,.95),rgba(250,249,247,0) 15%,rgba(240,239,236,0) 85%,rgba(240,239,236,.95))}
-body[data-theme="dark"]:has(#chat[data-layout="claude"])::after{background:linear-gradient(to bottom,rgba(26,26,26,.95),rgba(26,26,26,0) 15%,rgba(26,26,26,0) 85%,rgba(26,26,26,.95))}
+body:has(#chat[data-layout="claude"])::after{content:"";position:fixed;inset:0;z-index:20;pointer-events:none;background:linear-gradient(to bottom,rgba(250,249,247,.95),rgba(250,249,247,0) 10%,rgba(240,239,236,0) 80%,rgba(240,239,236,.95))}
+body[data-theme="dark"]:has(#chat[data-layout="claude"])::after{background:linear-gradient(to bottom,rgba(26,26,26,.95),rgba(26,26,26,0) 10%,rgba(26,26,26,0) 80%,rgba(26,26,26,.95))}
 /* 2026-09-24 P0：claude 背景规则去 !important——原 !important 会压掉 applyTheme 设置的用户背景图（内联 backgroundImage 优先于样式表），切到极简后背景图静默失效 */
 body:has(#chat[data-layout="claude"]){background:linear-gradient(180deg,#faf9f7 0%,#f0efec 100%);font-family:Georgia,-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Noto Sans CJK SC","Microsoft YaHei",serif}
 body:has(#chat[data-layout="claude"]) header{background:transparent;border-bottom:none;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
@@ -8330,7 +8350,7 @@ body[data-theme="dark"] .drawer-close{color:#999!important}
   -webkit-text-fill-color:transparent;
   animation:thoughtShimmer 1.5s linear infinite;
 }
-.claude-typing{display:flex;align-items:center;padding:8px 0;margin-bottom:8px}
+.claude-typing{display:flex;align-items:center;margin:4px 0}
 .claude-typing-dot{width:10px;height:10px;border-radius:50%;background:#999;animation:claudeBreathe 1.2s ease-in-out infinite}
 @keyframes claudeBreathe{0%,100%{transform:scale(.6);opacity:.4}50%{transform:scale(1.2);opacity:1}}
 /* claude 主题：工具卡——简洁灰色文字+图标+箭头，无卡片背景 */
