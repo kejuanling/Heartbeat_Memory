@@ -12,6 +12,7 @@ self.addEventListener('push', function (event) {
     icon: '/push-icon-192.png',
     badge: '/push-icon-192.png',
     tag: 'dylan-chat',
+    vibrate: [80, 40, 80],
     data: { url: (data && data.url) || '/chat' }
   }));
 });
