@@ -3921,7 +3921,7 @@ async function request(finalMsgs, fromSend, regenAnchorId){
         if(document.hidden && full && full.trim()){
           fetch("/v1/notify/reply-done",{
             method:"POST",
-            headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key},
+            headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},
             body:JSON.stringify({preview:String(full).replace(/[#*`>\n]/g," ").trim().slice(0,80),session_id:sidAtStart})
           });
         }
@@ -7033,7 +7033,8 @@ function urlBase64ToUint8Array(b64){
   return out;
 }
 function pushUploadSubscription(sub){
-  return fetch("/v1/push/subscribe",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key},
+  // 带 admin_session cookie 登录时，/v1/* POST 受 CSRF 双提交校验（server.js preHandler），必须带 token
+  return fetch("/v1/push/subscribe",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},
     body:JSON.stringify({session_id:SessionStore.getCurrentSession(),subscription:sub.toJSON()})});
 }
 async function pushEnsureSubscribed(){
@@ -7068,7 +7069,7 @@ async function updatePushUI(){
   let has=false;
   try{ const reg=await navigator.serviceWorker.ready; has=!!(await reg.pushManager.getSubscription()); }catch(e){}
   if(Notification.permission==="granted"){
-    st.innerHTML=has?"系统通知已开启 ✓（唤醒消息、后台回复会推送到手机）":"已授权但还没有订阅，点下面按钮完成开启。";
+    st.innerHTML=has?"系统通知已开启 ✓":"已授权但还没有订阅，点下面按钮完成开启。";
   }else{
     st.innerHTML="未开启。点下面按钮，iOS 会弹出授权确认。";
   }
