@@ -6765,7 +6765,8 @@ app.post("/v1/notify/reply-done", async (req, reply) => {
     const preview = String((req.body && req.body.preview) || "").trim();
     if (!preview) return reply.send({ ok: false, reason: "empty" });
     const sessionId = String((req.body && req.body.session_id) || "").trim() || "default";
-    const r = await sendPushNotification({ title: "AI 回复了", body: preview.slice(0, 200), sessionId });
+    // 2026-09-26 用户拍板：通知不显示标题行，preview 全文作为正文（title 置空）
+    const r = await sendPushNotification({ title: "", body: preview.slice(0, 200), sessionId });
     reply.send(r);
   } catch (e) { reply.code(500).send({ error: e.message }); }
 });

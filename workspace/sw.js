@@ -3,10 +3,15 @@
    不缓存页面资源（聊天页自身带 no-cache 头，恢复靠页面 re-fetch server truth）。 */
 'use strict';
 
+// 无缓存逻辑，新版本可直接接管（配合 PWA 重开触发更新检查）
+self.addEventListener('install', function () { self.skipWaiting(); });
+self.addEventListener('activate', function (event) { event.waitUntil(self.clients.claim()); });
+
 self.addEventListener('push', function (event) {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch (e) { data = {}; }
-  const title = (data && data.title) || '谢意行';
+  // 标题留空 = 通知只显示 App 名 + 正文（2026-09-26 用户拍板）
+  const title = (data && typeof data.title === 'string') ? data.title : '';
   event.waitUntil(self.registration.showNotification(title, {
     body: (data && data.body) || '',
     icon: '/push-icon-192.png',
