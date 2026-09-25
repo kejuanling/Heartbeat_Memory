@@ -2347,10 +2347,20 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
       // 存储用原始文本但去工具回声：保留 <wake>/<memory> 等标签作为上下文一部分；下发/回放仍用 aiClean。
       // 2026-09-24 B3：storedText/timeline 映射提级为函数级 finalStoredText/finalTimelinePayload（与终止帧共用）
       const storedText = finalStoredText;
-      if (!tailHasReply(sessionId, storedText)) {
+      // 2026-09-26 [DIARY]（MCP 分支补齐，与 routes/chat.js:1039 同口径）：回复中的日记块 →
+      // 日记文件 + 独立 kind=diary 隐藏消息（context-replacements isDiaryEvent 对其永不压缩，
+      // AI 上下文重建仍可见），可见正文剥掉日记块，避免时间线孪生。此前此分支漏提取，
+      // 日记既不进 diary/ 文件、又粘在可被压缩的普通消息里。
+      const _diaryResult = diaryLib.extractDiaryFromResponse(storedText);
+      const visibleStored = _diaryResult.diaryContent ? _diaryResult.remainingText : storedText;
+      if (!tailHasReply(sessionId, visibleStored)) {
+        if (_diaryResult.diaryContent) {
+          diaryLib.appendDiaryEntry(_diaryResult.diaryContent, sessionId);
+          toAppend.push({ role: "assistant", content: diaryLib.wrapDiaryTag(_diaryResult.diaryContent), kind: "diary" });
+        }
         toAppend.push({
           id: replyMsgId || undefined,
-          role: "assistant", content: storedText, reasoning: r.reasoning || "", tools: r.toolHistory || [], tokens: r.usage || null,
+          role: "assistant", content: visibleStored, reasoning: r.reasoning || "", tools: r.toolHistory || [], tokens: r.usage || null,
           segments: (r.toolHistory && r.toolHistory.length) ? (r.segments || []).map(function(s){ return stripToolEchoBlocks(tagParser.stripTags(s)); }) : undefined,
           stream_timeline: finalTimelinePayload   // 真实事件时间线：刷新时按 text/tool 原顺序重建（与终止帧下发同一份）
         });
@@ -2681,6 +2691,11 @@ function readEnvValueOrDefault(key, fallback) {
   const value = readEnvValue(key);
   return value === "" ? fallback : value;
 }
+
+// 日记共享模块（2026-09-26）：MCP 工具循环分支的 [DIARY] 提取/落库，与 routes/chat.js、
+// lib/wake-scheduler.js 同一实现（lib/diary.js），杜绝三路径口径漂移。
+// 依赖 readEnvValue，故在 .env 读取区之后初始化；请求期才被 handleMcpRequest 调用。
+const diaryLib = require("./lib/diary")({ baseDir: __dirname, readEnvValue });
 
 function normalizePositiveInteger(value, key, fallback) {
   const n = Number(value);
