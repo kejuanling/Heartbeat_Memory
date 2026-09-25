@@ -2597,7 +2597,18 @@ function partialToHtml(partial,cfg){
   var done=lines.join("\n");
   var h="";
   if(done){ h+= md?renderMd(done):escapeHtml(done).replace(/\n/g,"<br>"); }
-  if(last!==undefined && last!==""){ h+=(h?'\n':'')+escapeHtml(last); }
+  if(last!==undefined && last!==""){
+    var esc=escapeHtml(last);
+    if(md && done && /\n$/.test(done)){
+      // 段落边界：收尾后此行是独立 <p>(带段距)。裸文本若用字面\n 拼接，pre-wrap 气泡会在块级边界上
+      // 再渲染一行空行(流式间距比收尾多一整行)；直接同构包 <p>
+      h+='<p>'+esc+'</p>';
+    }else if(md){
+      h+=esc;   // md 段内续行：renderMd 输出全是块级元素，块级边界已保证换行，与收尾后同段<br>形态一致
+    }else{
+      h+=(h?'\n':'')+esc;   // 非 md 模式输出是行内文本+<br>，依赖字面\n 换行且收尾保留原始空行，保持不动
+    }
+  }
   return h;
 }
 function _streamFillBubblePartial(node){
