@@ -593,12 +593,13 @@ function summarizeMessagesForLog(messages = []) {
 // （文件锁 + 锁内重读合并 + 损坏拒写），调度器以 20s 轻量轮询文件指纹感知变化后重挂定时器
 // （原 wake-up 独立进程轮询，进程已退役）。批注 2026-09-13（审查 D3）。
 const wakeSchedule = require("./lib/wake-schedule");
-function saveWakeSchedule(nextWakeAtIso, sessionId) {
-  return wakeSchedule.saveSlot(nextWakeAtIso, sessionId);
+function saveWakeSchedule(nextWakeAtIso, sessionId, options) {
+  return wakeSchedule.saveSlot(nextWakeAtIso, sessionId, options);
 }
 
 // 对话侧 <wake> 闹钟标签：AI 在对话里设置闹钟（日期时间或分钟）；标签不显示给用户。
 // 返回剥离标签后的文本；同时把闹钟写入 wake_schedule.json（唤醒调度器轮询感知后挂定时器）。
+// 2026-09-26：支持尾部 keep=true —— 该闹钟不受「用户中途发言即作废」影响（落 keep 字段）。
 function parseWakeTagAndSchedule(text, sessionId) {
   const cleaned = String(text || "").replace(/<wake>[\s\S]*?<\/wake>/gi, "").trim();
   const m = String(text || "").match(/<wake>([\s\S]*?)<\/wake>/i);
@@ -614,8 +615,8 @@ function parseWakeTagAndSchedule(text, sessionId) {
     return cleaned;
   }
   try {
-    saveWakeSchedule(nextWakeAt.toISOString(), sessionId);
-    console.log(`[wake] 对话设置闹钟：${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}（${nextWakeAt.toISOString()}，会话 ${sessionId || "default"}）`);
+    saveWakeSchedule(nextWakeAt.toISOString(), sessionId, { keep: !!target.keep });
+    console.log(`[wake] 对话设置闹钟：${formatDateTimeInTimeZone(nextWakeAt, TIME_ZONE)}（${nextWakeAt.toISOString()}，会话 ${sessionId || "default"}${target.keep ? "，keep=true 不受用户发言影响" : ""}）`);
   } catch (err) {
     console.warn("[wake] 保存闹钟失败:", err.message);
   }
@@ -1698,8 +1699,8 @@ function readRestartCommand() {
 // ========================
 app.addHook("onRequest", (req, reply, done) => {
   if (req.url.startsWith("/admin")) return done();
-  // 内部接口（唤醒事件/心跳/测试推送）：若配置了 INTERNAL_API_KEY 则必须携带
-  const isInternalPath = req.url.startsWith("/internal/") || req.url.startsWith("/test-bark");
+  // 内部接口：若配置了 INTERNAL_API_KEY 则必须携带
+  const isInternalPath = req.url.startsWith("/internal/");
   if (isInternalPath) {
     const internalKey = readEnvValue("INTERNAL_API_KEY");
     // 2026-09-21 审查 H6：fail-closed——未配置 INTERNAL_API_KEY 时直接拒绝（原为放行落到网络判断）
@@ -2454,8 +2455,6 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
 // 2026-09-13 审查修复：唤醒事件幂等去重——HTTP 重试会把同一唤醒事件/回复重复落库
 // （appendSpecialEvent 无内容查重，buildTimeline 的视图去重掩盖不了盘上累积）。
 // 进程内指纹窗口 10 分钟：同会话+同内容组合的重复请求直接跳过。
-const _wakeEventSeen = new Map();
-const WAKE_EVENT_DEDUP_MS = 10 * 60 * 1000;
 
 // ========================
 // 内部：小世界事件落时间线（2026-09-19 批6 D4）
@@ -2520,9 +2519,7 @@ function normalizeDiaryForStore(raw) {
   return inner ? "[DIARY]" + inner + "[/DIARY]" : "";
 }
 
-// wake-event v2 落库实现（2026-09-15 批3收尾抽出）：HTTP 入口（/internal/wake-event）
-// 与网关内唤醒调度器（lib/wake-scheduler.js）共用同一实现，杜绝两处口径漂移。
-// 幂等去重只在 HTTP 入口做（调度器进程内调用无重试路径）。
+// wake-event v2 落库实现（2026-09-15 批3收尾抽出）：网关内唤醒调度器（lib/wake-scheduler.js）进程内直调，无 HTTP 入口。
 function applyWakeEventV2(body) {
   try {
     const { session_id, speak, diary, push, event, tools, wake_block_id, reasoning } = body || {};
@@ -2564,116 +2561,6 @@ function applyWakeEventV2(body) {
     return { ok: false, error: err.message };
   }
 }
-
-app.post("/internal/wake-event", async (req, reply) => {
-  try {
-    const body = req.body || {};
-    // ===== v2（2026-09-15 role 法）：唤醒产出原地追加为 assistant 消息，无回显行、无插位 =====
-    // speak = 模型完整输出（含 <wake> 标签，存储保留作上下文；[DIARY] 段由 stripDiaryBlocks 剥除进 diary 消息）
-    // diary = 本次写的日记原文 → assistant(kind=diary) 落时间线（前端隐藏），日记文件由唤醒侧自行写
-    //（原 wake_up.js；现为 gateway 内调度器经共享模块 lib/diary.js，口径一致）
-    // push  = 推送元数据（Bark 成功时），结构化挂 assistant.push 字段，不再生成「刚刚给X发了推送」回显行
-    // event  = 唤醒判定记录（2026-09-20 恢复回写：发推/未发/失败）→ developer 系统层消息（前端不显示），推送管理读端按文本口径解析
-    // noaction = [NO_ACTION] 原始输出 → 2026-09-24 起 assistant(kind=noaction) 原样落时间线（记录层完整流水），
-    //   /v1/history 与 sidx 下发层按 kind 过滤（前端不显示）；上下文重建可见。旧 body.noaction 字段已废弃。
-    // tools = 唤醒工具调用记录 → 挂 speak 消息 tools 字段；静默无消息时回填到 [唤醒] 块
-    if (body.v2 === true) {
-      const { session_id, speak, diary, push } = body;
-      const evSession = typeof session_id === "string" && session_id.trim() ? String(session_id).trim() : null;
-      const speakRaw = String(speak || "").trim();
-      const diaryRaw = String(diary || "").trim();
-      const pushMeta = (push && typeof push === "object") ? push : null;
-      // 幂等去重（2026-09-15 补）：v2 分支此前漏了 v1 的同款护栏——HTTP 层任何重试
-      // 会把 speak/diary 重复落库。同会话+同内容 10 分钟窗口内直接跳过。
-      if (speakRaw || diaryRaw) {
-        const dedupKey = "v2\u0000" + (evSession || "default") + "\u0000" + [String(speak || ""), String(diary || ""), pushMeta ? (String(pushMeta.title || "") + "\u0002" + String(pushMeta.at || "")) : ""].map(s => s.slice(0, 2000)).join("\u0001");
-        const seenAt = _wakeEventSeen.get(dedupKey);
-        const nowTs = Date.now();
-        if (seenAt && nowTs - seenAt < WAKE_EVENT_DEDUP_MS) {
-          console.log("[wake-event] 重复事件（重试?）跳过落库 (v2)");
-          return reply.send({ success: true, v2: true, dedup: true });
-        }
-        _wakeEventSeen.set(dedupKey, nowTs);
-        if (_wakeEventSeen.size > 500) {
-          for (const [k, t] of _wakeEventSeen) { if (nowTs - t > WAKE_EVENT_DEDUP_MS) _wakeEventSeen.delete(k); }
-        }
-      }
-      const res = applyWakeEventV2(body);
-      if (!res.ok) return reply.code(500).send({ error: res.error });
-      return reply.send({ success: true, v2: true, appended: res.appended });
-    }
-    const { content, event, diary, push_meta, session_id, tools } = body;
-    // 批注 2026-08-29：多会话。唤醒侧（原 wake_up.js 独立进程，现 gateway 内调度器）会携带 session_id，
-    // 把唤醒事件写到对应会话语，而不是永远堆在主会话。未携带时回退主会话（100% 兼容旧行为）。
-    const evSession = typeof session_id === "string" && session_id.trim() ? String(session_id).trim() : null;
-    // 幂等去重（放在 400 校验之后，保证参数非法仍报错）
-    if (content || event || diary) {
-      const dedupKey = (evSession || "default") + "\u0000" + [String(event || ""), String(diary || ""), String(content || "")].map(s => s.slice(0, 2000)).join("\u0001");
-      const seenAt = _wakeEventSeen.get(dedupKey);
-      const nowTs = Date.now();
-      if (seenAt && nowTs - seenAt < WAKE_EVENT_DEDUP_MS) {
-        console.log("[wake-event] 重复事件（重试?）跳过落库");
-        return reply.send({ success: true, dedup: true });
-      }
-      _wakeEventSeen.set(dedupKey, nowTs);
-      if (_wakeEventSeen.size > 500) {
-        for (const [k, t] of _wakeEventSeen) { if (nowTs - t > WAKE_EVENT_DEDUP_MS) _wakeEventSeen.delete(k); }
-      }
-    }
-    // 推送回显判定：成功推送时 event=回显（含标题+正文全文）、content=AI 完整回复（同正文）。
-    // 正文已含于回显，不再单独落库（避免上下文/时间线重复）；记忆标签解析仍照常执行。
-    const isPushEcho = !!(push_meta && event && isPushEchoContent(event));
-    if (!content && !event && !diary) return reply.code(400).send({ error: "content or event is required" });
-    if (diary) {
-      // 2026-09-21 统一日记唯一格式：v1 路径同样落 [DIARY]正文[/DIARY]（kind=diary），
-      // 不再用旧「（时间 醒来写了日记：…）」特殊事件包裹
-      appendMessages(evSession, [{ role: "assistant", content: normalizeDiaryForStore(diary), kind: "diary" }].filter(m => m.content), { silent: true });
-    }
-    if (event) {
-      if (push_meta && isPushEchoContent(event)) {
-        appendSpecialEvent(event, {
-          event_type: "push",
-          push_at: String(push_meta.at || ""),
-          push_user: String(push_meta.user || "") || (readEnvValue("USER_DISPLAY_NAME") || "用户"),
-          push_channel: String(push_meta.channel || "Bark"),
-          push_title: String(push_meta.title || "").trim(),
-          push_body: String(push_meta.body || "").trim(),
-          push_tail: String(push_meta.tail || ""),
-          push_session: String(push_meta.session || ""),
-          push_session_name: String(push_meta.session_name || "")
-        }, evSession);
-      } else {
-        appendSpecialEvent(event, null, evSession);
-      }
-    }
-    if (content) {
-      // 解析记忆标签仅用于入库副作用（记忆/钉选），存储仍保留原始含标签文本作为上下文一部分；
-      // 气泡显示由前端 stripInnerTags 剥掉。不再用 cleaned 覆盖 stored。
-      const trimmedContent = String(content).trim();
-      // 2026-09-24：与 v2 同口径（用户拍板 B 案）——[NO_ACTION] 开头原样入库、打 kind=noaction，
-      // /v1/history 与 sidx 下发层过滤（与 kind=diary 同款）；不再整条跳过（0829 旧拦截，0920 拍板时漏撤）。
-      let stored = stripDiaryBlocks(trimmedContent);
-      try {
-        await tagParser.extractAndStore(content, { sessionId: evSession });
-      } catch (e) {
-        console.warn("[wake-event] 标签解析失败:", e.message);
-      }
-      if (stored && !isPushEcho) {
-        // 唤醒侧工具卡（0913-03）：tools 随消息落时间线，前端复用聊天侧工具卡渲染
-        const wakeTools = Array.isArray(tools) ? tools.filter(function(t){ return t && t.name; }) : [];
-        const extra = wakeTools.length ? { tools: wakeTools } : {};
-        if (/^\[NO_ACTION\]/.test(trimmedContent)) extra.kind = "noaction";
-        appendSpecialEvent(stored, Object.keys(extra).length ? extra : null, evSession);
-      } else if (isPushEcho) {
-        console.log(`[wake-event] 推送正文已含于回显，跳过正文单独落库 (chars=${stored.length})`);
-      }
-    }
-    reply.send({ success: true });
-  } catch (err) {
-    console.error(err);
-    reply.code(500).send({ error: err.message });
-  }
-});
 
 // ========================
 // 读取 .env 值
@@ -3278,14 +3165,6 @@ app.post("/admin/netease/save", { preHandler: basicAuth }, async (req, reply) =>
 });
 
 // ========================
-// 心跳接口
-// ========================
-app.post("/internal/heartbeat", async (req, reply) => {
-  wakeUpLastHeartbeat = Date.now();
-  reply.send({ status: "ok" });
-});
-
-// ========================
 // 管理页一键重启
 // ========================
 app.post("/admin/restart", { preHandler: basicAuth }, async (req, reply) => {
@@ -3371,24 +3250,6 @@ app.post("/internal/context-replacements/apply", async (req, reply) => {
     reply.send(result);
   } catch (err) {
     console.error("[POST /internal/context-replacements/apply] error:", err.message);
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-app.get("/internal/context-replacements/list", async (req, reply) => {
-  try {
-    reply.send({ items: contextReplacements.listReplacements() });
-  } catch (err) {
-    console.error("[GET /internal/context-replacements/list] error:", err.message);
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-app.post("/internal/context-replacements/undo", async (req, reply) => {
-  try {
-    reply.send(contextReplacements.removeReplacement(String((req.body || {}).id || "").trim()));
-  } catch (err) {
-    console.error("[POST /internal/context-replacements/undo] error:", err.message);
     reply.code(500).send({ error: err.message });
   }
 });
@@ -3583,74 +3444,6 @@ app.post("/internal/memory-v2/update", async (req, reply) => {
     reply.send({ success: true, entry: { id: e.id, content: e.text, content_updated_at: e.content_updated_at } });
   } catch (err) {
     console.error("[POST /internal/memory-v2/update] error:", err.message);
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-// 永久注入上下文（pin）：MCP 工具 pin_add / pin_update / pin_delete 用
-app.get("/internal/pin", async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const list = engine.getPinnedMemories ? engine.getPinnedMemories() : [];
-    const safe = list.map(m => ({
-      id: m.id,
-      title: m.title || "",
-      content: m.content || "",
-      order: m.order || 0,
-      updated_at: m.updated_at || ""
-    }));
-    reply.send({ count: safe.length, pins: safe });
-  } catch (err) {
-    console.error("[GET /internal/pin] error:", err.message);
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-app.post("/internal/pin", async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const body = req.body || {};
-    const content = String(body.content || "").trim();
-    if (!content) return reply.code(400).send({ error: "content 必填" });
-    const mem = await engine.addPinnedMemory({ title: String(body.title || "").trim(), content: content }, { allowDeleted: true });
-    reply.send({ success: true, pin: mem });
-  } catch (err) {
-    console.error("[POST /internal/pin] error:", err.message);
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-app.put("/internal/pin/:id", async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const body = req.body || {};
-    const updates = {};
-    if (body.title !== undefined) updates.title = String(body.title).trim();
-    if (body.content !== undefined) {
-      const c = String(body.content).trim();
-      if (!c) return reply.code(400).send({ error: "content 不能为空" });
-      updates.content = c;
-    }
-    if (Object.keys(updates).length === 0) {
-      return reply.code(400).send({ error: "没有可更新的字段（title/content）" });
-    }
-    const mem = await engine.updatePinnedMemory(req.params.id, updates);
-    if (!mem) return reply.code(404).send({ error: "pin 不存在: " + req.params.id });
-    reply.send({ success: true, pin: mem });
-  } catch (err) {
-    console.error("[PUT /internal/pin] error:", err.message);
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-app.delete("/internal/pin/:id", async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const ok = await engine.deletePinnedMemory(req.params.id);
-    if (!ok) return reply.code(404).send({ error: "pin 不存在: " + req.params.id });
-    reply.send({ success: true });
-  } catch (err) {
-    console.error("[DELETE /internal/pin] error:", err.message);
     reply.code(500).send({ error: err.message });
   }
 });
@@ -3890,19 +3683,6 @@ app.post("/admin/memory-pool/config", { preHandler: basicAuth }, async (req, rep
   try { reply.send(memoryPool.setConfig(req.body || {})); } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
-// 一键清空全部记忆的检索计数（管理台按钮）：计数归零、置顶状态不动
-app.post("/admin/memory-pool/clear-retrieval", { preHandler: basicAuth }, async (req, reply) => {
-  try { reply.send({ ok: true, ...memoryPool.clearRetrievalStats() }); } catch (err) { reply.code(500).send({ error: err.message }); }
-});
-
-app.get("/admin/memory-pool/clean/prompt", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const cfg = memoryPool.getConfig();
-    const def = memoryPool.buildCleanPrompt();
-    reply.send({ ...cfg, default_clean_system_prompt: def.system, default_clean_user_prompt: def.user });
-  } catch (err) { reply.code(500).send({ error: err.message }); }
-});
-
 app.post("/admin/memory-pool/clean", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const b = req.body || {};
@@ -3935,53 +3715,6 @@ function isPushEchoContent(s) {
 // 解析推送回显内容
 // 2026-09-22 审查 R19：注入 loadTimeline/saveTimeline，让推送编辑/删除走时间线四道守卫 + 快照指纹
 require("./routes/push-events")(app, { basicAuth, baseDir: __dirname, loadTimeline, saveTimeline });
-
-app.get("/admin/cross-window-inject", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    // 2026-09-19：S4 后生产实际注入=V2 固定六块（旧 [永久上下文]/[跨窗口] 已被剥除），预览随总闸双轨——
-    // ctx_v2_enabled=true 时与主聊天同一 assembleInput+buildContextBlocks 实时拼真实注入内容
-    //（Relevant 块依赖当轮用户消息，预览不含；不受 cross_inject 开关控制，与 V2 生产路径同口径）。
-    // false/配置缺失=回滚态，保持旧逻辑（computeCrossMemoryText，含 cross_inject 总开关/会话覆盖门）。
-    const sid = String(req.query && req.query.session_id ? req.query.session_id : "").trim() || "default";
-    let v2Cfg = null;
-    try { v2Cfg = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "memory_v2_config.json"), "utf8")); } catch (e) {}
-    if (v2Cfg && v2Cfg.ctx_v2_enabled === true) {
-      let v2Text = "";
-      try {
-        const v2Input = ctxV2Shadow.assembleInput({
-          baseDir: __dirname,
-          sessionId: sid,
-          llmMessages: [],
-          loadTimeline: loadTimeline,
-          normalizeContentToText: normalizeContentToText,
-        });
-        const built = buildContextBlocks(v2Input);
-        v2Text = (built.blocks || [])
-          .filter(function (b) { return b && !b.empty && b.key !== "relevant_memories"; })
-          .map(function (b) { return b.content; }).join("\n\n");
-      } catch (cx) { console.warn("[cross-inject] V2 预览失败:", cx.message); }
-      return reply.send({ text: v2Text, session_id: sid, mode: "v2" });
-    }
-    // 2026-09-13：预览改「每次实时重算」（computeCrossMemoryText），不再复用开窗口时落盘固定的旧快照；
-    // 边界仍用本会话创建日（优先时间线首条消息，其次旧快照固化的 created_at），与实际注入同口径，只算不落盘。
-    let text = "";
-    try {
-      const cfg = memoryPool.getConfig();
-      const cfgOverride = sessionCrossInjectOverride(sid);
-      if (cfgOverride !== false && cfg.cross_inject_enabled !== false) {
-        let createdIso = sessionCreatedAtOf(sid);
-        if (!createdIso) {
-          try {
-            const snapFile = crossSnapshotFile(sid);
-            if (fs.existsSync(snapFile)) createdIso = (fs.readJsonSync(snapFile) || {}).created_at;
-          } catch (e) {}
-        }
-        text = computeCrossMemoryText(cfg, createdIso);
-      }
-    } catch (cx) { console.warn("[cross-inject] 预览失败:", cx.message); }
-    reply.send({ text: text, session_id: sid, mode: "legacy" });
-  } catch (err) { reply.code(500).send({ error: err.message }); }
-});
 
 
 // 上下文记忆替换：管理台撤销（压缩页 AI 块的「撤销」按钮用）
@@ -4101,13 +3834,9 @@ function buildToolsHistory(oldDisabled, oldDesc, oldSchema, newDisabled, newDesc
 
 const MANAGED_SERVICES = [
   { name: "mcp-tools", type: "systemd", label: "工具集 MCP（8771）" },
-  { name: "mcp-ssh", type: "systemd", label: "SSH MCP（9000）" },
   { name: "zzf-mcp", type: "systemd", label: "远程玩具 MCP（8890）" },
   { name: "gateway", type: "pm2", label: "网关 gateway" },
-  { name: "wake-up", type: "pm2", label: "唤醒 wake-up" },   // 已退役（2026-09-15 并入 gateway）；进程不存在时服务页显示 stopped，条目清理待拍板
-  { name: "heart-web", type: "pm2", label: "心跳网页 heart-web" },
   { name: "netease-music-mcp", type: "port", port: 3303, label: "网易云 MCP（3303）", cmd: "cd /opt/netease-music-mcp && PORT=3303 nohup node src/http-server.js > http-server.log 2>&1 &", pattern: "netease-music-mcp" },
-  { name: "decision-trail", type: "port", port: 8787, label: "决策痕迹 MCP（8787）", cmd: "cd /root/workspace/decision-trail && PORT=8787 nohup node server.mjs >> logs/server.log 2>&1 &", pattern: "decision-trail" },
   { name: "spicy-monopoly", type: "port", port: 8773, label: "涩涩大富翁 MCP（8773）", cmd: `cd /opt/dylan-heartbeat/spicy-monopoly && SPICY_MONOPOLY_MCP_TRANSPORT=streamable-http SPICY_MONOPOLY_MCP_HOST=0.0.0.0 SPICY_MONOPOLY_MCP_PORT=8773 SPICY_MONOPOLY_MCP_PATH=/mcp SPICY_MONOPOLY_MCP_BEARER_TOKEN=${process.env.SPICY_MONOPOLY_MCP_BEARER_TOKEN || ""} nohup node mcp-server.js > mcp_spicy.log 2>&1 &`, pattern: "spicy-monopoly" },
   { name: "yun-mcp-v2", type: "systemd", label: "云文件 MCP yun（9010）" },
   { name: "unified-backend", type: "systemd", label: "统一后端（8777）" },
@@ -5992,35 +5721,6 @@ app.get("/admin/env", { preHandler: basicAuth }, async (req, reply) => {
 
 
 
-// ── 留纸一览（2026-09-12）：AI 留的纸（故事/梦/随手创作）只落盘不注入上下文，这里供管理台查看/删除 ──
-app.get("/admin/papers", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const papers = require("./papers");
-    const entries = papers.listPapers();
-    const data = entries.map(e => ({
-      name: e.name, relPath: e.relPath, session: e.session, title: e.title, time: e.time,
-      content: e.content
-    }));
-    reply.send({ papers: data });
-  } catch (err) {
-    console.error("[papers] 留纸列表失败:", err);
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-app.post("/admin/papers/delete", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const papers = require("./papers");
-    const { name } = req.body || {};
-    const r = papers.deletePaper(name);
-    if (!r.ok) return reply.code(400).send({ error: r.error });
-    reply.send({ success: true, file: r.file });
-  } catch (err) {
-    console.error("[papers] 删除留纸失败:", err);
-    reply.code(500).send({ error: err.message });
-  }
-});
-
 // 小世界门户「留纸」页 API（2026-09-12）：与站点其它门户 API 同口径公开（单人流站点，nginx SSL 层）
 app.get("/papers/api/list", async (req, reply) => {
   try {
@@ -7532,66 +7232,7 @@ app.get("/admin/logs/wake-up", { preHandler: basicAuth }, async (req, reply) => 
   }
 });
 
-// 获取/新增/删除 永久注入上下文 (pinned memories)
-app.get("/admin/logs/pinned", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const list = engine.getPinnedMemories ? engine.getPinnedMemories() : [];
-    reply.send({ list });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
 
-app.post("/admin/logs/pinned", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const { title, content, order } = req.body || {};
-    const mem = await engine.addPinnedMemory({ title, content, order }, { allowDeleted: true });
-    reply.send({ success: true, memory: mem });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-
-
-app.put("/admin/logs/pinned/:id", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const { title, content, order } = req.body || {};
-    const updates = {};
-    if (title !== undefined) updates.title = title;
-    if (content !== undefined) updates.content = content;
-    if (order !== undefined) updates.order = order;
-    const mem = await engine.updatePinnedMemory(req.params.id, updates);
-    if (!mem) return reply.code(404).send({ error: "not found" });
-    reply.send({ success: true, memory: mem });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-app.post("/admin/logs/pinned/reorder", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const ids = (req.body || {}).ids;
-    const list = await engine.reorderPinnedMemory(ids);
-    if (!list) return reply.code(400).send({ error: "无效的排序数据" });
-    reply.send({ success: true, list: list });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
-app.delete("/admin/logs/pinned/:id", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const ok = await engine.deletePinnedMemory(req.params.id);
-    reply.send({ success: ok });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
 
 // 获取最后一次发给LLM的完整上下文
 app.get("/admin/logs/context", { preHandler: basicAuth }, async (req, reply) => {
@@ -7608,14 +7249,6 @@ app.get("/admin/logs/context", { preHandler: basicAuth }, async (req, reply) => 
   } catch (err) {
     reply.code(500).send({ error: err.message });
   }
-});
-
-// 测试 Bark
-// ========================
-app.get("/test-bark", async (req, reply) => {
-  const formattedTime = formatDateTimeInTimeZone(new Date(), TIME_ZONE);
-  appendSpecialEvent(`（${formattedTime} 刚刚给${readEnvValue("USER_DISPLAY_NAME") || "用户"}发了 Bark：这是一条测试推送。）`);
-  reply.send({ success: true });
 });
 
 // ========================
