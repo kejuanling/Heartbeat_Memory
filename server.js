@@ -5897,61 +5897,6 @@ app.delete("/admin/logs/context-digest-prompt", { preHandler: basicAuth }, async
   }
 });
 
-// 共影：观影唤醒提示词
-const CO_WAKE_PROMPT_FILE = path.join(__dirname, "data", "co_wake_prompt.json");
-const DEFAULT_CO_WAKE_PROMPT = `## 最高优先级规则
-1. 这是一次「共影」中的定时观影唤醒，不是涵主动发起的对话。你只是收到了新的画面和字幕。
-2. 你的任务是决定是否根据当前剧情/画面自然地陪她聊一句；不想说就保持沉默。
-3. 说话时贴合剧情和你的人设，语气自然简短，不剧透后面还没播到的情节。
-
-## 观影信息
-- 当前时间：\${currentTime}
-- 画面描述：\${frameDescription}
-- 当前字幕：\${subtitle}
-
-## 输出格式
-- 想说话：直接输出你想说的话（一句即可，可带一句轻快的点评）。
-- 不想说话：只输出 [NO_ACTION]。`;
-
-function readCoWakePrompt() {
-  try {
-    const raw = fs.readFileSync(CO_WAKE_PROMPT_FILE, "utf-8");
-    const j = JSON.parse(raw);
-    if (j && typeof j.prompt === "string" && j.prompt.trim()) return j.prompt;
-  } catch (e) {}
-  return DEFAULT_CO_WAKE_PROMPT;
-}
-
-app.get("/admin/logs/co-wake-prompt", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    reply.send({ prompt: readCoWakePrompt() });
-  } catch (err) {
-    reply.send({ error: err.message });
-  }
-});
-
-app.post("/admin/logs/co-wake-prompt", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const prompt = String((req.body && req.body.prompt) || "").trim();
-    if (!prompt) return reply.code(400).send({ error: "提示词不能为空" });
-    const tmp = CO_WAKE_PROMPT_FILE + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify({ prompt }, null, 2), "utf-8");
-    fs.renameSync(tmp, CO_WAKE_PROMPT_FILE);
-    reply.send({ ok: true, prompt });
-  } catch (err) {
-    reply.code(400).send({ error: err.message });
-  }
-});
-
-app.delete("/admin/logs/co-wake-prompt", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    if (fs.existsSync(CO_WAKE_PROMPT_FILE)) fs.unlinkSync(CO_WAKE_PROMPT_FILE);
-    reply.send({ ok: true, prompt: DEFAULT_CO_WAKE_PROMPT });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
-
 // ========================
 // 共影（一起看电影）业务
 // ========================
@@ -6061,156 +6006,6 @@ function coBuildHistory() {
   return messages;
 }
 
-// 共影：画面描述提示词（视觉模型用，管理台可编辑）
-const CO_VISION_PROMPT_FILE = path.join(__dirname, "data", "co_vision_prompt.json");
-const DEFAULT_CO_VISION_PROMPT = "这是视频播放页的截图（连续约 ${seconds} 秒）。只描述视频画面本身的内容：人物、动作表情、场景、画面上的字幕。忽略网页导航栏、推荐列表、按钮、播放器控件等界面元素。简洁中文，只描述看到的，不评价剧情、不推测后续。";
-
-function readCoVisionPrompt() {
-  try {
-    const raw = fs.readFileSync(CO_VISION_PROMPT_FILE, "utf-8");
-    const j = JSON.parse(raw);
-    if (j && typeof j.prompt === "string" && j.prompt.trim()) return j.prompt;
-  } catch (e) {}
-  return DEFAULT_CO_VISION_PROMPT;
-}
-
-app.get("/admin/logs/co-vision-prompt", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    reply.send({ prompt: readCoVisionPrompt() });
-  } catch (err) {
-    reply.send({ error: err.message });
-  }
-});
-
-app.post("/admin/logs/co-vision-prompt", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const prompt = String((req.body && req.body.prompt) || "").trim();
-    if (!prompt) return reply.code(400).send({ error: "提示词不能为空" });
-    const tmp = CO_VISION_PROMPT_FILE + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify({ prompt }, null, 2), "utf-8");
-    fs.renameSync(tmp, CO_VISION_PROMPT_FILE);
-    reply.send({ ok: true, prompt });
-  } catch (err) {
-    reply.code(400).send({ error: err.message });
-  }
-});
-
-app.delete("/admin/logs/co-vision-prompt", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    if (fs.existsSync(CO_VISION_PROMPT_FILE)) fs.unlinkSync(CO_VISION_PROMPT_FILE);
-    reply.send({ ok: true, prompt: DEFAULT_CO_VISION_PROMPT });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-// 视觉描述：画面（base64/dataURL）+ 可选字幕 → 文字描述
-// 短时缓存：同一帧 5 秒内复用描述，避免「唤醒截帧」和「用户发消息」撞在同一时刻时重复调用视觉模型
-let coFrameCache = { at: 0, key: "", description: "" };
-// 视觉模型列表 + 解析（共影 / 截图上传 各自选择模型，以后可加更多模型）
-function getVisionModels() {
-  const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
-  const list = Array.isArray(cfg.vision_models) ? cfg.vision_models.slice() : [];
-  // 兼容旧的单一视觉模型配置：列表为空但有旧配置时，作为隐式默认模型
-  if (list.length === 0 && cfg.co_vision_api_key && String(cfg.co_vision_api_key).trim()) {
-    list.push({ id: "default", name: "默认视觉模型", api_url: cfg.co_vision_api_url || "https://open.bigmodel.cn/api/paas/v4/chat/completions", api_key: cfg.co_vision_api_key, model: cfg.co_vision_model || "glm-4v-flash" });
-  }
-  return list;
-}
-
-function resolveVisionModel(feature) {
-  const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
-  const models = getVisionModels();
-  if (!models.length) return null;
-  const selId = feature === "co" ? cfg.co_vision_model_id : cfg.screenshot_vision_model_id;
-  const hit = models.find(function (m) { return m && m.id === selId && m.api_key && String(m.api_key).trim(); });
-  if (hit) return hit;
-  return models.find(function (m) { return m && m.api_key && String(m.api_key).trim(); }) || null;
-}
-
-async function describeCoFrame({ image, frames, subtitle, duration, noPrompt }) {
-  const now = Date.now();
-  // 缓存 key 用内容哈希：dataURL 前 120-200 字符是固定文件头/量化表（同设备截图几乎恒同），
-  // 直接做 key 会让 5 秒窗口内不同画面互相命中旧描述
-  const imgKey = (Array.isArray(frames) && frames.length)
-    ? "multi:" + frames.length + ":" + crypto.createHash("sha1").update(String(frames[0] || "")).digest("hex").slice(0, 16)
-    : "img:" + crypto.createHash("sha1").update(String(image || "")).digest("hex").slice(0, 16);
-  if (coFrameCache.key && coFrameCache.key === imgKey && now - coFrameCache.at < 5000) {
-    return coFrameCache.description;
-  }
-  const vm = resolveVisionModel("co");
-  const apiUrl = String((vm && vm.api_url) || "https://open.bigmodel.cn/api/paas/v4/chat/completions").trim();
-  const apiKey = String((vm && vm.api_key) || "").trim();
-  const model = String((vm && vm.model) || "glm-4v-flash").trim();
-  if (!apiKey) throw new Error("视觉模型 Key 未配置：请到管理台「心跳」页的「视觉模型」添加并填写");
-  const rawList = (Array.isArray(frames) && frames.length) ? frames : (image ? [image] : []);
-  const imageUrls = rawList.map(function (f) {
-    let u = String(f || "").trim();
-    if (!u) return null;
-    if (!u.startsWith("data:") && !/^https?:\/\//.test(u)) u = "data:image/jpeg;base64," + u;
-    return u;
-  }).filter(Boolean);
-  if (!imageUrls.length) throw new Error("缺少画面数据");
-  const customVisionPrompt = readCoVisionPrompt() || DEFAULT_CO_VISION_PROMPT;
-  const visionSeconds = Number(duration) > 0 ? Number(duration) : Math.max(1, Math.round(imageUrls.length * 0.7));
-  const visionText = String(customVisionPrompt)
-    .replace(/\$\{frameCount\}/g, String(imageUrls.length))
-    .replace(/\$\{seconds\}/g, String(visionSeconds));
-  const textParts = [visionText];
-  if (subtitle && String(subtitle).trim()) {
-    textParts.push(`\n当前字幕：${String(subtitle).trim()}`);
-    textParts.push("字幕若与画面重复则以画面为准。");
-  }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
-  try {
-    const imgContent = imageUrls.map(function (u) { return { type: "image_url", image_url: { url: u } }; });
-    let content = noPrompt
-      ? imgContent
-      : imgContent.concat({ type: "text", text: textParts.join("\n") });
-    const payload = {
-      model,
-      messages: [{ role: "user", content }],
-      temperature: 0.3,
-      stream: false
-    };
-    // MiniMax 默认 adaptive thinking，视觉描述关掉思考，避免思考内容混入画面描述
-    if (/minimax/i.test(model)) payload.thinking = { type: "disabled" };
-    let resp = await fetch(apiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify(payload),
-      signal: controller.signal
-    });
-    // 手动 👁 纯图请求被拒时：补上默认提示词重试一次，保证功能可用
-    if (noPrompt && !resp.ok) {
-      try { await resp.arrayBuffer(); } catch (e) {}   // 先消费旧响应体释放连接，避免重试时旧连接悬挂
-      content = imgContent.concat({ type: "text", text: textParts.join("\n") });
-      payload.messages[0].content = content;
-      resp = await fetch(apiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify(payload),
-        signal: controller.signal
-      });
-    }
-    const text = await resp.text();
-    let data;
-    try { data = JSON.parse(text); } catch (e) { throw new Error("视觉模型返回异常: " + text.slice(0, 200)); }
-    if (!resp.ok) {
-      const msg = (data && data.error && (data.error.message || JSON.stringify(data.error))) || text.slice(0, 200);
-      throw new Error("视觉模型调用失败: " + String(msg));
-    }
-    let description = String(data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || "").trim();
-    // 兜底：剥掉模型返回的思考块（如 <think>…</think>），只保留正式描述
-    description = description.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
-    coFrameCache = { at: Date.now(), key: imgKey, description };
-    return description;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 // 多模态 content 拆分：文字保留原文，图片/音频/文件只留标记，
 // 避免 base64 大字符串进入管理台上下文面板导致手机渲染卡死
 function splitMultimodalContent(content) {
@@ -6288,133 +6083,14 @@ async function callCoLLM(messages, temperature) {
 }
 
 // 共影配置（播放页读取：截帧间隔、视觉模型是否就绪）
-app.get("/internal/co/config", async (req, reply) => {
-  try {
-    const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
-    const vm = resolveVisionModel("co");
-    reply.send({
-      frameInterval: Number(cfg.co_frame_interval) || 30,
-      peekSeconds: Number(cfg.co_peek_seconds) || 3,
-      visionConfigured: Boolean(vm),
-      visionModel: String((vm && vm.model) || "glm-4v-flash"),
-      visionName: vm ? String(vm.name || "") : "",
-      displayName: readEnvValue("AI_DISPLAY_NAME") || "谢",
-      userDisplayName: readEnvValue("USER_DISPLAY_NAME") || "涵"
-    });
-  } catch (err) {
-    reply.send({ error: err.message });
-  }
-});
 
 // 共影记录（播放页打开时显示历史）
-app.get("/internal/co/record", async (req, reply) => {
-  try {
-    reply.send({ record: coRecordText() });
-  } catch (err) {
-    reply.send({ error: err.message });
-  }
-});
 
 // 视觉描述代理：前端不暴露 Key
-app.post("/internal/co/describe", async (req, reply) => {
-  try {
-    const body = req.body || {};
-    const description = await describeCoFrame({ image: body.image, subtitle: body.subtitle });
-    reply.send({ description });
-  } catch (err) {
-    console.warn("[co/describe] 失败:", err.message);
-    reply.code(400).send({ error: err.message });
-  }
-});
 
 // 共影聊天：user 消息（可选带画面）→ AI 回复；对话写入时间线共影记录
-app.post("/internal/co/chat", async (req, reply) => {
-  try {
-    const body = req.body || {};
-    const userText = String(body.text || "").trim();
-    const videoTitle = String(body.videoTitle || "").trim();
-    if (!userText) return reply.code(400).send({ error: "消息不能为空" });
-    let frameDescription = "";
-    if (body.image) {
-      frameDescription = await describeCoFrame({ image: body.image, subtitle: body.subtitle });
-    }
-    const messages = coBuildHistory();
-    let viewInfo = `【当前观影】\n时间：${coNowText()}`;
-    if (videoTitle) viewInfo += `\n正在看：《${videoTitle}》`;
-    if (frameDescription) viewInfo += `\n画面：${frameDescription}`;
-    if (body.subtitle && String(body.subtitle).trim()) viewInfo += `\n字幕：${String(body.subtitle).trim()}`;
-    messages.push({ role: "user", content: viewInfo + `\n\n${userText}` });
-    const aiReply = await callCoLLM(messages, 0.7);
-    const clean = String(aiReply || "").trim();
-    if (clean) {
-      const userDisplay = readEnvValue("USER_DISPLAY_NAME") || "涵";
-      const displayName = readEnvValue("AI_DISPLAY_NAME") || "谢";
-      const nowText = coNowText();
-      // 画面/字幕信息一并写入共影记录，不再过滤
-      let coUserRecord = `${nowText} ${userDisplay}：${userText}`;
-      if (frameDescription) coUserRecord += `\n（画面：${frameDescription}）`;
-      if (body.subtitle && String(body.subtitle).trim()) coUserRecord += `\n（字幕：${String(body.subtitle).trim()}）`;
-      appendCoRecordLine(`${coUserRecord}\n${nowText} ${displayName}：${clean}`, videoTitle || undefined);
-    }
-    console.log(`[co/chat] user chars ${userText.length}, reply chars ${clean.length}`);
-    reply.send({ reply: clean, frameDescription });
-  } catch (err) {
-    console.warn("[co/chat] 失败:", err.message);
-    reply.code(500).send({ error: err.message });
-  }
-});
 
 // 共影定时唤醒：画面+字幕 → AI 决定说不说；说了就写入共影记录
-app.post("/internal/co/wake", async (req, reply) => {
-  try {
-    const body = req.body || {};
-    const videoTitle = String(body.videoTitle || "").trim();
-    let frameDescription = "";
-    if (body.image || (Array.isArray(body.frames) && body.frames.length)) {
-      try {
-        frameDescription = await describeCoFrame({ image: body.image, frames: body.frames, subtitle: body.subtitle, duration: body.duration });
-      } catch (e) {
-        console.warn("[co/wake] 画面解析失败:", e.message);
-      }
-    }
-    let userContent;
-    if (body.manual === true) {
-      // 手动 👁：不带唤醒提示词，直接把当前画面信息发给聊天 AI，AI 必然回应
-      userContent = `【当前观影】\n时间：${coNowText()}` +
-        (videoTitle ? `\n正在看：《${videoTitle}》` : "") +
-        (frameDescription ? `\n画面：${frameDescription}` : "") +
-        (String(body.subtitle || "").trim() ? `\n字幕：${String(body.subtitle).trim()}` : "");
-    } else {
-      userContent = readCoWakePrompt()
-        .replace(/\$\{currentTime\}/g, coNowText())
-        .replace(/\$\{frameDescription\}/g, frameDescription || "（画面无法获取）")
-        .replace(/\$\{subtitle\}/g, String(body.subtitle || "").trim() || "（无字幕）");
-    }
-    // 统一唤醒链路（2026-09-15 批3收尾②）：与主唤醒同一套上下文构建（role 法/替换/容量守卫/出口映射），
-    // 进程内直调 runWakeCompletion，会话=共影记录所在的 default 会话。
-    // 不带工具（保持共影既有成本口径，播放期每帧间隔一次检查）；不落盘 [唤醒] 块（高频检查落盘会刷屏）。
-    const res = await wakeChatModule.runWakeCompletion(wakeChatDeps, {
-      session_id: "default",
-      wake_block: userContent,
-      with_tools: false,
-      persist_wake_block: false,
-      temperature: body.manual === true ? 0.7 : 0.9
-    });
-    const aiReply = res.text;
-    const clean = String(aiReply || "").trim();
-    if (!clean) return reply.send({ action: "silent", reply: null });
-    if (body.manual !== true && clean.includes("[NO_ACTION]")) {
-      return reply.send({ action: "silent", reply: null });
-    }
-    const displayName = readEnvValue("AI_DISPLAY_NAME") || "谢";
-    appendCoRecordLine(`${coNowText()} ${displayName}：${clean}`, videoTitle || undefined);
-    console.log(`[co/wake] 主动说话 chars ${clean.length}`);
-    reply.send({ action: "speak", reply: clean });
-  } catch (err) {
-    console.warn("[co/wake] 失败:", err.message);
-    reply.send({ action: "silent", reply: null, error: err.message });
-  }
-});
 
 
 
@@ -6507,8 +6183,7 @@ app.post("/v1/push/subscribe", async (req, reply) => {
 // 运行配置（精简版）：仅服务心跳页的共影配置读写；参数设置页已移除
 // ========================
 const RUN_CONFIG_WHITELIST = new Set([
-  "co_vision_model_id", "co_frame_interval", "co_peek_seconds",
-  "event_inject_types", "vision_models",
+  "event_inject_types",
   "memory_retrieval_enabled", "retrieval_top_k", "keyword_search_enabled",
   "memory_relevance_threshold", "memory_item_cooldown_minutes",
   "context_injection_types", "third_party_session_id",
@@ -6518,11 +6193,7 @@ const RUN_CONFIG_WHITELIST = new Set([
 
 // key -> expected type, applied to /admin/config whitelist write
 const RUN_CONFIG_TYPES = {
-  co_vision_model_id: "string",
-  co_frame_interval: "number",
-  co_peek_seconds: "number",
   event_inject_types: "array",
-  vision_models: "array",
   memory_retrieval_enabled: "boolean",
   retrieval_top_k: "number",
   keyword_search_enabled: "boolean",
@@ -6538,30 +6209,10 @@ const RUN_CONFIG_TYPES = {
   third_party_session_id: "string"
 };
 
-// ── 配置读出口脱敏（2026-09-20 审查 P1-1 收尾）──
-// data/config.json 里的视觉模型 api_key 此前经 GET /admin/config 明文回传（0913 审查 S4 只修了
-// 同源漏网）。读出口统一置空+附 *_set 布尔；写入口（POST /admin/config 的
-// vision_models 数组）空 api_key 按 id 从现值恢复，脱敏后的 GET 数据原样回传不会抹掉真 key。
-function maskConfigSecrets(cfg) {
-  const out = JSON.parse(JSON.stringify(cfg || {}));
-  if (typeof out.co_vision_api_key === "string") {
-    out.co_vision_api_key_set = !!out.co_vision_api_key.trim();
-    out.co_vision_api_key = "";
-  }
-  if (Array.isArray(out.vision_models)) {
-    out.vision_models = out.vision_models.map(function (m) {
-      if (!m || typeof m !== "object") return m;
-      const has = !!(m.api_key && String(m.api_key).trim());
-      return Object.assign({}, m, { api_key: "", api_key_set: has });
-    });
-  }
-  return out;
-}
-
 app.get("/admin/config", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const cfg = require("./memory-engine").getConfig ? require("./memory-engine").getConfig() : {};
-    reply.send(maskConfigSecrets(cfg));
+    reply.send(cfg);
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
@@ -6578,20 +6229,6 @@ app.post("/admin/config", { preHandler: basicAuth }, async (req, reply) => {
         return reply.code(400).send({ error: `配置项 ${key} 类型无效：期望 ${want}，实际 ${got}` });
       }
       updates[key] = value;
-    }
-    // vision_models 空 api_key 按 id 从现值恢复：GET 已脱敏（api_key 恒空），客户端回传空值
-    // 视为「未改动」，避免脱敏回写把真实凭据抹掉（与 /admin/config 同一套协议）
-    if (Array.isArray(updates.vision_models)) {
-      const oldModels = (require("./memory-engine").getConfig().vision_models) || [];
-      updates.vision_models = updates.vision_models.map(function (m) {
-        if (!m || typeof m !== "object") return m;
-        let apiKey = String(m.api_key || "").trim();
-        if (!apiKey) {
-          const old = oldModels.find(function (x) { return x && String(x.id || "") === String(m.id || "") && x.api_key; });
-          if (old) apiKey = String(old.api_key);
-        }
-        return Object.assign({}, m, { api_key: apiKey });
-      });
     }
     if (Object.keys(updates).length === 0) {
       return reply.code(400).send({ error: "没有可更新的配置项" });
@@ -6808,92 +6445,6 @@ app.put("/admin/current-session", { preHandler: basicAuth }, async (req, reply) 
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
-// ======================== 网页视频解析（共影） ========================
-// 抓取网页页面，提取候选视频地址（video 标签 / og:video / 页面内视频链接）
-// 内网/保留地址判断：/internal/co/resolve 是服务端代抓网页，必须挡住对内网与云元数据的探测（SSRF）
-function isPrivateHost(hostname) {
-  const h = String(hostname || "").toLowerCase();
-  if (!h) return true;
-  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local") || h === "0.0.0.0") return true;
-  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (m) {
-    const a = Number(m[1]), b = Number(m[2]);
-    if (a === 127 || a === 10 || a === 0) return true;              // 回环 / 私网 / 未指定
-    if (a === 172 && b >= 16 && b <= 31) return true;               // 172.16/12
-    if (a === 192 && b === 168) return true;                        // 192.168/16
-    if (a === 169 && b === 254) return true;                        // 云元数据 169.254/16
-  }
-  return false;
-}
-
-async function fetchPageLimited(pageUrl, maxBytes) {
-  const MAX_HOPS = 5;
-  let currentUrl = pageUrl;
-  for (let hop = 0; hop <= MAX_HOPS; hop++) {
-    let parsedUrl;
-    try { parsedUrl = new URL(currentUrl); } catch (e) { throw new Error("无效的网页地址"); }
-    if (!/^https?:$/.test(parsedUrl.protocol)) throw new Error("仅支持 http/https 网页地址");
-    if (isPrivateHost(parsedUrl.hostname)) throw new Error("该地址指向内网/保留地址，不允许抓取");
-    // 域名也要防解析到内网 IP（DNS 指向 127.0.0.1 / 内网服务的绕过手法）
-    try {
-      const dns = require("dns").promises;
-      const lookup = await dns.lookup(parsedUrl.hostname);
-      if (isPrivateHost(lookup.address)) throw new Error("该域名解析到内网地址，不允许抓取");
-    } catch (e) {
-      if (/内网/.test(e.message)) throw e;
-      throw new Error("域名解析失败: " + e.message);
-    }
-    // redirect: "manual" —— 重定向绝不自动跟随，Location 每跳都重新走上面的完整校验，防公网地址 302 绕道内网（SSRF）
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 20000);
-    try {
-      const resp = await fetch(currentUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-        },
-        redirect: "manual",
-        signal: controller.signal
-      });
-      if (resp.status >= 300 && resp.status < 400) {
-        const loc = resp.headers.get("location");
-        try { await resp.arrayBuffer(); } catch (e) {} // 丢弃跳转响应体，释放连接
-        if (!loc) throw new Error("网页请求失败 HTTP " + resp.status + "（无重定向目标）");
-        if (hop >= MAX_HOPS) throw new Error("重定向次数过多，放弃抓取");
-        try { currentUrl = new URL(loc, currentUrl).href; } catch (e) { throw new Error("重定向地址无效"); }
-        continue;
-      }
-      if (!resp.ok) {
-        if (resp.status === 403 || resp.status === 412) throw new Error("该网站有反爬保护，抓不到网页内容，建议直接用本地下载的视频");
-        if (resp.status === 404) throw new Error("网页不存在（404）");
-        if (resp.status === 429) throw new Error("网页访问太频繁被限流，稍后再试");
-        throw new Error("网页请求失败 HTTP " + resp.status);
-      }
-      const ct = String(resp.headers.get("content-type") || "");
-      if (ct && !/html|text|json|xml/i.test(ct)) {
-        throw new Error("该地址返回的不是网页（" + ct.split(";")[0].trim() + "）");
-      }
-      const reader = resp.body.getReader();
-      const chunks = [];
-      let total = 0;
-      const max = maxBytes || 5 * 1024 * 1024;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) {
-          chunks.push(value);
-          total += value.length;
-          if (total > max) break;
-        }
-      }
-      return { html: Buffer.concat(chunks).toString("utf-8"), finalUrl: resp.url || currentUrl };
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  throw new Error("重定向次数过多，放弃抓取");
-}
-
 function coAbsUrl(base, u) {
   try { return new URL(u, base).href; } catch (e) { return ""; }
 }
@@ -6931,19 +6482,6 @@ function resolvePageVideos(pageUrl, html) {
 }
 
 // 网页视频解析：粘贴网页地址 → 返回候选视频地址列表
-app.post("/internal/co/resolve", async (req, reply) => {
-  try {
-    const pageUrl = String((req.body || {}).url || "").trim();
-    if (!pageUrl) return reply.code(400).send({ error: "缺少网页地址" });
-    if (!/^https?:\/\//i.test(pageUrl)) return reply.code(400).send({ error: "只支持 http/https 网页地址" });
-    const { html, finalUrl } = await fetchPageLimited(pageUrl);
-    const candidates = resolvePageVideos(finalUrl || pageUrl, html);
-    reply.send({ pageUrl, total: candidates.length, candidates });
-  } catch (err) {
-    console.warn("[co/resolve] 失败:", err.message);
-    reply.code(400).send({ error: err.message });
-  }
-});
 
 // 唤醒原始日志（wake-up 独立进程的 pm2 日志尾读）：2026-09-15 进程退役后日志不再增长，
 // 仅剩历史排查价值；路径可经 WAKE_UP_LOG_PATH 覆盖

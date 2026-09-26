@@ -48,11 +48,6 @@
    <div class="card"><div class="card-title">网易云环境</div><div id="netease-status"></div>
      <button type="button" class="btn btn-outline" onclick="openNeteaseEditor()">编辑网易云环境</button>
    </div>
-   <div class="card">
-     <div class="card-title">共影环境</div>
-     <div id="co-view-status"></div>
-     <button type="button" class="btn btn-outline" onclick="openCoViewEditor()">编辑共影环境</button>
-   </div>
    <div class="card" data-collapse-id="memory-wake-config" data-default="collapsed">
      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆与唤醒参数</span><span class="collapse-arrow">▾</span></div>
      <div class="card-body">
@@ -382,18 +377,6 @@
    </div>
  </div>
  
- <!-- 共影环境 Editor Modal -->
- <div class="modal-overlay" id="coViewModal">
-   <div class="modal" style="max-width:min(94vw,440px)">
-     <h3>编辑共影环境</h3>
-     <div class="form-group"><label>定时截帧间隔（秒）</label><input type="number" id="co-frame-interval" min="5" max="600"></div>
-     <div class="form-group"><label>手动查看采样（秒）</label><input type="number" id="co-peek-seconds" min="1" max="10"></div>
-     <div class="modal-actions">
-       <button type="button" class="btn btn-outline" onclick="closeModal('coViewModal')">取消</button>
-       <button type="button" class="btn btn-primary" id="covew-save-btn" onclick="saveCoViewConfig()">保存</button>
-     </div>
-   </div>
- </div>
  
  <div class="modal-overlay" id="ccAiEditModal">
    <div class="modal modal-edit-mem" style="max-width:min(94vw,660px)">

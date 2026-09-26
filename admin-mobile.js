@@ -163,7 +163,6 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
   editingPinnedId: null,           // 置顶编辑中的 pinned id
   INITIAL_DATA: null,              // 初始环境数据（登录后拉取一次）
   memView: "cloud",                // 记忆视图: cloud/memory/pinned
-  visionModels: [],                // 视觉模型列表
   toolsDraft: null,                // 工具集配置草稿 { manifest, config }
   logPanelOpen: false,             // 日志面板是否打开
   unreadLogCount: 0                // 日志未读数（角标）
@@ -236,7 +235,6 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    renderHeartbeat();
    renderEnv();
    renderNetease();
-   renderCoView();
    loadMemoryWakeConfig();
    initAdminSessionSelector();
  }
@@ -653,53 +651,6 @@ function toast(msg){
  
  
  
- function selectedVisionModelName(id){
-   const m=AppState.visionModels.find(x=>x.id===id);
-   if(!m)return '未选择';
-   return (m.name||'未命名')+(m.model?'（'+m.model+'）':'');
- }
- 
- // ============ 共影环境 ============
- function renderCoView(){
-   const el=document.getElementById('co-view-status');
-   if(!el)return;
-   el.innerHTML='<div class="empty">加载中…</div>';
-   fetch(ADMIN_API + '/config').then(r=>r.json()).then(cfg=>{
-     if(!cfg||typeof cfg!=='object'){el.innerHTML='<div class="empty">加载失败</div>';return}
-     let rows='';
-     rows+='<div class="env-row"><span class="env-key">定时截帧间隔</span><span class="env-val">'+escapeHtml(String(cfg.co_frame_interval!=null?cfg.co_frame_interval:30))+' 秒</span></div>';
-     rows+='<div class="env-row"><span class="env-key">手动查看采样</span><span class="env-val">'+escapeHtml(String(cfg.co_peek_seconds!=null?cfg.co_peek_seconds:3))+' 秒</span></div>';
-     el.innerHTML=rows;
-   }).catch(e=>{el.innerHTML='<div class="empty">加载失败: '+escapeHtml(e.message)+'</div>'});
- }
- 
- function openCoViewEditor(){
-   document.getElementById('co-frame-interval').value='';
-   document.getElementById('co-peek-seconds').value='';
-   fetch(ADMIN_API + '/config').then(r=>r.json()).then(cfg=>{
-     if(!cfg||typeof cfg!=='object')return;
-     document.getElementById('co-frame-interval').value=cfg.co_frame_interval!=null?cfg.co_frame_interval:30;
-     document.getElementById('co-peek-seconds').value=cfg.co_peek_seconds!=null?cfg.co_peek_seconds:3;
-     openModal('coViewModal');
-   }).catch(e=>{toast('读取配置失败: '+e.message)});
- }
- 
- async function saveCoViewConfig(){
-   const updates={};
-   const interval=parseFloat(document.getElementById('co-frame-interval').value);
-   if(Number.isFinite(interval)&&interval>=5)updates.co_frame_interval=interval;
-   const peek=parseFloat(document.getElementById('co-peek-seconds').value);
-   if(Number.isFinite(peek)&&peek>=1&&peek<=10)updates.co_peek_seconds=peek;
-   try{
-     const r=await apiRequest('POST', ADMIN_API + '/config', updates, {busy:document.getElementById('covew-save-btn')});
-     if(!r.ok) return;
-     const j=r.data||{};
-     if(j.success){toast('共影环境已保存');closeModal('coViewModal');renderCoView();}
-     else toast('保存失败: '+(j.error||''));
-   }catch(e){toast('网络错误: '+e.message)}
- }
- 
- // ============ 截图上传 ============
  
  
 
@@ -3168,68 +3119,6 @@ function ccNumLiveCheck(input, max){
    }catch(e){toast('网络错误')}
  }
 
- // 共影观影唤醒提示词
- async function loadCoWakePrompt(){
-   const pe=document.getElementById('co-wake-prompt-edit');
-   if(!pe)return;
-   try{
-     const r=await fetch(ADMIN_API + '/logs/co-wake-prompt');
-     const j=await r.json();
-     pe.value=j.prompt||'';
-   }catch(e){pe.value='加载失败'}
- }
- async function saveCoWakePrompt(){
-   const pe=document.getElementById('co-wake-prompt-edit');
-   const v=pe.value.trim();
-   if(!v||v==='加载中...'||v==='加载失败'){toast('提示词还没加载出来，先点「重新载入」');return}
-   try{
-     const r=await fetch(ADMIN_API + '/logs/co-wake-prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:pe.value})});
-     const j=await r.json();
-     if(j.ok) toast('已保存，共影定时唤醒时生效');
-     else toast('保存失败: '+(j.error||''));
-   }catch(e){toast('网络错误')}
- }
- async function resetCoWakePrompt(){
-   if(!confirm('恢复默认观影唤醒提示词？'))return;
-   try{
-     const r=await fetch(ADMIN_API + '/logs/co-wake-prompt',{method:'DELETE'});
-     const j=await r.json();
-     if(j.ok){toast('已恢复默认');loadCoWakePrompt();}
-     else toast('失败: '+(j.error||''));
-   }catch(e){toast('网络错误')}
- }
- 
- // 共影画面描述提示词
- async function loadCoVisionPrompt(){
-   const pe=document.getElementById('co-vision-prompt-edit');
-   if(!pe)return;
-   try{
-     const r=await fetch(ADMIN_API + '/logs/co-vision-prompt');
-     const j=await r.json();
-     pe.value=j.prompt||'';
-   }catch(e){pe.value='加载失败'}
- }
- async function saveCoVisionPrompt(){
-   const pe=document.getElementById('co-vision-prompt-edit');
-   const v=pe.value.trim();
-   if(!v||v==='加载中...'||v==='加载失败'){toast('提示词还没加载出来，先点「重新载入」');return}
-   try{
-     const r=await fetch(ADMIN_API + '/logs/co-vision-prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:pe.value})});
-     const j=await r.json();
-     if(j.ok) toast('已保存，共影画面描述生效');
-     else toast('保存失败: '+(j.error||''));
-   }catch(e){toast('网络错误')}
- }
- async function resetCoVisionPrompt(){
-   if(!confirm('恢复默认画面描述提示词？'))return;
-   try{
-     const r=await fetch(ADMIN_API + '/logs/co-vision-prompt',{method:'DELETE'});
-     const j=await r.json();
-     if(j.ok){toast('已恢复默认');loadCoVisionPrompt();}
-     else toast('失败: '+(j.error||''));
-   }catch(e){toast('网络错误')}
- }
- 
  // 后台页板块折叠
  function toggleCard(header){
    const card=header.closest('.card');
