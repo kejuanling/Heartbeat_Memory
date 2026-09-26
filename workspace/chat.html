@@ -5262,6 +5262,7 @@ async function setDefaultProv(i){
   const p=_providers[i]; if(!p)return;
   const body={ providers: _providers.map(function(x){ return { id:x.id, name:x.name, api_url:x.api_url, api_key:x.api_key||"", model:x.model||"", models:(Array.isArray(x.models)?x.models:[]), enabled:x.enabled!==false, is_default:(x.id===p.id) }; }) };
   fetch("/heartbeat/admin/ai-providers",{method:"PUT",headers:mcpAuthHeaders(),body:JSON.stringify(body),credentials:"include"}).then(function(r){return r.json();}).then(function(){ chatToast("已设为默认供应商"); renderProviders(); });
+}
 
 // ===== 默认模型（按用途路由）=====
 let _roleProviders=[];
@@ -5321,7 +5322,6 @@ function renderModelRoles(roles){
       sel.disabled=false;
     });
   });
-}
 }
 async function deleteProv(i){
   if(!confirm("删除该 AI 供应商？")) return;
