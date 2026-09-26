@@ -65,6 +65,8 @@
   --bg-img:none;
   --bubble-opacity:1;
   --bubble-blur:0px;
+  --bubble-ai-blur:0px;
+  --bubble-user-blur:0px;
   /* 胶囊（思考/工具） */
   --cap-think-border:#EDE2E3;
   --cap-think-bg:#F8F2F1;
@@ -1228,7 +1230,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 }
 .win-sentinel.btm{margin-top:10px;margin-bottom:2px;}
 
-.theme-section-title{font-size:11px;font-weight:600;color:var(--ink2);letter-spacing:.04em;margin:16px 0 8px}.theme-section-title:first-child{margin-top:0}.theme-profile-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;width:100%;box-sizing:border-box}.theme-profile-block{width:100%;box-sizing:border-box;padding:12px;border:1px solid var(--border);border-radius:14px;background:var(--chrome-item);box-shadow:var(--shadow-soft);transition:border-color .18s ease,background .18s ease,box-shadow .18s ease}.theme-profile-block:hover{border-color:var(--border-strong);background:var(--chrome-item-hover);box-shadow:var(--shadow-float)}.theme-profile-block .theme-field+.theme-field{margin-top:10px}.theme-field label{display:flex;align-items:center;gap:5px;margin-bottom:7px;font-size:12px;font-weight:600;color:var(--ink)}.theme-field .theme-row{display:flex;align-items:center;gap:7px}.theme-field .theme-row input{min-width:0;flex:1;background:transparent;border:0;border-bottom:1px solid var(--border);border-radius:0;padding:6px 2px;color:var(--ink);font-size:12px;line-height:1.35;outline:none;box-shadow:none;transition:border-color .18s ease}.theme-field .theme-row input:focus{border-bottom-color:var(--border-strong);box-shadow:0 1px 0 rgba(201,130,141,.18)}.theme-field .theme-row input::placeholder{color:var(--ink3)}.theme-field .theme-row .mcp-btn{flex:none;padding:7px 10px;border-radius:9px}.theme-inline-field{display:flex;align-items:center;gap:12px}.theme-inline-field label{width:56px;flex:none;margin:0}.theme-inline-field .theme-row{flex:1;min-width:0;width:0}.theme-profile-block .theme-field+.theme-field{margin-top:12px}.theme-intro{display:flex;flex-direction:column;gap:3px;margin-bottom:12px}.theme-intro strong{font-size:14px;color:var(--ink)}.theme-intro span{font-size:11px;color:var(--ink3)}.theme-grid{display:grid;grid-template-columns:1fr;gap:9px}.theme-choice{display:flex;align-items:center;gap:11px;width:100%;padding:10px 11px;border:1px solid var(--border);border-radius:14px;background:var(--chrome-item);color:var(--ink);text-align:left;cursor:pointer}.theme-choice.active{border-color:rgba(201,130,141,.35);background:var(--accent-faint);box-shadow:0 0 0 1px rgba(201,130,141,.08) inset}.theme-choice>span:last-child{display:flex;flex-direction:column;gap:2px}.theme-choice strong{font-size:13px;font-weight:600}.theme-choice small{font-size:11px;color:var(--ink3)}.theme-swatch{position:relative;display:block;width:46px;height:34px;flex:none;border-radius:10px;overflow:hidden;border:1px solid rgba(92,76,66,.08)}.theme-swatch:before{content:"";position:absolute;inset:0;background:linear-gradient(135deg,#FCF9F7,#F0E9E7)}.theme-swatch.wx:before{background:linear-gradient(135deg,#F2F2F2,#E7E7E7)}.theme-swatch.wx i{background:#FFFFFF}.theme-swatch.wx b{background:#95EC69}.theme-swatch.claude:before{background:linear-gradient(135deg,#f5f5f5,#ececec)}.theme-swatch.claude i{background:transparent;border:0}.theme-swatch.claude b{background:#d4d4d4}.theme-swatch.dark:before{background:linear-gradient(135deg,#1a1a1a,#0d0d0d)}.theme-swatch.dark i{background:#2a2a2a;border-color:rgba(255,255,255,.1)}.theme-swatch.dark b{background:#3a3a3a}.theme-swatch i,.theme-swatch b{position:absolute;display:block;border-radius:8px}.theme-swatch i{width:23px;height:13px;left:5px;top:7px;background:#FFFDF9;border:1px solid rgba(92,76,66,.06)}.theme-swatch b{width:21px;height:13px;right:5px;bottom:6px;background:#F8E8E8}
+.theme-section-title{font-size:11px;font-weight:600;color:var(--ink2);letter-spacing:.04em;margin:16px 0 8px}.theme-section-title:first-child{margin-top:0}.theme-profile-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;width:100%;box-sizing:border-box}.theme-profile-block{width:100%;box-sizing:border-box;padding:12px;border:1px solid var(--border);border-radius:14px;background:var(--chrome-item);box-shadow:var(--shadow-soft);transition:border-color .18s ease,background .18s ease,box-shadow .18s ease}.theme-profile-block:hover{border-color:var(--border-strong);background:var(--chrome-item-hover);box-shadow:var(--shadow-float)}.theme-profile-block .theme-field+.theme-field{margin-top:10px}.theme-field label{display:flex;align-items:center;gap:5px;margin-bottom:7px;font-size:12px;font-weight:600;color:var(--ink)}.theme-field .theme-row{display:flex;align-items:center;gap:7px}.theme-field .theme-row input{min-width:0;flex:1;background:transparent;border:0;border-bottom:1px solid var(--border);border-radius:0;padding:6px 2px;color:var(--ink);font-size:12px;line-height:1.35;outline:none;box-shadow:none;transition:border-color .18s ease}.theme-field .theme-row input:focus{border-bottom-color:var(--border-strong);box-shadow:0 1px 0 rgba(201,130,141,.18)}.theme-field .theme-row input::placeholder{color:var(--ink3)}.theme-field .theme-row .mcp-btn{flex:none;padding:7px 10px;border-radius:9px}.theme-inline-field{display:flex;align-items:center;gap:12px}.theme-inline-field label{width:56px;flex:none;margin:0}.theme-inline-field .theme-row{flex:1;min-width:0;width:0}.theme-profile-block .theme-field+.theme-field{margin-top:12px}.theme-intro{display:flex;flex-direction:column;gap:3px;margin-bottom:12px}.theme-intro strong{font-size:14px;color:var(--ink)}.theme-intro span{font-size:11px;color:var(--ink3)}.theme-grid{display:grid;grid-template-columns:1fr;gap:9px}.theme-choice{display:flex;align-items:center;gap:11px;width:100%;padding:10px 11px;border:1px solid var(--border);border-radius:14px;background:var(--chrome-item);color:var(--ink);text-align:left;cursor:pointer}.theme-choice.active{border-color:rgba(201,130,141,.35);background:var(--accent-faint);box-shadow:0 0 0 1px rgba(201,130,141,.08) inset}.theme-choice>span:last-child{display:flex;flex-direction:column;gap:2px}.theme-choice strong{font-size:13px;font-weight:600}.theme-choice small{font-size:11px;color:var(--ink3)}.theme-swatch{position:relative;display:block;width:46px;height:34px;flex:none;border-radius:10px;overflow:hidden;border:1px solid rgba(92,76,66,.08)}.theme-swatch:before{content:"";position:absolute;inset:0;background:linear-gradient(135deg,#FCF9F7,#F0E9E7)}.theme-swatch.wx:before{background:linear-gradient(135deg,#F2F2F2,#E7E7E7)}.theme-swatch.wx i{background:#FFFFFF}.theme-swatch.wx b{background:#95EC69}.theme-swatch.claude:before{background:linear-gradient(135deg,#f5f5f5,#ececec)}.theme-swatch.claude i{background:transparent;border:0}.theme-swatch.claude b{background:#d4d4d4}.theme-swatch.dark:before{background:linear-gradient(135deg,#1a1a1a,#0d0d0d)}.theme-swatch.dark i{background:#2a2a2a;border-color:rgba(255,255,255,.1)}.theme-swatch.dark b{background:#3a3a3a}.theme-swatch.glass:before{background:linear-gradient(135deg,#F7F5F2,#E6E1DA)}.theme-swatch.glass i{background:rgba(255,255,255,.62);border:1px solid rgba(92,76,66,.08)}.theme-swatch.glass b{background:rgba(248,232,232,.8);border:1px solid rgba(92,76,66,.08)}.theme-swatch i,.theme-swatch b{position:absolute;display:block;border-radius:8px}.theme-swatch i{width:23px;height:13px;left:5px;top:7px;background:#FFFDF9;border:1px solid rgba(92,76,66,.06)}.theme-swatch b{width:21px;height:13px;right:5px;bottom:6px;background:#F8E8E8}
 
 /* 微信主题细节 */
 #chat[data-layout="wx"] .msg{margin-bottom:18px}
@@ -1620,7 +1622,7 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
               </div>
             </div></div><div class="set-panel" data-acc="theme"><div class="set-acc-h" data-acc="theme">主题<span class="ar">▾</span></div><div class="set-sec">
             <div class="theme-section-title">主题预设</div>
-            <div class="theme-grid" id="themeGrid"><button type="button" class="theme-choice active" data-theme="warm"><span class="theme-swatch warm"><i></i><b></b></span><span><strong>暖白</strong><small>暖白 · 短信式</small></span></button><button type="button" class="theme-choice" data-theme="wx"><span class="theme-swatch wx"><i></i><b></b></span><span><strong>微信</strong><small>微信绿 · 微信式</small></span></button><button type="button" class="theme-choice" data-theme="claude"><span class="theme-swatch claude"><i></i><b></b></span><span><strong>极简</strong><small>灰白 · Claude 风</small></span></button><button type="button" class="theme-choice" data-theme="dark"><span class="theme-swatch dark"><i></i><b></b></span><span><strong>黑夜</strong><small>深色 · Claude 风</small></span></button></div>
+            <div class="theme-grid" id="themeGrid"><button type="button" class="theme-choice active" data-theme="warm"><span class="theme-swatch warm"><i></i><b></b></span><span><strong>暖白</strong><small>暖白 · 短信式</small></span></button><button type="button" class="theme-choice" data-theme="wx"><span class="theme-swatch wx"><i></i><b></b></span><span><strong>微信</strong><small>微信绿 · 微信式</small></span></button><button type="button" class="theme-choice" data-theme="claude"><span class="theme-swatch claude"><i></i><b></b></span><span><strong>极简</strong><small>灰白 · Claude 风</small></span></button><button type="button" class="theme-choice" data-theme="dark"><span class="theme-swatch dark"><i></i><b></b></span><span><strong>黑夜</strong><small>深色 · Claude 风</small></span></button><button type="button" class="theme-choice" data-theme="glass"><span class="theme-swatch glass"><i></i><b></b></span><span><strong>玻璃</strong><small>清透 · 毛玻璃风</small></span></button></div>
             <div class="theme-section-title">聊天背景</div>
             <div class="theme-profile-block">
               <div class="theme-field theme-inline-field"><label>背景图片</label><div class="theme-row"><input type="text" id="bgImageInput" placeholder="上传后自动填URL" readonly><button type="button" class="mcp-btn" id="bgImageUp">上传</button><button type="button" class="mcp-btn danger" id="bgImageClear">清空</button></div></div>
@@ -1630,6 +1632,19 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
             <div class="theme-profile-grid">
               <div class="theme-profile-block"><div class="theme-field theme-inline-field"><label>我的名称</label><div class="theme-row"><input type="text" id="userNameInput" placeholder="我"></div></div><div class="theme-field theme-inline-field"><label>我的头像</label><div class="theme-row"><input type="text" id="userAvatarInput" placeholder="留空用名字首字"><button type="button" class="mcp-btn" id="userAvatarUp">上传</button></div></div></div>
               <div class="theme-profile-block"><div class="theme-field theme-inline-field"><label>助手名称</label><div class="theme-row"><input type="text" id="thAiNameInput" placeholder="谢意行"></div></div><div class="theme-field theme-inline-field"><label>助手头像</label><div class="theme-row"><input type="text" id="aiAvatarInput" placeholder="留空用名字首字"><button type="button" class="mcp-btn" id="aiAvatarUp">上传</button></div></div></div>
+            <div class="theme-section-title" id="glassBubbleTitle" style="display:none">气泡</div>
+            <div class="theme-profile-grid" id="glassBubbleSection" style="display:none">
+              <div class="theme-profile-block"><div class="theme-intro"><strong>助手气泡</strong><span>颜色 · 透明度 · 模糊度</span></div>
+                <div class="theme-field theme-inline-field"><label>颜色</label><div class="theme-row"><input type="color" id="glassBubbleAiColor" value="#FFFDF9"><button type="button" class="mcp-btn" id="glassBubbleAiReset">默认</button></div></div>
+                <div class="theme-field theme-inline-field"><label>透明度</label><div class="theme-row"><input type="range" id="glassBubbleAiOp" min="0" max="100" value="60" style="flex:1"><span id="glassBubbleAiOpVal">60%</span></div></div>
+                <div class="theme-field theme-inline-field"><label>模糊度</label><div class="theme-row"><input type="range" id="glassBubbleAiBlur" min="0" max="24" value="8" style="flex:1"><span id="glassBubbleAiBlurVal">8px</span></div></div>
+              </div>
+              <div class="theme-profile-block"><div class="theme-intro"><strong>我的气泡</strong><span>颜色 · 透明度 · 模糊度</span></div>
+                <div class="theme-field theme-inline-field"><label>颜色</label><div class="theme-row"><input type="color" id="glassBubbleMeColor" value="#F8E8E8"><button type="button" class="mcp-btn" id="glassBubbleMeReset">默认</button></div></div>
+                <div class="theme-field theme-inline-field"><label>透明度</label><div class="theme-row"><input type="range" id="glassBubbleMeOp" min="0" max="100" value="60" style="flex:1"><span id="glassBubbleMeOpVal">60%</span></div></div>
+                <div class="theme-field theme-inline-field"><label>模糊度</label><div class="theme-row"><input type="range" id="glassBubbleMeBlur" min="0" max="24" value="8" style="flex:1"><span id="glassBubbleMeBlurVal">8px</span></div></div>
+              </div>
+            </div>
             </div>
           </div></div><div class="set-panel" data-acc="render"><div class="set-acc-h" data-acc="render">渲染设置<span class="ar">▾</span></div><div class="set-sec">
                 <div class="set-sec-label">默认渲染</div>
@@ -1704,6 +1719,13 @@ const DEFAULT_CFG={
   fold_code:false,   // 自动折叠代码块
   code_wrap:true,    // 移动端代码块自动换行
   theme:"warm",
+  // 玻璃主题气泡调节（仅 theme=glass 生效）
+  glass_bubble_ai_color:"#FFFDF9",
+  glass_bubble_ai_opacity:60,
+  glass_bubble_ai_blur:8,
+  glass_bubble_me_color:"#F8E8E8",
+  glass_bubble_me_opacity:60,
+  glass_bubble_me_blur:8,
   // 头像与名称
   user_name:"我",       // 我的消息显示名
   user_avatar:"",        // 我的头像（1 个字/emoji，空则取名称首字）
@@ -1775,6 +1797,7 @@ function applySettingsToUI(){
   if(typeof bubbleDelimInput!=="undefined" && bubbleDelimInput) bubbleDelimInput.value=cfg.bubble_delim;
   // 云端设置拉取后 api_key 已就绪，顺带刷新提示词备份列表（渲染「默认使用中」标记要用最新全局人设）
   loadPromptBackups();
+  if(typeof glassBubbleFill==="function"){glassBubbleFill();updateGlassBubbleUI();}
 }
 async function syncSettingsFromCloud(){
   topLoadStart();
@@ -4587,6 +4610,7 @@ function populateSettings(){
   maxTokInput.value=cfg.max_tokens!=null?cfg.max_tokens:"";
   if(uploadMaxMbInput)uploadMaxMbInput.value=cfg.upload_max_mb!=null?cfg.upload_max_mb:2;
   bubbleDelimInput.value=cfg.bubble_delim;
+  if(typeof glassBubbleFill==="function"){glassBubbleFill();updateGlassBubbleUI();}
 }
 async function saveSettingsAll(){
   const k=keyInput.value.trim();
@@ -4834,12 +4858,111 @@ const THEME_PRESETS={warm:{name:"暖白",layout:"sms",vars:{"--bg1":"#FCF9F7","-
 "--send-size":"36px","--send-radius":"50%","--send-font-size":"16px","--send-shadow":"none",
 "--send-hover-bg":"#333333",
 "--theme-dur":"0ms","--bg-blur":"0px",
-"--user-font-color":"#1a1a1a","--ai-font-color":"#1a1a1a"}},dark:{name:"黑夜",layout:"claude",vars:{"--bg1":"#1a1a1a","--bg2":"#1a1a1a","--bg3":"#1a1a1a","--ink":"#e8e8e8","--ink2":"#999","--ink3":"#666","--surface":"#2a2a2a","--surface-solid":"#2a2a2a","--card":"#2a2a2a","--card-solid":"#2a2a2a","--sheet-bg":"#2a2a2a","--chrome-rgb":"45,45,45","--chrome-item":"rgba(45,45,45,.8)","--chrome-item-hover":"rgba(58,58,58,.92)","--accent":"#a0a0a0","--accent-deep":"#cfcfcf","--accent-soft":"rgba(160,160,160,.14)","--accent-faint":"rgba(160,160,160,.07)","--accent-grad":"linear-gradient(135deg,#666,#333)","--accent-rgb":"160,160,160","--border":"rgba(255,255,255,.08)","--border-strong":"rgba(255,255,255,.16)","--line":"rgba(255,255,255,.08)","--line-strong":"rgba(255,255,255,.16)","--shadow-soft":"0 2px 10px rgba(0,0,0,.25)","--shadow-float":"0 10px 30px rgba(0,0,0,.45)","--shadow-rgb":"0,0,0","--mask-rgb":"0,0,0","--bubble-shadow":"none","--bubble-ai":"#2a2a2a","--bubble-user":"#2d2d2d","--bubble-user1":"#2d2d2d","--bubble-user2":"#2d2d2d","--radius":"20px","--radius-sm":"12px","--panel-radius":"24px","--bg-img":"none","--bubble-opacity":"1","--bubble-blur":"0px","--cap-think-border":"#333","--cap-think-bg":"#222","--cap-think-text":"#999","--cap-tool-border":"#333","--cap-tool-bg":"#222","--cap-tool-text":"#888","--hd-title":"#e8e8e8","--inputbar-bg":"#2d2d2d","--inputbar-border":"rgba(255,255,255,.08)","--input-text":"#e8e8e8","--send-bg":"#e8e8e8","--send-icon":"#1a1a1a","--icon-btn-bg":"transparent","--icon-btn-color":"#999","--ok":"#6fae86","--ok-deep":"#5a9470","--ok-soft":"rgba(111,174,134,.15)","--ok-rgb":"111,174,134","--warn":"#c9a05e","--warn-deep":"#a8843f","--warn-soft":"rgba(201,160,94,.15)","--warn-rgb":"201,160,94","--bad":"#d08078","--bad-deep":"#b5655d","--bad-soft":"rgba(208,128,120,.15)","--bad-rgb":"208,128,120","--bad-grad":"#d06f66","--info":"#7d8a99","--info-rgb":"125,138,153","--field-bg":"#2a2a2a","--menu-bg":"#2a2a2a","--code-bg":"#333","--code-ink":"#aaa","--glass":"10px","--font-family":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--font-size":"16px","--line-height":"1.7","--font-weight":"400","--letter-spacing":"0em","--font-family-mono":"ui-monospace,\"SF Mono\",Menlo,Consolas,monospace","--title-font":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",sans-serif","--header-padding":"calc(env(safe-area-inset-top) + 12px) 16px 10px","--header-gap":"12px","--header-bg":"#1a1a1a","--header-border":"1px solid rgba(255,255,255,.06)","--header-shadow":"none","--header-blur":"0px","--header-saturate":"100%","--header-title-x":"0px","--header-title-y":"0px","--header-title-size":"16px","--header-title-weight":"600","--header-title-letter-spacing":"normal","--header-title-color":"#e8e8e8","--header-title-font":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",sans-serif","--header-sub-size":"11px","--header-sub-color":"#666","--header-sub-letter-spacing":".02em","--header-sub-gap":"2px","--header-btn-size":"36px","--header-btn-radius":"50%","--header-btn-bg":"#2d2d2d","--header-btn-color":"#ccc","--header-btn-font-size":"17px","--header-btn-shadow":"none","--header-btn-transition":"background .2s,color .2s,transform .15s","--header-btn-hover-bg":"#3a3a3a","--header-btn-hover-color":"#fff","--header-btn-active-bg":"#333","--header-btn-active-color":"#fff","--session-padding":"10px 14px","--session-margin":"3px 8px","--session-radius":"12px","--session-transition":"background .15s,border-color .15s","--session-bg":"rgba(42,42,42,.6)","--session-hover-bg":"#333","--session-active-bg":"#333","--session-active-border":"rgba(255,255,255,.12)","--session-title-size":"14px","--session-title-weight":"500","--session-title-color":"#e8e8e8","--session-meta-size":"11px","--session-meta-color":"#666","--session-action-hover-color":"#ccc","--session-action-hover-bg":"#333","--call-bg":"linear-gradient(165deg,#1a1a1a,#242424)","--bubble-font-size":"16px","--bubble-line-height":"1.7","--bubble-font-weight":"400","--bubble-letter-spacing":"0em","--bubble-para-gap":"10px","--msg-gap":"20px","--bubble-max-width":"75%","--bubble-padding":"0","--avatar-size":"34px","--avatar-radius":"50%","--inputbar-radius":"24px","--inputbar-gap":"8px","--inputbar-padding":"10px 14px","--inputbar-shadow":"0 1px 3px rgba(0,0,0,.3)","--inputbar-focus-border":"transparent","--inputbar-focus-shadow":"none","--input-font-size":"16px","--input-line-height":"1.5","--input-max-height":"120px","--input-placeholder":"#666","--icon-btn-size":"36px","--icon-btn-radius":"50%","--icon-btn-font-size":"18px","--send-size":"36px","--send-radius":"50%","--send-font-size":"16px","--send-shadow":"none","--send-hover-bg":"#cfcfcf","--theme-dur":"0ms","--bg-blur":"0px","--user-font-color":"#e8e8e8","--ai-font-color":"#e8e8e8"}
-}};
+"--user-font-color":"#1a1a1a","--ai-font-color":"#1a1a1a"}},dark:{name:"黑夜",layout:"claude",vars:{"--bg1":"#1a1a1a","--bg2":"#1a1a1a","--bg3":"#1a1a1a","--ink":"#e8e8e8","--ink2":"#999","--ink3":"#666","--surface":"#2a2a2a","--surface-solid":"#2a2a2a","--card":"#2a2a2a","--card-solid":"#2a2a2a","--sheet-bg":"#2a2a2a","--chrome-rgb":"45,45,45","--chrome-item":"rgba(45,45,45,.8)","--chrome-item-hover":"rgba(58,58,58,.92)","--accent":"#a0a0a0","--accent-deep":"#cfcfcf","--accent-soft":"rgba(160,160,160,.14)","--accent-faint":"rgba(160,160,160,.07)","--accent-grad":"linear-gradient(135deg,#666,#333)","--accent-rgb":"160,160,160","--border":"rgba(255,255,255,.08)","--border-strong":"rgba(255,255,255,.16)","--line":"rgba(255,255,255,.08)","--line-strong":"rgba(255,255,255,.16)","--shadow-soft":"0 2px 10px rgba(0,0,0,.25)","--shadow-float":"0 10px 30px rgba(0,0,0,.45)","--shadow-rgb":"0,0,0","--mask-rgb":"0,0,0","--bubble-shadow":"none","--bubble-ai":"#2a2a2a","--bubble-user":"#2d2d2d","--bubble-user1":"#2d2d2d","--bubble-user2":"#2d2d2d","--radius":"20px","--radius-sm":"12px","--panel-radius":"24px","--bg-img":"none","--bubble-opacity":"1","--bubble-blur":"0px","--cap-think-border":"#333","--cap-think-bg":"#222","--cap-think-text":"#999","--cap-tool-border":"#333","--cap-tool-bg":"#222","--cap-tool-text":"#888","--hd-title":"#e8e8e8","--inputbar-bg":"#2d2d2d","--inputbar-border":"rgba(255,255,255,.08)","--input-text":"#e8e8e8","--send-bg":"#e8e8e8","--send-icon":"#1a1a1a","--icon-btn-bg":"transparent","--icon-btn-color":"#999","--ok":"#6fae86","--ok-deep":"#5a9470","--ok-soft":"rgba(111,174,134,.15)","--ok-rgb":"111,174,134","--warn":"#c9a05e","--warn-deep":"#a8843f","--warn-soft":"rgba(201,160,94,.15)","--warn-rgb":"201,160,94","--bad":"#d08078","--bad-deep":"#b5655d","--bad-soft":"rgba(208,128,120,.15)","--bad-rgb":"208,128,120","--bad-grad":"#d06f66","--info":"#7d8a99","--info-rgb":"125,138,153","--field-bg":"#2a2a2a","--menu-bg":"#2a2a2a","--code-bg":"#333","--code-ink":"#aaa","--glass":"10px","--font-family":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--font-size":"16px","--line-height":"1.7","--font-weight":"400","--letter-spacing":"0em","--font-family-mono":"ui-monospace,\"SF Mono\",Menlo,Consolas,monospace","--title-font":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",sans-serif","--header-padding":"calc(env(safe-area-inset-top) + 12px) 16px 10px","--header-gap":"12px","--header-bg":"#1a1a1a","--header-border":"1px solid rgba(255,255,255,.06)","--header-shadow":"none","--header-blur":"0px","--header-saturate":"100%","--header-title-x":"0px","--header-title-y":"0px","--header-title-size":"16px","--header-title-weight":"600","--header-title-letter-spacing":"normal","--header-title-color":"#e8e8e8","--header-title-font":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",sans-serif","--header-sub-size":"11px","--header-sub-color":"#666","--header-sub-letter-spacing":".02em","--header-sub-gap":"2px","--header-btn-size":"36px","--header-btn-radius":"50%","--header-btn-bg":"#2d2d2d","--header-btn-color":"#ccc","--header-btn-font-size":"17px","--header-btn-shadow":"none","--header-btn-transition":"background .2s,color .2s,transform .15s","--header-btn-hover-bg":"#3a3a3a","--header-btn-hover-color":"#fff","--header-btn-active-bg":"#333","--header-btn-active-color":"#fff","--session-padding":"10px 14px","--session-margin":"3px 8px","--session-radius":"12px","--session-transition":"background .15s,border-color .15s","--session-bg":"rgba(42,42,42,.6)","--session-hover-bg":"#333","--session-active-bg":"#333","--session-active-border":"rgba(255,255,255,.12)","--session-title-size":"14px","--session-title-weight":"500","--session-title-color":"#e8e8e8","--session-meta-size":"11px","--session-meta-color":"#666","--session-action-hover-color":"#ccc","--session-action-hover-bg":"#333","--call-bg":"linear-gradient(165deg,#1a1a1a,#242424)","--bubble-font-size":"16px","--bubble-line-height":"1.7","--bubble-font-weight":"400","--bubble-letter-spacing":"0em","--bubble-para-gap":"10px","--msg-gap":"20px","--bubble-max-width":"75%","--bubble-padding":"0","--avatar-size":"34px","--avatar-radius":"50%","--inputbar-radius":"24px","--inputbar-gap":"8px","--inputbar-padding":"10px 14px","--inputbar-shadow":"0 1px 3px rgba(0,0,0,.3)","--inputbar-focus-border":"transparent","--inputbar-focus-shadow":"none","--input-font-size":"16px","--input-line-height":"1.5","--input-max-height":"120px","--input-placeholder":"#666","--icon-btn-size":"36px","--icon-btn-radius":"50%","--icon-btn-font-size":"18px","--send-size":"36px","--send-radius":"50%","--send-font-size":"16px","--send-shadow":"none","--send-hover-bg":"#cfcfcf","--theme-dur":"0ms","--bg-blur":"0px","--user-font-color":"#e8e8e8","--ai-font-color":"#e8e8e8"}},
+glass:{name:"玻璃",layout:"sms",vars:{"--bg1":"#F7F5F2","--bg2":"#F2EFEA","--bg3":"#EAE6DF","--surface":"rgba(255,255,255,.5)","--surface-solid":"#FBFAF7","--card":"rgba(255,255,255,.5)","--card-solid":"#FBFAF7","--sheet-bg":"rgba(250,249,246,.92)","--chrome-rgb":"255,255,255","--chrome-item":"rgba(255,255,255,.5)","--chrome-item-hover":"rgba(255,255,255,.72)","--ink":"#4F4A45","--ink2":"#8C857D","--ink3":"#B3ACA3","--accent":"#8AA0AE","--accent-deep":"#6C8296","--accent-soft":"rgba(138,160,174,.16)","--accent-faint":"rgba(138,160,174,.08)","--accent-grad":"linear-gradient(135deg,#A8BBC7,#7C93A5)","--accent-rgb":"138,160,174","--border":"rgba(79,74,69,.08)","--border-strong":"rgba(79,74,69,.14)","--line":"rgba(79,74,69,.08)","--line-strong":"rgba(79,74,69,.14)","--shadow-soft":"0 2px 12px rgba(79,74,69,.04)","--shadow-float":"0 12px 32px rgba(79,74,69,.08)","--shadow-rgb":"79,74,69","--mask-rgb":"79,74,69","--bubble-shadow":"rgba(79,74,69,.05)","--bubble-ai":"#FFFDF9","--bubble-user":"#F8E8E8","--bubble-user1":"#F8E8E8","--bubble-user2":"#F8E8E8","--radius":"16px","--radius-sm":"11px","--panel-radius":"20px","--bg-img":"none","--bubble-opacity":"1","--bubble-blur":"0px","--bubble-ai-blur":"0px","--bubble-user-blur":"0px","--cap-think-border":"#D9D0C9","--cap-think-bg":"rgba(255,255,255,.55)","--cap-think-text":"#A99F95","--cap-tool-border":"#D9D0C9","--cap-tool-bg":"rgba(255,255,255,.55)","--cap-tool-text":"#A99F95","--hd-title":"#4F4A45","--inputbar-bg":"transparent","--inputbar-border":"transparent","--input-text":"#4F4A45","--send-bg":"#8AA0AE","--send-icon":"#FFFFFF","--icon-btn-bg":"rgba(255,255,255,.42)","--icon-btn-color":"#6C8296","--ok":"#7da188","--ok-deep":"#5f8a6d","--ok-soft":"rgba(95,138,109,.14)","--ok-rgb":"125,161,136","--warn":"#b08b4f","--warn-deep":"#8f6f3a","--warn-soft":"rgba(143,111,58,.13)","--warn-rgb":"176,139,79","--bad":"#b97f77","--bad-deep":"#9c5f57","--bad-soft":"rgba(156,95,87,.12)","--bad-rgb":"185,127,119","--bad-grad":"#bc6f66","--info":"#98a2ab","--info-rgb":"152,162,171","--field-bg":"rgba(255,255,255,.55)","--menu-bg":"rgba(250,249,246,.94)","--code-bg":"rgba(255,255,255,.5)","--code-ink":"#8C857D","--glass":"18px","--font-family":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Songti SC\",\"STSong\",\"Noto Serif SC\",\"SimSun\",serif","--font-size":"14px","--line-height":"1.78","--font-weight":"300","--letter-spacing":"0.01em","--font-family-mono":"ui-monospace,\"SF Mono\",Menlo,Consolas,monospace","--title-font":"\"Snell Roundhand\",\"Zapfino\",\"Segoe Script\",\"Brush Script MT\",\"Songti SC\",\"STSong\",\"Noto Serif SC\",\"SimSun\",serif","--header-padding":"calc(env(safe-area-inset-top) + 12px) 16px 10px","--header-gap":"12px","--header-bg":"rgba(255,255,255,.28)","--header-border":"1px solid transparent","--header-shadow":"none","--header-blur":"24px","--header-saturate":"150%","--header-title-x":"0px","--header-title-y":"0px","--header-title-size":"14.5px","--header-title-weight":"300","--header-title-letter-spacing":"0.04em","--header-title-color":"#4F4A45","--header-title-font":"\"Snell Roundhand\",\"Zapfino\",\"Segoe Script\",\"Brush Script MT\",\"Songti SC\",\"STSong\",\"Noto Serif SC\",\"SimSun\",serif","--header-sub-size":"10px","--header-sub-color":"#B3ACA3","--header-sub-letter-spacing":".03em","--header-sub-gap":"2px","--header-btn-size":"36px","--header-btn-radius":"50%","--header-btn-bg":"transparent","--header-btn-color":"#6C8296","--header-btn-font-size":"17px","--header-btn-shadow":"0 1px 6px rgba(79,74,69,.05)","--header-btn-transition":"background .2s,color .2s,transform .15s","--header-btn-hover-bg":"rgba(255,255,255,.7)","--header-btn-hover-color":"#4F4A45","--header-btn-active-bg":"rgba(138,160,174,.12)","--header-btn-active-color":"#6C8296","--session-padding":"10px 14px","--session-margin":"3px 8px","--session-radius":"12px","--session-transition":"background .15s,border-color .15s","--session-bg":"rgba(255,255,255,.4)","--session-hover-bg":"rgba(255,255,255,.6)","--session-active-bg":"rgba(138,160,174,.14)","--session-active-border":"rgba(79,74,69,.12)","--session-title-size":"12.5px","--session-title-weight":"300","--session-title-color":"#4F4A45","--session-meta-size":"10.5px","--session-meta-color":"#B3ACA3","--session-action-hover-color":"#6C8296","--session-action-hover-bg":"rgba(138,160,174,.1)","--call-bg":"linear-gradient(165deg,#F7F5F2 0%,#EFEAE5 100%)","--bubble-font-size":"14px","--bubble-line-height":"1.78","--bubble-font-weight":"300","--bubble-letter-spacing":"0.01em","--bubble-para-gap":"8px","--msg-gap":"14px","--bubble-max-width":"84%","--bubble-padding":"7px 11px","--avatar-size":"34px","--avatar-radius":"50%","--inputbar-radius":"0px","--inputbar-gap":"8px","--inputbar-padding":"4px 0","--inputbar-shadow":"none","--inputbar-focus-border":"rgba(138,160,174,.5)","--inputbar-focus-shadow":"none","--input-font-size":"14.5px","--input-line-height":"1.5","--input-max-height":"120px","--input-placeholder":"#B3ACA3","--icon-btn-size":"36px","--icon-btn-radius":"50%","--icon-btn-font-size":"15.5px","--send-size":"36px","--send-radius":"50%","--send-font-size":"14.5px","--send-shadow":"0 2px 8px rgba(108,130,150,.18)","--send-hover-bg":"#6C8296","--theme-dur":"250ms","--bg-blur":"0px","--user-font-color":"#4A4640","--ai-font-color":"#4A4640"}}
+};
+/* ===== 玻璃主题：气泡调节（颜色/透明度/模糊度）+ 文字自动反色 ===== */
+var GBFIELDS=[
+  ["glassBubbleAiColor","glass_bubble_ai_color",{def:"#FFFDF9",suffix:""}],
+  ["glassBubbleAiOp","glass_bubble_ai_opacity",{def:60,suffix:"%"}],
+  ["glassBubbleAiBlur","glass_bubble_ai_blur",{def:8,suffix:"px"}],
+  ["glassBubbleMeColor","glass_bubble_me_color",{def:"#F8E8E8",suffix:""}],
+  ["glassBubbleMeOp","glass_bubble_me_opacity",{def:60,suffix:"%"}],
+  ["glassBubbleMeBlur","glass_bubble_me_blur",{def:8,suffix:"px"}]
+];
+function glassRgba(hex,a){var h=String(hex||"").replace("#","");if(h.length===3)h=h.split("").map(function(c){return c+c;}).join("");var r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16);if(isNaN(r)||isNaN(g)||isNaN(b))return hex;return "rgba("+r+","+g+","+b+","+Math.max(0,Math.min(1,a))+")";}
+function glassLum(hex){var h=String(hex||"").replace("#","");if(h.length===3)h=h.split("").map(function(c){return c+c;}).join("");var r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16);return (0.299*r+0.587*g+0.114*b)/255;}
+var _glassBgLum=0.75;   // 背景图采样亮度（0~1），glassAdaptInk 异步更新，气泡/输入框文字反色共用
+function glassEffLum(lum,alpha){return lum*alpha+_glassBgLum*(1-alpha);}
+function glassInkFor(lum){return lum>0.5?"#4A4640":"#F4F0EA";}
+function applyGlassBubble(){
+  var root=document.documentElement.style;
+  var ac=cfg.glass_bubble_ai_color||"#FFFDF9", ao=(cfg.glass_bubble_ai_opacity!=null?cfg.glass_bubble_ai_opacity:60)/100, ab=cfg.glass_bubble_ai_blur!=null?cfg.glass_bubble_ai_blur:8;
+  var mc=cfg.glass_bubble_me_color||"#F8E8E8", mo=(cfg.glass_bubble_me_opacity!=null?cfg.glass_bubble_me_opacity:60)/100, mb=cfg.glass_bubble_me_blur!=null?cfg.glass_bubble_me_blur:8;
+  root.setProperty("--bubble-ai",glassRgba(ac,ao));
+  root.setProperty("--bubble-user1",glassRgba(mc,mo));
+  root.setProperty("--bubble-ai-blur",Math.max(0,ab)+"px");
+  root.setProperty("--bubble-user-blur",Math.max(0,mb)+"px");
+  glassApplyBubbleInk();
+  glassAdaptInk();
+}
+function glassApplyBubbleInk(){
+  var root=document.documentElement.style;
+  var ac=cfg.glass_bubble_ai_color||"#FFFDF9", ao=(cfg.glass_bubble_ai_opacity!=null?cfg.glass_bubble_ai_opacity:60)/100;
+  var mc=cfg.glass_bubble_me_color||"#F8E8E8", mo=(cfg.glass_bubble_me_opacity!=null?cfg.glass_bubble_me_opacity:60)/100;
+  root.setProperty("--ai-font-color",glassInkFor(glassEffLum(glassLum(ac),ao)));
+  root.setProperty("--user-font-color",glassInkFor(glassEffLum(glassLum(mc),mo)));
+}
+function glassSetInkByLum(lum){
+  var dark=lum<0.50;
+  var root=document.documentElement.style;
+  root.setProperty("--glass-ink",dark?"#FFFFFF":"#1A1A1A");
+  root.setProperty("--glass-ink2",dark?"#E6ECF1":"#4A4A4A");
+  root.setProperty("--glass-ink3",dark?"rgba(255,255,255,.55)":"rgba(30,30,30,.34)");
+  root.setProperty("--glass-veil",dark?"rgba(0,0,0,.30)":"rgba(255,255,255,.34)");
+  root.setProperty("--glass-line",dark?"rgba(255,255,255,.55)":"rgba(30,30,30,.22)");
+}
+function glassAdaptInk(){
+  var url=(cfg&&cfg.bg_image)||"";
+  if(!url){_glassBgLum=0.75;glassSetInkByLum(0.75);glassApplyBubbleInk();return;}
+  var img=new Image();
+  img.onload=function(){
+    try{
+      var c=document.createElement("canvas");c.width=8;c.height=8;
+      var x=c.getContext("2d");x.drawImage(img,Math.floor(img.width*0.12),Math.floor(img.height*0.28),Math.floor(img.width*0.76),Math.floor(img.height*0.5),0,0,8,8);
+      var d=x.getImageData(0,0,8,8).data,sum=0,n=0;
+      for(var i=0;i<d.length;i+=4){sum+=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];n++;}
+      _glassBgLum=sum/n/255;glassSetInkByLum(_glassBgLum);glassApplyBubbleInk();
+    }catch(e){_glassBgLum=0.45;glassSetInkByLum(0.45);glassApplyBubbleInk();}
+  };
+  img.onerror=function(){_glassBgLum=0.45;glassSetInkByLum(0.45);glassApplyBubbleInk();};
+  img.crossOrigin="anonymous";img.src=url;
+}
+function updateGlassBubbleUI(){
+  var sec=document.getElementById("glassBubbleSection"), title=document.getElementById("glassBubbleTitle");
+  var show=(cfg&&cfg.theme)==="glass";
+  if(sec)sec.style.display=show?"":"none";
+  if(title)title.style.display=show?"":"none";
+}
+function glassBubbleFill(){
+  GBFIELDS.forEach(function(f){
+    var el=document.getElementById(f[0]); if(!el)return;
+    el.value=cfg[f[1]]!=null?cfg[f[1]]:f[2].def;
+    var ve=document.getElementById(f[0]+"Val"); if(ve)ve.textContent=el.value+f[2].suffix;
+  });
+}
+function glassBubbleBind(){
+  glassBubbleFill();
+  GBFIELDS.forEach(function(f){
+    var el=document.getElementById(f[0]); if(!el)return;
+    el.addEventListener("input",function(){
+      cfg[f[1]]=(f[1].indexOf("color")>-1)?(el.value||f[2].def):(parseInt(el.value)||0);
+      saveCfg(); applyGlassBubble();
+      var ve=document.getElementById(f[0]+"Val"); if(ve)ve.textContent=el.value+f[2].suffix;
+    });
+  });
+  function bindReset(btn,prefix){
+    if(!btn)return;
+    btn.addEventListener("click",function(){
+      GBFIELDS.forEach(function(f){
+        if(f[0].indexOf(prefix)===-1)return;
+        cfg[f[1]]=f[2].def;
+        var el=document.getElementById(f[0]); if(el)el.value=cfg[f[1]];
+        var ve=document.getElementById(f[0]+"Val"); if(ve)ve.textContent=cfg[f[1]]+f[2].suffix;
+      });
+      saveCfg(); applyGlassBubble(); showToast("已恢复默认气泡");
+    });
+  }
+  bindReset(document.getElementById("glassBubbleAiReset"),"Ai");
+  bindReset(document.getElementById("glassBubbleMeReset"),"Me");
+  updateGlassBubbleUI();
+}
+glassBubbleBind();
+
 function applyTheme(){const name=THEME_PRESETS[cfg.theme]?cfg.theme:"warm";cfg.theme=name;const root=document.documentElement.style;Object.keys(THEME_PRESETS[name].vars).forEach(function(k){root.setProperty(k,THEME_PRESETS[name].vars[k]);});document.body.setAttribute("data-theme",name);document.body.setAttribute("data-style","classic");document.body.setAttribute("data-bgblur","0");document.body.style.fontFamily="";document.body.style.background="";
   if(cfg.bg_image){
     var op=cfg.bg_opacity!=null?cfg.bg_opacity/100:1;
-    document.body.style.backgroundImage="url('"+cfg.bg_image+"')";
+    document.body.style.backgroundImage="linear-gradient(rgba(245,245,245,"+(1-op)+"),rgba(245,245,245,"+(1-op)+")),url('"+cfg.bg_image+"')";
     document.body.style.backgroundSize="cover";
     document.body.style.backgroundPosition="center";
     document.body.style.backgroundAttachment="fixed";
@@ -4847,7 +4970,10 @@ function applyTheme(){const name=THEME_PRESETS[cfg.theme]?cfg.theme:"warm";cfg.t
   }if(chatEl)chatEl.setAttribute("data-layout",THEME_PRESETS[name].layout||"sms");   // 2026-09-25 ⑩：不再在此改写 cfg.show_avatar（渲染函数不该写配置）——wx 的头像由三处 `layout==="wx"` 兜底创建
   // 2026-09-24 P0：不再对 claude 静默改写全局配置——claude 布局 CSS 已强制隐藏 .mav（L7969）；
   // wx 布局有 layout==="wx" 兜底创建头像；切回其他主题不再被置 false
-  try{applyHeader();}catch(e){}const grid=document.getElementById("themeGrid");if(grid)grid.querySelectorAll(".theme-choice").forEach(function(b){b.classList.toggle("active",b.dataset.theme===name);});}
+  try{applyHeader();}catch(e){}
+  if(name==="glass"&&typeof applyGlassBubble==="function"){applyGlassBubble();}
+  if(typeof updateGlassBubbleUI==="function"){updateGlassBubbleUI();}
+  const grid=document.getElementById("themeGrid");if(grid)grid.querySelectorAll(".theme-choice").forEach(function(b){b.classList.toggle("active",b.dataset.theme===name);});}
 applyTheme();
 if(cfg.bg_image){document.getElementById("bgImageInput").value=cfg.bg_image;}
 const themeGrid=document.getElementById("themeGrid");if(themeGrid)themeGrid.addEventListener("click",function(e){const b=e.target.closest(".theme-choice");if(!b)return;cfg.theme=b.dataset.theme||"warm";saveCfg();applyTheme();renderAllNoAnim(true);});   // 2026-09-25：切主题保留滚动位置与已补载窗口（原 renderAll() 会重置窗口并跳到底部）
@@ -8342,6 +8468,69 @@ body:has(#chat[data-layout="claude"]) .session-item.active,body:has(#chat[data-l
 body:has(#chat[data-layout="claude"]) #thinkSheetBody pre,
 body:has(#chat[data-layout="claude"]) #thinkSheetBody .tt-arg,
 body:has(#chat[data-layout="claude"]) #thinkSheetBody div{white-space:pre-wrap!important;word-break:break-word!important;overflow-wrap:anywhere!important}
+/* ===== 玻璃主题（文艺 · 清透 · 毛玻璃） ===== */
+body[data-theme="glass"]{background:linear-gradient(180deg,#F7F5F2 0%,#EDE9E2 100%);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Songti SC","STSong","Noto Serif SC","SimSun",serif;font-weight:300;letter-spacing:.01em}
+/* 顶栏：玻璃清透质感 */
+body[data-theme="glass"] header{background:transparent!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;border-bottom:none!important;box-shadow:none!important}
+/* 底部毛玻璃暗角（跟随背景反色：浅底白雾 / 深底暗角；顶部柔光已删 0927-04） */
+body[data-theme="glass"]::after{content:"";position:fixed;left:0;right:0;bottom:0;height:15vh;z-index:1;pointer-events:none;background:linear-gradient(to bottom,rgba(0,0,0,0),var(--glass-veil,rgba(255,255,255,.34)));backdrop-filter:blur(14px) saturate(160%);-webkit-backdrop-filter:blur(14px) saturate(160%);-webkit-mask-image:linear-gradient(to bottom,transparent 0%,#000 58%);mask-image:linear-gradient(to bottom,transparent 0%,#000 58%)}
+/* 输入区：去底栏卡片，下划线式 */
+body[data-theme="glass"] footer{position:fixed;left:0;right:0;bottom:0;z-index:30;background:transparent!important;border-top:none!important;padding:6px 16px calc(env(safe-area-inset-bottom) + 10px)!important}
+body[data-theme="glass"] footer .inputbar{background:transparent!important;border:none!important;border-radius:0!important;box-shadow:none!important;padding:4px 0!important}
+body[data-theme="glass"] footer .inputbar #input{background:transparent!important;border:none!important;outline:none!important;box-shadow:none!important;border-bottom:1px solid var(--glass-line,rgba(79,74,69,.16))!important;border-radius:0!important;padding:8px 2px!important;color:var(--glass-ink,#4A4640);font-family:inherit;font-weight:300}
+body[data-theme="glass"] footer .inputbar:focus-within #input{border-bottom-color:var(--accent,#8AA0AE)!important}
+body[data-theme="glass"] footer .inputbar #input::placeholder{color:var(--glass-ink2,#6E675F)!important}
+body[data-theme="glass"] footer .inputbar #send{background:transparent!important;border:none!important;border-radius:50%!important;width:36px!important;height:36px!important;box-shadow:none!important;color:var(--icon-btn-color,#6C8296)!important}
+body[data-theme="glass"] footer .inputbar #send:hover{background:transparent!important;color:var(--accent-deep,#6C8296)!important}
+body[data-theme="glass"] footer .inputbar #send .ico{width:19px;height:19px;transform:translateX(1.5px)}
+body[data-theme="glass"] header .hd-btn{background:transparent!important;border:1px solid rgba(108,130,150,.5)!important;box-shadow:none!important;color:var(--glass-ink2,#6C8296)!important}
+body[data-theme="glass"] header .hd-btn:hover{background:rgba(138,160,174,.12)!important;border-color:rgba(108,130,150,.5)!important;color:var(--glass-ink,#4F4A45)!important}
+body[data-theme="glass"] .hd-name{color:var(--glass-ink,#4F4A45)!important}
+body[data-theme="glass"] .hd-sub{color:var(--glass-ink2,#6E675F)!important}
+body[data-theme="glass"] #chat,body[data-theme="glass"] #chat .msg .bubble,body[data-theme="glass"] footer,body[data-theme="glass"] footer .inputbar #input,body[data-theme="glass"] .rw-wrap,body[data-theme="glass"] .tool-trace{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Songti SC","STSong","Noto Serif SC","SimSun",serif}
+body[data-theme="glass"] footer .inputbar #imgBtn,body[data-theme="glass"] footer .inputbar #micBtn{background:transparent!important;border:none!important;border-radius:50%!important;width:36px!important;height:36px!important;color:var(--icon-btn-color,#6C8296)!important;box-shadow:none!important}
+/* 气泡：玻璃片——半透明底 + 顶部两圆角自然高光（连续渐隐，过渡自然）+ 内亮线 + 柔影 */
+body[data-theme="glass"] .msg.ai .bubble,body[data-theme="glass"] .msg.user .bubble{
+  border:0.5px solid rgba(255,255,255,.34)!important;
+  background:linear-gradient(155deg,rgba(255,255,255,.5) 0%,rgba(255,255,255,.15) 22%,rgba(255,255,255,0) 45%) padding-box,var(--bubble-ai,transparent) padding-box!important;
+  box-shadow:0 3px 14px rgba(79,74,69,.06),inset 0 1px 0 rgba(255,255,255,.26)!important;
+}
+body[data-theme="glass"] .msg.user .bubble{
+  border-bottom-right-radius:5px;
+  background:linear-gradient(155deg,rgba(255,255,255,.5) 0%,rgba(255,255,255,.15) 22%,rgba(255,255,255,0) 45%) padding-box,var(--bubble-user1,transparent) padding-box!important;
+}
+body[data-theme="glass"] .msg.ai .bubble{backdrop-filter:blur(var(--bubble-ai-blur,0px));-webkit-backdrop-filter:blur(var(--bubble-ai-blur,0px))}
+body[data-theme="glass"] .msg.user .bubble{backdrop-filter:blur(var(--bubble-user-blur,0px));-webkit-backdrop-filter:blur(var(--bubble-user-blur,0px))}
+body[data-theme="glass"] #chat{padding-bottom:calc(env(safe-area-inset-bottom) + 92px)!important}
+/* 思考/工具胶囊：无背景，左侧小竖线，展开才有淡玻璃背景 */
+body[data-theme="glass"] .rw-wrap,body[data-theme="glass"] .tool-trace{
+  background:transparent!important;border:none!important;border-left:2px solid var(--glass-line,rgba(138,160,174,.42))!important;border-radius:0!important;
+  padding:3px 0 3px 10px!important;margin:6px 0!important;width:fit-content!important;max-width:min(84%,640px)!important;
+  box-shadow:none!important;overflow:visible!important;pointer-events:auto!important;
+  transition:background .18s ease,border-color .18s ease;
+}
+body[data-theme="glass"] .rw-wrap.open,body[data-theme="glass"] .tool-trace.open{
+  background:transparent!important;border-left:2px solid var(--accent,#8AA0AE)!important;
+  border-radius:0!important;padding:3px 0 3px 10px!important;
+}
+body[data-theme="glass"] .rw-wrap .rw-h,body[data-theme="glass"] .tool-trace .tt-h{color:var(--glass-ink2,#6E675F)!important;font-weight:300}
+body[data-theme="glass"] .tool-trace .tt-name{color:var(--glass-ink2,#6E675F)!important;font-weight:400}
+body[data-theme="glass"] .rw{background:transparent!important;border:none!important;border-radius:0!important;padding:0!important;box-shadow:none!important}
+body[data-theme="glass"] .tool-trace .tt-body,body[data-theme="glass"] .rw-wrap .rw{color:var(--glass-ink,#1A1A1A)!important}
+body[data-theme="glass"] .tool-trace .tt-res{background:transparent!important;border:none!important;border-radius:0!important;padding:2px 0!important;color:var(--glass-ink2,#4A4A4A)!important}
+/* 面板玻璃化：设置卡片 / 主题选择 / 会话列表 / 抽屉 / 操作单 */
+body[data-theme="glass"] .theme-profile-block{background:rgba(255,255,255,.5)!important;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-color:rgba(79,74,69,.08)!important}
+body[data-theme="glass"] .theme-choice{background:rgba(255,255,255,.5)!important;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+body[data-theme="glass"] .theme-choice.active{background:rgba(138,160,174,.12)!important;border-color:rgba(138,160,174,.4)!important}
+body[data-theme="glass"] .session-item,body[data-theme="glass"] .session{background:rgba(255,255,255,.44)!important;border-color:transparent!important;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+body[data-theme="glass"] .session-item.active,body[data-theme="glass"] .session.active{background:rgba(138,160,174,.14)!important}
+body[data-theme="glass"] .act-sheet{background:rgba(255,255,255,.6)!important;backdrop-filter:blur(30px) saturate(160%);-webkit-backdrop-filter:blur(30px) saturate(160%)!important}
+body[data-theme="glass"] .act-mask{background:rgba(79,74,69,.08)!important}
+body[data-theme="glass"] .drawer-panel{background:rgba(255,255,255,.68)!important;backdrop-filter:blur(22px) saturate(160%);-webkit-backdrop-filter:blur(22px) saturate(160%)}
+/* 空状态与文字细节 */
+body[data-theme="glass"] #empty .t1{color:var(--glass-ink2,#8C857D)!important;font-weight:300}
+body[data-theme="glass"] #empty .t2{color:var(--glass-ink3,#B3ACA3)!important}
+body[data-theme="glass"] input[type="range"]{background:rgba(79,74,69,.12)!important}
 </style>
 <script id="wx-input-auto-grow-consolidated-20260921">
 /* 微信输入框自动增高：合并原 wx-input-auto-height-v1 与 wx-input-auto-grow-v3
