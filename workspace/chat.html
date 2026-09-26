@@ -8453,6 +8453,34 @@ body:has(#chat[data-layout="claude"]) #thinkSheetBody div{white-space:pre-wrap!i
   window.addEventListener('load',wxGrow);
   wxGrow();
 })();
+
+// ===== 前端自动更新：切回前台 HEAD /chat 比对 ETag，有新版且空闲时自动重载（2026-09-26 用户拍板：仅前台检测+避让中）=====
+(function(){
+  let _etag0=null, _pendingReload=false;
+  function _autoReloadBusy(){
+    try{
+      if(typeof sending!=="undefined"&&sending) return true;
+      if(typeof inputEl!=="undefined"&&inputEl&&inputEl.value&&inputEl.value.trim()) return true;
+    }catch(e){}
+    return false;
+  }
+  async function _checkFrontUpdate(){
+    try{
+      const r=await fetch("/chat",{method:"HEAD",cache:"no-store"});
+      const tag=r.headers.get("etag");
+      if(!_etag0){ _etag0=tag; return; }
+      if(tag&&tag!==_etag0){ _pendingReload=true; _tryAutoReload(); }
+    }catch(e){}
+  }
+  function _tryAutoReload(){
+    if(!_pendingReload||_autoReloadBusy()) return;
+    location.reload();
+  }
+  _checkFrontUpdate(); // 记本页出生指纹
+  document.addEventListener("visibilitychange",function(){ if(!document.hidden) _checkFrontUpdate(); });
+  setInterval(_tryAutoReload, 15000); // 避让中：空闲即自动刷
+})();
+
 </script>
 <!-- claude 主题思考链抽屉 -->
 <div id="thinkSheet" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;max-height:60vh;border-radius:20px 20px 0 0;background:rgba(255,255,255,.85);backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);box-shadow:0 -4px 30px rgba(0,0,0,.1);flex-direction:column;overflow:hidden">
