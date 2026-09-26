@@ -3699,6 +3699,53 @@ function isPushEchoContent(s) {
 // 解析推送回显内容
 // 2026-09-22 审查 R19：注入 loadTimeline/saveTimeline，让推送编辑/删除走时间线四道守卫 + 快照指纹
 require("./routes/push-events")(app, { basicAuth, baseDir: __dirname, loadTimeline, saveTimeline });
+app.get("/admin/cross-window-inject", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    // 2026-09-19：S4 后生产实际注入=V2 固定六块（旧 [永久上下文]/[跨窗口] 已被剥除），预览随总闸双轨——
+    // ctx_v2_enabled=true 时与主聊天同一 assembleInput+buildContextBlocks 实时拼真实注入内容
+    //（Relevant 块依赖当轮用户消息，预览不含；不受 cross_inject 开关控制，与 V2 生产路径同口径）。
+    // false/配置缺失=回滚态，保持旧逻辑（computeCrossMemoryText，含 cross_inject 总开关/会话覆盖门）。
+    const sid = String(req.query && req.query.session_id ? req.query.session_id : "").trim() || "default";
+    let v2Cfg = null;
+    try { v2Cfg = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "memory_v2_config.json"), "utf8")); } catch (e) {}
+    if (v2Cfg && v2Cfg.ctx_v2_enabled === true) {
+      let v2Text = "";
+      try {
+        const v2Input = ctxV2Shadow.assembleInput({
+          baseDir: __dirname,
+          sessionId: sid,
+          llmMessages: [],
+          loadTimeline: loadTimeline,
+          normalizeContentToText: normalizeContentToText,
+        });
+        const built = buildContextBlocks(v2Input);
+        v2Text = (built.blocks || [])
+          .filter(function (b) { return b && !b.empty && b.key !== "relevant_memories"; })
+          .map(function (b) { return b.content; }).join("\n\n");
+      } catch (cx) { console.warn("[cross-inject] V2 预览失败:", cx.message); }
+      return reply.send({ text: v2Text, session_id: sid, mode: "v2" });
+    }
+    // 2026-09-13：预览改「每次实时重算」（computeCrossMemoryText），不再复用开窗口时落盘固定的旧快照；
+    // 边界仍用本会话创建日（优先时间线首条消息，其次旧快照固化的 created_at），与实际注入同口径，只算不落盘。
+    let text = "";
+    try {
+      const cfg = memoryPool.getConfig();
+      const cfgOverride = sessionCrossInjectOverride(sid);
+      if (cfgOverride !== false && cfg.cross_inject_enabled !== false) {
+        let createdIso = sessionCreatedAtOf(sid);
+        if (!createdIso) {
+          try {
+            const snapFile = crossSnapshotFile(sid);
+            if (fs.existsSync(snapFile)) createdIso = (fs.readJsonSync(snapFile) || {}).created_at;
+          } catch (e) {}
+        }
+        text = computeCrossMemoryText(cfg, createdIso);
+      }
+    } catch (cx) { console.warn("[cross-inject] 预览失败:", cx.message); }
+    reply.send({ text: text, session_id: sid, mode: "legacy" });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
 
 
 // 上下文记忆替换：管理台撤销（压缩页 AI 块的「撤销」按钮用）
@@ -6487,6 +6534,67 @@ app.get("/admin/logs/wake-up", { preHandler: basicAuth }, async (req, reply) => 
 });
 
 
+
+// 获取/新增/删除 永久注入上下文 (pinned memories)
+app.get("/admin/logs/pinned", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const list = engine.getPinnedMemories ? engine.getPinnedMemories() : [];
+    reply.send({ list });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+app.post("/admin/logs/pinned", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const { title, content, order } = req.body || {};
+    const mem = await engine.addPinnedMemory({ title, content, order }, { allowDeleted: true });
+    reply.send({ success: true, memory: mem });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+
+
+app.put("/admin/logs/pinned/:id", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const { title, content, order } = req.body || {};
+    const updates = {};
+    if (title !== undefined) updates.title = title;
+    if (content !== undefined) updates.content = content;
+    if (order !== undefined) updates.order = order;
+    const mem = await engine.updatePinnedMemory(req.params.id, updates);
+    if (!mem) return reply.code(404).send({ error: "not found" });
+    reply.send({ success: true, memory: mem });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+app.post("/admin/logs/pinned/reorder", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const ids = (req.body || {}).ids;
+    const list = await engine.reorderPinnedMemory(ids);
+    if (!list) return reply.code(400).send({ error: "无效的排序数据" });
+    reply.send({ success: true, list: list });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+app.delete("/admin/logs/pinned/:id", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const ok = await engine.deletePinnedMemory(req.params.id);
+    reply.send({ success: ok });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
 
 // 获取最后一次发给LLM的完整上下文
 app.get("/admin/logs/context", { preHandler: basicAuth }, async (req, reply) => {
