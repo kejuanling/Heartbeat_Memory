@@ -1519,11 +1519,6 @@ const PREFERRED_ENV_ORDER = [
   "CUSTOM_ICON_URL",
   "ALLOW_PUBLIC_API",
   "PUSH_PROVIDER",
-  "NTFY_SERVER_URL",
-  "NTFY_TOPIC",
-  "NTFY_TOKEN",
-  "NTFY_PRIORITY",
-  "NTFY_TAGS",
   "DIARY_ENABLED",
   "DIARY_DIR",
   "REQUEST_BODY_LIMIT_MB",
@@ -2604,7 +2599,7 @@ function normalizeBooleanString(value, key, fallback) {
 
 function normalizePushProvider(value) {
   const raw = String(value || "").trim().toLowerCase();
-  if (raw === "bark" || raw === "ntfy" || raw === "webpush") return raw;
+  if (raw === "bark" || raw === "webpush") return raw;
   return readEnvValueOrDefault("PUSH_PROVIDER", "bark");
 }
 
@@ -3034,11 +3029,6 @@ app.post("/admin/save", { preHandler: basicAuth }, async (req, reply) => {
       weather_units,
       all_public_api,
       push_provider,
-      ntfy_server_url,
-      ntfy_topic,
-      ntfy_token,
-      ntfy_priority,
-      ntfy_tags,
       user_display_name,
       ai_display_name,
       diary_enabled
@@ -3074,11 +3064,6 @@ app.post("/admin/save", { preHandler: basicAuth }, async (req, reply) => {
       WEATHER_UNITS: normalizeWeatherUnits(weather_units),
       ALLOW_PUBLIC_API: normalizeBooleanString(all_public_api, "ALLOW_PUBLIC_API", "false"),
       PUSH_PROVIDER: normalizePushProvider(push_provider),
-      NTFY_SERVER_URL: ntfy_server_url ?? readEnvValue("NTFY_SERVER_URL"),
-      NTFY_TOPIC: ntfy_topic ?? readEnvValue("NTFY_TOPIC"),
-      NTFY_TOKEN: ntfy_token || readEnvValue("NTFY_TOKEN"),
-      NTFY_PRIORITY: ntfy_priority ?? readEnvValue("NTFY_PRIORITY"),
-      NTFY_TAGS: ntfy_tags ?? readEnvValue("NTFY_TAGS"),
       USER_DISPLAY_NAME: user_display_name ?? readEnvValue("USER_DISPLAY_NAME"),
       AI_DISPLAY_NAME: ai_display_name ?? readEnvValue("AI_DISPLAY_NAME"),
       DIARY_ENABLED: normalizeBooleanString(diary_enabled, "DIARY_ENABLED", "true"),
@@ -5699,12 +5684,6 @@ app.get("/admin/env", { preHandler: basicAuth }, async (req, reply) => {
         WEATHER_UNITS: readEnvValueOrDefault("WEATHER_UNITS", "metric"),
         ALLOW_PUBLIC_API: readEnvValueOrDefault("ALLOW_PUBLIC_API", "false"),
         PUSH_PROVIDER: readEnvValueOrDefault("PUSH_PROVIDER", "bark"),
-        NTFY_SERVER_URL: readEnvValue("NTFY_SERVER_URL"),
-        NTFY_TOPIC: readEnvValue("NTFY_TOPIC"),
-        NTFY_TOKEN: "",
-        NTFY_TOKEN_SET: Boolean(readEnvValue("NTFY_TOKEN")),
-        NTFY_PRIORITY: readEnvValue("NTFY_PRIORITY"),
-        NTFY_TAGS: readEnvValue("NTFY_TAGS"),
         USER_DISPLAY_NAME: readEnvValue("USER_DISPLAY_NAME"),
         AI_DISPLAY_NAME: readEnvValue("AI_DISPLAY_NAME"),
         DIARY_ENABLED: readEnvValueOrDefault("DIARY_ENABLED", "true"),
@@ -6100,11 +6079,11 @@ async function callCoLLM(messages, temperature) {
 // ========================
 
 
-// 推送（Bark / ntfy / WebPush，与唤醒系统同一套配置）
-// sessionId：目标会话（WebPush 通道按会话定向订阅；bark/ntfy 忽略此字段）。
+// 推送（Bark / WebPush，与唤醒系统同一套配置）
+// sessionId：目标会话（WebPush 通道按会话定向订阅；bark 忽略此字段）。
 // 唤醒/告警类调用方必须传；后台回复类由 /v1/notify/reply-done 带入。
 async function sendPushNotification({ title, body, sessionId } = {}) {
-  // 15s 超时：Bark/ntfy 对端挂起时不能卡住免打扰释放等调用方
+  // 15s 超时：Bark 对端挂起时不能卡住免打扰释放等调用方
   const pushController = new AbortController();
   const pushTimer = setTimeout(() => pushController.abort(), 15000);
   try {
@@ -6112,20 +6091,6 @@ async function sendPushNotification({ title, body, sessionId } = {}) {
     if (provider === "webpush") {
       clearTimeout(pushTimer);
       return await require("./lib/webpush").sendToSession({ title, body, sessionId });
-    }
-    if (provider === "ntfy") {
-      const topic = String(readEnvValue("NTFY_TOPIC") || "").trim();
-      if (!topic) return { ok: false, reason: "NTFY_TOPIC 未配置" };
-      const server = (readEnvValue("NTFY_SERVER_URL") || "https://ntfy.sh").replace(/\/+$/, "");
-      const headers = { "Content-Type": "application/json" };
-      const token = readEnvValue("NTFY_TOKEN");
-      if (token) headers.Authorization = `Bearer ${token}`;
-      const { buildNtfyPayload } = require("./ntfy_priority");
-      const payload = buildNtfyPayload({ topic, title, message: body, priority: readEnvValue("NTFY_PRIORITY"), tags: readEnvValue("NTFY_TAGS") });
-      const response = await fetch(server, { method: "POST", headers, body: JSON.stringify(payload), signal: pushController.signal });
-      const responseText = await response.text();
-      if (!response.ok) return { ok: false, reason: responseText || `HTTP ${response.status}` };
-      return { ok: true };
     }
     if (provider !== "bark") return { ok: false, reason: `不支持的 PUSH_PROVIDER：${provider}` };
     const barkKey = readEnvValue("BARK_KEY");

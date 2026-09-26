@@ -550,8 +550,8 @@ function toast(msg){
  }
  
  function renderEnv(){
-   const keys=['TARGET_API_URL','TARGET_API_KEY','MODEL_NAME','BARK_KEY','GATEWAY_API_KEY','CUSTOM_ICON_URL','ALLOW_PUBLIC_API','PUSH_PROVIDER','NTFY_SERVER_URL','NTFY_TOPIC','NTFY_TOKEN','NTFY_PRIORITY','NTFY_TAGS','USER_DISPLAY_NAME','AI_DISPLAY_NAME','WEATHER_ENABLED','WEATHER_LOCATION_NAME','WEATHER_LAT','WEATHER_LON','DIARY_ENABLED','DIARY_DIR','PORT'];
-   const SECRET_KEYS=new Set(['TARGET_API_KEY','BARK_KEY','GATEWAY_API_KEY','NTFY_TOKEN']);
+   const keys=['TARGET_API_URL','TARGET_API_KEY','MODEL_NAME','BARK_KEY','GATEWAY_API_KEY','CUSTOM_ICON_URL','ALLOW_PUBLIC_API','PUSH_PROVIDER','USER_DISPLAY_NAME','AI_DISPLAY_NAME','WEATHER_ENABLED','WEATHER_LOCATION_NAME','WEATHER_LAT','WEATHER_LON','DIARY_ENABLED','DIARY_DIR','PORT'];
+   const SECRET_KEYS=new Set(['TARGET_API_KEY','BARK_KEY','GATEWAY_API_KEY']);
    document.getElementById('env-list').innerHTML=keys.map(k=>{
      const v=AppState.INITIAL_DATA.env[k]||'';
      let display;
@@ -568,15 +568,15 @@ function toast(msg){
  }
  
  function openEnvEditor(){
-   const keys=['TARGET_API_URL','TARGET_API_KEY','GATEWAY_API_KEY','MODEL_NAME','BARK_KEY','CUSTOM_ICON_URL','DAY_WAKE_AFTER_MINUTES','NIGHT_WAKE_AFTER_MINUTES','DAY_CHECK_INTERVAL_MINUTES','NIGHT_CHECK_INTERVAL_MINUTES','WAKE_DAY_START_HOUR','WAKE_DAY_END_HOUR','WEATHER_ENABLED','WEATHER_LOCATION_NAME','WEATHER_LAT','WEATHER_LON','WEATHER_UNITS','ALLOW_PUBLIC_API','PUSH_PROVIDER','NTFY_SERVER_URL','NTFY_TOPIC','NTFY_TOKEN','NTFY_PRIORITY','NTFY_TAGS','USER_DISPLAY_NAME','AI_DISPLAY_NAME','DIARY_ENABLED'];
-   const SECRET_KEYS=new Set(['TARGET_API_KEY','BARK_KEY','GATEWAY_API_KEY','NTFY_TOKEN']);
+   const keys=['TARGET_API_URL','TARGET_API_KEY','GATEWAY_API_KEY','MODEL_NAME','BARK_KEY','CUSTOM_ICON_URL','DAY_WAKE_AFTER_MINUTES','NIGHT_WAKE_AFTER_MINUTES','DAY_CHECK_INTERVAL_MINUTES','NIGHT_CHECK_INTERVAL_MINUTES','WAKE_DAY_START_HOUR','WAKE_DAY_END_HOUR','WEATHER_ENABLED','WEATHER_LOCATION_NAME','WEATHER_LAT','WEATHER_LON','WEATHER_UNITS','ALLOW_PUBLIC_API','PUSH_PROVIDER','USER_DISPLAY_NAME','AI_DISPLAY_NAME','DIARY_ENABLED'];
+   const SECRET_KEYS=new Set(['TARGET_API_KEY','BARK_KEY','GATEWAY_API_KEY']);
    document.getElementById('env-editor-fields').innerHTML=keys.map(k=>{
      const v=AppState.INITIAL_DATA.env[k]||'';
      if(k==='ALLOW_PUBLIC_API'){
        return '<div class="form-group"><label>ALLOW_PUBLIC_API <span style="color:var(--text3);font-size:11px">公网 /v1 开关</span></label><select id="env-'+k+'"><option value="true"'+(v==='true'?' selected':'')+'>开启（需 GATEWAY_API_KEY）</option><option value="false"'+(v!=='true'?' selected':'')+'>关闭（仅内网）</option></select></div>';
      }
      if(k==='PUSH_PROVIDER'){
-       return '<div class="form-group"><label>PUSH_PROVIDER <span style="color:var(--text3);font-size:11px">推送渠道</span></label><select id="env-'+k+'"><option value="bark"'+(v==='bark'||!v?' selected':'')+'>bark</option><option value="ntfy"'+(v==='ntfy'?' selected':'')+'>ntfy</option></select></div>';
+       return '<div class="form-group"><label>PUSH_PROVIDER <span style="color:var(--text3);font-size:11px">推送渠道</span></label><select id="env-'+k+'"><option value="bark"'+(v==='bark'||!v?' selected':'')+'>bark</option></select></div>';
      }
      const ph=SECRET_KEYS.has(k)?' placeholder="'+(AppState.INITIAL_DATA.env[k+'_SET']?'已设置，留空不修改':'未设置，留空保存')+'"':'';
      return '<div class="form-group"><label>'+k+'</label><input type="text" id="env-'+k+'" value="'+escapeHtml(v)+'"'+ph+'></div>';
@@ -585,7 +585,7 @@ function toast(msg){
  }
  
  async function saveEnv(){
-   const keyMap={'TARGET_API_URL':'target_url','TARGET_API_KEY':'target_key','GATEWAY_API_KEY':'gateway_api_key','MODEL_NAME':'model_name','BARK_KEY':'bark_key','CUSTOM_ICON_URL':'custom_icon','DAY_WAKE_AFTER_MINUTES':'day_wake_after','NIGHT_WAKE_AFTER_MINUTES':'night_wake_after','DAY_CHECK_INTERVAL_MINUTES':'day_check_interval','NIGHT_CHECK_INTERVAL_MINUTES':'night_check_interval','WAKE_DAY_START_HOUR':'wake_day_start_hour','WAKE_DAY_END_HOUR':'wake_day_end_hour','WEATHER_ENABLED':'weather_enabled','WEATHER_LOCATION_NAME':'weather_location_name','WEATHER_LAT':'weather_lat','WEATHER_LON':'weather_lon','WEATHER_UNITS':'weather_units','ALLOW_PUBLIC_API':'all_public_api','PUSH_PROVIDER':'push_provider','NTFY_SERVER_URL':'ntfy_server_url','NTFY_TOPIC':'ntfy_topic','NTFY_TOKEN':'ntfy_token','NTFY_PRIORITY':'ntfy_priority','NTFY_TAGS':'ntfy_tags','USER_DISPLAY_NAME':'user_display_name','AI_DISPLAY_NAME':'ai_display_name','DIARY_ENABLED':'diary_enabled'};
+   const keyMap={'TARGET_API_URL':'target_url','TARGET_API_KEY':'target_key','GATEWAY_API_KEY':'gateway_api_key','MODEL_NAME':'model_name','BARK_KEY':'bark_key','CUSTOM_ICON_URL':'custom_icon','DAY_WAKE_AFTER_MINUTES':'day_wake_after','NIGHT_WAKE_AFTER_MINUTES':'night_wake_after','DAY_CHECK_INTERVAL_MINUTES':'day_check_interval','NIGHT_CHECK_INTERVAL_MINUTES':'night_check_interval','WAKE_DAY_START_HOUR':'wake_day_start_hour','WAKE_DAY_END_HOUR':'wake_day_end_hour','WEATHER_ENABLED':'weather_enabled','WEATHER_LOCATION_NAME':'weather_location_name','WEATHER_LAT':'weather_lat','WEATHER_LON':'weather_lon','WEATHER_UNITS':'weather_units','ALLOW_PUBLIC_API':'all_public_api','PUSH_PROVIDER':'push_provider','USER_DISPLAY_NAME':'user_display_name','AI_DISPLAY_NAME':'ai_display_name','DIARY_ENABLED':'diary_enabled'};
    const body={};
    Object.keys(keyMap).forEach(k=>{const el=document.getElementById('env-'+k);if(el)body[keyMap[k]]=el.value;});
    try{
