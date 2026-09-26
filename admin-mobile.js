@@ -397,12 +397,40 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    }).join('');
  }
 
+ // —— 生成中状态恢复（0926）：解析/生成摘要是服务端同步任务，页面被杀或重进后前端 fetch 已丢，
+ // 但服务端仍在跑、操作日志会翻状态。挂在既有轮询上（不新增定时器）：最新生成类日志为 pending 时
+ // 消息栏显示「后台生成中」，翻成 success/error 后把结果写回一次。
+ // 只写空栏或本机制自己的文案（⏳ 开头），绝不覆盖其他操作的提示。——
+ var GEN_ACTIONS = { reparse: 1, gap: 1, block: 1 };
+ var trackedGenId = null;
+ function syncGenStateFromLogs(logs){
+   const msg = document.getElementById('compaction-msg');
+   if(!msg || !logs || !logs.length) return;
+   let top = null;
+   for(let i = 0; i < logs.length; i++){
+     if(GEN_ACTIONS[logs[i].action]){ top = logs[i]; break; }
+   }
+   if(!top) return;
+   if(top.status === 'pending'){
+     trackedGenId = top.id;
+     if(msg.textContent === '' || msg.textContent.charAt(0) === '⏳'){
+       msg.textContent = '⏳ ' + (top.label || '生成任务') + '：后台生成中，切走不影响；完成后此处和日志面板会更新';
+     }
+   } else if(trackedGenId && top.id === trackedGenId){
+     trackedGenId = null;
+     if(msg.textContent.charAt(0) === '⏳'){
+       msg.textContent = (top.label || '生成任务') + '：' + (top.message || '已结束');
+     }
+   }
+ }
+
  async function loadCompactionLogs(){
    try {
      const r = await fetch(ADMIN_API + '/context-compaction/logs');
      const d = await r.json();
      if(d && d.logs){
        renderLogs(d.logs);
+       syncGenStateFromLogs(d.logs);
        if(d.logs.length > 0 && d.logs[0].id !== lastLogId){
          if(lastLogId && !AppState.logPanelOpen){
            AppState.unreadLogCount++;
@@ -453,6 +481,7 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
          updateLogBadge();
        }
        if(!lastLogId) lastLogId = d.logs[0].id;
+       syncGenStateFromLogs(d.logs);
      }
    }).catch(()=>{});
  }

@@ -3849,7 +3849,8 @@ async function extractMemoryCandidates(sourceText) {
   const system = String(pcfg.reparse_system_prompt || "").trim() || pdef.system;
   const user = (String(pcfg.reparse_user_prompt || "").trim() || pdef.user) + "\n\n对话原文：\n" + sourceText;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 60000);
+  // 5 分钟（0926 拍板）：思考型模型解析长文实测可超 60s（1:1 复现 >150s 未返回）；与摘要生成(300s)/nginx 读超时(310s) 对齐
+  const timer = setTimeout(() => controller.abort(), 300000);
   let resp, data;
   try {
     resp = await fetch(apiUrl, {
