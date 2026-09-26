@@ -659,17 +659,13 @@ _SMTP_SERVER = "smtp.qq.com"
 _SMTP_PORT = 465
 
 
-def _send_chagang_mail(screenshot: bool, weather: bool, location: bool):
-    """发「查岗」触发邮件；三个开关逐行写进正文，手机快捷指令解析后按需取值。"""
+def _send_chagang_mail():
+    """发「查岗」触发邮件。2026-09-26 起手机端快捷指令不做选择、每次全量上报，
+    正文不再携带开关（screenshot/weather/location 过滤在工具侧做）。"""
     import smtplib
     from email.mime.text import MIMEText
     from email.header import Header
-    body = "screenshot=%s\nweather=%s\nlocation=%s" % (
-        "true" if screenshot else "false",
-        "true" if weather else "false",
-        "true" if location else "false",
-    )
-    msg = MIMEText(body, "plain", "utf-8")
+    msg = MIMEText(_CHAGANG_SUBJECT, "plain", "utf-8")
     msg["Subject"] = Header(_CHAGANG_SUBJECT, "utf-8")
     msg["From"] = _EMAIL_ADDR
     msg["To"] = _CHAGANG_MAIL_TO
@@ -719,7 +715,7 @@ def tool_phone_state(args):
 
     sent_ts = time.time()
     try:
-        _send_chagang_mail(screenshot=screenshot, weather=weather, location=location)
+        _send_chagang_mail()
     except Exception as e:
         return {"error": "查岗邮件发送失败: " + str(e)}
 
@@ -737,12 +733,15 @@ def tool_phone_state(args):
     if not state:
         return {"error": "查岗邮件已发送，但等待后未读到手机上报（手机可能没收到邮件或快捷指令未触发）"}
 
+    # 手机端永远全量上报；screenshot/weather/location 三个开关在工具侧过滤返回内容
     result = {
         "battery": state.get("battery"),
-        "weather": state.get("weather"),
-        "location": state.get("location"),
         "created_at": state.get("created_at"),
     }
+    if weather:
+        result["weather"] = state.get("weather")
+    if location:
+        result["location"] = state.get("location")
     if not _state_is_fresh(state.get("created_at"), sent_ts):
         result["note"] = "未等到本次新上报，以上为上次查岗的旧快照"
 
