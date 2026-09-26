@@ -340,7 +340,6 @@ function timelineFileFor(sessionId) {
 const DEFAULT_RESTART_COMMAND = "cd /opt/dylan-heartbeat && pm2 restart gateway --update-env 2>&1";
 // 上游模型请求超时（毫秒），防止上游挂起时 /v1 请求永久阻塞
 const UPSTREAM_TIMEOUT_MS = Number(process.env.UPSTREAM_TIMEOUT_MS) || 180000;
-const SCREENSHOT_TIMEOUT_MS = Number(process.env.SCREENSHOT_TIMEOUT_MS) || 60000;
 
 // 布尔环境读取：注意这里直读 process.env（非 readEnvValue 的 cachedEnv 口径），
 // 管理台改 .env 后要等重启才对本函数生效
@@ -6499,262 +6498,16 @@ app.post("/v1/push/subscribe", async (req, reply) => {
   reply.send(r);
 });
 
-// 截图唤醒提示词（AI 决定说不说）
-const SCREENSHOT_WAKE_PROMPT_FILE = path.join(__dirname, "data", "screenshot_wake_prompt.json");
-const DEFAULT_SCREENSHOT_WAKE_PROMPT = `## 最高优先级规则
-1. 这是一次「截图唤醒」，不是涵主动发起的对话。你只是收到了涵手机里的一张新截图。
-2. 根据截图内容决定要不要主动说话。想说话就简洁地说，不用重复描述画面；不想说话就保持沉默。
-
-## 截图信息
-- 当前时间：\${currentTime}
-- 画面描述：\${frameDescription}
-
-## 输出格式
-- 想说话：直接输出你想说的话。
-- 不想说话：只输出 [NO_ACTION]。`;
-
-function readScreenshotWakePrompt() {
-  try {
-    const raw = fs.readFileSync(SCREENSHOT_WAKE_PROMPT_FILE, "utf-8");
-    const j = JSON.parse(raw);
-    if (j && typeof j.prompt === "string" && j.prompt.trim()) return j.prompt;
-  } catch (e) {}
-  return DEFAULT_SCREENSHOT_WAKE_PROMPT;
-}
-
-// 截图画面描述提示词
-const SCREENSHOT_VISION_PROMPT_FILE = path.join(__dirname, "data", "screenshot_vision_prompt.json");
-const DEFAULT_SCREENSHOT_VISION_PROMPT = `请描述这张手机截图的内容，包括：
-1. 这是什么应用或什么类型的页面（如微信聊天、淘宝商品、文章、游戏等）
-2. 页面上的主要内容和关键信息
-3. 能看出用户在做什么或看什么
-
-用中文简洁描述，不超过200字。`;
-
-function readScreenshotVisionPrompt() {
-  try {
-    const raw = fs.readFileSync(SCREENSHOT_VISION_PROMPT_FILE, "utf-8");
-    const j = JSON.parse(raw);
-    if (j && typeof j.prompt === "string" && j.prompt.trim()) return j.prompt;
-  } catch (e) {}
-  return DEFAULT_SCREENSHOT_VISION_PROMPT;
-}
-
-// 调用共影的视觉模型描述图片
-async function describeScreenshot(image) {
-  const vm = resolveVisionModel("screenshot");
-  const apiUrl = String((vm && vm.api_url) || "https://open.bigmodel.cn/api/paas/v4/chat/completions").trim();
-  const apiKey = String((vm && vm.api_key) || "").trim();
-  const model = String((vm && vm.model) || "glm-4v-flash").trim();
-  if (!apiKey) throw new Error("视觉模型 Key 未配置：请到管理台「心跳」页的「视觉模型」添加并填写");
-  
-  let imgUrl = String(image || "").trim();
-  if (!imgUrl.startsWith("data:") && !/^https?:\/\//.test(imgUrl)) {
-    imgUrl = "data:image/jpeg;base64," + imgUrl;
-  }
-  
-  const visionPrompt = readScreenshotVisionPrompt();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SCREENSHOT_TIMEOUT_MS);
-  try {
-    const payload = {
-      model,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "image_url", image_url: { url: imgUrl } },
-          { type: "text", text: visionPrompt }
-        ]
-      }],
-      temperature: 0.3,
-      stream: false
-    };
-    if (/minimax/i.test(model)) payload.thinking = { type: "disabled" };
-    const resp = await fetch(apiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify(payload),
-      signal: controller.signal
-    });
-    const text = await resp.text();
-    let data;
-    try { data = JSON.parse(text); } catch (e) { throw new Error("视觉模型返回异常: " + text.slice(0, 200)); }
-    if (!resp.ok) {
-      const msg = (data && data.error && (data.error.message || JSON.stringify(data.error))) || text.slice(0, 200);
-      throw new Error("视觉模型调用失败: " + String(msg));
-    }
-    let description = String(data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || "").trim();
-    description = description.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
-    return description;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-
-let screenshotProcessing = false;
-
-// 截图上传：图片 → 视觉解析 → 作为特殊事件写入时间线
-app.post("/internal/screenshot/wake", async (req, reply) => {
-  if (screenshotProcessing) {
-    return reply.code(429).send({ error: "上一次截图还在处理中，请稍后再试" });
-  }
-  screenshotProcessing = true;
-  try {
-    const body = req.body || {};
-    const image = body.image || null;
-    if (!image) return reply.code(400).send({ error: "缺少图片数据" });
-    
-    // 1. 视觉解析
-    let frameDescription = "";
-    try {
-      frameDescription = await describeScreenshot(image);
-    } catch (e) {
-      console.warn("[screenshot] 画面解析失败:", e.message);
-      return reply.code(500).send({ error: "画面解析失败: " + e.message });
-    }
-    
-    // 2. 写入时间线（截图特殊事件）
-    const nowText = formatDateTimeInTimeZone(new Date(), TIME_ZONE);
-    const eventContent = `（${nowText} 截图）\n画面：${frameDescription.slice(0, 300)}${frameDescription.length > 300 ? "…" : ""}`;
-    appendSpecialEvent(eventContent);
-    
-    console.log(`[screenshot] 已写入时间线，描述 ${frameDescription.length} 字`);
-    // 3. 截图唤醒（可选开关）：把画面描述 + 唤醒提示词发给聊天 AI，让它决定说不说
-    const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
-    if (cfg.screenshot_wake_enabled) {
-      try {
-        const wakePrompt = readScreenshotWakePrompt()
-          .replace(/\$\{currentTime\}/g, nowText)
-          .replace(/\$\{frameDescription\}/g, frameDescription || "（画面无法获取）");
-        // 统一唤醒链路（2026-09-15 批3收尾②）：与主唤醒/共影同一套上下文构建，进程内直调 runWakeCompletion。
-        // 截图唤醒是低频事件，同样不落盘 [唤醒] 块（截图已有「（截图）」事件留痕）、不带工具。
-        const res = await wakeChatModule.runWakeCompletion(wakeChatDeps, {
-          session_id: "default",
-          wake_block: wakePrompt,
-          with_tools: false,
-          persist_wake_block: false,
-          temperature: 0.9
-        });
-        const aiReply = res.text;
-        const clean = String(aiReply || "").trim();
-        if (clean && !clean.includes("[NO_ACTION]")) {
-          const displayName = readEnvValue("AI_DISPLAY_NAME") || "谢";
-          appendSpecialEvent(`（${nowText} 截图唤醒）${displayName}：${clean.slice(0, 500)}`);
-          const pushResult = await sendPushNotification({ title: "截图唤醒", body: clean.slice(0, 500) });
-          console.log(`[screenshot] 唤醒说话 chars ${clean.length}, 推送 ${pushResult.ok ? "OK" : "失败:" + pushResult.reason}`);
-        } else {
-          console.log("[screenshot] 唤醒判定沉默，不推送");
-        }
-      } catch (e) {
-        console.warn("[screenshot] 唤醒判定失败（不影响截图记录）:", e.message);
-      }
-    }
-
-    reply.send({ ok: true, description: frameDescription });
-    
-  } catch (err) {
-    console.warn("[screenshot] 失败:", err.message);
-    reply.code(500).send({ error: err.message });
-  } finally {
-    screenshotProcessing = false;
-  }
-});
 
 // 管理台：截图画面描述提示词读取
-app.get("/admin/logs/screenshot-vision-prompt", { preHandler: basicAuth }, async (req, reply) => {
-  try { reply.send({ prompt: readScreenshotVisionPrompt() }); }
-  catch (err) { reply.send({ error: err.message }); }
-});
-app.post("/admin/logs/screenshot-vision-prompt", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const prompt = String((req.body && req.body.prompt) || "").trim();
-    if (!prompt) return reply.code(400).send({ error: "提示词不能为空" });
-    const tmp = SCREENSHOT_VISION_PROMPT_FILE + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify({ prompt }, null, 2), "utf-8");
-    fs.renameSync(tmp, SCREENSHOT_VISION_PROMPT_FILE);
-    reply.send({ ok: true, prompt });
-  } catch (err) { reply.code(400).send({ error: err.message }); }
-});
-app.delete("/admin/logs/screenshot-vision-prompt", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    if (fs.existsSync(SCREENSHOT_VISION_PROMPT_FILE)) fs.unlinkSync(SCREENSHOT_VISION_PROMPT_FILE);
-    reply.send({ ok: true, prompt: DEFAULT_SCREENSHOT_VISION_PROMPT });
-  } catch (err) { reply.code(500).send({ error: err.message }); }
-});
 
 // 管理台：截图唤醒提示词读取
-app.get("/admin/logs/screenshot-wake-prompt", { preHandler: basicAuth }, async (req, reply) => {
-  try { reply.send({ prompt: readScreenshotWakePrompt() }); }
-  catch (err) { reply.send({ error: err.message }); }
-});
-app.post("/admin/logs/screenshot-wake-prompt", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const prompt = String((req.body && req.body.prompt) || "").trim();
-    if (!prompt) return reply.code(400).send({ error: "提示词不能为空" });
-    const tmp = SCREENSHOT_WAKE_PROMPT_FILE + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify({ prompt }, null, 2), "utf-8");
-    fs.renameSync(tmp, SCREENSHOT_WAKE_PROMPT_FILE);
-    reply.send({ ok: true, prompt });
-  } catch (err) { reply.code(400).send({ error: err.message }); }
-});
-app.delete("/admin/logs/screenshot-wake-prompt", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    if (fs.existsSync(SCREENSHOT_WAKE_PROMPT_FILE)) fs.unlinkSync(SCREENSHOT_WAKE_PROMPT_FILE);
-    reply.send({ ok: true, prompt: DEFAULT_SCREENSHOT_WAKE_PROMPT });
-  } catch (err) { reply.code(500).send({ error: err.message }); }
-});
-
-// 管理台：视觉模型列表读写
-app.get("/admin/vision-models", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const cfg = memoryEngine.getConfig ? memoryEngine.getConfig() : {};
-    // 批注 2026-09-13（审查 S4）：api_key 不回明文，只回 api_key_set 布尔；POST 端空值按 id 保留旧值。
-    const models = getVisionModels().map(function (m) {
-      if (!m || typeof m !== "object") return m;
-      const has = !!(m.api_key && String(m.api_key).trim());
-      return Object.assign({}, m, { api_key: "", api_key_set: has });
-    });
-    reply.send({ success: true, models: models, coId: cfg.co_vision_model_id || "", screenshotId: cfg.screenshot_vision_model_id || "" });
-  } catch (err) { reply.code(500).send({ error: err.message }); }
-});
-app.post("/admin/vision-models", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const body = req.body || {};
-    const updates = {};
-    if (Array.isArray(body.models)) {
-      // 批注 2026-09-13（审查 S4）：GET 已不回明文 api_key，客户端回传空值视为「未改动」，
-      // 按 id 从旧配置恢复，避免脱敏回写抹掉真实凭据。
-      const oldModels = getVisionModels();
-      updates.vision_models = body.models.map(function (m, i) {
-        const mid = String((m && m.id) || ("m" + Date.now() + "_" + i));
-        let apiKey = String((m && m.api_key) || "").trim();
-        if (!apiKey) {
-          const old = oldModels.find(function (x) { return x && String(x.id || "") === mid && x.api_key; });
-          if (old) apiKey = String(old.api_key);
-        }
-        return {
-          id: mid,
-          name: String((m && m.name) || ("视觉模型 " + (i + 1))).trim(),
-          api_url: String((m && m.api_url) || "").trim(),
-          api_key: apiKey,
-          model: String((m && m.model) || "").trim()
-        };
-      });
-    }
-    if (body.coId !== undefined) updates.co_vision_model_id = String(body.coId || "");
-    if (body.screenshotId !== undefined) updates.screenshot_vision_model_id = String(body.screenshotId || "");
-    await require("./memory-engine").updateConfig(updates);
-    reply.send({ success: true });
-  } catch (err) { reply.code(500).send({ error: err.message }); }
-});
 
 // ========================
-// 运行配置（精简版）：仅服务心跳页的共影/截图配置读写；参数设置页已移除
+// 运行配置（精简版）：仅服务心跳页的共影配置读写；参数设置页已移除
 // ========================
 const RUN_CONFIG_WHITELIST = new Set([
   "co_vision_model_id", "co_frame_interval", "co_peek_seconds",
-  "screenshot_vision_model_id", "screenshot_wake_enabled",
   "event_inject_types", "vision_models",
   "memory_retrieval_enabled", "retrieval_top_k", "keyword_search_enabled",
   "memory_relevance_threshold", "memory_item_cooldown_minutes",
@@ -6763,13 +6516,11 @@ const RUN_CONFIG_WHITELIST = new Set([
   "memory_retrieval_wake_enabled", "wake_history_max_messages"
 ]);
 
-// key -> expected type, applied to /admin/config and /admin/vision-models whitelist write
+// key -> expected type, applied to /admin/config whitelist write
 const RUN_CONFIG_TYPES = {
   co_vision_model_id: "string",
-  screenshot_vision_model_id: "string",
   co_frame_interval: "number",
   co_peek_seconds: "number",
-  screenshot_wake_enabled: "boolean",
   event_inject_types: "array",
   vision_models: "array",
   memory_retrieval_enabled: "boolean",
@@ -6789,7 +6540,7 @@ const RUN_CONFIG_TYPES = {
 
 // ── 配置读出口脱敏（2026-09-20 审查 P1-1 收尾）──
 // data/config.json 里的视觉模型 api_key 此前经 GET /admin/config 明文回传（0913 审查 S4 只修了
-// /admin/vision-models，同源漏网）。读出口统一置空+附 *_set 布尔；写入口（POST /admin/config 的
+// 同源漏网）。读出口统一置空+附 *_set 布尔；写入口（POST /admin/config 的
 // vision_models 数组）空 api_key 按 id 从现值恢复，脱敏后的 GET 数据原样回传不会抹掉真 key。
 function maskConfigSecrets(cfg) {
   const out = JSON.parse(JSON.stringify(cfg || {}));
@@ -6829,7 +6580,7 @@ app.post("/admin/config", { preHandler: basicAuth }, async (req, reply) => {
       updates[key] = value;
     }
     // vision_models 空 api_key 按 id 从现值恢复：GET 已脱敏（api_key 恒空），客户端回传空值
-    // 视为「未改动」，避免脱敏回写把真实凭据抹掉（与 /admin/vision-models 同一套协议）
+    // 视为「未改动」，避免脱敏回写把真实凭据抹掉（与 /admin/config 同一套协议）
     if (Array.isArray(updates.vision_models)) {
       const oldModels = (require("./memory-engine").getConfig().vision_models) || [];
       updates.vision_models = updates.vision_models.map(function (m) {
