@@ -719,9 +719,10 @@ def tool_phone_state(args):
     except Exception as e:
         return {"error": "查岗邮件发送失败: " + str(e)}
 
-    # 等手机收邮件→跑快捷指令→上报：实测手机响应可能 >20s，累计等 30s
+    # 等手机收邮件→跑快捷指令→上报：实测邮件自动化延迟约 30-60s（首次失败第二次通的实测），
+    # 累计等 60s，等到新快照即提前返回
     state = None
-    for wait_s in (10, 10, 10):
+    for wait_s in (15, 15, 15, 15):
         time.sleep(wait_s)
         try:
             state = _read_phone_state()
