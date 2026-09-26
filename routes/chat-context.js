@@ -6,6 +6,8 @@
 
 const crypto = require('crypto');
 const { formatDateTimeInTimeZone } = require('../time_utils');
+// 工具结果标头与 mcp-tool-loop 轮内/落盘同一实现（单一代码源，改口径只动一处）
+const { buildToolResultContent } = require('../mcp-tool-loop');
 
 // ---- 工具调用记录 → role=tool 消息组（发送模型前的内存转换，不落盘）----
 // 历史里的工具结果此前以 assistant 文本「【工具调用记录】…」回灌，模型分不清是工具返回还是自己说过的话。
@@ -82,6 +84,49 @@ function convertToolNotesToToolRole(msgs) {
     converted++;
   }
   if (converted) console.log("[tool-note] 已将 " + converted + " 条工具调用记录转换为 role=tool 消息组");
+  return out;
+}
+
+// ---- 新格式富字段（assistant.tools，2026-09-23 起落盘）→ role=tool 消息组（发送前内存转换，不落盘）----
+// 落盘侧（server.js MCP 写回段）把整轮 toolHistory 存进 assistant.tools，轮内的
+// assistant(tool_calls)+role:tool 结构不落时间线；此前没有任何代码把它还原回去，导致 9-23
+// 之后的新格式回合跨轮丢失全部工具回执（旧格式文本有转换、新格式没有，两套口径漂移）——
+// 模型看不到自己调过什么/收到过什么，只能按内容记忆补全，2026-09-26「第三次煮水」幻觉事故根因。
+// 还原口径与主流框架的 ToolMessage 回灌一致（OpenAI tool 协议 / LangChain AIMessage.tool_calls+
+// ToolMessage / Vercel AI SDK toolCallId），也与 mcp-tool-loop 轮内结构同形：
+//   assistant(content:"", tool_calls, reasoning_content) → role:tool ×N → assistant(content:正文)
+// thinking 模式约束（mcp-tool-loop 2026-09-23 实证）：带 tool_calls 的 assistant 缺 reasoning_content
+// 会被上游 400 拒绝，故整轮 reasoning 挂在 tool_calls 消息上；尾随正文消息不重复携带。
+// tool_call_id =「消息id+条目序号+工具名+时间+参数」稳定哈希（同 H11 口径）：同一段历史每轮重建
+// 逐字节一致，前缀缓存不失效；id 派生不含 content，前端编辑正文不会牵连 id 变化。
+function convertToolsFieldToToolRole(msgs) {
+  if (!Array.isArray(msgs)) return msgs;
+  const out = [];
+  let converted = 0;
+  for (const m of msgs) {
+    const isRich = m && m.role === "assistant" && Array.isArray(m.tools) && m.tools.length > 0 && !m.tool_calls;
+    if (!isRich) { out.push(m); continue; }
+    const toolCalls = [];
+    const toolMsgs = [];
+    const idBase = String(m.id || ("noid:" + String(m.content || "").slice(0, 120)));
+    m.tools.forEach(function (t, k) {
+      const name = String((t && t.name) || "unknown");
+      const time = String((t && t.time) || "");
+      const argsJson = JSON.stringify((t && t.args) || {});
+      const id = "call_hist_" + crypto.createHash("sha256")
+        .update(idBase + "\0" + k + "\0" + name + "\0" + time + "\0" + argsJson)
+        .digest("hex").slice(0, 28);
+      toolCalls.push({ id: id, type: "function", function: { name: name, arguments: argsJson } });
+      toolMsgs.push({ role: "tool", tool_call_id: id, content: buildToolResultContent({ name: name, time: time, error: (t && t.error) || null, markdown: (t && t.result) || "" }) });
+    });
+    const rc = (typeof m.reasoning_content === "string" && m.reasoning_content)
+      || (typeof m.reasoning === "string" && m.reasoning) || "";
+    out.push(Object.assign({ role: "assistant", content: "", tool_calls: toolCalls }, rc ? { reasoning_content: rc } : {}));
+    for (const tm of toolMsgs) out.push(tm);
+    out.push({ role: "assistant", content: String(m.content || "") });
+    converted++;
+  }
+  if (converted) console.log("[tool-field] 已将 " + converted + " 条 assistant.tools 还原为 role=tool 消息组");
   return out;
 }
 
@@ -457,7 +502,8 @@ function downgradeHistoryImages(m) {
 // 同一份历史两条入口产出不同结构，与文件头「两条链路必须同一套」的约束冲突。
 // 现在顺序在这里写死，两条链路只准调本函数：
 //   repair（先修残缺对）→ applyReplacements（上下文替换）→ ctxLimitGuard（容量提醒）
-//   → convertToolNotesToToolRole（工具记录回灌）→ sanitizeForUpstream（出口净化）
+//   → convertToolNotesToToolRole（旧格式工具记录回灌）→ convertToolsFieldToToolRole（新格式 tools 字段回灌）
+//   → sanitizeForUpstream（出口净化）
 // opts: { applyReplacements?, ctxLimitGuard?, sessionId?, timeByKey?, logPrefix? }
 function prepareModelMessages(messages, opts) {
   const o = opts || {};
@@ -477,6 +523,7 @@ function prepareModelMessages(messages, opts) {
     catch (e) { console.warn(logPrefix + " 容量提醒检测失败（不影响转发）:", e.message); }
   }
   msgs = convertToolNotesToToolRole(msgs);
+  msgs = convertToolsFieldToToolRole(msgs);
   return sanitizeForUpstream(msgs);
 }
 
@@ -484,6 +531,7 @@ module.exports = {
   parseToolNoteEntries,
   toolEntryToContent,
   convertToolNotesToToolRole,
+  convertToolsFieldToToolRole,
   repairToolCallPairs,
   sanitizeForUpstream,
   buildDeveloperHeaderBlocks,
