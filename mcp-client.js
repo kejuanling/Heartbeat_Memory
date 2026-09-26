@@ -236,13 +236,34 @@ class McpServerClient {
     return this.tools;
   }
 
+  // 2026-09-26：tools/call 的超时与重试改为服务器级可配（mcp-servers.json 条目字段）：
+  //   callTimeoutMs —— 单次调用超时毫秒数（缺省 15000，与原行为一致）；仅作用于 HTTP 类传输。
+  //   retryOnTimeout —— 超时/中止类失败时同参重试一次（默认关，不重试）。
+  // 背景：花园（galatea）的写操作偶发超 15s 被硬掐成 tool_call_failed: This operation was
+  // aborted（2026-09-26 两次中止诱发模型补全出假成功回执），且其 request_id 幂等设计允许同参重发。
+  // 重试必须按服务器显式开启：非幂等工具（发邮件/写记忆等）盲目同参重发会造成重复副作用。
   async callTool(name, args = {}) {
+    const timeoutMs = Number(this.config && this.config.callTimeoutMs) > 0
+      ? Number(this.config.callTimeoutMs) : undefined;
+    try {
+      return await this._callToolOnce(name, args, timeoutMs);
+    } catch (e) {
+      const retriable = /abort|timeout|timed out|ETIMEDOUT|ECONNRESET|超时/i.test(String((e && e.message) || e));
+      if (retriable && this.config && this.config.retryOnTimeout) {
+        console.warn(`[mcp] 服务器 ${this.id} 工具 ${name} 超时/中止，按配置同参重试一次: ${(e && e.message) || e}`);
+        return await this._callToolOnce(name, args, timeoutMs);
+      }
+      throw e;
+    }
+  }
+
+  async _callToolOnce(name, args = {}, timeoutMs) {
     if (!this.connected && this.type !== "stdio") await this.connect();
     try {
       if (this.type === "stdio" || (this.transport instanceof StdioMcpTransport)) {
         return await this.transport.request("tools/call", { name, arguments: args });
       }
-      const r = await httpJsonRpc(this.url, "tools/call", { name, arguments: args }, { headers: this.headers, sessionId: this.sessionId });
+      const r = await httpJsonRpc(this.url, "tools/call", { name, arguments: args }, { headers: this.headers, sessionId: this.sessionId, timeoutMs });
       if (r && r.result) return r.result;
       if (r && r.error) throw new Error(r.error.message || "调用失败");
       return r;
