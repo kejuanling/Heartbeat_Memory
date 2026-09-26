@@ -203,7 +203,6 @@ header.hd-sms .hd-sub{display:none}
 .msg .meta{align-self:center;text-align:center;font-size:10.5px;color:var(--ink3);padding:2px 12px;letter-spacing:1px;margin:3px 0;min-height:0}
 .msg.user .meta{display:none}
 .msg.ai .meta{display:none} /* 时间统一走居中时间线(renderAll), 不再贴气泡 */
-.message-avatar{display:none}
 .tok .tok-c{background:var(--accent-faint);border-radius:6px;padding:1px 6px;margin-right:4px;display:inline-block}
 .act-tok{display:flex;flex-wrap:wrap;gap:6px;padding:10px 4px 4px;font-size:12px;color:var(--ink2);align-items:center}
 .act-tok .tok-c{background:var(--accent-faint);border-radius:6px;padding:2px 10px;display:inline-block}
@@ -451,10 +450,6 @@ footer{
 #micBtn.rec{
   background:var(--bad);color:#fff;animation:vmRec 1s ease-in-out infinite;
 }
-#micBtn.cancel{
-  background:var(--bad);color:#fff;transform:scale(.94);animation:none;
-  box-shadow:0 0 0 8px rgba(var(--bad-rgb),.14);
-}
 /* 按住说话：禁止页面选字/滚动（录完确认发送，无需手势取消） */
 body.vm-lock{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-webkit-user-select:none}
@@ -580,10 +575,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 @keyframes sheetUp{from{transform:translateY(14px);opacity:.6}to{transform:translateY(0);opacity:1}}
 .sheet h2{font-size:18px;color:var(--accent-deep);letter-spacing:.02em;margin-bottom:6px;font-family:var(--title-font)}
 .sheet .sub{font-size:12.5px;color:var(--ink2);line-height:1.7;margin-bottom:14px}
-.sheet-grip{width:40px;height:4px;border-radius:2px;background:var(--line-strong);margin:0 auto 14px}
 .set-sec{margin-bottom:18px}
-.set-sec-title{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--accent-deep);letter-spacing:.02em;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--line)}
-.set-sec-title .si{font-size:15px}
 /* 设置改为折叠分组：点标题收起/展开（不再切页） */
 .set-panel{display:block;border:1px solid var(--line);border-radius:var(--radius-sm);background:transparent;margin:0 10px 12px;overflow:hidden;padding:0}
 .set-panel .set-sec{display:none;padding:12px 14px}
@@ -592,12 +584,6 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .set-acc-h:hover{background:var(--accent-faint)}
 .set-acc-h .ar{color:var(--ink3);transition:transform .2s}
 .set-panel.open .set-acc-h .ar{transform:rotate(180deg)}
-.set-fold{border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--accent-faint);margin-bottom:10px;overflow:hidden}
-.set-fold-h{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;cursor:pointer;font-size:12.5px;color:var(--ink2);user-select:none;-webkit-user-select:none}
-.set-fold-h .ar{color:var(--ink3);font-size:10px;transition:transform .2s}
-.set-fold.open .set-fold-h .ar{transform:rotate(180deg)}
-.set-fold-b{display:none;padding:2px 12px 12px}
-.set-fold.open .set-fold-b{display:block}
 .field{margin-bottom:16px}
 .field label{display:block;font-size:12px;color:var(--ink2);margin-bottom:7px;letter-spacing:.5px}
 .field label .tag{color:var(--accent);font-size:10px;margin-left:5px}
@@ -641,8 +627,6 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .mcp-row label .tag{margin-left:4px}
 .mcp-row input[type="text"],.mcp-row input[type="password"],.mcp-row select,.mcp-row textarea{width:100%;flex:1;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:16px;color:var(--ink);outline:none;background:var(--field-bg,#fff);font-family:inherit}
 .mcp-row input[type="checkbox"]{width:18px;height:18px}
-.mcp-row.single{align-items:center;flex-direction:row;gap:10px}
-.mcp-row.single label{margin-bottom:0}
 .mcp-btns{display:flex;gap:8px;margin-top:4px}
 .mcp-btn{flex:1;border:none;border-radius:9px;padding:9px;font-size:13px;cursor:pointer;background:var(--accent-faint);color:var(--accent-deep)}
 .mcp-btn.primary{background:var(--accent-grad);color:#fff;font-weight:600}
@@ -682,11 +666,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .mcp-item .mi .mn{gap:6px}
 .mcp-item .mcp-chevron{margin-left:auto;color:var(--ink3);font-size:13px;flex-shrink:0}
 /* 折叠块标题更轻，内容不重复 */
-.set-fold-h{font-size:12px;font-weight:600;color:var(--ink2)}
-.set-fold-b{padding:2px 14px 14px}
 /* 显示与行为 / 渲染设置：pick 分块更清晰 */
-.pick button{border:1px solid var(--line-strong);background:var(--field-bg,#fff);color:var(--ink2);padding:7px 13px;border-radius:9px;font-size:12px;cursor:pointer;transition:all .15s}
-.pick button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
 /* 提示词备份（AI 设置内）：与保存主题同风格，列表纵向排布 */
 .pb-row{display:flex;align-items:center;gap:8px}
 .pb-row input[type="text"]{flex:1;min-width:0;border:1px solid var(--line);border-radius:var(--radius-sm);padding:9px 11px;font-size:13px;color:var(--ink);outline:none;background:var(--field-bg,#fff);font-family:inherit}
@@ -712,19 +692,10 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .np-sel{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 11px;font-size:13px;color:var(--ink);background:var(--field-bg,#fff);font-family:inherit;outline:none}
 .np-tip{font-size:11px;color:var(--ink3);margin-top:6px}
 /* 显示与行为 / 渲染设置 内部再分小节 */
-.set-fold-b .set-sec-title{font-size:12px;font-weight:600;color:var(--accent-deep);margin:12px 0 4px}
 .set-sec-label{font-size:11px;color:var(--ink3);margin:12px 0 6px;display:flex;align-items:center;gap:6px;letter-spacing:.5px}
 .set-sec-label:first-child{margin-top:0}
 .field .row{display:flex;gap:12px}
 .field .row>div{flex:1}
-.pick{
-  display:flex;gap:10px;flex-wrap:wrap;margin:4px 0;
-}
-.pick button{
-  border:1px solid var(--line);background:var(--field-bg,#fff);color:var(--ink2);
-  padding:5px 11px;border-radius:16px;font-size:12px;cursor:pointer;
-}
-.pick button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
 .btn{
   width:100%;padding:13px;border:none;border-radius:var(--radius-sm);
   background:var(--accent-grad);
@@ -739,16 +710,6 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 }
 .btn-ghost:hover{background:var(--accent-faint)}
 /* 提示卡片 — 复刻 .cc-notice 设计语言 */
-.cc-notice{display:flex;flex-direction:column;margin:0 0 12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--accent-faint);overflow:hidden}
-.cc-notice-head{display:flex;align-items:center;gap:8px;padding:9px 12px;cursor:pointer;user-select:none;-webkit-user-select:none}
-.cc-notice-icon{color:var(--accent);font-size:12px;flex-shrink:0}
-.cc-notice-txt{flex:1;min-width:0;font-size:11.5px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.cc-notice-arrow{color:var(--ink3);font-size:10px;transition:transform .2s;flex-shrink:0}
-.cc-notice.open .cc-notice-arrow{transform:rotate(180deg)}
-.cc-notice-body{display:none;padding:0 12px 10px;font-size:12px;color:var(--ink3);line-height:1.7;white-space:pre-wrap}
-.cc-notice.open .cc-notice-body{display:block}
-.sheet-actions .cc-notice{margin-top:16px}
-
 /* markdown */
 .bubble pre{
   background:var(--code-bg,#fbf6f0);border:1px solid var(--line);border-radius:var(--radius-sm);
@@ -914,9 +875,6 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .cc-block-b .cc-fade{max-height:92px;overflow:hidden;position:relative}
 .cc-block-b .cc-full{margin-top:6px;padding-top:6px;border-top:1px dashed var(--line);max-height:300px;overflow:auto;scrollbar-width:thin}
 .cc-block-b .cc-toggle{font-size:10.5px;color:var(--accent-deep);margin-top:6px;letter-spacing:1px;user-select:none;-webkit-user-select:none}
-.cc-block-a{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
-.cc-block-a button{border:1px solid var(--line);background:none;border-radius:7px;font-size:11px;color:var(--ink2);padding:4px 9px;cursor:pointer}
-.cc-block-a button.p{background:var(--accent-grad);color:#fff;font-weight:600;border:none}
 /* 压缩块「替换/取消替换」快捷开关 */
 /* 隐藏块（超出活跃块上限）：置灰 + 顶部文字提示建议入池 */
 .cc-block-hidden{opacity:.55}
@@ -940,7 +898,6 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .cc-uncovered-body .cc-msg:last-child{margin-bottom:0}
 .cc-uncovered-body .cc-msg u{color:var(--accent-deep);font-weight:600;text-decoration:none;margin-right:6px}
 /* 压缩页头部工具条 + 配置提示（对齐 admin 压缩 tab 结构） */
-.cc-cfg-tip{margin-top:14px;padding:10px 12px;font-size:11px;color:var(--ink3);text-align:center;background:var(--accent-faint);border-radius:10px;border:1px dashed var(--line)}
 .session-item{
   display:flex;flex-direction:column;gap:2px;padding:10px 14px;margin:3px 8px;border-radius:12px;
   cursor:pointer;transition:background .15s,border-color .15s; border:1px solid transparent;
@@ -992,13 +949,9 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .ico.fill{fill:currentColor;stroke:none}
 .mnav .mnav-group{margin:10px 8px 2px;font-size:10px;letter-spacing:2px;color:var(--ink3);font-weight:600;padding:4px 6px;width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;background:none;border:none;cursor:pointer;text-align:left;border-radius:8px}
 .mnav .mnav-group:active{background:var(--accent-soft)}
-.mnav .mnav-group .mg-arrow{font-size:11px;color:var(--ink3);transition:transform .2s}
-.mnav .mnav-group.mg-collapsed .mg-arrow{transform:rotate(-90deg)}
 /* 管理分组行：默认收起，作为可点入口（组名 + 条目数 + 箭头），更像列表项而非小标题 */
 .mnav .mnav-group[data-group]{margin:6px 8px 2px;font-size:13px;letter-spacing:.5px;color:var(--ink);font-weight:600;padding:12px 14px;background:var(--accent-faint);border:1px solid var(--line);border-radius:12px}
 .mnav .mnav-group[data-group]:active{background:var(--accent-soft)}
-.mnav .mnav-group[data-group] .mg-meta{display:flex;align-items:center;gap:6px}
-.mnav .mnav-group[data-group] .mg-count{font-size:10px;font-weight:600;background:var(--accent-faint);color:var(--accent-deep);border-radius:999px;padding:2px 7px}
 .mnav .mnav-btn{width:100%;text-align:left;display:flex;align-items:center;gap:12px;border:none;background:none;border-radius:12px;padding:12px 14px;font-size:14px;color:var(--ink);cursor:pointer;transition:background .2s;}
 .mnav .mnav-btn:active{background:var(--accent-soft);}
 .mnav .mnav-btn .mi{font-size:19px;flex-shrink:0;}
@@ -1006,11 +959,6 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .mnav .mnav-btn .md{font-size:11px;color:var(--ink3);margin-top:2px;}
 .mnav .mnav-btn .mrow{margin-left:auto;color:var(--ink3);font-size:14px;}
 .mnav .mnav-btn.open .mrow{transform:rotate(90deg);transition:transform .2s}
-.mnav .mnav-actions{display:flex;gap:8px;margin:0;padding:10px 12px calc(env(safe-area-inset-bottom) + 12px);border-top:1px solid var(--line);background:var(--bg1);position:sticky;bottom:0;z-index:2}
-.mnav .mnav-actions .btn,.mnav .mnav-actions .btn-ghost{flex:1;margin:0;width:auto;padding:11px 0;border-radius:12px;font-size:13.5px;box-shadow:none}
-.mnav .mnav-actions .btn{background:var(--accent-grad);color:#fff;font-weight:600;letter-spacing:.5px}
-.mnav .mnav-actions .btn-ghost{background:var(--accent-faint);color:var(--accent-deep);font-weight:500}
-.mnav .mnav-actions .btn:active,.mnav .mnav-actions .btn-ghost:active{transform:scale(.97);opacity:.9}
 /* 会话侧边栏底部：退出登录（分隔线 + 间距，避免误触） */
 .session-logout{margin:auto 12px 4px;padding:0;flex-shrink:0}
 .session-logout .mnav-btn{width:100%;display:flex;align-items:center;gap:12px;border:none;border-radius:12px;padding:12px 14px;font-size:14px;color:var(--ink);cursor:pointer;background:var(--accent-faint);transition:background .2s}
@@ -1022,7 +970,6 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 
 /* 设置区：恢复可折叠（点标题收起/展开）；仅保留配色与去掉内层重复标题盒的微调 */
 /* 批次4 C5：提醒板块 */
-.alerts-panel{margin:0 10px 10px;border:1px solid var(--line);border-radius:12px;background:var(--field-bg,#fff);padding:6px 10px}
 .alerts-empty{font-size:12px;color:var(--ink3);padding:7px 2px}
 .alert-item{display:flex;gap:9px;padding:7px 2px;border-bottom:1px solid var(--line);font-size:12px;line-height:1.5}
 .alert-item:last-child{border-bottom:none}
@@ -1030,7 +977,6 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .alert-dot.warn{background:#e0a33c}
 .alert-dot.error{background:#d65a4f}
 .alert-dot.ok{background:#7cb87c}
-.alert-sec{font-size:11px;letter-spacing:1px;color:var(--ink3);font-weight:600;padding:9px 2px 3px;border-top:1px dashed var(--line);margin-top:4px}
 .alerts-scroll{max-height:240px;overflow-y:auto;margin:0;padding:0 4px 0 0;scrollbar-width:thin}
 .alerts-scroll::-webkit-scrollbar{width:6px}
 .alerts-scroll::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:3px}
@@ -1041,7 +987,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 #navDrawer .set-panel .set-sec{padding:8px 14px 12px}
 #navDrawer .set-panel .set-acc-h{font-size:13px}
 /* 去掉内层重复的一块标题（mcp-h / set-sec-title），只保留其内容；也让内层容器去边框，避免“卡中卡” */
-#navDrawer .mcp-block .mcp-h,#navDrawer .set-panel .set-sec-title{display:none}
+#navDrawer .mcp-block .mcp-h {display:none}
 #navDrawer .mcp-block{border:none;background:transparent;padding:2px 0 0;margin-top:0}
 
 /* 设置抽屉：原「抽屉菜单→设置」移入后保持折叠样式，并放右下角「设置」按钮 */
@@ -1076,7 +1022,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .settings-page .set-panel .set-acc-h{display:none}
 .settings-page .set-panel .set-sec{display:block !important;padding:12px 2px;margin:0;background:transparent;border:none;border-bottom:1px solid var(--line)}
 .settings-page .set-panel:last-child .set-sec{border-bottom:none}
-#settingsDrawer .mcp-block .mcp-h,#settingsDrawer .set-panel .set-sec-title{display:none}
+#settingsDrawer .mcp-block .mcp-h {display:none}
 #settingsDrawer .mcp-block{border:none;background:transparent;padding:2px 0 0;margin-top:0}
 /* 设置页内 MCP/供应商等项：直接嵌入、去盒子（仅保留细分隔线） */
 #settingsDrawer .mcp-item,#settingsDrawer .mcp-block{background:transparent !important;border:none !important;border-radius:0 !important;box-shadow:none !important}
@@ -1126,7 +1072,6 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .adm-tr .p{background:var(--accent-grad);color:#fff;font-weight:600}
 .adm-tr .s{background:var(--accent-faint);color:var(--accent-deep)}
 .adm-msg{font-size:11.5px;color:var(--ink3);margin-top:6px;min-height:4px}
-.adm-sel{width:100%;border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 11px;font-size:13px;color:var(--ink);outline:none;background:var(--field-bg,#fff);font-family:inherit}
 .adm-empty{font-size:12px;color:var(--ink3);padding:10px 0 4px}
 .adm-item{background:transparent;border:none;border-bottom:1px solid var(--line);border-radius:0;padding:10px 2px;margin-bottom:2px}
 .adm-item-h{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink2);margin-bottom:4px;flex-wrap:wrap}
@@ -1135,16 +1080,6 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .adm-item-a button{border:1px solid var(--line);background:none;border-radius:7px;font-size:11px;color:var(--ink2);padding:4px 9px;cursor:pointer}
 .adm-item-a button.danger{color:var(--bad-deep);border-color:var(--bad-deep)}
 .adm-load{font-size:12px;color:var(--ink3);padding:10px 0}
-.adm-grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.adm-counter{font-size:11px;color:var(--ink3);margin:2px 0 8px;display:block}
-.adm-btn{width:100%;border-radius:9px;padding:9px;font-size:13px;cursor:pointer;border:none;background:var(--accent-faint);color:var(--accent-deep);font-weight:500}
-.adm-btn.p{background:var(--accent-grad);color:#fff;font-weight:600}
-.adm-sw{position:relative;width:40px;height:22px;flex-shrink:0;display:inline-block}
-.adm-sw input{opacity:0;width:0;height:0}
-.adm-sw i{position:absolute;inset:0;border-radius:20px;background:var(--accent-faint);transition:.2s}
-.adm-sw i::after{content:'';position:absolute;left:2px;top:2px;width:18px;height:18px;border-radius:50%;background:var(--field-bg,#fff);transition:.2s}
-.adm-sw input:checked+i{background:var(--accent)}
-.adm-sw input:checked+i::after{transform:translateX(18px)}
 /* 记忆池搜索输入与按钮排整齐 */
 .adm-searchbar{display:flex;gap:8px;align-items:center;margin-bottom:8px}
 .adm-searchbar input{flex:1;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:12px;color:var(--ink);background:var(--field-bg,#fff);outline:none;font-family:inherit}
@@ -1208,12 +1143,9 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .mcp-sw input:checked+i::after{transform:translateX(20px)}
 .mcp-sw input:focus+i{box-shadow:0 0 0 2px rgba(var(--accent-rgb),.3)}
 /* 修正：邮件/列表项里若被泛化 label 或 input 样式干扰，这里强制开关形态 */
-.mcp-row.single label.mcp-sw{margin:0;border:none;background:none;padding:0;display:inline-block;width:44px;height:24px}
 /* 标星内容收起 */
 .adm-mark-text{font-size:12px;color:var(--ink);line-height:1.6;white-space:pre-wrap;word-break:break-all;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer;transition:max-height .2s}
 .adm-mark-text.open{-webkit-line-clamp:none;overflow:visible}
-.adm-mark-text .adm-more{color:var(--accent-deep);font-size:11px;margin-left:4px}
-
 /* ===== 语音通话页 ===== */
 .call-overlay{position:fixed;inset:0;z-index:200;display:none;align-items:center;justify-content:center}
 .call-overlay.open{display:flex}
@@ -1240,8 +1172,6 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .call-heartbeat span:nth-child(5n){animation-delay:.4s}
 .call-heartbeat span:nth-child(6n){animation-delay:.5s}
 @keyframes hbWave{0%,100%{transform:scaleY(1)}50%{transform:scaleY(.3)}}
-.call-avatar{position:relative;z-index:2;width:min(118px,32vw);height:min(118px,32vw);border-radius:50%;background:var(--accent-grad);display:flex;align-items:center;justify-content:center;color:#fff;font-size:42px;font-family:var(--title-font);box-shadow:0 8px 28px rgba(var(--accent-rgb),.18);overflow:hidden}
-.call-avatar img{width:100%;height:100%;object-fit:cover;display:block}
 .call-name{margin-top:22px;font-size:24px;font-weight:600;color:var(--accent-deep);letter-spacing:1px;font-family:var(--title-font)}
 .call-status{margin-top:6px;font-size:13px;color:var(--ink2);letter-spacing:.5px}
 /* 字幕 */
@@ -2411,10 +2341,6 @@ function renderToolCapsule(t){
   else{badge='<span class="tt-ok">✓ 已执行</span>';res=(t&&t.result)||"";}
   const argHtml=args&&args!=="{}"?('<div class="tt-arg">参数：'+escapeHtml(args)+'</div>'):'';
   return '<div class="tool-trace"><span class="tt-h"><span class="tt-icon"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4L15 12l-3-3z"/></svg></span><span class="tt-name">'+escapeHtml(name)+'</span>'+badge+'<span class="tt-a">▾</span></span><div class="tt-body">'+argHtml+'<pre class="tt-res">'+escapeHtml(res)+(res? "":"（无返回）")+'</pre></div></div>';
-}
-function renderToolCapsules(tools){
-  if(!tools||!tools.length)return "";
-  return tools.map(renderToolCapsule).join("");
 }
 // ===== 方案2：工具卡与正文交错 + running→done 状态（流式）=====
 // 把工具作为聊流里的独立块，紧跟所属正文段插入；running 卡执行完就地更新为 done/failed。
@@ -3647,10 +3573,6 @@ function showHeaderTyping(show){
 function removeTyping(){
   showHeaderTyping(false);
 }
-function lastAIBubble(){
-  const ms=chatEl.querySelectorAll(".msg.ai");
-  return ms[ms.length-1]||null;
-}
 function showError(msg){
   removeTyping();
   const d=document.createElement("div");d.className="msg ev-silent";
@@ -4826,31 +4748,6 @@ if(typeof pwSaveBtn!=="undefined" && document.getElementById("pwSaveBtn")){
 }
 
 
-function hexToRgba(hex,a){
-  try{
-    let c=String(hex||"").replace("#","");
-    if(c.length===3)c=c.split("").map(x=>x+x).join("");
-    const n=parseInt(c,16);
-    const r=(n>>16)&255,g=(n>>8)&255,b=n&255;
-    return "rgba("+r+","+g+","+b+","+Math.max(0,Math.min(1,a))+")";
-  }catch(e){return hex||"";}
-}
-function hexToRgbStr(hex){
-  try{
-    let c=String(hex||"").replace("#","");
-    if(c.length===3)c=c.split("").map(x=>x+x).join("");
-    const n=parseInt(c,16);
-    return ((n>>16)&255)+","+((n>>8)&255)+","+(n&255);
-  }catch(e){return "";}
-}
-function setCapsuleVars(root, v){
-  root.setProperty("--cap-think-border", v.think_cap_border);
-  root.setProperty("--cap-think-bg", v.think_cap_bg);
-  root.setProperty("--cap-think-text", v.think_cap_text);
-  root.setProperty("--cap-tool-border", v.tool_cap_border);
-  root.setProperty("--cap-tool-bg", v.tool_cap_bg);
-  root.setProperty("--cap-tool-text", v.tool_cap_text);
-}
 // 图片转存服务器：dataURL 换 /uploads/ 短 URL，避免大 base64 撑爆 localStorage（配额满后保存会静默失败）
 async function uploadImageToServer(dataUrl){
   const r=await fetch("/v1/upload-image",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({data:dataUrl})});
@@ -4865,9 +4762,6 @@ async function uploadFileToServer(dataUrl,name,mime){
   const j=await r.json().catch(function(){return {};});
   if(r.ok&&j&&j.ok&&j.url)return j;
   throw new Error((j&&j.error)||("HTTP "+r.status));
-}
-function shade(hex,p){
-  try{let c=hex.replace("#","");if(c.length===3)c=c.split("").map(x=>x+x).join("");let n=parseInt(c,16);let r=Math.max(0,Math.min(255,(n>>16)+p)),g=Math.max(0,Math.min(255,((n>>8)&255)+p)),b=Math.max(0,Math.min(255,(n&255)+p));return "#"+(r.toString(16).padStart(2,"0"))+(g.toString(16).padStart(2,"0"))+(b.toString(16).padStart(2,"0"));}catch(e){return hex;}
 }
 const THEME_PRESETS={warm:{name:"暖白",layout:"sms",vars:{"--bg1":"#FCF9F7","--bg2":"#F8F3F1","--bg3":"#F0E9E7","--surface":"rgba(255,253,251,.78)","--surface-solid":"#FFFCFA","--card":"rgba(255,253,251,.78)","--card-solid":"#FFFCFA","--sheet-bg":"#FFFCFA","--chrome-rgb":"255,255,255","--chrome-item":"rgba(255,255,255,.66)","--chrome-item-hover":"rgba(255,255,255,.88)","--ink":"#55483F","--ink2":"#8F8177","--ink3":"#B4A9A1","--accent":"#C9828D","--accent-deep":"#A96876","--accent-soft":"rgba(201,130,141,.16)","--accent-faint":"rgba(201,130,141,.08)","--accent-grad":"linear-gradient(135deg,#D89AA2,#B87482)","--accent-rgb":"197,143,150","--border":"rgba(92,76,66,.09)","--border-strong":"rgba(92,76,66,.14)","--line":"rgba(92,76,66,.09)","--line-strong":"rgba(92,76,66,.14)","--shadow-soft":"0 2px 10px rgba(99,70,68,.035)","--shadow-float":"0 10px 30px rgba(99,70,68,.08)","--shadow-rgb":"80,65,55","--mask-rgb":"92,76,66","--bubble-shadow":"rgba(80,65,55,.05)","--bubble-ai":"#FFFDF9","--bubble-user":"#F3E7E5","--bubble-user1":"#F8E8E8","--bubble-user2":"#F8E8E8","--radius":"16px","--radius-sm":"11px","--panel-radius":"20px","--bg-img":"none","--bubble-opacity":"1","--bubble-blur":"0px","--cap-think-border":"#EDE2E3","--cap-think-bg":"#F8F2F1","--cap-think-text":"#B08784","--cap-tool-border":"#E6E1DA","--cap-tool-bg":"#F6F4F0","--cap-tool-text":"#9A8F80","--hd-title":"#55483F","--inputbar-bg":"transparent","--inputbar-border":"rgba(92,76,66,.10)","--input-text":"#55483F","--send-bg":"#C89098","--send-icon":"#FFFDFB","--icon-btn-bg":"transparent","--icon-btn-color":"#8F8177","--ok":"#7da188","--ok-deep":"#5f8a6d","--ok-soft":"rgba(95,138,109,.14)","--ok-rgb":"125,161,136","--warn":"#b08b4f","--warn-deep":"#8f6f3a","--warn-soft":"rgba(143,111,58,.13)","--warn-rgb":"176,139,79","--bad":"#b97f77","--bad-deep":"#9c5f57","--bad-soft":"rgba(156,95,87,.12)","--bad-rgb":"185,127,119","--bad-grad":"#bc6f66","--info":"#98a2ab","--info-rgb":"152,162,171","--field-bg":"#FFFCFA","--menu-bg":"#FFFCFA","--code-bg":"#F7F2ED","--code-ink":"#9A7E76","--glass":"10px","--font-family":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--font-size":"15px","--line-height":"1.72","--font-weight":"300","--letter-spacing":"0em","--font-family-mono":"ui-monospace,\"SF Mono\",Menlo,Consolas,monospace","--title-font":"\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--header-padding":"calc(env(safe-area-inset-top) + 10px) 14px 10px","--header-gap":"12px","--header-bg":"rgba(255,252,250,.58)","--header-border":"1px solid transparent","--header-shadow":"0 2px 7px rgba(80,65,55,.025)","--header-blur":"20px","--header-saturate":"110%","--header-title-x":"0px","--header-title-y":"0px","--header-title-size":"15px","--header-title-weight":"600","--header-title-letter-spacing":"normal","--header-title-color":"#55483F","--header-title-font":"\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--header-sub-size":"11px","--header-sub-color":"#B4A9A1","--header-sub-letter-spacing":".02em","--header-sub-gap":"2px","--header-btn-size":"36px","--header-btn-radius":"50%","--header-btn-bg":"rgba(255,255,255,.56)","--header-btn-color":"#8F8177","--header-btn-font-size":"17px","--header-btn-shadow":"0 2px 8px rgba(99,70,68,.06),inset 0 1px 0 rgba(255,255,255,.7)","--header-btn-transition":"background .2s,color .2s,transform .15s","--header-btn-hover-bg":"rgba(255,255,255,.9)","--header-btn-hover-color":"#A96876","--header-btn-active-bg":"rgba(201,130,141,.08)","--header-btn-active-color":"#A96876","--session-padding":"10px 14px","--session-margin":"3px 8px","--session-radius":"12px","--session-transition":"background .15s,border-color .15s","--session-bg":"rgba(255,255,255,.66)","--session-hover-bg":"rgba(201,130,141,.08)","--session-active-bg":"rgba(201,130,141,.16)","--session-active-border":"rgba(92,76,66,.14)","--session-title-size":"13px","--session-title-weight":"600","--session-title-color":"#55483F","--session-meta-size":"11px","--session-meta-color":"#B4A9A1","--session-action-hover-color":"#A96876","--session-action-hover-bg":"rgba(201,130,141,.08)","--call-bg":"linear-gradient(165deg,#FBF4F1 0%,#F7E9E8 55%,#F3E0DF 100%)","--bubble-font-size":"15px","--bubble-line-height":"1.72","--bubble-font-weight":"300","--bubble-letter-spacing":"0em","--bubble-para-gap":"8px","--msg-gap":"12px","--bubble-max-width":"84%","--bubble-padding":"11px 15px","--avatar-size":"34px","--avatar-radius":"50%","--inputbar-radius":"20px","--inputbar-gap":"8px","--inputbar-padding":"7px 8px 7px 15px","--inputbar-shadow":"0 1px 5px rgba(99,70,68,.025)","--inputbar-focus-border":"rgba(197,143,150,.35)","--inputbar-focus-shadow":"0 0 0 3px rgba(197,143,150,.07),0 4px 18px rgba(80,65,55,.06)","--input-font-size":"15px","--input-line-height":"1.5","--input-max-height":"120px","--input-placeholder":"#B4A9A1","--icon-btn-size":"34px","--icon-btn-radius":"50%","--icon-btn-font-size":"16px","--send-size":"34px","--send-radius":"50%","--send-font-size":"15px","--send-shadow":"0 2px 6px rgba(169,91,105,.11)","--send-hover-bg":"#A96876","--theme-dur":"0ms","--bg-blur":"0px","--user-font-color":"#4A3F3F","--ai-font-color":"#000000"}},wx:{name:"微信",layout:"wx",vars:{"--bg1":"#F5F6F7","--bg2":"#F5F6F7","--bg3":"#F5F6F7","--surface":"rgba(255,255,255,.88)","--surface-solid":"#FFFFFF","--card":"rgba(255,255,255,.88)","--card-solid":"#FFFFFF","--sheet-bg":"#FFFFFF","--chrome-rgb":"255,255,255","--chrome-item":"rgba(255,255,255,.72)","--chrome-item-hover":"rgba(255,255,255,.92)","--ink":"#111111","--ink2":"#666666","--ink3":"#999999","--accent":"#B7B7B7","--accent-deep":"#969696","--accent-soft":"rgba(0,0,0,.10)","--accent-faint":"rgba(0,0,0,.05)","--accent-grad":"linear-gradient(135deg,#BDBDBD,#9E9E9E)","--accent-rgb":"183,183,183","--border":"rgba(0,0,0,.08)","--border-strong":"rgba(0,0,0,.14)","--line":"rgba(0,0,0,.08)","--line-strong":"rgba(0,0,0,.14)","--shadow-soft":"0 1px 5px rgba(0,0,0,.035)","--shadow-float":"0 8px 24px rgba(0,0,0,.10)","--shadow-rgb":"0,0,0","--mask-rgb":"0,0,0","--bubble-shadow":"rgba(0,0,0,.04)","--bubble-ai":"#FFFFFF","--bubble-user":"#95EC69","--bubble-user1":"#95EC69","--bubble-user2":"#95EC69","--radius":"4px","--radius-sm":"8px","--panel-radius":"12px","--bg-img":"none","--bubble-opacity":"1","--bubble-blur":"0px","--cap-think-border":"#D8D8D8","--cap-think-bg":"#F7F7F7","--cap-think-text":"#777777","--cap-tool-border":"#D8D8D8","--cap-tool-bg":"#F7F7F7","--cap-tool-text":"#777777","--hd-title":"#111111","--inputbar-bg":"#FFFFFF","--inputbar-border":"rgba(0,0,0,.08)","--input-text":"#111111","--send-bg":"#B7B7B7","--send-icon":"#FFFFFF","--icon-btn-bg":"transparent","--icon-btn-color":"#666666","--ok":"#7da188","--ok-deep":"#5f8a6d","--ok-soft":"rgba(95,138,109,.14)","--ok-rgb":"125,161,136","--warn":"#b08b4f","--warn-deep":"#8f6f3a","--warn-soft":"rgba(143,111,58,.13)","--warn-rgb":"176,139,79","--bad":"#b97f77","--bad-deep":"#9c5f57","--bad-soft":"rgba(156,95,87,.12)","--bad-rgb":"185,127,119","--bad-grad":"#bc6f66","--info":"#98a2ab","--info-rgb":"152,162,171","--field-bg":"#FFFFFF","--menu-bg":"#FFFFFF","--code-bg":"#F5F5F5","--code-ink":"#666666","--glass":"0px","--font-family":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--font-size":"15px","--line-height":"1.72","--font-weight":"400","--letter-spacing":"0em","--font-family-mono":"ui-monospace,\"SF Mono\",Menlo,Consolas,monospace","--title-font":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--header-padding":"calc(env(safe-area-inset-top) + 10px) 14px 10px","--header-gap":"12px","--header-bg":"rgba(255,255,255,.94)","--header-border":"1px solid rgba(0,0,0,.06)","--header-shadow":"0 1px 4px rgba(0,0,0,.04)","--header-blur":"12px","--header-saturate":"100%","--header-title-x":"0px","--header-title-y":"0px","--header-title-size":"15px","--header-title-weight":"600","--header-title-letter-spacing":"normal","--header-title-color":"#111111","--header-title-font":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--header-sub-size":"11px","--header-sub-color":"#999999","--header-sub-letter-spacing":".02em","--header-sub-gap":"2px","--header-btn-size":"36px","--header-btn-radius":"50%","--header-btn-bg":"transparent","--header-btn-color":"#555555","--header-btn-font-size":"17px","--header-btn-shadow":"none","--header-btn-transition":"background .2s,color .2s,transform .15s","--header-btn-hover-bg":"rgba(0,0,0,.05)","--header-btn-hover-color":"#777777","--header-btn-active-bg":"rgba(0,0,0,.06)","--header-btn-active-color":"#777777","--session-padding":"10px 14px","--session-margin":"3px 8px","--session-radius":"12px","--session-transition":"background .15s,border-color .15s","--session-bg":"rgba(255,255,255,.72)","--session-hover-bg":"rgba(0,0,0,.04)","--session-active-bg":"rgba(0,0,0,.08)","--session-active-border":"rgba(0,0,0,.14)","--session-title-size":"13px","--session-title-weight":"600","--session-title-color":"#222222","--session-meta-size":"11px","--session-meta-color":"#999999","--session-action-hover-color":"#777777","--session-action-hover-bg":"rgba(0,0,0,.06)","--call-bg":"linear-gradient(165deg,#F5F5F5 0%,#EDEDED 100%)","--bubble-font-size":"15px","--bubble-line-height":"1.55","--bubble-font-weight":"400","--bubble-letter-spacing":"0em","--bubble-para-gap":"8px","--msg-gap":"18px","--bubble-max-width":"72%","--bubble-padding":"7px 12px","--avatar-size":"40px","--avatar-radius":"6px","--inputbar-radius":"12px","--inputbar-gap":"8px","--inputbar-padding":"6px 8px 6px 12px","--inputbar-shadow":"none","--inputbar-focus-border":"rgba(0,0,0,.06)","--inputbar-focus-shadow":"none","--input-font-size":"15px","--input-line-height":"1.5","--input-max-height":"120px","--input-placeholder":"#999999","--icon-btn-size":"34px","--icon-btn-radius":"4px","--icon-btn-font-size":"16px","--send-size":"34px","--send-radius":"4px","--send-font-size":"15px","--send-shadow":"none","--send-hover-bg":"#969696","--theme-dur":"0ms","--bg-blur":"0px","--user-font-color":"#111111","--ai-font-color":"#111111"}},claude:{name:"极简",layout:"claude",vars:{
 "--bg1":"#f5f5f5","--bg2":"#f5f5f5","--bg3":"#f5f5f5",
@@ -5817,12 +5711,6 @@ function bindCallGuard(){
   if(!_callGuardBound){ _callGuardBound=true; window.addEventListener("popstate",_callGuard); document.addEventListener("visibilitychange",_callVisChange); }
 }
 function callEl(id){ return document.getElementById(id); }
-function callAvatarSet(){
-  const av=callEl("callAvatar"); if(!av) return;
-  const img=(cfg&&cfg.ai_avatar)||"";
-  if(img && /^data:|https?:/i.test(img)){ av.innerHTML='<img src="'+escapeHtml(img)+'" alt="">'; }
-  else{ av.textContent=((cfg&&cfg.ai_name)?String(cfg.ai_name).charAt(0):"谢")||"谢"; }
-}
 function callAddCaption(text){
   const box=callEl("callCaptions"); if(!box) return;
   const d=document.createElement("div"); d.className="call-caption";
@@ -6055,10 +5943,6 @@ function openSettingsDrawer(){ var sd=document.getElementById("settingsDrawer");
 function closeSettingsDrawer(){ var sd=document.getElementById("settingsDrawer"); if(sd) sd.classList.remove("open"); }
 (function(){ var sdb=document.getElementById("settingsBody"); if(sdb) sdb.addEventListener("click",function(e){ var b=e.target.closest?e.target.closest(".settings-back"):null; if(b){ settingsBackHome(); } }); })();
 // ===== B5：外观与主题入口（渲染设置 / 主题；入口位置以用户确认为准） =====
-function openAppearancePanel(acc){
-  openSettingsDrawer();
-  settingsShowPage("appearance", acc);
-}
 
 /* ===== 会话压缩弹窗：从左到右滑入，宽度不变，显示该会话的压缩块 ===== */
 function openSessionCc(id){
@@ -7528,29 +7412,6 @@ function renderAlerts(body){
   }).catch(function(e){ body.innerHTML='<div class="alerts-empty">加载失败</div>'; });
 }
 
-function toggleMenuGroup(key){
-  var gb=document.querySelector('.mnav-group[data-group="'+key+'"]');
-  if(!gb) return;
-  var open=gb.classList.toggle('mg-collapsed'); // false=本组现在展开
-  var focusing=!open;
-  // 聚焦本组：展开时隐藏其它分组标题（页面只留本组）；收起时恢复全部标题
-  document.querySelectorAll('.mnav-group[data-group]').forEach(function(b){
-    var k2=b.getAttribute('data-group');
-    var hide = focusing && k2!==key;
-    if(b.parentElement) b.parentElement.style.display = hide ? 'none' : '';
-  });
-  // 条目：只显示当前展开组的条目
-  document.querySelectorAll('.mg-item').forEach(function(li){
-    var k2=li.getAttribute('data-group');
-    li.style.display = (focusing && k2===key) ? '' : 'none';
-  });
-  // 展开：把本组标题滚到菜单可视区最上方
-  if(focusing){
-    var menu=gb.closest('.mnav');
-    if(menu){ var delta=gb.getBoundingClientRect().top - menu.getBoundingClientRect().top; menu.scrollTop += delta; }
-  }
-}
-
 function toggleCard(id){
   var body=document.getElementById('adm-body-'+id);
   if(!body){ return; }
@@ -8400,7 +8261,6 @@ body[data-theme="dark"] .drawer-close{color:#999!important}
 #chat[data-layout="claude"] .rw-wrap .rw-h{
   font-size:14px!important;letter-spacing:0!important;color:#999!important;cursor:pointer;
 }
-/* 2026-09-25 ⑩：原「#chat[data-layout="claude"] .rw-wrap .rw-body{display:none!important}」已删——
    该类名不存在（实际是 .rw-c），思考链的折叠由基础规则 `.rw .rw-c{display:none}` 负责。 */
 #chat[data-layout="claude"] .rw-wrap .rw{
   background:transparent!important;border:0!important;border-radius:0!important;
