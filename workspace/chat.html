@@ -4353,12 +4353,15 @@ async function branchFromMsg(idx){
   try{ parents=JSON.parse(localStorage.getItem("han_branch_parents")||"{}"); }catch(e){}
   parents[sid]={fromSession:srcSession,fromIndex:idx,createdAt:new Date().toISOString()};
   try{ localStorage.setItem("han_branch_parents",JSON.stringify(parents)); }catch(e){}
-  pushSessionParents();   // 跨设备同步分支父级
+  var _pbSet={}; _pbSet[sid]=parents[sid];
+  pushSessionParentsDelta(_pbSet, []);   // 跨设备同步分支父级（单键变更）
   const seg=msgText(m).replace(/\s+/g," ").slice(0,12);
   const named=("分支 · "+(seg||"从该消息"));
   let nameMap={}; try{ nameMap=JSON.parse(localStorage.getItem("han_session_names")||"{}"); }catch(e){}
   nameMap[sid]=named;
   try{ localStorage.setItem("han_session_names",JSON.stringify(nameMap)); }catch(e){}
+  var _nmSet={}; _nmSet[sid]=named;
+  pushSessionNamesDelta(_nmSet, []);   // 跨设备同步改名（单键变更）
   saveMsgs();
   SessionStore.setCurrentSession(sid);
   applyHeader();
@@ -4523,7 +4526,7 @@ async function autoNameSessionWhenUntitled(full){
     if(s&&!s.name)s.name=snip;
     applyHeader();
     renderSessionList();
-    try{ pushSessionNames(); }catch(e){}
+    try{ var _nmSet={}; _nmSet[SessionStore.getCurrentSession()]=snip; pushSessionNamesDelta(_nmSet, []); }catch(e){}
   }catch(e){}
 }
 
@@ -4625,7 +4628,14 @@ async function saveSettingsAll(){
 let promptBackups=[];
 const LS_SESSION_PROMPTS="han_session_prompts";
 function getSessionPromptMap(){ try{ return JSON.parse(localStorage.getItem(LS_SESSION_PROMPTS)||"{}")||{}; }catch(e){ return {}; } }
-function setSessionPrompt(sid,backupId){ const m=getSessionPromptMap(); if(backupId) m[sid]=backupId; else delete m[sid]; try{ localStorage.setItem(LS_SESSION_PROMPTS,JSON.stringify(m)); }catch(e){} pushSessionPrompts(); }
+function setSessionPrompt(sid,backupId){
+  const m=getSessionPromptMap(); if(backupId) m[sid]=backupId; else delete m[sid];
+  try{ localStorage.setItem(LS_SESSION_PROMPTS,JSON.stringify(m)); }catch(e){}
+  // 只提交本次变更（set/unset 单键），服务器按键合并，不做整表覆盖其它设备的设定
+  const body={set:{},unset:[]};
+  if(backupId) body.set[sid]=backupId; else body.unset.push(sid);
+  fetch("/heartbeat/admin/session-prompts",{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":getCookie("admin_csrf")},body:JSON.stringify(body),credentials:"include"}).catch(function(){});
+}
 function resolveSessionSystemPrompt(){
   const bid=SessionStore.getCurrentSession()&&getSessionPromptMap()[SessionStore.getCurrentSession()];
   if(bid){ const b=promptBackups.find(function(x){return x.id===bid;}); if(b&&typeof b.content==="string"&&b.content.trim()) return b.content.trim(); }
@@ -4639,8 +4649,13 @@ async function loadPromptBackups(){
   }catch(e){ promptBackups=[]; }
   renderPromptBackups();
 }
-function putPromptBackups(){
-  return fetch("/v1/prompt-backups",{method:"PUT",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({backups:promptBackups,replace:true})})
+function putPromptBackupOps(upserts, delIds){
+  // 只提交本次变更（upserts/delIds），服务器按 id 合并，不做整表覆盖
+  const body={};
+  if(upserts&&upserts.length) body.upserts=upserts;
+  if(delIds&&delIds.length) body.delIds=delIds;
+  if(!Object.keys(body).length) return Promise.resolve({});
+  return fetch("/v1/prompt-backups",{method:"PUT",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify(body)})
     .then(function(r){return r.json();}).catch(function(){return {};});
 }
 function renderPromptBackups(){
@@ -4678,12 +4693,12 @@ function renderPromptBackups(){
             if(!nv.trim()){ showToast("内容不能为空"); return false; }
             b.name=(document.getElementById("pb-ed-name").value||"").trim()||"未命名";
             b.content=nv; b.updatedAt=new Date().toISOString();
-            putPromptBackups().then(function(j){ showToast(j&&j.saved?"备份已更新":"备份更新失败"); renderPromptBackups(); });
+            putPromptBackupOps([b],null).then(function(j){ showToast(j&&j.saved?"备份已更新":"备份更新失败"); renderPromptBackups(); });
           },"保存");
       } else if(act==="del"){
-        if(!confirm("删除这个提示词备份？（不影响当前已生效的全局人设）")) return;
+        if(!confirm("删除这个提示词备份？引用它的会话将同步恢复为跟随全局人设。")) return;
         promptBackups=promptBackups.filter(function(x){return x.id!==id;});
-        putPromptBackups().then(function(j){ showToast(j&&j.saved?"已删除":"删除失败"); renderPromptBackups(); });
+        putPromptBackupOps(null,[id]).then(function(j){ showToast(j&&j.saved?"已删除（引用会话已恢复跟随全局）":"删除失败"); renderPromptBackups(); });
       }
     });
   });
@@ -4693,8 +4708,9 @@ function savePromptBackupFromInput(){
   const content=(promptInput&&promptInput.value)||"";
   if(!content.trim()){ showToast("当前系统人设为空，先填写再保存"); return; }
   const now=new Date().toISOString();
-  promptBackups.push({id:"pb_"+Date.now().toString(36)+Math.random().toString(36).slice(2,8),name:((ni&&ni.value)||"").trim()||("备份 "+(promptBackups.length+1)),content:content,createdAt:now,updatedAt:now});
-  putPromptBackups().then(function(j){
+  const nb={id:"pb_"+Date.now().toString(36)+Math.random().toString(36).slice(2,8),name:((ni&&ni.value)||"").trim()||("备份 "+(promptBackups.length+1)),content:content,createdAt:now,updatedAt:now};
+  promptBackups.push(nb);
+  putPromptBackupOps([nb],null).then(function(j){
     showToast(j&&j.saved?"已保存备份":"保存失败");
     if(ni) ni.value="";
     renderPromptBackups();
@@ -6154,7 +6170,14 @@ function openSessMenu(sid, anchorEl){
   if(top+mh>window.innerHeight-8) top=r.top-mh-6;
   el.style.left=left+"px"; el.style.top=top+"px";
   // 同步勾：本会话是否单独设了人设（不跟随全局）
-  try{ const _pm=getSessionPromptMap(); if(_pm && _pm[sid]){ markIf('[data-op="persona"]',"设定"); } }catch(e){}
+  try{
+    const _pm=getSessionPromptMap();
+    if(_pm && _pm[sid]){
+      const _bid=_pm[sid];
+      const _valid=promptBackups.some(function(x){return x.id===_bid;});
+      markIf('[data-op="persona"]', _valid?"设定":"设定已失效");
+    }
+  }catch(e){}
   // 异步补勾（参考「锁定唤醒 ✓」）：跨窗口=实际生效（显式开启，或跟随全局且全局开关开着）；模型=单独指定过供应商
   const seq=++_sessMenuSeq;
   const alive=function(){ return seq===_sessMenuSeq && _sessMenuEl && !_sessMenuEl.classList.contains("hidden"); };
@@ -6179,9 +6202,12 @@ function openSessionPersona(sid){
   const nm=sessionDisplayName(sid)||(sid==="default"?"主会话":sid);
   const curMap=getSessionPromptMap();
   const cur=curMap[sid]||"";
-  const opts='<option value="">默认（跟随全局人设）</option>'+promptBackups.map(function(b){
-    return '<option value="'+escapeHtml(b.id)+'"'+(cur===b.id?' selected':'')+'>'+escapeHtml(b.name||'未命名')+'</option>';
-  }).join('');
+  const curValid=!cur||promptBackups.some(function(b){return b.id===cur;});
+  const opts='<option value="">默认（跟随全局人设）</option>'
+    +(cur&&!curValid?'<option value="'+escapeHtml(cur)+'" selected>（引用的备份已删除）</option>':'')
+    +promptBackups.map(function(b){
+      return '<option value="'+escapeHtml(b.id)+'"'+(cur===b.id?' selected':'')+'>'+escapeHtml(b.name||'未命名')+'</option>';
+    }).join('');
   openEditModal("人设 · "+nm,
     '<div class="field"><label>本会话使用的人设</label><select class="np-sel" id="sp-persona">'+opts+'</select>'
     +'<div class="np-tip">选择的人设仅对这个会话生效，优先级高于全局人设；「默认」跟随全局人设。</div></div>',
@@ -6323,7 +6349,7 @@ async function doMergeSessions(){
       const map=JSON.parse(localStorage.getItem("han_session_names")||"{}");
       map[target]=mergedName;
       localStorage.setItem("han_session_names",JSON.stringify(map));
-      try{ pushSessionNames(); }catch(e){}
+      try{ var _nmSet={}; _nmSet[target]=mergedName; pushSessionNamesDelta(_nmSet, []); }catch(e){}
     }
     mergeMode=false; mergeSel.clear();
     await loadSessions();
@@ -6347,14 +6373,14 @@ function togglePinSession(id){
     try{ localStorage.setItem("han_pinned_sessions",JSON.stringify(pinnedArr)); }catch(e){}
     showToast("已取消置顶");
     updateSessionItem(id);
-    pushSessionPins();   // 跨设备同步置顶
+    pushSessionPinsDelta([], [id]);   // 跨设备同步置顶（单键变更）
     return;
   }
   pinnedArr.unshift(id);
   try{ localStorage.setItem("han_pinned_sessions",JSON.stringify(pinnedArr)); }catch(e){}
   showToast("已置顶");
   updateSessionItem(id);
-  pushSessionPins();   // 跨设备同步置顶
+  pushSessionPinsDelta([id], []);   // 跨设备同步置顶（单键变更）
 }
 
 // 锁定/解锁唤醒（会话独立）：自动唤醒只对锁定的会话进行，与置顶无关
@@ -6618,17 +6644,21 @@ function renameSession(id){
   const map=JSON.parse(localStorage.getItem("han_session_names")||"{}");
   map[id]=nn.trim();
   localStorage.setItem("han_session_names",JSON.stringify(map));
-  pushSessionNames();   // 跨设备同步改名映射
+  var _nmSet={}; _nmSet[id]=nn.trim();
+  pushSessionNamesDelta(_nmSet, []);   // 跨设备同步改名映射（单键变更）
   // 若重命名的是当前会话，同步左上角标题
   if(id===SessionStore.getCurrentSession()) applyHeader();
   loadSessions();
 }
 
-// 会话改名映射跨设备同步（存到服务器 data/session-names.json）
-async function pushSessionNames(){
+// 会话改名映射增量同步（服务器按键合并，不做整表覆盖；仅提交本地差异）
+async function pushSessionNamesDelta(setMap, unsetArr){
+  const body={set:{},unset:[]};
+  if(setMap&&typeof setMap==="object") for(const k of Object.keys(setMap)){ const v=setMap[k]; if(typeof v==="string") body.set[k]=v; }
+  if(unsetArr&&Array.isArray(unsetArr)) for(const k of unsetArr){ if(typeof k==="string") body.unset.push(k); }
+  if(!Object.keys(body.set).length&&!body.unset.length) return false;
   try{
-    let map={}; try{ map=JSON.parse(localStorage.getItem("han_session_names")||"{}"); }catch(e){ map={}; }
-    const r=await fetch("/heartbeat/admin/session-names",{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":getCookie("admin_csrf")},body:JSON.stringify({names:map}),credentials:"include"});
+    const r=await fetch("/heartbeat/admin/session-names",{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":getCookie("admin_csrf")},body:JSON.stringify(body),credentials:"include"});
     return r.ok;
   }catch(e){ return false; }
 }
@@ -6645,16 +6675,22 @@ async function pullSessionNames(){
     const j=await r.json();
     const serverNames=(j&&j.names)||{};
     let map={}; try{ map=JSON.parse(localStorage.getItem("han_session_names")||"{}"); }catch(e){ map={}; }
+    // 先记录本地独有项，再以服务器为准合并（只补推本地独有，不整表覆盖）
+    const localOnly={};
+    for(const k of Object.keys(map)){ if(!(k in serverNames) && typeof map[k]==="string") localOnly[k]=map[k]; }
     for(const k of Object.keys(serverNames)){ if(typeof serverNames[k]==="string") map[k]=serverNames[k]; }
     try{ localStorage.setItem("han_session_names",JSON.stringify(map)); }catch(e){}
-    pushSessionNames();   // 双向收敛：本地独有项也推回服务器
+    if(Object.keys(localOnly).length) pushSessionNamesDelta(localOnly, []);
   }catch(e){}
 }
-// 会话级人设（提示词备份）选择跨设备同步（存到服务器 data/session-prompts.json）
-async function pushSessionPrompts(){
+// 会话级人设选择增量同步（服务器按键合并，不做整表覆盖；仅提交本地差异）
+async function pushSessionPromptsDelta(setMap, unsetArr){
+  const body={set:{},unset:[]};
+  if(setMap&&typeof setMap==="object") for(const k of Object.keys(setMap)){ if(typeof setMap[k]==="string") body.set[k]=setMap[k]; }
+  if(unsetArr&&Array.isArray(unsetArr)) for(const k of unsetArr){ if(typeof k==="string") body.unset.push(k); }
+  if(!Object.keys(body.set).length&&!body.unset.length) return false;
   try{
-    let map={}; try{ map=JSON.parse(localStorage.getItem(LS_SESSION_PROMPTS)||"{}"); }catch(e){ map={}; }
-    const r=await fetch("/heartbeat/admin/session-prompts",{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":getCookie("admin_csrf")},body:JSON.stringify({prompts:map}),credentials:"include"});
+    const r=await fetch("/heartbeat/admin/session-prompts",{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":getCookie("admin_csrf")},body:JSON.stringify(body),credentials:"include"});
     return r.ok;
   }catch(e){ return false; }
 }
@@ -6665,16 +6701,22 @@ async function pullSessionPrompts(){
     const j=await r.json();
     const serverPrompts=(j&&j.prompts)||{};
     let map={}; try{ map=JSON.parse(localStorage.getItem(LS_SESSION_PROMPTS)||"{}"); }catch(e){ map={}; }
+    // 先记录本地独有项，再以服务器为准合并（服务器键不删、本地旧键不覆盖）
+    const localOnly={};
+    for(const k of Object.keys(map)){ if(!(k in serverPrompts) && typeof map[k]==="string") localOnly[k]=map[k]; }
     for(const k of Object.keys(serverPrompts)){ if(typeof serverPrompts[k]==="string") map[k]=serverPrompts[k]; }
     try{ localStorage.setItem(LS_SESSION_PROMPTS,JSON.stringify(map)); }catch(e){}
-    pushSessionPrompts();   // 双向收敛：本地独有项也推回服务器
+    if(Object.keys(localOnly).length) pushSessionPromptsDelta(localOnly, []);
   }catch(e){}
 }
-// 会话置顶跨设备同步（存到服务器 data/session-pins.json）
-async function pushSessionPins(){
+// 会话置顶增量同步（服务器逐项合并，不做整表覆盖；仅提交本地差异）
+async function pushSessionPinsDelta(addArr, removeArr){
+  const body={};
+  if(addArr&&addArr.length) body.add=addArr;
+  if(removeArr&&removeArr.length) body.remove=removeArr;
+  if(!body.add&&!body.remove) return false;
   try{
-    let pins=[]; try{ pins=JSON.parse(localStorage.getItem("han_pinned_sessions")||"[]"); }catch(e){ pins=[]; }
-    const r=await fetch("/heartbeat/admin/session-pins",{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":getCookie("admin_csrf")},body:JSON.stringify({pins:pins}),credentials:"include"});
+    const r=await fetch("/heartbeat/admin/session-pins",{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":getCookie("admin_csrf")},body:JSON.stringify(body),credentials:"include"});
     return r.ok;
   }catch(e){ return false; }
 }
@@ -6685,17 +6727,23 @@ async function pullSessionPins(){
     const j=await r.json();
     const serverPins=(j&&Array.isArray(j.pins))? j.pins : [];
     let pins=[]; try{ pins=JSON.parse(localStorage.getItem("han_pinned_sessions")||"[]"); }catch(e){ pins=[]; }
+    // 以服务器为准合并；本地独有项补推 add（服务器独有不删）
+    const localOnly=[];
+    pins.forEach(function(s){ if(typeof s==="string" && s && serverPins.indexOf(s)<0) localOnly.push(s); });
     serverPins.forEach(function(s){ if(typeof s==="string" && s && pins.indexOf(s)<0) pins.push(s); });
     try{ localStorage.setItem("han_pinned_sessions",JSON.stringify(pins)); }catch(e){}
-    pushSessionPins();
+    if(localOnly.length) pushSessionPinsDelta(localOnly, []);
   }catch(e){}
 }
 
-// 会话分支父级跨设备同步（存到服务器 data/session-branches.json）
-async function pushSessionParents(){
+// 会话分支父级增量同步（服务器按键合并，不做整表覆盖；仅提交本地差异）
+async function pushSessionParentsDelta(setMap, unsetArr){
+  const body={set:{},unset:[]};
+  if(setMap&&typeof setMap==="object") for(const k of Object.keys(setMap)){ const v=setMap[k]; if(v&&typeof v==="object") body.set[k]=v; }
+  if(unsetArr&&Array.isArray(unsetArr)) for(const k of unsetArr){ if(typeof k==="string") body.unset.push(k); }
+  if(!Object.keys(body.set).length&&!body.unset.length) return false;
   try{
-    let parents={}; try{ parents=JSON.parse(localStorage.getItem("han_branch_parents")||"{}"); }catch(e){ parents={}; }
-    const r=await fetch("/heartbeat/admin/session-branches",{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":getCookie("admin_csrf")},body:JSON.stringify({branches:parents}),credentials:"include"});
+    const r=await fetch("/heartbeat/admin/session-branches",{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":getCookie("admin_csrf")},body:JSON.stringify(body),credentials:"include"});
     return r.ok;
   }catch(e){ return false; }
 }
@@ -6706,16 +6754,17 @@ async function pullSessionParents(){
     const j=await r.json();
     const serverBranches=(j&&j.branches)||{};
     let parents={}; try{ parents=JSON.parse(localStorage.getItem("han_branch_parents")||"{}"); }catch(e){ parents={}; }
-    let changed=false;
+    // 先记录本地独有项，再以服务器为准合并（只补推本地独有，不整表覆盖）
+    const localOnly={};
+    for(const k of Object.keys(parents)){ if(!(k in serverBranches)) localOnly[k]=parents[k]; }
     for(const k of Object.keys(serverBranches)){
       const v=serverBranches[k];
-      if(v && typeof v==="object" && !parents[k]){
+      if(v && typeof v==="object"){
         parents[k]={fromSession:String(v.fromSession||""),fromIndex:(Number(v.fromIndex)>=0)?Number(v.fromIndex):0,createdAt:String(v.createdAt||"")};
-        changed=true;
       }
     }
-    if(changed){ try{ localStorage.setItem("han_branch_parents",JSON.stringify(parents)); }catch(e){} }
-    pushSessionParents();   // 双向收敛：本地独有项也推回服务器
+    try{ localStorage.setItem("han_branch_parents",JSON.stringify(parents)); }catch(e){}
+    if(Object.keys(localOnly).length) pushSessionParentsDelta(localOnly, []);
   }catch(e){}
 }
 

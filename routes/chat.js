@@ -435,20 +435,48 @@ module.exports = function registerChatRoutes(app, deps) {
   app.put('/v1/prompt-backups', async (req, reply) => {
     try {
       const body = (req.body && typeof req.body === 'object') ? req.body : {};
-      const backups = Array.isArray(body.backups) ? body.backups : [];
       const now = new Date().toISOString();
-      const clean = backups.filter(b => b && typeof b === 'object' && typeof b.content === 'string')
-        .map(b => ({
+      const norm = function (b) {
+        if (!b || typeof b !== 'object' || typeof b.content !== 'string') return null;
+        return {
           id: String(b.id || '').slice(0, 64) || ('pb_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)),
           name: String(b.name || '未命名').slice(0, 60),
           content: b.content,
           createdAt: String(b.createdAt || now).slice(0, 40),
           updatedAt: String(b.updatedAt || now).slice(0, 40)
-        })).slice(0, 50);
+        };
+      };
       let existing = [];
       try { if (fsp.existsSync(PROMPT_BACKUPS_FILE)) existing = JSON.parse(fsp.readFileSync(PROMPT_BACKUPS_FILE, 'utf-8')) || []; } catch (e) {}
       if (!Array.isArray(existing)) existing = [];
-      // 防空覆盖：服务器已有备份却收到空数组时保留原数据，除非显式 replace（与已删的 /v1/themes 同模式）
+      // 新格式（2026-09-26 多端合并）：{ upserts: [备份...], delIds: [id...] } 按 id 合并，不做整表覆盖。
+      // delIds 删除时同步清理 session-prompts.json 中引用该备份的会话键，避免悬挂引用导致静默回退全局。
+      if (Array.isArray(body.upserts) || Array.isArray(body.delIds)) {
+        const upserts = (Array.isArray(body.upserts) ? body.upserts : []).map(norm).filter(Boolean);
+        const delIds = (Array.isArray(body.delIds) ? body.delIds : []).filter(id => typeof id === 'string' && id);
+        for (const b of upserts) {
+          const idx = existing.findIndex(x => x && x.id === b.id);
+          if (idx >= 0) existing[idx] = b; else existing.push(b);
+        }
+        if (delIds.length) {
+          existing = existing.filter(x => delIds.indexOf(x && x.id) < 0);
+          const spFile = path.join(baseDir, 'data', 'session-prompts.json');
+          try {
+            if (fsp.existsSync(spFile)) {
+              const sp = JSON.parse(fsp.readFileSync(spFile, 'utf-8')) || {};
+              let changed = false;
+              for (const k of Object.keys(sp)) { if (delIds.indexOf(sp[k]) >= 0) { delete sp[k]; changed = true; } }
+              if (changed) fsp.writeFileSync(spFile, JSON.stringify(sp, null, 2), 'utf-8');
+            }
+          } catch (e) { console.warn('[prompt-backups] 清理会话引用失败:', e.message); }
+        }
+        existing = existing.slice(0, 50);
+        fsp.writeFileSync(PROMPT_BACKUPS_FILE, JSON.stringify(existing, null, 2), 'utf-8');
+        reply.send({ ok: true, saved: true, count: existing.length });
+        return;
+      }
+      // 旧格式整表（兼容旧缓存页面）
+      const clean = (Array.isArray(body.backups) ? body.backups : []).map(norm).filter(Boolean);
       if (clean.length === 0 && existing.length > 0 && !body.replace) {
         reply.send({ ok: true, saved: false, skipped: 'empty', count: existing.length });
         return;
@@ -792,8 +820,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
       // 不再拿请求全量重建覆盖；通知由同步函数按需发出。
       // 2026-09-23：透传重生成锚点 id（前端「重新生成」时上报），服务端按 id 截断锚点 user 之后的全部内容
       appendRequestMessages(sessionId, kelivoMessages, { regenAnchorId: body.regen_anchor_id });
-      // 用户主动聊天 → 取消 AI 之前设的定时唤醒
-      try { wakeSchedule.clearSlot(sessionId); } catch(e) {}
+      // 用户主动聊天 → 取消 AI 之前设的定时唤醒（keep=true 的闹钟除外，2026-09-26）
+      try { wakeSchedule.clearSlotUnlessKeep(sessionId); } catch(e) {}
     } else {
       console.log("[timeline] 跳过时间线保存 (真实消息=" + kelivoMessages.some(isRealMessageForTimeline) + ")");
     }

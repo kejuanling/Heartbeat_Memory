@@ -206,6 +206,9 @@ function resolveSessionSystemPrompt(sessionId) {
           const arr = JSON.parse(fs.readFileSync(pbFile, "utf-8"));
           const hit = Array.isArray(arr) ? arr.find(function (b) { return b && b.id === backupId && typeof b.content === "string"; }) : null;
           if (hit && hit.content && hit.content.trim()) return hit.content.trim();
+          console.warn("[resolveSessionSystemPrompt] 会话人设引用的备份缺失，回退全局人设: session=" + sid + " backupId=" + backupId);
+        } else {
+          console.warn("[resolveSessionSystemPrompt] 会话人设引用的备份缺失（备份文件不存在），回退全局人设: session=" + sid + " backupId=" + backupId);
         }
       } catch (e) {}
     }
@@ -6338,12 +6341,31 @@ app.get("/admin/session-names", { preHandler: basicAuth }, async (req, reply) =>
 app.put("/admin/session-names", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const body = (req.body && typeof req.body === "object") ? req.body : {};
-    const names = (body.names && typeof body.names === "object") ? body.names : {};
     fs.ensureDirSync(path.dirname(SESSION_NAMES_FILE));
-    const clean = {};
-    for (const k of Object.keys(names)) { if (typeof names[k] === "string") clean[k] = names[k]; }
-    fs.writeFileSync(SESSION_NAMES_FILE, JSON.stringify(clean, null, 2), "utf-8");
-    reply.send({ ok: true, saved: true, count: Object.keys(clean).length });
+    let names = {};
+    try { if (fs.existsSync(SESSION_NAMES_FILE)) names = JSON.parse(fs.readFileSync(SESSION_NAMES_FILE, "utf-8")) || {}; } catch (e) { names = {}; }
+    if (!names || typeof names !== "object" || Array.isArray(names)) names = {};
+    const hasDelta = (body.set && typeof body.set === "object") || Array.isArray(body.unset);
+    if (hasDelta) {
+      // 新格式（2026-09-26 多端合并）：{ set: {会话: 名称}, unset: [会话...] } 按键合并，不做整表覆盖；
+      // set/unset 均可单独出现（只改 / 只删），互不依赖
+      if (body.set && typeof body.set === "object") {
+        for (const k of Object.keys(body.set)) {
+          const v = body.set[k];
+          if (typeof v === "string") { if (v.trim()) names[k] = v.trim(); else delete names[k]; }
+        }
+      }
+      if (Array.isArray(body.unset)) {
+        for (const k of body.unset) { if (typeof k === "string") delete names[k]; }
+      }
+    } else if (body.names && typeof body.names === "object") {
+      // 旧格式整表（兼容旧缓存页面）
+      const clean = {};
+      for (const k of Object.keys(body.names)) { if (typeof body.names[k] === "string") clean[k] = body.names[k]; }
+      names = clean;
+    }
+    fs.writeFileSync(SESSION_NAMES_FILE, JSON.stringify(names, null, 2), "utf-8");
+    reply.send({ ok: true, saved: true, count: Object.keys(names).length });
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
@@ -6359,12 +6381,31 @@ app.get("/admin/session-prompts", { preHandler: basicAuth }, async (req, reply) 
 app.put("/admin/session-prompts", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const body = (req.body && typeof req.body === "object") ? req.body : {};
-    const prompts = (body.prompts && typeof body.prompts === "object") ? body.prompts : {};
     fs.ensureDirSync(path.dirname(SESSION_PROMPTS_FILE));
-    const clean = {};
-    for (const k of Object.keys(prompts)) { if (typeof prompts[k] === "string") clean[k] = prompts[k]; }
-    fs.writeFileSync(SESSION_PROMPTS_FILE, JSON.stringify(clean, null, 2), "utf-8");
-    reply.send({ ok: true, saved: true, count: Object.keys(clean).length });
+    let prompts = {};
+    try { if (fs.existsSync(SESSION_PROMPTS_FILE)) prompts = JSON.parse(fs.readFileSync(SESSION_PROMPTS_FILE, "utf-8")) || {}; } catch (e) { prompts = {}; }
+    if (!prompts || typeof prompts !== "object" || Array.isArray(prompts)) prompts = {};
+    const hasDelta = (body.set && typeof body.set === "object") || Array.isArray(body.unset);
+    if (hasDelta) {
+      // 新格式（2026-09-26 多端合并）：{ set: {会话: 备份id}, unset: [会话...] } 按键合并，不做整表覆盖；
+      // set/unset 均可单独出现（只改 / 只删），互不依赖
+      if (body.set && typeof body.set === "object") {
+        for (const k of Object.keys(body.set)) {
+          const v = body.set[k];
+          if (typeof v === "string") { if (v) prompts[k] = v; else delete prompts[k]; }
+        }
+      }
+      if (Array.isArray(body.unset)) {
+        for (const k of body.unset) { if (typeof k === "string") delete prompts[k]; }
+      }
+    } else if (body.prompts && typeof body.prompts === "object") {
+      // 旧格式整表（兼容旧缓存页面）
+      const clean = {};
+      for (const k of Object.keys(body.prompts)) { if (typeof body.prompts[k] === "string") clean[k] = body.prompts[k]; }
+      prompts = clean;
+    }
+    fs.writeFileSync(SESSION_PROMPTS_FILE, JSON.stringify(prompts, null, 2), "utf-8");
+    reply.send({ ok: true, saved: true, count: Object.keys(prompts).length });
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
@@ -6380,8 +6421,19 @@ app.get("/admin/session-pins", { preHandler: basicAuth }, async (req, reply) => 
 app.put("/admin/session-pins", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const body = (req.body && typeof req.body === "object") ? req.body : {};
-    const pins = (body.pins && Array.isArray(body.pins)) ? body.pins.filter(function (s) { return typeof s === "string" && s; }) : [];
     fs.ensureDirSync(path.dirname(SESSION_PINS_FILE));
+    let pins = [];
+    try { if (fs.existsSync(SESSION_PINS_FILE)) { const v = JSON.parse(fs.readFileSync(SESSION_PINS_FILE, "utf-8")) || []; if (Array.isArray(v)) pins = v; } } catch (e) { pins = []; }
+    if (Array.isArray(body.add) || Array.isArray(body.remove)) {
+      // 新格式（2026-09-26 多端合并）：{ add: [会话], remove: [会话] } 逐项合并，不做整表覆盖
+      const add = Array.isArray(body.add) ? body.add.filter(function (s) { return typeof s === "string" && s; }) : [];
+      const remove = Array.isArray(body.remove) ? body.remove.filter(function (s) { return typeof s === "string" && s; }) : [];
+      for (const s2 of add) { if (pins.indexOf(s2) < 0) pins.push(s2); }
+      pins = pins.filter(function (s2) { return remove.indexOf(s2) < 0; });
+    } else if (Array.isArray(body.pins)) {
+      // 旧格式整表（兼容旧缓存页面）
+      pins = body.pins.filter(function (s2) { return typeof s2 === "string" && s2; });
+    }
     fs.writeFileSync(SESSION_PINS_FILE, JSON.stringify(pins, null, 2), "utf-8");
     reply.send({ ok: true, saved: true, count: pins.length });
   } catch (err) { reply.code(500).send({ error: err.message }); }
@@ -6419,21 +6471,35 @@ app.get("/admin/session-branches", { preHandler: basicAuth }, async (req, reply)
 app.put("/admin/session-branches", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const body = (req.body && typeof req.body === "object") ? req.body : {};
-    const branches = (body.branches && typeof body.branches === "object") ? body.branches : {};
     fs.ensureDirSync(path.dirname(SESSION_BRANCHES_FILE));
-    const clean = {};
-    for (const k of Object.keys(branches)) {
-      const v = branches[k];
-      if (v && typeof v === "object") {
-        clean[k] = {
-          fromSession: String(v.fromSession || ""),
-          fromIndex: (Number(v.fromIndex) >= 0) ? Number(v.fromIndex) : 0,
-          createdAt: String(v.createdAt || "")
-        };
+    let branches = {};
+    try { if (fs.existsSync(SESSION_BRANCHES_FILE)) branches = JSON.parse(fs.readFileSync(SESSION_BRANCHES_FILE, "utf-8")) || {}; } catch (e) { branches = {}; }
+    if (!branches || typeof branches !== "object" || Array.isArray(branches)) branches = {};
+    const normBranch = function (v) {
+      if (!v || typeof v !== "object") return null;
+      return { fromSession: String(v.fromSession || ""), fromIndex: (Number(v.fromIndex) >= 0) ? Number(v.fromIndex) : 0, createdAt: String(v.createdAt || "") };
+    };
+    const hasDelta = (body.set && typeof body.set === "object") || Array.isArray(body.unset);
+    if (hasDelta) {
+      // 新格式（2026-09-26 多端合并）：{ set: {会话: 分支父级}, unset: [会话...] } 按键合并，不做整表覆盖；
+      // set/unset 均可单独出现（只改 / 只删），互不依赖
+      if (body.set && typeof body.set === "object") {
+        for (const k of Object.keys(body.set)) {
+          const nv = normBranch(body.set[k]);
+          if (nv) branches[k] = nv; else delete branches[k];
+        }
       }
+      if (Array.isArray(body.unset)) {
+        for (const k of body.unset) { if (typeof k === "string") delete branches[k]; }
+      }
+    } else if (body.branches && typeof body.branches === "object") {
+      // 旧格式整表（兼容旧缓存页面）
+      const clean = {};
+      for (const k of Object.keys(body.branches)) { const nv = normBranch(body.branches[k]); if (nv) clean[k] = nv; }
+      branches = clean;
     }
-    fs.writeFileSync(SESSION_BRANCHES_FILE, JSON.stringify(clean, null, 2), "utf-8");
-    reply.send({ ok: true, saved: true, count: Object.keys(clean).length });
+    fs.writeFileSync(SESSION_BRANCHES_FILE, JSON.stringify(branches, null, 2), "utf-8");
+    reply.send({ ok: true, saved: true, count: Object.keys(branches).length });
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
