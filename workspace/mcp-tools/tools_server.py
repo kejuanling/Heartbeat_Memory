@@ -661,7 +661,7 @@ _SMTP_PORT = 465
 
 def _send_chagang_mail():
     """发「查岗」触发邮件。2026-09-26 起手机端快捷指令不做选择、每次全量上报，
-    正文不再携带开关（screenshot/weather/location 过滤在工具侧做）。"""
+    正文不再携带开关（weather/location 过滤在工具侧做）。"""
     import smtplib
     from email.mime.text import MIMEText
     from email.header import Header
@@ -701,7 +701,6 @@ def tool_phone_state(args):
             v = v.strip().lower() not in ("false", "0", "no", "off")
         return bool(v)
 
-    screenshot = _flag("screenshot")
     weather = _flag("weather")
     location = _flag("location")
     try:
@@ -734,7 +733,7 @@ def tool_phone_state(args):
     if not state:
         return {"error": "查岗邮件已发送，但等待后未读到手机上报（手机可能没收到邮件或快捷指令未触发）"}
 
-    # 手机端永远全量上报；screenshot/weather/location 三个开关在工具侧过滤返回内容
+    # 手机端永远全量上报；weather/location 两个开关在工具侧过滤返回内容
     result = {
         "battery": state.get("battery"),
         "created_at": state.get("created_at"),
@@ -756,16 +755,13 @@ def tool_phone_state(args):
         except Exception as e:
             result["app_records"] = [{"error": "读取App记录失败: " + str(e)}]
 
-    if screenshot and state.get("screenshot_url"):
-        result["screenshot_url"] = state.get("screenshot_url")
     return result
 
 TOOLS["phone_state"] = {
-    "description": "看她现在在做什么：电池电量、天气、位置、最近App记录、最新屏幕截图。调用后会自动发「查岗」邮件触发手机立即上报，稍等几秒返回最新快照；截图以图片形式直接随本工具结果附上，可直接看。",
+    "description": "看她现在的状态：电量、天气、位置、最近App记录。调用后会发「查岗」邮件触发手机立即上报，稍等几秒返回最新快照。",
     "inputSchema": {
         "type": "object",
         "properties": {
-            "screenshot": {"type": "boolean", "description": "是否看屏幕截图，默认 true，false=不看屏幕"},
             "weather": {"type": "boolean", "description": "是否要天气，默认 true"},
             "location": {"type": "boolean", "description": "是否要位置，默认 true"},
             "app_records": {"type": "integer", "description": "附带最近App记录条数，默认 5，0=不带"}

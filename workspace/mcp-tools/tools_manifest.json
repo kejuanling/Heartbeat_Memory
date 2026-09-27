@@ -1,6 +1,6 @@
 {
   "server": "小世界MCP工具集",
-  "generated_at": "2026-09-23 18:55:47",
+  "generated_at": "2026-09-27 17:58:44",
   "tools": [
     {
       "name": "context_digest",
@@ -611,40 +611,42 @@
       "enabled": true
     },
     {
-      "name": "phone_records",
-      "description": "用于查看她今天手机 App 使用记录",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "limit": {
-            "type": "integer",
-            "description": "返回条数，默认20"
-          }
-        }
-      },
-      "defaultDescription": "查看今天手机 App 使用的详细记录（来自手机端记录服务），默认返回最近 20 条",
-      "defaultInputSchema": {
-        "type": "object",
-        "properties": {
-          "limit": {
-            "type": "integer",
-            "description": "返回条数，默认20"
-          }
-        }
-      },
-      "enabled": true
-    },
-    {
       "name": "phone_state",
-      "description": "读她最近一次手机上报的状态快照：电池电量、当前正在用的 App、位置（地点）。",
+      "description": "看她现在的状态：电量、天气、位置、最近App记录。",
       "inputSchema": {
         "type": "object",
-        "properties": {}
+        "properties": {
+          "weather": {
+            "type": "boolean",
+            "description": "是否要天气，默认 true"
+          },
+          "location": {
+            "type": "boolean",
+            "description": "是否要位置，默认 true"
+          },
+          "app_records": {
+            "type": "integer",
+            "description": "附带最近App记录条数，默认 5，0=不带"
+          }
+        }
       },
-      "defaultDescription": "读 han 本人手机最近一次主动上报的状态快照：电池电量、当前正在用的 App、位置（地点）。这是 han 自己手机的信息，只有一份、没有其他用户。若还没上报过则返回 state=None。",
+      "defaultDescription": "看她现在的状态：电量、天气、位置、最近App记录。调用后会发「查岗」邮件触发手机立即上报，稍等几秒返回最新快照。",
       "defaultInputSchema": {
         "type": "object",
-        "properties": {}
+        "properties": {
+          "weather": {
+            "type": "boolean",
+            "description": "是否要天气，默认 true"
+          },
+          "location": {
+            "type": "boolean",
+            "description": "是否要位置，默认 true"
+          },
+          "app_records": {
+            "type": "integer",
+            "description": "附带最近App记录条数，默认 5，0=不带"
+          }
+        }
       },
       "enabled": true
     },

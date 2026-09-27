@@ -255,25 +255,6 @@ async function executeToolCalls(toolCalls, working, toolHistory, ctx, onEvent, n
       // 截断超大工具结果：时间线/后续轮次上下文都不需要完整大结果，30k 字符足够模型引用
       content: buildToolResultContent({ name, time: toolTime, error: error || null, markdown: _truncateResult(result.markdown || "", MAX_TOOL_RESULT_CHARS) })
     });
-    // 2026-09-26 查岗图片注入：工具结果带 screenshot_url（如 phone_state）时，紧跟 tool 结果
-    // 补一条带 image_url 的 user 消息——上游约定 tool 消息只收纯文本，模型看图必须走普通
-    // 消息的图片部件，下一轮请求模型即可真正看到截图。注入只进当轮 working，不落时间线。
-    let _injectImgUrl = null;
-    try {
-      const _parsed = JSON.parse(result.markdown || "");
-      if (_parsed && typeof _parsed.screenshot_url === "string" && /^https:\/\//.test(_parsed.screenshot_url)) {
-        _injectImgUrl = _parsed.screenshot_url;
-      }
-    } catch (e) { /* markdown 不是 JSON 的工具照常，无注入 */ }
-    if (_injectImgUrl) {
-      working.push({
-        role: "user",
-        content: [
-          { type: "text", text: "（phone_state 返回的最新手机截图）" },
-          { type: "image_url", image_url: { url: _injectImgUrl } }
-        ]
-      });
-    }
     toolHistory.push({
       name,
       args,
