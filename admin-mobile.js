@@ -3689,7 +3689,7 @@ function ccNumLiveCheck(input, max){
           +'<div class="mp-stat-card-label">待审</div><div class="mp-stat-card-num">'+(window.__reviewTotal!=null?window.__reviewTotal:'…')+'</div>'
         +'</div>'
         +'<div class="mp-stat-card'+(window.__memShowSimilar?' on':'')+'" onclick="toggleMemPoolSimilar()" role="button" title="向量相近的记忆一组一组列出，挑重复的沉底">'
-          +'<div class="mp-stat-card-label">相似</div><div class="mp-stat-card-num">'+(window.__similarGroupCount!=null?window.__similarGroupCount+' 组':'…')+'</div>'
+          +'<div class="mp-stat-card-label">相似</div><div class="mp-stat-card-num">'+(window.__similarGroupCount!=null?window.__similarGroupCount:'…')+'</div>'
         +'</div>'
         +'</div>';
     }
