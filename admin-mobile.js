@@ -1332,6 +1332,7 @@ function updateCcStatusBar(d){
    const replaceBtn = document.getElementById('cc-multi-replace-btn');
    const reparseBtn = document.getElementById('cc-multi-reparse-btn');
    const exportBtn = document.getElementById('cc-multi-export-btn');
+   const sumExportBtn = document.getElementById('cc-multi-sumexport-btn');
    const removeBtn = document.getElementById('cc-multi-remove-btn');
    if(!bar) return;
    const d = AppState.compactionPlan;
@@ -1348,7 +1349,7 @@ function updateCcStatusBar(d){
    if(countEl) countEl.textContent = '已选 ' + AppState.ccSelectedChunks.size + ' 项';
    if(selectAllEl) selectAllEl.checked = visibleCount > 0 && visibleSelected >= visibleCount;
    // 统计选中的块中各状态数量
-   let canGenerate = 0, canReplace = 0, canReparse = 0, canExport = 0, canRemove = 0;
+   let canGenerate = 0, canReplace = 0, canReparse = 0, canExport = 0, canExportSum = 0, canRemove = 0;
    AppState.ccSelectedChunks.forEach(function(key){
      if(String(key).startsWith('gap-')){
        canGenerate++; // 未覆盖区可以生成摘要
@@ -1362,6 +1363,7 @@ function updateCcStatusBar(d){
          if(!c.cached) canGenerate++; // 未生成的可以生成
          if(c.cached) canReplace++; // 已生成摘要的块都可执行替换/取消替换转换
          if(c.enabled !== false) canReparse++; // 已替换的可以解析入池
+         if(c.enabled === true && c.summary) canExportSum++; // 已替换生效且有摘要 → 可导出摘要
        }
      }
    });
@@ -1369,6 +1371,7 @@ function updateCcStatusBar(d){
    if(replaceBtn) replaceBtn.disabled = canReplace === 0;
    if(reparseBtn) reparseBtn.disabled = canReparse === 0;
    if(exportBtn) exportBtn.disabled = canExport === 0;
+   if(sumExportBtn) sumExportBtn.disabled = canExportSum === 0;
    if(removeBtn) removeBtn.disabled = canRemove === 0;
  }
 
@@ -1700,6 +1703,35 @@ function updateCcStatusBar(d){
    const url = URL.createObjectURL(blob);
    const a = document.createElement('a');
    a.href = url; a.download = 'selected_blocks_' + selected.length + '.txt';
+   document.body.appendChild(a); a.click();
+   setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 60);
+ }
+ // 批量导出摘要（2026-09-27 用户拍板：范围=选中块中已替换生效的、内容=仅摘要文本）
+ function batchExportSummaries(){
+   if(!AppState.ccSelectedChunks.size) return;
+   const d = AppState.compactionPlan;
+   if(!d) return;
+   const chunks = d.chunks || [];
+   const selected = [];
+   AppState.ccSelectedChunks.forEach(function(key){
+     if(String(key).startsWith('gap-')) return;
+     const idx = Number(key);
+     const c = chunks.find(function(x){ return x.index === idx; });
+     if(c && c.enabled === true && c.summary) selected.push(c);
+   });
+   if(!selected.length){ toast('选中的块中没有已替换生效的摘要'); return; }
+   if(!confirm('导出选中的 ' + selected.length + ' 个已替换块的摘要？')) return;
+   let allTxt = '';
+   selected.sort(function(a, b){ return a.index - b.index; });
+   selected.forEach(function(c){
+     allTxt += '块 #' + c.index + (c.range_label ? (' ' + c.range_label) : '') + '\n';
+     allTxt += '========================================\n';
+     allTxt += (c.summary || '').trim() + '\n\n';
+   });
+   const blob = new Blob([allTxt], {type: 'text/plain;charset=utf-8'});
+   const url = URL.createObjectURL(blob);
+   const a = document.createElement('a');
+   a.href = url; a.download = 'selected_summaries_' + selected.length + '.txt';
    document.body.appendChild(a); a.click();
    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 60);
  }
