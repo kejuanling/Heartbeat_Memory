@@ -5188,14 +5188,14 @@ app.post("/admin/context-compaction/update", { preHandler: basicAuth }, async (r
   try {
     if (!summary) return reply.code(400).send({ error: "替换正文不能为空" });
     if (recId) {
-      const r = contextReplacements.setManualRecordTextById(recId, summary);
+      const r = contextReplacements.setManualRecordTextById(recId, summary, true);
       if (!r.ok) return reply.code(400).send({ error: r.message });
       return reply.send({ ok: true, summary: summary, length: r.length });
     }
     const preview = buildUnifiedReplacementPreview(false);
     const chunk = (preview.chunks || []).find(function (c) { return c.index === chunkIndex && c.source === "manual"; });
     if (!chunk) return reply.code(404).send({ error: "块 #" + chunkIndex + " 不存在" });
-    const r = contextReplacements.setManualRecordText(chunk.blockIndex, summary);
+    const r = contextReplacements.setManualRecordText(chunk.blockIndex, summary, true);
     if (!r.ok) return reply.code(400).send({ error: r.message });
     reply.send({ ok: true, summary: summary, length: r.length });
   } catch (err) {

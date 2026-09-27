@@ -1289,14 +1289,14 @@ function removeHistory(id, historyIndex) {
   return { ok: true, remaining: it.history.length };
 }
 
-// 给手工记录写入/更新替换正文（摘要生成后调用）
-function setManualRecordText(index, text) {
+// 给手工记录写入/更新替换正文（摘要生成后调用；markPending=true 时置 enabled=false 回到待替换）
+function setManualRecordText(index, text, markPending) {
   const found = manualRecordAt(index);
   if (!found) return { ok: false, message: "块不存在" };
-  return setManualRecordTextById(found.record.id, text);
+  return setManualRecordTextById(found.record.id, text, markPending);
 }
 
-function setManualRecordTextById(id, text) {
+function setManualRecordTextById(id, text, markPending) {
   const found = manualRecordById(id);
   if (!found) return { ok: false, message: "块不存在" };
   const t = String(text || "").trim();
@@ -1311,6 +1311,7 @@ function setManualRecordTextById(id, text) {
   it.text = t;
   it.memory = t;
   it.updated_at = nowIso();
+  if (markPending === true) it.enabled = false; // 手写保存：新摘要待确认，需手动替换
   saveItems(items);
   return { ok: true, length: t.length, record: publicItem(it) };
 }

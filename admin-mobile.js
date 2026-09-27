@@ -2833,11 +2833,12 @@ function ccNumLiveCheck(input, max){
        chunk.mode='edited';
        chunk.manual=true;
        chunk.cached=true;
+       chunk.enabled=false; // 手写保存后回到「待替换」，与批量导入口径一致，需手动点替换才生效
        if(wasForce){
          chunk.forceReplaced=false;
        }
      }
-     if(msg) msg.textContent='块 #'+idx+' 摘要已保存修改（'+d.length+' 字）'+(wasForce?'，已取消旧替换，可重新替换。':'，下次请求生效。');
+     if(msg) msg.textContent='块 #'+idx+' 摘要已保存修改（'+d.length+' 字），已变为待替换，点块上「替换」后生效。';
      renderCompaction();
    }).catch(function(e){
      if(msg) msg.textContent='保存失败: '+e.message;
