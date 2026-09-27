@@ -648,33 +648,9 @@ TOOLS["period_set"] = {
 # ── 手机app使用记录（phone_records 工具）2026-09-26 删除：其数据已并入 phone_state
 #    查岗工具的返回（app_records 字段，读 8080 /summary）；8084 phone-records-api 服务同步下线。──
 
-# ── 12. 手机状态快照（2026-09-26 查岗改造：一键触发手机上报再读结果）──
+# ── 12. 手机状态快照（2026-09-27 B 方案：手机打开「查岗」快捷指令自动上传，工具直读最新快照，不再发邮件触发）──
 _PHONE_REPORT_TOKEN = os.environ.get("PHONE_STATE_TOKEN", "")  # 对应 phone-report-api(8080) systemd unit 的 AUTH_TOKEN，值在 .env
 _OWNER = "han"  # 这是唯一的主人，即 han 本人的手机；没有"别的用户"
-_CHAGANG_MAIL_TO = os.environ.get("CHAGANG_MAIL_TO", "1365126894@qq.com")  # 手机上登录的收件邮箱
-_CHAGANG_SUBJECT = "查岗"  # 手机自动化按此主题触发
-_EMAIL_ADDR = os.environ.get("EMAIL_ADDR", "")   # AI 发件邮箱（与 email_server.py 同一账号，值配在 mcp-tools systemd 环境）
-_EMAIL_PASS = os.environ.get("EMAIL_PASS", "")   # 对应 SMTP 授权码
-_SMTP_SERVER = "smtp.qq.com"
-_SMTP_PORT = 465
-
-
-def _send_chagang_mail():
-    """发「查岗」触发邮件。2026-09-26 起手机端快捷指令不做选择、每次全量上报，
-    正文不再携带开关（weather/location 过滤在工具侧做）。"""
-    import smtplib
-    from email.mime.text import MIMEText
-    from email.header import Header
-    msg = MIMEText(_CHAGANG_SUBJECT, "plain", "utf-8")
-    msg["Subject"] = Header(_CHAGANG_SUBJECT, "utf-8")
-    msg["From"] = _EMAIL_ADDR
-    msg["To"] = _CHAGANG_MAIL_TO
-    conn = smtplib.SMTP_SSL(_SMTP_SERVER, _SMTP_PORT, timeout=15)
-    try:
-        conn.login(_EMAIL_ADDR, _EMAIL_PASS)
-        conn.sendmail(_EMAIL_ADDR, [_CHAGANG_MAIL_TO], msg.as_string())
-    finally:
-        conn.quit()
 
 
 def _read_phone_state():
@@ -683,15 +659,6 @@ def _read_phone_state():
     req = urllib.request.Request(url, headers={"Authorization": "Bearer " + _PHONE_REPORT_TOKEN})
     with urllib.request.urlopen(req, timeout=5) as resp:
         return json.loads(resp.read()).get("state")
-
-
-def _state_is_fresh(created_at, sent_ts):
-    """快照 created_at（服务器本地时区）晚于发信时刻-5s 视为本次查岗的新上报。"""
-    try:
-        t = datetime.datetime.strptime(str(created_at).strip(), "%Y-%m-%d %H:%M:%S")
-        return t.timestamp() >= sent_ts - 5
-    except (ValueError, TypeError):
-        return False
 
 
 def tool_phone_state(args):
@@ -709,29 +676,15 @@ def tool_phone_state(args):
         n_app = 5
     n_app = max(0, n_app)
 
-    if not _EMAIL_ADDR or not _EMAIL_PASS:
-        return {"error": "邮箱凭证未配置（mcp-tools 环境变量 EMAIL_ADDR / EMAIL_PASS）"}
-
-    sent_ts = time.time()
+    # B 方案（2026-09-27）：不再发邮件触发；手机打开「查岗」快捷指令时自动全量上报，
+    # 这里直接读 8080 库里的最新快照即返回，快照新旧看 created_at
     try:
-        _send_chagang_mail()
+        state = _read_phone_state()
     except Exception as e:
-        return {"error": "查岗邮件发送失败: " + str(e)}
-
-    # 等手机收邮件→跑快捷指令→上报：实测邮件自动化延迟约 30-60s（首次失败第二次通的实测），
-    # 累计等 60s，等到新快照即提前返回
-    state = None
-    for wait_s in (15, 15, 15, 15):
-        time.sleep(wait_s)
-        try:
-            state = _read_phone_state()
-        except Exception as e:
-            return {"error": "读取手机状态失败: " + str(e)}
-        if state and _state_is_fresh(state.get("created_at"), sent_ts):
-            break
+        return {"error": "读取手机状态失败: " + str(e)}
 
     if not state:
-        return {"error": "查岗邮件已发送，但等待后未读到手机上报（手机可能没收到邮件或快捷指令未触发）"}
+        return {"error": "暂无手机上报数据（手机打开「查岗」快捷指令上传一次后即有快照）"}
 
     # 手机端永远全量上报；weather/location 两个开关在工具侧过滤返回内容
     result = {
@@ -742,8 +695,6 @@ def tool_phone_state(args):
         result["weather"] = state.get("weather")
     if location:
         result["location"] = state.get("location")
-    if not _state_is_fresh(state.get("created_at"), sent_ts):
-        result["note"] = "未等到本次新上报，以上为上次查岗的旧快照"
 
     if n_app > 0:
         try:
