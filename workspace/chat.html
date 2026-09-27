@@ -3429,7 +3429,7 @@ const SEGQ={q:[],running:false,lastAt:0,   // 弹出队列：每条弹出前等�
 // 300ms 起手 + 60ms/字，钳在 [400ms, 2600ms]（约 5 字≈0.6s / 20 字≈1.5s / 40+ 字封顶 2.6s）
 function segGapFor(t){
   const n=(String(t)||"").replace(/\s+/g,"").length;
-  return Math.max(400,Math.min(2600,300+n*60));
+  return Math.max(400,Math.min(1600,300+n*60));
 }
 function segSplitText(text){   // 与 makeMsgEl 相同的拆段逻辑（先剥标签再按分隔符拆）
   const c=(stripCurrentTime(stripInnerTags(text)).clean)||"";
@@ -3502,7 +3502,7 @@ function makeSegPlayer(srcMsg){
     // 2026-09-24 P0-1：段边界处必须封口（_streamSealCurrentText 原本定义了但零调用）——
     // 否则下一段经 _streamPushText 追加进同一个未封口节点，全部分段粘成一坨且段间换行丢失。
     // 无论段是否为空都要 seal（空段时 emitText 直接 return，seal 必须独立调用才不漏）。
-    while((m=re.exec(tail))){ emitText(tail.slice(pos,m.index)); _streamSealCurrentText(); pos=m.index+m[0].length; }
+    while((m=re.exec(tail))){ emitText(tail.slice(pos,m.index)); if(_streamActive) SEGQ.push(function(){_streamSealCurrentText();},0); pos=m.index+m[0].length; }
     if(forceTail){ emitText(tail.slice(pos)); cursor=clean.length; }
     else if(pos>0) cursor+=pos;
   }
@@ -8496,8 +8496,14 @@ body[data-theme="glass"] .msg.ai .bubble,body[data-theme="glass"] .msg.user .bub
   background:linear-gradient(155deg,rgba(255,255,255,.5) 0%,rgba(255,255,255,.15) 22%,rgba(255,255,255,0) 45%) padding-box,var(--bubble-ai,transparent) padding-box!important;
   box-shadow:0 3px 14px rgba(79,74,69,.06),inset 0 1px 0 rgba(255,255,255,.26)!important;
 }
+body[data-theme="glass"] .msg.ai .bubble{
+  border-top-left-radius:5px!important;
+  border-bottom-left-radius:var(--radius)!important;
+  background:linear-gradient(180deg,rgba(255,255,255,.5) 0%,rgba(255,255,255,.15) 22%,rgba(255,255,255,0) 45%) padding-box,var(--bubble-ai,transparent) padding-box!important;
+}
 body[data-theme="glass"] .msg.user .bubble{
-  border-bottom-right-radius:5px;
+  border-top-right-radius:5px!important;
+  border-bottom-right-radius:var(--radius)!important;
   background:linear-gradient(155deg,rgba(255,255,255,.5) 0%,rgba(255,255,255,.15) 22%,rgba(255,255,255,0) 45%) padding-box,var(--bubble-user1,transparent) padding-box!important;
 }
 body[data-theme="glass"] .msg.ai .bubble{backdrop-filter:blur(var(--bubble-ai-blur,0px));-webkit-backdrop-filter:blur(var(--bubble-ai-blur,0px))}
