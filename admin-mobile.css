@@ -344,7 +344,17 @@
  .cc-meta b{color:var(--tab-active);font-weight:600}
  .cc-num{width:52px;padding:4px 5px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text);font-family:inherit;font-size:12px;text-align:center;outline:none;transition:border-color .2s,box-shadow .2s}
  .cc-num:focus{border-color:var(--accent2);box-shadow:0 0 0 3px rgba(216,168,176,.18)}
- .cc-head{display:block;margin-bottom:12px}
+ .cc-head{display:block;margin-bottom:12px;position:relative}
+ /* 批量导入：标题行右上角隐藏式入口（点击才弹面板） */
+ .cc-import-btn{position:absolute;top:0;right:0;display:inline-flex;align-items:center;gap:3px;padding:4px 10px;border:1px solid rgba(200,144,152,.35);border-radius:999px;background:rgba(200,144,152,.08);color:#b57f88;font-size:10.5px;font-family:inherit;cursor:pointer;transition:all .2s;line-height:1.4;white-space:nowrap;letter-spacing:.3px}
+ .cc-import-btn:hover{background:rgba(200,144,152,.18);border-color:rgba(200,144,152,.55)}
+ .cc-import-btn:active{transform:scale(.96)}
+ .cc-import-item{border:1px solid var(--border);border-radius:8px;padding:7px 10px;margin-bottom:6px;background:rgba(255,255,255,.6)}
+ .cc-import-item.ok{border-color:rgba(106,154,90,.4);background:rgba(106,154,90,.06)}
+ .cc-import-item.fail{border-color:rgba(192,80,80,.35);background:rgba(192,80,80,.05)}
+ .cc-import-item .cc-import-meta{font-weight:600;color:var(--text2)}
+ .cc-import-item .cc-import-err{color:#c05050}
+ .cc-import-item .cc-import-body{color:var(--text3);margin-top:2px;word-break:break-all}
  .cc-head-title{min-width:0;flex:1}
  .cc-head-h2{font-family:'Noto Serif SC',serif;font-size:27px;font-weight:700;color:var(--tab-active);letter-spacing:4px;margin:0;line-height:1.35}
  .cc-head-underline{width:38px;height:4px;border-radius:2px;background:var(--accent);margin-top:10px;box-shadow:0 2px 8px rgba(200,144,152,.30)}

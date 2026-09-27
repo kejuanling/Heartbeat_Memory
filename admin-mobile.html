@@ -149,6 +149,7 @@
          <h2 class="cc-head-h2">上下文压缩</h2>
          <div class="cc-head-underline"></div>
        </div>
+       <button type="button" class="cc-import-btn" id="cc-import-btn" onclick="openCcImportPanel()" title="批量导入手写摘要（按消息 id 边界对号入座，旧摘要自动进历史）">＋ 导入</button>
        <div class="cc-head-actions">
          <label class="cc-session-sel" title="选择要操作的会话（默认跟随聊天页当前会话）">
            <select id="adm-session-sel" onchange="onAdminSessionChange()" aria-label="选择会话"></select>
@@ -391,6 +392,27 @@
        <button type="button" class="btn btn-primary" onclick="ccSaveAiEdit()" style="flex:1;background:var(--accent)">保存</button>
        <button type="button" class="btn btn-outline" onclick="closeModal('ccAiEditModal')" style="flex:1">取消</button>
      </div>
+   </div>
+ </div>
+
+ <div class="modal-overlay" id="ccImportModal">
+   <div class="modal modal-edit-mem" style="max-width:min(94vw,720px)">
+     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-shrink:0">
+       <h3 style="margin:0;font-size:16px">批量导入手写摘要</h3>
+       <button type="button" onclick="closeModal('ccImportModal')" style="background:rgba(0,0,0,0.04);border:none;font-size:16px;color:var(--text2);cursor:pointer;padding:6px 10px;border-radius:8px;line-height:1">&times;</button>
+     </div>
+     <div style="font-size:11px;color:var(--text3);line-height:1.7;margin-bottom:8px;background:rgba(200,144,152,.08);border:1px solid rgba(200,144,152,.25);border-radius:8px;padding:8px 10px">
+       每段以 <b>边界: 首消息id..尾消息id</b>（推荐，稳定不漂移）、<b>[首id..尾id]</b> 或 <b>块 #N</b> 开头，正文接其后可多行，段间空行分隔。<br>
+       工作流：用「导出」生成文件 → 让 AI 保留每块第一行的边界标记并重写摘要 → 粘贴回来点「解析预览」→ 确认后「导入」。<br>
+       导入后：旧摘要自动进<b>历史版本</b>（最多 8 条，可查看/恢复），块变为<b>待替换</b>（需手动点替换才生效）。
+     </div>
+     <textarea id="cc-import-ta" rows="10" placeholder="边界: a123..b456&#10;这是这块的摘要正文，可多行……&#10;&#10;块 #3 另一块的摘要……" style="width:100%;box-sizing:border-box;padding:12px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,0.85);font-size:13px;line-height:1.5;color:var(--text2);resize:vertical;font-family:inherit"></textarea>
+     <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
+       <button type="button" class="btn btn-outline" onclick="previewCcImport()" style="flex:1;min-width:120px">解析预览</button>
+       <button type="button" class="btn btn-primary" id="cc-import-do-btn" onclick="doCcImport()" disabled style="flex:1;min-width:120px;background:var(--accent)">导入</button>
+       <button type="button" class="btn btn-outline" onclick="closeModal('ccImportModal');resetCcImportState()" style="flex:1;min-width:120px">取消</button>
+     </div>
+     <div id="cc-import-preview" style="margin-top:10px;max-height:34vh;overflow:auto;font-size:11px;color:var(--text2);line-height:1.6"></div>
    </div>
  </div>
  

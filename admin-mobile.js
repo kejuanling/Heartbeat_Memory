@@ -1690,6 +1690,7 @@ function updateCcStatusBar(d){
      const msgs = c.msgs || AppState.ccMsgBySig[c.signature] || [];
      const baseNum = (typeof c.blockStart === 'number' && c.blockStart >= 0) ? c.blockStart : ((typeof c.firstIdx === 'number' && c.firstIdx >= 0) ? c.firstIdx : null);
      allTxt += '块 #' + c.index + (c.range_label ? (' ' + c.range_label) : '') + '\n';
+     if(c.first_id && c.last_id) allTxt += '边界: ' + c.first_id + '..' + c.last_id + '\n';
      allTxt += '========================================\n\n';
      msgs.forEach(function(m, i){
        const role = m.role === 'user' ? '她' : '我';
@@ -1725,6 +1726,7 @@ function updateCcStatusBar(d){
    selected.sort(function(a, b){ return a.index - b.index; });
    selected.forEach(function(c){
      allTxt += '块 #' + c.index + (c.range_label ? (' ' + c.range_label) : '') + '\n';
+     if(c.first_id && c.last_id) allTxt += '边界: ' + c.first_id + '..' + c.last_id + '\n';
      allTxt += '========================================\n';
      allTxt += (c.summary || '').trim() + '\n\n';
    });
@@ -1734,6 +1736,130 @@ function updateCcStatusBar(d){
    a.href = url; a.download = 'selected_summaries_' + selected.length + '.txt';
    document.body.appendChild(a); a.click();
    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 60);
+ }
+
+ // ==================== 批量导入手写摘要（2026-09-27） ====================
+ // 格式：每段以「边界: 首消息id..尾消息id」（推荐，与导出格式对称）/[首id..尾id]/「块 #N」/[a:b] 开头，
+ // 正文接其后可多行，段间空行分隔；匹配到块后按记录 id 批量写入（后端归档历史+置 enabled=false=待替换）
+ let ccImportMatched = [];  // [{entry, chunk}]
+ let ccImportFailed = [];   // [{entry}]
+ function openCcImportPanel(){
+   ccImportMatched = [];
+   ccImportFailed = [];
+   const ta = document.getElementById('cc-import-ta');
+   if(ta) ta.value = '';
+   const pv = document.getElementById('cc-import-preview');
+   if(pv) pv.innerHTML = '';
+   const btn = document.getElementById('cc-import-do-btn');
+   if(btn) btn.disabled = true;
+   openModal('ccImportModal');
+ }
+ function resetCcImportState(){ ccImportMatched = []; ccImportFailed = []; }
+ function parseCcImportText(text){
+   const lines = String(text||'').split(/\r?\n/);
+   const entries = [];
+   let cur = null;
+   lines.forEach(function(line, i){
+     const t = line.trim();
+     if(!t){ if(cur && cur.summary) cur.summary += '\n'; return; }
+     const mBlock = t.match(/^块\s*#\s*(\d+)\b/);
+     const mBound = t.match(/^边界:\s*(\S+?)\.\.(\S+)/) || t.match(/^\[(\S+?)\.\.(\S+)\]/);
+     const mRange = t.match(/^\[(\d+):(\d+)\]/);
+     if(mBlock){ cur = { line: i+1, blockNo: Number(mBlock[1]), startId: null, endId: null, rangeStart: null, rangeEnd: null, summary: t.slice(mBlock[0].length).trim() }; entries.push(cur); return; }
+     if(mBound){ cur = { line: i+1, blockNo: null, startId: mBound[1], endId: mBound[2], rangeStart: null, rangeEnd: null, summary: t.slice(mBound[0].length).trim() }; entries.push(cur); return; }
+     if(mRange){ cur = { line: i+1, blockNo: null, startId: null, endId: null, rangeStart: Number(mRange[1]), rangeEnd: Number(mRange[2]), summary: t.slice(mRange[0].length).trim() }; entries.push(cur); return; }
+     if(cur){ cur.summary = (cur.summary ? cur.summary + '\n' : '') + t; }
+   });
+   return entries.filter(function(e){ return e.summary && e.summary.trim(); });
+ }
+ function matchCcImportEntry(entry){
+   const chunks = (AppState.compactionPlan && AppState.compactionPlan.chunks) || [];
+   if(entry.blockNo !== null && entry.blockNo !== undefined){
+     const c = chunks.find(function(x){ return x.index === entry.blockNo; });
+     return c || null;
+   }
+   if(entry.startId && entry.endId){
+     const c = chunks.find(function(x){ return x.first_id === entry.startId && x.last_id === entry.endId; });
+     return c || null;
+   }
+   if(entry.rangeStart !== null && entry.rangeEnd !== null){
+     const c = chunks.find(function(x){ return (x.blockStart + 1) === entry.rangeStart && (x.blockEnd + 1) === entry.rangeEnd; });
+     return c || null;
+   }
+   return null;
+ }
+ function entryTag(e){
+   if(e.blockNo !== null && e.blockNo !== undefined) return '块 #' + e.blockNo;
+   if(e.startId) return '边界: ' + e.startId + '..' + (e.endId||'?');
+   if(e.rangeStart !== null && e.rangeStart !== undefined) return '范围: ' + e.rangeStart + '..' + (e.rangeEnd||'?');
+   return '?';
+ }
+ function renderCcImportPreview(){
+   const pv = document.getElementById('cc-import-preview');
+   if(!pv) return;
+   let html = '<div style="margin-bottom:6px">共解析 <b>' + (ccImportMatched.length + ccImportFailed.length) + '</b> 条：命中 <b style="color:#5c8a4e">' + ccImportMatched.length + '</b> 条，未命中 <b style="color:#c05050">' + ccImportFailed.length + '</b> 条</div>';
+   ccImportMatched.forEach(function(item){
+     const c = item.chunk, e = item.entry;
+     const body = e.summary.length > 60 ? (e.summary.slice(0,60) + '…') : e.summary;
+     html += '<div class="cc-import-item ok"><span class="cc-import-meta">' + escHtml(entryTag(e)) + ' → 块 #' + c.index + '</span><div class="cc-import-body">' + escHtml(body) + '</div></div>';
+   });
+   ccImportFailed.forEach(function(item){
+     const e = item.entry;
+     const body = e.summary.length > 40 ? (e.summary.slice(0,40) + '…') : e.summary;
+     html += '<div class="cc-import-item fail"><span class="cc-import-meta">' + escHtml(entryTag(e)) + '</span><span class="cc-import-err"> 未命中（第 ' + e.line + ' 行）</span><div class="cc-import-body">' + escHtml(body) + '</div></div>';
+   });
+   pv.innerHTML = html;
+ }
+ function previewCcImport(){
+   const ta = document.getElementById('cc-import-ta');
+   if(!ta) return;
+   const entries = parseCcImportText(ta.value);
+   const pv = document.getElementById('cc-import-preview');
+   if(!entries.length){
+     if(pv) pv.innerHTML = '<div class="cc-import-item fail">未解析到任何条目：每段请以「边界: 首id..尾id」「[首id..尾id]」「块 #N」或「[a:b]」开头，正文接其后</div>';
+     const btn = document.getElementById('cc-import-do-btn');
+     if(btn) btn.disabled = true;
+     return;
+   }
+   ccImportMatched = [];
+   ccImportFailed = [];
+   entries.forEach(function(entry){
+     const c = matchCcImportEntry(entry);
+     if(c) ccImportMatched.push({ entry: entry, chunk: c });
+     else ccImportFailed.push({ entry: entry });
+   });
+   const btn = document.getElementById('cc-import-do-btn');
+   if(btn) btn.disabled = ccImportMatched.length === 0;
+   renderCcImportPreview();
+ }
+ async function doCcImport(){
+   if(!ccImportMatched.length) return;
+   const items = ccImportMatched.map(function(item){
+     const c = item.chunk;
+     return { id: c.id || c.repId || '', summary: item.entry.summary };
+   });
+   const pv = document.getElementById('cc-import-preview');
+   if(pv) pv.innerHTML = '<div class="cc-import-item">正在导入 ' + items.length + ' 条…</div>';
+   try{
+     const r = await fetch(ADMIN_API + '/context-compaction/import-summaries', {
+       method:'POST', headers:{'Content-Type':'application/json'},
+       body: JSON.stringify({ items: items }), credentials:'include'
+     });
+     const j = await r.json();
+     if(!r.ok || j.error){ if(pv) pv.innerHTML = '<div class="cc-import-item fail">导入失败：' + escHtml(j.error||'未知错误') + '</div>'; return; }
+     let html = '<div style="margin-bottom:6px">导入完成：成功 <b style="color:#5c8a4e">' + j.okCount + '</b> 条，失败 <b style="color:#c05050">' + (j.failCount||0) + '</b> 条。旧摘要已自动归档历史版本，块已置为待替换。</div>';
+     (j.results || []).forEach(function(res, i){
+       if(res && res.ok) return;
+       const item = items[i] || {};
+       html += '<div class="cc-import-item fail"><span class="cc-import-meta">块 ' + escHtml(item.id||'') + '</span> <span class="cc-import-err">' + escHtml((res&&res.error)||'失败') + '</span></div>';
+     });
+     if(pv) pv.innerHTML = html;
+     resetCcMsgCache();
+     loadCompactionPreview();
+     toast('批量导入完成：成功 ' + j.okCount + ' 条' + ((j.failCount||0) ? ('，失败 ' + j.failCount + ' 条') : ''));
+   }catch(e){
+     if(pv) pv.innerHTML = '<div class="cc-import-item fail">导入失败：' + escHtml(e.message) + '</div>';
+   }
  }
  // 批量移除
  async function batchRemoveBlocks(){

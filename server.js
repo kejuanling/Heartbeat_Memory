@@ -4888,6 +4888,9 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
       enabled: it.enabled !== false,
       manualHidden: it.hidden === true,
       range_label: it.range_label || "",
+      // 消息 id 边界（批量导入识别用）：首/尾非特殊压缩消息的自带 id，id 稳定不受内容编辑/位置漂移影响
+      first_id: (aStart && aStart.id) ? String(aStart.id) : undefined,
+      last_id: (aEnd && aEnd.id) ? String(aEnd.id) : undefined,
       original_preview: matched.slice(0, 2).map(m => ({ role: m.role, content: String(m.content || "").slice(0, 150) })),
       history: (Array.isArray(it.history) ? it.history : []).map(function (h, i) { return { index: i, summary: h.summary, generatedAt: h.generatedAt, mode: h.mode || (manual ? "edited" : "ai"), manual: h.manual === true || manual }; }).slice(0, 8),
       msgs: includeMessages ? matched.map((function () {
@@ -4898,7 +4901,7 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
         // 手工块：编号=存储起点+块内序号（matched 与压缩切片一一对应），避免锚点撞键漂移；
         // 存储编号失效（换窗口）时退回内容锚点编号
         const _num = (hasStoredIdx && storedValid) ? (storedStart + i) : (itemPosByKey.has(nKeyOf(m)) ? itemPosByKey.get(nKeyOf(m)) : null);
-        return { role: m.role, content: typeof m.content === "string" ? m.content : "", key: _key, marked: !!_marks[_key], num: _num };
+        return { role: m.role, content: typeof m.content === "string" ? m.content : "", key: _key, marked: !!_marks[_key], num: _num, id: m && m.id ? String(m.id) : undefined };
         };
       })()) : undefined,
       pos: compStart
@@ -5195,6 +5198,20 @@ app.post("/admin/context-compaction/update", { preHandler: basicAuth }, async (r
     const r = contextReplacements.setManualRecordText(chunk.blockIndex, summary);
     if (!r.ok) return reply.code(400).send({ error: r.message });
     reply.send({ ok: true, summary: summary, length: r.length });
+  } catch (err) {
+    reply.code(400).send({ error: err.message });
+  }
+});
+
+// 批量导入摘要（压缩页右上角「导入」：前端按消息 id 边界/块号匹配块后，按记录 id 批量写入手写摘要；
+// 旧摘要自动归档历史（最多 8 条），块状态置 enabled=false 回到「待替换/已停用」，需手动替换才生效）
+app.post("/admin/context-compaction/import-summaries", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  const items = Array.isArray(body.items) ? body.items : [];
+  try {
+    const r = contextReplacements.importSummariesByItems(items);
+    if (!r.ok) return reply.code(400).send({ error: r.error });
+    return reply.send({ ok: true, okCount: r.okCount, failCount: r.failCount, results: r.results });
   } catch (err) {
     reply.code(400).send({ error: err.message });
   }

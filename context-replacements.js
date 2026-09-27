@@ -1315,6 +1315,32 @@ function setManualRecordTextById(id, text) {
   return { ok: true, length: t.length, record: publicItem(it) };
 }
 
+// 批量导入摘要（2026-09-27 压缩页「批量导入」：按记录 id 定位 manual/AI 通用；
+// 旧正文自动归档历史，正文覆盖写，置 enabled=false 回到「待替换/已停用」需手动替换）
+function importSummariesByItems(items) {
+  if (!Array.isArray(items) || !items.length) return { ok: false, error: "导入列表为空" };
+  const list = loadItems();
+  const results = [];
+  items.forEach(function (it) {
+    const id = String(it && it.id || "").trim();
+    const t = String(it && it.summary || "").trim();
+    if (!id) { results.push({ ok: false, id: "", error: "缺少记录 id" }); return; }
+    const found = list.find(function (x) { return x && x.id === id && !x.removed; });
+    if (!found) { results.push({ ok: false, id: id, error: "块不存在（记录已删除或不在当前会话）" }); return; }
+    if (!t) { results.push({ ok: false, id: id, error: "摘要内容为空" }); return; }
+    if (t.length > MAX_MEMORY_CHARS) { results.push({ ok: false, id: id, error: "摘要超长（" + t.length + " 字，上限 " + MAX_MEMORY_CHARS + "）" }); return; }
+    archiveHistory(found, t);
+    found.text = t;
+    found.memory = t;
+    found.updated_at = nowIso();
+    found.enabled = false;
+    results.push({ ok: true, id: id, length: t.length });
+  });
+  if (results.some(function (r) { return r.ok; })) saveItems(list);
+  const okCount = results.filter(function (r) { return r.ok; }).length;
+  return { ok: true, okCount: okCount, failCount: results.length - okCount, results: results };
+}
+
 // 清空全部手工块（压缩页 blocks 路由 reset 动作用）
 function removeAllManualRecords() {
   const items = loadItems();
@@ -2817,6 +2843,7 @@ module.exports = {
   splitRangeByGaps,
   setManualRecordText,
   setManualRecordTextById,
+  importSummariesByItems,
   restoreHistory,
   removeHistory,
   manualRecordsSorted,
