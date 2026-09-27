@@ -474,6 +474,12 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    initLogFab();
    loadCompactionLogs();
    startUnreadPoll();
+   // 2026-09-27 悬浮球仅压缩页显示：初始按当前激活 tab 设置（initApp 恢复 tab 也可能已切到 compaction）
+   const fab0=document.getElementById('logFab');
+   if(fab0){
+     const curTab=document.querySelector('.tab-content.active');
+     fab0.style.display=(curTab && curTab.id==='tab-compaction')?'':'none';
+   }
  });
 
  function checkUnreadLogs(){
@@ -3064,6 +3070,10 @@ function ccNumLiveCheck(input, max){
 
  function switchTab(name){
    try{localStorage.setItem('adminTab',name)}catch(e){}
+   // 2026-09-27 悬浮球（生成日志）仅压缩页显示：其他 tab 隐藏并关闭日志面板
+   const fab=document.getElementById('logFab');
+   if(fab) fab.style.display=(name==='compaction')?'':'none';
+   if(name!=='compaction' && AppState.logPanelOpen) closeLogPanel();
    document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
    document.querySelectorAll('.tab-item').forEach(el=>el.classList.remove('active'));
    document.getElementById('tab-'+name).classList.add('active');

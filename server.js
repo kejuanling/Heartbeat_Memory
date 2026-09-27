@@ -5502,13 +5502,22 @@ app.post("/admin/context-compaction/blocks", { preHandler: basicAuth }, async (r
 //（「解析入池」= LLM 提炼；「一键入池」= 摘要全文直接入库，均不自动跑）
 
 
-// ---------------- 摘要生成日志（内存队列，最近 100 条） ----------------
-const COMPACTION_LOG_MAX = 100;
-const compactionLogs = [];
+// ---------------- 摘要生成日志（文件持久化，最近 10 条；重启不丢） ----------------
+const COMPACTION_LOG_MAX = 10;
+const COMPACTION_LOG_FILE = path.join(__dirname, "data", "compaction_log.json");
+let compactionLogs = [];
+try {
+  const loaded = JSON.parse(fs.readFileSync(COMPACTION_LOG_FILE, "utf8"));
+  if (Array.isArray(loaded)) compactionLogs = loaded.slice(0, COMPACTION_LOG_MAX);
+} catch (e) { compactionLogs = []; }
+function persistCompactionLogs() {
+  try { fs.writeFileSync(COMPACTION_LOG_FILE, JSON.stringify(compactionLogs.slice(0, COMPACTION_LOG_MAX))); } catch (e) { /* 持久化失败不影响运行 */ }
+}
 function addCompactionLog(entry) {
   const log = Object.assign({ id: Date.now() + '-' + Math.random().toString(36).slice(2, 8), time: new Date().toISOString() }, entry);
   compactionLogs.unshift(log);
   if (compactionLogs.length > COMPACTION_LOG_MAX) compactionLogs.length = COMPACTION_LOG_MAX;
+  persistCompactionLogs();
   return log;
 }
 
