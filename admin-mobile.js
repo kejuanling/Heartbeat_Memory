@@ -3609,7 +3609,7 @@ function ccNumLiveCheck(input, max){
   function initMemPoolView(){
     window.__memShowSunk=false;
     window.__memShowPinned=false;
-    window.__memShowAll=false;
+    window.__memShowActive=false;
     window.__memShowReview=false;
     window.__memShowSimilar=false;
     populateMemPoolCatOptions();
@@ -3642,9 +3642,14 @@ function ccNumLiveCheck(input, max){
     const q=document.getElementById('mempool-search').value;
     const cat=document.getElementById('mempool-cat').value;
     const sort=document.getElementById('mempool-sort').value;
+    // 0927 下拉=视图筛选：最新/最旧=全部视图（仅排序不同）；已pin/已沉底=对应视图
+    if(sort==='pinned'){ window.__memShowPinned=true; window.__memShowSunk=false; window.__memShowActive=false; window.__memShowReview=false; window.__memShowSimilar=false; }
+    else if(sort==='sunk'){ window.__memShowSunk=true; window.__memShowPinned=false; window.__memShowActive=false; window.__memShowReview=false; window.__memShowSimilar=false; }
+    else { window.__memShowPinned=false; window.__memShowSunk=false; window.__memShowActive=false; window.__memShowReview=false; window.__memShowSimilar=false; }
     const savedY=(window.pageYOffset!==undefined)?window.pageYOffset:(document.documentElement.scrollTop||0);
     try{
-      const r=await fetch(ADMIN_API + '/memory-v2/pool-view?q='+encodeURIComponent(q)+'&category='+encodeURIComponent(cat)+'&sort='+encodeURIComponent(sort));
+      const apiSort=(sort==='oldest')?'oldest':'recent';
+      const r=await fetch(ADMIN_API + '/memory-v2/pool-view?q='+encodeURIComponent(q)+'&category='+encodeURIComponent(cat)+'&sort='+encodeURIComponent(apiSort));
       const d=await r.json();
       renderMemPool(d);
       // 重绘后恢复页面滚动位置，防止操作后视口跳动
@@ -3661,22 +3666,32 @@ function ccNumLiveCheck(input, max){
     window.__memPoolData=d;
     let items;
     if(window.__memShowReview||window.__memShowSimilar) items=[];
-    else if(window.__memShowAll) items=allItems;
     else if(window.__memShowPinned) items=allItems.filter(function(x){return x.pinned===true;});
     else if(window.__memShowSunk) items=allItems.filter(function(x){return x.active===false;});
-    else items=allItems.filter(function(x){return x.active!==false;});
+    else if(window.__memShowActive) items=allItems.filter(function(x){return x.active!==false;});
+    else items=allItems;
+    // 0927 排序：最新(默认)=活跃优先→时间最新→沉底最后；最旧=时间升序
+    const sortVal=(document.getElementById('mempool-sort')||{}).value||'recent';
+    items=items.slice().sort(function(a,b){
+      if(sortVal==='oldest') return String(a.updated_at||'').localeCompare(String(b.updated_at||''));
+      const ra=(a.active!==false)?0:1, rb=(b.active!==false)?0:1;
+      return ra-rb || String(b.updated_at||'').localeCompare(String(a.updated_at||''));
+    });
     window.__memPoolItems=items;
     const st=document.getElementById('mempool-stats');
     if(st){
-      const onAll=!!window.__memShowAll;
-      const onActive=!window.__memShowAll&&!window.__memShowPinned&&!window.__memShowSunk&&!window.__memShowReview&&!window.__memShowSimilar;
       st.innerHTML=''
-        +'<span class="mp-stat toggle'+(onAll?' on':'')+'" onclick="toggleMemPoolAll()" title="显示全部记忆（含已沉底）">共 <b>'+stats.total+'</b> 条</span>'
-        +'<span class="mp-stat toggle'+(onActive?' on':'')+'" onclick="toggleMemPoolActive()" title="只看活跃记忆">活跃 <b>'+stats.active+'</b></span>'
-        +'<span class="mp-stat toggle'+(window.__memShowPinned?' on':'')+'" onclick="toggleMemPoolPinned()" title="点一下只看已置顶记忆，再点回到活跃">已pin <b>'+stats.pinned+'</b></span>'
-        +'<span class="mp-stat toggle'+(window.__memShowSunk?' on':'')+'" onclick="toggleMemPoolSunk()" title="点一下只看已沉底记忆，再点回到活跃">已沉底 <b>'+stats.sunk+'</b></span>'
-        +'<span class="mp-stat toggle'+(window.__memShowReview?' on':'')+'" onclick="toggleMemPoolReview()" title="人工裁决解析出的记忆候选：通过入库 / 驳回">待审 <b>'+(window.__reviewTotal!=null?window.__reviewTotal:'…')+'</b></span>'
-        +'<span class="mp-stat toggle'+(window.__memShowSimilar?' on':'')+'" onclick="toggleMemPoolSimilar()" title="向量相近的记忆一组一组列出，挑重复的沉底">相似'+(window.__similarGroupCount!=null?' <b>'+window.__similarGroupCount+'</b> 组':'')+'</span>';
+        +'<div class="mp-stat-cards">'
+        +'<div class="mp-stat-card'+(window.__memShowActive?' on':'')+'" onclick="toggleMemPoolActive()" role="button" title="只看活跃记忆；再点回到全部">'
+          +'<div class="mp-stat-card-label">活跃</div><div class="mp-stat-card-num">'+stats.active+'</div>'
+        +'</div>'
+        +'<div class="mp-stat-card'+(window.__memShowReview?' on':'')+'" onclick="toggleMemPoolReview()" role="button" title="人工裁决解析出的记忆候选：通过入库 / 驳回">'
+          +'<div class="mp-stat-card-label">待审</div><div class="mp-stat-card-num">'+(window.__reviewTotal!=null?window.__reviewTotal:'…')+'</div>'
+        +'</div>'
+        +'<div class="mp-stat-card'+(window.__memShowSimilar?' on':'')+'" onclick="toggleMemPoolSimilar()" role="button" title="向量相近的记忆一组一组列出，挑重复的沉底">'
+          +'<div class="mp-stat-card-label">相似</div><div class="mp-stat-card-num">'+(window.__similarGroupCount!=null?window.__similarGroupCount+' 组':'…')+'</div>'
+        +'</div>'
+        +'</div>';
     }
     const el=document.getElementById('mempool-list');
     if(!el)return;
@@ -3928,39 +3943,25 @@ function ccNumLiveCheck(input, max){
     }catch(e){ if(st) st.textContent='导入失败: '+e.message; }
   }
   function rerenderMemPoolView(){ if(window.__memShowReview){ loadReviewQueue(); return; } if(window.__memPoolData){ renderMemPool(window.__memPoolData); } else { loadMemPool(); } }
-  function toggleMemPoolAll(){
-    window.__memShowAll=true; window.__memShowPinned=false; window.__memShowSunk=false; window.__memShowReview=false;
-    rerenderMemPoolView();
-  }
+  // 0927 统计卡片（活跃）：开关式切换——点一下只看活跃，再点回到全部；进入时下拉同步回「最新」
   function toggleMemPoolActive(){
-    window.__memShowAll=false; window.__memShowPinned=false; window.__memShowSunk=false; window.__memShowReview=false;
+    window.__memShowActive=!window.__memShowActive;
+    if(window.__memShowActive){ window.__memShowPinned=false; window.__memShowSunk=false; window.__memShowReview=false; window.__memShowSimilar=false; const so=document.getElementById('mempool-sort'); if(so) so.value='recent'; }
     rerenderMemPoolView();
   }
-  function toggleMemPoolSunk(){
-    window.__memShowSunk=!window.__memShowSunk;
-    if(window.__memShowSunk){ window.__memShowPinned=false; window.__memShowAll=false; }
-    window.__memShowReview=false;
-    rerenderMemPoolView();
-  }
-  function toggleMemPoolPinned(){
-    window.__memShowPinned=!window.__memShowPinned;
-    if(window.__memShowPinned){ window.__memShowSunk=false; window.__memShowAll=false; }
-    window.__memShowReview=false;
-    rerenderMemPoolView();
-  }
-  // 待审（review 队列，0919 第五个统计按钮）：列表区切换显示记忆候选，通过入库 / 驳回
+  // 待审（review 队列）：列表区切换显示记忆候选，通过入库 / 驳回
   function toggleMemPoolReview(){
     window.__memShowReview=!window.__memShowReview;
     // 每次进出待审视图都重置多选状态，避免残留勾选跨视图生效
     window.__reviewMultiSel=false;
     window.__reviewSel={};
-    if(window.__memShowReview){ window.__memShowAll=false; window.__memShowPinned=false; window.__memShowSunk=false; loadReviewQueue(); return; }
+    if(window.__memShowReview){ window.__memShowActive=false; window.__memShowPinned=false; window.__memShowSunk=false; loadReviewQueue(); return; }
     loadMemPool();
   }
-  // 相似（0919 第六个统计按钮）：活跃记忆按语义向量分组列出，组内挑重复的沉底
+  // 相似：活跃记忆按语义向量分组列出，组内挑重复的沉底
   function toggleMemPoolSimilar(){
     window.__memShowSimilar=!window.__memShowSimilar;
-    if(window.__memShowSimilar){ window.__memShowAll=false; window.__memShowPinned=false; window.__memShowSunk=false; window.__memShowReview=false; loadSimilarGroups(); return; }
+    if(window.__memShowSimilar){ window.__memShowActive=false; window.__memShowPinned=false; window.__memShowSunk=false; window.__memShowReview=false; loadSimilarGroups(); return; }
     loadMemPool();
   }
   async function loadSimilarGroups(){

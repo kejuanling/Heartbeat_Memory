@@ -127,7 +127,7 @@
    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin:12px 0 0;padding:0 2px">
      <div><h2 style="font-family:'Noto Serif SC',serif;font-size:27px;font-weight:700;color:var(--tab-active);letter-spacing:4px;margin:0;line-height:1.35">记忆池</h2>
      <div style="width:38px;height:4px;border-radius:2px;background:var(--accent);margin-top:10px;box-shadow:0 2px 8px rgba(200,144,152,.30)"></div></div>
-     <button type="button" class="mp-import-btn" id="mempool-batch-import-btn" onclick="openMemPoolBatchImportPanel()" title="批量导入记忆（JSON，全部进待审队列）">＋ 导入</button>
+     <button type="button" class="mp-import-ico" id="mempool-batch-import-btn" onclick="openMemPoolBatchImportPanel()" title="批量导入记忆（JSON，全部进待审队列）" aria-label="导入">↑</button>
      <button type="button" class="mp-btn primary" onclick="openMemPoolAdd()" style="flex-shrink:0">＋ 新增记忆</button>
    </div>
    <div id="mem-mempool-wrap">
@@ -138,7 +138,7 @@
       <div class="mp-controls" id="mempool-controls">
         <input type="text" id="mempool-search" placeholder="搜索记忆（关键词）..." oninput="mempoolSearchInput(this.value)">
         <select id="mempool-cat" onchange="loadMemPool()"><option value="">全部分类</option></select>
-        <select id="mempool-sort" onchange="loadMemPool()"><option value="recent">最新</option><option value="oldest">最旧</option></select>
+        <select id="mempool-sort" onchange="loadMemPool()"><option value="recent">最新</option><option value="oldest">最旧</option><option value="pinned">已pin</option><option value="sunk">已沉底</option></select>
       </div>
       <div id="mempool-list" class="mp-list"><div class="loading">加载中...</div></div>
     </div></div>
