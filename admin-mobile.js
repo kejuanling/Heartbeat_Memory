@@ -258,9 +258,16 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    });
    try {
      const saved = JSON.parse(localStorage.getItem('logFabPos') || '{}');
-     if(saved.x !== undefined) fab.style.left = saved.x + 'px';
-     if(saved.y !== undefined) fab.style.top = saved.y + 'px';
-     if(saved.x !== undefined || saved.y !== undefined){
+     // 2026-09-27 位置恢复边界钳制：换窗口/设备后保存的位置可能越出当前视口（悬浮球“消失”），
+     // 越界自动拉回屏幕内（4px 边距；窄视口下钳到 4px 保证可见），无位置记录仍走默认右下角。
+     const vw = window.innerWidth, vh = window.innerHeight;
+     const fw = fab.offsetWidth || 50, fh = fab.offsetHeight || 50;
+     let rx = saved.x, ry = saved.y;
+     if(rx !== undefined) rx = Math.max(4, Math.min(vw - fw - 4, rx));
+     if(ry !== undefined) ry = Math.max(4, Math.min(vh - fh - 4, ry));
+     if(rx !== undefined) fab.style.left = rx + 'px';
+     if(ry !== undefined) fab.style.top = ry + 'px';
+     if(rx !== undefined || ry !== undefined){
        fab.style.right = 'auto';
        fab.style.bottom = 'auto';
      }
