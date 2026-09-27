@@ -127,6 +127,7 @@
    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin:12px 0 0;padding:0 2px">
      <div><h2 style="font-family:'Noto Serif SC',serif;font-size:27px;font-weight:700;color:var(--tab-active);letter-spacing:4px;margin:0;line-height:1.35">记忆池</h2>
      <div style="width:38px;height:4px;border-radius:2px;background:var(--accent);margin-top:10px;box-shadow:0 2px 8px rgba(200,144,152,.30)"></div></div>
+     <button type="button" class="mp-import-btn" id="mempool-batch-import-btn" onclick="openMemPoolBatchImportPanel()" title="批量导入记忆（JSON，全部进待审队列）">＋ 导入</button>
      <button type="button" class="mp-btn primary" onclick="openMemPoolAdd()" style="flex-shrink:0">＋ 新增记忆</button>
    </div>
    <div id="mem-mempool-wrap">
@@ -476,6 +477,27 @@
       <div class="mp-modal-actions">
         <button type="button" class="mp-btn" onclick="closeModal('mempoolExportModal')">取消</button>
         <button type="button" class="mp-btn primary" onclick="exportMemPool()">导出</button>
+      </div>
+    </div>
+  </div>
+    <div class="modal-overlay" id="mempoolBatchImportModal">
+    <div class="modal" style="max-width:min(94vw,720px)">
+      <div class="mp-modal-head">
+        <h3>批量导入记忆 · JSON</h3>
+        <button type="button" class="mp-modal-x" onclick="closeModal('mempoolBatchImportModal')">&times;</button>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:8px;line-height:1.7">
+        JSON 格式（与导出对齐）：顶层数组或 <b>{items:[...]}</b>，每条 <b>{category?, content}</b>。<br>
+        category 可选：fact / rule / quote / milestone（或旧类名 关于她/认账/拓本），缺省或留空=自动识别。<br>
+        <b>导入去向固定为「待审」</b>：全部条目进记忆 Review 队列人工裁决，不会直接入库。<br>
+        先「解析预览」看统计（分类数量 / 与已有记忆去重 / 格式失败），再「确认导入」。
+      </div>
+      <textarea id="mempool-batch-import-ta" rows="10" placeholder='[{"category":"fact","content":"她喝奶茶只要三分糖"},{"content":"这条不写分类，自动识别"}]' style="width:100%;font-size:12px;font-family:monospace;box-sizing:border-box;padding:10px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);color:var(--text2);resize:vertical"></textarea>
+      <div id="mempool-batch-import-preview" style="font-size:12px;color:var(--text2);min-height:18px;margin:8px 0;max-height:30vh;overflow:auto;line-height:1.7"></div>
+      <div class="mp-modal-actions">
+        <button type="button" class="mp-btn" onclick="closeModal('mempoolBatchImportModal')">关闭</button>
+        <button type="button" class="mp-btn" onclick="previewMemPoolBatchImport()">解析预览</button>
+        <button type="button" class="mp-btn primary" id="mempool-batch-import-do-btn" onclick="doMemPoolBatchImport()" style="display:none">确认导入</button>
       </div>
     </div>
   </div>

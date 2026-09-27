@@ -3748,6 +3748,104 @@ function ccNumLiveCheck(input, max){
       if(msg) msg.textContent='已导出 '+catLabel+' '+items.length+' 条（JSON）';
     }catch(e){ toast('导出失败: '+e.message); if(msg) msg.textContent='导出失败: '+e.message; }
   }
+  // ---- 批量导入记忆（JSON，2026-09-27：只进待审队列，复用 /memory-v2/entries 非 direct 通道） ----
+  let memPoolBatchEntries = [];   // 有效条目 [{category, content, dup}]
+  let memPoolBatchFailed = [];    // [{idx, err}]
+  function openMemPoolBatchImportPanel(){
+    memPoolBatchEntries = [];
+    memPoolBatchFailed = [];
+    const ta=document.getElementById('mempool-batch-import-ta');
+    if(ta) ta.value='';
+    const pv=document.getElementById('mempool-batch-import-preview');
+    if(pv) pv.textContent='';
+    const btn=document.getElementById('mempool-batch-import-do-btn');
+    if(btn) btn.style.display='none';
+    openModal('mempoolBatchImportModal');
+  }
+  function parseMemPoolBatchJson(raw){
+    const failed=[], entries=[];
+    let arr=null;
+    try{ arr=JSON.parse(raw); }catch(e){ failed.push({idx:1, err:'JSON 解析失败: '+e.message, text:String(raw||'').slice(0,60)}); return {entries:entries, failed:failed}; }
+    if(arr && !Array.isArray(arr) && Array.isArray(arr.items)) arr=arr.items;
+    if(!Array.isArray(arr)){ failed.push({idx:1, err:'顶层必须是数组或 {items:[...]}', text:String(raw||'').slice(0,60)}); return {entries:entries, failed:failed}; }
+    const okCats={fact:1, rule:1, quote:1, milestone:1, '关于她':1, '认账':1, '拓本':1};
+    arr.forEach(function(it, i){
+      if(!it || typeof it!=='object'){ failed.push({idx:i+1, err:'条目不是对象', text:String(it).slice(0,40)}); return; }
+      const content=String(it.content||'').trim();
+      if(!content){ failed.push({idx:i+1, err:'content 为空', text:''}); return; }
+      const cat=String(it.category||'').trim();
+      if(cat && !okCats[cat]){ failed.push({idx:i+1, err:'category 非法（fact/rule/quote/milestone 或 关于她/认账/拓本，可省略=自动识别）', text:content.slice(0,40)}); return; }
+      entries.push({category: cat || '', content: content});
+    });
+    return {entries:entries, failed:failed};
+  }
+  async function previewMemPoolBatchImport(){
+    const ta=document.getElementById('mempool-batch-import-ta');
+    if(!ta) return;
+    const raw=String(ta.value||'').trim();
+    const pv=document.getElementById('mempool-batch-import-preview');
+    if(!raw){ if(pv) pv.textContent='先粘贴要导入的 JSON'; return; }
+    const parsed=parseMemPoolBatchJson(raw);
+    memPoolBatchEntries=parsed.entries;
+    memPoolBatchFailed=parsed.failed;
+    if(!memPoolBatchEntries.length && !memPoolBatchFailed.length){ if(pv) pv.innerHTML='<div class="cc-import-item fail">没有可导入的条目</div>'; return; }
+    // 去重：与已有记忆 content 完全一致
+    let existingSet=null;
+    try{
+      const r=await fetch(ADMIN_API+'/memory-pool');
+      const d=await r.json();
+      const items=d.items||[];
+      existingSet=new Set(items.map(function(x){ return String(x.content||'').trim(); }));
+    }catch(e){ existingSet=null; }
+    let dup=0;
+    memPoolBatchEntries.forEach(function(e){ if(existingSet && existingSet.has(e.content)){ e.dup=true; dup++; } });
+    // 分类统计（预设）
+    const catCount={};
+    memPoolBatchEntries.forEach(function(e){
+      const k=e.category||'自动识别';
+      catCount[k]=(catCount[k]||0)+1;
+    });
+    let html='<div style="margin-bottom:6px">共 <b>'+(memPoolBatchEntries.length+memPoolBatchFailed.length)+'</b> 条：有效 <b style="color:#5c8a4e">'+memPoolBatchEntries.length+'</b> 条，格式失败 <b style="color:#c05050">'+memPoolBatchFailed.length+'</b> 条'+(dup?'，与已有记忆重复 <b style="color:#b57f88">'+dup+'</b> 条（将跳过）':'')+'</div>';
+    html+='<div style="margin-bottom:6px">分类：'+(Object.keys(catCount).map(function(k){ return '<b>'+k+'</b> '+catCount[k]; }).join('　')||'（无）')+'</div>';
+    if(memPoolBatchFailed.length){
+      html+='<div class="cc-import-item fail" style="margin-bottom:4px">格式失败明细：</div>';
+      memPoolBatchFailed.slice(0,8).forEach(function(f){
+        html+='<div class="cc-import-item fail"><b>第 '+f.idx+' 条</b> '+(f.err||'')+'</div>';
+      });
+      if(memPoolBatchFailed.length>8) html+='<div class="cc-import-item fail">… 其余 '+(memPoolBatchFailed.length-8)+' 条略</div>';
+    }
+    if(pv) pv.innerHTML=html;
+    const btn=document.getElementById('mempool-batch-import-do-btn');
+    if(btn) btn.style.display=(memPoolBatchEntries.length>0)?'':'none';
+  }
+  async function doMemPoolBatchImport(){
+    const dupCount=memPoolBatchEntries.filter(function(e){ return e.dup; }).length;
+    const todo=memPoolBatchEntries.filter(function(e){ return !e.dup; });
+    if(!todo.length){ toast('没有可导入的条目（全部为重复或已过滤）'); return; }
+    if(!confirm('确认导入 '+todo.length+' 条到记忆待审队列？'+(dupCount?('与已有记忆重复 '+dupCount+' 条将跳过。'):'')+(memPoolBatchFailed.length?('格式失败 '+memPoolBatchFailed.length+' 条将跳过。'):''))) return;
+    const btn=document.getElementById('mempool-batch-import-do-btn');
+    if(btn) btn.disabled=true;
+    const pv=document.getElementById('mempool-batch-import-preview');
+    if(pv) pv.innerHTML='<div class="cc-import-item">正在导入 '+todo.length+' 条到待审队列…</div>';
+    let ok=0, fail=0;
+    const failList=[];
+    for(let i=0;i<todo.length;i++){
+      const e=todo[i];
+      try{
+        const body={content:e.content};
+        if(e.category) body.category=e.category;
+        const r=await apiRequest('POST', ADMIN_API+'/memory-v2/entries', body, {busy:null});
+        if(!r.ok){ fail++; failList.push('「'+(e.content||'').slice(0,20)+'」: '+(r.error||'请求失败')); continue; }
+        const d=r.data||{};
+        if(d.error || d.action==='reject'){ fail++; failList.push('「'+(e.content||'').slice(0,20)+'」: '+(d.error||'被校验拒绝')); continue; }
+        ok++;
+      }catch(err){ fail++; failList.push('「'+(e.content||'').slice(0,20)+'」: '+((err&&err.message)||String(err))); }
+    }
+    if(pv) pv.innerHTML='<div class="cc-import-item ok">导入完成：成功进待审 <b>'+ok+'</b> 条，失败 <b>'+fail+'</b> 条'+(failList.length?('。<br>失败明细：'+failList.slice(0,5).join('；')+(failList.length>5?'；…':'')):'')+'</div>';
+    if(btn){ btn.disabled=false; btn.style.display='none'; }
+    loadMemPool();
+    toast('批量导入完成：'+ok+' 条已进待审'+(fail?('，'+fail+' 条失败'):''));
+  }
   // ---- 清洗结果导入：粘贴/上传清洗产出的变更 JSON → 预览统计 → 确认应用（后端自动备份） ----
   function openMemPoolImport(){
     const ta=document.getElementById('mempool-import-text');
