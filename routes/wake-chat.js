@@ -262,7 +262,8 @@ function ensureBuilder(deps) {
       loadTimeline: deps.loadTimeline,
       prepareMessageForLLM: deps.prepareMessageForLLM,
       stripPosition: deps.stripPosition,
-      resolveSessionSystemPrompt: deps.resolveSessionSystemPrompt
+      resolveSessionSystemPrompt: deps.resolveSessionSystemPrompt,
+      incrementalContext: deps.incrementalContext   // 0929 增量：块摘要化+尾部现算
     });
   }
   return buildConversation;

@@ -2824,6 +2824,125 @@ function searchCompactionOriginal(keyword, maxResults) {
   return { ok: true, total: results.length, results: results.slice(0, maxReturn) };
 }
 
+// ========================
+// 增量上下文构建（2026-09-29）：keh3 5000+ 条会话提速——每请求只 prepare 尾部未覆盖对话
+// 只摘要化「id 可定位 + 窗口内 + 非隐藏 + 非截断」的块区间；其余（窗口外/定位失败）区间原文透传，
+// 由后续 applyReplacements 兜底（窗口外/定位失败跳过、隐藏/截断剔除），结果与全量路径一致。
+// 区间内保留语义与 applyReplacements 同款：记忆浮现/工具剔除、标星前置、不可压缩（真日记等）保留。
+// 返回 { head, tailStart, blockFp }：head = 原始消息引用（调用方 prepare；_ctxRep 摘要直接透传）；
+// tailStart = 最后一个参与处理块 end+1（其后的尾部未覆盖消息由调用方现算）。
+// blockFp = context_replacements.json 指纹（整体缓存键用，块记录未变时 head 稳定）。
+// ========================
+function buildIncrementalContext(sessionId, timeline) {
+  const tl = Array.isArray(timeline) ? timeline : [];
+  const out = { head: [], tailStart: tl.length, blockFp: "" };
+  if (!tl.length) return out;
+  try {
+    const st = fs.statSync(REPLACEMENTS_FILE);
+    out.blockFp = String(st.mtimeMs) + ":" + String(st.size);
+  } catch (e) { out.blockFp = ""; }
+
+  const curSession = activeSessionOr() || sessionId || "default";
+  let items = loadItems().filter(function (it) {
+    if (it.removed || it.enabled === false) return false;
+    if (!recordText(it)) return false;
+    if (it.session && it.session !== curSession) return false;
+    return true;
+  });
+  if (!items.length) return out;
+
+  // id → idx 映射（非 system、未删除）
+  const idPos = new Map();
+  for (let i = 0; i < tl.length; i++) {
+    const m = tl[i];
+    if (!m || m.role === "system" || m.deleted) continue;
+    const id = m.id ? String(m.id) : "";
+    if (id && !idPos.has(id)) idPos.set(id, i);
+  }
+
+  const windowStartMs = currentWindowStartMs(tl);
+  const maxActive = loadMaxActiveBlocks();
+
+  // 定位区间：优先用 matched 首尾非特殊事件消息的 id（与 applyReplacements 完全同口径——
+  // 块记录里 range 是创建时快照，matched 会随消息编辑/边界微调更新，两者可能不一致）；
+  // matched 缺 id / 查不到 → 该块整体透传，applyReplacements 兜底。
+  const located = [];
+  for (const it of items) {
+    const matched = (Array.isArray(it.matched) && it.matched.length > 0) ? it.matched : null;
+    if (!matched || matched.length === 0) continue;
+    let aStart = null;
+    let aEnd = null;
+    for (const m of matched) { if (!isSpecialEvent(m)) { aStart = m; break; } }
+    for (let i = matched.length - 1; i >= 0; i--) { if (!isSpecialEvent(matched[i])) { aEnd = matched[i]; break; } }
+    if (!aStart || !aEnd) continue;
+    const sId = aStart && aStart.id ? String(aStart.id) : "";
+    const eId = aEnd && aEnd.id ? String(aEnd.id) : "";
+    if (!sId || !eId) continue;
+    const s = idPos.get(sId);
+    const e = idPos.get(eId);
+    if (s === undefined || e === undefined || e < s) continue;
+    // 窗口隔离（与 applyReplacements 同口径：首条非特殊事件锚点早于窗口起点 → 旧窗口块，原文透传）
+    if (windowStartMs !== null) {
+      let anchorM = null;
+      for (let i = s; i <= e; i++) { if (!isSpecialEvent(tl[i])) { anchorM = tl[i]; break; } }
+      if (anchorM) {
+        const t = messageTime(anchorM);
+        if (t && t.getTime() < windowStartMs) continue;
+      }
+    }
+    located.push({ it: it, s: s, e: e });
+  }
+  if (!located.length) return out;
+  located.sort(function (a, b) { return a.s - b.s; });
+
+  // 隐藏块/超限截断块（区间原文从上下文剔除，与 applyReplacements 同口径）
+  const hiddenIds = new Set(items.filter(function (it) { return it.hidden === true; }).map(function (it) { return it.id; }));
+  let activeLocs = located.filter(function (l) { return !hiddenIds.has(l.it.id); });
+  let truncatedIds = new Set();
+  if (maxActive > 0 && activeLocs.length > maxActive) {
+    const drop = activeLocs.slice(0, activeLocs.length - maxActive);
+    truncatedIds = new Set(drop.map(function (l) { return l.it.id; }));
+  }
+
+  const marks = loadMarks();
+  let cur = 0;
+  let lastEnd = -1;
+  for (const loc of located) {
+    // 前缀/间隙：未覆盖消息透传（调用方 prepare）
+    for (let i = cur; i < loc.s; i++) {
+      const m = tl[i];
+      if (!m || m.role === "system" || m.deleted) continue;
+      out.head.push(m);
+    }
+    if (!hiddenIds.has(loc.it.id) && !truncatedIds.has(loc.it.id)) {
+      // 正常块：标星前置 + 摘要 + 区间保留（记忆浮现/工具剔除、标星跳过、不可压缩保留）
+      const starred = [];
+      for (let i = loc.s; i <= loc.e; i++) {
+        const m = tl[i];
+        if (!m || m.role === "system" || m.deleted) continue;
+        if (m.role === "tool" || m.tool_calls) continue;
+        if (marks[contentKey(m)]) starred.push(m);
+      }
+      starred.forEach(function (sm) { out.head.push(sm); });
+      out.head.push(buildMemoryMessage(loc.it));
+      for (let i = loc.s; i <= loc.e; i++) {
+        const m = tl[i];
+        if (!m || m.role === "system" || m.deleted) continue;
+        if (isMemoryFlash(m)) continue;
+        if (m.role === "tool" || m.tool_calls) continue;
+        if (isReplacementMemoryMessage(m)) { out.head.push(m); continue; }
+        if (marks[contentKey(m)]) continue;
+        if (!isCompressible(m, true)) out.head.push(m);
+      }
+    }
+    // 隐藏/截断块：区间原文剔除（不输出）
+    cur = loc.e + 1;
+    if (loc.e > lastEnd) lastEnd = loc.e;
+  }
+  out.tailStart = lastEnd + 1;
+  return out;
+}
+
 module.exports = {
   addReplacement,
   migrateSessionBlocks,
@@ -2841,6 +2960,8 @@ module.exports = {
   // isEventInjectionVisible/classifySpecialEvent（均内部调用）；listReplacements/setMarkPoolId/getMarkPoolId 整函数删除
   loadItems,
   recordText,
+  buildIncrementalContext,
+  buildMemoryMessage,
   // 手工记录管理
   addManualRecord,
   removeManualRecord,

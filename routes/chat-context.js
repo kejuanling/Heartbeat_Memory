@@ -430,21 +430,23 @@ function createCtxLimitReminderGuard(deps) {
 // 前缀身份：同一会话同一时刻，聊天请求与唤醒请求的本构建器输出逐字一致 → 上游前缀缓存共享。
 // 图片规则（两侧对称）：历史图片降级为「（图片）」占位（附件正文由 prepareMessageForLLM 读入文本，
 // 与聊天侧同口径）；仅时间线末尾的连续 user 消息（本轮待回复）图片保真。
-// 2026-09-29 重建结果缓存（用户反馈 keh3 5000+ 条请求越来越慢）：
-// buildConversation 每次请求全量遍历时间线（prepareMessageForLLM/stripPosition），
-// 唤醒链路（wake-chat.js 共用本 builder）与聊天重试等时间线未变场景每次都在重复重建。
-// 缓存键 = 会话 + 时间线指纹(__fp) + 系统提示内容（长度+前缀）；只缓存大会话（>=300 条），
-// 上限 10 会话，超限淘汰最旧（Map 插入序）。命中返回引用——下游 apply/prepareModelMessages
-// 均在副本数组上操作、sanitizeForUpstream 产出全新对象，不会污染缓存（已核查）。
-// 聊天正常请求追加消息 → 时间线 mtime/size 变 → fp 变 → 自动失效，仍全量重建（合理成本）。
+// 2026-09-29 增量上下文构建（keh3 5000+ 条提速，用户拍板方案）：
+// 把发给模型的消息流拆成「稳定头 + 实时尾」——系统注入前缀与压缩块摘要/保留消息是稳定部分，
+// 每请求只现处理尾部未压缩对话。增量函数 buildIncrementalContext（context-replacements.js）
+// 按块 range id 定位区间：正常块 → 摘要化（buildMemoryMessage）+ 保留不可压缩（真日记/标星前置），
+// 隐藏/截断块 → 区间原文剔除，窗口外/定位失败块 → 原文透传（后续 applyReplacements 兜底，结果与全量一致）。
+// 整体缓存：会话+时间线fp+块记录fp+系统提示 未变（唤醒/重试）→ 直接返回（连尾部都不重算）；
+// 聊天发消息 → fp 变 → 走增量（head 轻量构建 + 尾部少量 prepare），处理量随块覆盖率大幅下降。
+// 命中返回引用——下游 apply/prepareModelMessages 在副本数组操作、sanitizeForUpstream 产全新对象（已核查）。
 function createConversationBuilder(deps) {
   const { loadTimeline, prepareMessageForLLM, stripPosition, resolveSessionSystemPrompt } = deps;
-  const _convCache = new Map(); // key: sessionId|fp|sysKey -> msgs
+  const incrementalContext = deps.incrementalContext || null;
+  const _convCache = new Map(); // key: sessionId|fp|blockFp|sysKey -> msgs
   const _CONV_CACHE_MAX = 10;
   const _CONV_CACHE_MIN_MSGS = 300;
-  function _convCacheKey(sessionId, fp, systemRaw) {
+  function _convCacheKey(sessionId, fp, blockFp, systemRaw) {
     const sc = systemRaw ? String(systemRaw.content || "") : "";
-    return String(sessionId || "default") + "|" + fp + "|" + sc.length + "|" + sc.slice(0, 120);
+    return String(sessionId || "default") + "|" + fp + "|" + (blockFp || "") + "|" + sc.length + "|" + sc.slice(0, 120);
   }
   function _convCacheSet(key, msgs) {
     if (_convCache.size >= _CONV_CACHE_MAX) {
@@ -471,7 +473,37 @@ function createConversationBuilder(deps) {
     }
     // 缓存命中判断（fp 非空 + 大会话才缓存；小会话重建便宜不缓存）
     const cacheable = !!(fp && timeline && timeline.length >= _CONV_CACHE_MIN_MSGS);
-    const cacheKey = cacheable ? _convCacheKey(sessionId, fp, systemRaw) : null;
+    const cacheKey = cacheable ? _convCacheKey(sessionId, fp, null, systemRaw) : null;
+    // 增量路径（块记录指纹 + 系统提示）：先按「时间线fp+块fp+系统」试整体缓存
+    let incResult = null;
+    if (cacheable && incrementalContext) {
+      incResult = incrementalContext(sessionId, timeline);
+      if (incResult && incResult.head && incResult.tailStart > 0) {
+        const incKey = _convCacheKey(sessionId, fp, incResult.blockFp, systemRaw);
+        const incHit = _convCache.get(incKey);
+        if (incHit) return incHit;
+        // 增量构建：head（块摘要/保留/前缀/间隙，_ctxRep 直接透传） + 尾部现算
+        const sysPrep = systemRaw ? prepareMessageForLLM(systemRaw) : null;
+        if (sysPrep) msgs.push(sysPrep);
+        const turnStart = _tailTurnStart(timeline);
+        for (const m of incResult.head) {
+          if (!m) continue;
+          if (m._ctxRep) { msgs.push(m); continue; }
+          const p = prepareMessageForLLM(m);
+          if (!p) continue;
+          msgs.push(downgradeHistoryImages(p));
+        }
+        for (let k = incResult.tailStart; k < timeline.length; k++) {
+          const m = timeline[k];
+          if (!m || m.role === "system" || m.deleted) continue;
+          const p = prepareMessageForLLM(m);
+          if (!p) continue;
+          msgs.push(k < turnStart ? downgradeHistoryImages(p) : p);
+        }
+        _convCacheSet(incKey, msgs);
+        return msgs;
+      }
+    }
     if (cacheKey) {
       const hit = _convCache.get(cacheKey);
       if (hit) return hit;
@@ -493,6 +525,18 @@ function createConversationBuilder(deps) {
     if (cacheKey) _convCacheSet(cacheKey, msgs);
     return msgs;
   };
+
+  // 增量路径用：时间线末尾连续 user 起点（图片保真），口径与全量路径一致
+  function _tailTurnStart(timeline) {
+    let n = 0;
+    for (let i = timeline.length - 1; i >= 0; i--) {
+      const m = timeline[i];
+      if (!m || m.role === "system" || m.deleted) continue;
+      if (m.role === "user") n++;
+      else break;
+    }
+    return timeline.length - n;
+  }
 }
 
 // 历史图片降级为占位文本（对称规则的历史侧；附件正文已在 prepareMessageForLLM 转为文本）
