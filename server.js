@@ -5702,7 +5702,23 @@ function persistCompactionLogs() {
   try { fs.writeFileSync(COMPACTION_LOG_FILE, JSON.stringify(compactionLogs.filter(inCompactionLogDay))); } catch (e) { /* 持久化失败不影响运行 */ }
 }
 function addCompactionLog(entry) {
-  const log = Object.assign({ id: Date.now() + '-' + Math.random().toString(36).slice(2, 8), time: new Date().toISOString() }, entry);
+  const now = new Date().toISOString();
+  // 2026-09-29 修复：带 id 的 entry 是"更新已有日志"（生成任务的 pending→success/error 翻状态），
+  // 原实现总是 unshift 新建 → 同一次生成产生 pending+success 两条、且前端 trackedGenId 只匹配
+  // logs[0]，多点几次生成后 id 错位 → 消息栏永远"进行中"。更新时原地替换并移到最前
+  // （保持"最新状态"在 logs[0]），time 刷新为本次更新时间（前端显示完成时刻）。
+  if (entry && entry.id) {
+    const idx = compactionLogs.findIndex(function (l) { return l && l.id === entry.id; });
+    if (idx >= 0) {
+      const old = compactionLogs[idx];
+      compactionLogs.splice(idx, 1);
+      const merged = Object.assign({}, old, entry, { id: old.id, time: now });
+      compactionLogs.unshift(merged);
+      persistCompactionLogs();
+      return merged;
+    }
+  }
+  const log = Object.assign({ id: Date.now() + '-' + Math.random().toString(36).slice(2, 8), time: now }, entry);
   compactionLogs.unshift(log);
   compactionLogs = compactionLogs.filter(inCompactionLogDay);
   persistCompactionLogs();
