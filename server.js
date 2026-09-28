@@ -3499,6 +3499,15 @@ app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, re
     }
     if (!texts.length) return reply.code(400).send({ error: "无可解析的摘要" });
     const list = texts.slice(0, 200);
+    // 0928：块编号（块#N）与压缩页预览同源——复用统一预览构建，按记录 id 取展示序号
+    let indexByRecord = null;
+    try {
+      const pv = buildUnifiedReplacementPreview(false);
+      if (pv && Array.isArray(pv.chunks)) {
+        indexByRecord = new Map();
+        pv.chunks.forEach(function (c) { if (c && c.id != null) indexByRecord.set(String(c.id), c.index); });
+      }
+    } catch (e) { indexByRecord = null; }
     // 一键入池（direct）：0918 起停用——无判断直灌是低质量记忆的主通道（存量 340+ 条教训）。
     // 请走 LLM 解析：解析压缩块覆盖区间的「时间线原文」（原文都在，压缩只影响发送），
     // 产出的候选走 V2 admission 完整流水线并全部进 review 队列人工把关。
@@ -3529,10 +3538,13 @@ app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, re
       const li = compactionLogs.findIndex(function (x) { return x.id === logId2; });
       if (li >= 0) { compactionLogs[li].message = msg; try { persistCompactionLogs(); } catch (e) {} }
     };
-    // 0928：块标识 = 摘要前 20 字（无摘要回退 block_id），一眼认出解析的是哪块
+    // 0928：块标识 = 压缩页块编号（块#N，与预览同源）；预览不可得时回退摘要前 12 字
     const blockLabel = function (sb) {
+      const bid = String((sb && sb.block_id) || "");
+      const idx = indexByRecord ? indexByRecord.get(bid) : undefined;
+      if (idx != null) return "块 #" + idx;
       const sum = String((sb && sb.summary) || "").replace(/\s+/g, " ").trim();
-      return sum ? sum.slice(0, 20) : String((sb && sb.block_id) || "?").slice(0, 12);
+      return sum ? "块 ?（" + sum.slice(0, 12) + "）" : String(bid || "?").slice(0, 12);
     };
     for (let k = 0; k < slicedOriginals.length; k++) {
       const s = slicedOriginals[k];
@@ -3567,6 +3579,138 @@ app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, re
     addCompactionLog({ action: "reparse", label: "再解析", status: "error", message: "再解析失败：" + err.message });
     reply.code(500).send({ error: err.message });
   }
+});
+
+// ========================
+// 0928-48：reparse 分批限流调度器（按会话串行 + 块间定时间隔，防 LLM 429）
+// 用法：POST /admin/memory-pool/reparse/schedule {sessions:[...], gapMs:300000, skipParsed:true}
+// 单飞：已有任务在跑返回 409；状态 GET /schedule/status；取消 POST /schedule/cancel
+// ========================
+let reparseScheduler = null;
+const REPARSE_DEFAULT_GAP_MS = 300000; // 块间默认 5 分钟
+
+app.post("/admin/memory-pool/reparse/schedule", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    if (reparseScheduler && reparseScheduler.running) {
+      return reply.code(409).send({ error: "已有分批解析在跑，请先取消或等它完成", status: reparseScheduler.status() });
+    }
+    const b = req.body || {};
+    const fsx = require("fs-extra");
+    const cf = require("path").join(__dirname, "data", "context_replacements.json");
+    let records = [];
+    try { records = await fsx.readJson(cf); } catch (e) { records = []; }
+    const active = Array.isArray(records) ? records.filter(function (it) { return it && !it.removed && it.enabled !== false; }) : [];
+    const bySession = new Map();
+    active.forEach(function (it) {
+      const s = it.session || "default";
+      if (!bySession.has(s)) bySession.set(s, []);
+      bySession.get(s).push(it);
+    });
+    const sessions = (Array.isArray(b.sessions) && b.sessions.length) ? b.sessions : Array.from(bySession.keys());
+    const gapMs = (Number(b.gapMs) >= 10000) ? Number(b.gapMs) : REPARSE_DEFAULT_GAP_MS;
+    const skipParsed = b.skipParsed !== false;
+    const queue = [];
+    const skipped = [];
+    sessions.forEach(function (s) {
+      (bySession.get(s) || []).forEach(function (it) {
+        const sum = String(it.text || it.memory || "").trim();
+        if (!sum) return;
+        if (skipParsed && it.reparsed_at) { skipped.push(String(it.id || "")); return; }
+        queue.push({ session: s, it: it });
+      });
+    });
+    if (!queue.length) return reply.send({ success: true, scheduled: 0, skipped: skipped.length, note: "无可解析块（全部已解析或无可解析摘要）" });
+
+    // 旧的 pending reparse 日志标「被新任务取代」
+    compactionLogs.forEach(function (l) {
+      if (l && l.status === "pending" && l.action === "reparse") l.status = "skipped";
+    });
+
+    const st = {
+      running: true, queue: queue, cursor: 0, sessions: sessions,
+      gapMs: gapMs, skipParsed: skipParsed, done: 0, failed: 0, candidates: 0,
+      logId: null, timer: null, nextAt: null, startAt: Date.now(),
+      status: function () {
+        return {
+          running: this.running,
+          session: this.queue[this.cursor] ? this.queue[this.cursor].session : null,
+          current: this.cursor, total: this.queue.length,
+          done: this.done, failed: this.failed, candidates: this.candidates,
+          nextAt: this.nextAt, gapMs: this.gapMs
+        };
+      }
+    };
+    reparseScheduler = st;
+    const label = "分批再解析（" + queue.length + " 块 · 间隔 " + Math.round(gapMs / 60000) + " 分钟）";
+    const log = addCompactionLog({ action: "reparse", label: label, status: "pending", message: "队列：会话 " + sessions.join(" → ") + "，跳过已解析 " + skipped.length + " 块" });
+    st.logId = log.id;
+    const update = function (msg) {
+      const li = compactionLogs.findIndex(function (x) { return x.id === st.logId; });
+      if (li >= 0) { compactionLogs[li].message = msg; try { persistCompactionLogs(); } catch (e) {} }
+    };
+
+    const processOne = async function () {
+      if (!st.running) return;
+      if (st.cursor >= st.queue.length) {
+        st.running = false;
+        try { await fsx.writeJson(cf, records); } catch (e) {}
+        update("全部完成：成功 " + st.done + " / 失败 " + st.failed + "，候选 " + st.candidates + " 条进待审");
+        addCompactionLog({ id: st.logId, action: "reparse", label: label, status: "success", message: "全部完成：成功 " + st.done + " / 失败 " + st.failed + "，候选 " + st.candidates + " 条进待审（跳过已解析 " + skipped.length + "）" });
+        return;
+      }
+      const cur = st.queue[st.cursor];
+      const it = cur.it;
+      const idx = st.cursor + 1;
+      st.nextAt = null;
+      const bl = String((it.text || it.memory || "") || "").replace(/\s+/g, " ").trim().slice(0, 16) || String(it.id || "?").slice(0, 12);
+      update("正在解析 第 " + idx + "/" + st.queue.length + " 块（会话 " + cur.session + " · " + bl + "）...");
+      try {
+        const original = (it && it.range) ? sliceTimelineOriginal(it.session, it.range) : null;
+        const sourceText = (original && original.trim()) ? original : String(it.text || it.memory || "").trim();
+        const candidates = await extractMemoryCandidates(sourceText);
+        it.reparsed_at = new Date().toISOString();
+        let candOk = 0;
+        for (const c of candidates) {
+          try {
+            const r = await (memoryV2Admission
+              ? memoryV2Admission.submitPromotion({ content: c.text, kind: c.kind, block_id: String(it.id || "") }, { sessionId: it.session })
+              : Promise.resolve({ action: "error" }));
+            if (r && r.action !== "reject") candOk++;
+          } catch (e) {}
+        }
+        st.candidates += candOk;
+        st.done++;
+        update("第 " + idx + "/" + st.queue.length + " 块已解析（" + bl + "）：候选 " + candOk + " 条进待审，等待 " + Math.round(st.gapMs / 60000) + " 分钟后下一块");
+      } catch (e) {
+        st.failed++;
+        update("第 " + idx + "/" + st.queue.length + " 块失败（" + bl + "）：" + String(e && e.message || e).slice(0, 80) + "，等待 " + Math.round(st.gapMs / 60000) + " 分钟后下一块");
+      }
+      st.cursor++;
+      if (st.cursor >= st.queue.length) { st.nextAt = Date.now() + st.gapMs; st.timer = setTimeout(processOne, st.gapMs); }
+      else { st.nextAt = Date.now() + st.gapMs; st.timer = setTimeout(processOne, st.gapMs); }
+    };
+
+    // 启动（首块立即跑，后续块间隔 gapMs）
+    st.timer = setTimeout(processOne, 0);
+    reply.send({ success: true, scheduled: queue.length, skipped: skipped.length, sessions: sessions, gapMs: gapMs, status: st.status() });
+  } catch (err) {
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+app.get("/admin/memory-pool/reparse/schedule/status", { preHandler: basicAuth }, (req, reply) => {
+  reply.send({ scheduler: reparseScheduler ? reparseScheduler.status() : null });
+});
+
+app.post("/admin/memory-pool/reparse/schedule/cancel", { preHandler: basicAuth }, (req, reply) => {
+  if (!reparseScheduler || !reparseScheduler.running) return reply.send({ success: true, note: "当前无运行中的任务" });
+  reparseScheduler.running = false;
+  if (reparseScheduler.timer) { clearTimeout(reparseScheduler.timer); reparseScheduler.timer = null; }
+  const li = compactionLogs.findIndex(function (x) { return x.id === reparseScheduler.logId; });
+  if (li >= 0) { compactionLogs[li].status = "skipped"; compactionLogs[li].message = "已取消（剩余 " + (reparseScheduler.queue.length - reparseScheduler.cursor) + " 块未解析）"; try { persistCompactionLogs(); } catch (e) {} }
+  const st = reparseScheduler.status();
+  reparseScheduler = null;
+  reply.send({ success: true, note: "已取消", status: st });
 });
 
 // —— promotion 改造 helper（0918）：压缩块区间的时间线原文切片 + LLM 候选提取 ——
