@@ -745,18 +745,6 @@ function recent(opts) {
   }));
 }
 
-// 一键清空全部记忆的检索计数（管理台按钮用）：计数归零、清掉最近检索时间；置顶状态不动。
-function clearRetrievalStats() {
-  const rows = load();
-  let n = 0;
-  for (const r of rows) {
-    if (Number(r.retrieval_count) > 0) { r.retrieval_count = 0; n++; }
-    if (r.last_retrieved_at) delete r.last_retrieved_at;
-  }
-  if (n) dirty = true;
-  return { cleared: n };
-}
-
 // ---------------- 压缩摘要 → 记忆池 ----------------
 // 从压缩摘要里提取【分类】标记文本（正则兜底），再调用 LLM 客观再解析 → 结构化记忆
 function parseCategoryBlocks(text, opts) {
@@ -1302,44 +1290,6 @@ async function importChanges(changes, opts) {
   return { ok: true, preview: false, updated, deleted, merged, unchanged, errors, backup, stat };
 }
 
-// 记忆池词云关键词：从池内 active 记忆内容提取高频重点词（复用 memory-engine 分词/停用词）
-// 旧实现读取已废弃的 memories.json，这里改为读 memory_pool.json，符合数据源统一策略
-function poolKeywords(limit) {
-  if (limit === undefined) limit = 80;
-  let extract = null;
-  let stop = null;
-  try {
-    const me = require("./memory-engine");
-    extract = me.extractKeywordsFromText;
-    stop = me.KEYWORD_STOP_WORDS;
-  } catch (e) { /* 不可用时返回空 */ }
-  if (typeof extract !== "function") return [];
-  const rows = load().filter(function (r) { return r.active !== false; });
-  const counts = new Map();
-  let total = 0;
-  for (const m of rows) {
-    total++;
-    const imp = Math.max(0.3, Number(m.importance) || 0.5);
-    const seen = new Set();
-    for (const w of extract(m.content)) {
-      if (seen.has(w)) continue;
-      seen.add(w);
-      const cur = counts.get(w) || { count: 0, weight: 0 };
-      cur.count += 1;
-      cur.weight += imp;
-      counts.set(w, cur);
-    }
-  }
-  const N = Math.max(2, total);
-  return Array.from(counts.entries())
-    .filter(function (e) { return e[1].count >= 2 && e[0].length >= 2 && !(stop && stop.has(e[0])); })
-    .map(function (e) {
-      return { word: e[0], count: e[1].count, weight: Math.round(e[1].weight * Math.log(N / e[1].count) * 10) / 10 };
-    })
-    .sort(function (a, b) { return b.weight - a.weight || b.count - a.count; })
-    .slice(0, Math.max(1, Number(limit) || 80));
-}
-
 function setConfig(updates) {
   if (READONLY) return getConfig();
   Object.assign(CONFIG, updates || {});
@@ -1351,11 +1301,13 @@ function getConfig() { return { ...CONFIG }; }
 
 module.exports = {
   init, shutdown, flush,
-  CATEGORIES, LEGACY_CATEGORIES, AI_CATEGORIES, COMPACTION_CATEGORY,
+  CATEGORIES,
   list, stats, get, add, update, remove, sink, revive,
-  retrieve, retrieveHybrid, breath, recent, clearRetrievalStats, warmVectors, ingestSummary, parseCategoryBlocks, reparseSummaryViaLLM, buildReparsePrompt,
-  contentSimilarity, tokensOf, decayFactor, scoreOf,
-  buildCleanPrompt, cleanPool,
-  buildImportPlan, importChanges,
-  setConfig, getConfig, poolKeywords
+  retrieve, retrieveHybrid, breath, recent, ingestSummary, buildReparsePrompt,
+  cleanPool, importChanges,
+  setConfig, getConfig
+  // 2026-09-28 收窄：AI_CATEGORIES/COMPACTION_CATEGORY/LEGACY_CATEGORIES（内部常量，LEGACY 仅存档标记）、
+  // warmVectors/parseCategoryBlocks/reparseSummaryViaLLM（内部调用）、contentSimilarity/tokensOf/decayFactor/scoreOf、
+  // buildCleanPrompt/buildImportPlan（内部调用）不再导出；poolKeywords（词云旧实现，被 context-replacements
+  // extractPoolKeywords 取代）与 clearRetrievalStats（管理台按钮已撤）整函数删除。
 };

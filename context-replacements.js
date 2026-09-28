@@ -518,9 +518,7 @@ function publicItem(item) {
   };
 }
 
-function listReplacements() {
-  return loadItems().map(publicItem);
-}
+// listReplacements（loadItems→publicItem 的列表包装）已于 2026-09-28 删除：全仓零调用，server 直接组合两者
 
 // ========================
 // 时间线
@@ -1525,20 +1523,8 @@ function updateMark(key, opt) {
   return { ok: true, content: content };
 }
 
-// 自动同步到记忆池「对话碎片」分类时，把数据池条目 id 记在该标星条目上，
-// 供取消标星时反查并同步沉底对应记忆（标星数据文件仍允许存额外键，读取方按需取字段）。
-function setMarkPoolId(key, poolId) {
-  const marks = loadMarks();
-  if (!marks[key]) return null;
-  marks[key].poolId = poolId;
-  saveMarks(marks);
-  return poolId;
-}
-
-function getMarkPoolId(key) {
-  const marks = loadMarks();
-  return (marks[key] && marks[key].poolId) || null;
-}
+// setMarkPoolId/getMarkPoolId（标星→记忆池联动 poolId 通道）已于 2026-09-28 删除：
+// 写入方从未被接通（全仓零调用，marks 里从不存在 poolId 字段）。
 
 // 按 会话id+消息id 批量取消息（AI 标星 context_star 用）：
 // 返回 found=[{msg_id,key,content,role,time}]（key=contentKey，可直接进 setMark）、missing=没找到的编号。
@@ -2828,7 +2814,6 @@ function searchCompactionOriginal(keyword, maxResults) {
 }
 
 module.exports = {
-  isReplacementMemoryMessage,
   addReplacement,
   migrateSessionBlocks,
   inheritSessionBlocks,
@@ -2836,15 +2821,13 @@ module.exports = {
   toggleReplacement,
   setReplacementHidden,
   updateReplacement,
-  listReplacements,
   applyReplacements,
   getReplaceLog,
   searchContextEnhanced,
   getLatestUserMessage,
   startMsgVectorWarmup,
-  loadAllSessionTimelines,
-  resolveRange,
-  recordCompRange,
+  // 2026-09-28 收窄：isReplacementMemoryMessage/resolveRange/loadAllSessionTimelines/findContentByKey/
+  // isEventInjectionVisible/classifySpecialEvent（均内部调用）；listReplacements/setMarkPoolId/getMarkPoolId 整函数删除
   loadItems,
   recordText,
   // 手工记录管理
@@ -2878,16 +2861,11 @@ module.exports = {
   loadMarks,
   setMark,
   updateMark,
-  setMarkPoolId,
-  getMarkPoolId,
   findMessagesByIds,
-  findContentByKey,
   contentKey,
   // 特殊事件结构化识别与注入窗口过滤（供 context-compactor / server 复用同一口径）
   messageTime,
   currentWindowStartMs,
   isSpecialEvent,
-  isDiaryEvent,
-  isEventInjectionVisible,
-  classifySpecialEvent
+  isDiaryEvent
 };

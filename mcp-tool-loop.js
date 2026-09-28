@@ -637,6 +637,5 @@ module.exports = {
   streamToolLoop,
   buildSSE,
   DEFAULT_MAX_TOOL_ROUNDS,
-  _toolCallTime,
   buildToolResultContent
 };

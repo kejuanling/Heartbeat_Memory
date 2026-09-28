@@ -576,7 +576,6 @@ module.exports = {
   saveConfig,
   estimateTokens,
   EST_IMAGE_TOKENS,
-  loadCompactionPromptConfig,
   loadCtxLimitPrompt,
   saveCtxLimitPrompt,
   resetCtxLimitPrompt,
