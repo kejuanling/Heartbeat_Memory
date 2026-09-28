@@ -1,18 +1,17 @@
 'use strict';
 // 统一「自主唤醒调用器」（2026-09-15 唤醒并入网关）：
 // 从会话时间线重建结构化上下文（与对话侧同一套加工函数：替换/容量提醒/工具记录转换/配对修复），
-// 头部注入 developer [永久上下文]/[跨窗口]，末尾追加 developer [唤醒] 块（落盘），
+// 末尾追加 developer [唤醒] 块（落盘），
 // 走工具循环（失败回退直连）调模型，返回文本。
 // 唤醒特有行为（Bark 推送/[NO_ACTION]/日记/<wake> 定时/写回时间线）仍由调用方负责，本模块不碰。
 //
 // role 法（2026-09-15 定稿；0920 起 V2 开启时上下文与聊天侧完全统一——
 // 同一 assembleAndApply 入口：system 人设 → V2 固定块（assembly/instructions/identity/
 // understanding/moments/continuity）→ 历史 → Relevant → [唤醒] 块（落盘）→ 生成 assistant。
-// V2 关闭时回退旧路径：system 人设 → developer [永久上下文] → [跨窗口] → 历史 → [唤醒]）。
+// V2 关闭时回退旧路径：system 人设 → 历史 → [唤醒]）。
 // 内部消息出口前经 lib/role-mapper.js 按供应商 profile 翻译（default: developer→system）。
 
 const path = require('path');
-const memoryEngine = require('../memory-engine');
 const contextReplacements = require('../context-replacements');
 const upstreamAlert = require('../lib/upstream-alert'); // 2026-09-28 上游 402（余额不足）提醒
 const mcp = require('../mcp-tool-loop');
@@ -263,9 +262,7 @@ function ensureBuilder(deps) {
     buildConversation = chatCtx.createConversationBuilder({
       loadTimeline: deps.loadTimeline,
       prepareMessageForLLM: deps.prepareMessageForLLM,
-      buildCrossMemorySnapshot: deps.buildCrossMemorySnapshot,
       stripPosition: deps.stripPosition,
-      memoryEngine,
       resolveSessionSystemPrompt: deps.resolveSessionSystemPrompt
     });
   }
@@ -297,4 +294,3 @@ module.exports = function registerWakeChatRoutes(app, deps) {
 };
 
 module.exports.runWakeCompletion = runWakeCompletion;
-module.exports.getWakeMcpClients = getWakeMcpClients;

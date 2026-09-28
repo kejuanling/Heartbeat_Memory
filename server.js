@@ -227,16 +227,6 @@ function resolveActiveProvider() {
   if (def) return def;
   return ps.find(function (p) { return p.enabled !== false && (p.api_url || p.base_url) && p.api_key; }) || null;
 }
-// 按会话取当前应使用的供应商：会话有覆盖且该供应商仍可用则用覆盖，否则回退全局。
-function resolveSessionProvider(sessionId) {
-  const pid = sessionModelProviderOverride(sessionId);
-  if (pid) {
-    const ps = loadAiProviders();
-    const hit = ps.find(function (p) { return p.id === pid && p.enabled !== false && (p.api_url || p.base_url) && p.api_key; });
-    if (hit) return hit;
-  }
-  return resolveActiveProvider();
-}
 // 统一聊天模型解析（2026-09-08）：会话级设置(供应商+模型) → 全局默认供应商 → env 兜底。
 // 直通路径与 MCP 工具循环共用同一口径；模型名必须属于供应商模型列表，不在则回退供应商默认并告警。
 function resolveChatModel(sessionId, bodyModel) {
@@ -1013,22 +1003,6 @@ function isSpecialEvent(msg) {
 }
 
 // 特殊事件注入分类：一个事件可能命中多类，返回命中的所有分类 key
-function classifySpecialEvent(msg) {
-  const c = normalizeContentToText(msg.content);
-  const out = [];
-  if (/自动唤醒|本次未发送/.test(c)) out.push("wake");
-  else if (/发了 Bark|推送/.test(c)) out.push("push");
-  if (c.includes("醒来写了日记") || c.includes("自动写了日记")) out.push("diary");
-  if (c.includes("记忆浮现）")) out.push("memory");
-  if (c.includes("时间标记")) out.push("time");
-  if (c.includes("摘要）")) out.push("summary");
-  if (c.includes("共影）")) out.push("co");
-  if (c.includes("截图）") || c.includes("截图唤醒）")) out.push("screenshot");
-  if (c.includes("记忆碎片")) out.push("star");
-  if (c.includes("（容量提醒）")) out.push("ctxlimit");
-  return out;
-}
-
 // 「真实对话消息」判定（时间线写入/计数/搜索的统一口径）：排除 system、工具调用、
 // 特殊事件、<system> 开头的 user 伪装消息，只认 user/assistant
 function isRealMessageForTimeline(msg) {
@@ -1249,18 +1223,6 @@ function patchMessage(sessionId, id, patch) {
   return timeline[idx];
 }
 
-// 按稳定 id 定点删除一条消息（删除同步）——只删这一条，其余 position 不动。
-function deleteMessage(sessionId, id) {
-  if (!id) return false;
-  const timeline = loadTimeline(sessionId);
-  const idx = timeline.findIndex(m => m && m.id === id);
-  if (idx < 0) return false;
-  timeline.splice(idx, 1);
-  saveTimeline(timeline, sessionId);
-  sseNotify(sessionId);
-  return true;
-}
-
 // 工具调用记录消息判定（服务器写入格式：assistant + 「【工具调用记录】」开头）
 function isToolNoteMessage(m) {
   return !!m && m.role === "assistant" && typeof m.content === "string" && m.content.startsWith("【工具调用记录】");
@@ -1456,10 +1418,6 @@ function appendSpecialEvent(content, extra, sessionId) {
 
 
 // 剥离内部标签（用于把客户端清洗版和时间线原始版互相匹配）
-function stripInternalTags(text) {
-  return tagParser.stripTags(text).trim();
-}
-
 // 剥离模型抄进正文的「工具回声」块【工具 · NAME】{.../[...]/(...)}：
 // 权威工具结果由 toolHistory(tools 字段) 与「【工具调用记录】」承担，模型重复抄写会造成冗余/刷屏，故服务端删除。
 // 与前端 extractToolEchoBlocks 同判据（标签后紧跟 { [ （ 才当作工具结果块）。
@@ -1781,8 +1739,6 @@ require("./routes/chat")(app, {
   appendMessages,
   appendRequestMessages,
   tailHasReply,
-  patchMessage,
-  deleteMessage,
   markSessionDeleted,
   sseSubscribe,
   sseUnsubscribe,
@@ -1802,13 +1758,8 @@ require("./routes/chat")(app, {
   prepareMessageForLLM,
   normalizeContentToText,
   isSpecialEvent,
-  stripInternalTags,
   extractTimestampWithMemory,
   stripPosition,
-  extractCoRecordEventTime,
-  classifySpecialEvent,
-  resolveActiveProvider,
-  resolveSessionProvider,
   resolveChatModel,
   resolveSessionSystemPrompt,
   sessionModelProviderOverride,

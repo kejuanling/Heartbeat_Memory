@@ -77,4 +77,4 @@ function toEpoch(at) {
 // 它绕过 saveTimeline 的四道守卫（损坏/过期快照/墓碑/__corrupt）且用固定 .tmp 名（并发互相截断），
 // 唯一调用方 routes/push-events.js 已于 2026-09-22（46a60e5）改走 loadTimeline/saveTimeline。
 // 全仓 grep 确认零调用方（仅剩注释提及）后删除，避免后人误用。时间线写入请一律走 server.js saveTimeline。
-module.exports = { parsePushEcho, parseWakeEcho, buildPushEcho, fmtLocalAt, pushEchoMeta, toEpoch };
+module.exports = { parsePushEcho, parseWakeEcho, buildPushEcho, pushEchoMeta, toEpoch };

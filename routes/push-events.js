@@ -94,7 +94,6 @@ module.exports = function registerPushEventsRoutes(app, { basicAuth, baseDir, lo
       const b = req.body || {};
       const sessionId = String(b.session_id || '').trim() || 'default';
       const position = Number(b.position);
-      const content = String(b.content || '');
       const title = String(b.title || '').trim();
       const body = String(b.body || '').trim();
       if (!body) return reply.send({ error: '内容不能为空' });
@@ -129,7 +128,6 @@ module.exports = function registerPushEventsRoutes(app, { basicAuth, baseDir, lo
       const b = req.body || {};
       const sessionId = String(b.session_id || '').trim() || 'default';
       const position = Number(b.position);
-      const content = String(b.content || '');
       const tlPath = timelinePathFor(baseDir, sessionId);
       if (!fsx.existsSync(tlPath)) return reply.code(404).send({ error: '时间线不存在' });
       // 2026-09-22 审查 R19：同 update 路由，改走 loadTimeline/saveTimeline（守卫 + 快照指纹）

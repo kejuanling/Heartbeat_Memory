@@ -52,4 +52,4 @@ function imageAbsUrl(req, pathOrUri) {
   return base + (abs.charAt(0) === '/' ? abs : '/' + abs);
 }
 
-module.exports = { imageAbsUrl, isLocalHost };
+module.exports = { imageAbsUrl };

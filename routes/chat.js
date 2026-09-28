@@ -5,8 +5,6 @@
 const path = require('path');
 const fsp = require('fs-extra');
 const mcp = require('../mcp-tool-loop');
-const memoryPool = require('../memory-pool');
-const memoryEngine = require('../memory-engine');
 const tagParser = require('../tag-parser');
 const wakeSchedule = require('../lib/wake-schedule');
 const contextReplacements = require('../context-replacements');
@@ -17,7 +15,6 @@ const { formatDateTimeInTimeZone } = require('../time_utils');
 const { parsePushEcho, parseWakeEcho } = require('../utils/push');
 // 对话侧/唤醒侧共用上下文加工函数（2026-09-15 唤醒并入网关）
 const chatCtx = require('./chat-context');
-const ctxV2Shadow = require('../context-v2-shadow'); // Context V2 Shadow 观察（C10 S2-B1，只记录不改生产）
 const ctxV2Runtime = require('../context-v2-runtime'); // Context V2 共享运行时（0920 完全统一：聊天唤醒同一组装入口）
 const { mapMessagesForProvider } = require('../lib/role-mapper');
 
@@ -138,8 +135,6 @@ module.exports = function registerChatRoutes(app, deps) {
     appendMessages,
     appendRequestMessages,
     tailHasReply,
-    patchMessage,
-    deleteMessage,
     markSessionDeleted,
     sseSubscribe,
     sseUnsubscribe,
@@ -153,19 +148,13 @@ module.exports = function registerChatRoutes(app, deps) {
     beginPendingReply,
     waitPendingReply,
     clearPendingReply,
-    buildCrossMemorySnapshot,
     sessionCrossInjectOverride,
     saveSessionCrossInjectOverride,
     prepareMessageForLLM,
     normalizeContentToText,
     isSpecialEvent,
-    stripInternalTags,
     extractTimestampWithMemory,
     stripPosition,
-    extractCoRecordEventTime,
-    classifySpecialEvent,
-    resolveActiveProvider,
-    resolveSessionProvider,
     resolveChatModel,
     resolveSessionSystemPrompt,
     sessionModelProviderOverride,
@@ -198,31 +187,15 @@ module.exports = function registerChatRoutes(app, deps) {
   const buildConversation = chatCtx.createConversationBuilder({
     loadTimeline,
     prepareMessageForLLM,
-    buildCrossMemorySnapshot,
     stripPosition,
-    memoryEngine,
     resolveSessionSystemPrompt
   });
 
   // 日记共享模块（2026-09-16）：日常聊天 [DIARY] 提取与保存（与唤醒共用 lib/diary.js）
   const diaryLib = require('../lib/diary')({ baseDir, readEnvValue });
 
-  // ---- Context V2 输入组装（C10 S2-B1，2026-09-17；2026-09-19 实现整体搬至 context-v2-shadow）----
-  // 主聊天与预览接口（/admin/cross-window-inject）共用同一组装（assembleInput），后续唤醒切 V2 也走那里；
-  // 此处保留同名薄包装：行为零变化，test_shadow_wire 静态断言依赖本调用名。
-  function readDiaryEntriesForShadow() {
-    return ctxV2Shadow.readDiaryEntriesForShadow(baseDir);
-  }
-
-  function buildCtxV2ShadowInput(sessionId, llmMessages) {
-    return ctxV2Shadow.assembleInput({
-      baseDir: baseDir,
-      sessionId: sessionId,
-      llmMessages: llmMessages,
-      loadTimeline: loadTimeline,
-      normalizeContentToText: normalizeContentToText,
-    });
-  }
+  // （Context V2 输入组装 assembleInput 由 server.js /admin/cross-window-inject 预览接口直接调用；
+  //   Shadow 观察分支已随 S3 观察期结束退役，2026-09-28。）
 
   // S4 的换块（applyContextV2）与记忆浮现写入（floatMemoriesToTimeline）已于 0920 上移到
   // context-v2-runtime 共享运行时（与唤醒侧完全统一，同一 assembleAndApply 入口），此处不再保留本地副本。
@@ -870,17 +843,6 @@ app.post("/v1/chat/completions", async (req, reply) => {
             if (n) console.log('[ctx-v2] 本轮记忆浮现', n, '条');
           }
         } catch (e) { console.error('[ctx-v2] 切换层失败，回退旧上下文（不影响主聊天）:', e && e.message); }
-      } else if (v2Cfg && v2Cfg.ctx_v2_shadow === true) {
-        // ---- Shadow 观察（S3 遗留，enabled 后自动停用）----
-        try {
-          ctxV2Shadow.maybeObserve({
-            flag: true,
-            sessionId,
-            oldMessages: llmMessages,
-            v2Input: buildCtxV2ShadowInput(sessionId, llmMessages),
-            file: ctxV2Shadow.buildShadowPath(path.join(baseDir, 'data', 'context_shadow'), new Date()),
-          });
-        } catch (e) { console.error('[ctx-v2-shadow] 接线层失败（不影响主聊天）:', e && e.message); }
       }
     }
 
@@ -918,7 +880,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
 
     const requestedStream = body?.stream === true;
 
-    // [永久上下文]/[跨窗口] developer 头部块已由统一对话构建器注入（buildConversation），此处不再重复。
+    // 上下文（人设 + V2 组装块 + 历史）由统一对话构建器重建（buildConversation），此处不再重复注入。
 
     // ========================
     // 对话时记忆浮现 / 时间注入：已随记忆池与摘要体系一起移除
