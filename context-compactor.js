@@ -249,7 +249,8 @@ function makeChunk(items, index, includeMsgs, manual) {
       return {
         role: m.role,
         content: contentToText(m),
-        thinking: m.thinking,
+        // 2026-09-28 修正：时间线思考链字段是 reasoning（thinking 恒为空，此前压缩模型拿不到思考链）
+        reasoning: (m && typeof m.reasoning === "string" && m.reasoning) ? m.reasoning : "",
         time: t ? formatTime(t) : "",
         key: contentKey(m),
         marked: !!marks[contentKey(m)]
@@ -347,6 +348,11 @@ function resetCtxLimitPrompt() {
 
 function buildCompactionPrompt(chunk, cfg) {
   const persona = loadPersona();
+  // 2026-09-28 思考链总量预算（闭包）：限制附给压缩模型的思考链总字数，防 prompt 无界膨胀
+  let _reasoningTotal = 0;
+  const MAX_REASONING_TOTAL = 12000;
+  const _reasoningBudget = function () { return MAX_REASONING_TOTAL - _reasoningTotal; };
+  const _reasoningSpend = function (n) { _reasoningTotal += n; };
   const maxChars = Number(cfg.compaction_summary_max_chars) || 1200;
   const minChars = Number(cfg.compaction_summary_min_chars) || 250;
   const normalChars = Math.max(minChars, Math.min(maxChars, Math.round((chunk.chars || 0) / 50)));
@@ -356,10 +362,21 @@ function buildCompactionPrompt(chunk, cfg) {
   const usable = msgs.filter(function (m) { return !isMemoryFlash(m); });
   const targetMsgs = usable.length > 0 ? usable : msgs;
   const lines = targetMsgs.map(function (m) {
-    const role = m.role === "user" ? (process.env.USER_DISPLAY_NAME || "对方") : "我";
+    // 2026-09-28 developer 参与压缩后（判定记录/日记通知等）：标签标「系统」，不再误显为「我」
+    const role = m.role === "user" ? (process.env.USER_DISPLAY_NAME || "对方") : (m.role === "developer" ? "系统" : "我");
     const body = contentToText(m);
-    // 2026-09-22 审查 §3.3：原此处有 `const think = ""` 死变量（思考链渲染移除后的残留）并拼进行尾，
-    // 恒为空串、无任何作用，已删。
+    // 2026-09-28 思考链参考（用户需求）：把被压缩消息的思考链（reasoning）附在消息行后，
+    // 让压缩模型写摘要时贴合真实 AI 的思考/风格；摘要正文本身不含思考段（模型按模板只输出摘要）。
+    // 每条截断 MAX_REASONING_EACH 字防 prompt 爆炸；总量超 MAX_REASONING_TOTAL 即停（后面消息不再附）。
+    const r = (m && m.role === "assistant" && typeof m.reasoning === "string") ? m.reasoning.trim() : "";
+    if (r) {
+      const MAX_EACH = 600;
+      const cut = r.length > MAX_EACH ? r.slice(0, MAX_EACH) + "…（思考链已截断）" : r;
+      if ((_reasoningBudget() - cut.length) >= 0) {
+        _reasoningSpend(cut.length);
+        return "[" + role + "] " + body + "\n[思考] " + cut;
+      }
+    }
     return "[" + role + "] " + body;
   });
   let conversationText = lines.join("\n\n");
@@ -525,7 +542,7 @@ function rangePreview(start, end, opts) {
       id: m && m.id ? String(m.id) : undefined,
       role: m.role,
       content: contentToText(m),
-      thinking: m.thinking,
+      reasoning: (m && typeof m.reasoning === "string" && m.reasoning) ? m.reasoning : "",
       time: t ? formatTime(t) : "",
       key: contentKey(m),
       marked: !!marks[contentKey(m)]

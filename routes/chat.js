@@ -10,6 +10,7 @@ const memoryEngine = require('../memory-engine');
 const tagParser = require('../tag-parser');
 const wakeSchedule = require('../lib/wake-schedule');
 const contextReplacements = require('../context-replacements');
+const upstreamAlert = require('../lib/upstream-alert'); // 2026-09-28 上游 402（余额不足）提醒
 const contextCompactor = require('../context-compactor');
 const { imageAbsUrl } = require('./imgurl');
 const { formatDateTimeInTimeZone } = require('../time_utils');
@@ -1006,6 +1007,10 @@ app.post("/v1/chat/completions", async (req, reply) => {
         signal: upstreamController.signal
       });
       response = await doFetch();
+      // 2026-09-28 余额不足提醒：聊天直连 402 时记录并限频推 Bark（不阻断下方透传流程）
+      if (response.status === 402) {
+        upstreamAlert.note402({ model: String((body && body.model) || (resolvedModel) || ""), detail: "", sessionId }).catch(function () {});
+      }
       // 图片 400 优雅降级（2026-09-15）：上游拉不到本轮新图（CDN 拦截供应商爬虫/文件失效）会整包 400，
       // 此前用户只能看到报错。这里把消息里的图片换成占位文本重试一次，保证回复仍能生成。
       // 用 clone() 探测错误体：非图片原因不降级时，原响应体保持可读、照常透传给客户端。

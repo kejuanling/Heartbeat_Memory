@@ -102,6 +102,38 @@ module.exports = function registerThemeRoutes(app, deps) {
     reply.send({ ok: true, name: keepName, url: imageAbsUrl(req, '/uploads/' + name), size: buf.length, mime: outMime });
   });
 
+  // 桌面图标换图（PWA 主屏图标）：前端 canvas 已居中裁方，body {icon192, icon512} 为两个 PNG dataURL，
+  // 直接覆盖 workspace/push-icon-{192,512}.png（manifest.webmanifest 引用路径固定，无需改动）。
+  // 旧图先备份 .bak-<ts>；iOS 缓存主屏图标，换图后需删掉桌面图标重新「添加到主屏幕」才可见。
+  app.post('/v1/set-app-icon', async (req, reply) => {
+    const body = req.body || {};
+    const wsDir = path.join(baseDir, 'workspace');
+    const targets = [
+      { key: 'icon192', file: path.join(wsDir, 'push-icon-192.png') },
+      { key: 'icon512', file: path.join(wsDir, 'push-icon-512.png') },
+    ];
+    const bufs = [];
+    for (const t of targets) {
+      const m = String(body[t.key] || '').match(/^data:image\/png;base64,([A-Za-z0-9+/=]+)$/);
+      if (!m) {
+        reply.code(400).send({ ok: false, error: t.key + ' 必填：PNG dataURL' });
+        return;
+      }
+      const buf = Buffer.from(m[1], 'base64');
+      if (!buf.length || buf.length > 2 * 1024 * 1024) {
+        reply.code(413).send({ ok: false, error: t.key + ' 过大（上限 2MB）' });
+        return;
+      }
+      bufs.push({ file: t.file, buf });
+    }
+    const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+    for (const b of bufs) {
+      try { await fsp.copy(b.file, b.file + '.bak-' + ts); } catch (e) { /* 首次无旧图，忽略 */ }
+      await fsp.writeFile(b.file, b.buf);
+    }
+    reply.send({ ok: true });
+  });
+
   // 网关直出兜底（正常流量走 nginx alias 直读磁盘）：path.basename 剥掉目录成分防路径穿越
   app.get('/uploads/:file', async (req, reply) => {
     const file = path.basename(String((req.params && req.params.file) || ''));

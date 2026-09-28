@@ -333,6 +333,8 @@ const TIMELINE_FILE = "enhanced_messages.json";
 // 清洗后为空的会话ID（如纯中文）用哈希生成稳定文件名：否则不同会话会共用 enhanced_messages_.json 串数据。
 // 2026-09-21 审查 R20：实现收敛到 lib/session-token.js（diary.js / context-replacements.js 同源副本已一并收敛）
 const { safeSessionToken } = require("./lib/session-token");
+const upstreamAlert = require("./lib/upstream-alert"); // 2026-09-28 上游 402（余额不足）提醒
+upstreamAlert.setPushFn(function (opts) { return sendPushNotification(opts); });
 function timelineFileFor(sessionId) {
   const token = safeSessionToken(sessionId);
   if (token === "default") return TIMELINE_FILE;
@@ -4088,6 +4090,15 @@ app.get("/admin/alerts", { preHandler: basicAuth }, async (req, reply) => {
       alerts.push({ type: "sentinel", level: "warn", title: ev.title || "哨兵事件", desc: when + " · " + (ev.body || "") });
     });
   } catch (e) { console.warn("[alerts] sentinel:", e.message); }
+  // 5) 上游余额不足：最近 402 记录（24h 窗口），数据来自 lib/upstream-alert（各上游调用点 note402）
+  try {
+    const ua = upstreamAlert.snapshot();
+    if (ua.last402At && (Date.now() - ua.last402At) < 24 * 3600 * 1000) {
+      const d = new Date(ua.last402At);
+      const when = (d.getMonth() + 1) + "月" + d.getDate() + "日 " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+      alerts.push({ type: "balance", level: "warn", title: "上游模型余额不足", desc: when + " · " + (ua.lastModel || "模型未知") + "（24h 内累计 " + (ua.count || 0) + " 次 402）" });
+    }
+  } catch (e) { console.warn("[alerts] balance:", e.message); }
   // 3) 服务状态：列出全部实际部署的服务（pm2 存在 / systemd unit 存在 / 端口型全部），异常高亮
   const services = [];
   try {

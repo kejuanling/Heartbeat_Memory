@@ -14,6 +14,7 @@
 const path = require('path');
 const memoryEngine = require('../memory-engine');
 const contextReplacements = require('../context-replacements');
+const upstreamAlert = require('../lib/upstream-alert'); // 2026-09-28 上游 402（余额不足）提醒
 const mcp = require('../mcp-tool-loop');
 const { McpServerClient, loadConfig } = require('../mcp-client');
 const { mapMessagesForProvider } = require('../lib/role-mapper');
@@ -92,6 +93,25 @@ async function runWakeCompletion(deps, opts) {
       let blockContent = wakeBlock;
       if (persistWakeBlock) {
         try {
+          // 2026-09-28 防堆积：developer [唤醒] 块每次落盘前，先删掉时间线里旧的唤醒块
+          // （内容含「系统唤醒」特征），只保留最新一条。旧唤醒块是含当时时间戳的过期指令，
+          // 模型只需看到最新一条；否则每唤醒周期追加一条、且 developer 不在压缩范围
+          // （isCompressible 只认 user/assistant）永不压缩 → 无限堆积。
+          // 一次 load + filter + save（不逐条 deleteMessage，避免大量重复读写）；
+          // 静默保存不触发 sseNotify，新块由下方 appendMessages 统一通知。
+          try {
+            const tl = deps.loadTimeline(sessionId);
+            const kept = tl.filter(function (m) {
+              return !(m && m.role === "developer" && typeof m.content === "string" &&
+                m.content.indexOf("系统唤醒") >= 0);
+            });
+            if (kept.length !== tl.length) {
+              deps.saveTimeline(kept, sessionId);
+              console.log(`[wake-chat] 已清理旧 [唤醒] 块 ${tl.length - kept.length} 条（session ${sessionId}）`);
+            }
+          } catch (e) {
+            console.warn("[wake-chat] 清理旧 [唤醒] 块失败（跳过清理，仅追加新块）:", e.message);
+          }
           const created = deps.appendMessages(sessionId, [{ role: "developer", content: blockContent }]);
           wakeBlockId = (created && created[0] && created[0].id) || null;
           console.log(`[wake-chat] developer [唤醒] 块已落盘（session ${sessionId}，${blockContent.length} 字）`);
@@ -222,7 +242,10 @@ async function runWakeCompletion(deps, opts) {
       let data;
       try { data = JSON.parse(respText); }
       catch { throw new Error(`上游返回的不是 JSON（HTTP ${resp.status}）：${respText.slice(0, 300)}`); }
-      if (!resp.ok) throw new Error(`上游模型请求失败（HTTP ${resp.status}）：${respText.slice(0, 300)}`);
+      if (!resp.ok) {
+        if (resp.status === 402) upstreamAlert.note402({ model, detail: respText, sessionId }).catch(function () {});
+        throw new Error(`上游模型请求失败（HTTP ${resp.status}）：${respText.slice(0, 300)}`);
+      }
       text = String((data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "").trim();
       if (text) console.log(`[wake-chat] 直连完成：正文 ${text.length} 字`);
     }

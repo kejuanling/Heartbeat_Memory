@@ -87,14 +87,28 @@ function zonedWallTimeToDate({ year, month, day, hour, minute, second = 0 }, tim
 }
 
 // 闹钟目标解析：优先日期时间（YYYY-MM-DD HH:mm，按 timeZone 墙上时间），纯数字按分钟（1~1440）。
-// 返回 { at: Date }（日期时间）或 { minutes: number }（分钟）；无法解析返回 null。
+// 尾部可选 keep=true / keep=false（2026-09-26 加；严格语法、不做容错）：
+//   keep=true  → 该闹钟不受「用户中途发言即作废」影响（槽位落 keep 字段）；
+//   keep=false → 与不写等价（用户发言即作废，默认行为）。
+// 写了 keep 但不是规范写法（keep / keep = true / KEEP=true 等）→ 整条拒绝，避免静默降级成"以为保护了其实没保护"。
+// 返回 { at: Date }（日期时间）或 { minutes: number }（分钟），两者都带 keep 布尔；无法解析返回 null。
 function parseWakeTarget(raw, timeZone = resolveTimeZone()) {
-  const s = String(raw || "").trim();
+  let s = String(raw || "").trim();
   if (!s) return null;
+  let keep = false;
+  const keepMatch = s.match(/^(.*\S)\s+(keep=(?:true|false))$/);
+  if (keepMatch) {
+    keep = keepMatch[2] === "keep=true";
+    s = keepMatch[1].trim();
+    if (!s) return null;
+  } else if (/\bkeep\b/i.test(s)) {
+    console.warn("[wake] keep 写法不规范，整条 <wake> 拒绝: " + String(raw || "").trim());
+    return null;
+  }
   // 纯数字 → 分钟（1~1440，与旧 <wake> 语义一致）
   if (/^\d+$/.test(s)) {
     const n = Number(s);
-    if (Number.isInteger(n) && n >= 1) return { minutes: Math.min(1440, n) };
+    if (Number.isInteger(n) && n >= 1) return { minutes: Math.min(1440, n), keep };
     return null;
   }
   // 纯时间 HH:mm → 按 TIME_ZONE 的今天此刻解析；若已过该点则顺延到明天（到点结束语义）
@@ -118,10 +132,10 @@ function parseWakeTarget(raw, timeZone = resolveTimeZone()) {
           { year: tp.year, month: tp.month, day: tp.day, hour, minute },
           timeZone
         );
-        if (next && !Number.isNaN(next.getTime())) return { at: next };
+        if (next && !Number.isNaN(next.getTime())) return { at: next, keep };
         return null;
       }
-      return { at: candidate };
+      return { at: candidate, keep };
     }
     return null;
   }
@@ -155,7 +169,7 @@ function parseWakeTarget(raw, timeZone = resolveTimeZone()) {
           console.warn("[wake] 闹钟目标超过 30 天上限，拒绝设定: " + s);
           return null;
         }
-        return { at: date };
+        return { at: date, keep };
       }
     }
   }

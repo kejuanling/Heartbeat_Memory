@@ -217,18 +217,6 @@ function sanitizeForUpstream(msgs) {
   });
 }
 
-// ---- developer 头部注入块（role 法 2026-09-15）----
-// 注入内容一律 developer 块：[永久上下文]、[跨窗口]。不再拼进 system、不再伪装 assistant。
-// 顺序：system → [永久上下文] → [跨窗口] → 历史。跨窗口快照稳定，放头部正好喂前缀缓存。
-function buildDeveloperHeaderBlocks({ pinnedCtx, crossCtx }) {
-  const blocks = [];
-  const pin = String(pinnedCtx || "").trim();
-  if (pin) blocks.push({ role: "developer", content: "[永久上下文]\n" + pin });
-  const cross = String(crossCtx || "").trim();
-  if (cross) blocks.push({ role: "developer", content: "[跨窗口]\n" + cross });
-  return blocks;
-}
-
 // ---- 会话上下文容量提醒守卫（原 chat.js 整段原样搬入，仅提醒消息 role 改 developer）----
 // 发送前检测，超限时往当轮消息流塞一条隐藏提醒并落盘，让 AI 自己调 context_replace 压缩；
 // 提醒随早期对话被压缩块覆盖后自然消失，再超限再塞。
@@ -245,9 +233,9 @@ function createCtxLimitReminderGuard(deps) {
   const CTX_LIMIT_HEAD = "（容量提醒）";
 
   // 摘要占位消息：被压缩块替换成的一段「## Historical Summary …」消息（0919 头改英文；旧「（回忆 · /（对话摘要」前缀保留兼容历史）
-  // 与 context-replacements.js isReplacementMemoryMessage 同口径
+  // 与 context-replacements.js isReplacementMemoryMessage 同口径（2026-09-28 压缩块改 developer 段，同步放行）
   function isSummaryPlaceholder(m) {
-    if (!m || m.role !== 'assistant') return false;
+    if (!m || (m.role !== 'assistant' && m.role !== 'developer')) return false;
     const c = String(m.content || '');
     return c.startsWith('## Historical Summary') || c.startsWith('（回忆 · ') || c.startsWith('（对话摘要');
   }
@@ -443,7 +431,7 @@ function createCtxLimitReminderGuard(deps) {
 // 图片规则（两侧对称）：历史图片降级为「（图片）」占位（附件正文由 prepareMessageForLLM 读入文本，
 // 与聊天侧同口径）；仅时间线末尾的连续 user 消息（本轮待回复）图片保真。
 function createConversationBuilder(deps) {
-  const { loadTimeline, prepareMessageForLLM, buildCrossMemorySnapshot, stripPosition, memoryEngine, resolveSessionSystemPrompt } = deps;
+  const { loadTimeline, prepareMessageForLLM, stripPosition, resolveSessionSystemPrompt } = deps;
   return function buildConversation(sessionId) {
     const timeline = loadTimeline(sessionId);
     const msgs = [];
@@ -463,14 +451,6 @@ function createConversationBuilder(deps) {
       const sysPrep = prepareMessageForLLM(systemRaw);
       if (sysPrep) msgs.push(sysPrep);
     }
-    // developer 头部：[永久上下文] + [跨窗口]（快照稳定，放头部喂前缀缓存）
-    let pinnedCtx = "";
-    try { pinnedCtx = memoryEngine && memoryEngine.buildPinnedContext ? memoryEngine.buildPinnedContext() : ""; }
-    catch (e) { console.warn("[conversation] 永久上下文构建失败（跳过）:", e.message); }
-    let crossCtx = "";
-    try { crossCtx = buildCrossMemorySnapshot(sessionId); }
-    catch (e) { console.warn("[conversation] 跨窗口快照构建失败（跳过）:", e.message); }
-    msgs.push(...buildDeveloperHeaderBlocks({ pinnedCtx, crossCtx }));
     // 历史：非 system、未删除，剥内部字段
     const history = stripPosition(timeline.filter(m => m && m.role !== "system" && !m.deleted));
     // 本轮待回复：时间线末尾的连续 user 消息（图片保真）
@@ -534,7 +514,6 @@ module.exports = {
   convertToolsFieldToToolRole,
   repairToolCallPairs,
   sanitizeForUpstream,
-  buildDeveloperHeaderBlocks,
   prepareModelMessages,
   createCtxLimitReminderGuard,
   createConversationBuilder

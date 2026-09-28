@@ -186,7 +186,8 @@ const TIME_ZONE = resolveTimeZone();
 // 判断消息是否为「替换」生成的占位消息（压缩/唤醒等环节需保护，避免被吞掉）
 // 与 routes/chat-context.js isSummaryPlaceholder、server.js token 估算跳过三处同口径，改一处必须同步其余
 function isReplacementMemoryMessage(msg) {
-  if (!msg || msg.role !== "assistant") return false;
+  // 2026-09-28 压缩块改为 developer 段后，这里同步放行 developer（assistant 历史格式仍兼容）
+  if (!msg || (msg.role !== "assistant" && msg.role !== "developer")) return false;
   const c = String(msg.content || "");
   return c.startsWith("## Historical Summary") || c.startsWith("（回忆 · ") || c.startsWith("（对话摘要");
 }
@@ -410,7 +411,21 @@ function isEventInjectionVisible(msg) {
 }
 
 function isCompressible(msg, includeEvents) {
-  if (!msg || (msg.role !== "user" && msg.role !== "assistant")) return false;
+  if (!msg) return false;
+  // 2026-09-28 用户拍板：developer 默认参与压缩（判定记录/日记通知/唤醒提示该压就压），
+  // 只排除顶部系统注入块与保护类消息；system（人设）仍不压缩。
+  const role = msg.role;
+  if (role !== "user" && role !== "assistant" && role !== "developer") return false;
+  // 顶部系统注入块排除：
+  if (role === "system") return false;                    // 人设（最顶，永不压缩）
+  if (isReplacementMemoryMessage(msg)) return false;      // 压缩块替身（防自压缩）
+  if (typeof msg.content === "string") {
+    const t = String(msg.content).trim();
+    // V2 注入块（## 英文名：Context Assembly / System Instructions / Core Identity / …）
+    // 请求时注入不落盘，此处兜底防未来落盘；V1 旧块 [永久上下文]/[跨窗口] 同兜底（V2 已剔除）。
+    if (t.startsWith("## ")) return false;
+    if (t.startsWith("[永久上下文]") || t.startsWith("[跨窗口]")) return false;
+  }
   // 2026-09-13 审查修复：软删除消息不进压缩索引——此前已删除的容量提醒仍占编号、
   // 计入容量估算，且原文被发给摘要模型导致摘要串味（compactor/findContentByKey 等处均已过滤）
   if (msg.deleted) return false;
@@ -1407,8 +1422,10 @@ function updateReplacement(id, text) {
 // ========================
 function buildMemoryMessage(item) {
   // 占位头 0919 起改英文块头（Context Assembly 0918 定稿命名），时间段紧跟一个空格；旧「（对话摘要」头仅存在于历史会话
+  // 2026-09-28 用户拍板：压缩替换块在上下文中显示为 developer 段（与其他 V2 注入块同层）；
+  // 出口经 role-mapper default 映射为 system 发给上游。
   const label = item.range_label ? " " + item.range_label : "";
-  return { role: "assistant", _ctxRep: true, content: "## Historical Summary" + label + "\n" + recordText(item) };
+  return { role: "developer", _ctxRep: true, content: "## Historical Summary" + label + "\n" + recordText(item) };
 }
 
 // ---------------- 重要内容标记（星星） ----------------

@@ -14,6 +14,7 @@
 "use strict";
 
 const { loadTools, toOpenAITools, callToolByExposedName } = require("./mcp-service");
+const upstreamAlert = require("./lib/upstream-alert"); // 2026-09-28 上游 402（余额不足）提醒
 
 const DEFAULT_MAX_TOOL_ROUNDS = 6;
 const MAX_REASONING_CHARS = 4000; // 思考链最多保留字符数，避免过长
@@ -158,6 +159,7 @@ async function runWithTools({
           " ofWhichHasRc=" + _tcRc.length +
           " tail3=" + working.slice(-3).map(function (m) { return (m && m.role) || "?"; }).join("/"));
       } catch (e) {}
+      if (resp.status === 402) upstreamAlert.note402({ model, detail: t, sessionId }).catch(function () {});
       throw new Error(`上游请求失败 HTTP ${resp.status}: ${t.slice(0, 300)}`);
     }
 
@@ -400,6 +402,7 @@ async function streamToolLoop({
           " assistantWithToolCalls=" + _tcA.length +
           " ofWhichHasRc=" + _tcRc.length);
       } catch (e) {}
+      if (resp.status === 402) upstreamAlert.note402({ model, detail: t, sessionId }).catch(function () {});
       throw new Error(`上游请求失败 HTTP ${resp.status}: ${t.slice(0, 300)}`);
     }
     if (!resp.body) throw new Error("上游无响应体");

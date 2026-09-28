@@ -1,6 +1,6 @@
 {
   "server": "小世界MCP工具集",
-  "generated_at": "2026-09-27 17:58:44",
+  "generated_at": "2026-09-27 22:39:44",
   "tools": [
     {
       "name": "context_digest",
@@ -612,7 +612,7 @@
     },
     {
       "name": "phone_state",
-      "description": "看她现在的状态：电量、天气、位置、最近App记录。",
+      "description": "查岗：电量、天气、位置、最近App记录。",
       "inputSchema": {
         "type": "object",
         "properties": {
