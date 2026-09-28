@@ -445,8 +445,12 @@ function createConversationBuilder(deps) {
   const _CONV_CACHE_MAX = 10;
   const _CONV_CACHE_MIN_MSGS = 300;
   function _convCacheKey(sessionId, fp, blockFp, systemRaw) {
+    // 系统提示取全文 sha1 指纹（0929-07：原"长度+前120字"在"人设改版但长度与前缀相同"时会漏判缓存）
     const sc = systemRaw ? String(systemRaw.content || "") : "";
-    return String(sessionId || "default") + "|" + fp + "|" + (blockFp || "") + "|" + sc.length + "|" + sc.slice(0, 120);
+    let sysFp = "";
+    try { sysFp = crypto.createHash("sha1").update(sc).digest("hex").slice(0, 16); }
+    catch (e) { sysFp = String(sc.length); }
+    return String(sessionId || "default") + "|" + fp + "|" + (blockFp || "") + "|" + sysFp;
   }
   function _convCacheSet(key, msgs) {
     if (_convCache.size >= _CONV_CACHE_MAX) {
