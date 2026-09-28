@@ -275,6 +275,17 @@ function isMemoryFlash(msg) {
 // isSpecialEvent 独立判定：认 kind 字段 / [DIARY] 前缀 / 旧格式文本三种形态。
 // 注意 isSpecialEvent 本身刻意不动：日记当前以普通 assistant 消息内联进上下文，
 // 若升格为特殊事件而注入机制不认回，日记会整段从上下文消失。
+// 2026-09-29：真日记判定——只保护「AI 实际写的日记内容」（assistant 的 kind=diary / [DIARY] 前缀 /
+// 「醒来写了日记/自动写了日记」事件）。developer 的写日记通知提示（[小世界] 涵写了日记（时间），无正文）
+// 不算真日记：默认参与压缩，该压就压，避免在上下文里无限堆积。
+function isRealDiary(msg) {
+  if (!msg || msg.role !== "assistant") return false;
+  if (msg.kind === "diary") return true;
+  const c = String(msg.content || "");
+  if (/^\s*\[DIARY\]/.test(c)) return true;
+  return isSpecialEvent(msg) && (c.indexOf("醒来写了日记") !== -1 || c.indexOf("自动写了日记") !== -1);
+}
+
 function isDiaryEvent(msg) {
   if (!msg) return false;
   if (msg.kind === "diary") return true;
@@ -429,7 +440,7 @@ function isCompressible(msg, includeEvents) {
   // 2026-09-13 审查修复：软删除消息不进压缩索引——此前已删除的容量提醒仍占编号、
   // 计入容量估算，且原文被发给摘要模型导致摘要串味（compactor/findContentByKey 等处均已过滤）
   if (msg.deleted) return false;
-  if (isDiaryEvent(msg)) return false; // 日记永远不压缩
+  if (isRealDiary(msg)) return false; // 真日记永远不压缩（developer 写日记通知提示可压缩，0929）
   if (isStarEvent(msg)) return false; // 记忆碎片永远不压缩（与日记同级，跨窗口带走的标星正文）
   if (!includeEvents && msg.role === "assistant" && isSpecialEvent(msg)) return false;
   // 特殊事件只在当前事件窗口内才计入压缩索引：与真实请求注入口径一致，避免旧窗口事件残留在未覆盖区
