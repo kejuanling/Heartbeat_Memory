@@ -220,4 +220,4 @@ async function relevantScores(rows, query) {
   return { ok: true, scores };
 }
 
-module.exports = { ensureVectors, pruneVectors, similarGroups, retrieveHybrid, recent, breath, relevantScores, entryHash, VECTOR_FILE };
+module.exports = { ensureVectors, pruneVectors, similarGroups, retrieveHybrid, recent, breath, relevantScores };

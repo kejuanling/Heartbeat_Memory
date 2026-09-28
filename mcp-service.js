@@ -180,7 +180,5 @@ function _toolError(code, message, route) {
 module.exports = {
   loadTools,
   toOpenAITools,
-  callToolByExposedName,
-  sanitizeNamePart,
-  qualifiedToolName
+  callToolByExposedName
 };

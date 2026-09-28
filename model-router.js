@@ -13,8 +13,7 @@ const KNOWN_MODEL_ROLES = {
   memory_pool:  "记忆提炼",
   reparse:      "摘要解析",
   digest:       "回看摘要",
-  rerank:       "记忆重排",
-  co_chat:      "共影对话"
+  rerank:       "记忆重排"
 };
 
 function loadProviders() {
@@ -73,4 +72,4 @@ function resolveRoleModel(role) {
   return { provider: null, model: "" };
 }
 
-module.exports = { KNOWN_MODEL_ROLES, loadProviders, loadRoleModelsRaw, saveRoleModel, resolveRoleModel, resolveActiveProvider };
+module.exports = { KNOWN_MODEL_ROLES, loadRoleModelsRaw, saveRoleModel, resolveRoleModel, resolveActiveProvider };

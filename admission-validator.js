@@ -226,8 +226,4 @@ function validate(candidate, deps = {}) {
 module.exports = {
   validate,
   isInstruction,
-  PRIVACY_PATTERNS,
-  OPS_WORDS,
-  RUNTIME_TAG_RE,
-  ORIGIN_METHOD_BASE,
 };

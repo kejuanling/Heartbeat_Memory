@@ -149,4 +149,4 @@ async function judge(candidateText, existingText, opts = {}) {
   return judgeMock(candidateText, existingText);
 }
 
-module.exports = { judge, judgeMock, judgeLLM, parseJudgeOutput, buildPrompt, normalizeText, RELATIONS, getJudgePromptConfig, saveJudgeTemplate };
+module.exports = { judge, judgeLLM, parseJudgeOutput, buildPrompt, normalizeText, RELATIONS, getJudgePromptConfig, saveJudgeTemplate };

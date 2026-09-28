@@ -6,17 +6,16 @@
 const fs = require("fs");
 const path = require("path");
 const { getDatePartsInTimeZone, resolveTimeZone } = require("./time_utils");
+const { safeSessionToken } = require("./lib/session-token");
 
 const PAPERS_DIR = path.join(__dirname, "papers");
 const MAX_PAPER_CHARS = 30000; // 单篇软上限：超长截断保护，防止单张纸撑爆管理台列表
 const SHARED_TOKEN = "_shared";
 
-// 会话目录名：与 server.js safeSessionToken 同一套规则（非法字符清洗，清洗后为空退 md5 哈希）
+// 会话目录名：引用共享 safeSessionToken（原手抄副本，0921 R20 收敛漏网）。
+// 本模块语义=空会话返回 ""，由调用方兜底 _shared 目录，故这里包一层而非直用。
 function sessionToken(sessionId) {
-  if (!sessionId) return "";
-  if (sessionId === "default") return "default";
-  const safe = String(sessionId).replace(/[^A-Za-z0-9_-]/g, "");
-  return safe || ("h" + require("crypto").createHash("md5").update(String(sessionId)).digest("hex").slice(0, 12));
+  return sessionId ? safeSessionToken(String(sessionId)) : "";
 }
 
 function timeZone() {
@@ -97,17 +96,4 @@ function listPapers(limit) {
   return limit ? out.slice(0, limit) : out;
 }
 
-// 删除一张纸（按相对路径，resolvePaperRelPath 校验防目录穿越）
-function deletePaper(relPath) {
-  const r = resolvePaperRelPath(relPath);
-  if (!r) return { ok: false, error: "非法路径" };
-  try {
-    if (!fs.existsSync(r.full)) return { ok: false, error: "纸不存在：" + r.rel };
-    fs.removeSync(r.full);
-    return { ok: true, file: r.rel };
-  } catch (e) {
-    return { ok: false, error: e.message || String(e) };
-  }
-}
-
-module.exports = { savePaper, listPapers, deletePaper, resolvePaperRelPath, sessionToken };
+module.exports = { savePaper, listPapers, resolvePaperRelPath };

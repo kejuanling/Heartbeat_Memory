@@ -216,4 +216,4 @@ function extractWavPcm(buf) {
   return null;
 }
 
-module.exports = { recognizeAsr, extractWavPcm };
+module.exports = { recognizeAsr };

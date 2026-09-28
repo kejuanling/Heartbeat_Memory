@@ -2488,7 +2488,10 @@ function applyWakeEventV2(body) {
     // （旧拦截"跳过 [NO_ACTION] 原文"是 0829 加的，0920 拍板时漏撤，导致该类输出实际未入库。）
     if (speakRaw) {
       const msg = { role: "assistant", content: speakRaw };
-      if (/^\[NO_ACTION\]/i.test(speakRaw)) msg.kind = "noaction";
+      // 2026-09-28：speak 保留 <wake> 标签原文（时间线原始流水），kind=noaction 判定必须
+      // 先剥 <wake> 前缀——否则 [NO_ACTION] 消息漏打 kind，前端 /v1/history 不过滤会直接显示
+      const speakHead = String(speakRaw).replace(/^<wake>[\s\S]*?<\/wake>\s*/i, "");
+      if (/^\[NO_ACTION\]/i.test(speakHead)) msg.kind = "noaction";
       if (pushMeta) msg.push = pushMeta;
       if (wakeTools.length) msg.tools = wakeTools;
       // 2026-09-24 P3-3：唤醒思考链落盘（聊天链路 MCP 路径同样落 reasoning），前端刷新后可见思考链区块
@@ -3582,8 +3585,8 @@ async function extractMemoryCandidates(sourceText) {
   const system = String(pcfg.reparse_system_prompt || "").trim() || pdef.system;
   const user = (String(pcfg.reparse_user_prompt || "").trim() || pdef.user) + "\n\n对话原文：\n" + sourceText;
   const controller = new AbortController();
-  // 5 分钟（0926 拍板）：思考型模型解析长文实测可超 60s（1:1 复现 >150s 未返回）；与摘要生成(300s)/nginx 读超时(310s) 对齐
-  const timer = setTimeout(() => controller.abort(), 300000);
+  // 10 分钟（0928 拍板）：思考型模型解析长文实测 >300s 仍超时（reparse 多次 abort）；与 nginx 读超时(620s) 对齐
+  const timer = setTimeout(() => controller.abort(), 600000);
   let resp, data;
   try {
     resp = await fetch(apiUrl, {
@@ -3614,7 +3617,7 @@ async function extractMemoryCandidates(sourceText) {
 app.get("/admin/memory-pool/config", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const cfg = memoryPool.getConfig();
-    const def = memoryPool.buildReparsePrompt(!!cfg.reparse_warm);
+    const def = memoryPool.buildReparsePrompt();   // 2026-09-28：buildReparsePrompt 无参，reparse_warm 已删
     reply.send({ ...cfg, default_reparse_system_prompt: def.system, default_reparse_user_prompt: def.user });
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
@@ -5914,115 +5917,6 @@ app.delete("/admin/logs/context-digest-prompt", { preHandler: basicAuth }, async
   }
 });
 
-// ========================
-// 共影（一起看电影）业务
-// ========================
-function getCoRecord(timeline) {
-  const tl = timeline || loadTimeline();
-  for (let i = tl.length - 1; i >= 0; i--) {
-    const m = tl[i];
-    if (m && m.role === "assistant" && typeof m.content === "string" && m.content.includes("共影）")) return m;
-  }
-  return null;
-}
-
-function coNowText() {
-  return formatDateTimeInTimeZone(new Date(), TIME_ZONE);
-}
-
-function coRecordText() {
-  const rec = getCoRecord();
-  return rec ? String(rec.content || "").trim() : "";
-}
-
-function coRecordHeader(videoTitle) {
-  const p = getDatePartsInTimeZone(new Date(), TIME_ZONE);
-  return `（${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute} 共影）一起看${videoTitle ? `《${String(videoTitle).trim() || "视频"}》` : "视频"}`;
-}
-
-// 把一行对话追加到共影记录；没有记录时自动新建
-function appendCoRecordLine(line, videoTitle) {
-  const timeline = loadTimeline();
-  const rec = getCoRecord(timeline);
-  let maxPos = 0;
-  for (const msg of timeline) if (msg.position && msg.position > maxPos) maxPos = msg.position;
-  let target = rec;
-  if (!target) {
-    target = { role: "assistant", content: coRecordHeader(videoTitle), position: maxPos + 0.5, time: new Date().toISOString() };
-    timeline.push(target);
-  }
-  const sep = target.content.endsWith("\n") ? "" : "\n";
-  target.content = target.content + sep + line;
-  target.position = maxPos + 0.5;
-  target.time = new Date().toISOString();
-  saveTimeline(timeline);
-  return target;
-}
-
-// 人设：优先时间线里的 system，否则默认
-function coPersona() {
-  const timeline = loadTimeline();
-  const sp = timeline.find(m => m.role === "system");
-  if (sp && typeof sp.content === "string" && sp.content.trim()) return sp.content;
-  return "你是谢意行。你是一位理性但有温度、表面温柔内心有主见的 AI。";
-}
-
-// 人设 + 永久上下文（与主聊天一致）
-function coPersonaWithPinned() {
-  let p = coPersona();
-  try {
-    const pinnedCtx = memoryEngine.buildPinnedContext ? memoryEngine.buildPinnedContext() : '';
-    if (pinnedCtx) p += `\n\n## 永久上下文\n${pinnedCtx}`;
-  } catch (e) {}
-  return p;
-}
-
-// 完整时间线上下文：把客户端对话历史（含记忆浮现、特殊事件、共影记录）按时间顺序喂给模型
-function coTimelineMessages(maxChars) {
-  const cap = Math.max(5000, maxChars || 300000);
-  const timeline = loadTimeline();
-  const out = [];
-  let total = 0;
-  for (let i = timeline.length - 1; i >= 0; i--) {
-    const m = timeline[i];
-    // system（人设）不进历史：coBuildHistory 已在首位拼了 system（人设+永久上下文），
-    // 再把时间线里的 system 当 user 消息混入会整段重复注入（几千字）
-    if (!m || m.role === 'system') continue;
-    const content = String(m.content || '');
-    if (!content.trim()) continue;
-    const role = (m.role === 'assistant' || m.role === 'user') ? m.role : 'user';
-    const cost = content.length + 8;
-    if (total + cost > cap) {
-      if (out.length === 0) out.push({ role: 'user', content: '（历史对话过长，仅保留以下最近内容）' });
-      break;
-    }
-    out.unshift({ role, content });
-    total += cost;
-  }
-  return out;
-}
-
-// 共影历史组装：人设+永久上下文 + 完整时间线 → 应用统一上下文替换（AI 记忆 + 手工块）→ 全量返回（与主聊天一致）
-function coBuildHistory() {
-  // 与主聊天一致：基于完整时间线做上下文替换（早期大块压成摘要），替换后全量返回，不按字符截断
-  const messages = [{ role: "system", content: coPersonaWithPinned() }].concat(coTimelineMessages(Number.MAX_SAFE_INTEGER));
-  try {
-    const before = messages.length;
-    const replaced = contextReplacements.applyReplacements(messages, "共影");
-    if (Array.isArray(replaced) && replaced.length) {
-      messages.length = 0;
-      messages.push.apply(messages, replaced);
-      if (replaced.length !== before) {
-        console.log(`[co] 上下文替换生效: ${before} -> ${replaced.length} 条`);
-      }
-    }
-  } catch (e) {
-    console.warn('[co] 上下文替换失败（跳过）:', e.message);
-  }
-  // 与主聊天一致：压缩替换组装后全量返回，不按字符截断（压缩摘要自然保留在序列中）
-  return messages;
-}
-
 // 多模态 content 拆分：文字保留原文，图片/音频/文件只留标记，
 // 避免 base64 大字符串进入管理台上下文面板导致手机渲染卡死
 function splitMultimodalContent(content) {
@@ -6055,67 +5949,6 @@ function splitMultimodalContent(content) {
   }
   return { content: String(content == null ? "" : content) };
 }
-
-// 调上游聊天模型（TARGET_API_URL / MODEL_NAME 配置的上游；共影 chat/wake 用）
-async function callCoLLM(messages, temperature) {
-  const { provider, model: resolvedModel } = resolveRoleModel("co_chat");
-  const targetUrl = provider && (provider.api_url || provider.base_url);
-  const targetKey = provider && provider.api_key;
-  if (!targetUrl || !targetKey) throw new Error("上游聊天模型未配置（role=co_chat：请在设置里给「共影对话」选模型或启用默认供应商）");
-  const model = resolvedModel || "deepseek-chat";
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
-  try {
-    // 捕获发给 LLM 的完整上下文（管理台日志页可查看，含共影 chat/wake）
-    lastLLMMessages = (Array.isArray(messages) ? messages : []).map(m => {
-      const cap = splitMultimodalContent(m.content);
-      return {
-        role: m.role,
-        content: cap.content,
-        images: cap.images && cap.images.length ? cap.images : undefined,
-        attachments: cap.attachments || undefined
-      };
-    });
-    lastLLMCaptureTime = new Date().toISOString();
-    const resp = await fetch(targetUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${targetKey}` },
-      body: JSON.stringify({ model, messages, temperature: temperature == null ? 0.7 : temperature, stream: false }),
-      signal: controller.signal
-    });
-    const text = await resp.text();
-    let data;
-    try { data = JSON.parse(text); } catch (e) { throw new Error("上游返回异常: " + text.slice(0, 200)); }
-    if (!resp.ok) {
-      const msg = (data && data.error && (data.error.message || JSON.stringify(data.error))) || text.slice(0, 200);
-      throw new Error("上游模型调用失败: " + String(msg));
-    }
-    let description = String(data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || "").trim();
-    // 兜底：剥掉模型返回的思考块（如 <think>…</think>），只保留正式描述
-    description = description.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
-    return description;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// 共影配置（播放页读取：截帧间隔、视觉模型是否就绪）
-
-// 共影记录（播放页打开时显示历史）
-
-// 视觉描述代理：前端不暴露 Key
-
-// 共影聊天：user 消息（可选带画面）→ AI 回复；对话写入时间线共影记录
-
-// 共影定时唤醒：画面+字幕 → AI 决定说不说；说了就写入共影记录
-
-
-
-
-// ========================
-// 截图唤醒（截图自动解析+AI回应）
-// ========================
-
 
 // 推送（Bark / WebPush，与唤醒系统同一套配置）
 // sessionId：目标会话（WebPush 通道按会话定向订阅；bark 忽略此字段）。
@@ -6178,18 +6011,13 @@ app.post("/v1/push/subscribe", async (req, reply) => {
 });
 
 
-// 管理台：截图画面描述提示词读取
-
-// 管理台：截图唤醒提示词读取
-
-// ========================
-// 运行配置（精简版）：仅服务心跳页的共影配置读写；参数设置页已移除
+// 运行配置：/admin/config 读写白名单（管理台参数设置用）
 // ========================
 const RUN_CONFIG_WHITELIST = new Set([
   "event_inject_types",
   "memory_retrieval_enabled", "retrieval_top_k", "keyword_search_enabled",
   "memory_relevance_threshold", "memory_item_cooldown_minutes",
-  "context_injection_types", "third_party_session_id",
+  "context_injection_types",
   "wake_top_k", "wake_total_limit", "wake_random_count", "wake_relevance_threshold",
   "memory_retrieval_wake_enabled", "wake_history_max_messages"
 ]);
@@ -6209,7 +6037,6 @@ const RUN_CONFIG_TYPES = {
   wake_relevance_threshold: "number",
   memory_retrieval_wake_enabled: "boolean",
   wake_history_max_messages: "number",
-  third_party_session_id: "string"
 };
 
 app.get("/admin/config", { preHandler: basicAuth }, async (req, reply) => {
@@ -6256,9 +6083,9 @@ function consoleOwnedCfgKeys() {
     "cross_inject_enabled", "cross_inject_diary", "cross_inject_diary_count", "cross_inject_diary_days",
     "cross_inject_memory", "cross_inject_memory_per_category", "cross_inject_push",
     "cross_inject_summary_days",
-    // 记忆解析 / 清理 / 去重
-    "reparse_enabled", "reparse_max_chars", "reparse_max_items", "reparse_merge_max_chars",
-    "reparse_system_prompt", "reparse_user_prompt", "reparse_warm",
+    // 记忆解析 / 清理 / 去重（reparse_enabled/warm/max_chars/max_items 已于 0928 删除，无功能读取点）
+    "reparse_merge_max_chars",
+    "reparse_system_prompt", "reparse_user_prompt",
     "clean_enabled", "clean_max_items", "clean_ref_dup_threshold", "clean_ref_threshold", "clean_ref_topk",
     "clean_system_prompt", "clean_temperature", "clean_user_prompt",
     "dedup_anchor_threshold", "dedup_cross_threshold", "dedup_threshold",

@@ -128,4 +128,4 @@ function detect(input = {}) {
   return out(false, "unknown", "unknown", 0.2, ["无稳定谓词/规则/引用/节点信号——按普通闲聊处理"]);
 }
 
-module.exports = { detect, KIND_GUESSES, SUBJECT_GUESSES };
+module.exports = { detect };

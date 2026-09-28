@@ -56,4 +56,4 @@ function buildProvenance(input = {}) {
   };
 }
 
-module.exports = { buildProvenance, ORIGIN_METHOD };
+module.exports = { buildProvenance };

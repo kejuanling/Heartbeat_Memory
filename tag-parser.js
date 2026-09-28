@@ -35,16 +35,10 @@ function parseKeyValueBlock(raw, keys) {
   const parts = trimmed.split(re);
   const out = {};
   for (const part of parts) {
-    const m = part.match(/^\s*(title|content|type|category|importance|reason|pinned)\s*[:=]\s*(.*)$/i);
+    const m = part.match(/^\s*(title|content|type|category|reason|pinned)\s*[:=]\s*(.*)$/i);
     if (!m) continue;
     const key = m[1].toLowerCase();
-    let val = m[2].trim().replace(/^["']|["']$/g, "");
-    if (key === "importance") {
-      const n = parseFloat(val);
-      if (isFinite(n)) out.importance = n;
-    } else {
-      out[key] = val;
-    }
+    out[key] = m[2].trim().replace(/^["']|["']$/g, "");
   }
   return out;
 }
@@ -55,20 +49,17 @@ function parsePinContent(raw) {
     if (parsed.content) {
       return {
         title: parsed.title || '',
-        content: parsed.content.trim(),
-        importance: parsed.importance,
-        reason: parsed.reason || ''
+        content: parsed.content.trim()
       };
     }
   } catch {}
 
-  const out = parseKeyValueBlock(raw, ["title", "content", "importance", "reason"]);
+  // importance 已随 0920 重要级全链路删除退出解析（split 键保留 reason 以正确终止 content 取值）
+  const out = parseKeyValueBlock(raw, ["title", "content", "reason"]);
   if (out.content) {
     return {
       title: out.title || '',
-      content: out.content.trim(),
-      importance: out.importance,
-      reason: out.reason || ''
+      content: out.content.trim()
     };
   }
 
@@ -92,7 +83,7 @@ async function extractAndStore(text, ctx) {
         if (pm) title = (pm[2] || pm[3] || pm[4] || "").trim();
         const body = stripTags(text).trim();
         if (!body) return null;
-        const r = papers.savePaper({ sessionId: ctx && ctx.sessionId, content: body, title, source: "paper_tag" });
+        const r = papers.savePaper({ sessionId: ctx && ctx.sessionId, content: body, title });
         if (r && r.ok) console.log("[tag-parser] <paper> 已留纸:", r.relPath, title ? ("标题=" + title) : "");
         else console.warn("[tag-parser] <paper> 留纸失败:", (r && r.error) || "unknown");
         return r;
