@@ -4583,6 +4583,14 @@ selDel.addEventListener("click",()=>{
 });
 
 /* 会话命名辅助：新会话在 AI 首条回复到达后用回复开头命名（只动仍叫"会话id"的未命名会话） */
+// 2026-09-29 新建会话默认名改为「创建日期时间」（原为 AI 回复前 12 字）。
+// 创建即写入 han_session_names + 会话列表 name，autoNameSessionWhenUntitled 因已命名自动跳过，
+// 回复开头不再覆盖新会话名；旧未命名会话（存量 sid 名）收到回复仍按旧逻辑命名。
+function fmtSessionDate(d){
+  d=d||new Date();
+  var p=function(n){return String(n).padStart(2,"0");};
+  return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+" "+p(d.getHours())+":"+p(d.getMinutes());
+}
 function codeNameSnippet(txt){
   return String(txt||"").replace(/\s+/g," ").trim().slice(0,12);
 }
@@ -6840,9 +6848,14 @@ function createSessionWithPrompt(backupId, providerId, modelName){
   msgs=[];saveMsgs();
   renderAll();
   closeDrawer();
-  // 把新会话加入本地列表
+  // 把新会话加入本地列表（2026-09-29：默认名 = 创建日期时间，原为 sid 待 AI 回复后命名）
+  const sessName=fmtSessionDate();
+  let _nm={}; try{ _nm=JSON.parse(localStorage.getItem("han_session_names")||"{}"); }catch(e){}
+  _nm[sid]=sessName;
+  try{ localStorage.setItem("han_session_names",JSON.stringify(_nm)); }catch(e){}
   SessionStore.removeSession("default");
-  SessionStore.upsertSession({id:sid,name:sid,total:0,real:0,last_time:null,is_default:false});
+  SessionStore.upsertSession({id:sid,name:sessName,total:0,real:0,last_time:null,is_default:false});
+  try{ var _nmSet={}; _nmSet[sid]=sessName; pushSessionNamesDelta(_nmSet, []); }catch(e){}
   renderSessionList();
   startLiveEvents();   // 空会话也订阅，等 AI 主动消息/别设备消息进来时即时可刷新
   showToast(backupId?"新会话已创建，本会话使用所选提示词":"新会话已创建");
