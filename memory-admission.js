@@ -175,9 +175,10 @@ function createAdmission(opts = {}) {
     const detection = detect({ text, source: originVal, explicitKind: mapped ? mapped.kind : b.kind, explicitSubject: mapped ? mapped.subject : b.subject });
 
     // [2] provenance_builder（manual：无 session/msg → null，不伪造；promotion：block_id 必带（压缩块溯源），msg_id=null）
+    // method 一律用契约内合法值（2026-09-28 拍板方案B：原 chat_manual_pick 不在 LEGAL_METHODS 会被静默置 null）
     const provenance = buildProvenance({
       origin: originVal,
-      method: isPromo ? "summary_promotion" : (isManualReview ? "chat_manual_pick" : "admin_form"),
+      method: isPromo ? "summary_promotion" : "admin_form",
       sessionId: strSafe(ctx.sessionId),
       msgId: strSafe(ctx.msgId),
     });

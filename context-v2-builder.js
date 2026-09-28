@@ -356,4 +356,4 @@ function buildContextBlocks(input, opts) {
   return { blocks, relevantHits };
 }
 
-module.exports = { buildContextBlocks, DEFAULT_CONFIG, BLOCK_DEFS, HEADERS, estimateTokens };
+module.exports = { buildContextBlocks, DEFAULT_CONFIG, BLOCK_DEFS, estimateTokens };

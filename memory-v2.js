@@ -449,16 +449,8 @@ function createStore(opts = {}) {
   };
 }
 
-// 默认生产实例（惰性：不 require 即不触盘；init() 才确保文件存在）
-let defaultStore = null;
-function getDefaultStore() {
-  if (!defaultStore) defaultStore = createStore();
-  return defaultStore;
-}
-
 module.exports = {
   createStore,
-  getDefaultStore,
   validateEntry,
   DEFAULT_CONFIG,
   CONSTANTS: {
