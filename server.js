@@ -5680,27 +5680,37 @@ app.post("/admin/context-compaction/blocks", { preHandler: basicAuth }, async (r
 //（「解析入池」= LLM 提炼；「一键入池」= 摘要全文直接入库，均不自动跑）
 
 
-// ---------------- 摘要生成日志（文件持久化，最近 10 条；重启不丢） ----------------
-const COMPACTION_LOG_MAX = 10;
+// ---------------- 摘要生成日志（文件持久化，保留当天；重启不丢） ----------------
+// 2026-09-29：原「最近 10 条」改「当天」——生成任务多时 10 条放不下（keh3 一次批量 35 块），
+// 当天 00:00（服务器本地时区，+8）之后的条目全保留，跨天自动清出；已读角标逻辑不受影响（不清日志）。
 const COMPACTION_LOG_FILE = path.join(__dirname, "data", "compaction_log.json");
+function compactionLogDayStart() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+function inCompactionLogDay(l) {
+  try { return !!(l && new Date(l.time).getTime() >= compactionLogDayStart()); }
+  catch (e) { return false; }
+}
 let compactionLogs = [];
 try {
   const loaded = JSON.parse(fs.readFileSync(COMPACTION_LOG_FILE, "utf8"));
-  if (Array.isArray(loaded)) compactionLogs = loaded.slice(0, COMPACTION_LOG_MAX);
+  if (Array.isArray(loaded)) compactionLogs = loaded.filter(inCompactionLogDay);
 } catch (e) { compactionLogs = []; }
 function persistCompactionLogs() {
-  try { fs.writeFileSync(COMPACTION_LOG_FILE, JSON.stringify(compactionLogs.slice(0, COMPACTION_LOG_MAX))); } catch (e) { /* 持久化失败不影响运行 */ }
+  try { fs.writeFileSync(COMPACTION_LOG_FILE, JSON.stringify(compactionLogs.filter(inCompactionLogDay))); } catch (e) { /* 持久化失败不影响运行 */ }
 }
 function addCompactionLog(entry) {
   const log = Object.assign({ id: Date.now() + '-' + Math.random().toString(36).slice(2, 8), time: new Date().toISOString() }, entry);
   compactionLogs.unshift(log);
-  if (compactionLogs.length > COMPACTION_LOG_MAX) compactionLogs.length = COMPACTION_LOG_MAX;
+  compactionLogs = compactionLogs.filter(inCompactionLogDay);
   persistCompactionLogs();
   return log;
 }
 
 app.get("/admin/context-compaction/logs", { preHandler: basicAuth }, (req, reply) => {
-  reply.send({ logs: compactionLogs, max: COMPACTION_LOG_MAX });
+  reply.send({ logs: compactionLogs, max: compactionLogs.length });
 });
 
 app.post("/admin/context-compaction/generate", { preHandler: basicAuth }, async (req, reply) => {
