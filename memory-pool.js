@@ -65,19 +65,12 @@ const CONFIG = {
   cross_inject_diary: true,
   cross_inject_memory: true,
   cross_inject_diary_count: 3,
-  // 压缩摘要再解析入库（LLM）：总开关 + 温暖风格
-  // ⚠️ 2026-09-21（审查 R17，用户拍板删除）起，下面 reparse_enabled / reparse_warm /
-  // reparse_max_chars / reparse_max_items 四个键**已无任何功能性读取点**，仅为管理台表单
-  // 往返兼容而保留。LLM 再解析分支已从 reparseSummaryViaLLM 删除；管理台「解析原文进 review」
-  // 实际走 server.js 的 extractMemoryCandidates() → memoryV2Admission.submitPromotion（全落 review），
-  // 其提示词由 reparse_system_prompt / reparse_user_prompt 驱动（这两个仍在用）。
-  // 调这个功能请改 extractMemoryCandidates，不要改上面四个开关——改了不起作用。
-  reparse_enabled: true,
-  reparse_warm: false,
+  // 压缩摘要再解析入库（LLM）：提示词由 reparse_system_prompt / reparse_user_prompt 驱动（在用）
+  // ⚠️ 2026-09-28：reparse_enabled / reparse_warm / reparse_max_chars / reparse_max_items 四键
+  // 已从配置与 CONFIG 中彻底删除（R17 起无功能性读取点，管理台亦无表单控件）。
+  // reparse_system_prompt / reparse_user_prompt 仍在用（extractMemoryCandidates 驱动）；reparse_merge_max_chars 管理台用。
   reparse_system_prompt: "",
   reparse_user_prompt: "",
-  reparse_max_chars: 30,
-  reparse_max_items: 8,
   reparse_merge_max_chars: 8000,
   // 整理记忆池（全局清洗 LLM）：预览/落地、提示词、数量上限、温度
   clean_enabled: true,

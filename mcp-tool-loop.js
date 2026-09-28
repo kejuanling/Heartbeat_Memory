@@ -192,7 +192,7 @@ async function runWithTools({
     working.push({
       role: "assistant",
       content: msg.content || "",
-      reasoning_content: rtext || undefined,
+      reasoning_content: rtext,   // 2026-09-28：DeepSeek 要求所有 assistant 都带 rc（空串也可），不能省略
       tool_calls: msg.tool_calls
     });
 
@@ -509,7 +509,7 @@ async function streamToolLoop({
       if (!s || !s.name) return null;
       return { _sourceIndex: i, id: s.id || ("call_" + Date.now() + "_" + i), type: "function", function: { name: s.name, arguments: s.args || "{}" } };
     }).filter(Boolean);
-    working.push({ role: "assistant", content: roundContent || "", reasoning_content: roundReasoning || undefined, tool_calls: toolCalls.length ? toolCalls : undefined });
+    working.push({ role: "assistant", content: roundContent || "", reasoning_content: roundReasoning, tool_calls: toolCalls.length ? toolCalls : undefined });   // 2026-09-28：rc 空串也保留（DeepSeek 要求）
     if (!toolCalls.length) break;
 
     for (let i = 0; i < toolCalls.length; i++) {
