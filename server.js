@@ -3521,8 +3521,15 @@ app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, re
     const degradedCount = slicedOriginals.filter(s => s.degraded).length;
     if (degradedCount) console.warn("[reparse] " + degradedCount + "/" + slicedOriginals.length + " 块原文切片不可得，退化为摘要文本解析");
     let reviewed = 0, rejected = 0, failed = 0;
-    const logId2 = addCompactionLog({ action: "reparse", label: "解析原文进 review（" + slicedOriginals.length + " 块）", status: "pending", message: "开始解析原文并提取候选..." }).id;
-    for (const s of slicedOriginals) {
+    let failedBlocks = []; // 失败块明细：{ idx, block, err }
+    const logId2 = addCompactionLog({ action: "reparse", label: "解析原文进 review（" + slicedOriginals.length + " 块）", status: "pending", message: "开始解析原文并提取候选...（共 " + slicedOriginals.length + " 块）" }).id;
+    // 0928：日志实时更新「正在解析第 k/N 块」（写回同一条日志，面板轮询可见进度）
+    const updateLogMsg = function (msg) {
+      const li = compactionLogs.findIndex(function (x) { return x.id === logId2; });
+      if (li >= 0) { compactionLogs[li].message = msg; try { persistCompactionLogs(); } catch (e) {} }
+    };
+    for (let k = 0; k < slicedOriginals.length; k++) {
+      const s = slicedOriginals[k];
       try {
         const candidates = await extractMemoryCandidates(s.source_text);
         // 2026-09-28：解析成功 → 该块标记「已解析」（preview 下发 parsed，前端徽标显示蓝色已解析）
@@ -3536,11 +3543,19 @@ app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, re
             if (r.action === "reject") rejected++; else reviewed++;
           } catch (e) { failed++; }
         }
-      } catch (e) { failed++; console.error("[reparse] 原文解析失败:", e.message); }
+        updateLogMsg("正在解析 第 " + (k + 1) + "/" + slicedOriginals.length + " 块（" + String(s.block_id || "").slice(0, 12) + "）：已产候选 " + reviewed + " 条 / 门卫拒绝 " + rejected + " / 失败 " + failed);
+      } catch (e) {
+        failed++;
+        failedBlocks.push({ idx: k + 1, block: String(s.block_id || "").slice(0, 12), err: e && e.message ? String(e.message).slice(0, 80) : String(e) });
+        console.error("[reparse] 原文解析失败:", e.message);
+        updateLogMsg("正在解析 第 " + (k + 1) + "/" + slicedOriginals.length + " 块（" + String(s.block_id || "").slice(0, 12) + "）：失败 - " + (e && e.message ? String(e.message).slice(0, 80) : String(e)));
+      }
     }
     // 2026-09-28：把「已解析」标记写回压缩块记录（解析成功才标记；失败块保持原状可重试）
     try { await fsx.writeJson(cf, records); } catch (e) { console.warn("[reparse] 写回解析标记失败:", e.message); }
-    addCompactionLog({ id: logId2, action: "reparse", label: "解析原文进 review（" + slicedOriginals.length + " 块）", status: "success", message: "候选 " + reviewed + " 条进 review 队列 / 门卫拒绝 " + rejected + " / 失败 " + failed });
+    let finalMsg = "候选 " + reviewed + " 条进 review 队列 / 门卫拒绝 " + rejected + " / 失败 " + failed;
+    if (failedBlocks.length) finalMsg += "；失败块：" + failedBlocks.map(function (f) { return "第" + f.idx + "块(" + f.block + ":" + f.err + ")"; }).join(" / ");
+    addCompactionLog({ id: logId2, action: "reparse", label: "解析原文进 review（" + slicedOriginals.length + " 块）", status: "success", message: finalMsg });
     return reply.send({ success: true, promotion: true, processed: slicedOriginals.length, degraded: degradedCount, reviewed, rejected, failed, note: "候选已全部进 review 队列，请在记忆 review 页人工裁决" });
   } catch (err) {
     addCompactionLog({ action: "reparse", label: "再解析", status: "error", message: "再解析失败：" + err.message });
