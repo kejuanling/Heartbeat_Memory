@@ -235,7 +235,6 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    renderHeartbeat();
    renderEnv();
    renderNetease();
-   loadMemoryWakeConfig();
    initAdminSessionSelector();
  }
 
