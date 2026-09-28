@@ -69,6 +69,9 @@ function createStateExecutor(opts = {}) {
       audit_id: strSafe(meta.auditId) || null,
       details: Array.isArray(meta.details) ? meta.details : null,
       draft, // 校验过的基础字段，供人工裁决时直通落地
+      // 0928 合并草稿：{ merged_text, from_id, from_kind, from_text }——approve 时以 merged_text 覆盖正文，
+      // 旧条目（from_id）置 superseded(reason=merged)；reject 时旧条目原样不动
+      merge: meta.merge && typeof meta.merge === "object" ? meta.merge : null,
     };
     q.push(rec);
     flushQueue();
@@ -95,11 +98,25 @@ function createStateExecutor(opts = {}) {
     if (rec.status !== "pending_review") return { ok: false, error: "already_resolved: " + rec.status };
     if (decision === "approve") {
       const draft = { ...(opts2.edit || {}), ...rec.draft };
+      // 0928 合并候选：批准即用 LLM 合并文本覆盖正文；旧条目置 superseded(reason=merged) 并回链新条目
+      let mergeInfo = null;
+      if (rec.merge && rec.merge.merged_text) {
+        draft.text = rec.merge.merged_text;
+      }
       const r = store.create(draft);
       if (!r.ok) return { ok: false, error: r.error };
+      if (rec.merge && rec.merge.merged_text && rec.merge.from_id) {
+        const old = store.get(rec.merge.from_id);
+        if (old && old.status === "active") {
+          const up = store.updateStatus(rec.merge.from_id, "superseded", { reason: "merged", supersededBy: [r.entry.id] });
+          mergeInfo = { old_id: rec.merge.from_id, superseded: up.ok, error: up.ok ? null : up.error, merged_id: r.entry.id };
+        } else {
+          mergeInfo = { old_id: rec.merge.from_id, superseded: false, reason: old ? "not_active" : "missing", merged_id: r.entry.id };
+        }
+      }
       q.splice(idx, 1);
       flushQueue();
-      return { ok: true, action: "admit", entry: r.entry, resolved: rec };
+      return { ok: true, action: "admit", entry: r.entry, resolved: rec, merge: mergeInfo };
     }
     if (decision === "reject_with_reason") {
       q.splice(idx, 1);

@@ -223,7 +223,17 @@ function validate(candidate, deps = {}) {
   return { allowed: matched_rules.length === 0, reasons, matched_rules };
 }
 
+// 0928：merged_text 隐私扫描专用（只跑 V1 正则；供 admission 层对 LLM 合并产物做安检）
+function hasPrivacyHit(text) {
+  const scanText = String(text || "");
+  for (const p of PRIVACY_PATTERNS) {
+    if (p.re.test(scanText)) return true;
+  }
+  return false;
+}
+
 module.exports = {
   validate,
   isInstruction,
+  hasPrivacyHit,
 };

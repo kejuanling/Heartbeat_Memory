@@ -23,9 +23,9 @@ const fs = require("fs-extra");
 const path = require("path");
 const { detect } = require("./candidate-detector");
 const { buildProvenance } = require("./provenance-builder");
-const { validate } = require("./admission-validator");
+const { validate, hasPrivacyHit } = require("./admission-validator");
 const { createAuditLogger } = require("./admission-audit");
-const { createStore, DEFAULT_CONFIG } = require("./memory-v2");
+const { createStore, DEFAULT_CONFIG, CONSTANTS } = require("./memory-v2");
 const { createStateExecutor } = require("./state-executor");
 const { buildPrompt, parseJudgeOutput, normalizeText } = require("./judge-adapter");
 
@@ -205,6 +205,7 @@ function createAdmission(opts = {}) {
     // [4] 决策（judge LLM 判定 + 保守回退）
     let { action, why } = decide(detection, validation);
     let judgeNote = null;
+    let mergeDraft = null; // 0928 合并草稿：{ merged_text, from_id, from_kind, from_text }
     const judgeApplies = (formal || isManualReviewGate) && detection.candidate && validation.allowed && judgeMode !== "off";
     if (judgeApplies) {
       const existing = await findBestExisting(mainStore, text);
@@ -225,8 +226,22 @@ function createAdmission(opts = {}) {
           judgeNote = "judge:" + jr.relation + "(" + jr.confidence + "," + existing.score + ")/" + jr.reason;
           if (!isManualReviewGate) {
             // 正式路径：按 judge 关系改写动作；R7 通道保持首入 review，judge 只做注解
-            if (jr.relation === "duplicate") { action = "reject"; why = "judge duplicate: " + jr.reason; }
-            else if (jr.relation === "update" || jr.relation === "need_review") { action = "review"; why = "judge " + jr.relation + ": " + jr.reason; }
+            if (jr.relation === "duplicate") {
+              // 0928 合并去重：duplicate 不再直接丢——LLM 给出合并文本则进 review 待人工批准（批准时旧条目置 superseded）
+              const merged = safeMerged(jr.merged_text);
+              if (merged) {
+                action = "review"; why = "judge duplicate→merge: " + jr.reason;
+                mergeDraft = { merged_text: merged, from_id: existing.entry.id, from_kind: existing.entry.kind, from_text: existing.entry.text };
+              } else {
+                action = "reject"; why = "judge duplicate: " + jr.reason;
+              }
+            }
+            else if (jr.relation === "update") {
+              action = "review"; why = "judge update: " + jr.reason;
+              const merged = safeMerged(jr.merged_text);
+              if (merged) mergeDraft = { merged_text: merged, from_id: existing.entry.id, from_kind: existing.entry.kind, from_text: existing.entry.text };
+            }
+            else if (jr.relation === "need_review") { action = "review"; why = "judge need_review: " + jr.reason; }
             else if (jr.relation === "coexist") { action = "admit"; why = "judge coexist: " + jr.reason; }
           }
         } else {
@@ -258,11 +273,12 @@ function createAdmission(opts = {}) {
     if (action === "review") {
       auditRec = audit.append(audit.buildRecord({
         candidateText: text, origin: originVal, validator: validation, action: "review",
-        notes: { shadow: !formal && !isPromo, detector_kind: detection.kind_guess, why, judge: judgeNote },
+        notes: { shadow: !formal && !isPromo, detector_kind: detection.kind_guess, why, judge: judgeNote, merge: mergeDraft ? { from_id: mergeDraft.from_id } : null },
       }));
       execResult = exec.review(draft, why, {
         auditId: auditRec.ok ? auditRec.id : null,
         details: validation.reasons.concat(judgeNote ? [judgeNote] : []),
+        merge: mergeDraft || null,
       });
     } else if (action === "admit") {
       execResult = exec.admit(draft);
@@ -330,6 +346,16 @@ function createAdmission(opts = {}) {
     audit,
     paths: { main: mainStore.paths, shadow: shadowStore.paths },
   };
+}
+
+// 0928：合并文本安检——LLM 合并产物可能引入隐私/超长，命中即丢弃（调用方回退原行为）
+function safeMerged(m) {
+  if (m == null || typeof m !== "string") return null;
+  const t = m.trim();
+  if (!t) return null;
+  if (hasPrivacyHit(t)) return null;
+  if (t.length > CONSTANTS.TEXT_MAX) return null;
+  return t;
 }
 
 function decide(detection, validation) {

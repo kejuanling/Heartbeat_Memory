@@ -3944,12 +3944,17 @@ function ccNumLiveCheck(input, max){
           +'<span class="mp-badges"><span class="mp-badge">待审</span></span>'
         +'</div>'
         +'<div class="mp-body">'+escapeHtml(c.text||'')+'</div>'
+        +(it.merge&&it.merge.merged_text?'<div class="mp-merge" style="margin:8px 0 0;padding:8px;border:1px dashed var(--text3);border-radius:8px;font-size:12px;color:var(--text3);line-height:1.7">'
+          +'<div><span style="color:var(--mp-cat)">既有</span>：'+escapeHtml(it.merge.from_text||'')+'</div>'
+          +'<div style="margin-top:4px"><span style="color:var(--mp-cat)">候选</span>：'+escapeHtml(c.text||'')+'</div>'
+          +'<div style="margin-top:4px;color:var(--accent)"><b>合并后</b>：'+escapeHtml(it.merge.merged_text||'')+'</div>'
+        +'</div>':'')
         +'<div class="mp-meta">'
           +'<span>来源 '+(ORIGIN[c.origin]||escapeHtml(String(c.origin||'未知')))+'</span>'
           +(it.created_at?'<span>'+escapeHtml(String(it.created_at).slice(0,10))+'</span>':'')
         +'</div>'
         +(multi?'':'<div class="mp-actions">'
-          +'<button type="button" class="mp-btn ghost" onclick="approveReviewItem(\''+it.id+'\')">通过入库</button>'
+          +'<button type="button" class="mp-btn ghost" onclick="approveReviewItem(\''+it.id+'\')">'+(it.merge&&it.merge.merged_text?'通过（合并入库）':'通过入库')+'</button>'
           +'<button type="button" class="mp-btn danger" onclick="rejectReviewItem(\''+it.id+'\')">驳回</button>'
         +'</div>')
       +'</div>';
