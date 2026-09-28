@@ -23,9 +23,9 @@ const ctxV2Runtime = require('../context-v2-runtime');
 // 唤醒侧注入白名单服务器：「工具集合」（本地记忆/日记工具，127.0.0.1:8771）+「花园」+「邮箱」，
 // 从 mcp-servers.json 里按名称/端口挑出，避免把 search.parallel / 网易云等带进唤醒；
 // loadConfig 已滤掉 enabled:false，聊天端停用即唤醒侧同步停用。（与原 wake_up.js 同一白名单）
-let _wakeMcpClients = null;
+// 2026-09-28：去掉永久缓存——与聊天侧一致，每次唤醒重新 loadConfig，
+// 管理台改 mcp-servers.json（增/停服务器）即时生效，无需重启 gateway。
 function getWakeMcpClients(baseDir) {
-  if (_wakeMcpClients) return _wakeMcpClients;
   try {
     const servers = loadConfig(path.join(baseDir, "mcp-servers.json"));
     const target = servers.filter(s => {
@@ -34,12 +34,11 @@ function getWakeMcpClients(baseDir) {
         || /花园/.test(key) || /galatea\.abysslumina\.com/.test(key)
         || /邮箱/.test(key) || /127\.0\.0\.1:5000\b/.test(key);
     });
-    _wakeMcpClients = target.map(c => new McpServerClient(c));
+    return target.map(c => new McpServerClient(c));
   } catch (e) {
     console.warn("[wake-chat] 加载工具集合配置失败:", e.message);
-    _wakeMcpClients = [];
+    return [];
   }
-  return _wakeMcpClients;
 }
 
 // 唤醒基础上下文：与聊天侧共用统一对话构建器（createConversationBuilder，见 chat-context.js）。
