@@ -29,10 +29,11 @@ function fullInput() {
       { date: "2026-09-13", content: "她说最近在准备考试。" },
     ],
     memoriesV2: [
-      { id: "mv2_r1", text: "睡前不许催她", kind: "rule", status: "active", priority: 0.7, created_at: "2026-09-02T00:00:00+08:00" },
-      { id: "mv2_f1", text: "她膝盖受过伤", kind: "fact", status: "active", priority: 0.9, created_at: "2026-09-03T00:00:00+08:00" },
+      // 0920 删重要级后注入判定只认 anchor（priority 遗留字段已清）
+      { id: "mv2_r1", text: "睡前不许催她", kind: "rule", status: "active", anchor: true, created_at: "2026-09-02T00:00:00+08:00" },
+      { id: "mv2_f1", text: "她膝盖受过伤", kind: "fact", status: "active", anchor: true, created_at: "2026-09-03T00:00:00+08:00" },
       { id: "mv2_q1", text: "无论你怎么样我都选择接你", kind: "quote", status: "active", anchor: true, established_at: "2026-07-14T00:00:00+08:00", created_at: "2026-09-04T00:00:00+08:00" },
-      { id: "mv2_q2", text: "她对薄荷过敏", kind: "fact", status: "active", priority: 0.6, created_at: "2026-09-05T00:00:00+08:00" },
+      { id: "mv2_q2", text: "她对薄荷过敏", kind: "fact", status: "active", created_at: "2026-09-05T00:00:00+08:00" },
     ],
     query: "她对薄荷过敏吗",
   };
@@ -107,7 +108,7 @@ ok("config 覆盖：门槛提高→核心层省略；diaryCount=1→只最新一
   // 0920 核心层 priority 门槛已删（仅 anchor），传入的 understandingCoreMinPriority 被忽略
   assert.strictEqual(DEFAULT_CONFIG.understandingCoreMinPriority, undefined, "核心层 priority 门槛配置已删");
   const cont = res.blocks.find(b => b.key === "conversation_continuity");
-  assert.ok(cont.content.includes("2026-09-13") && !cont.content.includes("2026-09-10"), "diaryCount=1 只最新一篇");
+  assert.ok(cont.content.includes("她说最近在准备考试") && !cont.content.includes("聊了很多"), "diaryCount=1 只最新一篇");
   assert.strictEqual(DEFAULT_CONFIG.diaryCount, 3, "默认篇数未被改");
 });
 

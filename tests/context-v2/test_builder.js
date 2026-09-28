@@ -26,14 +26,15 @@ const pinnedFull = [
 ];
 
 const memFull = [
-  { id: "mv2_r1", text: "睡前不许催她", kind: "rule", status: "active", priority: 0.7, created_at: "2026-09-02T10:00:00+08:00" },
-  { id: "mv2_r2", text: "只能我先说晚安", kind: "rule", status: "active", priority: 0.7, created_at: "2026-09-01T10:00:00+08:00" },
-  { id: "mv2_f1", text: "她膝盖受过伤，阴雨天会疼", kind: "fact", status: "active", priority: 0.9, created_at: "2026-09-03T10:00:00+08:00" },
-  { id: "mv2_f2", text: "她在准备一场重要的考试", kind: "fact", status: "active", priority: 0.85, created_at: "2026-09-04T10:00:00+08:00" },
-  { id: "mv2_f3", text: "她喜欢草莓", kind: "fact", status: "active", priority: 0.5, created_at: "2026-09-05T10:00:00+08:00" },
-  { id: "mv2_f4", text: "她旧作息", kind: "fact", status: "superseded", priority: 0.9, created_at: "2026-09-06T10:00:00+08:00" },
-  { id: "mv2_f5", text: "她对薄荷过敏", kind: "fact", status: "active", priority: 0.6, created_at: "2026-09-07T10:00:00+08:00" },
-  { id: "mv2_f6", text: "她养了一只猫叫团子", kind: "fact", status: "active", priority: 0.6, created_at: "2026-09-08T10:00:00+08:00" },
+  // 0920 删重要级后固定块注入只认 anchor；priority 遗留字段已清
+  { id: "mv2_r1", text: "睡前不许催她", kind: "rule", status: "active", anchor: true, created_at: "2026-09-02T10:00:00+08:00" },
+  { id: "mv2_r2", text: "只能我先说晚安", kind: "rule", status: "active", anchor: true, created_at: "2026-09-01T10:00:00+08:00" },
+  { id: "mv2_f1", text: "她膝盖受过伤，阴雨天会疼", kind: "fact", status: "active", anchor: true, created_at: "2026-09-03T10:00:00+08:00" },
+  { id: "mv2_f2", text: "她在准备一场重要的考试", kind: "fact", status: "active", anchor: true, created_at: "2026-09-04T10:00:00+08:00" },
+  { id: "mv2_f3", text: "她喜欢草莓", kind: "fact", status: "active", created_at: "2026-09-05T10:00:00+08:00" },
+  { id: "mv2_f4", text: "她旧作息", kind: "fact", status: "superseded", anchor: true, created_at: "2026-09-06T10:00:00+08:00" },
+  { id: "mv2_f5", text: "她对薄荷过敏", kind: "fact", status: "active", created_at: "2026-09-07T10:00:00+08:00" },
+  { id: "mv2_f6", text: "她养了一只猫叫团子", kind: "fact", status: "active", created_at: "2026-09-08T10:00:00+08:00" },
   { id: "mv2_q1", text: "无论你怎么样我都选择接你", kind: "quote", status: "active", anchor: true, established_at: "2026-07-14T21:00:00+08:00", created_at: "2026-09-09T10:00:00+08:00" },
   { id: "mv2_q2", text: "标签什么的说了就死了", kind: "quote", status: "active", anchor: false, created_at: "2026-09-10T10:00:00+08:00" },
   { id: "mv2_m1", text: "07-14 我们成为恋人", kind: "milestone", status: "active", anchor: true, established_at: "2026-07-14T00:00:00+08:00", created_at: "2026-09-11T10:00:00+08:00" },
@@ -75,20 +76,21 @@ ok("identity: 超预算不截断（管理问题报警，代码不删约定）", 
   for (let i = 0; i < 80; i++) many.push({ id: "pin" + i, content: "规训条目" + i + "的内容占位文本", target: "identity" });
   const res = buildContextBlocks({ pinnedEntries: many, memoriesV2: [] });
   const b = blockOf(res, "core_identity");
-  assert.ok(b.tokens > DEFAULT_CONFIG.budgets.core_identity, "如实超预算");
+  // R23 后 identity 无预算键（budgets 仅 continuity/relevant），验证 80 条全量注入
+  assert.ok(b.tokens > 500, "如实全量");
   assert.ok(b.content.includes("规训条目79"), "条目不删");
 });
 
 // ============================================================
 // [2] Long-term Understanding
 // ============================================================
-ok("understanding: 只收 fact+active+priority≥0.8；created_at 升序；无日期后缀", () => {
+ok("understanding: 只收 fact+active+anchor；created_at 升序；无日期后缀", () => {
   const res = buildContextBlocks({ memoriesV2: memFull });
   const b = blockOf(res, "long_term_understanding");
   assert.ok(b, "块应存在");
   assert.ok(b.content.includes("她膝盖受过伤"), "f1 进");
   assert.ok(b.content.includes("她在准备一场重要的考试"), "f2 进");
-  assert.ok(!b.content.includes("她喜欢草莓"), "priority 0.5 不进");
+  assert.ok(!b.content.includes("她喜欢草莓"), "无 anchor 不进");
   assert.ok(!b.content.includes("她旧作息"), "superseded 不进");
   const i1 = b.content.indexOf("她膝盖受过伤");
   const i2 = b.content.indexOf("她在准备一场重要的考试");
@@ -135,22 +137,23 @@ ok("moments: 无条数上限（0920 拍板），7 条全注入", () => {
 // ============================================================
 // [4] Conversation Continuity（Earlier Days，0918 回归原逻辑）
 // ============================================================
-ok("continuity: 最近 N=3 篇全量（含最新，不再排除）、时间正序、日期行", () => {
+ok("continuity: 最近 N=3 篇全量（含最新，不再排除）、时间正序", () => {
   const res = buildContextBlocks({ diaryEntries: diaryFull });
   const b = blockOf(res, "conversation_continuity");
   assert.ok(b, "块应存在");
-  assert.ok(b.content.includes("（2026-09-11）"), "倒数第 3 篇在");
-  assert.ok(b.content.includes("（2026-09-13）"), "最新一篇也注入（0918 回归原逻辑）");
-  const i11 = b.content.indexOf("2026-09-11");
-  const i13 = b.content.indexOf("2026-09-13");
+  assert.ok(b.content.includes("她分享了童年的故事。"), "倒数第 3 篇在");
+  assert.ok(b.content.includes("她说最近在准备考试，有点累。我要多关心她。"), "最新一篇也注入（0918 回归原逻辑）");
+  assert.ok(!b.content.includes("陪她聊了很久"), "更早的不进（N=3）");
+  const i11 = b.content.indexOf("她分享了童年的故事");
+  const i13 = b.content.indexOf("她说最近在准备考试");
   assert.ok(i11 < i13, "时间正序呈现");
 });
 
 ok("continuity: diaryCount 可配置（=2 时只取最近 2 篇）", () => {
   const res = buildContextBlocks({ diaryEntries: diaryFull, config: { diaryCount: 2 } });
   const b = blockOf(res, "conversation_continuity");
-  assert.ok(b.content.includes("2026-09-12") && b.content.includes("2026-09-13"), "最近 2 篇");
-  assert.ok(!b.content.includes("2026-09-11"), "更早的不进");
+  assert.ok(b.content.includes("一起云看电影。") && b.content.includes("她说最近在准备考试"), "最近 2 篇");
+  assert.ok(!b.content.includes("她分享了童年的故事"), "更早的不进");
 });
 
 ok("continuity: 无日记→空块省略", () => {
@@ -171,8 +174,8 @@ ok("relevant: 词面命中进、无关淘汰（minScore 宁缺毋滥）、日期
 
 ok("relevant: 固定块成员去重（核心 fact/rule/anchor/instructions 均不入检索结果）", () => {
   const mems = [
-    { id: "core1", text: "她膝盖受过伤", kind: "fact", status: "active", priority: 0.9, created_at: "2026-09-01T00:00:00+08:00" },
-    { id: "pool1", text: "她膝盖受伤后的康复训练", kind: "fact", status: "active", priority: 0.6, created_at: "2026-09-02T00:00:00+08:00" },
+    { id: "core1", text: "她膝盖受过伤", kind: "fact", status: "active", anchor: true, created_at: "2026-09-01T00:00:00+08:00" },
+    { id: "pool1", text: "她膝盖受伤后的康复训练", kind: "fact", status: "active", created_at: "2026-09-02T00:00:00+08:00" },
   ];
   const res = buildContextBlocks({ pinnedEntries: [], memoriesV2: mems, query: "她膝盖受伤怎么样了" });
   const u = blockOf(res, "long_term_understanding");
@@ -190,8 +193,8 @@ ok("relevant: 空 query→空块；全部无关→空块省略", () => {
 
 ok("relevant: excludeIds 剥除（本会话已浮现时间线的记忆不再注入）", () => {
   const mems = [
-    { id: "floated", text: "她对薄荷过敏", kind: "fact", status: "active", priority: 0.6, created_at: "2026-09-01T00:00:00+08:00" },
-    { id: "fresh", text: "她对薄荷轻度过敏史", kind: "fact", status: "active", priority: 0.6, created_at: "2026-09-02T00:00:00+08:00" },
+    { id: "floated", text: "她对薄荷过敏", kind: "fact", status: "active", created_at: "2026-09-01T00:00:00+08:00" },
+    { id: "fresh", text: "她对薄荷轻度过敏史", kind: "fact", status: "active", created_at: "2026-09-02T00:00:00+08:00" },
   ];
   const res = buildContextBlocks({ memoriesV2: mems, query: "她对薄荷过敏吗", excludeIds: ["floated"] });
   const b = blockOf(res, "relevant_memories");
@@ -200,10 +203,10 @@ ok("relevant: excludeIds 剥除（本会话已浮现时间线的记忆不再注�
   assert.ok(b.content.includes("轻度过敏史"), "其他条目正常");
 });
 
-ok("relevant: 排序 score desc → priority 打破并列（同分时 priority 高者前）", () => {
+ok("relevant: 排序 score desc → 同分 id 升序打破并列（0920 删 priority 后）", () => {
   const mems = [
-    { id: "lo", text: "她喜欢喝咖啡", kind: "fact", status: "active", priority: 0.5, created_at: "2026-09-01T00:00:00+08:00" },
-    { id: "hi", text: "她喜欢喝可乐", kind: "fact", status: "active", priority: 0.7, created_at: "2026-09-02T00:00:00+08:00" },
+    { id: "lo", text: "她喜欢喝咖啡", kind: "fact", status: "active", created_at: "2026-09-01T00:00:00+08:00" },
+    { id: "hi", text: "她喜欢喝可乐", kind: "fact", status: "active", created_at: "2026-09-02T00:00:00+08:00" },
   ];
   const res = buildContextBlocks({ memoriesV2: mems, query: "她喜欢喝" });
   const b = blockOf(res, "relevant_memories");
@@ -211,7 +214,7 @@ ok("relevant: 排序 score desc → priority 打破并列（同分时 priority �
   const iHi = b.content.indexOf("她喜欢喝可乐");
   const iLo = b.content.indexOf("她喜欢喝咖啡（");
   assert.ok(iHi >= 0 && iLo >= 0, "两条都在");
-  assert.ok(iHi < iLo, "同分并列时 priority 高者在前");
+  assert.ok(iHi < iLo, "同分并列时 id 升序（hi<lo）在前");
 });
 
 // ============================================================

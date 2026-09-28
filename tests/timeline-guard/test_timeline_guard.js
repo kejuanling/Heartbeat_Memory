@@ -40,6 +40,8 @@ function extractLine(src, prefix) {
 }
 
 const src = nodeFs.readFileSync(SERVER_JS, "utf8");
+// 2026-09-21 R20 起 safeSessionToken 收敛到共享模块 lib/session-token.js（server.js 内已无副本），提取源跟随
+const sessionTokenSrc = nodeFs.readFileSync(nodePath.join(__dirname, "..", "..", "lib", "session-token.js"), "utf8");
 const parts = [
   extractLine(src, "const TIMELINE_FILE"),
   extractLine(src, "const _timelineCache"),
@@ -47,7 +49,9 @@ const parts = [
   extractLine(src, "const _corruptBackupDone"),
   extractLine(src, "const TOMBSTONE_FILE"),
   extractLine(src, "const SESSION_TOMBSTONE_TTL_MS"),
-  extractFunction(src, "safeSessionToken"),
+  extractFunction(sessionTokenSrc, "safeSessionToken"),
+  extractFunction(src, "notifyTimelineWriteRejected"),
+  extractFunction(src, "hasSameCorruptBackup"),
   extractFunction(src, "timelineFileFor"),
   extractFunction(src, "timelineFingerprint"),
   extractFunction(src, "cloneTimeline"),
@@ -63,7 +67,7 @@ const parts = [
   extractFunction(src, "saveTimeline"),
 ];
 // fs 参数 = fs-extra 最小面 shim（server.js 里 const fs = require("fs-extra")）
-const factory = new Function("fs", "crypto", "path", parts.join("\n\n") +
+const factory = new Function("fs", "crypto", "path", "sendPushNotification", parts.join("\n\n") +
   "\nreturn { timelineFileFor, timelineFingerprint, cloneTimeline, loadTimeline, saveTimeline, isSessionTombstoned, markSessionDeleted };");
 
 function makeFsShim() {
@@ -78,11 +82,13 @@ function makeFsShim() {
     readJsonSync: (f) => JSON.parse(nodeFs.readFileSync(f, "utf-8")),
     writeJsonSync: (f, data, opts) => nodeFs.writeFileSync(f, JSON.stringify(data, null, (opts && opts.spaces) != null ? opts.spaces : 0), "utf-8"),
     copySync: (a, b) => nodeFs.copyFileSync(a, b),
+    readdirSync: (d, o) => nodeFs.readdirSync(d, o), // M9 hasSameCorruptBackup 扫 .corrupt-* 备份用
   };
 }
 
 function makeModule() {
-  return factory(makeFsShim(), crypto, nodePath);
+  // sendPushNotification 注入 no-op（返回 Promise：调用侧有 .catch 链）：拒写告警在测试环境不需真推送
+  return factory(makeFsShim(), crypto, nodePath, function () { return Promise.resolve(); });
 }
 
 // ---- 测试环境：每个用例独立临时目录 + 独立模块实例（独立缓存/守卫状态）----
