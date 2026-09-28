@@ -1247,10 +1247,6 @@ function reconcileCcList(el, html){
     if(!k || !newKeys[k]) n.remove();
   });
 }
-function toggleCcNotice(head){
-  const n=head.closest('.cc-notice');
-  if(n) n.classList.toggle('open');
-}
 function updateCcStatusBar(d){
   d=d||AppState.compactionPlan;
   const el=document.getElementById('cc-status-chips');
@@ -1953,31 +1949,7 @@ function updateCcStatusBar(d){
     
 
 
-function locateCcFromSearch(el){
-  if(!el) return;
-  const cid=el.getAttribute('data-chunk');
-  const idx=el.getAttribute('data-idx');
-  let list=document.getElementById('compaction-chunks');
-  if(!list) return;
-  let target=null;
-  if(cid!==null&&cid!=='') target=list.querySelector('.cc-chunk-swipe[data-cid="'+cid+'"]');
-  if(!target && idx!==null&&idx!==''){
-    const n=Number(idx);
-    const gaps=((AppState.compactionPlan&&AppState.compactionPlan.uncovered&&AppState.compactionPlan.uncovered.gaps)||[]);
-    const g=gaps.find(function(x){ return n>=x.startIdx && n<=x.endIdx; });
-    if(g){ const k=g.startIdx+'-'+g.endIdx; target=list.querySelector('.cc-uncovered[data-gkey="'+k+'"]'); }
-  }
-  if(!target){
-    renderCompaction();
-    list=document.getElementById('compaction-chunks');
-    if(list && cid!==null && cid!=='') target=list.querySelector('.cc-chunk-swipe[data-cid="'+cid+'"]');
-  }
-  if(target){
-    target.scrollIntoView({behavior:'smooth',block:'center'});
-    target.classList.add('cc-locate-target');
-    setTimeout(function(){ target.classList.remove('cc-locate-target'); },1100);
-  }
-}
+// locateCcFromSearch（搜索结果跳转定位）已于 2026-09-28 删除：零引用（UI 不再生成该入口）
 
  // 移除单块：手动块调 blocks/remove_at，AI块调 context-replacements/undo
 function removeSingleBlock(idx, blockIndex, isAi, recId){
@@ -2140,34 +2112,8 @@ function ccGapCutAt(key,n){
   if(!confirm('在第 '+val+' 条后切开，形成两个块？')) return;
   ccDoCutRange(gs, val, val+1, ge);
 }
-function ccGapCutAtInput(key){
-  const el=document.getElementById('cc-gap-cut-input-'+key);
-  const v=el?el.value.trim():'';
-  if(!v){ toast('请输入要切的编号'); return; }
-  ccGapCutAt(key, v);
-}
-async function ccDoCutSegments(segs){
-  const msg=document.getElementById('compaction-msg');
-  if(msg) msg.textContent='正在按 '+segs.length+' 个切点切分未覆盖区…';
-  try{
-    for(let i=0;i<segs.length;i++){
-      const s=segs[i];
-      const r=await fetch(ADMIN_API+'/context-compaction/blocks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'add_range',start:s[0],end:s[1]})});
-      const j=await r.json();
-      if(j.error||j.ok===false) throw new Error(j.message||j.error||'切分失败');
-    }
-    resetCcMsgCache();
-    await loadCompactionPreview();
-    if(msg) msg.textContent='已按候选切成 '+segs.length+' 个块。';
-  }catch(e){
-    if(msg) msg.textContent='切分失败: '+e.message;
-    toast('切分失败: '+e.message);
-  }
-}
-function ccGapToggleCuts(key){
-  if(AppState.ccGapCutsOff.has(key)) AppState.ccGapCutsOff.delete(key); else AppState.ccGapCutsOff.add(key);
-  renderCompaction();
-}
+// ccGapCutAtInput / ccDoCutSegments / ccGapToggleCuts（切点输入框/批量切分/切点开关）
+// 已于 2026-09-28 删除：零引用（UI 不再生成切点输入与开关入口）
 function ccFindGap(gs, ge){
   const d=AppState.compactionPlan; if(!d||!d.uncovered||!d.uncovered.gaps) return null;
   for(let i=0;i<d.uncovered.gaps.length;i++){ const g=d.uncovered.gaps[i]; if((g.startIdx||0)===gs && (g.endIdx||0)===ge) return g; }
