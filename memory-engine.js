@@ -28,7 +28,15 @@ async function atomicWriteJson(file, data) {
   await fs.rename(tmp, file);
 }
 
-const DEFAULT_CONFIG = { idle_threshold_minutes: 5, max_interval_minutes: 30, auto_summary_enabled: true, summary_max_messages: 50, memory_retrieval_enabled: true, retrieval_top_k: 5, dedup_threshold: 0.9, conflict_threshold: 0.85, time_decay_days: 30, keyword_search_enabled: true, embedding_enabled: false, embedding_model: "Xenova/paraphrase-multilingual-MiniLM-L12-v2", memory_relevance_threshold: 0.3, memory_query_window: 3, memory_retrieval_window_days: 0, context_injection_types: ["fact", "preference", "emotion", "summary", "moment"], memory_cooldown_minutes: 30, memory_item_cooldown_minutes: 120, summary_surfacing_min_age_hours: 24, summary_surfacing_min_age_enabled: true, summary_event_injection_enabled: false, summary_event_inject_enabled: true, summary_event_short_ctx_msgs: 20, time_event_injection_enabled: false, wake_query_window: 3, wake_relevance_threshold: 0.3, wake_repeat_window: 3, wake_history_max_messages: 100, wake_context_compaction_enabled: false, memory_persist_on_surface_enabled: false, summary_enabled: true, moment_sync_enabled: true, event_inject_types: ["wake","diary","push","summary","co","screenshot"] };
+// DEFAULT_CONFIG（2026-09-28 配置键专项收敛）：只剩 event_inject_types 一个有真实读取点的键
+// （context-replacements.loadEventInjectConfig 直读 config.json；键不存在=注入不过滤，故保留默认值）。
+// 本模块 config 无任何属性级读取；旧 /admin/config 端点（回显+白名单写入）已随本批删除——
+// admin-mobile 零调用、白名单 15 键全部零读取。旧「自动摘要/记忆浮现注入」时代参数
+// （auto_summary_enabled 等 29 键）与盘上存量一并清除（见 0928-38）。
+const DEFAULT_CONFIG = {
+  // 特殊事件注入类型过滤（context-replacements 按此过滤旧窗口事件；值=classifySpecialEvent 分类 key）
+  event_inject_types: ["wake", "diary", "push", "summary"]
+};
 
 // 启动：确保数据目录、读 config/pinned/已删签名；READONLY 时挂 30s 重载定时器跟随写方进程
 async function init() {

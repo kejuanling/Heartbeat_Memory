@@ -6018,62 +6018,7 @@ app.post("/v1/push/subscribe", async (req, reply) => {
 });
 
 
-// 运行配置：/admin/config 读写白名单（管理台参数设置用）
-// ========================
-const RUN_CONFIG_WHITELIST = new Set([
-  "event_inject_types",
-  "memory_retrieval_enabled", "retrieval_top_k", "keyword_search_enabled",
-  "memory_relevance_threshold", "memory_item_cooldown_minutes",
-  "context_injection_types",
-  "wake_top_k", "wake_total_limit", "wake_random_count", "wake_relevance_threshold",
-  "memory_retrieval_wake_enabled", "wake_history_max_messages"
-]);
 
-// key -> expected type, applied to /admin/config whitelist write
-const RUN_CONFIG_TYPES = {
-  event_inject_types: "array",
-  memory_retrieval_enabled: "boolean",
-  retrieval_top_k: "number",
-  keyword_search_enabled: "boolean",
-  memory_relevance_threshold: "number",
-  memory_item_cooldown_minutes: "number",
-  context_injection_types: "array",
-  wake_top_k: "number",
-  wake_total_limit: "number",
-  wake_random_count: "number",
-  wake_relevance_threshold: "number",
-  memory_retrieval_wake_enabled: "boolean",
-  wake_history_max_messages: "number",
-};
-
-app.get("/admin/config", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const cfg = require("./memory-engine").getConfig ? require("./memory-engine").getConfig() : {};
-    reply.send(cfg);
-  } catch (err) { reply.code(500).send({ error: err.message }); }
-});
-
-app.post("/admin/config", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const body = (req.body && typeof req.body === "object") ? req.body : {};
-    const updates = {};
-    for (const key of Object.keys(body)) {
-      if (!RUN_CONFIG_WHITELIST.has(key)) continue;
-      const value = body[key];
-      const want = RUN_CONFIG_TYPES[key];
-      const got = Array.isArray(value) ? "array" : typeof value;
-      if (got !== want) {
-        return reply.code(400).send({ error: `配置项 ${key} 类型无效：期望 ${want}，实际 ${got}` });
-      }
-      updates[key] = value;
-    }
-    if (Object.keys(updates).length === 0) {
-      return reply.code(400).send({ error: "没有可更新的配置项" });
-    }
-    await require("./memory-engine").updateConfig(updates);
-    reply.send({ success: true });
-  } catch (err) { reply.code(500).send({ error: err.message }); }
-});
 
 // ======================== 聊天页设置云端同步 ========================
 // 把 chat.html 的前端设置（api_key / system_prompt / cfg）整体存到服务器，
