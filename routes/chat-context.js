@@ -430,10 +430,32 @@ function createCtxLimitReminderGuard(deps) {
 // 前缀身份：同一会话同一时刻，聊天请求与唤醒请求的本构建器输出逐字一致 → 上游前缀缓存共享。
 // 图片规则（两侧对称）：历史图片降级为「（图片）」占位（附件正文由 prepareMessageForLLM 读入文本，
 // 与聊天侧同口径）；仅时间线末尾的连续 user 消息（本轮待回复）图片保真。
+// 2026-09-29 重建结果缓存（用户反馈 keh3 5000+ 条请求越来越慢）：
+// buildConversation 每次请求全量遍历时间线（prepareMessageForLLM/stripPosition），
+// 唤醒链路（wake-chat.js 共用本 builder）与聊天重试等时间线未变场景每次都在重复重建。
+// 缓存键 = 会话 + 时间线指纹(__fp) + 系统提示内容（长度+前缀）；只缓存大会话（>=300 条），
+// 上限 10 会话，超限淘汰最旧（Map 插入序）。命中返回引用——下游 apply/prepareModelMessages
+// 均在副本数组上操作、sanitizeForUpstream 产出全新对象，不会污染缓存（已核查）。
+// 聊天正常请求追加消息 → 时间线 mtime/size 变 → fp 变 → 自动失效，仍全量重建（合理成本）。
 function createConversationBuilder(deps) {
   const { loadTimeline, prepareMessageForLLM, stripPosition, resolveSessionSystemPrompt } = deps;
+  const _convCache = new Map(); // key: sessionId|fp|sysKey -> msgs
+  const _CONV_CACHE_MAX = 10;
+  const _CONV_CACHE_MIN_MSGS = 300;
+  function _convCacheKey(sessionId, fp, systemRaw) {
+    const sc = systemRaw ? String(systemRaw.content || "") : "";
+    return String(sessionId || "default") + "|" + fp + "|" + sc.length + "|" + sc.slice(0, 120);
+  }
+  function _convCacheSet(key, msgs) {
+    if (_convCache.size >= _CONV_CACHE_MAX) {
+      const firstKey = _convCache.keys().next().value;
+      if (firstKey !== undefined) _convCache.delete(firstKey);
+    }
+    _convCache.set(key, msgs);
+  }
   return function buildConversation(sessionId) {
     const timeline = loadTimeline(sessionId);
+    const fp = (timeline && timeline.__fp) || "";
     const msgs = [];
     // system 人设（2026-09-24 B 方案）：服务端权威解析优先（会话级备份 -> 全局），
     // 盘上时间线里的 system 仅作兜底。前端请求带什么 system 都不再决定这里发什么。
@@ -446,6 +468,13 @@ function createConversationBuilder(deps) {
       for (const m of timeline) {
         if (m && m.role === "system" && !m.deleted) systemRaw = m;
       }
+    }
+    // 缓存命中判断（fp 非空 + 大会话才缓存；小会话重建便宜不缓存）
+    const cacheable = !!(fp && timeline && timeline.length >= _CONV_CACHE_MIN_MSGS);
+    const cacheKey = cacheable ? _convCacheKey(sessionId, fp, systemRaw) : null;
+    if (cacheKey) {
+      const hit = _convCache.get(cacheKey);
+      if (hit) return hit;
     }
     if (systemRaw) {
       const sysPrep = prepareMessageForLLM(systemRaw);
@@ -461,6 +490,7 @@ function createConversationBuilder(deps) {
       if (!prepared) continue;
       msgs.push(k < turnStart ? downgradeHistoryImages(prepared) : prepared);
     }
+    if (cacheKey) _convCacheSet(cacheKey, msgs);
     return msgs;
   };
 }
