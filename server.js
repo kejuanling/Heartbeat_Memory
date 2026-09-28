@@ -3531,6 +3531,9 @@ app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, re
     for (const s of slicedOriginals) {
       try {
         const candidates = await extractMemoryCandidates(s.source_text);
+        // 2026-09-28：解析成功 → 该块标记「已解析」（preview 下发 parsed，前端徽标显示蓝色已解析）
+        const parsedItem = active.find(function (it) { return String(it.id) === String(s.block_id); });
+        if (parsedItem) parsedItem.reparsed_at = new Date().toISOString();
         for (const c of candidates) {
           try {
             const r = await (memoryV2Admission
@@ -3541,6 +3544,8 @@ app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, re
         }
       } catch (e) { failed++; console.error("[reparse] 原文解析失败:", e.message); }
     }
+    // 2026-09-28：把「已解析」标记写回压缩块记录（解析成功才标记；失败块保持原状可重试）
+    try { await fsx.writeJson(cf, records); } catch (e) { console.warn("[reparse] 写回解析标记失败:", e.message); }
     addCompactionLog({ id: logId2, action: "reparse", label: "解析原文进 review（" + slicedOriginals.length + " 块）", status: "success", message: "候选 " + reviewed + " 条进 review 队列 / 门卫拒绝 " + rejected + " / 失败 " + failed });
     return reply.send({ success: true, promotion: true, processed: slicedOriginals.length, degraded: degradedCount, reviewed, rejected, failed, note: "候选已全部进 review 队列，请在记忆 review 页人工裁决" });
   } catch (err) {
@@ -4851,6 +4856,8 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
       mode: manual ? "manual" : "ai",
       manual: manual,
       enabled: it.enabled !== false,
+      parsed: !!it.reparsed_at,          // 2026-09-28：该块已解析过（前端徽标显示蓝色「已解析」）
+      parsedAt: it.reparsed_at || null,
       manualHidden: it.hidden === true,
       range_label: it.range_label || "",
       // 消息 id 边界（批量导入识别用）：首/尾非特殊压缩消息的自带 id，id 稳定不受内容编辑/位置漂移影响

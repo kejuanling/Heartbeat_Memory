@@ -337,6 +337,7 @@
  .cc-badge.gen{background:rgba(200,144,152,.14);color:var(--accent)}
  .cc-badge.warn{background:rgba(230,160,70,.12);color:#d48b2f}
  .cc-badge.done{background:rgba(106,154,90,.12);color:#5c8a4e}
+ .cc-badge.parsed{background:rgba(90,132,196,.14);color:#4a7fc0}  /* 2026-09-28：已解析（蓝色） */
  .cc-badge.off{background:rgba(120,120,120,.12);color:#8a8a8a}
  .cc-spin{display:inline-block;width:11px;height:11px;border:2px solid rgba(200,144,152,.3);border-top-color:var(--accent);border-radius:50%;animation:ccspin .8s linear infinite}
  @keyframes ccspin{to{transform:rotate(360deg)}}

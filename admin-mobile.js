@@ -1116,7 +1116,7 @@ function ccBuildSummaryStatsHtml(d, t){
        +'<span class="cc-chunk-title '+(isAi?'ai':'manual')+'">块 #'+c.index+'</span>'
        +(hidden
          ? '<span class="cc-badge off">'+(manualHidden?'已隐藏·手动':'已隐藏')+'</span>'
-         : '<span class="cc-badge '+(isAi?(enabled?'done':'off'):(c.cached?(enabled?'done':'warn'):'todo'))+'">'+(isAi?(enabled?'已替换':'已停用'):(c.cached?(enabled?'已替换':'待替换'):'待生成'))+'</span>')
+         : '<span class="cc-badge '+(c.parsed?'parsed':(isAi?(enabled?'done':'off'):(c.cached?(enabled?'done':'warn'):'todo')))+'">'+(c.parsed?'已解析':(isAi?(enabled?'已替换':'已停用'):(c.cached?(enabled?'已替换':'待替换'):'待生成')))+'</span>')
        +'<span class="cc-chunk-stat">'+count+' 条 · '+fmtCcNum(c.chars)+' 字</span>'
        +(hidden
          ? (manualHidden
