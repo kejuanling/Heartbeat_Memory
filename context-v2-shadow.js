@@ -150,7 +150,7 @@ function readDiaryEntriesForShadow(baseDir) {
     let entries = [];
     try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch (e) { return; }
     for (const ent of entries) {
-      if (ent.isFile() && /^\d{4}-\d{2}-\d{2}(_\d{6})?\.md$/.test(ent.name)) {
+      if (ent.isFile() && /^\d{4}-\d{2}-\d{2}(_\d{4,6})?\.md$/.test(ent.name)) { // 0929：时间戳放开 4-6 位（实际日记为 _HHMM 4 位）
         const rel = relBase ? relBase + '/' + ent.name : ent.name;
         try { out.push({ rel, date: ent.name.slice(0, 10), content: fs.readFileSync(path.join(root, ent.name), 'utf8') }); } catch (e) {}
       } else if (ent.isDirectory() && depth < 1) {
@@ -159,7 +159,13 @@ function readDiaryEntriesForShadow(baseDir) {
     }
   };
   scan('', 0);
-  return out.sort((a, b) => (a.date === b.date ? (a.rel < b.rel ? -1 : 1) : String(a.date).localeCompare(String(b.date))));
+  // 2026-09-29：按「日期+时间戳」排序（原只按日期+rel 字符串，同天多篇/子目录时间错位）
+  const sortKey = function (e) {
+    const base = e.rel.slice(e.rel.lastIndexOf("/") + 1);
+    const ts = (base.slice(11, -3) || "").replace(/_/g, "").padEnd(4, "0");
+    return e.date + "_" + ts + "_" + e.rel;
+  };
+  return out.sort((a, b) => (sortKey(a) < sortKey(b) ? -1 : 1));
 }
 
 // 隐藏清单（data/diary_hidden.json，rel 路径数组）：隐藏篇不注入也不占份数（与旧版 recentDiaryTextBefore 同口径）

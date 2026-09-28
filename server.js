@@ -1912,7 +1912,14 @@ function recentDiaryTextBefore(sessionId, count, createdIso) {
   scanDir("");
   for (const s of diarySessionDirs()) scanDir(s);
   if (!files.length) return "";
-  files.sort((a, b) => (a.date === b.date ? (a.rel < b.rel ? -1 : 1) : (a.date < b.date ? -1 : 1))); // 升序：旧在前新在后
+  // 2026-09-29：按「日期+时间戳」排序（原只按日期+rel 字符串：同天多篇或带会话子目录时时间错位）。
+  // 文件名 YYYY-MM-DD(_HHMM|_HHMMSS).md → 时间戳取 basename 第 11 位后（空=当天最早）。
+  const diarySortKey = function (f) {
+    const base = f.rel.slice(f.rel.lastIndexOf("/") + 1);
+    const ts = (base.slice(11, -3) || "").replace(/_/g, "").padEnd(4, "0");
+    return f.date + "_" + ts + "_" + f.rel;
+  };
+  files.sort((a, b) => (diarySortKey(a) < diarySortKey(b) ? -1 : 1)); // 升序：旧在前新在后
   let cutoff = "";
   try {
     const d = new Date(createdIso);
