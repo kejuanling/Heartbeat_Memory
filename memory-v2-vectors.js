@@ -69,6 +69,46 @@ async function ensureVectors(rows) {
   return true;
 }
 
+// ---- 后台预热（2026-09-28 用户拍板，对齐旧池机制）----
+// 启动 8s 后 + 每 10 分钟增量兜底：补齐全量 active 条目的缺失向量（含历史存量/漏算），
+// 让首次检索不必现场补算。embed 熔断时自动停，恢复后下一周期续跑；批次断点续算，绝不全量塞进一个请求。
+const WARM_BATCH_SIZE = 16;
+const WARM_PAUSE_MS = 2000;
+let warmPromise = null;
+
+async function warmVectors() {
+  if (embedClient.fused()) return false;
+  if (warmPromise) return warmPromise;
+  warmPromise = (async function () {
+    let completed = 0;
+    while (!embedClient.fused()) {
+      const { createStore } = require("./memory-v2"); // 动态 require：避免与 memory-v2 的即时向量产生循环依赖
+      const rows = createStore({ config: {} }).list({ status: "active" });
+      const missing = missingVectors(rows);
+      if (!missing.length) break;
+      const batch = missing.slice(0, WARM_BATCH_SIZE);
+      const vecs = await embedClient.embedBatch(batch.map(function (r) { return r.kind + "：" + r.text; }), false, EMBED_TIMEOUT_MS);
+      if (!vecs || vecs.length !== batch.length) return completed > 0;
+      const m = vecMap();
+      batch.forEach(function (r, i) {
+        if (vecs[i] && vecs[i].length) m[r.id] = { h: entryHash(r), v: vecs[i] };
+      });
+      saveVecMap();
+      completed += batch.length;
+      if (batch.length < WARM_BATCH_SIZE) break;
+      await new Promise(function (res) { setTimeout(res, WARM_PAUSE_MS); });
+    }
+    return completed > 0;
+  })().finally(function () { warmPromise = null; });
+  return warmPromise;
+}
+
+// 启动调度：8s 首轮预热 + 每 10 分钟增量（由 server.js 启动时调用一次）
+function startWarmup() {
+  setTimeout(function () { warmVectors().catch(function () {}); }, 8000);
+  setInterval(function () { warmVectors().catch(function () {}); }, 10 * 60 * 1000);
+}
+
 // 清理集合里已不存在的 id（调用方须传全量行；归档条目 revive 后会重算，量小无妨）
 function pruneVectors(rows) {
   const ids = new Set(rows.map(function (r) { return r.id; }));
@@ -220,4 +260,4 @@ async function relevantScores(rows, query) {
   return { ok: true, scores };
 }
 
-module.exports = { ensureVectors, pruneVectors, similarGroups, retrieveHybrid, recent, breath, relevantScores };
+module.exports = { ensureVectors, warmVectors, startWarmup, pruneVectors, similarGroups, retrieveHybrid, recent, breath, relevantScores };

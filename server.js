@@ -1966,14 +1966,20 @@ function crossSnapshotFile(sessionId) {
   const token = safeSessionToken(sessionId || "default");
   return path.join(CROSS_SNAPSHOT_DIR, "cross_snapshot_" + token + ".json");
 }
+// 2026-09-28：V1 记忆池已删除，回退路径（ctx_v2=false）的跨窗口注入改用 V2 anchor 记忆
+function v2AnchorList() {
+  try {
+    return require("./memory-v2").createStore({ config: {} }).list({ status: "active" }).filter(function (m) { return m.anchor === true; });
+  } catch (e) { return []; }
+}
 function crossFingerprint(cfg) {
   // 跨窗口快照指纹：置顶记忆 + 标星 + 日记目录 mtime 任一变化即重建。
   // 只算轻量指纹（id/长度/keys/mtime），不拼正文，避免每请求 O(n) 重建。
   const parts = [];
   try {
     if (cfg.cross_inject_memory !== false) {
-      const pinned = memoryPool.list({ active: true, pinned: true });
-      parts.push("mem:" + pinned.map(function (m) { return m.id + ":" + String(m.content || "").length; }).join(","));
+      const pinned = v2AnchorList();
+      parts.push("mem:" + pinned.map(function (m) { return m.id + ":" + String(m.text || "").length; }).join(","));
     }
   } catch (e) {}
   try {
@@ -2068,7 +2074,8 @@ function saveSessionModelNameOverride(sessionId, modelName) {
   return o;
 }
 function buildCrossMemorySnapshot(sessionId) {
-  const cfg = memoryPool.getConfig();
+  // 2026-09-28：V1 记忆池删除后回退路径固定启用跨窗口注入（V2 生产路径不受本开关控制）
+  const cfg = { cross_inject_enabled: true, cross_inject_memory: true, cross_inject_diary: true, cross_inject_diary_count: 3 };
   // 会话级覆盖：本会话显式关闭 → 不注入；显式开启 → 继续，但要遵从全局总开关（全局关=全关）
   const cfgOverride = sessionCrossInjectOverride(sessionId);
   if (cfgOverride === false) return "";
@@ -2107,11 +2114,11 @@ function buildCrossMemorySnapshot(sessionId) {
 function computeCrossMemoryText(cfg, createdIso) {
   const parts = [];
   if (cfg.cross_inject_memory !== false) {
-    // 相关记忆：只固定「置顶」记忆（手动置顶 + 多次检索自动置顶），不限制条数。
-    // 不再按分类抽高重要级、不再带最近「对话摘要」——话题相关交给 surface_memory 按需召回。
-    const pinnedMems = memoryPool.list({ active: true, pinned: true });
+    // 相关记忆：只固定 V2 anchor 记忆（管理台手动置顶），不限制条数。
+    // 话题相关交给对话中 Relevant 语义检索按需召回。
+    const pinnedMems = v2AnchorList();
     if (pinnedMems.length) {
-      parts.push("## 相关记忆\n" + pinnedMems.map(function (m) { return "【" + m.category + "】" + m.content; }).join("\n"));
+      parts.push("## 相关记忆\n" + pinnedMems.map(function (m) { return "【" + m.kind + "】" + m.text; }).join("\n"));
     }
   }
   // 日记：跨窗口注入（快照的一部分），只注入"本会话创建日期之前"的日记。
@@ -3321,8 +3328,8 @@ app.post("/internal/memory-pool/add", async (req, reply) => {
         });
       }
     }
-    const r = await memoryPool.add({ content, category: b.category, importance: b.importance, pinned: b.pinned, source: "mcp" });
-    reply.send({ success: true, dup: r.dup, entry: r.entry });
+    // 2026-09-28：V1 记忆池删除，旧池直灌回滚通道移除——V2 admission 不可用即失败
+    reply.code(503).send({ error: "V2 记忆通道未就绪" });
   } catch (err) {
     console.error("[POST /internal/memory-pool/add] error:", err.message);
     reply.code(500).send({ error: err.message });
@@ -3396,6 +3403,9 @@ app.post("/internal/memory-v2/update", async (req, reply) => {
 // 记忆池（8 分类结构化记忆）管理
 // ========================
 // Memory V2 admission（C5）：惰性轻量初始化，失败仅停用 V2（v2_enabled 默认 false，旧池行为不变）
+// 2026-09-28：V2 记忆向量后台预热（启动 8s + 每 10 分钟增量，对齐旧池机制；新增即算由 memory-v2 写入路径负责）
+try { require("./memory-v2-vectors").startWarmup(); } catch (e) { console.warn("[memory-v2] 向量预热启动失败:", e.message); }
+
 let memoryV2Admission = null;
 try {
   memoryV2Admission = require("./memory-admission").createAdmission({});
@@ -3403,45 +3413,7 @@ try {
   console.warn("[memory-v2] admission 初始化失败，V2 停用:", err.message);
 }
 
-// 旧记忆池静默迁移：只走 promotion→review，绝不直接写入 V2 主集合。
-// 配置 memory_v2_config.json 的 mig_background=true 后启用；done-set 保证可重启续跑且不重复。
-function startMemoryBackgroundMigration(admission) {
-  if (!admission || !admission.submitPromotion) return;
-  const fsx = require("fs-extra");
-  const pathx = require("path");
-  const cfgFile = pathx.join(__dirname, "data", "memory_v2_config.json");
-  let cfg = {};
-  try { cfg = fsx.readJsonSync(cfgFile) || {}; } catch (_) {}
-  if (cfg.mig_background !== true) return;
-  const batchSize = Math.max(1, Math.min(50, Number(cfg.mig_batch_size) || 10));
-  const intervalMs = Math.max(60 * 1000, (Number(cfg.mig_interval_min) || 10) * 60 * 1000);
-  const poolFile = pathx.join(__dirname, "data", "memory_pool.json");
-  const doneFile = pathx.join(__dirname, "data", "memory_v2_mig_done.json");
-  const kindMap = { "关于她": "fact", "认账": "rule", "拓本": "quote", "压缩摘要": "milestone", "对话碎片": "fact", "关于我们": "fact", "锚点": "quote", "信号": "fact", "对话摘要": "fact" };
-  let running = false;
-  const runBatch = async () => {
-    if (running) return;
-    running = true;
-    try {
-      const rows = fsx.readJsonSync(poolFile);
-      const done = fsx.existsSync(doneFile) ? (fsx.readJsonSync(doneFile) || {}) : {};
-      const list = Array.isArray(rows) ? rows.filter(r => r && r.active !== false && r.id && !done[r.id]) : [];
-      let n = 0;
-      for (const r of list.slice(0, batchSize)) {
-        const result = await admission.submitPromotion({ content: String(r.content || "").trim(), kind: kindMap[r.category] || "fact", block_id: "legacy:" + r.id });
-        if (result && result.action !== "error") { done[r.id] = { at: new Date().toISOString(), action: result.action, queue_id: result.queue_id || null }; n++; }
-      }
-      if (n) fsx.writeJsonSync(doneFile, done, { spaces: 2 });
-      if (n) console.log(`[memory-v2-mig] processed=${n}, remaining=${Math.max(0, list.length - n)}`);
-    } catch (e) { console.warn("[memory-v2-mig] batch failed:", e.message); }
-    finally { running = false; }
-  };
-  setTimeout(runBatch, 15 * 1000).unref();
-  setInterval(runBatch, intervalMs).unref();
-  console.log(`[memory-v2-mig] enabled: batch=${batchSize}, interval=${Math.round(intervalMs / 60000)}min`);
-}
-startMemoryBackgroundMigration(memoryV2Admission);
-require("./routes/memory-pool")(app, { basicAuth, v2Manual: memoryV2Admission ? (b) => memoryV2Admission.submitV2(b) : null });
+// 2026-09-28：V1 记忆池删除——旧池静默迁移（startMemoryBackgroundMigration）与 routes/memory-pool 挂载已移除
 
 // 记忆流水线 judge 判定提示词（提示词页配置，2026-09-19）
 const judgeAdapter = require("./judge-adapter");
@@ -3578,15 +3550,39 @@ function sliceTimelineOriginal(sessionId, range) {
   } catch (e) { return null; }
 }
 
+// ---------------- 摘要解析（reparse）提示词配置（2026-09-28 从 V1 记忆池迁出） ----------------
+// V1 记忆池已删除，reparse_system_prompt/user_prompt/reparse_merge_max_chars 改存独立文件，
+// 管理台端点 /admin/reparse/config 读写（原 /admin/memory-pool/config）。
+const REPARSE_CONFIG_FILE = path.join(__dirname, "data", "reparse_config.json");
+function readReparseConfig() {
+  try { return fs.readJsonSync(REPARSE_CONFIG_FILE) || {}; } catch (e) { return {}; }
+}
+function buildReparsePrompt() {
+  const system = "你是长期记忆提取器。你的任务不是总结对话，而是从对话原文中找出那些在未来再次交流时仍然有用、并且会改变你理解用户或处理方式的信息。宁可少记，也不要把聊天流水账写进长期记忆。\n" +
+    "只提取有证据支持的信息，不要根据一次行为猜测人格、心理、动机或身份；不要把你自己的解释当成用户事实。区分一次性事件与稳定倾向：‘今天吃了什么’通常不记，‘长期偏好什么’才记。\n" +
+    "优先提取：稳定偏好/习惯；用户明确要求以后遵守的交互规则；用户反复纠正并希望以后避免的行为；长期目标、项目背景和持续有效的约束；重要关系规则；只有在未来确实有用时才保留重要原话或里程碑。\n" +
+    "不要提取：当天情绪、一次性事件、普通寒暄、玩笑调侃、聊天流水账、已经明显过期的信息、单次行为推导出的性格标签、心理分析、模型自我叙事。\n" +
+    "特别注意：用户对助手的纠正、明确的‘以后不要……/以后要……/记住……’、以及会改变未来回应方式的要求，优先视为高价值规则。不要把这些规则写成对用户人格的判断。\n" +
+    "每条记忆必须独立、简洁、可执行或可验证；不要复述上下文，不要加入未出现的因果关系。quote 只有在原话本身具有长期价值时才保留，而且必须逐字来自原文，不能改写。";
+  const user = "从下面的对话原文中提取长期记忆候选。只输出 JSON 数组，不要输出解释。每项格式为 {\"text\":\"记忆内容\",\"kind\":\"fact|rule|quote|milestone\",\"importance\":0到1之间的小数}。没有真正值得长期记住的信息就输出 []。\n\n判断标准：如果删掉这条信息，未来再次与她交流时基本不会改变你的理解或行为，就不要提取。";
+  return { system, user };
+}
+function saveReparseConfig(patch) {
+  const cur = readReparseConfig();
+  Object.assign(cur, patch || {});
+  try { fs.writeJsonSync(REPARSE_CONFIG_FILE, cur, { spaces: 2 }); } catch (e) { throw e; }
+  return cur;
+}
+
 // LLM 候选提取：从对话原文提取值得长期记住的稳定信息（简短风格 prompt，JSON 数组输出）
 async function extractMemoryCandidates(sourceText) {
   const { provider, model } = resolveRoleModel("reparse");
   const apiUrl = provider && (provider.api_url || provider.base_url);
   const apiKey = provider && provider.api_key;
   if (!apiUrl || !apiKey || !model) throw new Error("模型未配置（role=reparse：请在设置里给「摘要解析」选模型或启用默认供应商）");
-  // 提示词接入管理台配置（0918）：reparse_system_prompt/user_prompt 自定义覆盖，内置默认=buildReparsePrompt（原文提取版）
-  const pcfg = memoryPool.getConfig();
-  const pdef = memoryPool.buildReparsePrompt();
+  // 提示词接入管理台配置：reparse_system_prompt/user_prompt 自定义覆盖，内置默认=buildReparsePrompt（原文提取版）
+  const pcfg = readReparseConfig();
+  const pdef = buildReparsePrompt();
   const system = String(pcfg.reparse_system_prompt || "").trim() || pdef.system;
   const user = (String(pcfg.reparse_user_prompt || "").trim() || pdef.user) + "\n\n对话原文：\n" + sourceText;
   const controller = new AbortController();
@@ -3619,37 +3615,30 @@ async function extractMemoryCandidates(sourceText) {
     .filter(x => x && x.text.length >= 4 && x.text.length <= 500);
 }
 
-app.get("/admin/memory-pool/config", { preHandler: basicAuth }, async (req, reply) => {
+// 摘要解析提示词配置（2026-09-28 从 /admin/memory-pool/config 迁出，V1 记忆池已删除）
+app.get("/admin/reparse/config", { preHandler: basicAuth }, async (req, reply) => {
   try {
-    const cfg = memoryPool.getConfig();
-    const def = memoryPool.buildReparsePrompt();   // 2026-09-28：buildReparsePrompt 无参，reparse_warm 已删
-    reply.send({ ...cfg, default_reparse_system_prompt: def.system, default_reparse_user_prompt: def.user });
+    const cfg = readReparseConfig();
+    const def = buildReparsePrompt();
+    reply.send({
+      reparse_system_prompt: String(cfg.reparse_system_prompt || ""),
+      reparse_user_prompt: String(cfg.reparse_user_prompt || ""),
+      reparse_merge_max_chars: Number(cfg.reparse_merge_max_chars) || 8000,
+      default_reparse_system_prompt: def.system,
+      default_reparse_user_prompt: def.user,
+    });
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
-app.post("/admin/memory-pool/config", { preHandler: basicAuth }, async (req, reply) => {
-  try { reply.send(memoryPool.setConfig(req.body || {})); } catch (err) { reply.code(500).send({ error: err.message }); }
-});
-
-app.post("/admin/memory-pool/clean", { preHandler: basicAuth }, async (req, reply) => {
+app.post("/admin/reparse/config", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const b = req.body || {};
-    const preview = b.preview !== false;
-    const label = preview ? "整理记忆池·预览" : "整理记忆池·落地";
-    const st = memoryPool.stats();
-    addCompactionLog({ action: "memory-clean", label: label, status: "pending", message: "开始整理（活跃 " + st.active + " 条）…" });
-    const r = await memoryPool.cleanPool({ preview: preview, force: b.force === true });
-    if (r.error) {
-      addCompactionLog({ action: "memory-clean", label: label, status: "error", message: "整理失败：" + r.error });
-      return reply.send(r);
-    }
-    const statMsg = "待清洗 " + (r.to_clean || 0) + " 条 → 合并 " + (r.merged || 0) + " / 沉底 " + (r.sunk || 0) + " / 重分类 " + (r.recategorized || 0) + " / 重打分 " + (r.rescored || 0) + " / 新增 " + (r.added || 0);
-    addCompactionLog({ action: "memory-clean", label: label, status: "success", message: "记忆已整理完成 " + statMsg });
-    reply.send(r);
-  } catch (err) {
-    addCompactionLog({ action: "memory-clean", label: "整理记忆池", status: "error", message: "整理失败：" + err.message });
-    reply.code(500).send({ error: err.message });
-  }
+    const patch = {};
+    if (b.reparse_system_prompt !== undefined) patch.reparse_system_prompt = String(b.reparse_system_prompt).trim();
+    if (b.reparse_user_prompt !== undefined) patch.reparse_user_prompt = String(b.reparse_user_prompt).trim();
+    if (b.reparse_merge_max_chars !== undefined) patch.reparse_merge_max_chars = Number(b.reparse_merge_max_chars) || 8000;
+    reply.send(saveReparseConfig(patch));
+  } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
 // ========================
@@ -3693,7 +3682,7 @@ app.get("/admin/cross-window-inject", { preHandler: basicAuth }, async (req, rep
     // 边界仍用本会话创建日（优先时间线首条消息，其次旧快照固化的 created_at），与实际注入同口径，只算不落盘。
     let text = "";
     try {
-      const cfg = memoryPool.getConfig();
+      const cfg = { cross_inject_enabled: true, cross_inject_memory: true, cross_inject_diary: true, cross_inject_diary_count: 3 };
       const cfgOverride = sessionCrossInjectOverride(sid);
       if (cfgOverride !== false && cfg.cross_inject_enabled !== false) {
         let createdIso = sessionCreatedAtOf(sid);
@@ -6043,14 +6032,7 @@ function consoleOwnedCfgKeys() {
     "dedup_anchor_threshold", "dedup_cross_threshold", "dedup_threshold",
     "retrieval_top_k", "decay_days", "auto_pin_retrieval_count"
   ]);
-  // 运行时以 data/memory_pool_config.json 为准：把该文件当前已有的键也并入拦截集，防漏（新增参数无需改代码）。
-  try {
-    const mpf = path.join(__dirname, "data", "memory_pool_config.json");
-    if (fs.existsSync(mpf)) {
-      const mp = JSON.parse(fs.readFileSync(mpf, "utf-8")) || {};
-      for (const k of Object.keys(mp)) blocked.add(k);
-    }
-  } catch (e) {}
+  // 2026-09-28：V1 记忆池删除，不再从 memory_pool_config.json 运行时并入拦截键
   return blocked;
 }
 app.get("/admin/chat-settings", { preHandler: basicAuth }, async (req, reply) => {
@@ -6454,7 +6436,6 @@ app.get("/admin/logs/context", { preHandler: basicAuth }, async (req, reply) => 
 // ========================
 const tagParser = require("./tag-parser");
 const memoryEngine = require("./memory-engine");
-const memoryPool = require("./memory-pool");
 
 require("./memory-engine").init().then(() => {
   console.log("[memory] 记忆引擎就绪");
@@ -6462,22 +6443,12 @@ require("./memory-engine").init().then(() => {
   console.error("[memory] 记忆引擎初始化失败:", err.message);
 });
 
-require("./memory-pool").init().then(() => {
-  console.log("[memory-pool] 记忆池就绪");
-}).catch(err => {
-  console.error("[memory-pool] 记忆池初始化失败:", err.message);
-});
-
-// 优雅关闭时刷盘
-// 2026-09-28：memory-engine 的空壳 shutdown 已于 1335d36（死代码清理）删除——flush 机制残迹
-// 零调用；server.js 退出 handler 漏同步，一直在抛 `TypeError: ...shutdown is not a function`
-// （unhandled_rejection）。此处删除该调用，仅保留 memory-pool.shutdown()（其导出仍在）。
+// 2026-09-28：V1 记忆池删除——memory-pool require/init/shutdown 全部移除
+// （memory-engine 空壳 shutdown 已于 1335d36 删除；退出仅保留 V2 记忆闪存兜底）
 process.on("SIGINT", async () => {
-  await require("./memory-pool").shutdown();
   process.exit(0);
 });
 process.on("SIGTERM", async () => {
-  await require("./memory-pool").shutdown();
   process.exit(0);
 });
 

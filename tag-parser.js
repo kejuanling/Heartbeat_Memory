@@ -123,6 +123,31 @@ async function extractAndStore(text, ctx) {
 
   }
 
+  // <memory> → V2 记忆池（2026-09-28：V1 记忆池删除，改直写 V2 主集合；memory_tag origin 合法）
+  const V2_KIND_MAP = { "关于她": "fact", "认账": "rule", "拓本": "quote", "压缩摘要": "milestone", "对话碎片": "fact", "关于我们": "fact", "锚点": "quote", "信号": "fact", "对话摘要": "fact" };
+  const V2_KINDS = ["fact", "rule", "quote"];
+  function memoryTagToV2(body, category, pinned) {
+    const { createStore } = require("./memory-v2");
+    const store = createStore({ config: {} });
+    const text = String(body || "").trim();
+    if (!text) return { skipped: true };
+    // 简单去重：同正文的 active 条目已存在则跳过（对齐旧池自动去重语义）
+    const dup = (store.list({ status: "active" }) || []).some(function (e) { return String(e.text || "").trim() === text; });
+    if (dup) return { skipped: true };
+    // 分类映射：旧类名（关于她/认账/拓本）→ kind；V2 枚举直用；里程碑无 established_at 不适用（降级 fact）
+    let kind = category ? (V2_KIND_MAP[category] || (V2_KINDS.includes(category) ? category : null)) : null;
+    if (!kind || kind === "milestone") kind = "fact";
+    const r = store.create({
+      text: text,
+      kind: kind,
+      subject: kind === "quote" ? "user" : "user",
+      origin: "memory_tag",
+      anchor: pinned === true,
+      provenance: { method: "memory_tag" },
+    });
+    return r && r.ok ? { added: 1 } : { skipped: false, error: r && r.error };
+  }
+
   // --- <memory> 轻量辅助：AI 顺手写的重要记忆 → 记忆池（自动去重，非必需） ---
   // 只允许前三类（关于她/认账/拓本），标签内开头写 {category:"认账"} 指定分类（重要级已删，0920），如
   //   <memory>{category:"认账"}她情绪低落时先抱住她，别急着讲道理</memory>
@@ -144,11 +169,10 @@ async function extractAndStore(text, ctx) {
     if (!body) continue;
     promises.push(
       Promise.resolve().then(function () {
-        const memoryPool = require("./memory-pool");
-        return memoryPool.ingestSummary(body, { source: "memory_tag", directCategory: category, directPinned: pinned });
+        return memoryTagToV2(body, category, pinned);
       }).then(function (r) {
-        if (r && (r.added || r.merged)) {
-          console.log("[tag-parser] <memory> 已入记忆池:", body.slice(0, 50), "added=", r.added, "merged=", r.merged);
+        if (r && r.added) {
+          console.log("[tag-parser] <memory> 已入 V2 记忆池:", body.slice(0, 50));
         } else if (r && r.skipped) {
           console.log("[tag-parser] <memory> 重复跳过:", body.slice(0, 50));
         }

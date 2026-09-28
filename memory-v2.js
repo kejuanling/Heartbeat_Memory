@@ -247,6 +247,26 @@ function _buildEntry(input, cfg) {
   };
 }
 
+// 写入即算向量（2026-09-28 用户拍板）：新增/编辑 active 条目后异步补算并缓存，
+// 让向量在写入完成时即可用，不再等首次检索现场补算。动态 require 规避循环依赖
+// （memory-v2-vectors 预热会 require 本模块）；失败/熔断静默，不影响写入。
+function scheduleVector(id) {
+  try {
+    const vv = require("./memory-v2-vectors");
+    const e = id != null ? getById(id) : null;
+    if (!e || e.status !== "active") return;
+    Promise.resolve(vv.ensureVectors([e])).catch(function () {});
+  } catch (e) { /* 向量旁路失败不影响写入 */ }
+}
+
+// 供 scheduleVector 用的单条查询（createStore 内部 get 依赖闭包，这里用轻量直读）
+function getById(id) {
+  try {
+    const { createStore } = module.exports;
+    return createStore({ config: {} }).get(id);
+  } catch (e) { return null; }
+}
+
 // ---------------- 存储工厂 ----------------
 // 生产用默认实例之外的独立实例（测试指向 tmp 目录）：
 //   createStore({ rootDir, config, readonly })
@@ -299,6 +319,7 @@ function createStore(opts = {}) {
     const rows2 = load();
     rows2.push(v.entry);
     flush(); // 写穿透：V2 数据量小（个位数/天），安全优先于批量
+    scheduleVector(v.entry.id); // 2026-09-28：新增即算向量（异步，不阻塞写入）
     return { ok: true, entry: v.entry };
   }
 
@@ -366,13 +387,14 @@ function createStore(opts = {}) {
     if (!e) return fail("not_found: " + id);
     if (!patch || typeof patch !== "object") return fail("patch 必须为对象");
     const now = nowIso();
+    let textChanged = false;
     for (const k of Object.keys(patch)) {
       if (!UPDATABLE_FIELDS.includes(k)) return fail("字段不可编辑: " + k);
       const v = patch[k];
       if (k === "text") {
         const t = typeof v === "string" ? v.trim() : "";
         if (!t || t.length > TEXT_MAX) return fail("text 非法");
-        if (e.text !== t) { e.text = t; e.content_updated_at = now; }
+        if (e.text !== t) { e.text = t; e.content_updated_at = now; textChanged = true; }
       } else if (k === "note") {
         const n = strOrNull(v);
         if (n && n.length > NOTE_MAX) return fail("note 超长");
@@ -409,6 +431,7 @@ function createStore(opts = {}) {
       }
     }
     flush();
+    if (textChanged) scheduleVector(id); // 2026-09-28：正文变化即重算向量（异步）
     return { ok: true, entry: e };
   }
 

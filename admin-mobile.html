@@ -48,25 +48,6 @@
    <div class="card"><div class="card-title">网易云环境</div><div id="netease-status"></div>
      <button type="button" class="btn btn-outline" onclick="openNeteaseEditor()">编辑网易云环境</button>
    </div>
-   <div class="card" data-collapse-id="memory-wake-config" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆与唤醒参数</span><span class="collapse-arrow">▾</span></div>
-     <div class="card-body">
-               <div class="cc-cfg-grid">
-          <div class="cc-cfg-group-title">记忆池</div>
-          <label class="cc-cfg-field">去重阈值<input type="number" id="mw-dedup" min="0" max="1" step="0.05"></label>
-          <div class="cc-cfg-group-title">跨窗口注入（新会话自动带上：置顶记忆 + 近期日记）</div>
-          <label class="cc-cfg-field cc-cfg-check">总开关<span class="cc-sw"><input type="checkbox" id="mw-cross-enabled"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
-          <label class="cc-cfg-field cc-cfg-check">近期日记<span class="cc-sw"><input type="checkbox" id="mw-cross-diary"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
-          <label class="cc-cfg-field cc-cfg-check">置顶记忆<span class="cc-sw"><input type="checkbox" id="mw-cross-memory"><i class="sw-track"></i><i class="sw-thumb"></i></span></label>
-          <label class="cc-cfg-field">近期日记篇数<input type="number" id="mw-cross-days" min="1" step="1"></label>
-        </div>
-       <div class="cc-cfg-btns">
-         <button type="button" class="cc-btn primary" onclick="saveMemoryWakeConfig()">保存参数</button>
-         <button type="button" class="cc-btn secondary" onclick="loadMemoryWakeConfig()">重新载入</button>
-       </div>
-       <div id="memory-wake-config-msg" class="cc-cfg-msg"></div>
-     </div>
-   </div>
 
    <div class="card" data-collapse-id="cc-config" data-default="collapsed">
      <div class="card-title collapsible" onclick="toggleCard(this)"><span>压缩参数配置</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
@@ -432,37 +413,6 @@
       <div class="mp-modal-actions">
         <button type="button" class="mp-btn primary" id="mp-save-btn" onclick="saveMemPoolEdit()">保存</button>
         <button type="button" class="mp-btn" onclick="closeModal('mempoolEditModal')">取消</button>
-      </div>
-    </div>
-  </div>
-    <div class="modal-overlay" id="mempoolCleanModal">
-    <div class="modal" style="max-width:min(94vw,720px)">
-      <div class="mp-modal-head">
-        <h3>整理记忆池 · 预览</h3>
-        <button type="button" class="mp-modal-x" onclick="closeModal('mempoolCleanModal')">&times;</button>
-      </div>
-      <div id="mempool-clean-stat" style="font-size:12px;color:var(--text2);margin-bottom:10px"></div>
-      <div id="mempool-clean-body" style="padding-right:4px"></div>
-      <div class="mp-modal-actions">
-        <button type="button" class="mp-btn" onclick="closeModal('mempoolCleanModal')">取消</button>
-        <button type="button" class="mp-btn primary" id="mempool-clean-apply" onclick="applyClean()">确认落地</button>
-      </div>
-    </div>
-  </div>
-    <div class="modal-overlay" id="mempoolImportModal">
-    <div class="modal" style="max-width:min(94vw,720px)">
-      <div class="mp-modal-head">
-        <h3>导入清洗结果</h3>
-        <button type="button" class="mp-modal-x" onclick="closeModal('mempoolImportModal')">&times;</button>
-      </div>
-      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">粘贴或上传清洗产出的变更 JSON（数组，每条 {id, op:"update"/"delete"/"merge", category?, content?, into?}）。先「预览校验」看统计，再「确认导入」；应用前服务器自动全量备份，条目 id 不变，标星关联不受影响。</div>
-      <input type="file" id="mempool-import-file" accept=".json,.txt" onchange="memPoolImportFile(this)" style="font-size:12px;margin-bottom:8px">
-      <textarea id="mempool-import-text" rows="10" placeholder='[{"id":"mp_xxxxxxxx","op":"update","category":"认账"}]' style="width:100%;font-size:12px;font-family:monospace"></textarea>
-      <div id="mempool-import-result" style="font-size:12px;color:var(--text2);min-height:18px;margin:8px 0"></div>
-      <div class="mp-modal-actions">
-        <button type="button" class="mp-btn" onclick="closeModal('mempoolImportModal')">关闭</button>
-        <button type="button" class="mp-btn" onclick="previewMemPoolImport()">预览校验</button>
-        <button type="button" class="mp-btn primary" id="mempool-import-apply" onclick="applyMemPoolImport()" style="display:none">确认导入</button>
       </div>
     </div>
   </div>
