@@ -5,7 +5,6 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "wake": "node wake_up.js",
     "test": "node --test"
   },
   "keywords": [

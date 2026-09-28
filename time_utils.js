@@ -182,7 +182,6 @@ function nowIso() {
 }
 
 module.exports = {
-  DEFAULT_TIME_ZONE,
   formatDateTimeInTimeZone,
   getDatePartsInTimeZone,
   getHourInTimeZone,
