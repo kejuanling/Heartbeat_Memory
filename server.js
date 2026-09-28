@@ -6524,13 +6524,14 @@ require("./memory-pool").init().then(() => {
 });
 
 // 优雅关闭时刷盘
+// 2026-09-28：memory-engine 的空壳 shutdown 已于 1335d36（死代码清理）删除——flush 机制残迹
+// 零调用；server.js 退出 handler 漏同步，一直在抛 `TypeError: ...shutdown is not a function`
+// （unhandled_rejection）。此处删除该调用，仅保留 memory-pool.shutdown()（其导出仍在）。
 process.on("SIGINT", async () => {
-  await require("./memory-engine").shutdown();
   await require("./memory-pool").shutdown();
   process.exit(0);
 });
 process.on("SIGTERM", async () => {
-  await require("./memory-engine").shutdown();
   await require("./memory-pool").shutdown();
   process.exit(0);
 });
