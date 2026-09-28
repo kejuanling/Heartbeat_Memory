@@ -3515,6 +3515,7 @@ app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, re
         block_id: t.block_id,
         session: item && item.session || null,
         source_text: original && original.trim() ? original : t.summary,
+        summary: t.summary, // 0928：日志块标识用摘要前 20 字（原 block_id 分不清是哪块）
         degraded: !(original && original.trim()),
       });
     }
@@ -3527,6 +3528,11 @@ app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, re
     const updateLogMsg = function (msg) {
       const li = compactionLogs.findIndex(function (x) { return x.id === logId2; });
       if (li >= 0) { compactionLogs[li].message = msg; try { persistCompactionLogs(); } catch (e) {} }
+    };
+    // 0928：块标识 = 摘要前 20 字（无摘要回退 block_id），一眼认出解析的是哪块
+    const blockLabel = function (sb) {
+      const sum = String((sb && sb.summary) || "").replace(/\s+/g, " ").trim();
+      return sum ? sum.slice(0, 20) : String((sb && sb.block_id) || "?").slice(0, 12);
     };
     for (let k = 0; k < slicedOriginals.length; k++) {
       const s = slicedOriginals[k];
@@ -3543,12 +3549,12 @@ app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, re
             if (r.action === "reject") rejected++; else reviewed++;
           } catch (e) { failed++; }
         }
-        updateLogMsg("正在解析 第 " + (k + 1) + "/" + slicedOriginals.length + " 块（" + String(s.block_id || "").slice(0, 12) + "）：已产候选 " + reviewed + " 条 / 门卫拒绝 " + rejected + " / 失败 " + failed);
+        updateLogMsg("正在解析 第 " + (k + 1) + "/" + slicedOriginals.length + " 块（" + blockLabel(s) + "）：已产候选 " + reviewed + " 条 / 门卫拒绝 " + rejected + " / 失败 " + failed);
       } catch (e) {
         failed++;
-        failedBlocks.push({ idx: k + 1, block: String(s.block_id || "").slice(0, 12), err: e && e.message ? String(e.message).slice(0, 80) : String(e) });
+        failedBlocks.push({ idx: k + 1, block: blockLabel(s), err: e && e.message ? String(e.message).slice(0, 80) : String(e) });
         console.error("[reparse] 原文解析失败:", e.message);
-        updateLogMsg("正在解析 第 " + (k + 1) + "/" + slicedOriginals.length + " 块（" + String(s.block_id || "").slice(0, 12) + "）：失败 - " + (e && e.message ? String(e.message).slice(0, 80) : String(e)));
+        updateLogMsg("正在解析 第 " + (k + 1) + "/" + slicedOriginals.length + " 块（" + blockLabel(s) + "）：失败 - " + (e && e.message ? String(e.message).slice(0, 80) : String(e)));
       }
     }
     // 2026-09-28：把「已解析」标记写回压缩块记录（解析成功才标记；失败块保持原状可重试）
