@@ -265,6 +265,15 @@ async function executeToolCalls(toolCalls, working, toolHistory, ctx, onEvent, n
       error,
       afterSeg: (typeof afterSeg === "number") ? afterSeg : -1   // 方案2刷新：该工具位于第 afterSeg 段正文之后（-1=最前）
     });
+    // 2026-09-29：diary_add 写日记 → 时间线落库。工具端只把正文写进 diary/ 文件、回执不返正文，
+    // 服务端无从提取 [DIARY] 落库，导致 AI 上下文里缺日记（keh3 9-28 三篇全缺）。由 server 侧
+    // onDiaryWritten 回调写盘（kind=diary，isRealDiary 保护永不压缩）。
+    if (name === "diary_add" && !error && typeof ctx.onDiaryWritten === "function") {
+      const dText = (args && typeof args.content === "string" && args.content.trim()) ? args.content.trim() : "";
+      if (dText) {
+        try { ctx.onDiaryWritten(ctx.sessionId, dText); } catch (e) { console.warn("[diary] 时间线落库回调失败:", e.message); }
+      }
+    }
     if (typeof onEvent === "function") onEvent({ type: "tool_end", index, id, name, args, result: resTrunc, error, ok: !error, afterSeg: (typeof afterSeg === "number") ? afterSeg : -1 });
   }
 }

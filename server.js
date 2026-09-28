@@ -2250,7 +2250,15 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         messages: messages || body.messages || [],
         serverClients: clients,
         onEvent: (body.stream === true) ? onEvent : null,
-        sessionId
+        sessionId,
+        // 2026-09-29：diary_add 工具直写日记文件、正文不回传 → 时间线缺 [DIARY]（AI 上下文缺日记）。
+        // 工具循环成功调用后回调：正文落库时间线 kind=diary 隐藏消息（isRealDiary 保护、上下文重建可见）。
+        onDiaryWritten: (sid, dContent) => {
+          try {
+            appendMessages(sid, [{ role: "assistant", content: diaryLib.wrapDiaryTag(dContent), kind: "diary", time: new Date().toISOString() }], { silent: true });
+            console.log("[diary] diary_add 已落库时间线 (session=" + sid + ", chars=" + dContent.length + ")");
+          } catch (e) { console.warn("[diary] diary_add 落库时间线失败:", e.message); }
+        }
       });
     }
 
