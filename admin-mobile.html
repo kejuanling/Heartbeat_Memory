@@ -49,6 +49,24 @@
      <button type="button" class="btn btn-outline" onclick="openNeteaseEditor()">编辑网易云环境</button>
    </div>
 
+   <div class="card" data-collapse-id="cross-inject-config" data-default="collapsed">
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>跨窗口注入 · 日记条数</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+     <div class="hint-card">
+       <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px;">控制 V2 上下文「Earlier Days」块注入的近期日记篇数（默认 3）。保存后写入 data/cross_inject_config.json，下次请求即生效。</div>
+     </div>
+     <div class="card-body">
+       <div class="cc-cfg-grid">
+         <label class="cc-cfg-item"><span>Earlier Days 注入篇数</span>
+           <input type="number" id="cross-inject-diary-count" min="1" max="20" style="width:80px">
+         </label>
+       </div>
+       <div class="cc-cfg-btns">
+         <button type="button" class="cc-btn primary" onclick="saveCrossInjectConfig()">保存</button>
+         <button type="button" class="cc-btn secondary" onclick="loadCrossInjectConfig()">重新载入</button>
+       </div>
+       <div id="cross-inject-config-msg" class="cc-cfg-msg"></div>
+     </div>
+   </div>
    <div class="card" data-collapse-id="cc-config" data-default="collapsed">
      <div class="card-title collapsible" onclick="toggleCard(this)"><span>压缩参数配置</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
      <div class="card-body">

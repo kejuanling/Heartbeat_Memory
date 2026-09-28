@@ -234,8 +234,9 @@ function assembleInput(opts) {
     excludeIds = floatIdsForSession(path.join(dataDir, 'context_v2_floated.json'), opts.sessionId);
   } catch (e) {}
   // 日记篇数跟随管理台配置（0919 用户拍板：按我设定的数量来）
+  // 0928：V1 memory_pool_config.json 已归档，篇数配置迁 data/cross_inject_config.json（管理台配置页可调）
   let diaryCount = 3;
-  try { diaryCount = Number(JSON.parse(fs.readFileSync(path.join(dataDir, 'memory_pool_config.json'), 'utf8')).cross_inject_diary_count) || 3; } catch (e) {}
+  try { diaryCount = Number(JSON.parse(fs.readFileSync(path.join(dataDir, 'cross_inject_config.json'), 'utf8')).cross_inject_diary_count) || 3; } catch (e) {}
   // map 挂在 v2Input 上供溯源（builder 只读已知字段，多余键无害）
   // 日记过滤（2026-09-20 恢复旧注入边界，用户拍板）：只留「严格早于会话创建日期」且未被隐藏的篇，
   // 创建之后写的日记由本会话时间线的日记特殊事件自然覆盖，不再跨窗口重复注入；边界缺失时不注入任何日记。

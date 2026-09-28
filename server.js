@@ -1998,6 +1998,7 @@ function crossFingerprint(cfg) {
       };
       scanDir("");
       for (const s of diarySessionDirs()) scanDir(s);
+      marks.push("count:" + (Number(cfg.cross_inject_diary_count) || 3));
       marks.sort();
       // 2026-09-09：隐藏清单变化（隐藏/取消隐藏）也要触发快照重建，否则旧快照里的日记内容不会更新
       parts.push("diary:" + marks.join(",") + "|hidden:" + Array.from(readDiaryHiddenSet()).sort().join(","));
@@ -2073,9 +2074,30 @@ function saveSessionModelNameOverride(sessionId, modelName) {
   fs.writeJsonSync(file, o);
   return o;
 }
+// ========================
+// 跨窗口注入参数（2026-09-28：V1 memory_pool_config.json 归档后独立存储 data/cross_inject_config.json；
+// V2 Earlier Days 篇数（context-v2-shadow）与回退路径/预览同源，管理台配置页可调）
+// ========================
+const CROSS_INJECT_CONFIG_FILE = path.join(__dirname, "data", "cross_inject_config.json");
+function readCrossInjectConfig() {
+  const base = { cross_inject_enabled: true, cross_inject_memory: true, cross_inject_diary: true, cross_inject_diary_count: 3 };
+  try {
+    const o = fs.readJsonSync(CROSS_INJECT_CONFIG_FILE) || {};
+    if (o.cross_inject_diary_count != null) base.cross_inject_diary_count = Math.max(1, Number(o.cross_inject_diary_count) || 3);
+    return base;
+  } catch (e) { return base; }
+}
+function saveCrossInjectConfig(patch) {
+  const cur = readCrossInjectConfig();
+  if (patch && patch.cross_inject_diary_count != null) cur.cross_inject_diary_count = Math.max(1, Number(patch.cross_inject_diary_count) || 3);
+  fs.ensureDirSync(path.dirname(CROSS_INJECT_CONFIG_FILE));
+  writeJsonFileAtomic(CROSS_INJECT_CONFIG_FILE, { cross_inject_diary_count: cur.cross_inject_diary_count });
+  return cur;
+}
 function buildCrossMemorySnapshot(sessionId) {
-  // 2026-09-28：V1 记忆池删除后回退路径固定启用跨窗口注入（V2 生产路径不受本开关控制）
-  const cfg = { cross_inject_enabled: true, cross_inject_memory: true, cross_inject_diary: true, cross_inject_diary_count: 3 };
+  // 2026-09-28：V1 记忆池删除后回退路径固定启用跨窗口注入（V2 生产路径不受本开关控制）；
+  // 日记条数从 data/cross_inject_config.json 读取（管理台配置页可调）
+  const cfg = readCrossInjectConfig();
   // 会话级覆盖：本会话显式关闭 → 不注入；显式开启 → 继续，但要遵从全局总开关（全局关=全关）
   const cfgOverride = sessionCrossInjectOverride(sessionId);
   if (cfgOverride === false) return "";
@@ -3682,7 +3704,7 @@ app.get("/admin/cross-window-inject", { preHandler: basicAuth }, async (req, rep
     // 边界仍用本会话创建日（优先时间线首条消息，其次旧快照固化的 created_at），与实际注入同口径，只算不落盘。
     let text = "";
     try {
-      const cfg = { cross_inject_enabled: true, cross_inject_memory: true, cross_inject_diary: true, cross_inject_diary_count: 3 };
+      const cfg = readCrossInjectConfig();
       const cfgOverride = sessionCrossInjectOverride(sid);
       if (cfgOverride !== false && cfg.cross_inject_enabled !== false) {
         let createdIso = sessionCreatedAtOf(sid);
@@ -3696,6 +3718,20 @@ app.get("/admin/cross-window-inject", { preHandler: basicAuth }, async (req, rep
       }
     } catch (cx) { console.warn("[cross-inject] 预览失败:", cx.message); }
     reply.send({ text: text, session_id: sid, mode: "legacy" });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+// 跨窗口注入参数（日记条数，V2 Earlier Days 篇数同源）
+app.get("/admin/cross-inject/config", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const c = readCrossInjectConfig();
+    reply.send({ cross_inject_diary_count: c.cross_inject_diary_count, default_count: 3 });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+app.post("/admin/cross-inject/config", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const c = saveCrossInjectConfig((req.body || {}));
+    reply.send({ ok: true, cross_inject_diary_count: c.cross_inject_diary_count });
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 

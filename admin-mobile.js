@@ -721,6 +721,29 @@ function toast(msg){
     }catch(e){ if(msg) msg.textContent='恢复失败: '+e.message; }
   }
   // ============ 记忆与唤醒参数 ============
+  // 跨窗口注入参数（日记条数，V2 Earlier Days 篇数同源；0928 V1 memory_pool_config 归档后独立存储）
+  async function loadCrossInjectConfig(){
+    const msg=document.getElementById('cross-inject-config-msg');
+    try{
+      const r=await fetch(ADMIN_API + '/cross-inject/config');
+      const c=await r.json();
+      const el=document.getElementById('cross-inject-diary-count');
+      if(el) el.value=c.cross_inject_diary_count!=null?c.cross_inject_diary_count:3;
+      if(msg) msg.textContent='';
+    }catch(e){ if(msg) msg.textContent='读取失败: '+e.message; }
+  }
+  async function saveCrossInjectConfig(){
+    const msg=document.getElementById('cross-inject-config-msg');
+    if(msg) msg.textContent='保存中...';
+    const v=Math.max(1, Number(document.getElementById('cross-inject-diary-count').value)||3);
+    try{
+      const r=await fetch(ADMIN_API+'/cross-inject/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cross_inject_diary_count:v})});
+      const d=await r.json();
+      if(d.error){ if(msg) msg.textContent='保存失败: '+d.error; toast('保存失败: '+d.error); return; }
+      if(msg) msg.textContent='已保存：Earlier Days 注入 '+d.cross_inject_diary_count+' 篇日记，下次请求生效。';
+      toast('跨窗口注入日记条数已保存');
+    }catch(e){ if(msg) msg.textContent='保存失败: '+e.message; toast('保存失败: '+e.message); }
+  }
   async function loadReparsePrompt(){
     const msg=document.getElementById('reparse-prompt-msg');
     try{
@@ -3018,7 +3041,7 @@ function ccNumLiveCheck(input, max){
   if(name==='memory'){ if(!window.__memPoolInited){ initMemPoolView(); window.__memPoolInited=true; } loadReviewQueue(); }
   if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
   if(name==='prompts'){loadWakePrompt();loadContextDigestPrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadReparsePrompt();loadJudgePrompt();}
-  if(name==='config'){loadToolsConfig();}
+  if(name==='config'){loadToolsConfig(); loadCrossInjectConfig();}
   }
  
    function renderPushLog(d){
