@@ -425,12 +425,6 @@ async function digest(q, opts) {
 
 module.exports = {
   digest,
-  loadActiveSummaries,
-  parseTimeWindow,
-  parseRangeLabel,
   loadPromptTemplate,
-  dedupByLiteral,
-  _literalSim,
-  DEFAULT_PROMPT_TEMPLATE,
   PROMPT_FILE
 };

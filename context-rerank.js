@@ -228,7 +228,5 @@ module.exports = {
   pickProvidersFromConfig,
   resolveRerankProvider,
   parsePickedIds,
-  buildRerankPrompt,
-  rerankDisabled,
   _candidateId
 };

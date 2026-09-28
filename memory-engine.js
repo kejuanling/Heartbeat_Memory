@@ -21,13 +21,7 @@ let deletedPinSignatures = new Set();
 // 2026-09-15 wake-up 退役后 gateway 单进程，机制保留作多进程部署防御）
 const READONLY = process.env.MEMORY_ENGINE_READONLY === "1";
 
-// 同步/异步原子写 JSON（tmp+rename）——本模块 pair 与 server.js 的同名函数重复，历史并存
-function atomicWriteJsonSync(file, data) {
-  const tmp = file + ".tmp";
-  fs.writeJsonSync(tmp, data, { spaces: 2 });
-  fs.renameSync(tmp, file);
-}
-
+// 异步原子写 JSON（tmp+rename）——与 server.js 的同名函数重复，历史并存
 async function atomicWriteJson(file, data) {
   const tmp = file + ".tmp";
   await fs.writeJson(tmp, data, { spaces: 2 });
@@ -248,9 +242,7 @@ function buildPinnedContext() {
   }).join('\n');
 }
 
-// 旧 flush/flushTimer 刷盘机制已移除：pin 写盘均为即时 atomicWriteJson，无延迟刷盘需求。
-async function shutdown() {
-}
+// 旧 flush/flushTimer 刷盘机制已移除：pin 写盘均为即时 atomicWriteJson，无延迟刷盘需求（空 shutdown 残壳已于 2026-09-28 删除）。
 
 // ========================
 // 词云关键词提取（管理台词云卡片用）
@@ -293,9 +285,8 @@ function extractKeywordsFromText(text) {
 }
 
 module.exports = {
-  init, shutdown,
+  init,
   extractKeywordsFromText, KEYWORD_STOP_WORDS,
-  get config() { return config; },
   getConfig() { return config; },
   addPinnedMemory, updatePinnedMemory, deletePinnedMemory, reorderPinnedMemory, getPinnedMemories, buildPinnedContext,
   async updateConfig(updates) {

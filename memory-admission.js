@@ -340,4 +340,4 @@ function decide(detection, validation) {
 
 function strSafe(v) { return v == null ? null : String(v); }
 
-module.exports = { createAdmission, decide, CATEGORY_MAP };
+module.exports = { createAdmission };
