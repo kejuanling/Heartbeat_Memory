@@ -408,6 +408,24 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
  // 只写空栏或本机制自己的文案（⏳ 开头），绝不覆盖其他操作的提示。——
  var GEN_ACTIONS = { reparse: 1, gap: 1, block: 1 };
  var trackedGenId = null;
+ // 2026-09-28：生成完成且当前不在压缩页（切走 tab 或浏览器后台）→ Bark 推送。
+ // 判定：页面后台或激活 tab 不是 compaction 都算"不在压缩页"。
+ function isCompactionActive(){
+   if(document.hidden) return false;
+   const t = document.querySelector('.tab-content.active');
+   return !!(t && t.id === 'tab-compaction');
+ }
+ function barkGenDone(top){
+   if(!top) return;
+   const _t = (top.label || '生成任务') + (top.status === 'success' ? '完成' : '失败') + (top.message ? ('：' + top.message) : '');
+   try{
+     fetch('/v1/notify/reply-done',{
+       method:'POST',
+       headers:{'Content-Type':'application/json','X-CSRF-Token':getCookie('admin_csrf')},
+       body:JSON.stringify({preview:String(_t).replace(/[#*`>\n]/g,' ').trim().slice(0,200),session_id:'default'})
+     }).catch(function(){});
+   }catch(e){}
+ }
  function syncGenStateFromLogs(logs){
    const msg = document.getElementById('compaction-msg');
    if(!msg || !logs || !logs.length) return;
@@ -426,6 +444,8 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
      if(msg.textContent.charAt(0) === '⏳'){
        msg.textContent = (top.label || '生成任务') + '：' + (top.message || '已结束');
      }
+     // 2026-09-28：生成结束（成功/失败都推）且不在压缩页 → Bark 推送
+     if(!isCompactionActive()) barkGenDone(top);
    }
  }
 
