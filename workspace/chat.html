@@ -6235,6 +6235,31 @@ function genSessionId(){return "s_"+Date.now().toString(36)+"_"+Math.random().to
 // 打开/关闭侧边栏
 function openDrawer(){document.getElementById("sessionDrawer").classList.add("open");loadSessions();}
 function closeDrawer(){document.getElementById("sessionDrawer").classList.remove("open");}
+/* ===== 0929-25 手势：屏幕左边缘向右滑 → 呼出会话列表（与聊天区垂直滚动不冲突） ===== */
+(function(){
+  var _sx=0,_sy=0,_tx=0,_ty=0,_swipe=false;
+  document.addEventListener("touchstart",function(e){
+    var t=e.touches&&e.touches[0]; if(!t)return;
+    var d=document.getElementById("sessionDrawer");
+    if(d&&d.classList.contains("open"))return;
+    var tg=e.target;
+    if(tg&&typeof tg.closest==="function"&&tg.closest(".drawer,textarea,input,select"))return;
+    _sx=t.clientX;_sy=t.clientY;_tx=0;_ty=0;_swipe=false;
+    if(_sx>34)return;   // 仅左边缘窄带触发
+  },{passive:true});
+  document.addEventListener("touchmove",function(e){
+    var t=e.touches&&e.touches[0]; if(!t)return;
+    _tx=t.clientX-_sx; _ty=t.clientY-_sy;
+    if(_tx>18&&_tx>Math.abs(_ty))_swipe=true;
+  },{passive:true});
+  document.addEventListener("touchend",function(){
+    if(_swipe&&_tx>50&&_tx>Math.abs(_ty)*1.2){
+      var d=document.getElementById("sessionDrawer");
+      if(d&&!d.classList.contains("open")&&typeof openDrawer==="function")openDrawer();
+    }
+    _sx=_sy=_tx=_ty=0;_swipe=false;
+  },{passive:true});
+})();
 // 2026-09-23 审查 M23：原 hdAvatar（左上角头像）元素已整体删除——其点击绑定 2026-09-13 即已移除、
 // applyHeader() 又无条件 display:none，留着的是个「不可见且无交互」的死元素（role/tabindex/aria 均无意义）。
 document.getElementById("sessionClose").onclick=closeDrawer;
