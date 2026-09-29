@@ -4500,6 +4500,8 @@ app.put("/admin/ai-providers", { preHandler: mcpManageAuth }, async (req, reply)
         if (old) o.api_key = String(old.api_key);
       }
       if (p.is_default === true || p.is_default === "true") o.is_default = true;
+      if (p.profile && String(p.profile).trim()) o.profile = String(p.profile).trim();
+      if (p.balance_url && String(p.balance_url).trim()) o.balance_url = String(p.balance_url).trim();
       let _models = [];
       if (Array.isArray(p.models)) _models = p.models.map(function(s){ return String(s).trim(); }).filter(Boolean);
       else if (p.model) _models = [String(p.model).trim()].filter(Boolean);
@@ -4514,6 +4516,105 @@ app.put("/admin/ai-providers", { preHandler: mcpManageAuth }, async (req, reply)
   } catch (err) {
     console.error("[PUT /admin/ai-providers] error:", err.message);
     reply.code(500).send({ error: err.message });
+  }
+});
+
+// ===== 供应商测试连接（2026-09-30）：GET /models 优先（零消耗），不支持则回退最小 chat 请求 =====
+function provBaseOf(urlStr) {
+  const u = String(urlStr || "").trim();
+  if (!u) return "";
+  // 去掉尾部路径（/chat/completions 或 /messages），得到基地址
+  let b = u;
+  if (b.endsWith("/chat/completions")) b = b.slice(0, -"/chat/completions".length);
+  else if (b.endsWith("/messages")) b = b.slice(0, -"/messages".length);
+  return b.replace(/\/+$/, "");
+}
+app.post("/admin/providers/test", { preHandler: mcpManageAuth }, async (req, reply) => {
+  const body = (req.body && typeof req.body === "object") ? req.body : {};
+  let apiUrl = String(body.api_url || "").trim(), apiKey = String(body.api_key || "").trim(), model = String(body.model || "").trim();
+  let profile = String(body.profile || "").trim() || "default";
+  if (body.id) {
+    const p = loadAiProviders().find(function (x) { return x && String(x.id) === String(body.id); });
+    if (p) { apiUrl = String(p.api_url || ""); apiKey = String(p.api_key || ""); model = String(p.model || ""); profile = String(p.profile || "") || "default"; }
+  }
+  if (!apiUrl || !apiKey) return reply.code(400).send({ ok: false, error: "缺少 API 地址或 Key" });
+  const base = provBaseOf(apiUrl);
+  const started = Date.now();
+  const lat = function () { return Date.now() - started; };
+  try {
+    if (profile === "claude") {
+      // Anthropic 原生：POST {base}/v1/messages（x-api-key 头）
+      const url = (base || apiUrl) + "/v1/messages";
+      const ctrl = new AbortController(); const t = setTimeout(function(){ ctrl.abort(); }, 15000);
+      const resp = await fetch(url, { method: "POST", signal: ctrl.signal, headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" }, body: JSON.stringify({ model: model || "claude-3-5-sonnet-latest", max_tokens: 1, messages: [{ role: "user", content: "hi" }] }) });
+      clearTimeout(t);
+      if (resp.ok) return reply.send({ ok: true, latency_ms: lat(), note: "连通（Anthropic /v1/messages）" });
+      const j = await resp.json().catch(function(){ return {}; });
+      return reply.send({ ok: false, latency_ms: lat(), error: (j && (j.error && (j.error.message || j.error.type))) || ("HTTP " + resp.status) });
+    }
+    // OpenAI 兼容：先 GET /models（免费）
+    try {
+      const url = base + "/models";
+      const ctrl = new AbortController(); const t = setTimeout(function(){ ctrl.abort(); }, 15000);
+      const resp = await fetch(url, { method: "GET", signal: ctrl.signal, headers: { "Authorization": "Bearer " + apiKey } });
+      clearTimeout(t);
+      if (resp.ok) {
+        const j = await resp.json().catch(function(){ return {}; });
+        const n = (j && Array.isArray(j.data)) ? j.data.length : 0;
+        return reply.send({ ok: true, latency_ms: lat(), note: "连通（GET /models" + (n ? "，拉取 " + n + " 个模型）" : "）") });
+      }
+    } catch (e) { /* 网络异常走 chat 回退 */ }
+    // 回退最小 chat 请求
+    const url = base + "/chat/completions";
+    const ctrl = new AbortController(); const t = setTimeout(function(){ ctrl.abort(); }, 20000);
+    const resp = await fetch(url, { method: "POST", signal: ctrl.signal, headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey }, body: JSON.stringify({ model: model || "default", max_tokens: 1, messages: [{ role: "user", content: "hi" }] }) });
+    clearTimeout(t);
+    if (resp.ok) return reply.send({ ok: true, latency_ms: lat(), note: "连通（最小 chat 请求）" });
+    const j = await resp.json().catch(function(){ return {}; });
+    return reply.send({ ok: false, latency_ms: lat(), error: (j && (j.error && (j.error.message || j.error.type))) || ("HTTP " + resp.status) });
+  } catch (err) {
+    return reply.send({ ok: false, latency_ms: lat(), error: "请求失败：" + (err && err.name === "AbortError" ? "超时(15s)" : (err && err.message || err)) });
+  }
+});
+
+// ===== 供应商余额查询（2026-09-30）：读 balance_url，兼容 DeepSeek / one-api 等格式 =====
+function pickBalance(json) {
+  if (json == null) return null;
+  // DeepSeek 官方：{ balance_infos:[{total_balance, currency,...}] }
+  if (Array.isArray(json.balance_infos) && json.balance_infos.length) {
+    const b = json.balance_infos[0];
+    return { balance: b.total_balance, currency: b.currency || "CNY" };
+  }
+  // one-api/new-api 系：{ balance, quota } 或 { data:{balance} }
+  for (const k of ["balance", "total_balance", "amount", "balance_usd"]) {
+    if (typeof json[k] === "number" || typeof json[k] === "string") {
+      if (String(json[k]).trim() !== "") return { balance: json[k], currency: "USD" };
+    }
+  }
+  if (json.data && typeof json.data === "object") return pickBalance(json.data);
+  return null;
+}
+app.post("/admin/providers/balance", { preHandler: mcpManageAuth }, async (req, reply) => {
+  const body = (req.body && typeof req.body === "object") ? req.body : {};
+  const id = String(body.id || "").trim();
+  if (!id) return reply.code(400).send({ ok: false, error: "缺少供应商 id" });
+  const p = loadAiProviders().find(function (x) { return x && String(x.id) === id; });
+  if (!p) return reply.code(404).send({ ok: false, error: "供应商不存在" });
+  const bu = String(p.balance_url || "").trim();
+  if (!bu) return reply.send({ ok: false, error: "该供应商未配置余额接口" });
+  if (!p.api_key) return reply.send({ ok: false, error: "供应商未配置 API Key" });
+  const started = Date.now();
+  try {
+    const ctrl = new AbortController(); const t = setTimeout(function(){ ctrl.abort(); }, 15000);
+    const resp = await fetch(bu, { method: "GET", signal: ctrl.signal, headers: { "Authorization": "Bearer " + String(p.api_key), "Accept": "application/json" } });
+    clearTimeout(t);
+    if (!resp.ok) return reply.send({ ok: false, error: "余额接口 HTTP " + resp.status });
+    const j = await resp.json().catch(function(){ return {}; });
+    const hit = pickBalance(j);
+    if (hit) return reply.send({ ok: true, balance: hit.balance, currency: hit.currency, latency_ms: Date.now() - started });
+    return reply.send({ ok: false, error: "无法解析余额（接口返回格式未知）", raw: JSON.stringify(j).slice(0, 300) });
+  } catch (err) {
+    return reply.send({ ok: false, error: "余额查询失败：" + (err && err.name === "AbortError" ? "超时(15s)" : (err && err.message || err)) });
   }
 });
 

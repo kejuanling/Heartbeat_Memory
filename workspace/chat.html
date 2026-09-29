@@ -613,6 +613,9 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .mcp-st.on{background:var(--ok-soft);color:var(--ok-deep)}
 .mcp-st.off{background:var(--bad-soft);color:var(--bad-deep)}
 .mcp-item .mo{display:flex;gap:6px;justify-content:flex-end;margin-top:2px;flex-shrink:0}
+.mcp-item .mo .prov-ico{width:26px;height:26px;padding:0;border:1px solid var(--line,#ddd);border-radius:8px;background:transparent;color:var(--ink2,#888);cursor:pointer;font-size:13px;display:inline-flex;align-items:center;justify-content:center;transition:all .12s}
+.mcp-item .mo .prov-ico:hover{color:var(--accent-deep,#3478f6);border-color:var(--accent-deep,#3478f6);background:var(--accent-faint,rgba(52,120,246,.08))}
+.mcp-item .mo .prov-ico:disabled{opacity:.55;cursor:wait}
 .mcp-item .mo button{border:1px solid var(--line);background:none;border-radius:7px;font-size:11px;color:var(--ink2);padding:3px 8px;cursor:pointer}
 .mcp-add{width:100%;border:none;background:var(--accent-soft);color:var(--accent-deep);border-radius:10px;padding:9px;font-size:13px;cursor:pointer;font-weight:600;margin-top:2px}
 /* 语音供应商：音色子列表项（单选启用 + 删除） */
@@ -1489,8 +1492,11 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
     <div id="provForm" style="display:none">
       <div class="mcp-form-inner">
         <div class="mcp-row"><label>名称</label><input type="text" id="provName" placeholder="如 DeepSeek 官方"></div>
-        <div class="mcp-row"><label>API 链接</label><input type="text" id="provUrl" placeholder="https://…/v1/chat/completions"></div>
+        <div class="mcp-row"><label>供应商类型</label><select id="provType"><option value="">自定义（OpenAI 兼容）</option></select><div class="np-tip">选择类型自动填接口基地址与消息格式；仍可手动改。</div></div>
+        <div class="mcp-row"><label>接口基地址</label><input type="text" id="provBase" placeholder="https://api.deepseek.com/v1"><button type="button" class="mcp-btn" id="provTestBtn" title="测试连接" aria-label="测试连接" style="width:auto;padding:6px 10px">⚡</button></div>
+        <div class="mcp-row"><label>接口路径</label><input type="text" id="provPath" placeholder="/chat/completions" value="/chat/completions"></div>
         <div class="mcp-row"><label>API Key</label><input type="password" id="provKey" placeholder="sk-…"></div>
+        <div class="mcp-row"><label>余额查询接口（可选）</label><input type="text" id="provBalanceUrl" placeholder="https://api.deepseek.com/user/balance"></div>
         <div class="mcp-row"><label>模型列表<span class="tag">可增删 · 单选设为默认</span></label>
           <div id="provModelList" class="mcp-list" style="margin-bottom:6px"></div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
@@ -1987,7 +1993,8 @@ const provList=document.getElementById("provList");
 const provAddBtn=document.getElementById("provAddBtn");
 const provForm=document.getElementById("provForm");
 const provName=document.getElementById("provName");
-const provUrl=document.getElementById("provUrl");
+const provBase=document.getElementById("provBase");
+const provPath=document.getElementById("provPath");
 const provKey=document.getElementById("provKey");
 const provSaveBtn=document.getElementById("provSaveBtn");
 const provCancelBtn=document.getElementById("provCancelBtn");
@@ -5485,6 +5492,27 @@ async function loadProviders(){
     renderProviders();
   }catch(e){ provMsg.textContent="加载失败: "+e.message; provList.innerHTML='<div class="mcp-empty">加载失败</div>'; }
 }
+async function testProviderById(i,btn){
+  const p=_providers[i]; if(!p)return;
+  const _o=btn.textContent; btn.textContent="…"; btn.disabled=true;
+  try{
+    const r=await fetch("/heartbeat/admin/providers/test",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},mcpAuthHeaders()),credentials:"include",body:JSON.stringify({id:p.id})});
+    const j=await r.json().catch(function(){return {};});
+    chatToast((j&&j.ok)?("✓ "+p.name+" 连通"+(j.latency_ms!=null?("（"+(j.latency_ms/1000).toFixed(2)+"s）"):"")):("✗ "+p.name+"："+(j&&j.error||"测试失败")));
+  }catch(e){ chatToast("测试失败:"+(e&&e.message||e)); }
+  btn.textContent=_o; btn.disabled=false;
+}
+async function checkProviderBalance(i,btn){
+  const p=_providers[i]; if(!p)return;
+  const _o=btn.textContent; btn.textContent="…"; btn.disabled=true;
+  try{
+    const r=await fetch("/heartbeat/admin/providers/balance",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},mcpAuthHeaders()),credentials:"include",body:JSON.stringify({id:p.id})});
+    const j=await r.json().catch(function(){return {};});
+    if(j&&j.ok) chatToast(p.name+" 余额："+j.balance+" "+(j.currency||""));
+    else chatToast(p.name+"："+(j&&j.error||"查询失败"));
+  }catch(e){ chatToast("余额查询失败:"+(e&&e.message||e)); }
+  btn.textContent=_o; btn.disabled=false;
+}
 function renderProviders(){
   if(!provList) return;
   if(!_providers.length){ provList.innerHTML='<div class="mcp-empty">还没有 AI 供应商。启用第一个即作为聊天模型。</div>'; return; }
@@ -5494,10 +5522,12 @@ function renderProviders(){
     const sw='<label class="mcp-sw"><input type="checkbox" data-sw="'+i+'" '+(p.enabled!==false?'checked':'')+'><i></i></label>';
     const mm=((p.models&&p.models.length>1)?(p.models.length+'个模型 · '+escapeHtml(p.models[0])):(p.model?escapeHtml(p.model):'默认模型'));
     const desc=mm+' · '+escapeHtml((p.api_url||'').slice(0,46));
-    return '<div class="mcp-item"><div class="mi"><div class="mn">'+escapeHtml(p.name)+' '+st+' '+df+'</div><div class="ms">'+desc+'</div></div><div class="mo">'+sw+(p.is_default?'':'<button data-i="'+i+'" data-act="def">设为默认</button>')+'<button data-i="'+i+'" data-act="edit">编辑</button><button data-i="'+i+'" data-act="del">删除</button></div></div>';
+    const _testBtn='<button data-i="'+i+'" data-act="test" title="测试连接" aria-label="测试连接" class="prov-ico">⚡</button>';
+    const _balBtn='<button data-i="'+i+'" data-act="balance" title="查询余额" aria-label="查询余额" class="prov-ico">¥</button>';
+    return '<div class="mcp-item"><div class="mi"><div class="mn">'+escapeHtml(p.name)+' '+st+' '+df+'</div><div class="ms">'+desc+'</div></div><div class="mo">'+sw+_testBtn+_balBtn+(p.is_default?'':'<button data-i="'+i+'" data-act="def">设为默认</button>')+'<button data-i="'+i+'" data-act="edit">编辑</button><button data-i="'+i+'" data-act="del">删除</button></div></div>';
   }).join("");
   provList.querySelectorAll('.mo button').forEach(function(b){
-    b.addEventListener('click',function(){ var i=+b.dataset.i; if(b.dataset.act==='edit') openProvForm(i); else if(b.dataset.act==='del') deleteProv(i); else if(b.dataset.act==='def') setDefaultProv(i); });
+    b.addEventListener('click',function(){ var i=+b.dataset.i; if(b.dataset.act==='edit') openProvForm(i); else if(b.dataset.act==='del') deleteProv(i); else if(b.dataset.act==='def') setDefaultProv(i); else if(b.dataset.act==='test') testProviderById(i,b); else if(b.dataset.act==='balance') checkProviderBalance(i,b); });
   });
   provList.querySelectorAll('input[data-sw]').forEach(function(inp){
     inp.addEventListener('change',function(){ toggleProvEnable(+inp.dataset.sw, inp.checked); });
@@ -5538,14 +5568,75 @@ function addProvModel(){
   provModelInput.value="";
   renderProvModels();
 }
+// ===== 供应商分类模板（2026-09-30）：选类型自动填基地址/路径/消息格式/余额接口 =====
+const PROVIDER_TYPES={
+  openai:{label:"OpenAI", base:"https://api.openai.com/v1", path:"/chat/completions", profile:"default", balance:""},
+  deepseek:{label:"DeepSeek", base:"https://api.deepseek.com/v1", path:"/chat/completions", profile:"default", balance:"https://api.deepseek.com/user/balance"},
+  anthropic:{label:"Anthropic（Claude）", base:"https://api.anthropic.com", path:"/v1/messages", profile:"claude", balance:""},
+  zhipu:{label:"智谱 GLM", base:"https://open.bigmodel.cn/api/paas/v4", path:"/chat/completions", profile:"default", balance:""},
+  silicon:{label:"硅基流动", base:"https://api.siliconflow.cn/v1", path:"/chat/completions", profile:"default", balance:""},
+  openrouter:{label:"OpenRouter", base:"https://openrouter.ai/api/v1", path:"/chat/completions", profile:"default", balance:""},
+  moonshot:{label:"Kimi/月之暗面", base:"https://api.moonshot.cn/v1", path:"/chat/completions", profile:"default", balance:""},
+  bailian:{label:"阿里百炼", base:"https://dashscope.aliyuncs.com/compatible-mode/v1", path:"/chat/completions", profile:"default", balance:""},
+  qianfan:{label:"百度千帆", base:"https://qianfan.baidubce.com/v2", path:"/chat/completions", profile:"default", balance:""}
+};
+let provProfile="default";   // 当前表单的消息格式（类型模板带入）
+function fillProviderType(){
+  const sel=document.getElementById("provType"); if(!sel) return;
+  const t=PROVIDER_TYPES[sel.value];
+  if(!t) return;
+  if(provBase) provBase.value=t.base;
+  if(provPath) provPath.value=t.path;
+  const bl=document.getElementById("provBalanceUrl"); if(bl) bl.value=t.balance||"";
+  provProfile=t.profile||"default";
+}
+function provFullUrl(){
+  const b=String((provBase&&provBase.value)||"").replace(/\/+$/,"");
+  const pt=String((provPath&&provPath.value)||"").trim();
+  return b+(pt?pt:"/chat/completions");
+}
+async function testProviderConn(){
+  const url=provFullUrl();
+  const key=(provKey&&provKey.value)||"";
+  const mdl=__provDefaultModel||"";
+  if(!url||!key){ provMsg.textContent="请先填写接口地址和 API Key"; return; }
+  const btn=document.getElementById("provTestBtn"); if(btn) btn.disabled=true;
+  provMsg.textContent="测试中…";
+  try{
+    const r=await fetch("/heartbeat/admin/providers/test",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},mcpAuthHeaders()),credentials:"include",body:JSON.stringify({api_url:url,api_key:key,model:mdl,profile:provProfile})});
+    const j=await r.json().catch(function(){return {};});
+    if(j&&j.ok) provMsg.textContent="✓ 连通"+(j.latency_ms!=null?("（"+(j.latency_ms/1000).toFixed(2)+"s）"):"")+(j.note?(" · "+j.note):"");
+    else provMsg.textContent="✗ "+(j&&j.error||"测试失败");
+  }catch(e){ provMsg.textContent="✗ 测试异常："+(e&&e.message||e); }
+  if(btn) btn.disabled=false;
+}
 function openProvForm(i){
   const has=(i!=null && !isNaN(i)) && _providers[i];
   window.__provEditingIndex = has? i : null;
   const p=has? _providers[i] : null;
 
   provName.value = p? (p.name||"") : "";
-  provUrl.value = p? (p.api_url||"") : "";
+  {
+    // 拆 api_url → 基地址 + 路径（/chat/completions 或 /messages 结尾则拆开）
+    const full=p? String(p.api_url||"") : "";
+    let base=full, path="/chat/completions";
+    if(full.endsWith("/chat/completions")){ base=full.slice(0,-"/chat/completions".length); path="/chat/completions"; }
+    else if(full.endsWith("/messages")){ base=full.slice(0,-"/messages".length); path="/messages"; }
+    provBase.value=base; provPath.value=path;
+  }
   provKey.value = p? (p.api_key||"") : "";
+  provProfile=(p&&p.profile)? String(p.profile) : "default";
+  const ptSel=document.getElementById("provType");
+  if(ptSel){
+    ptSel.innerHTML='<option value="">自定义（OpenAI 兼容）</option>'+Object.keys(PROVIDER_TYPES).map(function(k){
+      return '<option value="'+k+'">'+escapeHtml(PROVIDER_TYPES[k].label)+'</option>';
+    }).join('');
+    const base=(provBase.value||"").replace(/\/+$/,"");
+    let matched="";
+    Object.keys(PROVIDER_TYPES).forEach(function(k){ if(!matched&&PROVIDER_TYPES[k].base===base) matched=k; });
+    if(matched) ptSel.value=matched;
+  }
+  const blIn=document.getElementById("provBalanceUrl"); if(blIn) blIn.value=(p&&p.balance_url)? p.balance_url : "";
   __provModels = p? ((Array.isArray(p.models)&&p.models.length)? p.models.slice() : (p.model? [p.model] : [])) : [];
   __provDefaultModel = p? (p.model||__provModels[0]||"") : (__provModels[0]||"");
   renderProvModels();
@@ -5561,12 +5652,13 @@ function openProvForm(i){
 function closeProvForm(){ document.getElementById("mcpModal").classList.add("hidden"); window.__provEditingIndex=null; }
 async function saveProviders(){
   const name=provName.value.trim(); if(!name){ provMsg.textContent="请填名称"; return; }
-  const url=provUrl.value.trim(); if(!url){ provMsg.textContent="请填 API 链接"; return; }
+  const url=provFullUrl(); if(!url){ provMsg.textContent="请填接口基地址"; return; }
   const body={ providers: _providers.map(function(p){ return { id:p.id, name:p.name, api_url:p.api_url, api_key:p.api_key||"", model:p.model||"", models:(Array.isArray(p.models)?p.models:[]), enabled:p.enabled!==false, is_default:!!p.is_default }; }) };
   const rawModels=__provModels.slice();
   if(!rawModels.length){ provMsg.textContent="请至少添加一个模型"; return; }
   const ei0=window.__provEditingIndex;
-  const params={ name:name, api_url:url, api_key:provKey.value.trim(), model:(__provDefaultModel||rawModels[0]), models:rawModels, enabled:(ei0!=null && _providers[ei0]) ? (_providers[ei0].enabled!==false) : true };
+  const blIn=document.getElementById("provBalanceUrl");
+  const params={ name:name, api_url:url, api_key:provKey.value.trim(), model:(__provDefaultModel||rawModels[0]), models:rawModels, enabled:(ei0!=null && _providers[ei0]) ? (_providers[ei0].enabled!==false) : true, profile:provProfile||"default", balance_url:(blIn&&blIn.value)? blIn.value.trim() : "" };
   const ei=window.__provEditingIndex;
   if(ei!=null && _providers[ei]){ body.providers[ei]=Object.assign({},body.providers[ei],params); }
   else { body.providers.push(Object.assign({ id:"p_"+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36) },params)); }
@@ -5654,6 +5746,8 @@ if(provModelAddBtn) provModelAddBtn.addEventListener("click",addProvModel);
 if(provModelInput) provModelInput.addEventListener("keydown",function(e){ if(e.key==="Enter"){ e.preventDefault(); addProvModel(); } });
 if(provCancelBtn) provCancelBtn.addEventListener("click",closeProvForm);
 if(provSaveBtn) provSaveBtn.addEventListener("click",saveProviders);
+const _ptSel=document.getElementById("provType"); if(_ptSel) _ptSel.addEventListener("change",fillProviderType);
+const _ptBtn=document.getElementById("provTestBtn"); if(_ptBtn) _ptBtn.addEventListener("click",testProviderConn);
 function modelsEndpointFrom(base){
   let u=String(base||"").replace(/\/+$/,"");
   u=u.replace(/\/chat\/completions$/i,"");
@@ -5661,7 +5755,7 @@ function modelsEndpointFrom(base){
   return u+"/v1/models";
 }
 async function fetchProviderModels(){
-  const url=provUrl.value.trim(); if(!url){ provMsg.textContent="请先填 API 链接"; return; }
+  const url=provFullUrl(); if(!url){ provMsg.textContent="请先填接口基地址"; return; }
   const key=provKey.value.trim(); if(!key){ provMsg.textContent="请先填 API Key"; return; }
   provModelFetchBtn.disabled=true; provModelFetchBtn.textContent="获取中…";
   try{
