@@ -944,7 +944,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .session-item:hover{background:var(--session-hover-bg,var(--accent-faint))}
 .session-item.active{background:var(--session-active-bg,var(--accent-soft));border-color:var(--session-active-border,var(--line-strong))}
 .session-item .s-name{font-size:var(--session-title-size,13px);font-weight:var(--session-title-weight,600);color:var(--session-title-color,var(--ink));display:flex;align-items:center;gap:5px;min-width:0}
-.session-item .s-title{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.session-item .s-title{flex:0 1 auto;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}  /* 0929-30: 不占满，让笔紧跟会话名；三点靠 margin-left:auto 在最右 */
 .session-item .s-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;display:inline-block;margin-right:5px}
 .session-item .s-dot.lock{background:var(--warn)}
 .session-item .s-name .s-icon{display:inline-flex;align-items:center;justify-content:center;border:none;background:none;color:var(--ink3);cursor:pointer;padding:3px;border-radius:6px;flex-shrink:0;transition:all .12s}
@@ -6531,11 +6531,11 @@ function renderSessionList(){
     if(pinned) item.classList.add("pinned");   // 2026-09-28：置顶会话加类供 CSS 醒目样式
     const locked=isLocked(s.id);
     const _mp=[];
-    // 0929-30: 未单独绑人设/模型时一律显示「默认」；override 模型超 15 字符截断+省略号
+    // 0929-30: 顺序=人设·时间·条数·模型；未单独绑人设/模型显示「默认」；override 模型超15字符截断
     _mp.push(escapeHtml(s.persona_name||'默认'));
-    _mp.push(s.model_name?escapeHtml(truncModelName(s.model_name)):'默认');
     if(s.last_time)_mp.push(escapeHtml(fmtTime(new Date(s.last_time))));
     if(s.real!=null)_mp.push(""+s.real+" 条");
+    _mp.push(s.model_name?escapeHtml(truncModelName(s.model_name)):'默认');
     const meta=(locked?'<span class="s-dot lock" title="锁定唤醒"></span>':'')+_mp.join(" · ");
     const checkHtml=merging?('<span class="s-check'+(mergeSel.has(s.id)?' on':'')+'">'+(mergeSel.has(s.id)?'✓':'')+'</span>'):'';
     item.innerHTML='<div class="s-name">'+checkHtml+'<button class="s-icon pin'+(pinned?' on':'')+'" data-op="pin" data-id="'+escapeHtml(s.id)+'" title="'+(pinned?"取消置顶":"置顶")+'" aria-label="'+(pinned?"取消置顶":"置顶")+'"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/></svg></button>'+'<span class="s-title" title="'+escapeHtml(name)+'">'+escapeHtml(name)+'</span>'
