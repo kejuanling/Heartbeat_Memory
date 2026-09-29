@@ -96,6 +96,16 @@
   --title-font:"PingFang SC","Noto Sans CJK SC","Microsoft YaHei",sans-serif;
   --call-bg:linear-gradient(165deg,#FBF4F1 0%,#F7E9E8 55%,#F3E0DF 100%);
 }
+/* ===== 0929-24 iOS 毛玻璃底：极简主题背景加淡彩色渐变（供控件 blur 产生磨砂光斑；聊天观感基本不变） ===== */
+body[data-theme="claude"]{
+  background:
+    radial-gradient(900px 420px at 8% -8%,rgba(255,255,255,.85),transparent 68%),
+    radial-gradient(700px 520px at 92% 26%,rgba(176,190,255,.34),transparent 70%),
+    radial-gradient(620px 500px at 12% 72%,rgba(255,185,208,.30),transparent 70%),
+    radial-gradient(720px 520px at 78% 88%,rgba(255,216,168,.26),transparent 70%),
+    radial-gradient(520px 420px at 45% 45%,rgba(190,232,214,.20),transparent 70%),
+    linear-gradient(160deg,#F6F4F8 0%,#F2F1F6 62%,#ECEAF2 100%);
+}
 /* 背景图虚化（0913-11）：bg_blur>0 且图片背景时对聊天容器做背景磨砂（只虚化 body 背景，不虚化内容） */
 body[data-bgblur="1"] #chat{backdrop-filter:blur(var(--bg-blur,8px));-webkit-backdrop-filter:blur(var(--bg-blur,8px))}
 
@@ -8952,17 +8962,17 @@ body[data-theme="claude"]:has(#chat[data-layout="claude"]) .theme-choice,
 body[data-theme="claude"]:has(#chat[data-layout="claude"]) .theme-choice.active,
 body[data-theme="claude"]:has(#chat[data-layout="claude"]) .icon-btn,
 body[data-theme="claude"]:has(#chat[data-layout="claude"]) .mcp-btn{
-  background:rgba(255,255,255,.42);
+  background:rgba(255,255,255,.5);
   backdrop-filter:blur(18px) saturate(170%);
   -webkit-backdrop-filter:blur(18px) saturate(170%);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 1px 4px rgba(0,0,0,.03);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.65),0 1px 4px rgba(0,0,0,.03);
 }
 /* 选中态：更实的玻璃 + 更亮高光边（iOS 选中质感） */
 body[data-theme="claude"]:has(#chat[data-layout="claude"]) .session-item.active,
 body[data-theme="claude"]:has(#chat[data-layout="claude"]) .sr-item.active,
 body[data-theme="claude"]:has(#chat[data-layout="claude"]) .theme-choice.active{
-  background:rgba(255,255,255,.62);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.75),0 1px 6px rgba(0,0,0,.06);
+  background:rgba(255,255,255,.68);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.8),0 1px 6px rgba(0,0,0,.06);
 }
 /* 输入框聚焦：玻璃更亮 */
 body[data-theme="claude"]:has(#chat[data-layout="claude"]) .inputbar:focus-within{
