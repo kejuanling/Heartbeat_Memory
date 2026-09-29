@@ -1612,13 +1612,11 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
               /* 0929-30: 默认模型页结构样式统一（原内联样式抽类） */
               #roleList .role-row{padding:14px 4px;border-bottom:1px solid var(--line,rgba(128,128,128,.14))}
               #roleList .role-row:last-child{border-bottom:none}
-              #roleList .role-main{display:flex;justify-content:space-between;align-items:center;gap:12px}
-              #roleList .role-text{flex:1;min-width:0}
               #roleList .role-name{font-size:14px;font-weight:600;color:var(--ink,#222)}
-              #roleList .role-desc{font-size:12px;color:var(--ink2,#888);margin-top:3px;line-height:1.5}
-              #roleList .role-select{max-width:200px;min-width:132px;font-size:12.5px;color:var(--ink,#222);
+              #roleList .role-desc{font-size:12px;color:var(--ink2,#888);margin-top:4px;line-height:1.5}
+              #roleList .role-select{width:100%;box-sizing:border-box;font-size:12.5px;color:var(--ink,#222);
                 background:var(--panel-bg,rgba(255,255,255,.86));border:1px solid var(--line,#ddd);
-                border-radius:9px;padding:7px 8px;flex-shrink:0;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+                border-radius:9px;padding:8px 10px;margin-top:8px;cursor:pointer;transition:border-color .15s,box-shadow .15s}
               #roleList .role-select:focus{outline:none;border-color:var(--accent-deep,#3478f6);box-shadow:0 0 0 2.5px var(--accent-faint,rgba(52,120,246,.14))}
               #roleList .role-select:disabled{opacity:.6;cursor:wait}
               #roleList .role-select optgroup,#roleList .role-select option{color:var(--ink,#222);background:var(--panel-bg,#fff)}
@@ -5620,11 +5618,10 @@ function renderModelRoles(roles){
       opts+='</optgroup>';
     });
     return '<div class="role-row">'
-      +'<div class="role-main">'
-      +'<div class="role-text"><div class="role-name">'+escapeHtml(r.label||role)+'</div>'
-      +'<div class="role-desc">'+escapeHtml(desc[role]||"")+'</div></div>'
+      +'<div class="role-name">'+escapeHtml(r.label||role)+'</div>'
+      +'<div class="role-desc">'+escapeHtml(desc[role]||"")+'</div>'
       +'<select class="role-select" data-role="'+escapeHtml(role)+'">'+opts+'</select>'
-      +'</div></div>';
+      +'</div>';
   }).join('');
   el.innerHTML=rows||'<div class="mcp-empty">暂无用途</div>';
   el.querySelectorAll("select[data-role]").forEach(function(sel){
