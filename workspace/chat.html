@@ -467,6 +467,9 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 @media (hover:hover){#send:hover{background:var(--send-hover-bg,var(--accent-deep))}}
 #send:active{transform:scale(.92)}
 #send.disabled{opacity:.5;cursor:not-allowed}
+/* 2026-09-29 极简主题中断输出：发送中停止符（红色方块） */
+#send.stopping{background:rgba(201,112,112,.14);color:#c97070}
+#send.stopping .stop-icon{display:inline-block;width:10px;height:10px;background:currentColor;border-radius:2px}
 /* 预览图片 */
 .previews{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 8px 6px}
 .preview{
@@ -1750,6 +1753,8 @@ let api_key=localStorage.getItem(LS_KEY)||"";
 let system_prompt=localStorage.getItem(LS_PROMPT)||"";
 let cfg=loadCfg();
 let sending=false, aborter=null;
+let _streamStoppedByUser=false;   // 2026-09-29 极简主题中断输出：用户主动停止（中断不显示错误条）
+let _sendBtnOrigHTML="";          // 发送按钮原始图标（停止态结束后恢复）
 let _callAfterAI=false;   // 通话页文字发送后，AI 回复完成时朗读
 let _callPending=false;    // 已发出"来电"，待 AI 用 <phone> 表态接/不接
 let msgs=[];
@@ -3997,10 +4002,12 @@ async function request(finalMsgs, fromSend, regenAnchorId){
         }
       }catch(e){}
     }
-    if(_streamTimedOut) showError("响应超时（180 秒未收到数据），已中断。请检查网络后重试");
+    if(_streamStoppedByUser){ /* 用户主动中断输出：不显示错误条 */ }
+    else if(_streamTimedOut) showError("响应超时（180 秒未收到数据），已中断。请检查网络后重试");
     else showError(err.message);
   }finally{
     if(_silenceTimer){clearTimeout(_silenceTimer);_silenceTimer=null;}   // M17：清理静默超时计时器
+    _streamStoppedByUser=false;
     sending=false;setSendState(false);aborter=null;
     _streamActive=false; _streamToolMode="live"; _streamRenderModel=[]; _streamRenderCursor=0; _streamModelDraining=false; if(_streamDrainTimer){clearTimeout(_streamDrainTimer);_streamDrainTimer=null;} if(_streamTextRerenderTimer){clearTimeout(_streamTextRerenderTimer);_streamTextRerenderTimer=null;} _streamRoot=null; _streamThinkEl=null; _streamThinkCAt=0; _twStop();   // 结束统一响应模型（节流 timer 清、容器/思考链引用释放——DOM 由 renderAll 重建接管；打字机 timer 显式停）
     showHeaderTyping(false);
@@ -4092,11 +4099,36 @@ async function send(){
   return true;
 }
 function setSendState(on){
-  // 发送中仅灰化禁用（QQ 式），不再切换为"■"停止符——已移除中断生成功能
-  if(on){sendBtn.classList.add("disabled");}
-  else{sendBtn.classList.remove("disabled");}
+  const isClaude=(chatEl&&chatEl.dataset.layout==="claude");
+  if(on){
+    if(isClaude){
+      // 极简主题：发送中切换为"■ 停止"（可点击中断输出），不再灰化
+      sendBtn.classList.remove("disabled");
+      sendBtn.classList.add("stopping");
+      sendBtn.title="停止生成"; sendBtn.setAttribute("aria-label","停止生成");
+      if(!_sendBtnOrigHTML) _sendBtnOrigHTML=sendBtn.innerHTML;
+      sendBtn.innerHTML='<span class="stop-icon"></span>';
+    }else{
+      // 其他主题：发送中仅灰化禁用（QQ 式），不提供中断
+      sendBtn.classList.add("disabled");
+    }
+  }else{
+    sendBtn.classList.remove("disabled");
+    sendBtn.classList.remove("stopping");
+    sendBtn.title="发送"; sendBtn.setAttribute("aria-label","发送");
+    if(_sendBtnOrigHTML){ sendBtn.innerHTML=_sendBtnOrigHTML; _sendBtnOrigHTML=""; }
+  }
 }
-sendBtn.addEventListener("click",()=>{send();});
+// 2026-09-29 极简主题中断输出：abort 流（服务端检测客户端断开后停止上游/工具，已生成部分照常落盘）
+function stopGeneration(){
+  _streamStoppedByUser=true;
+  try{ if(aborter) aborter.abort(); }catch(e){}
+  showToast("已中断输出");
+}
+sendBtn.addEventListener("click",()=>{
+  if(sending&&chatEl&&chatEl.dataset.layout==="claude"){ stopGeneration(); return; }
+  send();
+});
 inputEl.addEventListener("input",()=>{inputEl.style.height="auto";inputEl.style.height=Math.min(inputEl.scrollHeight,120)+"px";});
 inputEl.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}});
 
