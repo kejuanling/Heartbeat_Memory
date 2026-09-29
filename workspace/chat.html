@@ -8701,7 +8701,8 @@ body:has(#chat[data-layout="wx"]) .session-item .s-name .s-icon.pin.on .ico{colo
 body:has(#chat[data-layout="wx"]) .session-item .s-name .s-icon.pin:not(.on){color:#C9C9C9!important;background:transparent!important}
 
 /* ===== 极简 Claude 风主题 ===== */
-#chat[data-layout="claude"]{padding-left:4%;padding-right:4%;padding-bottom:calc(env(safe-area-inset-bottom) + 35vh)}
+/* 0929-25 极简主题底部 35vh 留白改为主题级（不依赖 data-layout 属性，防 layout 异常时失效） */
+body[data-theme="claude"] #chat{padding-left:4%;padding-right:4%;padding-bottom:calc(env(safe-area-inset-bottom) + 35vh)}
 /* 全页上下边缘淡出罩：单条线性渐变只压上下、中间全净、左右无暗角（参考用户确认的结构）；颜色用主题背景色 */
 body:has(#chat[data-layout="claude"])::after{content:"";position:fixed;inset:0;z-index:20;pointer-events:none;background:linear-gradient(to bottom,rgba(250,249,247,.95),rgba(250,249,247,0) 10%,rgba(240,239,236,0) 80%,rgba(240,239,236,.95))}
 body[data-theme="dark"]:has(#chat[data-layout="claude"])::after{background:linear-gradient(to bottom,rgba(26,26,26,.95),rgba(26,26,26,0) 10%,rgba(26,26,26,0) 80%,rgba(26,26,26,.95))}
