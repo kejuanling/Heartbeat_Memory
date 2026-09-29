@@ -363,6 +363,13 @@ module.exports = function registerChatRoutes(app, deps) {
           return reply.send({ ok: true, total: fullItems.length, tail_start_id: tailId, has_more: false, items: [], session_id: sessionId || 'default' });
         }
         const win = limit ? fullItems.slice(startIdx, startIdx + limit) : fullItems.slice(startIdx);
+        if (!win.length && startIdx >= fullItems.length) {
+          // 2026-09-29：会话全部被压缩（无未压缩尾部原文）→ 从压缩块尾部起始点回退固定拉最后 limit 条原文，
+          // 前端点进去至少有最近 100 条可见；tail_start_id 设为这批第一条，向上翻页继续拉更早。
+          const back = Math.max(0, fullItems.length - (limit || 100));
+          const winBack = fullItems.slice(back);
+          return reply.send({ ok: true, total: fullItems.length, tail_start_id: winBack.length ? winBack[0].id : null, has_more: back > 0, items: winBack, session_id: sessionId || 'default' });
+        }
         return reply.send({ ok: true, total: fullItems.length, tail_start_id: tailId, has_more: startIdx > 0, items: win, session_id: sessionId || 'default' });
       }
       reply.send({ ok: true, total: fullItems.length, items: fullItems, session_id: sessionId || 'default' });
