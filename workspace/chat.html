@@ -6877,29 +6877,75 @@ function updateMergeBar(){
 async function doMergeSessions(){
   const ids=[...mergeSel];
   if(ids.length<2){ showToast("至少勾选 2 个会话"); return; }
-  if(!confirm("合并 "+ids.length+" 个会话为一个新会话？原会话数据保留不动，压缩块不迁移。")) return;
   try{
-    const target=genSessionId();   // 后端 /v1/sessions/merge 强校验并据此落盘，必须传新会话ID
-    const r=await fetch("/v1/sessions/merge",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({ids:ids,target:target})});
-    const j=await r.json().catch(()=>({}));
-    if(!r.ok){ showToast(j.error||"合并失败"); return; }
-    // 合并自动命名：形如「合并 · 会话A · 会话B」，与分支命名同风格；超长截断。
-    const partNames=ids.map(function(id){ const n=sessionDisplayName(id); return n||"未命名"; });
-    let mergedName="合并 · "+partNames.join(" · ");
-    if(mergedName.length>36)mergedName=mergedName.slice(0,33)+"…";
-    {
-      const map=JSON.parse(localStorage.getItem("han_session_names")||"{}");
-      map[target]=mergedName;
-      localStorage.setItem("han_session_names",JSON.stringify(map));
-      try{ var _nmSet={}; _nmSet[target]=mergedName; pushSessionNamesDelta(_nmSet, []); }catch(e){}
-    }
-    mergeMode=false; mergeSel.clear();
-    await loadSessions();
-    renderSessionList();
-    updateMergeBar();
-    showToast("已合并为「"+mergedName+"」，共 "+(j.merged||j.total||0)+" 条");
-    if(j.session_id){ switchSession(j.session_id); }
-  }catch(e){ showToast("合并失败:"+(e.message||"")); }
+    // 0929-30：合并前弹「新建会话」式设置窗（人设/模型/跨窗口），确定后才真正合并
+    const opts='<option value="">默认（跟随全局人设）</option>'+promptBackups.map(function(b){
+      return '<option value="'+escapeHtml(b.id)+'">'+escapeHtml(b.name||'未命名')+'</option>';
+    }).join('');
+    let providers=[];
+    try{
+      const r2=await fetch("/heartbeat/admin/ai-providers",{headers: mcpAuthHeaders(), credentials:"include"});
+      const j2=await r2.json();
+      if(j2&&Array.isArray(j2.providers)) providers=j2.providers.filter(function(p){ return p.enabled!==false && (p.api_url||p.base_url) && (p.api_key || p.api_key_set===true); });
+    }catch(e){}
+    let provOpts='<option value="">默认（跟随全局模型）</option>';
+    providers.forEach(function(p){ provOpts+='<option value="'+escapeHtml(p.id)+'">'+escapeHtml(p.name||"未命名")+'</option>'; });
+    const modelOptsFor=function(pid){
+      if(!pid) return '<option value="">（跟随供应商默认）</option>';
+      const p=providers.filter(function(x){return x.id===pid;})[0];
+      if(!p) return '<option value="">（跟随供应商默认）</option>';
+      const list=(Array.isArray(p.models)&&p.models.length)?p.models:(p.model?[p.model]:[]);
+      if(!list.length) return '<option value="">（跟随供应商默认）</option>';
+      return '<option value="">（跟随供应商默认）</option>'+list.map(function(m){return '<option value="'+escapeHtml(m)+'">'+escapeHtml(m)+'</option>';}).join('');
+    };
+    openEditModal("合并 "+ids.length+" 个会话",
+      '<div class="np-tip" style="margin-bottom:10px">原会话数据保留不动；各会话的压缩块会按内容锚点复制到新会话；消息按时间线自然排序合并。</div>'
+      +'<div class="field"><label>本会话使用的提示词</label><select class="np-sel" id="np-prompt">'+opts+'</select></div>'
+      +'<div class="field" style="margin-top:12px"><label>本会话使用的模型</label><select class="np-sel" id="np-provider">'+provOpts+'</select></div>'
+      +'<div class="field" style="margin-top:8px"><label>模型</label><select class="np-sel" id="np-model">'+modelOptsFor("")+'</select>'
+      +'<div class="np-tip">选定后这个会话单独走该供应商；「默认」跟随全局。</div></div>'
+      +'<div class="field" style="margin-top:12px"><label>注入跨窗口记忆</label><select class="np-sel" id="np-cross"><option value="">跟随全局</option><option value="1">开启</option><option value="0">关闭</option></select>'
+      +'<div class="np-tip">该会话是否注入其它会话的置顶记忆 / 近期日记。</div></div>',
+      async function(){
+        try{
+          const target=genSessionId();   // 后端强校验并据此落盘，必须传新会话ID
+          const r=await fetch("/v1/sessions/merge",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({ids:ids,target:target})});
+          const j=await r.json().catch(()=>({}));
+          if(!r.ok){ showToast(j.error||"合并失败"); return; }
+          // 合并自动命名：形如「合并 · 会话A · 会话B」，与分支命名同风格；超长截断。
+          const partNames=ids.map(function(id){ const n=sessionDisplayName(id); return n||"未命名"; });
+          let mergedName="合并 · "+partNames.join(" · ");
+          if(mergedName.length>36)mergedName=mergedName.slice(0,33)+"…";
+          {
+            const map=JSON.parse(localStorage.getItem("han_session_names")||"{}");
+            map[target]=mergedName;
+            localStorage.setItem("han_session_names",JSON.stringify(map));
+            try{ var _nmSet={}; _nmSet[target]=mergedName; pushSessionNamesDelta(_nmSet, []); }catch(e){}
+          }
+          // 合并会话的人设/模型/跨窗口设置（弹窗里选的）
+          const _bp=(document.getElementById("np-prompt")||{}).value||"";
+          if(_bp) setSessionPrompt(target, _bp);
+          const _pid=(document.getElementById("np-provider")||{}).value||"";
+          const _mdl=(document.getElementById("np-model")||{}).value||"";
+          if(_pid) saveSessionProvider(target, _pid, _mdl, mergedName);
+          const _cx=(document.getElementById("np-cross")||{}).value;
+          if(_cx==="1"||_cx==="0"){
+            try{ fetch("/v1/sessions/"+encodeURIComponent(target)+"/cross-inject",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({enabled:_cx==="1"})}); }
+            catch(e){ console.warn("[merge cross-inject] 提交失败:",e&&e.message); }
+          }
+          mergeMode=false; mergeSel.clear();
+          await loadSessions();
+          renderSessionList();
+          updateMergeBar();
+          showToast("已合并为「"+mergedName+"」，共 "+(j.merged||j.total||0)+" 条");
+          if(j.session_id){ switchSession(j.session_id); }
+        }catch(e){ showToast("合并失败:"+(e.message||"")); }
+      },
+      "合并");
+    const npProv=document.getElementById("np-provider");
+    const npMdl=document.getElementById("np-model");
+    if(npProv&&npMdl){ npProv.addEventListener("change",function(){ npMdl.innerHTML=modelOptsFor(npProv.value); }); }
+  }catch(e){ showToast("合并设置窗出错:"+(e&&e.message||"")); }
 }
 
 // 置顶/取消置顶会话（本地），置顶的排在列表最前；与唤醒锁定完全独立（锁定在「…」菜单）
