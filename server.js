@@ -1803,7 +1803,8 @@ const wakeChatDeps = {
   splitMultimodalContent,
   prepareMessageForLLM,
   extractTimestampWithMemory,   // 2026-09-22 审查 §3.5：唤醒侧时间反查与对话侧统一口径（原只认 tm.time）
-  incrementalContext: contextReplacements.buildIncrementalContext   // 0929 增量：块摘要化+尾部现算
+  incrementalContext: contextReplacements.buildIncrementalContext,   // 0929 增量：块摘要化+尾部现算
+  fullCache: true   // 0929 唤醒/重试：整体缓存直接命中（聊天侧 fullCache=false 只走增量）
 };
 wakeChatModule(app, wakeChatDeps);
 

@@ -263,7 +263,8 @@ function ensureBuilder(deps) {
       prepareMessageForLLM: deps.prepareMessageForLLM,
       stripPosition: deps.stripPosition,
       resolveSessionSystemPrompt: deps.resolveSessionSystemPrompt,
-      incrementalContext: deps.incrementalContext   // 0929 增量：块摘要化+尾部现算
+      incrementalContext: deps.incrementalContext,   // 0929 增量：块摘要化+尾部现算
+      fullCache: deps.fullCache !== false   // 0929 唤醒：整体缓存命中直接返回（时间线未变）
     });
   }
   return buildConversation;

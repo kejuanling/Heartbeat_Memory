@@ -189,7 +189,8 @@ module.exports = function registerChatRoutes(app, deps) {
     prepareMessageForLLM,
     stripPosition,
     resolveSessionSystemPrompt,
-    incrementalContext: contextReplacements.buildIncrementalContext   // 0929 增量：块摘要化+尾部现算
+    incrementalContext: contextReplacements.buildIncrementalContext,   // 0929 增量：块摘要化+尾部现算
+    fullCache: false   // 0929 聊天只走增量；整体缓存留给唤醒/重试（fp 不变场景）
   });
 
   // 日记共享模块（2026-09-16）：日常聊天 [DIARY] 提取与保存（与唤醒共用 lib/diary.js）

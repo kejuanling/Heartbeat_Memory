@@ -441,6 +441,10 @@ function createCtxLimitReminderGuard(deps) {
 function createConversationBuilder(deps) {
   const { loadTimeline, prepareMessageForLLM, stripPosition, resolveSessionSystemPrompt } = deps;
   const incrementalContext = deps.incrementalContext || null;
+  // 2026-09-29 缓存分层（用户拍板）：整体缓存只服务「时间线未变」的场景（唤醒/重试）——
+  // 聊天每次发消息 fp 必变、整体缓存必 miss，跳过 get/set 省一次 Map 查找，
+  // 且避免聊天把唤醒的缓存项挤出（_convCache 上限 10）。聊天一律走增量路径（块摘要+尾部现算）。
+  const useFullCache = deps.fullCache !== false;
   const _convCache = new Map(); // key: sessionId|fp|blockFp|sysKey -> msgs
   const _CONV_CACHE_MAX = 10;
   const _CONV_CACHE_MIN_MSGS = 300;
@@ -483,9 +487,12 @@ function createConversationBuilder(deps) {
     if (cacheable && incrementalContext) {
       incResult = incrementalContext(sessionId, timeline);
       if (incResult && incResult.head && incResult.tailStart > 0) {
-        const incKey = _convCacheKey(sessionId, fp, incResult.blockFp, systemRaw);
-        const incHit = _convCache.get(incKey);
-        if (incHit) return incHit;
+        let incKey = null;
+        if (useFullCache) {
+          incKey = _convCacheKey(sessionId, fp, incResult.blockFp, systemRaw);
+          const incHit = _convCache.get(incKey);
+          if (incHit) return incHit;
+        }
         // 增量构建：head（块摘要/保留/前缀/间隙，_ctxRep 直接透传） + 尾部现算
         const sysPrep = systemRaw ? prepareMessageForLLM(systemRaw) : null;
         if (sysPrep) msgs.push(sysPrep);
@@ -504,11 +511,11 @@ function createConversationBuilder(deps) {
           if (!p) continue;
           msgs.push(k < turnStart ? downgradeHistoryImages(p) : p);
         }
-        _convCacheSet(incKey, msgs);
+        if (useFullCache && incKey) _convCacheSet(incKey, msgs);
         return msgs;
       }
     }
-    if (cacheKey) {
+    if (useFullCache && cacheKey) {
       const hit = _convCache.get(cacheKey);
       if (hit) return hit;
     }
@@ -526,7 +533,7 @@ function createConversationBuilder(deps) {
       if (!prepared) continue;
       msgs.push(k < turnStart ? downgradeHistoryImages(prepared) : prepared);
     }
-    if (cacheKey) _convCacheSet(cacheKey, msgs);
+    if (useFullCache && cacheKey) _convCacheSet(cacheKey, msgs);
     return msgs;
   };
 
