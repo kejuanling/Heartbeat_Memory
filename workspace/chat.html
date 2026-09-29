@@ -7703,7 +7703,9 @@ async function initChat(){
     }
   }catch(e){}
   // 主会话(default)已废弃：恢复到 default 或已不存在的会话时，自动落到列表里最后活跃的会话
-  const preliminary = pushSeed || remoteCur || local;   // local→remote 后用于触发 best 的判定值
+  let preliminary = pushSeed || remoteCur || local;   // local→remote 后用于触发 best 的判定值
+  // 归档会话不默认恢复（2026-09-29）：归档=冷置，启动只落在非归档会话；点进归档区才拉取消息
+  if(preliminary && preliminary!=="default" && isArchived(preliminary)){ preliminary="default"; }
   let bestSeed;
   if((preliminary==="default"||!SessionStore.getSessionList().some(s=>s.id===preliminary))&&SessionStore.getSessionList().length){
     const best=SessionStore.getSessionList().slice().sort((a,b)=>((b.last_time||"")>(a.last_time||"")?1:((b.last_time||"")<(a.last_time||"")?-1:0)))[0];
