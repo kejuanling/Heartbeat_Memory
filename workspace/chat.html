@@ -6515,7 +6515,7 @@ function renderSessionList(){
     if(pinned) item.classList.add("pinned");   // 2026-09-28：置顶会话加类供 CSS 醒目样式
     const locked=isLocked(s.id);
     const _mp=[];
-    if(s.persona_name)_mp.push(escapeHtml(s.persona_name));
+    _mp.push(escapeHtml(s.persona_name||'默认设定'));   // 0929-30: 未单独绑人设显示默认设定
     if(s.model_name)_mp.push(escapeHtml(s.model_name));
     if(s.last_time)_mp.push(escapeHtml(fmtTime(new Date(s.last_time))));
     if(s.real!=null)_mp.push(""+s.real+" 条");
