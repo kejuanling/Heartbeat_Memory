@@ -45,6 +45,18 @@ function _injectSessionArg(name, args, sessionId) {
  *  - fetch : 可注入的 fetch（测试用），默认全局 fetch
  * @returns {Promise<{text:string, rounds:number, usage:any, reasoning:string, toolHistory:Array}>}
  */
+
+// MiniMax 等模型把思考链直接写在 content 的 <think> 块里（非 reasoning_content 字段），
+// 剥离进 reasoning，避免思考泄漏成正文显示/落库。
+function splitThinkBlock(text) {
+  if (typeof text !== "string" || !text) return { body: "", think: "" };
+  const re = /<think>([\s\S]*?)<\/think>/g;
+  const thinks = [];
+  let m;
+  while ((m = re.exec(text))) { if (m[1] && m[1].trim()) thinks.push(m[1].trim()); }
+  if (!thinks.length) return { body: text, think: "" };
+  return { body: text.replace(/<think>[\s\S]*?<\/think>/g, "").trim(), think: thinks.join("\n") };
+}
 async function runWithTools({
   upstreamUrl,
   upstreamKey,
@@ -169,12 +181,17 @@ async function runWithTools({
     const msg = choice.message || {};
     if (data.usage) totalUsage = data.usage;
 
-    // 收集思考链（兼容 reasoning_content 与 reasoning 两种字段）
-    const rtext = String(msg.reasoning_content || msg.reasoning || "").trim();
+    // 收集思考链（reasoning_content/reasoning 字段 + content 内 <think> 块，2026-09-29 MiniMax 修复）
+    const _sp = splitThinkBlock(String(msg.content || ""));
+    const _rparts = [];
+    const _rc = String(msg.reasoning_content || msg.reasoning || "").trim();
+    if (_rc) _rparts.push(_rc);
+    if (_sp.think) _rparts.push(_sp.think);
+    const rtext = _rparts.join("\n").trim();
     if (rtext) { reasoningParts.push(rtext); emit({ type: "reasoning", text: rtext }); }
 
-    // 收集本轮正文（混合轮文本保留，见 contentParts 注释）
-    const ctext = String(msg.content || "").trim();
+    // 收集本轮正文（<think> 块已剥离；混合轮文本保留，见 contentParts 注释）
+    const ctext = _sp.body.trim();
     if (ctext) {
       contentParts.push(ctext);
       // 轮次间补一个空行分隔：保证客户端流式拼接的 full 与最终 text(contentParts.join("\n\n")) 一致，
@@ -191,7 +208,7 @@ async function runWithTools({
     // 与 streamToolLoop 同口径：无思考链时传 undefined，让 JSON.stringify 省略该键。
     working.push({
       role: "assistant",
-      content: msg.content || "",
+      content: _sp.body || "",
       reasoning_content: rtext,   // 2026-09-28：DeepSeek 要求所有 assistant 都带 rc（空串也可），不能省略
       tool_calls: msg.tool_calls
     });

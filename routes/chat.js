@@ -1117,6 +1117,15 @@ app.post("/v1/chat/completions", async (req, reply) => {
     }
 
     // 2026-09-24 P3-2A：SSE 全文解析函数（正常路径与中断路径共用同一实现，杜绝口径漂移）
+    const _splitThinkBlock = function (text) {
+      if (typeof text !== "string" || !text) return { body: "", think: "" };
+      const re = /<think>([\s\S]*?)<\/think>/g;
+      const thinks = [];
+      let m;
+      while ((m = re.exec(text))) { if (m[1] && m[1].trim()) thinks.push(m[1].trim()); }
+      if (!thinks.length) return { body: text, think: "" };
+      return { body: text.replace(/<think>[\s\S]*?<\/think>/g, "").trim(), think: thinks.join("\n") };
+    };
     const _parseSseFull = function (rawSse) {
       let content = "", thinking = "", usage = null, parseErrors = 0;
       const _ls = String(rawSse || "").split("\n");
@@ -1134,7 +1143,11 @@ app.post("/v1/chat/completions", async (req, reply) => {
           } catch (e) { parseErrors++; }
         }
       }
-      return { content: content, thinking: thinking, usage: usage, parseErrors: parseErrors };
+      const _sp = _splitThinkBlock(content);
+      const _allT = [];
+      if (_sp.think) _allT.push(_sp.think);
+      if (thinking && thinking.trim()) _allT.push(thinking.trim());
+      return { content: _sp.body, thinking: _allT.join("\n").trim(), usage: usage, parseErrors: parseErrors };
     };
     reply.raw.writeHead(response.status, {
       "Content-Type": upstreamContentType || "text/event-stream",
