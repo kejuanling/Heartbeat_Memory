@@ -1984,20 +1984,11 @@ let imgData=[];
 let fileData=[];
 
 /* ================= 存储 ================= */
-function loadMsgs(){
-  try{return JSON.parse(localStorage.getItem(LS_MSGS+"_"+SessionStore.getCurrentSession())||"[]");}catch(e){return [];}
-}
-let _saveMsgsFailed=false;   // 2026-09-24 P0：本地缓存写入失败可观测——配额满时静默失败会让本地永久落后于服务器，_doHistoryPull 会把整段历史当新增逐条重播
-function saveMsgs(){
-  try{ localStorage.setItem(LS_MSGS+"_"+SessionStore.getCurrentSession(),JSON.stringify(msgs)); _saveMsgsFailed=false; }
-  catch(e){
-    // 配额满或超限：不再完全静默。置位后仅首次提示一次（防刷屏），避免中断发送/流式
-    if(!_saveMsgsFailed){
-      _saveMsgsFailed=true;
-      try{ if(typeof showToast==="function") showToast("本地缓存已满，历史同步降级，请清理浏览器存储"); }catch(_e){}
-    }
-  }
-}
+// 2026-09-29 前端"纯显示器"：msgs 只存内存（尾部窗口 + 向上翻页累积），不再 localStorage 全量缓存——
+// 服务端时间线是唯一权威；刷新/切换以网关拉取为准。乐观渲染（发送/回复流式）仍走内存，不受影响。
+function loadMsgs(){ return []; }
+let _saveMsgsFailed=false;
+function saveMsgs(){ /* no-op：已移除本地持久化（旧配额满降级逻辑随之失效） */ }
 
 /* 顶部加载指示：in-flight 计数，超过 250ms 才显示，防快速请求闪烁 */
 let _topLoadCnt=0,_topLoadTimer=null;
@@ -2005,14 +1996,21 @@ function topLoadStart(){_topLoadCnt++;if(_topLoadCnt===1){_topLoadTimer=setTimeo
 function topLoadEnd(){_topLoadCnt=Math.max(0,_topLoadCnt-1);if(_topLoadCnt===0){if(_topLoadTimer){clearTimeout(_topLoadTimer);_topLoadTimer=null;}var el=document.getElementById("topLoading");if(el)el.classList.remove("on");}}
 
 /* 从网关拉取完整历史（首次打开 / 刷新时用），失败回退本地 */
-async function fetchHistory(){
+async function fetchHistory(opts){
+  // 2026-09-29 分页：opts={mode:'tail'[,limit]} 拉尾部窗口（含 tail_start_id/has_more）；
+  // opts={before:<id>,limit} 拉该 id 之前更早窗口；缺省=全量（搜索定位/导出等低频功能兼容）。
   topLoadStart();
   try{
-    const r=await fetch(HISTORY_API+"?session_id="+encodeURIComponent(SessionStore.getCurrentSession()),{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
+    let qs="?session_id="+encodeURIComponent(SessionStore.getCurrentSession());
+    if(opts){
+      if(opts.mode==="tail") qs+="&mode=tail"+(opts.limit?("&limit="+opts.limit):"");
+      else if(opts.before) qs+="&before="+encodeURIComponent(opts.before)+(opts.limit?("&limit="+opts.limit):"");
+    }
+    const r=await fetch(HISTORY_API+qs,{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
     if(!r.ok)return null;
     const j=await r.json();
     if(!j||!Array.isArray(j.items))return null;
-    return j.items;
+    return { items:j.items, tail_start_id:(j.tail_start_id||null), has_more:!!j.has_more };
   }catch(e){return null;}
   finally{topLoadEnd();}
 }
@@ -2039,63 +2037,71 @@ async function _doHistoryPull(){
   // 2026-09-28：本地基线优先用内存 msgs（页面当前真实状态）——localStorage 可能因配额满写盘失败
   // 停留在旧状态，拿它当基线会把「本地落后 1-9 条旧消息」误判为"新增"逐条重播（0924-06 护栏阈值 10 拦不住）；
   // 内存为空（刷新/首开）才回退 localStorage。
+  // 2026-09-29 纯显示器：基线只用内存 msgs（localStorage 可能旧/配额满）；回退 loadMsgs 仅兜底
   const localMsgs=(msgs&&msgs.length)?msgs:loadMsgs();
-  const hist=await fetchHistory();
+  const hist=await fetchHistory({mode:'tail'});   // 只拉"最后一块摘要结尾之后"的未压缩原文，不再全量
   if(SessionStore.getCurrentSession()!==sidAtStart) return;
-  if(hist&&hist.length){
-    // 尾部新增检测（前缀不变、仅追加）：新增消息走 QQ 式分段连播，一条条弹出而不是整块刷新
-    let added=[];
-    if(localMsgs.length&&hist.length>localMsgs.length){
-      let same=true;
-      // 2026-09-24 P3-2B：前缀比较改「角色+剥标签归一化正文」键（与 mergeEnrichment 同一口径），
-      // 消除前后端 content 口径差异（工具回声/标签剥离）导致的误判——否则直通降级路径下 added 恒空、新消息永远无法逐条弹出
-      const nk=function(m){ let c=typeof m.content==="string"?m.content:""; c=c.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim(); return (m.role||"")+"\u0000"+c; };
-      for(let i=0;i<localMsgs.length;i++){
-        const a=hist[i],b=localMsgs[i];
-        if(!a||!b){same=false;break;}
-        if(nk(a)!==nk(b)){same=false;break;}
-      }
-      if(same){
-        added=hist.slice(localMsgs.length);
-        // 2026-09-28 护栏收窄：仅对「localStorage 基线」生效（刷新/首开后可能是旧缓存，
-        // 条数差无法区分新旧，>=10 或占一半视为落后→静默校准）；内存基线（聊着聊着）时
-        // hist 多出的即真·新消息，无需护栏——原全量护栏在该场景已被内存基线替代，属冗余。
-        if(!(msgs&&msgs.length)&&(added.length>=10||added.length*2>=hist.length))added=[];
-      }
-    }
-    const playables=added.filter(function(m){return m&&(m.role==="user"||m.role==="assistant"||m.role==="ai");});
-    // 2026-09-28 保险丝：本地缓存写盘失败（配额满）期间，服务器多出的条数无法可靠区分
-    // 「真·新消息」与「本地落后旧消息」——一律放弃逐条弹出，改走下方 renderAllNoAnim 静默校准
-    // （消息不丢、仅无动画；根治靠用户清理浏览器存储），防旧消息被当新增重播。
-    if(playables.length&&_saveMsgsFailed)playables.length=0;
-    // 完全无变化就不重建（避免每次 SSE 都把整列多段气泡的进场动画重播一遍）
-    if(!added.length&&hist.length===localMsgs.length){
-      let sameAll=true;
-      const nk2=function(m){ let c=typeof m.content==="string"?m.content:""; c=c.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim(); return (m.role||"")+"\u0000"+c; };
-      for(let i=0;i<hist.length;i++){ const a=hist[i],b=localMsgs[i]; if(!a||!b){sameAll=false;break;} if(nk2(a)!==nk2(b)){sameAll=false;break;} }
-      if(sameAll) return;
-    }
-    // 以服务器为准，但把本地富字段(思考链/工具/token)补回匹配的助手消息（兼容旧数据）
-    msgs=mergeEnrichment(hist,localMsgs);
-    rehydrateCallFlagsFromMarkers(msgs);   // 实时刷新同样按 <call_id> 标记折叠通话
+  if(!hist||!Array.isArray(hist.items)) return;
+  const tail=hist.items;
+  // ---- 起点联动：最后一块摘要结尾变了（新压缩块/隐藏块/块摘要变化）→ 整体替换尾部，更早翻页数据作废 ----
+  if(hist.tail_start_id!==_tailStartId){
+    _tailStartId=hist.tail_start_id;
+    _hasMoreOlder=hist.has_more;
+    msgs=mergeEnrichment(tail,localMsgs);
+    rehydrateCallFlagsFromMarkers(msgs);
     saveMsgs();
-    if(playables.length){
-      // AI 主动消息/别的设备新消息：按连发节奏逐条弹出
-      _segBusy=true;
-      try{
-        playables.forEach(function(m){segEnqueueMsg(m);});
-        await SEGQ.drained();
-      }catch(e){ _segBusy=false; }
-      _segBusy=false;
-      renderAllNoAnim(true);          // 静默重建校准（无动画，视觉无感）
-      if(autoScroll!==false) scrollBottom();
-      setTimeout(liveReloadNow,600);  // 连播期间漏掉的 history_update 补拉一次
+    renderAllNoAnim(true); if(autoScroll!==false) scrollBottom();
+    return;
+  }
+  // ---- 起点不变：与已加载 msgs 中"尾部部分"（_tailStartId 起）对比 ----
+  // 双键 = id + 归一化内容：id 相同但内容被编辑 → 不算相同（否则编辑不触发重建）
+  let tsIdx=-1;
+  if(_tailStartId){ for(let i=0;i<msgs.length;i++){ if(msgs[i]&&msgs[i].id===_tailStartId){tsIdx=i;break;} } }
+  const curTail=(tsIdx>=0)?msgs.slice(tsIdx):msgs;
+  const _ck=function(m){ let c=typeof m.content==="string"?m.content:""; c=c.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim(); return (m.id||"")+"\u0000"+c; };
+  // curTail 是否为 tail 的 id 前缀（追加/无变化判定；编辑时 id 仍同前缀，靠内容键区分）
+  let idSame=true;
+  const _minLen=Math.min(curTail.length,tail.length);
+  for(let i=0;i<_minLen;i++){ if(!curTail[i]||!tail[i]||curTail[i].id!==tail[i].id){ idSame=false; break; } }
+  if(idSame&&curTail.length<=tail.length){
+    if(curTail.length===tail.length){
+      // 长度相同且 id 全同：内容全同 → 无变化（不重建，避免动画重播）；有编辑 → 落入下方替换分支
+      let contentSame=true;
+      for(let i=0;i<curTail.length;i++){ if(!curTail[i]||!tail[i]||_ck(curTail[i])!==_ck(tail[i])){ contentSame=false; break; } }
+      if(contentSame) return;
     }else{
-      // 2026-09-24 P1-5：无新增消息、仅内容有差异（前后端 content 口径不一致，如工具回声/标签剥离）
-      // → 静默无动画校准。原 renderAll() 带全量进场动画，用户会看到整屏气泡在回复刚结束时又闪重排一次。
-      renderAllNoAnim(true); if(autoScroll!==false) scrollBottom();
+      // 真追加：新增消息走 QQ 式分段连播；尾部以网关为准整体替换（curTail 富字段服务端本就带）
+      const added=tail.slice(curTail.length);
+      const playables=added.filter(function(m){return m&&(m.role==="user"||m.role==="assistant"||m.role==="ai");});
+      if(playables.length&&_saveMsgsFailed)playables.length=0;   // 保险丝：写盘失败期间静默校准
+      const keep=(tsIdx>=0)?msgs.slice(0,tsIdx):[];
+      msgs=keep.concat(tail);
+      _hasMoreOlder=hist.has_more;
+      rehydrateCallFlagsFromMarkers(msgs);
+      saveMsgs();
+      if(playables.length){
+        _segBusy=true;
+        try{
+          playables.forEach(function(m){segEnqueueMsg(m);});
+          await SEGQ.drained();
+        }catch(e){ _segBusy=false; }
+        _segBusy=false;
+        renderAllNoAnim(true);
+        if(autoScroll!==false) scrollBottom();
+        setTimeout(liveReloadNow,600);   // 连播期间漏掉的 history_update 补拉一次
+      }else{
+        renderAllNoAnim(true); if(autoScroll!==false) scrollBottom();
+      }
+      return;
     }
   }
+  // 编辑/删除发生在尾部（或追加伴随编辑）：无动画替换尾部部分，保留更早已加载
+  const keep2=(tsIdx>=0)?msgs.slice(0,tsIdx):[];
+  msgs=keep2.concat(tail);
+  _hasMoreOlder=hist.has_more;
+  rehydrateCallFlagsFromMarkers(msgs);
+  saveMsgs();
+  renderAllNoAnim(true); if(autoScroll!==false) scrollBottom();
 }
 function liveReloadNow(){
   // 正在发送/流式中不打断（自身的回复正实时渲染）；置位标记，由 request 的 finally 在 sending 复位后统一补拉一次，
@@ -2135,28 +2141,24 @@ function stopLiveEvents(){ if(liveES){ try{liveES.close();}catch(e){} liveES=nul
    让「服务器优先」的刷新/跨设备/实时推送不再回滚本地改动。
    防抖 + 失败静默（不阻塞交互），发送中不同步（避免和流式写回竞争）。 */
 let localEditSyncTimer=null;
-function syncTimelineLocal(ops){
-  if(sending) return;
-  if(localEditSyncTimer) clearTimeout(localEditSyncTimer);
-  localEditSyncTimer=setTimeout(async ()=>{
-    try{
-      // 优先 diff：编辑/删除按稳定 id 定点同步（position 稳定、不重排）；ops 为空或含无 id（本地新消息）时回退整份（旧兼容）
-      const useDiff=!!(ops&&ops.length&&ops.every(function(o){return o&&o.id;}));
-      const payload={session_id:SessionStore.getCurrentSession()};
-      if(useDiff){
-        payload.ops=ops;
-      } else {
-        // 只发真实用户/AI消息（与服务端 buildTimeline 过滤口径一致），带 time 以便重建保留时刻、带 id 避免服务端换新 uuid 导致后续 diff 编辑/删除 miss
-        payload.messages=msgs.filter(function(m){return m&&(m.role==="user"||m.role==="assistant");}).map(function(m){return {role:m.role,content:m.content,time:m.time,id:m.id};});
-      }
-      const r=await fetch("/v1/timeline/sync",{
-        method:"POST",
-        headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-Client":"dylan-chat","X-CSRF-Token":getCookie("admin_csrf")},
-        body:JSON.stringify(payload),
-        credentials:"include"
-      });
-    }catch(e){ /* 同步失败静默，下次发送仍会全量重建兜底 */ }
-  }, 350);
+function syncTimelineLocal(payload){
+  // 2026-09-29 网关权威（纯显示器）：
+  //   payload=ops 数组 → diff 定点（编辑/删除，按 id 网关改+广播）
+  //   payload={messages:[...]} → 只发这批消息（分支创建/导入/通话记录等一次性落盘；服务端差量补齐，安全）
+  // 移除旧"整份回退"：分页后 msgs 只含窗口，整份回退会把服务端时间线覆盖成窗口数据（灾难）。
+  // 返回 Promise（编辑/删除等调用方据此决定是否更新本地显示）。
+  if(sending) return Promise.resolve(null);
+  let body={session_id:SessionStore.getCurrentSession()};
+  if(Array.isArray(payload)){ body.ops=payload; }
+  else if(payload&&Array.isArray(payload.messages)){ body.messages=payload.messages; }
+  else { return Promise.resolve(null); }
+  return fetch("/v1/timeline/sync",{
+    method:"POST",
+    headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-Client":"dylan-chat","X-CSRF-Token":getCookie("admin_csrf")},
+    body:JSON.stringify(body),
+    credentials:"include"
+  }).then(function(r){ return r.json().catch(function(){return {};}); })
+    .catch(function(){ return null; });
 }
 
 /* ================= markdown ================= */
@@ -2290,14 +2292,24 @@ if(jumpBtn)jumpBtn.addEventListener("click",function(){
   // - 回到顶部：把窗口补到最早(_from=0), 让头部消息真正渲染进 DOM 后再滚到起点
   if(jumpBtn.dataset.go==="top"){
     // 回到顶部：只渲染头部窗口 [_from,_to)=[0,min(len,_WIN)]，避免一次性全量渲染 3000 条阻塞主线程
-    // 头部窗口不含尾部，_replaceWindow 会自动挂底部哨兵，向下滚动时逐批补载剩余历史；语义即回到对话第一屏
-    _winSession=SessionStore.getCurrentSession();
-    _lockFrom=true;
-    _from=0;
-    _to=Math.min(msgs.length||0, _WIN);
-    renderAll(true);
-    // DOM 顶部即第一条消息; 窗口又是头部, 无顶部哨兵占位
-    requestAnimationFrame(function(){ chatEl.scrollTop=0; jumpSeen=false; });
+    // 2026-09-29 纯显示器：msgs 只含尾部窗口+翻页累积；起点之前还有更早时低频一次性拉全量到最早
+    const _goTop=function(){
+      _winSession=SessionStore.getCurrentSession();
+      _lockFrom=true;
+      _from=0;
+      _to=Math.min(msgs.length||0, _WIN);
+      renderAll(true);
+      // DOM 顶部即第一条消息; 窗口又是头部, 无顶部哨兵占位
+      requestAnimationFrame(function(){ chatEl.scrollTop=0; jumpSeen=false; });
+    };
+    if(_hasMoreOlder){
+      fetchHistory().then(function(h){
+        if(h&&h.items&&h.items.length){ msgs=h.items; _hasMoreOlder=false; }
+        _goTop();
+      });
+    }else{
+      _goTop();
+    }
   }
   else{
     // 回到底部：解除定位, 锚定尾部窗口
@@ -3360,6 +3372,11 @@ function makeMsgEl(m,idx){
 let _WIN=100;            // 单次窗口/补载条数
 let _from=0;             // 窗口起点（msgs 索引）
 let _to=null;            // 窗口终点(含? 否)。null=渲染到 msgs.length
+// 2026-09-29 前端"纯显示器"：渲染起点 = 最后一块摘要结尾（tailStart）之后的未压缩原文。
+// _tailStartId 由网关 /v1/history mode=tail 返回（稳定；新压缩块出现时联动变化）；
+// _hasMoreOlder 表示起点之前还有更早原文（顶部哨兵"↑ 向上滚动查看更多更早消息"的依据）。
+let _tailStartId=null;
+let _hasMoreOlder=false;
 let _lockFrom=false;     // 是否锁定窗口范围（搜索定位模式）
 let _winSession=null;    // 记录渲染窗口所属会话，会话切换时自动复位定位锁
 let _sentTop=null;       // 顶部哨兵：进入视口触发"加载更早"
@@ -3417,9 +3434,9 @@ function _replaceWindow(keepPos){
   const frag=_buildBatch(from,to,null);
   chatEl.appendChild(frag);
   _from=from;
-  // 重建顶部哨兵（若还有更早消息）
+  // 重建顶部哨兵（纯显示器：起点之前还有更早原文才显示）
   if(_sentTop){ try{_io&&_io.unobserve(_sentTop);}catch(e){} _sentTop=null; }
-  if(from>0){
+  if(_hasMoreOlder){
     _sentTop=document.createElement("div"); _sentTop.className="win-sentinel";
     _sentTop.textContent="↑ 加载更早消息";
     chatEl.insertBefore(_sentTop, chatEl.firstChild);
@@ -3436,18 +3453,32 @@ function _replaceWindow(keepPos){
   if(keepPos!==true) scrollBottom();
 }
 // 向上补载更早
-function loadMoreOlder(){
-  if(!_from) return;
-  const nstart=Math.max(0,_from-_WIN);
+async function loadMoreOlder(){
+  // 2026-09-29 分页：不再从内存切片——向网关拉"窗口最早消息 id 之前"的更早原文（含压缩区间原文），
+  // 拉回后插入 msgs 顶部 + 补偿滚动位置。起点（tailStart）之前的更早数据逐页累积在 msgs 里。
+  if(!_hasMoreOlder) return;
+  if(!(msgs&&msgs.length)){ _hasMoreOlder=false; return; }
+  const beforeId=msgs[0]&&msgs[0].id;
+  if(!beforeId){ _hasMoreOlder=false; return; }
+  const hist=await fetchHistory({before: beforeId, limit: 100});
+  if(!hist||!Array.isArray(hist.items)||!hist.items.length){ _hasMoreOlder=false; return; }
+  const older=hist.items;
+  // 防重复：服务端 before 语义保证返回 strictly 更早，不与现有窗口重叠；仍按 id 兜底去重
+  const known=new Set(msgs.map(function(m){return m&&m.id;}).filter(Boolean));
+  const dedup=older.filter(function(m){return m&&m.id&&!known.has(m.id);});
+  if(!dedup.length){ _hasMoreOlder=hist.has_more; return; }
   // 记录插入前顶部锚点位置，插入后补偿 scrollTop，避免视口跳动
   const oldH=chatEl.scrollHeight;
-  const frag=_buildBatch(nstart,_from,null);
+  msgs=dedup.concat(msgs);
+  _from+=dedup.length;
+  if(_to!==null) _to+=dedup.length;
+  _hasMoreOlder=hist.has_more;
+  const frag=_buildBatch(0, dedup.length, null);
   const anchor=_sentTop||chatEl.firstChild;
   chatEl.insertBefore(frag, anchor);
-  _from=nstart;
   // 重挂顶部哨兵
   if(_sentTop){ try{_io&&_io.unobserve(_sentTop);}catch(e){} _sentTop=null; }
-  if(_from>0){
+  if(_hasMoreOlder){
     _sentTop=document.createElement("div"); _sentTop.className="win-sentinel";
     _sentTop.textContent="↑ 向上滚动查看更多更早消息";
     chatEl.insertBefore(_sentTop, chatEl.firstChild);
@@ -4013,8 +4044,8 @@ async function send(){
   if(!msgs.length){
     msgs=loadMsgs();
     if(!msgs.length){
-      const history=await fetchHistory();
-      if(history&&history.length){msgs=history;saveMsgs();renderAll();}
+      const history=await fetchHistory({mode:'tail'});
+      if(history&&history.items&&history.items.length){msgs=mergeEnrichment(history.items,[]);_tailStartId=history.tail_start_id;_hasMoreOlder=history.has_more;saveMsgs();renderAll();}
     }
   }
   // 注入 current_time 标签（网关做时间/唤醒/特殊事件依赖；放到内容末尾，不在开头）
@@ -4355,21 +4386,31 @@ function saveEdit(){
   const m=msgs[editIdx];if(!m){closeEdit();return;}
   const v=editInput.value;
   const mid=m.id;   // 编辑前记住 id，用于 diff 定点同步
+  if(!mid){ closeEdit(); showToast("该消息无稳定 id，仅本地修改，无法同步网关"); return; }
+  let newContent;
   if(Array.isArray(m.content)&&m.content.some(x=>x&&x.type==="image_url")){
     const imgs=m.content.filter(x=>x&&x.type==="image_url");
-    m.content=v?[...imgs,{type:"text",text:v}]:imgs;
+    newContent=v?[...imgs,{type:"text",text:v}]:imgs;
   }else{
-    m.content=v;
+    newContent=v;
   }
-  // 2026-09-25 ⑦：编辑后不再改写旧 timeline——原实现把全文塞进首个 text 节点、其余 text 段置空，
-  // 会把工具卡前后的正文顺序打乱（工具后的正文被搬到工具前）。改为丢弃 timeline，让渲染走
-  // buildTimelineUnits 的「旧数据合成」口径（content 拆段 + 工具统一补在首段之后），行为可预期。
-  if(Array.isArray(m.stream_timeline)&&m.stream_timeline.length){ m.stream_timeline=null; }
-  saveMsgs();renderAll();
   closeEdit();
-  showToast("已保存");
-  // diff 编辑：按 id 定点同步（position 稳定不重排）；无 id（本地新消息）回退整份
-  syncTimelineLocal(mid?[{op:'edit', id:mid, newContent: m.content}]:null);
+  // 2026-09-29 网关权威：先发 diff ops（网关改时间线+广播），成功才更新本地窗口
+  syncTimelineLocal([{op:'edit', id:mid, newContent:newContent}]).then(function(j){
+    if(j&&j.ok!==false){
+      m.content=newContent;
+      // 2026-09-25 ⑦：编辑后不再改写旧 timeline——原实现把全文塞进首个 text 节点、其余 text 段置空，
+      // 会把工具卡前后的正文顺序打乱（工具后的正文被搬到工具前）。改为丢弃 timeline，让渲染走
+      // buildTimelineUnits 的「旧数据合成」口径（content 拆段 + 工具统一补在首段之后），行为可预期。
+      if(Array.isArray(m.stream_timeline)&&m.stream_timeline.length){ m.stream_timeline=null; }
+      renderAll();
+      showToast("已保存");
+    }else if(j&&j.missed>0){
+      showToast("编辑失败：消息已不在服务端");
+    }else{
+      showToast("编辑失败，请重试");
+    }
+  });
 }
 editCancel.addEventListener("click",closeEdit);
 editMask.addEventListener("click",e=>{if(e.target===editMask)closeEdit();});
@@ -4391,10 +4432,9 @@ actDel.addEventListener("click",()=>{
 // 导致卡顿（markdown 重渲染是大头）。数据层 splice 后逐个更新后续 data-idx（只改属性，不重渲染内容）。
 // 2026-09-22 审查 M21：轻量路径此前只改 DOM data-idx，未同步窗口边界 _from/_to 与多选集合 selectSet，
 // 导致窗口化渲染下边界偏移一条（后续补载漏/重）、多选导出与删除按错位索引取错消息。
-function deleteSingleMsg(idx){
+// 2026-09-29 网关权威：先发 diff ops 删除（网关改+广播），成功才移除本地。
+function _deleteMsgLocal(idx){
   if(idx<0||idx>=msgs.length)return;
-  const target=msgs[idx];
-  const tid=target&&target.id;   // 删除前记住 id，用于 diff 定点同步
   msgs.splice(idx,1);
   // 窗口边界同步：删除点位于窗口起点之前，起点整体前移；锁定窗口（_to 非 null）终点同理前移
   if(idx<_from)_from=Math.max(0,_from-1);
@@ -4416,7 +4456,16 @@ function deleteSingleMsg(idx){
   }
   saveMsgs();
   if(!msgs.length){ chatEl.innerHTML=""; chatEl.appendChild(emptyEl); }
-  syncTimelineLocal(tid?[{op:'delete', id:tid}]:null);   // diff 删除；无 id 回退整份
+}
+function deleteSingleMsg(idx){
+  if(idx<0||idx>=msgs.length)return;
+  const target=msgs[idx];
+  const tid=target&&target.id;   // 删除前记住 id，用于 diff 定点同步
+  if(!tid){ _deleteMsgLocal(idx); return; }   // 本地无 id 消息：直接本地删（不入库）
+  syncTimelineLocal([{op:'delete', id:tid}]).then(function(j){
+    if(j&&j.ok!==false){ _deleteMsgLocal(idx); }
+    else{ showToast("删除失败，请重试"); }
+  });
 }
 
 actEdit.addEventListener("click",()=>{
@@ -4459,7 +4508,7 @@ async function branchFromMsg(idx){
   renderSessionList();
   pushSessionNames();
   startLiveEvents();
-  syncTimelineLocal();
+  syncTimelineLocal({messages:branchMsgs});   // 分支=把父会话到分支点的消息一次性落盘到新会话
   // 继承父会话中完全落在分支点之前的压缩块（复制语义，父会话块保留）
   try{
     await fetch("/v1/sessions/branch-inherit",{
@@ -4564,22 +4613,24 @@ function exportSelectedMessages(){
   showToast("已导出 "+selectSet.size+" 条对话");
 }
 
-selDel.addEventListener("click",()=>{
-  if(!selectSet.size){showToast("请先选择");return;}
+function _selDelLocal(){
   const deleted=selectSet.size;
-  // 删除前收集被删消息的 id，用于 diff 定点同步
-  const delIds=[...selectSet].map(function(i){return msgs[i]&&msgs[i].id;}).filter(Boolean);
-  // 精简：直接按 msgs 过滤 + 一次重建。窗口化渲染下 DOM data-idx 是全量索引、
-  // 最终 renderAll 本来就会整体重建，原先"先逐条删 DOM 再重建"纯属多余遍历。
   msgs=msgs.filter(function(m,i){return !selectSet.has(i);});
   saveMsgs();selectSet.clear();updateSelBar();
   if(!msgs.length){ chatEl.innerHTML=""; chatEl.appendChild(emptyEl); exitSelect(); }
-  else {
-    renderAll();
-  }
+  else { renderAll(); }
   showToast("已删除 "+deleted+" 条");
-  // diff 删除：按 id 定点；有消息缺 id（导入等本地新消息）则回退整份，保证无 id 的删除也不同步漏掉
-  syncTimelineLocal(delIds.length===deleted? delIds.map(function(id){return {op:'delete', id:id};}) : null);
+}
+selDel.addEventListener("click",()=>{
+  if(!selectSet.size){showToast("请先选择");return;}
+  const deleted=selectSet.size;
+  // 删除前收集被删消息的 id，用于 diff 定点同步（要求全部有稳定 id，否则仅本地删）
+  const allIds=[...selectSet].map(function(i){return msgs[i]&&msgs[i].id;});
+  if(allIds.some(function(id){return !id;})){ showToast("存在无稳定 id 的消息，仅本地删除"); _selDelLocal(); return; }
+  syncTimelineLocal(allIds.map(function(id){return {op:'delete', id:id};})).then(function(j){
+    if(j&&j.ok!==false){ _selDelLocal(); }
+    else{ showToast("删除失败，请重试"); }
+  });
 });
 
 /* 会话命名辅助：新会话在 AI 首条回复到达后用回复开头命名（只动仍叫"会话id"的未命名会话） */
@@ -6032,9 +6083,10 @@ function callClose(){
   if(_call.open && _call.batchId){
     const initRole=(_call.initiator==="ai")?"assistant":"user";
     const text="【通话记录】语音通话 "+fmtClock(_call.active?Math.max(0,_call.seconds):0)+"，结束于 "+fmtTime(new Date())+"<call_id>"+_call.batchId+"</call_id>";
-    msgs.push({id:newMsgId(),role:initRole,content:text,time:new Date().toISOString(),_callFor:_call.batchId});
+    const _callRec={id:newMsgId(),role:initRole,content:text,time:new Date().toISOString(),_callFor:_call.batchId};
+    msgs.push(_callRec);
     saveMsgs(); renderAll(); if(typeof scrollBottom==="function")scrollBottom();
-    if(typeof syncTimelineLocal==="function")syncTimelineLocal();   // 把记录消息也同步到服务器时间线，否则刷新就没了
+    if(typeof syncTimelineLocal==="function")syncTimelineLocal({messages:[_callRec]});   // 只把这条通话记录追加到服务端，否则刷新就没了
   }
   ov.classList.add("ended");
   stopVoiceChan();
@@ -6735,7 +6787,8 @@ async function switchSessionAndLocate(sid,idx){
   alignLocalStars();      // 标星 UI 按目标会话对齐（与 switchSession 同口径）
   applyHeader();
   msgs=loadMsgs();
-  if(!(msgs&&msgs.length)){ const h=await fetchHistory(); if(h&&h.length){ msgs=h; saveMsgs(); } }
+  if(!(msgs&&msgs.length)){ const h=await fetchHistory(); if(h&&h.items&&h.items.length){ msgs=h.items; saveMsgs(); } }
+  _hasMoreOlder=false;   // 定位模式已全量加载，无更早可翻
   // 定位模式：以目标消息为中心开固定滑窗 [_from,_to)，保证该条必然被渲染
   _lockFrom=true;
   _from=Math.max(0, idx-Math.floor(_WIN/2));
@@ -6768,15 +6821,17 @@ async function switchSession(id){
   if(csEl)csEl.classList.add("on");
   try{
     const localMsgs=loadMsgs();    // 本地缓存：保留思考链/工具/token
-    // 优先用服务器权威数据（避免本地脏缓存导致不完整），服务器为空才回退本地。
-    const history=await fetchHistory();
+    // 2026-09-29 纯显示器：拉尾部窗口（最后一块摘要结尾之后的未压缩原文）；被压缩的旧对话
+    // 在聊天页不显示，向上翻页再拉更早。服务器为空才回退本地。
+    const history=await fetchHistory({mode:'tail'});
     // 会话快照校验（2026-09-20 审查 P1-3）：连点切换时慢响应晚到，本次作废——
     // 防 A 会话历史写进 B 会话缓存并渲染；收尾（关抽屉/订阅/列表刷新）由最新一次切换负责。
     if(SessionStore.getCurrentSession()!==id) return;
-    if(history&&history.length){
-      msgs=mergeEnrichment(history,localMsgs); saveMsgs();
+    if(history&&history.items&&history.items.length){
+      msgs=mergeEnrichment(history.items,localMsgs); saveMsgs();
+      _tailStartId=history.tail_start_id; _hasMoreOlder=history.has_more;
     }else{
-      msgs=localMsgs||[];
+      msgs=localMsgs||[]; _tailStartId=null; _hasMoreOlder=false;
     }
     renderAll();scrollBottom();
   }finally{ if(csEl)csEl.classList.remove("on"); }
@@ -6881,8 +6936,8 @@ async function deleteSession(id){
       SessionStore.setCurrentSession(target);
       pushCurrentSession();   // 跨设备同步：删除当前会话后落到的新会话也上报
       applyHeader();
-      msgs=[];const h=await fetchHistory();
-      if(h&&h.length){msgs=h;saveMsgs();}else{msgs=loadMsgs();}
+      msgs=[];const h=await fetchHistory({mode:'tail'});
+      if(h&&h.items&&h.items.length){msgs=h.items;_tailStartId=h.tail_start_id;_hasMoreOlder=h.has_more;saveMsgs();}else{msgs=loadMsgs();_tailStartId=null;_hasMoreOlder=false;}
       renderAll();
       startLiveEvents();   // 切到回退会话后重新订阅
     }
@@ -7159,7 +7214,7 @@ async function importSession(file){
     applyHeader();
     items.forEach(function(m){ if(m&&!m.id)m.id=newMsgId(); });   // 导入消息就地补稳定 id：随整份同步上行按 id 落库，后续编辑/删除可直接 diff 定点
     msgs=items;saveMsgs();
-    syncTimelineLocal();  // 导入即落盘：带导入消息的 time 一次性写进服务器时间线，建好会话文件（后续发消息走追加，不再整份重建）
+    syncTimelineLocal({messages:items});  // 导入即落盘：带导入消息的 time 一次性写进服务器时间线，建好会话文件
     renderAll();
     closeDrawer();
     // 记录名字
@@ -7499,12 +7554,14 @@ async function initChat(){
   const localMsgs=loadMsgs();               // 本地缓存：保留思考链/工具/token 等完整数据
   // 始终向网关拉一次，保证另一台设备发的消息能同步进来；失败则回退本地缓存。
   // 优先用服务器权威数据，避免本地缓存脏了(比如某浏览器历史遗留/重复消息)导致显示不完整、滚动错位。
-  const history=await fetchHistory();
-  if(history&&history.length){
-    msgs=mergeEnrichment(history,localMsgs);   // 以服务器为准，但把本地富字段(思考链/工具/token)补回匹配的助手消息
+  const history=await fetchHistory({mode:'tail'});
+  if(history&&history.items&&history.items.length){
+    msgs=mergeEnrichment(history.items,localMsgs);   // 以服务器为准，但把本地富字段(思考链/工具/token)补回匹配的助手消息
     saveMsgs();
+    _tailStartId=history.tail_start_id; _hasMoreOlder=history.has_more;
   }else{
     msgs=localMsgs||[];              // 服务器无(离线/仅本地导入的会话)才回退本地
+    _tailStartId=null; _hasMoreOlder=false;
   }
   rehydrateCallFlagsFromMarkers(msgs);   // 按 <call_id> 内容标记重建通话折叠（跨设备刷新同样生效）
   if(msgs && msgs.length){ renderAll(); scrollBottom(); }

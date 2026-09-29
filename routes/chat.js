@@ -295,7 +295,14 @@ module.exports = function registerChatRoutes(app, deps) {
     }
   });
 
-  // 只读返回完整时间线（供自建聊天前端首次拉取历史；剥离内部 position 字段，保留 role/content/time）
+  // 只读返回时间线（供自建聊天前端拉取历史；剥离内部 position 字段，保留 role/content/time）。
+  // 2026-09-29 前端"纯显示器"分页：
+  //   GET /v1/history?session_id=X                     → 全量（旧客户端/导出兼容）
+  //   GET /v1/history?session_id=X&mode=tail[&limit=N] → 尾部窗口：从"最后一块摘要结尾"起（未压缩原文），
+  //                                                      响应带 tail_start_id（前端渲染起点，稳定；新压缩块
+  //                                                      出现时联动变化）+ has_more（起点前还有更早原文）
+  //   GET /v1/history?session_id=X&before=<id>&limit=N → 更早窗口：before 为当前窗口最早消息 id，
+  //                                                      返回其前 N 条原文（含压缩区间原文）
   app.get('/v1/history', async (req, reply) => {
     try {
       const sessionId = String(req.query.session_id || req.headers['x-session-id'] || '').trim();
@@ -304,7 +311,7 @@ module.exports = function registerChatRoutes(app, deps) {
       let needWrite = false;
       for (const m of timeline) { if (m && !m.id) { m.id = (require('crypto').randomUUID) ? require('crypto').randomUUID() : String(Date.now()) + '-' + Math.random().toString(36).slice(2); needWrite = true; } }
       if (needWrite) saveTimeline(timeline, sessionId);
-      const items = timeline
+      const fullItems = timeline
         .filter(m => isRealMessageForTimeline(m) || (m && !m.deleted && isPushEchoLike(m)))
         // role 法（2026-09-15）：developer 块（[唤醒]等）与日记（kind=diary）只落盘不对前端展示
         .filter(m => !(m && (m.role === 'developer' || m.role === 'tool' || m.kind === 'diary' || m.kind === 'noaction')))
@@ -322,7 +329,41 @@ module.exports = function registerChatRoutes(app, deps) {
           if (m.tokens !== undefined) clean.tokens = m.tokens;
           return clean;
         });
-      reply.send({ ok: true, total: items.length, items, session_id: sessionId || 'default' });
+      const mode = String(req.query.mode || '');
+      if (mode === 'tail' || req.query.before !== undefined) {
+        const limit = req.query.limit !== undefined ? Math.min(Math.max(1, Number(req.query.limit) || 1), 500) : null;
+        const cs = contextReplacements.computeTailStart(sessionId, timeline);
+        // 渲染起点 = tailIndex 起第一条可见消息的 id（tailIndex 可能指向 developer/tool 等被过滤消息，向后找）
+        let tailId = null;
+        if (cs.tailIndex < timeline.length) {
+          const visibleIds = new Set();
+          for (const m of fullItems) { if (m && m.id) visibleIds.add(m.id); }
+          for (let i = cs.tailIndex; i < timeline.length; i++) {
+            const m = timeline[i];
+            if (m && m.id && visibleIds.has(m.id)) { tailId = m.id; break; }
+          }
+        }
+        if (req.query.before !== undefined) {
+          // 更早窗口：before 消息之前的 limit 条
+          const beforeId = String(req.query.before || '');
+          const pos = fullItems.findIndex(m => m && m.id === beforeId);
+          const lim = limit || 100;
+          if (pos < 0) {
+            return reply.send({ ok: true, total: fullItems.length, tail_start_id: tailId, has_more: false, items: [], session_id: sessionId || 'default' });
+          }
+          const start = Math.max(0, pos - lim);
+          const win = fullItems.slice(start, pos);
+          return reply.send({ ok: true, total: fullItems.length, tail_start_id: tailId, has_more: start > 0, items: win, session_id: sessionId || 'default' });
+        }
+        // mode=tail：从起点返回（limit 缺省 → 起点后全部，供 SSE 整段替换）
+        const startIdx = tailId ? fullItems.findIndex(m => m && m.id === tailId) : fullItems.length;
+        if (startIdx < 0) {
+          return reply.send({ ok: true, total: fullItems.length, tail_start_id: tailId, has_more: false, items: [], session_id: sessionId || 'default' });
+        }
+        const win = limit ? fullItems.slice(startIdx, startIdx + limit) : fullItems.slice(startIdx);
+        return reply.send({ ok: true, total: fullItems.length, tail_start_id: tailId, has_more: startIdx > 0, items: win, session_id: sessionId || 'default' });
+      }
+      reply.send({ ok: true, total: fullItems.length, items: fullItems, session_id: sessionId || 'default' });
     } catch (err) {
       console.error('[GET /v1/history] error:', err.message);
       reply.code(500).send({ error: err.message });

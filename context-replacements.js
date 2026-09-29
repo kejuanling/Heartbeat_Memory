@@ -2824,6 +2824,68 @@ function searchCompactionOriginal(keyword, maxResults) {
   return { ok: true, total: results.length, results: results.slice(0, maxReturn) };
 }
 
+
+// ========================
+// 计算渲染起点（2026-09-29 前端"纯显示器"）：最后一个参与处理块的结束位置。
+// 与 buildIncrementalContext 的定位/窗口/隐藏口径完全一致（matched id 锚点、窗口内、
+// 含隐藏块——隐藏块区间同样不显示原文，因此其 end 计入 lastEnd）。
+// 返回 { tailIndex, lastEndId, blockFp }：tailIndex = 时间线索引 lastEnd+1（其后的
+// 未覆盖消息即前端要显示的未压缩原文起点）；lastEndId = 最后一块 end 消息 id
+// （供 /v1/history 在过滤后可见序列中定位起点）；无块/无定位 → tailIndex=0, lastEndId=null。
+// ========================
+function computeTailStart(sessionId, timeline) {
+  const tl = Array.isArray(timeline) ? timeline : [];
+  if (!tl.length) return { tailIndex: 0, lastEndId: null, blockFp: "" };
+  let blockFp = "";
+  try {
+    const st = fs.statSync(REPLACEMENTS_FILE);
+    blockFp = String(st.mtimeMs) + ":" + String(st.size);
+  } catch (e) { blockFp = ""; }
+  const curSession = activeSessionOr() || sessionId || "default";
+  let items = loadItems().filter(function (it) {
+    if (it.removed || it.enabled === false) return false;
+    if (!recordText(it)) return false;
+    if (it.session && it.session !== curSession) return false;
+    return true;
+  });
+  if (!items.length) return { tailIndex: 0, lastEndId: null, blockFp: blockFp };
+  const idPos = new Map();
+  for (let i = 0; i < tl.length; i++) {
+    const m = tl[i];
+    if (!m || m.role === "system" || m.deleted) continue;
+    const id = m.id ? String(m.id) : "";
+    if (id && !idPos.has(id)) idPos.set(id, i);
+  }
+  const windowStartMs = currentWindowStartMs(tl);
+  let lastEnd = -1;
+  let lastEndId = null;
+  for (const it of items) {
+    const matched = (Array.isArray(it.matched) && it.matched.length > 0) ? it.matched : null;
+    if (!matched || matched.length === 0) continue;
+    let aStart = null;
+    let aEnd = null;
+    for (const m of matched) { if (!isSpecialEvent(m)) { aStart = m; break; } }
+    for (let i = matched.length - 1; i >= 0; i--) { if (!isSpecialEvent(matched[i])) { aEnd = matched[i]; break; } }
+    if (!aStart || !aEnd) continue;
+    const sId = aStart && aStart.id ? String(aStart.id) : "";
+    const eId = aEnd && aEnd.id ? String(aEnd.id) : "";
+    if (!sId || !eId) continue;
+    const s = idPos.get(sId);
+    const e = idPos.get(eId);
+    if (s === undefined || e === undefined || e < s) continue;
+    if (windowStartMs !== null) {
+      let anchorM = null;
+      for (let i = s; i <= e; i++) { if (!isSpecialEvent(tl[i])) { anchorM = tl[i]; break; } }
+      if (anchorM) {
+        const t = messageTime(anchorM);
+        if (t && t.getTime() < windowStartMs) continue;
+      }
+    }
+    if (e > lastEnd) { lastEnd = e; lastEndId = eId; }
+  }
+  return { tailIndex: lastEnd + 1, lastEndId: lastEndId, blockFp: blockFp };
+}
+
 // ========================
 // 增量上下文构建（2026-09-29）：keh3 5000+ 条会话提速——每请求只 prepare 尾部未覆盖对话
 // 只摘要化「id 可定位 + 窗口内 + 非隐藏 + 非截断」的块区间；其余（窗口外/定位失败）区间原文透传，
@@ -2961,6 +3023,7 @@ module.exports = {
   loadItems,
   recordText,
   buildIncrementalContext,
+  computeTailStart,
   buildMemoryMessage,
   // 手工记录管理
   addManualRecord,
