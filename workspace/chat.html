@@ -815,6 +815,14 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 #chatSwitching{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(var(--chrome-rgb),.5);backdrop-filter:blur(var(--glass,6px));-webkit-backdrop-filter:blur(var(--glass,6px));z-index:5;pointer-events:none}
 #chatSwitching.on{display:flex}
 #chatSwitching .cs-spin{width:30px;height:30px;border-radius:50%;border:3px solid var(--accent-soft);border-top-color:var(--accent);animation:csSpin .8s linear infinite}
+#chatSwitching .cs-text{display:none;margin-top:10px;font-size:12px;color:var(--ink2)}
+/* 极简主题拉取圈显眼版（2026-09-29）：默认白遮罩+细灰圈在浅底上几乎不可见 */
+#chat[data-layout="claude"] #chatSwitching{background:rgba(240,240,240,.62)}
+#chat[data-layout="claude"] #chatSwitching .cs-spin{width:36px;height:36px;border-color:rgba(0,0,0,.13);border-top-color:#555}
+#chat[data-layout="claude"] #chatSwitching .cs-text{display:block}
+/* 翻页加载更早提示 */
+.older-loading{position:sticky;top:0;z-index:4;display:none;align-items:center;justify-content:center;gap:8px;padding:10px 0 6px;font-size:12px;color:var(--ink2)}
+.older-loading .cs-spin{width:16px;height:16px;border-radius:50%;border:2px solid var(--accent-soft);border-top-color:var(--accent);animation:csSpin .8s linear infinite}
 @keyframes csSpin{to{transform:rotate(360deg)}}
 
 /* toast */
@@ -1386,7 +1394,8 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
 </div>
 
 <div id="chat" role="log" aria-live="polite" aria-relevant="additions text" aria-atomic="false">
-  <div id="chatSwitching"><span class="cs-spin"></span></div>
+  <div id="chatSwitching"><span class="cs-spin"></span><span class="cs-text">拉取中…</span></div>
+  <div id="olderLoading" class="older-loading"><span class="cs-spin"></span><span>加载更早…</span></div>
   <div id="empty">
     <div class="big"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.6L18 9.4l-4.2 1.8L12 16l-1.8-4.8L6 9.4l4.2-1.8z"/></svg></div>
     <div class="t1" id="emptyT1">Hello</div>
@@ -3483,6 +3492,9 @@ async function loadMoreOlder(){
   if(!(msgs&&msgs.length)){ _hasMoreOlder=false; return; }
   const beforeId=msgs[0]&&msgs[0].id;
   if(!beforeId){ _hasMoreOlder=false; return; }
+  const _olEl=document.getElementById("olderLoading");
+  if(_olEl) _olEl.style.display="flex";
+  try{
   const hist=await fetchHistory({before: beforeId, limit: 100});
   if(!hist||!Array.isArray(hist.items)||!hist.items.length){ _hasMoreOlder=false; return; }
   const older=hist.items;
@@ -3510,6 +3522,7 @@ async function loadMoreOlder(){
   // 补偿：内容变高了，把滚动往回调，保持用户当前仍停在同一批消息
   const dh=chatEl.scrollHeight-oldH;
   if(dh>0){ chatEl.scrollTop+=dh; }
+  }finally{ if(_olEl) _olEl.style.display="none"; }   // 翻页完成隐藏"加载更早"提示
 }
 // 向下补载更新（仅定位模式）
 function loadMoreNewer(){
@@ -7726,7 +7739,10 @@ async function initChat(){
   const localMsgs=loadMsgs();               // 本地缓存：保留思考链/工具/token 等完整数据
   // 始终向网关拉一次，保证另一台设备发的消息能同步进来；失败则回退本地缓存。
   // 优先用服务器权威数据，避免本地缓存脏了(比如某浏览器历史遗留/重复消息)导致显示不完整、滚动错位。
+  const csEl0=document.getElementById("chatSwitching");
+  if(csEl0)csEl0.classList.add("on");   // 首次拉取中：显示加载圈
   const history=await fetchHistory({mode:'tail'});
+  if(csEl0)csEl0.classList.remove("on");
   if(history&&history.items&&history.items.length){
     msgs=mergeEnrichment(history.items,localMsgs);   // 以服务器为准，但把本地富字段(思考链/工具/token)补回匹配的助手消息
     saveMsgs();
