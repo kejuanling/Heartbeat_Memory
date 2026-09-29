@@ -6833,16 +6833,20 @@ function togglePinSession(id){
   if(i>=0){
     pinnedArr.splice(i,1);
     try{ localStorage.setItem("han_pinned_sessions",JSON.stringify(pinnedArr)); }catch(e){}
-    showToast("已取消置顶");
     updateSessionItem(id);
-    pushSessionPinsDelta([], [id]);   // 跨设备同步置顶（单键变更）
+    pushSessionPinsDelta([], [id]).then(function(ok){   // 跨设备同步置顶：await 成功才提示，失败提示重试（防刷新复活）
+      if(ok) showToast("已取消置顶");
+      else showToast("取消置顶未同步到网关，请重试");
+    });
     return;
   }
   pinnedArr.unshift(id);
   try{ localStorage.setItem("han_pinned_sessions",JSON.stringify(pinnedArr)); }catch(e){}
-  showToast("已置顶");
   updateSessionItem(id);
-  pushSessionPinsDelta([id], []);   // 跨设备同步置顶（单键变更）
+  pushSessionPinsDelta([id], []).then(function(ok){
+    if(ok) showToast("已置顶");
+    else showToast("置顶未同步到网关，请重试");
+  });
 }
 
 // 锁定/解锁唤醒（会话独立）：自动唤醒只对锁定的会话进行，与置顶无关
@@ -7197,12 +7201,10 @@ async function pullSessionPins(){
     const j=await r.json();
     const serverPins=(j&&Array.isArray(j.pins))? j.pins : [];
     let pins=[]; try{ pins=JSON.parse(localStorage.getItem("han_pinned_sessions")||"[]"); }catch(e){ pins=[]; }
-    // 以服务器为准合并；本地独有项补推 add（服务器独有不删）
-    const localOnly=[];
-    pins.forEach(function(s){ if(typeof s==="string" && s && serverPins.indexOf(s)<0) localOnly.push(s); });
-    serverPins.forEach(function(s){ if(typeof s==="string" && s && pins.indexOf(s)<0) pins.push(s); });
+    // 服务器为准覆盖（2026-09-29 修复）：本地独有项直接删除，不再补推 add——
+    // 否则另一台设备取消置顶后，本端 pull 会把旧置顶推回网关导致「刷新又置顶」复活。
+    pins = serverPins.filter(function(s){ return typeof s==="string" && s; });
     try{ localStorage.setItem("han_pinned_sessions",JSON.stringify(pins)); }catch(e){}
-    if(localOnly.length) pushSessionPinsDelta(localOnly, []);
   }catch(e){}
 }
 
