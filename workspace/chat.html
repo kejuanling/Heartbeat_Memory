@@ -812,7 +812,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 #topLoading i{position:absolute;top:0;bottom:0;width:38%;border-radius:2px;background:linear-gradient(90deg,transparent,var(--accent),var(--accent-deep));animation:topLoad 1.1s ease-in-out infinite}
 @keyframes topLoad{0%{left:-40%}100%{left:105%}}
 /* 切会话转圈：消息区半透明遮罩 + 居中 spinner */
-#chatSwitching{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(var(--chrome-rgb),.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);z-index:50;pointer-events:none}
+#chatSwitching{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;background:rgba(var(--chrome-rgb),.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);z-index:50;pointer-events:none}
 #chatSwitching.on{display:flex}
 #chatSwitching .cs-spin{width:30px;height:30px;border-radius:50%;border:3px solid var(--accent-soft);border-top-color:var(--accent);border-right-color:var(--accent);animation:csSpin .8s linear infinite}
 #chatSwitching .cs-text{display:none;margin-top:10px;font-size:12px;color:var(--ink2)}
