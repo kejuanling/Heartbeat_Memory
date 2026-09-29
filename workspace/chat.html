@@ -1608,6 +1608,21 @@ body:has(#chat[data-layout="wx"]) footer{padding-left:4px;padding-right:4px;back
             </div></div></div><div class="set-panel" data-acc="roles"><div class="set-acc-h" data-acc="roles">默认模型（按用途分配）<span class="ar">▾</span></div><div class="set-sec">
               <div class="np-tip" style="margin-bottom:10px">后台任务可各自指定模型；选「跟随聊天模型」则用全局默认。下拉改动即时生效，无需重启。</div>
               <div id="roleList"><div class="mcp-empty">加载中…</div></div>
+              <style>
+              /* 0929-30: 默认模型页结构样式统一（原内联样式抽类） */
+              #roleList .role-row{padding:14px 4px;border-bottom:1px solid var(--line,rgba(128,128,128,.14))}
+              #roleList .role-row:last-child{border-bottom:none}
+              #roleList .role-main{display:flex;justify-content:space-between;align-items:center;gap:12px}
+              #roleList .role-text{flex:1;min-width:0}
+              #roleList .role-name{font-size:14px;font-weight:600;color:var(--ink,#222)}
+              #roleList .role-desc{font-size:12px;color:var(--ink2,#888);margin-top:3px;line-height:1.5}
+              #roleList .role-select{max-width:200px;min-width:132px;font-size:12.5px;color:var(--ink,#222);
+                background:var(--panel-bg,rgba(255,255,255,.86));border:1px solid var(--line,#ddd);
+                border-radius:9px;padding:7px 8px;flex-shrink:0;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+              #roleList .role-select:focus{outline:none;border-color:var(--accent-deep,#3478f6);box-shadow:0 0 0 2.5px var(--accent-faint,rgba(52,120,246,.14))}
+              #roleList .role-select:disabled{opacity:.6;cursor:wait}
+              #roleList .role-select optgroup,#roleList .role-select option{color:var(--ink,#222);background:var(--panel-bg,#fff)}
+              </style>
             </div></div><div class="set-panel" data-acc="voice"><div class="set-acc-h" data-acc="voice">语音服务<span class="ar">▾</span></div><div class="set-sec"><div class="mcp-block">
               <div class="mcp-h"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg> 语音服务（TTS 朗读 / 通话 / 语音输入）</div>
               <div id="vpList" class="mcp-list"><div class="mcp-empty">加载中…</div></div>
@@ -5589,8 +5604,7 @@ function renderModelRoles(roles){
     memory_pool:"从对话里提炼记忆入库",
     reparse:"压缩块原文提炼入记忆池",
     digest:"整理已替换历史供回看",
-    rerank:"检索记忆时给候选排序",
-    co_chat:"共影场景对话"
+    rerank:"检索记忆时给候选排序"
   };
   const rows=Object.keys(roles).map(function(role){
     const r=roles[role];
@@ -5605,11 +5619,11 @@ function renderModelRoles(roles){
       });
       opts+='</optgroup>';
     });
-    return '<div class="role-row" style="padding:10px 0;border-bottom:1px solid var(--line,#eee)">'
-      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:10px">'
-      +'<div style="flex:1"><div style="font-size:14px;font-weight:600;color:var(--ink,#222)">'+escapeHtml(r.label||role)+'</div>'
-      +'<div style="font-size:12px;color:var(--ink2,#888);margin-top:2px">'+escapeHtml(desc[role]||"")+'</div></div>'
-      +'<select data-role="'+escapeHtml(role)+'" style="max-width:200px">'+opts+'</select>'
+    return '<div class="role-row">'
+      +'<div class="role-main">'
+      +'<div class="role-text"><div class="role-name">'+escapeHtml(r.label||role)+'</div>'
+      +'<div class="role-desc">'+escapeHtml(desc[role]||"")+'</div></div>'
+      +'<select class="role-select" data-role="'+escapeHtml(role)+'">'+opts+'</select>'
       +'</div></div>';
   }).join('');
   el.innerHTML=rows||'<div class="mcp-empty">暂无用途</div>';
