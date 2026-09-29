@@ -6549,7 +6549,7 @@ function renderSessionList(){
     _mp.push(escapeHtml(s.persona_name||'默认'));
     if(s.last_time)_mp.push(escapeHtml(fmtTime(new Date(s.last_time))));
     if(s.real!=null)_mp.push(""+s.real+" 条");
-    _mp.push(s.model_name?escapeHtml(truncModelName(s.model_name)):'默认');
+    _mp.push(s.model_name?escapeHtml(truncModelName(s.model_name)):'默认模型');
     const meta=(locked?'<span class="s-dot lock" title="锁定唤醒"></span>':'')+_mp.join(" · ");
     const checkHtml=merging?('<span class="s-check'+(mergeSel.has(s.id)?' on':'')+'">'+(mergeSel.has(s.id)?'✓':'')+'</span>'):'';
     item.innerHTML='<div class="s-name">'+checkHtml+'<button class="s-icon pin'+(pinned?' on':'')+'" data-op="pin" data-id="'+escapeHtml(s.id)+'" title="'+(pinned?"取消置顶":"置顶")+'" aria-label="'+(pinned?"取消置顶":"置顶")+'"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/></svg></button>'+'<span class="s-title" title="'+escapeHtml(name)+'">'+escapeHtml(name)+'</span>'
