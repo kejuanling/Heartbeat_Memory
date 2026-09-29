@@ -4478,7 +4478,10 @@ function saveEdit(){
   }
   closeEdit();
   // 2026-09-29 网关权威：先发 diff ops（网关改时间线+广播），成功才更新本地窗口
+  // 0929-25：保存过程显示顶部加载条（保存中反馈），完成/失败即停
+  topLoadStart();
   syncTimelineLocal([{op:'edit', id:mid, newContent:newContent}]).then(function(j){
+    topLoadEnd();
     if(j&&j.ok!==false){
       m.content=newContent;
       // 2026-09-25 ⑦：编辑后不再改写旧 timeline——原实现把全文塞进首个 text 节点、其余 text 段置空，
