@@ -1202,6 +1202,7 @@ function appendMessages(sessionId, msgs, opts) {
     return nm;
   });
   saveTimeline(timeline, sessionId);
+  unarchiveSession(sessionId);   // 新消息落库 → 自动取消归档
   if (!opts.silent && out.some(m => !m.hidden)) sseNotify(sessionId);
   return out;
 }
@@ -1371,6 +1372,7 @@ function appendRequestMessages(sessionId, reqMsgs, opts) {
 
   if (changed) {
     saveTimeline(existing, sessionId);
+    unarchiveSession(sessionId);   // 新消息落库 → 自动取消归档
     sseNotify(sessionId);
   }
   return { appended: appended.length, removedTail: removedTail, changed: changed };
@@ -1738,6 +1740,7 @@ require("./routes/chat")(app, {
   appendMessage,
   appendMessages,
   appendRequestMessages,
+  readSessionArchive,
   tailHasReply,
   markSessionDeleted,
   sseSubscribe,
@@ -6402,6 +6405,43 @@ app.put("/admin/session-prompts", { preHandler: basicAuth }, async (req, reply) 
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
+// 会话归档跨设备同步（存 data/session-archive.json）：归档=收纳（数据完整保留），
+// 从主列表收进「归档」区；新消息落库自动取消归档回主列表。
+const SESSION_ARCHIVE_FILE = path.join(__dirname, "data", "session-archive.json");
+function readSessionArchive(){
+  try{ if(fs.existsSync(SESSION_ARCHIVE_FILE)){ const v=JSON.parse(fs.readFileSync(SESSION_ARCHIVE_FILE,"utf-8"))||[]; if(Array.isArray(v)) return v.filter(function(s){return typeof s==="string"&&s;}); } }catch(e){}
+  return [];
+}
+function writeSessionArchive(list){ try{ fs.ensureDirSync(path.dirname(SESSION_ARCHIVE_FILE)); fs.writeFileSync(SESSION_ARCHIVE_FILE, JSON.stringify(list,null,2),"utf-8"); }catch(e){} }
+function unarchiveSession(sessionId){
+  // 新消息落库 → 自动取消归档（归档会话回到主列表；多端由 loadSessions 拉取同步）
+  const sid=String(sessionId||"").trim();
+  if(!sid) return;
+  const list=readSessionArchive();
+  if(list.indexOf(sid)<0) return;
+  writeSessionArchive(list.filter(function(x){return x!==sid;}));
+  console.log(`[session-archive] 会话 ${sid} 有新消息，自动取消归档`);
+}
+app.get("/admin/session-archive", { preHandler: basicAuth }, async (req, reply) => {
+  try { reply.send({ ok: true, archived: readSessionArchive() }); }
+  catch (err) { reply.code(500).send({ error: err.message }); }
+});
+app.put("/admin/session-archive", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const body = (req.body && typeof req.body === "object") ? req.body : {};
+    let arch = readSessionArchive();
+    if (Array.isArray(body.add) || Array.isArray(body.remove)) {
+      const add = Array.isArray(body.add) ? body.add.filter(function (s2) { return typeof s2 === "string" && s2; }) : [];
+      const remove = Array.isArray(body.remove) ? body.remove.filter(function (s2) { return typeof s2 === "string" && s2; }) : [];
+      for (const s2 of add) { if (arch.indexOf(s2) < 0) arch.push(s2); }
+      arch = arch.filter(function (s2) { return remove.indexOf(s2) < 0; });
+    } else if (Array.isArray(body.archived)) {
+      arch = body.archived.filter(function (s2) { return typeof s2 === "string" && s2; });
+    }
+    writeSessionArchive(arch);
+    reply.send({ ok: true, saved: true, count: arch.length });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
 // 会话置顶跨设备同步（存 data/session-pins.json）
 const SESSION_PINS_FILE = path.join(__dirname, "data", "session-pins.json");
 app.get("/admin/session-pins", { preHandler: basicAuth }, async (req, reply) => {

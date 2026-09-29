@@ -134,6 +134,7 @@ module.exports = function registerChatRoutes(app, deps) {
     saveTimeline,
     appendMessages,
     appendRequestMessages,
+    readSessionArchive,
     tailHasReply,
     markSessionDeleted,
     sseSubscribe,
@@ -215,6 +216,7 @@ module.exports = function registerChatRoutes(app, deps) {
       const files = fsp.readdirSync(baseDir).filter(f => /^enhanced_messages[_-][A-Za-z0-9_-]+\.json$/.test(f));
       const sessions = [];
       const seen = new Set();
+      const archiveSet = new Set((typeof readSessionArchive === "function" ? readSessionArchive() : []));
       for (const f of files) {
         const sid = f.replace(/^enhanced_messages_/, '').replace(/\.json$/, '');
         if (!sid || sid === 'default') continue;
@@ -224,7 +226,7 @@ module.exports = function registerChatRoutes(app, deps) {
           const st = fsp.statSync(filePath);
           const cached = sessionMetaCache.get(sid);
           if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) {
-            sessions.push({ id: sid, name: sid, total: cached.total, real: cached.real, last_time: cached.last_time, is_default: false });
+            sessions.push({ id: sid, name: sid, total: cached.total, real: cached.real, last_time: cached.last_time, is_default: false, archived: archiveSet.has(sid) });
             continue;
           }
           const arr = loadTimeline(sid);
@@ -232,7 +234,7 @@ module.exports = function registerChatRoutes(app, deps) {
           const real = arr.filter(m => isRealMessageForTimeline(m) && m.kind !== 'diary');
           const meta = { mtimeMs: st.mtimeMs, size: st.size, total: arr.length, real: real.length, last_time: (arr[arr.length - 1] && arr[arr.length - 1].time) || null };
           sessionMetaCache.set(sid, meta);
-          sessions.push({ id: sid, name: sid, total: meta.total, real: meta.real, last_time: meta.last_time, is_default: false });
+          sessions.push({ id: sid, name: sid, total: meta.total, real: meta.real, last_time: meta.last_time, is_default: false, archived: archiveSet.has(sid) });
         } catch (e) {}
       }
       // 清理已删除会话的缓存项，避免陈旧
