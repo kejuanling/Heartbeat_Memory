@@ -213,6 +213,14 @@ module.exports = function registerChatRoutes(app, deps) {
   // 多会话列表：扫描本目录下所有 enhanced_messages*.json，返回会话摘要（命中缓存只 stat 不重读）
   app.get('/v1/sessions', async (req, reply) => {
     try {
+      // 0929-30：一次性读人设映射+备份名+全局模型，循环内查表，避免每会话重复读文件
+      let spMap = {};
+      try { const _j = JSON.parse(fs.readFileSync(path.join(baseDir, 'data', 'session-prompts.json'), 'utf-8')); if (_j && typeof _j === 'object') spMap = _j; } catch (e) {}
+      let pbList = [];
+      try { const _a = JSON.parse(fs.readFileSync(path.join(baseDir, 'data', 'prompt-backups.json'), 'utf-8')); if (Array.isArray(_a)) pbList = _a; } catch (e) {}
+      const pbNameOf = function (bid) { const h = pbList.find(b => b && b.id === bid); return (h && h.name) ? h.name : ''; };
+      let globalModel = '';
+      try { globalModel = readEnvValue ? (readEnvValue('MODEL_NAME') || 'gateway-model') : 'gateway-model'; } catch (e) { globalModel = 'gateway-model'; }
       const files = fsp.readdirSync(baseDir).filter(f => /^enhanced_messages[_-][A-Za-z0-9_-]+\.json$/.test(f));
       const sessions = [];
       const seen = new Set();
@@ -226,7 +234,10 @@ module.exports = function registerChatRoutes(app, deps) {
           const st = fsp.statSync(filePath);
           const cached = sessionMetaCache.get(sid);
           if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) {
-            sessions.push({ id: sid, name: sid, total: cached.total, real: cached.real, last_time: cached.last_time, is_default: false, archived: archiveSet.has(sid) });
+            let cPersona = '', cModel = '';
+            const cBid = spMap[sid]; if (cBid) cPersona = pbNameOf(cBid);
+            try { cModel = (deps.sessionModelNameOverride ? (deps.sessionModelNameOverride(sid) || globalModel) : globalModel); } catch (e) { cModel = globalModel; }
+            sessions.push({ id: sid, name: sid, total: cached.total, real: cached.real, last_time: cached.last_time, is_default: false, archived: archiveSet.has(sid), persona_name: cPersona, model_name: cModel });
             continue;
           }
           const arr = loadTimeline(sid);
@@ -234,7 +245,10 @@ module.exports = function registerChatRoutes(app, deps) {
           const real = arr.filter(m => isRealMessageForTimeline(m) && m.kind !== 'diary');
           const meta = { mtimeMs: st.mtimeMs, size: st.size, total: arr.length, real: real.length, last_time: (arr[arr.length - 1] && arr[arr.length - 1].time) || null };
           sessionMetaCache.set(sid, meta);
-          sessions.push({ id: sid, name: sid, total: meta.total, real: meta.real, last_time: meta.last_time, is_default: false, archived: archiveSet.has(sid) });
+          let persona = '', modelN = '';
+          const bid = spMap[sid]; if (bid) persona = pbNameOf(bid);
+          try { modelN = (deps.sessionModelNameOverride ? (deps.sessionModelNameOverride(sid) || globalModel) : globalModel); } catch (e) { modelN = globalModel; }
+          sessions.push({ id: sid, name: sid, total: meta.total, real: meta.real, last_time: meta.last_time, is_default: false, archived: archiveSet.has(sid), persona_name: persona, model_name: modelN });
         } catch (e) {}
       }
       // 清理已删除会话的缓存项，避免陈旧
