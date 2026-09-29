@@ -8940,8 +8940,6 @@ body[data-theme="glass"] .msg.user .bubble{
 body[data-theme="glass"] .msg.ai .bubble{backdrop-filter:blur(var(--bubble-ai-blur,0px));-webkit-backdrop-filter:blur(var(--bubble-ai-blur,0px))}
 body[data-theme="glass"] .msg.user .bubble{backdrop-filter:blur(var(--bubble-user-blur,0px));-webkit-backdrop-filter:blur(var(--bubble-user-blur,0px))}
 body[data-theme="glass"] #chat{padding-bottom:calc(env(safe-area-inset-bottom) + 92px)!important}
-/* 0929-25 极简主题：聊天区底部留出间距，最后一条消息不贴输入框（18px→34px） */
-body[data-theme="claude"]:has(#chat[data-layout="claude"]) #chat{padding-bottom:calc(env(safe-area-inset-bottom) + 34px)}
 /* 思考/工具胶囊：无背景，左侧小竖线，展开才有淡玻璃背景 */
 body[data-theme="glass"] .rw-wrap,body[data-theme="glass"] .tool-trace{
   background:transparent!important;border:none!important;border-left:2px solid var(--glass-line,rgba(138,160,174,.42))!important;border-radius:0!important;
