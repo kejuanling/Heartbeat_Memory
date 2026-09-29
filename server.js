@@ -196,7 +196,12 @@ function resolveSessionSystemPrompt(sessionId) {
       const spFile = path.join(__dirname, "data", "session-prompts.json");
       if (fs.existsSync(spFile)) {
         const j = JSON.parse(fs.readFileSync(spFile, "utf-8"));
-        if (j && j.prompts && typeof j.prompts[sid] === "string") backupId = j.prompts[sid];
+        // 0929-30：session-prompts.json 是顶层结构 {sid: backupId}（无 prompts 包裹），
+        // 旧读取 j.prompts[sid] 永远读不到 → 会话级人设一直回退全局。兼容两种结构。
+        if (j && typeof j === "object") {
+          if (typeof j[sid] === "string") backupId = j[sid];
+          else if (j.prompts && typeof j.prompts[sid] === "string") backupId = j.prompts[sid];
+        }
       }
     } catch (e) {}
     if (backupId) {

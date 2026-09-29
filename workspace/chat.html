@@ -4594,6 +4594,16 @@ async function branchFromMsg(idx){
   pushSessionNames();
   startLiveEvents();
   syncTimelineLocal({messages:branchMsgs});   // 分支=把父会话到分支点的消息一次性落盘到新会话
+  // 0929-30：分支继承父会话的人设 + 模型 override（父会话跟随全局则不复制，新会话同样跟随全局）
+  try{
+    const _ppMap=getSessionPromptMap();
+    if(_ppMap&&_ppMap[srcSession]) setSessionPrompt(sid, _ppMap[srcSession]);
+    try{
+      const _mr=await fetch("/v1/sessions/"+encodeURIComponent(srcSession)+"/model-provider",{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
+      const _mj=await _mr.json();
+      if(_mj&&_mj.follow_global===false&&_mj.model_name){ saveSessionProvider(sid, _mj.model_provider_id||null, _mj.model_name, sid); }
+    }catch(e){}
+  }catch(e){}
   // 继承父会话中完全落在分支点之前的压缩块（复制语义，父会话块保留）
   try{
     await fetch("/v1/sessions/branch-inherit",{
