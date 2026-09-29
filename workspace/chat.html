@@ -1763,6 +1763,7 @@ let api_key=localStorage.getItem(LS_KEY)||"";
 let system_prompt=localStorage.getItem(LS_PROMPT)||"";
 let cfg=loadCfg();
 let sending=false, aborter=null;
+let _silenceResetFn=null,_silenceClearFn=null;   // 流式静默计时器句柄（后台暂停/回前台重置用）
 let _archivedSessions=[];   // 归档会话集合（网关同步，渲染分流用）
 let _archFoldOpen=(localStorage.getItem("han_arch_fold_open")==="1");
 let _streamStoppedByUser=false;   // 2026-09-29 极简主题中断输出：用户主动停止（中断不显示错误条）
@@ -2135,7 +2136,12 @@ function liveReloadNow(){
   }, 250);
 }
 document.addEventListener("visibilitychange",function(){
-  if(!document.hidden&&_histReloadWhenVisible){ _histReloadWhenVisible=false; liveReloadNow(); }
+  if(!document.hidden){
+    if(_histReloadWhenVisible){ _histReloadWhenVisible=false; liveReloadNow(); }
+    if(_silenceResetFn) _silenceResetFn();   // 回前台：重置流式静默计时（后台节流期间不中断）
+  }else{
+    if(_silenceClearFn) _silenceClearFn();   // 进后台：暂停流式静默计时，避免误杀
+  }
 });
 function startLiveEvents(){
   stopLiveEvents();
@@ -3869,11 +3875,13 @@ async function request(finalMsgs, fromSend, regenAnchorId){
       _clearSilence();
       if(_streamToolRunning>0)return;
       _silenceTimer=setTimeout(function(){
+        if(document.hidden){ _clearSilence(); _resetSilence(); return; }   // 后台标签页被节流≠静默：回前台重新计时，不中断
         _streamTimedOut=true;
         try{ if(reader) reader.cancel(); }catch(e){}
         try{ if(aborter) aborter.abort(); }catch(e){}
       },STREAM_SILENCE_MS);
     };
+    _silenceResetFn=_resetSilence; _silenceClearFn=_clearSilence;   // 暴露给全局 visibilitychange（后台暂停/回前台重置）
     _resetSilence();
     /* ===== QQ 式分段连播（流式）=====
        正文按分隔符拆段，每段内容收齐后整条弹出一个气泡（带头像/名称），一条接一条；
@@ -4019,6 +4027,7 @@ async function request(finalMsgs, fromSend, regenAnchorId){
     else showError(err.message);
   }finally{
     if(_silenceTimer){clearTimeout(_silenceTimer);_silenceTimer=null;}   // M17：清理静默超时计时器
+    _silenceResetFn=null;_silenceClearFn=null;   // 清句柄，避免串到下一轮请求
     _streamStoppedByUser=false;
     sending=false;setSendState(false);aborter=null;
     _streamActive=false; _streamToolMode="live"; _streamRenderModel=[]; _streamRenderCursor=0; _streamModelDraining=false; if(_streamDrainTimer){clearTimeout(_streamDrainTimer);_streamDrainTimer=null;} if(_streamTextRerenderTimer){clearTimeout(_streamTextRerenderTimer);_streamTextRerenderTimer=null;} _streamRoot=null; _streamThinkEl=null; _streamThinkCAt=0; _twStop();   // 结束统一响应模型（节流 timer 清、容器/思考链引用释放——DOM 由 renderAll 重建接管；打字机 timer 显式停）
