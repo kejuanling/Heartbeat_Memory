@@ -956,8 +956,6 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .session-item .s-op{border:1px solid var(--line);background:none;border-radius:8px;padding:2px 8px;font-size:11px;color:var(--accent-deep);cursor:pointer;transition:background .12s}
 .session-item .s-op:hover{background:var(--accent-faint)}
 .session-item .s-more{margin-left:auto;border:none;background:none;color:var(--ink3);cursor:pointer;padding:3px 6px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;transition:all .12s}
-.session-item .s-act{display:inline-flex;align-items:center;gap:2px;margin-left:auto}  /* 0929-30: 笔+三点同一行，避免与主行误触 */
-.session-item .s-act .s-more{margin-left:4px}  /* 三点相对笔再右移一点 */
 .session-item .s-more:hover{color:var(--session-action-hover-color,var(--accent-deep));background:var(--session-action-hover-bg,var(--accent-faint))}
 .sess-menu{position:fixed;z-index:999;min-width:128px;background:var(--menu-bg,#fff);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 22px rgba(var(--shadow-rgb),.14);padding:5px;display:flex;flex-direction:column}
 .sess-menu.hidden{display:none}
@@ -6540,13 +6538,17 @@ function renderSessionList(){
     if(s.real!=null)_mp.push(""+s.real+" 条");
     const meta=(locked?'<span class="s-dot lock" title="锁定唤醒"></span>':'')+_mp.join(" · ");
     const checkHtml=merging?('<span class="s-check'+(mergeSel.has(s.id)?' on':'')+'">'+(mergeSel.has(s.id)?'✓':'')+'</span>'):'';
-    item.innerHTML='<div class="s-name">'+checkHtml+'<button class="s-icon pin'+(pinned?' on':'')+'" data-op="pin" data-id="'+escapeHtml(s.id)+'" title="'+(pinned?"取消置顶":"置顶")+'" aria-label="'+(pinned?"取消置顶":"置顶")+'"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/></svg></button>'+'<span class="s-title" title="'+escapeHtml(name)+'">'+escapeHtml(name)+'</span></div>'+
-      '<div class="s-ops"><span class="s-meta">'+meta+'</span><span class="s-act">'
+    item.innerHTML='<div class="s-name">'+checkHtml+'<button class="s-icon pin'+(pinned?' on':'')+'" data-op="pin" data-id="'+escapeHtml(s.id)+'" title="'+(pinned?"取消置顶":"置顶")+'" aria-label="'+(pinned?"取消置顶":"置顶")+'"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/></svg></button>'+'<span class="s-title" title="'+escapeHtml(name)+'">'+escapeHtml(name)+'</span>'
       +'<button class="s-icon ren" data-op="rename" data-id="'+escapeHtml(s.id)+'" title="改名" aria-label="改名"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/><path d="m15 5 4 4"/></svg></button>'
-      +'<button class="s-more" title="更多操作" aria-label="更多操作"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button></span></div>';
+      +'<button class="s-more" title="更多操作" aria-label="更多操作"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button></div>'+
+      '<div class="s-ops"><span class="s-meta">'+meta+'</span></div>';
     // 删除入口已收进「…」菜单（防误触），行内不再放常驻删除按钮
-    item.querySelector(".s-name .s-icon[data-op='pin']").addEventListener("click",e=>{ e.stopPropagation(); togglePinSession(btnData(e.currentTarget)); });
-    item.querySelector(".s-act .s-icon[data-op='rename']").addEventListener("click",e=>{ e.stopPropagation(); renameSession(btnData(e.currentTarget)); });
+    item.querySelectorAll(".s-name .s-icon").forEach(btn=>btn.addEventListener("click",e=>{
+      e.stopPropagation();
+      const op=btn.dataset.op,id=btn.dataset.id;
+      if(op==="pin")togglePinSession(id);
+      if(op==="rename")renameSession(id);
+    }));
     item.querySelector(".s-more").addEventListener("click",e=>{
       e.stopPropagation();
       openSessMenu(s.id, e.currentTarget);
