@@ -236,7 +236,7 @@ module.exports = function registerChatRoutes(app, deps) {
           if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) {
             let cPersona = '', cModel = '';
             const cBid = spMap[sid]; if (cBid) cPersona = pbNameOf(cBid);
-            try { cModel = (deps.sessionModelNameOverride ? (deps.sessionModelNameOverride(sid) || globalModel) : globalModel); } catch (e) { cModel = globalModel; }
+            try { cModel = (deps.sessionModelNameOverride ? (deps.sessionModelNameOverride(sid) || '') : ''); } catch (e) { cModel = ''; }  // 0929-30: 无 override 返回空，前端显示「默认」
             sessions.push({ id: sid, name: sid, total: cached.total, real: cached.real, last_time: cached.last_time, is_default: false, archived: archiveSet.has(sid), persona_name: cPersona, model_name: cModel });
             continue;
           }
@@ -247,7 +247,7 @@ module.exports = function registerChatRoutes(app, deps) {
           sessionMetaCache.set(sid, meta);
           let persona = '', modelN = '';
           const bid = spMap[sid]; if (bid) persona = pbNameOf(bid);
-          try { modelN = (deps.sessionModelNameOverride ? (deps.sessionModelNameOverride(sid) || globalModel) : globalModel); } catch (e) { modelN = globalModel; }
+          try { modelN = (deps.sessionModelNameOverride ? (deps.sessionModelNameOverride(sid) || '') : ''); } catch (e) { modelN = ''; }  // 0929-30: 无 override 返回空，前端显示「默认」
           sessions.push({ id: sid, name: sid, total: meta.total, real: meta.real, last_time: meta.last_time, is_default: false, archived: archiveSet.has(sid), persona_name: persona, model_name: modelN });
         } catch (e) {}
       }
