@@ -814,15 +814,15 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 /* 切会话转圈：消息区半透明遮罩 + 居中 spinner */
 #chatSwitching{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(var(--chrome-rgb),.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);z-index:5;pointer-events:none}
 #chatSwitching.on{display:flex}
-#chatSwitching .cs-spin{width:30px;height:30px;border-radius:50%;border:3px solid var(--accent-soft);border-top-color:var(--accent);animation:csSpin .8s linear infinite}
+#chatSwitching .cs-spin{width:30px;height:30px;border-radius:50%;border:3px solid var(--accent-soft);border-top-color:var(--accent);border-right-color:var(--accent);animation:csSpin .8s linear infinite}
 #chatSwitching .cs-text{display:none;margin-top:10px;font-size:12px;color:var(--ink2)}
 /* 极简主题拉取圈显眼版（2026-09-29）：默认白遮罩+细灰圈在浅底上几乎不可见 */
 #chat[data-layout="claude"] #chatSwitching{background:rgba(246,246,246,.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
-#chat[data-layout="claude"] #chatSwitching .cs-spin{width:36px;height:36px;border-color:rgba(0,0,0,.13);border-top-color:#555}
+#chat[data-layout="claude"] #chatSwitching .cs-spin{width:34px;height:34px;border-color:rgba(0,0,0,.14);border-top-color:#333;border-right-color:#333}
 #chat[data-layout="claude"] #chatSwitching .cs-text{display:block}
 /* 翻页加载更早提示 */
 .older-loading{position:sticky;top:0;z-index:4;display:none;align-items:center;justify-content:center;gap:8px;padding:10px 0 6px;font-size:12px;color:var(--ink2)}
-.older-loading .cs-spin{width:16px;height:16px;border-radius:50%;border:2px solid var(--accent-soft);border-top-color:var(--accent);animation:csSpin .8s linear infinite}
+.older-loading .cs-spin{width:16px;height:16px;border-radius:50%;border:2px solid var(--accent-soft);border-top-color:var(--accent);border-right-color:var(--accent);animation:csSpin .8s linear infinite}
 @keyframes csSpin{to{transform:rotate(360deg)}}
 
 /* toast */
