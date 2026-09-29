@@ -8979,6 +8979,16 @@ body[data-theme="claude"]:has(#chat[data-layout="claude"]) .inputbar:focus-withi
   background:rgba(255,255,255,.62);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.75),0 0 0 3px rgba(255,255,255,.3);
 }
+
+/* 0929-24 会话列表三个点菜单/归档菜单补毛玻璃（极简主题；原生 select 弹窗保留系统样式） */
+body[data-theme="claude"]:has(#chat[data-layout="claude"]) .sess-menu{
+  background:rgba(255,255,255,.55);
+  backdrop-filter:blur(20px) saturate(170%);
+  -webkit-backdrop-filter:blur(20px) saturate(170%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.7),0 8px 22px rgba(0,0,0,.08);
+  border:1px solid rgba(255,255,255,.6);
+}
+body[data-theme="claude"]:has(#chat[data-layout="claude"]) .sess-menu-item:hover{background:rgba(0,0,0,.04)}
 </style>
 <script id="wx-input-auto-grow-consolidated-20260921">
 /* 微信输入框自动增高：合并原 wx-input-auto-height-v1 与 wx-input-auto-grow-v3
