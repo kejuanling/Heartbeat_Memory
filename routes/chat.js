@@ -1100,8 +1100,10 @@ app.post("/v1/chat/completions", async (req, reply) => {
       try {
         const parsed = JSON.parse(responseText);
         const aiMessage = parsed.choices?.[0]?.message || {};
-        const aiContent = aiMessage.content || "";
-        const aiThinking = extractAssistantThinking(aiMessage);
+        // 2026-10-01 MiniMax 非流式修复：content 字符串里的 <think> 块剥离进思考链，正文用干净版（落盘/缓存/标签解析全走干净正文）
+        const _sp = mcp.splitThinkBlock(String(aiMessage.content || ""));
+        const aiContent = _sp.body;
+        const aiThinking = [extractAssistantThinking(aiMessage), _sp.think].filter(Boolean).join("\n").trim();
         if (aiContent) {
           // 解析 <wake> 闹钟标签并写入调度（标签随后被剥离，不显示给用户）
           parseWakeTagAndSchedule(aiContent, sessionId);
@@ -1204,6 +1206,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
     // Streaming tag filter: 上游会把 <memory>/<pin> 拆成 <、memory、> 等多个事件，
     // 字节层匹配不到完整标签，必须在 content 文本层过滤后再重组 SSE 事件。
     const contentFilter = createContentTagFilter();
+    const thinkStripper = mcp.createThinkStripper();
     const emitRawLine = (line) => reply.raw.write(line + "\n");
     let sseBuffer = "";
     // UTF-8 流式解码：多字节字符（中文/emoji）可能被网络分包从字节中间切开，
@@ -1241,8 +1244,22 @@ app.post("/v1/chat/completions", async (req, reply) => {
         // 空字符串 content 常伴随 finish_reason/usage（如末尾事件），必须原样透传
         if (delta && typeof delta.content === "string" && delta.content.length > 0) {
           contentFilter.push(delta.content, (filtered) => {
-            delta.content = filtered;
-            reply.raw.write("data: " + JSON.stringify(evt) + "\n\n");
+            // 2026-10-01 MiniMax：content 内 <think> 块跨帧剥离，剥离的思考以 reasoning_content 增量帧转发（前端实时显示思考链）
+            thinkStripper.push(filtered, (cleanText) => {
+              if (!cleanText) return;
+              delta.content = cleanText;
+              reply.raw.write("data: " + JSON.stringify(evt) + "\n\n");
+            });
+            const _td = thinkStripper.takeThinking();
+            if (_td) {
+              reply.raw.write("data: " + JSON.stringify({
+                id: "chatcmpl-direct",
+                object: "chat.completion.chunk",
+                created: Math.floor(Date.now() / 1000),
+                model: (body && body.model) || "",
+                choices: [{ index: 0, delta: { reasoning_content: _td }, finish_reason: null }]
+              }) + "\n\n");
+            }
           });
         } else {
           emitRawLine(line);
@@ -1278,6 +1295,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
     }
     // 收尾：丢弃未闭合标签/残留前缀，转发剩余行，结束响应
     contentFilter.flush();
+    thinkStripper.flush();
     if (sseBuffer) emitRawLine(sseBuffer.replace(/\n+$/, ""));
     reply.raw.end();
     } catch (streamErr) {

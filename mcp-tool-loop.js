@@ -69,6 +69,55 @@ function splitThinkBlock(text) {
   if (!thinks.length) return { body: text, think: "" };
   return { body: text.replace(/<think>[\s\S]*?<\/think>/g, "").trim(), think: thinks.join("\n") };
 }
+
+// 2026-10-01 MiniMax 跨帧剥离状态机：SSE 帧可能把 <think> 拆成 <th / ink> 等多帧，
+// 逐帧正则匹配不到，必须 buffer 累积：完整块提取进思考链，残片（含未闭合 <think> 前缀）等下一帧。
+function createThinkStripper() {
+  let buf = "";
+  let thinking = "";
+  const re = /<think>([\s\S]*?)<\/think>/g;
+  const PREFIXES = ["<", "<t", "<th", "<thi", "<thin", "<think"];
+  return {
+    push(text, cb) {
+      buf += text;
+      let out = "", last = 0;
+      re.lastIndex = 0;
+      let m;
+      while ((m = re.exec(buf))) {
+        out += buf.slice(last, m.index);
+        if (m[1] && m[1].trim()) thinking += m[1].trim() + "\n";
+        last = m.index + m[0].length;
+      }
+      const openIdx = buf.indexOf("<think", last);
+      if (openIdx >= 0) {
+        out += buf.slice(last, openIdx);
+        buf = buf.slice(openIdx);
+      } else {
+        let keep = 0;
+        for (let i = 0; i < PREFIXES.length; i++) {
+          if (buf.endsWith(PREFIXES[i])) keep = Math.max(keep, PREFIXES[i].length);
+        }
+        if (keep > 0) {
+          out += buf.slice(0, buf.length - keep);
+          buf = buf.slice(buf.length - keep);
+        } else {
+          out += buf;
+          buf = "";
+        }
+      }
+      if (out && cb) cb(out);
+      return this;
+    },
+    takeThinking() {
+      const t = thinking;
+      thinking = "";
+      return t;
+    },
+    flush() {
+      buf = "";
+    }
+  };
+}
 async function runWithTools({
   upstreamUrl,
   upstreamKey,
@@ -452,6 +501,7 @@ async function streamToolLoop({
     let roundContent = "";
     let roundReasoning = "";
     let seenContent = false;
+    const thinkStripper = createThinkStripper();
     const toolCallAcc = [];
     const accToolCall = (tcs) => {
       for (const tc of (tcs || [])) {
@@ -498,13 +548,19 @@ async function streamToolLoop({
           emit({ type: "reasoning", text: delta.reasoning_content });
         }
         if (typeof delta.content === "string" && delta.content.length) {
+          // 2026-10-01 MiniMax：content 内 <think> 块跨帧剥离进思考链（streamToolLoop 此前漏修，补齐）
           // 不在后端注入任何“气泡分隔符”。气泡分隔符属于前端配置，工具/正文顺序由事件时间线保存。
-          seenContent = true;
-          roundContent += delta.content;
-          const lastTimeline = streamTimeline.length ? streamTimeline[streamTimeline.length - 1] : null;
-          if (lastTimeline && lastTimeline.type === "text") lastTimeline.text += delta.content;
-          else streamTimeline.push({ type: "text", text: delta.content });
-          emit({ type: "text", text: delta.content });
+          thinkStripper.push(delta.content, function (cleanText) {
+            if (!cleanText) return;
+            seenContent = true;
+            roundContent += cleanText;
+            const lastTimeline = streamTimeline.length ? streamTimeline[streamTimeline.length - 1] : null;
+            if (lastTimeline && lastTimeline.type === "text") lastTimeline.text += cleanText;
+            else streamTimeline.push({ type: "text", text: cleanText });
+            emit({ type: "text", text: cleanText });
+          });
+          const _thinkDelta = thinkStripper.takeThinking();
+          if (_thinkDelta) { roundReasoning += _thinkDelta; emit({ type: "reasoning", text: _thinkDelta }); }
         }
         if (Array.isArray(delta.tool_calls) && delta.tool_calls.length) accToolCall(delta.tool_calls);
         if (evt.usage) totalUsage = evt.usage;
@@ -526,12 +582,17 @@ async function streamToolLoop({
               emit({ type: "reasoning", text: delta.reasoning_content });
             }
             if (typeof delta.content === "string" && delta.content.length) {
-              seenContent = true;
-              roundContent += delta.content;
-              const lastTimeline = streamTimeline.length ? streamTimeline[streamTimeline.length - 1] : null;
-              if (lastTimeline && lastTimeline.type === "text") lastTimeline.text += delta.content;
-              else streamTimeline.push({ type: "text", text: delta.content });
-              emit({ type: "text", text: delta.content });
+              thinkStripper.push(delta.content, function (cleanText) {
+                if (!cleanText) return;
+                seenContent = true;
+                roundContent += cleanText;
+                const lastTimeline = streamTimeline.length ? streamTimeline[streamTimeline.length - 1] : null;
+                if (lastTimeline && lastTimeline.type === "text") lastTimeline.text += cleanText;
+                else streamTimeline.push({ type: "text", text: cleanText });
+                emit({ type: "text", text: cleanText });
+              });
+              const _thinkDelta = thinkStripper.takeThinking();
+              if (_thinkDelta) { roundReasoning += _thinkDelta; emit({ type: "reasoning", text: _thinkDelta }); }
             }
             if (Array.isArray(delta.tool_calls) && delta.tool_calls.length) accToolCall(delta.tool_calls);
             if (evt.usage) totalUsage = evt.usage;
@@ -541,6 +602,7 @@ async function streamToolLoop({
     }
     if (roundReasoning) reasoningParts.push(roundReasoning);
     if (seenContent) contentParts.push(roundContent);
+    thinkStripper.flush();
 
     // 客户端断开后继续执行工具——结果要攒下来写入时间线
     const toolCalls = toolCallAcc.map(function (s, i) {
@@ -675,5 +737,7 @@ module.exports = {
   streamToolLoop,
   buildSSE,
   DEFAULT_MAX_TOOL_ROUNDS,
-  buildToolResultContent
+  buildToolResultContent,
+  splitThinkBlock,
+  createThinkStripper
 };

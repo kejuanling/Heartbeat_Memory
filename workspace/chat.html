@@ -144,7 +144,7 @@ header{
 /* ============ 消息区 ============ */
 #chat{
   position:relative;z-index:1;
-  flex:1;overflow-y:auto;
+  flex:1;min-height:0;overflow-y:auto;
   padding:18px 4% calc(env(safe-area-inset-bottom) + 18px);
   display:flex;flex-direction:column;gap:7px;
   -webkit-overflow-scrolling:touch;
@@ -8937,7 +8937,7 @@ body:has(#chat[data-layout="claude"]) header{background:transparent;border-botto
 #chat[data-layout="claude"] .msg.ai .mav{display:none!important}
 #chat[data-layout="claude"] .msg.ai .mnm{display:none!important}
 /* 用户消息：浅灰大圆角气泡右对齐 */
-#chat[data-layout="claude"] .msg.user .bubble{background:#f2f2f2!important;color:#1a1a1a;border:none;border-radius:20px;padding:10px 16px;box-shadow:none;max-width:85%}
+#chat[data-layout="claude"] .msg.user .bubble{background:#f2f2f2!important;color:#1a1a1a;border:none;border-radius:20px;padding:10px 16px;box-shadow:none;max-width:80%}
 #chat[data-layout="claude"] .msg.user .bubble::after{content:none}
 #chat[data-layout="claude"] .msg.user .mav{display:none!important}
 #chat[data-layout="claude"] .msg.user .mnm{display:none!important}
@@ -8947,7 +8947,7 @@ body:has(#chat[data-layout="claude"]) header{background:transparent;border-botto
 /* 输入栏：白色大圆角卡片悬浮底部 */
 body:has(#chat[data-layout="claude"]) footer{position:fixed;left:0;right:0;bottom:0;z-index:30;background:transparent;padding-left:4%;padding-right:4%;padding-bottom:calc(env(safe-area-inset-bottom) + 10px);transition:padding .25s ease!important}
 /* 2026-09-28 用户拍板：玻璃主题气泡文字改宋体（管理台同款衬线字体链）；只气泡，其他不动。原极简主题误改已撤（用户更正为玻璃主题） */
-body:has(#chat[data-layout="claude"]) footer:focus-within{padding-left:2%!important;padding-right:2%!important}
+body:has(#chat[data-layout="claude"]) footer:focus-within{padding-left:4%!important;padding-right:4%!important}
 body:has(#chat[data-layout="claude"]) footer .inputbar{background:rgba(255,255,255,.16)!important;backdrop-filter:blur(16px) saturate(180%);-webkit-backdrop-filter:blur(16px) saturate(180%);border:0.5px solid rgba(255,255,255,.40)!important;border-radius:30px!important;padding:4px 6px 4px 7px!important;min-height:36px!important;box-shadow:0 8px 32px rgba(0,0,0,.05),0 1px 2px rgba(0,0,0,.03)!important}
 body:has(#chat[data-layout="claude"]) footer .inputbar:active{transform:none!important}
 body:has(#chat[data-layout="claude"]) footer .inputbar{-webkit-tap-highlight-color:transparent!important}
@@ -9128,13 +9128,13 @@ body[data-theme="claude"] #chat[data-layout="claude"] .msg.ai{font-size:17px!imp
 body[data-theme="claude"] #chat[data-layout="claude"] .msg.ai .bubble{color:#171717!important;max-width:100%!important}
 body[data-theme="claude"] #chat[data-layout="claude"] .msg.ai .bubble p{margin:0 0 11px!important} body[data-theme="claude"] #chat[data-layout="claude"] .msg.ai .bubble p:last-child{margin-bottom:0!important}
 body[data-theme="claude"] #chat[data-layout="claude"] .msg.user{margin-bottom:22px!important}
-body[data-theme="claude"] #chat[data-layout="claude"] .msg.user .bubble{background:rgba(242,242,242,.88)!important;color:#171717!important;border:1px solid rgba(255,255,255,.56)!important;border-radius:20px!important;padding:10px 16px!important;max-width:76%!important;font-size:17px!important;line-height:1.55!important;box-shadow:inset 0 1px 1px rgba(255,255,255,.7)!important}
+body[data-theme="claude"] #chat[data-layout="claude"] .msg.user .bubble{background:rgba(242,242,242,.88)!important;color:#171717!important;border:1px solid rgba(255,255,255,.56)!important;border-radius:20px!important;padding:10px 16px!important;max-width:80%!important;font-size:17px!important;line-height:1.55!important;box-shadow:inset 0 1px 1px rgba(255,255,255,.7)!important}
 body[data-theme="claude"] #chat[data-layout="claude"] .meta{color:#b6b6b6!important;font-size:11px!important;line-height:1.2!important;margin-top:7px!important}
 body[data-theme="claude"] #chat[data-layout="claude"] .claude-msg-actions{gap:5px!important;margin-top:6px!important;padding-left:0!important}
 body[data-theme="claude"] #chat[data-layout="claude"] .cma-btn{width:30px!important;height:28px!important;padding:4px!important;color:#a5a5a5!important;border-radius:7px!important}
 body[data-theme="claude"] #chat[data-layout="claude"] .cma-btn svg{width:15px!important;height:15px!important}
 body[data-theme="claude"] footer{padding-left:9%!important;padding-right:9%!important;padding-bottom:calc(env(safe-area-inset-bottom) + 8px)!important;transition:padding .25s ease!important}
-body[data-theme="claude"] footer:focus-within{padding-left:2%!important;padding-right:2%!important}
+body[data-theme="claude"] footer:focus-within{padding-left:4%!important;padding-right:4%!important}
 body[data-theme="claude"] footer .inputbar{min-height:36px!important;background:rgba(255,255,255,.16)!important;backdrop-filter:blur(30px) saturate(190%) brightness(1.06)!important;-webkit-backdrop-filter:blur(30px) saturate(190%) brightness(1.06)!important;border:1px solid rgba(255,255,255,.32)!important;border-radius:30px!important;padding:4px 6px 4px 7px!important;box-shadow:inset 0 0 0 0.5px rgba(0,0,0,.035),inset 0 1px 0 rgba(255,255,255,.88),inset 0 -1px 0 rgba(0,0,0,.025),inset 0 1px 5px rgba(255,255,255,.32),0 6px 18px rgba(0,0,0,.045)!important;transition:transform .12s ease,background .15s,box-shadow .15s!important}
 body[data-theme="claude"] footer .inputbar:focus-within{background:rgba(255,255,255,.20)!important;box-shadow:inset 0 0 0 0.5px rgba(0,0,0,.035),inset 0 1px 0 rgba(255,255,255,.93),inset 0 -1px 0 rgba(0,0,0,.025),inset 0 1px 5px rgba(255,255,255,.36),0 7px 22px rgba(0,0,0,.055)!important}
 body[data-theme="claude"] footer .inputbar:active{transform:scale(.985)!important}
