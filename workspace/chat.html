@@ -8945,8 +8945,9 @@ body:has(#chat[data-layout="claude"]) header{background:transparent;border-botto
 /* 消息间距 */
 #chat[data-layout="claude"] .msg{margin-bottom:20px}
 /* 输入栏：白色大圆角卡片悬浮底部 */
-body:has(#chat[data-layout="claude"]) footer{position:fixed;left:0;right:0;bottom:0;z-index:30;background:transparent;padding-left:4%;padding-right:4%;padding-bottom:calc(env(safe-area-inset-bottom) + 22px)}
+body:has(#chat[data-layout="claude"]) footer{position:fixed;left:0;right:0;bottom:0;z-index:30;background:transparent;padding-left:4%;padding-right:4%;padding-bottom:calc(env(safe-area-inset-bottom) + 14px);transition:padding .25s ease!important}
 /* 2026-09-28 用户拍板：玻璃主题气泡文字改宋体（管理台同款衬线字体链）；只气泡，其他不动。原极简主题误改已撤（用户更正为玻璃主题） */
+body:has(#chat[data-layout="claude"]) footer:focus-within{padding-left:2%!important;padding-right:2%!important}
 body:has(#chat[data-layout="claude"]) footer .inputbar{background:rgba(255,255,255,.16)!important;backdrop-filter:blur(16px) saturate(180%);-webkit-backdrop-filter:blur(16px) saturate(180%);border:0.5px solid rgba(255,255,255,.40)!important;border-radius:30px!important;padding:4px 6px 4px 7px!important;min-height:36px!important;box-shadow:0 8px 32px rgba(0,0,0,.05),0 1px 2px rgba(0,0,0,.03)!important}
 body:has(#chat[data-layout="claude"]) footer .inputbar:active{transform:none!important}
 body:has(#chat[data-layout="claude"]) footer .inputbar{-webkit-tap-highlight-color:transparent!important}
