@@ -785,6 +785,9 @@ function toast(msg){
 function escapeHtml(s){
    return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]});
  }
+ // 2026-09-30 V10 转义收敛：escHtml/escHtml2 改为 escapeHtml 别名——三者本就重复实现
+ // （escapeHtml≡escHtml2 五字符全转；escHtml 原少转引号，并入全转版后 HTML 文本/属性场景显示等价且更安全）。
+ // 全部调用点已核：无「转义后再截断/比对」模式，合并零行为差异。
  function escJsStr(v){
    return String(v==null?'':v)
      .replace(/&/g,'&amp;')
@@ -823,7 +826,7 @@ function escapeHtml(s){
 
  const CC_GAP_PAGE = 200;
  
- function escHtml(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+ const escHtml = escapeHtml; // V10 收敛：原三字符版已删，统一走五字符全转
  
  function skeletonHtml(lines){
    let h='<div class="skeleton">';
@@ -3315,10 +3318,7 @@ function ccNumLiveCheck(input, max){
  }
  
  // ============ 工具集 + 服务管理 ============
- 
- function escHtml2(v){
-   return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
- }
+ const escHtml2 = escapeHtml; // V10 收敛：原五字符重复实现已删（与 escapeHtml 逐字符等价）
  
  async function loadToolsConfig(){
    const el=document.getElementById('tools-list');
