@@ -13,7 +13,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { AsyncLocalStorage } = require("async_hooks");
-const { nowIso, zonedWallTimeToDate, resolveTimeZone } = require("./time_utils");
+const { nowIso, resolveTimeZone, parseMsgTimestamp } = require("./time_utils");
 
 const DATA_DIR = path.join(__dirname, "data");
 const REPLACEMENTS_FILE = path.join(DATA_DIR, "context_replacements.json");
@@ -192,27 +192,10 @@ function isReplacementMemoryMessage(msg) {
   return c.startsWith("## Historical Summary") || c.startsWith("（回忆 · ") || c.startsWith("（对话摘要");
 }
 
-// 解析消息时间：优先 m.time，其次内容开头的墙上时间前缀
-function messageTime(m) {
-  if (m && m.time) {
-    const d = new Date(m.time);
-    if (!isNaN(d.getTime())) return d;
-  }
-  if (m && typeof m.content === "string") {
-    const match = m.content.match(/^（?\s*(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T]?)(\d{1,2})?[:：]?(\d{2})?/);
-    if (match) {
-      const y = Number(match[1]);
-      const mo = Number(match[2]);
-      const dd = Number(match[3]);
-      const hh = match[4] ? Number(match[4]) : 0;
-      const mm = match[5] ? Number(match[5]) : 0;
-      // 墙上时间按业务时区（Asia/Shanghai）解析，别按服务器本地时区——换 UTC 主机会整体偏 8 小时
-      const d = zonedWallTimeToDate({ year: y, month: mo, day: dd, hour: hh, minute: mm }, TIME_ZONE);
-      if (!isNaN(d.getTime())) return d;
-    }
-  }
-  return null;
-}
+// 解析消息时间（2026-09-30 V4 收敛）：本地两级链已删，统一引 time_utils 标准链。
+// 行为增强=修复不一致：原版缺 <current_time> 标签与末尾时间缀分支，同一消息在这里与
+// 压缩器（context-compactor）解析出不同时间，压缩块 range_label 与压缩页预览对不上。
+const messageTime = parseMsgTimestamp;
 
 // 解析时间范围边界的 parseRangeBound 已删（2026-09-19 统一消息 id 锚点，时间定位入口全清）
 

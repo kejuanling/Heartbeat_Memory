@@ -11,7 +11,7 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const { resolveTimeZone, zonedWallTimeToDate, formatDateTimeInTimeZone } = require("./time_utils");
+const { resolveTimeZone, zonedWallTimeToDate, formatDateTimeInTimeZone, parseMsgTimestamp } = require("./time_utils");
 const contextReplacements = require("./context-replacements");
 
 const DATA_DIR = path.join(__dirname, "data");
@@ -158,42 +158,9 @@ function contentToText(msg) {
   return "";
 }
 
-// 解析正文开头的墙上时间前缀（（YYYY-MM-DD HH:mm…），按 TIME_ZONE 转 UTC
-function parseLeadingTime(text) {
-  const m = String(text || "").match(/^（?\s*(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})/);
-  if (!m) return null;
-  return zonedWallTimeToDate({ year: Number(m[1]), month: Number(m[2]), day: Number(m[3]), hour: Number(m[4]), minute: Number(m[5]) }, TIME_ZONE);
-}
-
-// 解析正文末尾的时间缀（客户端自动注入的墙上时间），按 TIME_ZONE 转 UTC
-function parseTrailingTime(text) {
-  const m = String(text || "").match(/(\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[ T]?)\d{1,2}[:：]\d{2})\s*$/);
-  if (!m) return null;
-  const p = m[1].match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})/);
-  if (!p) return null;
-  return zonedWallTimeToDate({ year: Number(p[1]), month: Number(p[2]), day: Number(p[3]), hour: Number(p[4]), minute: Number(p[5]) }, TIME_ZONE);
-}
-
-// 消息时间解析链：time 字段 → <current_time> 标签 → 末尾时间缀 → 开头时间前缀
-function msgTime(msg) {
-  if (msg && msg.time) {
-    const d = new Date(msg.time);
-    if (!isNaN(d.getTime())) return d;
-  }
-  const text = contentToText(msg);
-  const fromTag = parseCurrentTimeTag(text);
-  if (fromTag) return fromTag;
-  const fromTrailing = parseTrailingTime(text);
-  if (fromTrailing) return fromTrailing;
-  return parseLeadingTime(text);
-}
-
-// 解析 <current_time>Sat 26-08-15 12:37:16</current_time> 里的时间（两位年份补全）
-function parseCurrentTimeTag(text) {
-  const m = String(text || "").match(/<current_time>[\s\S]*?(\d{2})[-/](\d{1,2})[-/](\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})/);
-  if (!m) return null;
-  return zonedWallTimeToDate({ year: 2000 + Number(m[1]), month: Number(m[2]), day: Number(m[3]), hour: Number(m[4]), minute: Number(m[5]) }, TIME_ZONE);
-}
+// 2026-09-30 V4 收敛：时间解析四函数本地实现已删，统一引 time_utils。
+// msgTime 别名保住全部调用点；链序与原版一致（time 字段 → 标签 → 末尾缀 → 开头前缀）。
+const msgTime = parseMsgTimestamp;
 
 function formatTime(d) {
   if (!d) return "";

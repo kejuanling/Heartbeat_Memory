@@ -181,11 +181,72 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+// ========================
+// 消息时间戳解析原子件（2026-09-30 V4 收敛：四套重复实现的唯一来源）
+// 此前 server.js / context-compactor.js / context-replacements.js / lib/wake-scheduler.js
+// 各自维护一份正则，细节漂移（replacements 缺 <current_time> 分支导致压缩块 range_label
+// 与预览时间不一致；wake 的标签正则最宽容）。统一取各版并集（最宽容）形态。
+// ========================
+
+// 时区缓存：本模块原子件共用（resolveTimeZone 每次 new Intl.DateTimeFormat，重复调用浪费）
+let _tzCache = null;
+function tzCached() {
+  return _tzCache || (_tzCache = resolveTimeZone());
+}
+
+// <current_time>Sat 26-08-15 12:37:16</current_time>（两位年份补全；容忍标签内空格、周几前缀、可选秒）
+function parseCurrentTimeTagLoose(value) {
+  const m = String(value || "").match(/<\s*current_time\s*>\s*(?:[A-Za-z]{2,4}\s+)?(\d{2})[-/](\d{1,2})[-/](\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})(?:[:：](\d{2}))?/);
+  if (!m) return null;
+  return zonedWallTimeToDate({ year: 2000 + Number(m[1]), month: Number(m[2]), day: Number(m[3]), hour: Number(m[4]), minute: Number(m[5]), second: m[6] ? Number(m[6]) : 0 }, tzCached());
+}
+
+// 行首墙上时间（「（」前缀容忍；四位年份、日期分隔符成对复用；时分可选——只有日期时按当天 00:00。
+// 墙上时间必须按业务时区解析，不能按服务器本地时区——换 UTC 主机会整体偏移）
+function parseLeadingWallTime(value) {
+  const m = String(value || "").match(/^（?\s*(\d{4})([-/])(\d{1,2})\2(\d{1,2})(?:[ T]?)(?:(\d{1,2})[:：](\d{2}))?/);
+  if (!m) return null;
+  return zonedWallTimeToDate({ year: Number(m[1]), month: Number(m[3]), day: Number(m[4]), hour: m[5] ? Number(m[5]) : 0, minute: m[6] ? Number(m[6]) : 0 }, tzCached());
+}
+
+// 行尾时间缀（客户端自动注入的墙上时间）
+function parseTrailingWallTime(value) {
+  const m = String(value || "").match(/(\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[ T]?)\d{1,2}[:：]\d{2})\s*$/);
+  return m ? parseLeadingWallTime(m[1]) : null;
+}
+
+// 消息内容拍平（多模态 content 数组 → 纯文本）
+function contentToTextLoose(content) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map(function (p) { return typeof p === "string" ? p : (p && typeof p === "object" ? (p.text || p.content || "") : ""); })
+      .filter(Boolean)
+      .join("\n");
+  }
+  return "";
+}
+
+// 标准消息时间链（与原 context-compactor 链一致）：msg.time 字段 → <current_time> 标签 → 行尾缀 → 行首前缀
+function parseMsgTimestamp(msg) {
+  if (msg && msg.time) {
+    const d = new Date(msg.time);
+    if (!isNaN(d.getTime())) return d;
+  }
+  const text = contentToTextLoose(msg && msg.content);
+  return parseCurrentTimeTagLoose(text) || parseTrailingWallTime(text) || parseLeadingWallTime(text);
+}
+
 module.exports = {
+  contentToTextLoose,
   formatDateTimeInTimeZone,
   getDatePartsInTimeZone,
   getHourInTimeZone,
   nowIso,
+  parseCurrentTimeTagLoose,
+  parseLeadingWallTime,
+  parseMsgTimestamp,
+  parseTrailingWallTime,
   parseWakeTarget,
   resolveTimeZone,
   zonedWallTimeToDate

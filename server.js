@@ -271,12 +271,19 @@ function resolveChatModel(sessionId, bodyModel) {
   // L3 env 兜底
   return { provider: null, model: bodyModel || readEnvValue("MODEL_NAME") || "" };
 }
+// 2026-09-30 V4 收敛：消息时间戳原子件统一引 time_utils（本地四份正则实现已删），
+// 别名保持原函数名，调用点零改动。parseCurrentTimeTagLoose/parseLeadingWallTime/parseTrailingWallTime
+// 为原 extractCurrentTimeTagLabel/parseTimestampLabel/extractTrailingTimestampLabel 的并集增强版。
 const {
   getDatePartsInTimeZone,
   formatDateTimeInTimeZone,
   parseWakeTarget,
   resolveTimeZone,
-  zonedWallTimeToDate
+  zonedWallTimeToDate,
+  parseCurrentTimeTagLoose: extractCurrentTimeTagLabel,
+  parseLeadingWallTime: parseTimestampLabel,
+  parseLeadingWallTime: extractTimestamp,
+  parseTrailingWallTime: extractTrailingTimestampLabel
 } = require("./time_utils");
 
 const contextCompactor = require("./context-compactor");
@@ -939,35 +946,10 @@ function saveTimeline(messages, sessionId) {
 
 // ========================
 // 提取时间戳（支持多种格式）
+// 2026-09-30 V4 收敛：以下四个解析函数的本地实现已删，统一从 time_utils 引入
+// （见顶部 require 的别名映射：parseTimestampLabel/extractTimestamp/extractTrailingTimestampLabel/
+// extractCurrentTimeTagLabel）。extractTimestampWithMemory 的调用链保持不变。
 // ========================
-function parseTimestampLabel(value) {
-  const text = String(value || "");
-  const match = text.match(/^（?\s*(\d{4})([-/])(\d{1,2})\2(\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})/);
-  if (!match) return null;
-  const [, yyyy, , month, day, hour, minute] = match;
-  // 批注 2026-07-30：Kelivo 写进消息前缀的是用户配置时区的墙上时间；
-  // 公网/Railway 不能按服务器 UTC 解析，否则时间线和自动唤醒都会被推迟。
-  return zonedWallTimeToDate({ year: yyyy, month, day, hour, minute }, TIME_ZONE);
-}
-
-function extractTimestamp(content) {
-  return parseTimestampLabel(content);
-}
-
-// 解析消息正文末尾的时间缀（客户端自动注入的墙上时间），按 TIME_ZONE 转 UTC
-function extractTrailingTimestampLabel(value) {
-  const text = String(value || "");
-  const m = text.match(/(\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[ T]?)\d{1,2}[:：]\d{2})\s*$/);
-  return m ? parseTimestampLabel(m[1]) : null;
-}
-
-// 解析 <current_time>Sat 26-08-15 12:37:16</current_time> 里的时间（客户端新时间格式，两位年份补全）
-function extractCurrentTimeTagLabel(value) {
-  const text = String(value || "");
-  const m = text.match(/<current_time>[\s\S]*?(\d{2})[-/](\d{1,2})[-/](\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})(?:[:：](\d{2}))?/);
-  if (!m) return null;
-  return zonedWallTimeToDate({ year: 2000 + Number(m[1]), month: Number(m[2]), day: Number(m[3]), hour: Number(m[4]), minute: Number(m[5]), second: m[6] ? Number(m[6]) : 0 }, TIME_ZONE);
-}
 
 // 消息时间解析：优先 time 字段（客户端已传）→ <current_time> 标签 → 末尾时间缀 → 开头时间戳（AI 抄的）
 function extractTimestampWithMemory(msg) {
