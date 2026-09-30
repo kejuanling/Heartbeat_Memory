@@ -16,6 +16,18 @@
 const { loadTools, toOpenAITools, callToolByExposedName } = require("./mcp-service");
 const upstreamAlert = require("./lib/upstream-alert"); // 2026-09-28 上游 402（余额不足）提醒
 
+// 2026-09-30 日志加时间（q5 清理项）：error.log 无时间戳，本模块被聊天/唤醒共用，
+// 错误统一带本地时间前缀，与 wake-scheduler.js logErr / wake-chat.js wakeLogWarn 同一口径。
+// 时间独立成前缀、原 [mcp]/[mcp-diag]/[diary] tag 保留在消息里，按 tag grep 的旧习惯不受影响。
+function mcpNowLocal() {
+  try {
+    const tu = require("./time_utils");
+    const p = tu.getDatePartsInTimeZone(new Date(), tu.resolveTimeZone());
+    return p.year + "-" + p.month + "-" + p.day + " " + p.hour + ":" + p.minute + ":" + p.second;
+  } catch (e) { return new Date().toISOString(); }
+}
+function mcpLogWarn(msg) { console.warn("[" + mcpNowLocal() + "] " + msg); }
+
 const DEFAULT_MAX_TOOL_ROUNDS = 6;
 const MAX_REASONING_CHARS = 4000; // 思考链最多保留字符数，避免过长
 // 轮内上游超时：与 server.js 全局口径一致（此前硬编码 120s，比全局 180s 短，长回复会先于全局超时被误杀）
@@ -153,7 +165,7 @@ async function runWithTools({
       const t = await resp.text().catch(() => "");
       // 2026-09-26：上游拉不到图片时整包 400，去图重试一次（与聊天侧图片降级同源保护）
       if (resp.status === 400 && /failed to download image/i.test(t) && stripImagePartsForDegrade(working)) {
-        console.warn("[mcp] runWithTools 上游拉取图片失败(400)，去图后重试本轮");
+        mcpLogWarn("[mcp] runWithTools 上游拉取图片失败(400)，去图后重试本轮");
         round--;
         continue;
       }
@@ -163,7 +175,7 @@ async function runWithTools({
       try {
         const _tcA = working.filter(function (m) { return m && m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length; });
         const _tcRc = _tcA.filter(function (m) { return typeof m.reasoning_content === "string" && m.reasoning_content.length > 0; });
-        console.warn("[mcp-diag] runWithTools 上游失败: status=" + resp.status +
+        mcpLogWarn("[mcp-diag] runWithTools 上游失败: status=" + resp.status +
           " round=" + round + "/" + maxToolRounds +
           " model=" + model +
           " working=" + working.length +
@@ -229,7 +241,7 @@ async function runWithTools({
   let text = contentParts.join("\n\n").trim();
   if (!text && !(resume && resume.assistantMsg)) {
     text = "（工具调用轮次已达上限，模型未给出最终回复，请重试或简化请求）";
-    console.warn("[mcp] 工具轮次耗尽兜底: rounds=" + rounds + " textLen=0");
+    mcpLogWarn("[mcp] 工具轮次耗尽兜底: rounds=" + rounds + " textLen=0");
   }
 
   // 汇总思考链（截断上限）
@@ -288,7 +300,7 @@ async function executeToolCalls(toolCalls, working, toolHistory, ctx, onEvent, n
     if (name === "diary_add" && !error && typeof ctx.onDiaryWritten === "function") {
       const dText = (args && typeof args.content === "string" && args.content.trim()) ? args.content.trim() : "";
       if (dText) {
-        try { ctx.onDiaryWritten(ctx.sessionId, dText); } catch (e) { console.warn("[diary] 时间线落库回调失败:", e.message); }
+        try { ctx.onDiaryWritten(ctx.sessionId, dText); } catch (e) { mcpLogWarn("[diary] 时间线落库回调失败: " + e.message); }
       }
     }
     if (typeof onEvent === "function") onEvent({ type: "tool_end", index, id, name, args, result: resTrunc, error, ok: !error, afterSeg: (typeof afterSeg === "number") ? afterSeg : -1 });
@@ -413,7 +425,7 @@ async function streamToolLoop({
       const t = await resp.text().catch(() => "");
       // 2026-09-26：上游拉不到图片时整包 400，去图重试一次（与聊天侧图片降级同源保护）
       if (resp.status === 400 && /failed to download image/i.test(t) && stripImagePartsForDegrade(working)) {
-        console.warn("[mcp] streamToolLoop 上游拉取图片失败(400)，去图后重试本轮");
+        mcpLogWarn("[mcp] streamToolLoop 上游拉取图片失败(400)，去图后重试本轮");
         round--;
         continue;
       }
@@ -421,7 +433,7 @@ async function streamToolLoop({
       try {
         const _tcA = working.filter(function (m) { return m && m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length; });
         const _tcRc = _tcA.filter(function (m) { return typeof m.reasoning_content === "string" && m.reasoning_content.length > 0; });
-        console.warn("[mcp-diag] streamToolLoop 上游失败: status=" + resp.status +
+        mcpLogWarn("[mcp-diag] streamToolLoop 上游失败: status=" + resp.status +
           " round=" + round + "/" + maxToolRounds +
           " model=" + model +
           " working=" + working.length +
