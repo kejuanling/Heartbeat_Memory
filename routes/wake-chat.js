@@ -275,9 +275,13 @@ async function runWakeCompletion(deps, opts) {
 }
 
 // 统一对话构建器（惰性创建，与聊天侧同一实例逻辑）
+// 2026-09-30 M24 修复：单例按 deps 身份失效重建——生产 deps 为 server.js 模块级常量（恒定，
+// 行为与原版相同）；测试/多实例注入不同 deps 时不再被首次固化卡住（原版串味）。
 let buildConversation = null;
+let _builderDeps = null;
 function ensureBuilder(deps) {
-  if (!buildConversation) {
+  if (!buildConversation || _builderDeps !== deps) {
+    _builderDeps = deps;
     buildConversation = chatCtx.createConversationBuilder({
       loadTimeline: deps.loadTimeline,
       prepareMessageForLLM: deps.prepareMessageForLLM,
@@ -292,8 +296,10 @@ function ensureBuilder(deps) {
 
 // 守卫惰性创建（依赖 server.js 注入的时间线函数；直接调用 runWakeCompletion 也可用）
 let ctxLimitGuard = null;
+let _guardDeps = null; // 2026-09-30 M24：同 ensureBuilder，deps 身份失效重建
 function ensureGuard(deps) {
-  if (!ctxLimitGuard) {
+  if (!ctxLimitGuard || _guardDeps !== deps) {
+    _guardDeps = deps;
     ctxLimitGuard = chatCtx.createCtxLimitReminderGuard({
       contextCompactor: require('../context-compactor'),
       contextReplacements,
