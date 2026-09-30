@@ -285,6 +285,7 @@ const {
   parseLeadingWallTime: extractTimestamp,
   parseTrailingWallTime: extractTrailingTimestampLabel
 } = require("./time_utils");
+const { writeJsonAtomic: _writeJsonAtomicBase } = require("./json_atomic");
 
 const contextCompactor = require("./context-compactor");
 const contextReplacements = require("./context-replacements");
@@ -862,15 +863,9 @@ function markSessionDeleted(sessionId) {
 }
 
 // 原子写入：先写临时文件再 rename，避免进程被杀/崩溃时把 JSON 写坏。
-// 临时文件名加 pid+时间戳后缀，避免同名 .tmp 交叉；失败/中断时尽力清理残留。
+// 2026-09-30 V10 收敛：实现统一委托 json_atomic.writeJsonAtomic（七份重复实现唯一来源），函数名保留。
 function atomicWriteJsonSync(file, data) {
-  const tmp = file + "." + process.pid + "." + Date.now() + ".tmp";
-  try {
-    fs.writeJsonSync(tmp, data, { spaces: 2 });
-    fs.renameSync(tmp, file);
-  } finally {
-    try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (e) {}
-  }
+  _writeJsonAtomicBase(file, data);
 }
 
 function atomicWriteFileSync(file, content) {
@@ -4046,12 +4041,10 @@ function readJsonFileSafe(file, fallback) {
   }
 }
 
-// 原子写 JSON（tmp+rename）。与上方 atomicWriteJsonSync 功能重复（历史并存，未合并清理）
+// 原子写 JSON（tmp+rename）。2026-09-30 V10 收敛：与上方 atomicWriteJsonSync 的历史重复已合并，
+// 统一委托 json_atomic.writeJsonAtomic；函数名保留（10 处调用点零改动）。
 function writeJsonFileAtomic(file, data) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = file + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
-  fs.renameSync(tmp, file);
+  _writeJsonAtomicBase(file, data);
 }
 
 // 同步执行 shell 命令（20s 超时），返回 {ok, output}；管理台服务状态/控制用（注意：同步阻塞事件循环）

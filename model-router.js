@@ -4,6 +4,7 @@
 // 所有后台 LLM 调用点统一从这里取 {provider, model}，不再各自读 env TARGET_API_*。
 const fs = require("fs");
 const path = require("path");
+const { writeJsonAtomic } = require("./json_atomic"); // V10 收敛：本地重复实现已删
 
 const AI_PROVIDERS_CONFIG = path.join(__dirname, "ai-providers.json");
 
@@ -32,11 +33,6 @@ function loadRoleModelsRaw() {
   const cfg = loadProvidersConfigRaw();
   const rm = cfg.role_models;
   return (rm && typeof rm === "object") ? rm : {};
-}
-function writeJsonAtomic(file, data) {
-  const tmp = file + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
-  fs.renameSync(tmp, file);
 }
 function saveRoleModel(role, entry) {
   if (!KNOWN_MODEL_ROLES[role]) return false;

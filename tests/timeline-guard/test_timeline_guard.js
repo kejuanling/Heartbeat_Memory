@@ -42,6 +42,8 @@ function extractLine(src, prefix) {
 const src = nodeFs.readFileSync(SERVER_JS, "utf8");
 // 2026-09-21 R20 起 safeSessionToken 收敛到共享模块 lib/session-token.js（server.js 内已无副本），提取源跟随
 const sessionTokenSrc = nodeFs.readFileSync(nodePath.join(__dirname, "..", "..", "lib", "session-token.js"), "utf8");
+// 2026-09-30 V10 起 atomicWriteJsonSync 委托 json_atomic.writeJsonAtomic（server.js 内已无实现体），提取源跟随
+const jsonAtomicSrc = nodeFs.readFileSync(nodePath.join(__dirname, "..", "..", "json_atomic.js"), "utf8");
 const parts = [
   extractLine(src, "const TIMELINE_FILE"),
   extractLine(src, "const _timelineCache"),
@@ -50,6 +52,8 @@ const parts = [
   extractLine(src, "const TOMBSTONE_FILE"),
   extractLine(src, "const SESSION_TOMBSTONE_TTL_MS"),
   extractFunction(sessionTokenSrc, "safeSessionToken"),
+  extractFunction(jsonAtomicSrc, "writeJsonAtomic"),
+  "const _writeJsonAtomicBase = writeJsonAtomic; // server.js 委托名的沙盒内对应",
   extractFunction(src, "notifyTimelineWriteRejected"),
   extractFunction(src, "hasSameCorruptBackup"),
   extractFunction(src, "timelineFileFor"),

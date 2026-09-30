@@ -146,11 +146,11 @@ function readJson(file, fallback) {
   }
 }
 
+// 2026-09-30 V10 收敛：原子写实现统一委托 json_atomic.writeJsonAtomic；
+// 本模块的读缓存失效副作用在这里包一层保留。
+const { writeJsonAtomic: _writeJsonAtomicBase } = require("./json_atomic");
 function writeJsonAtomic(file, data) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = file + ".tmp-" + process.pid + "-" + Date.now();
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
-  fs.renameSync(tmp, file);
+  _writeJsonAtomicBase(file, data);
   _readJsonCache.delete(file);
 }
 

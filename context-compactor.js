@@ -12,6 +12,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { resolveTimeZone, zonedWallTimeToDate, formatDateTimeInTimeZone, parseMsgTimestamp } = require("./time_utils");
+const { writeJsonAtomic } = require("./json_atomic"); // V10 收敛：三处内联原子写已删
 const contextReplacements = require("./context-replacements");
 
 const DATA_DIR = path.join(__dirname, "data");
@@ -101,10 +102,7 @@ function saveConfig(updates) {
     }
   }
   if (!changed) return { ok: false, message: "没有可更新的压缩参数" };
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  const tmp = file + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(current, null, 2), "utf-8");
-  fs.renameSync(tmp, file);
+  writeJsonAtomic(file, current);
   return { ok: true, config: loadConfig() };
 }
 
@@ -301,10 +299,7 @@ function saveCtxLimitPrompt(template) {
   if (!text.trim().startsWith("（容量提醒）")) {
     return { ok: false, message: "提示词必须以「（容量提醒）」开头——这是系统识别标记（前端隐藏/防重复塞/压缩清除都靠它），不可删改" };
   }
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  const tmp = CTX_LIMIT_PROMPT_FILE + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify({ template: text }, null, 2), "utf-8");
-  fs.renameSync(tmp, CTX_LIMIT_PROMPT_FILE);
+  writeJsonAtomic(CTX_LIMIT_PROMPT_FILE, { template: text });
   return { ok: true, template: loadCtxLimitPrompt() };
 }
 
@@ -386,9 +381,7 @@ function saveCompactionPromptConfig(system, template) {
     template: String(template || "")
   };
   if (!cfg.template.trim()) throw new Error("模板不能为空");
-  const tmp = COMPACTION_PROMPT_FILE + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2), "utf-8");
-  fs.renameSync(tmp, COMPACTION_PROMPT_FILE);
+  writeJsonAtomic(COMPACTION_PROMPT_FILE, cfg);
   return cfg;
 }
 
