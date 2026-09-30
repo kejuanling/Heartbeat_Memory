@@ -8948,12 +8948,15 @@ body:has(#chat[data-layout="claude"]) header{background:transparent;border-botto
 body:has(#chat[data-layout="claude"]) footer{position:fixed;left:0;right:0;bottom:0;z-index:30;background:transparent;padding-left:4%;padding-right:4%;padding-bottom:calc(env(safe-area-inset-bottom) + 22px)}
 /* 2026-09-28 用户拍板：玻璃主题气泡文字改宋体（管理台同款衬线字体链）；只气泡，其他不动。原极简主题误改已撤（用户更正为玻璃主题） */
 body:has(#chat[data-layout="claude"]) footer .inputbar{background:rgba(255,255,255,.16)!important;backdrop-filter:blur(16px) saturate(180%);-webkit-backdrop-filter:blur(16px) saturate(180%);border:0.5px solid rgba(255,255,255,.40)!important;border-radius:30px!important;padding:4px 6px 4px 7px!important;min-height:36px!important;box-shadow:0 8px 32px rgba(0,0,0,.05),0 1px 2px rgba(0,0,0,.03)!important}
+body:has(#chat[data-layout="claude"]) footer .inputbar:active{transform:none!important}
+body:has(#chat[data-layout="claude"]) footer .inputbar{-webkit-tap-highlight-color:transparent!important}
 body:has(#chat[data-layout="claude"]) footer .inputbar:focus-within{box-shadow:0 8px 36px rgba(0,0,0,.10),0 1px 2px rgba(0,0,0,.05)!important}
-body:has(#chat[data-layout="claude"]) footer .inputbar #input{background:transparent!important;border:none!important;outline:none!important;box-shadow:none!important;color:#1a1a1a;font-size:17px}
+body:has(#chat[data-layout="claude"]) footer .inputbar #input{background:transparent!important;border:none!important;outline:none!important;box-shadow:none!important;color:#1a1a1a;font-size:17px;text-align:center!important}
 #chat[data-layout="claude"] .msg.ai{font-size:17px;line-height:1.6;color:#1a1a1a}
 #chat[data-layout="claude"] .msg.user .bubble{border-radius:20px!important;font-size:17px!important}
 body:has(#chat[data-layout="claude"]) footer .inputbar #send{background:rgba(26,26,26,.82)!important;color:#fff!important;border-radius:50%!important;width:36px!important;height:36px!important;display:flex!important;align-items:center!important;justify-content:center!important}
 body:has(#chat[data-layout="claude"]) footer .inputbar #send .ico{transform:rotate(-45deg)!important;transform-origin:center!important}
+body:has(#chat[data-layout="claude"]) footer .inputbar #send:active{transform:none!important}
 body:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn{background:transparent!important;border:none!important;border-radius:0!important;width:36px!important;height:36px!important;display:flex!important;align-items:center;justify-content:center;color:#3c3c43!important;box-sizing:border-box}
 body:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn .ico{display:none!important}
 body:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn::before{content:"+";display:block;font-size:26px;font-weight:300;line-height:1;color:#3c3c43!important}
