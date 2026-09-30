@@ -1985,12 +1985,11 @@ const CONTEXT_SEARCH_DENSITY_FLOOR = 0.4;
 const CONTEXT_SEARCH_FILTER_MIN_HITS = 5;
 const CONTEXT_SEARCH_MIN_KEEP = 3;
 const CONTEXT_SEARCH_RECENT_EXCLUDE_MINUTES = 5;
-// 2026-09-13 死代码清理：CONTEXT_SEARCH_REPEAT_WINDOW_MINUTES / CONTEXT_SEARCH_IMPORTED_POS_OFFSET /
-// recentlyShown 已删——声明后全仓无引用（loadSearchableMessages 的 imported 恒为空数组）
+// 2026-09-30 V9c：imported 死路径整体删除（原 recentlyShown 外部导入通道）——恒空数组、
+// 消费端遍历永不执行、生产数据零存量（context_replacements.json 无 source=imported 条目）且零新增来源。
 
 function loadSearchableMessages() {
-  const timeline = nonSystemMessages(loadTimeline());
-  return { timeline: timeline, imported: [] };
+  return { timeline: nonSystemMessages(loadTimeline()) };
 }
 
 
@@ -2357,18 +2356,6 @@ async function searchContextEnhanced(query, options) {
         _gidx: i
       });
     }
-    const baseIdx = allMsgs.length;
-    for (let i = 0; i < src.imported.length; i++) {
-      allMsgs.push({
-        content: contentToText(src.imported[i]),
-        role: src.imported[i].role,
-        time: src.imported[i].time || null,
-        source: "imported",
-        record_id: src.imported[i].record_id,
-        msg_id: src.imported[i].msg_id,
-        _gidx: baseIdx + i
-      });
-    }
   }
   
   const now = Date.now();
@@ -2500,9 +2487,6 @@ async function searchContextEnhanced(query, options) {
       out.msg_id = rep.msg_id;
       out.start_index = rep.sidx;
       out.end_index = g[g.length-1].sidx;
-    } else if (rep.source === "imported") {
-      out.record_id = rep.record_id;
-      out.msg_id = rep.msg_id;
     }
     return out;
   });
@@ -2550,7 +2534,6 @@ function extractPoolKeywords(limit) {
     }
   };
   for (const m of src.timeline) scan(m);
-  for (const m of src.imported) scan(m);
 
   const N = Math.max(2, docCount);
   const out = Array.from(termFreq.entries())
@@ -2587,7 +2570,6 @@ function searchRelatedSegments(word, maxSegments) {
     hits.push({ sortIndex: ord++, source: isImported ? "imported" : "timeline", time: m.time || null, content: content });
   };
   for (const m of src.timeline) scan(m, false);
-  for (const m of src.imported) scan(m, true);
 
   const groups = [];
   for (const h of hits) {

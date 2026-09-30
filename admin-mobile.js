@@ -243,7 +243,6 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
   // ---------- 摘要生成日志（悬浮球 + 弹窗，可拖动） ----------
  let lastLogId = null;
  let logPollTimer = null;
- let unreadPollTimer = null;
  let fabDragging = false;
  let fabStartX = 0, fabStartY = 0;
  let fabOrigX = 0, fabOrigY = 0;
@@ -351,7 +350,7 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
      startLogPolling();
    } else {
      panel.classList.remove('show');
-     stopLogPolling();
+     // 2026-09-30 V9d：轮询已常驻（3s 单定时器），关面板不再停表——原双轮询时代 5s 保底已并入
    }
  }
 
@@ -359,7 +358,6 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    const panel = document.getElementById('logPanel');
    if(panel) panel.classList.remove('show');
    AppState.logPanelOpen = false;
-   stopLogPolling();
  }
 
  function updateLogBadge(){
@@ -492,7 +490,7 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
  document.addEventListener('DOMContentLoaded', function(){
    initLogFab();
    loadCompactionLogs();
-   startUnreadPoll();
+   startLogPolling();
    // 2026-09-27 悬浮球仅压缩页显示：初始按当前激活 tab 设置（initApp 恢复 tab 也可能已切到 compaction）
    const fab0=document.getElementById('logFab');
    if(fab0){
@@ -501,36 +499,16 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    }
  });
 
- function checkUnreadLogs(){
-   if(document.hidden || AppState.logPanelOpen) return;
-   fetch(ADMIN_API + '/context-compaction/logs').then(r=>r.json()).then(function(d){
-     if(d && d.logs && d.logs.length > 0){
-       if(lastLogId && d.logs[0].id !== lastLogId){
-         AppState.unreadLogCount++;
-         lastLogId = d.logs[0].id;   // 必须对齐：原来只自增不更新，角标变成"每 5 秒 +1"的轮询计数
-         updateLogBadge();
-       }
-       if(!lastLogId) lastLogId = d.logs[0].id;
-       syncGenStateFromLogs(d.logs);
-     }
-   }).catch(()=>{});
- }
- function startUnreadPoll(){
-   if(unreadPollTimer) return;
-   unreadPollTimer = setInterval(checkUnreadLogs, 5000);
- }
- function stopUnreadPoll(){
-   if(unreadPollTimer){ clearInterval(unreadPollTimer); unreadPollTimer=null; }
- }
+ // 2026-09-30 V9d 双轮询合并：原 5s 的 checkUnreadLogs 与 3s 的 loadCompactionLogs 打同一接口
+ // /context-compaction/logs，且其全部效果（未读自增+syncGenStateFromLogs）已被 3s 路径覆盖——
+ // 删除 5s 轮询，请求减半行为等价；DOMContentLoaded 改为常驻启动 3s 轮询（原 5s 在此常驻、3s 仅面板开时启）。
 
  // 页面切到后台/切回时暂停或恢复后台轮询，避免隐藏页持续请求
  document.addEventListener('visibilitychange', function(){
    if(document.hidden){
-     stopUnreadPoll();
      stopLogPolling();
    }else{
-     startUnreadPoll();
-     if(AppState.logPanelOpen) startLogPolling();
+     startLogPolling();
      let cur=''; try{ cur=localStorage.getItem('adminTab')||''; }catch(e){}
    }
  });
@@ -968,19 +946,6 @@ function loadCompactionPreview(){
  */
 
 /**
- * 未触发自动压缩时的提示卡片 HTML。
- * @param {Object} d 压缩预览数据
- * @param {number} ccGaps 未覆盖区数量
- * @param {number} ccMin 自动压缩阈值
- * @returns {string}
- */
-function ccBuildEmptyNoticeHtml(d, ccGaps, ccMin){
-  // 自动压缩相关提示已下线（不再提醒未达阈值/未触发自动压缩），
-  // 保留函数与调用点不变，仅不再渲染任何内容，避免影响手动压缩流程。
-  return '';
-}
-
-/**
  * 把压缩块（手动/AI）与未覆盖区合并成一条流，按消息位置排序并应用筛选。
  * @param {Object} d 压缩预览数据
  * @returns {Array} 筛选后的合并项列表
@@ -1051,11 +1016,6 @@ function ccBuildSummaryStatsHtml(d, t){
    const prevOpenCol={};
    document.querySelectorAll('.cc-collapse.open').forEach(function(w){ prevOpenCol[w.id]=true; });
    let html='';
-   if(!t.chunkCount){
-     const ccGaps=(d.uncovered&&d.uncovered.gaps&&d.uncovered.gaps.length)||0;
-     const ccMin=Number((d.config&&d.config.compaction_min_messages)||0);
-     html+=ccBuildEmptyNoticeHtml(d, ccGaps, ccMin);
-   }
    // 块（手动/AI）与未覆盖区合并成一条流，按消息位置穿插显示
    const filtered = ccBuildMergedItems(d);
    let blockOrdinal=-1;
