@@ -11,9 +11,9 @@ const { judge, judgeMock, parseJudgeOutput, buildPrompt, normalizeText, RELATION
 
 const cases = [
   // ---- mock ----
-  ["mock：完全一致 → duplicate 置信 1，输出恰三键", async () => {
+  ["mock：完全一致 → duplicate 置信 1，包含合并文本", async () => {
     const r = await judge("只能我先说晚安", "只能我先说晚安", { mode: "mock" });
-    assert.deepStrictEqual(Object.keys(r).sort(), ["confidence", "reason", "relation"]);
+    assert.deepStrictEqual(Object.keys(r).sort(), ["confidence", "merged_text", "reason", "relation"]);
     assert.strictEqual(r.relation, "duplicate");
     assert.strictEqual(r.confidence, 1);
   }],

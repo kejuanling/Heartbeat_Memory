@@ -71,7 +71,7 @@ function baseCfg() {
 const cases = [
   ["review 列表：候选摘要/provenance/reasons/audit_id 齐备", async () => {
     const { admission, handlers, tmpDir } = makeSetup("list", { v2_enabled: true });
-    const sub = admission.submitV2({ content: "涵：「只能我先说晚安」", category: "拓本", quote: "只能我先说晚安" });
+    const sub = await admission.submitV2({ content: "涵：「只能我先说晚安」", category: "拓本", quote: "只能我先说晚安" });
     assert.strictEqual(sub.action, "review", JSON.stringify(sub));
     const reply = await queueList(handlers);
     assert.strictEqual(reply._code, 200);
@@ -89,7 +89,7 @@ const cases = [
 
   ["approve：经 state_executor 落 memory_v2，队列清空，审计记 review_approved", async () => {
     const { admission, handlers, tmpDir } = makeSetup("approve", { v2_enabled: true });
-    const sub = admission.submitV2({ content: "涵：「只能我先说晚安」", category: "拓本", quote: "只能我先说晚安" });
+    const sub = await admission.submitV2({ content: "涵：「只能我先说晚安」", category: "拓本", quote: "只能我先说晚安" });
     const reply = fakeReply();
     await handlers["POST /admin/memory-review/queue/:id/approve"]({ params: { id: sub.queue_id }, body: {} }, reply);
     assert.strictEqual(reply._code, 200);
@@ -105,7 +105,7 @@ const cases = [
 
   ["reject：记录 reason、移出队列、主集合不变、审计记 review_rejected", async () => {
     const { admission, handlers, tmpDir } = makeSetup("rejectq", { v2_enabled: true });
-    const sub = admission.submitV2({ content: "涵：「你是我的锚」", category: "拓本", quote: "你是我的锚" });
+    const sub = await admission.submitV2({ content: "涵：「你是我的锚」", category: "拓本", quote: "你是我的锚" });
     const reply = fakeReply();
     await handlers["POST /admin/memory-review/queue/:id/reject"]({ params: { id: sub.queue_id }, body: { note: "AI 台词存疑" } }, reply);
     assert.strictEqual(reply._code, 200);
@@ -120,7 +120,7 @@ const cases = [
 
   ["audit 关联：队列记录的 audit_id 能回查到审计行", async () => {
     const { admission, tmpDir } = makeSetup("link", { v2_enabled: true });
-    const sub = admission.submitV2({ content: "涵：「给我亲一口」", category: "拓本", quote: "给我亲一口" });
+    const sub = await admission.submitV2({ content: "涵：「给我亲一口」", category: "拓本", quote: "给我亲一口" });
     const audits = requireAudit(admission);
     const line = audits.find((x) => x.id === sub.audit_id);
     assert.ok(line, "audit_id 对应审计行存在");
@@ -129,18 +129,18 @@ const cases = [
     fs.removeSync(tmpDir);
   }],
 
-  ["v2 关闭无影响：submitV2 → skipped_v2_off，零文件落地", () => {
+  ["v2 关闭无影响：submitV2 → skipped_v2_off，零文件落地", async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "mv2-review-off-"));
     const admission = createAdmission({ rootDir: tmpDir, config: baseCfg() });
-    const r = admission.submitV2({ content: "她喝奶茶只要三分糖", category: "关于她" });
+    const r = await admission.submitV2({ content: "她喝奶茶只要三分糖", category: "关于她" });
     assert.strictEqual(r.action, "skipped_v2_off");
     assert.strictEqual(fs.readdirSync(tmpDir).filter((f) => f.includes("memory_v2") || f.includes("memory_review") || f.includes("memory_audit")).length, 0, "零落地");
     fs.removeSync(tmpDir);
   }],
 
-  ["v2 开启正式旁路：旧池继续写由旧路由恒执行保证，V2 落主集合", () => {
+  ["v2 开启正式旁路：旧池继续写由旧路由恒执行保证，V2 落主集合", async () => {
     const { admission, tmpDir } = makeSetup("formal", { v2_enabled: true });
-    const r = admission.submitV2({ content: "她喝奶茶只要三分糖", category: "关于她", importance: 0.9 });
+    const r = await admission.submitV2({ content: "她喝奶茶只要三分糖", category: "关于她", importance: 0.9 });
     assert.strictEqual(r.action, "admit");
     assert.strictEqual(r.mode, "formal");
     assert.strictEqual(fs.readJsonSync(admission.paths.main.collection).length, 1);
@@ -148,9 +148,9 @@ const cases = [
     fs.removeSync(tmpDir);
   }],
 
-  ["v2 影子旁路：enabled=false + shadow=true → 只写影子", () => {
+  ["v2 影子旁路：enabled=false + shadow=true → 只写影子", async () => {
     const { admission, tmpDir } = makeSetup("shadowside", { v2_shadow: true });
-    const r = admission.submitV2({ content: "她喝奶茶只要三分糖", category: "关于她" });
+    const r = await admission.submitV2({ content: "她喝奶茶只要三分糖", category: "关于她" });
     assert.strictEqual(r.action, "admit");
     assert.strictEqual(r.mode, "shadow");
     assert.strictEqual(fs.readJsonSync(admission.paths.shadow.collection).length, 1);
@@ -158,10 +158,10 @@ const cases = [
     fs.removeSync(tmpDir);
   }],
 
-  ["旧池守卫：全流程不产生旧池/pinned 文件", () => {
+  ["旧池守卫：全流程不产生旧池/pinned 文件", async () => {
     const { admission, tmpDir } = makeSetup("oldpool", { v2_enabled: true });
-    admission.submitV2({ content: "她喜欢猫", category: "关于她" });
-    admission.submitV2({ content: "涵：「你是我的锚」", category: "拓本", quote: "你是我的锚" });
+    await admission.submitV2({ content: "她喜欢猫", category: "关于她" });
+    await admission.submitV2({ content: "涵：「你是我的锚」", category: "拓本", quote: "你是我的锚" });
     const all = fs.readdirSync(tmpDir);
     assert.ok(!all.some((f) => f.includes("memory_pool") || f.includes("pinned")), "旧池/pinned 零接触: " + all.join(","));
     fs.removeSync(tmpDir);
