@@ -426,7 +426,7 @@ footer{
   transition:background .2s,transform .15s;
 }
 #imgBtn{
-  background:rgba(255,255,255,.30);
+  background:transparent;
   box-shadow:none;
 }
 #imgBtn:hover{background:var(--accent-faint);color:var(--accent-deep)}
@@ -9142,7 +9142,7 @@ body[data-theme="claude"] footer .inputbar .icon-btn#imgBtn,body[data-theme="cla
 body[data-theme="claude"] footer .inputbar .icon-btn#imgBtn:active,body[data-theme="claude"] footer .inputbar .icon-btn#micBtn:active{background:transparent!important;color:inherit!important}
 body[data-theme="claude"] footer .inputbar .icon-btn#imgBtn .ico,body[data-theme="claude"] footer .inputbar .icon-btn#micBtn .ico{width:20px!important;height:20px!important}
 body[data-theme="claude"] footer .inputbar #input{color:#171717!important;font-size:17px!important;line-height:1.45!important} body[data-theme="claude"] footer .inputbar #input::placeholder{color:#9d9d9d!important}
-body[data-theme="claude"] footer .inputbar #imgBtn,body[data-theme="claude"] footer .inputbar #micBtn{width:40px!important;height:40px!important;background:rgba(255,255,255,.34)!important;backdrop-filter:blur(22px) saturate(145%) brightness(1.06)!important;-webkit-backdrop-filter:blur(22px) saturate(145%) brightness(1.06)!important;border:1px solid rgba(255,255,255,.72)!important;box-shadow:inset 0 1px 1px rgba(255,255,255,.92),inset 0 -1px 1px rgba(0,0,0,.02),0 2px 7px rgba(0,0,0,.035)!important;color:#333!important}
+body[data-theme="claude"] footer .inputbar #imgBtn,body[data-theme="claude"] footer .inputbar #micBtn{width:36px!important;height:36px!important;background:transparent!important;border:none!important;box-shadow:none!important;color:#3c3c43!important}
 body[data-theme="claude"] footer .inputbar #imgBtn::before{font-size:25px!important;color:#222!important}
 body[data-theme="claude"] footer .inputbar #send{width:36px!important;height:36px!important;background:#2f2f2f!important;color:#fff!important;box-shadow:0 2px 7px rgba(0,0,0,.08)!important;transition:transform .12s ease!important}
 body[data-theme="claude"] footer .inputbar #send .ico{transform:rotate(-45deg)!important}
@@ -9288,5 +9288,138 @@ body[data-theme="glass"] input[type="range"]{background:rgba(79,74,69,.12)!impor
   <div id="thinkSheetBody" style="padding:8px 20px 40px;overflow-y:auto;-webkit-overflow-scrolling:touch;font-size:15px;line-height:1.7;color:#333;white-space:pre-wrap;word-break:break-word;overflow-wrap:break-word"></div>
 </div>
 <div id="thinkSheetMask" style="display:none;position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.2);backdrop-filter:blur(2px)"></div>
+<style id="terra-enhance">
+/* ===== 暖陶主题专属增强：Claude Design System 风格 ===== */
+/* 字体加载 */
+@import url('https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=Newsreader:ital,opsz,wght@0,18..72,300;0,18..72,400;0,18..72,500;1,18..72,400&family=Geist+Mono:wght@400;500&display=swap');
+
+/* 全局字体 */
+body[data-theme="terra"] { font-family: Poppins, -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif; }
+body[data-theme="terra"] #chat { font-family: Poppins, -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif; }
+body[data-theme="terra"] #chat .msg .bubble,
+body[data-theme="terra"] #chat .bubble p { font-family: Lora, Georgia, 'PingFang SC', 'Noto Sans CJK SC', serif; line-height: 1.72; }
+body[data-theme="terra"] #chat .meta { font-family: Poppins, sans-serif; }
+
+/* 标题/会话名用 Newsreader 编辑式衬线 */
+body[data-theme="terra"] .header-title,
+body[data-theme="terra"] .session-title,
+body[data-theme="terra"] .set-acc-h,
+body[data-theme="terra"] .modal-title { font-family: Newsreader, Georgia, 'PingFang SC', 'Noto Sans CJK SC', serif !important; font-weight: 400 !important; letter-spacing: 0 !important; }
+
+/* 气泡：用户赤陶实色 + AI 白底留边 */
+body[data-theme="terra"] #chat[data-layout="sms"] .msg.user .bubble {
+  background: var(--accent) !important;
+  color: #ffffff !important;
+  border: none !important;
+  border-bottom-right-radius: 5px !important;
+  box-shadow: 0 1px 3px rgba(201,100,66,.15) !important;
+}
+body[data-theme="terra"] #chat[data-layout="sms"] .msg.ai .bubble {
+  background: var(--popover, #ffffff) !important;
+  color: var(--ink) !important;
+  border: 1px solid var(--border) !important;
+  border-bottom-left-radius: 5px !important;
+  box-shadow: 0 1px 3px rgba(61,57,41,.05) !important;
+}
+
+/* 头像 */
+body[data-theme="terra"] #chat .msg.ai .mav { background: linear-gradient(135deg, var(--accent), var(--accent-deep)) !important; }
+body[data-theme="terra"] #chat .msg.user .mav { background: var(--accent-deep) !important; }
+
+/* 思考链：编辑式小字 + shimmer 赤陶色 */
+body[data-theme="terra"] #chat .rw { border-radius: 12px !important; }
+body[data-theme="terra"] #chat .rw .rw-h {
+  font-family: 'Geist Mono', ui-monospace, monospace !important;
+  font-size: 11px !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+}
+body[data-theme="terra"] #chat .rw-wrap .rw-h.shimmer {
+  background: linear-gradient(90deg, var(--accent-deep) 0%, var(--accent) 50%, var(--accent-deep) 100%) !important;
+  background-size: 200% 100% !important;
+  -webkit-background-clip: text !important; background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  animation: thoughtShimmer 1.5s linear infinite !important;
+}
+
+/* 思考中三点动画（claude-typing-dot 用赤陶色） */
+body[data-theme="terra"] .claude-typing-dot { background: var(--accent) !important; }
+body[data-theme="terra"] .typing-dot { background: var(--accent) !important; }
+
+/* 工具胶囊：badge 风格 + 完成图标色调 */
+body[data-theme="terra"] #chat .tool-trace {
+  border-radius: 12px !important;
+  border: 1px solid var(--border) !important;
+  background: var(--card) !important;
+  box-shadow: 0 1px 3px rgba(61,57,41,.04) !important;
+}
+body[data-theme="terra"] #chat .tool-trace .tt-h {
+  font-family: 'Geist Mono', ui-monospace, monospace !important;
+  font-size: 11px !important;
+  color: var(--accent-deep) !important;
+  letter-spacing: 0.02em !important;
+}
+body[data-theme="terra"] #chat .tool-trace .tt-name {
+  font-family: 'Geist Mono', ui-monospace, monospace !important;
+  color: var(--ink) !important;
+}
+body[data-theme="terra"] #chat .tool-trace .tt-done,
+body[data-theme="terra"] #chat .tool-trace .tt-status-done { color: var(--ok) !important; }
+
+/* 输入框：编辑式圆角 + 聚焦赤陶环 */
+body[data-theme="terra"] footer .inputbar {
+  border-radius: 20px !important;
+  border: 1px solid var(--border) !important;
+  background: var(--popover, #ffffff) !important;
+  box-shadow: 0 1px 3px rgba(61,57,41,.05) !important;
+}
+body[data-theme="terra"] footer .inputbar:focus-within {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px rgba(201,100,66,.08), 0 4px 18px rgba(61,57,41,.06) !important;
+}
+body[data-theme="terra"] footer .inputbar #input { font-family: Poppins, sans-serif !important; }
+body[data-theme="terra"] footer .inputbar #input::placeholder { color: var(--ink3) !important; }
+
+/* 发送按钮：赤陶实色 */
+body[data-theme="terra"] footer .inputbar #send {
+  background: var(--accent) !important;
+  color: #ffffff !important;
+  border-radius: 50% !important;
+  box-shadow: 0 2px 6px rgba(201,100,66,.2) !important;
+}
+body[data-theme="terra"] footer .inputbar #send:hover { background: var(--accent-deep) !important; }
+
+/* 图标按钮 */
+body[data-theme="terra"] footer .inputbar .icon-btn { color: var(--ink2) !important; }
+body[data-theme="terra"] footer .inputbar .icon-btn:hover { color: var(--accent) !important; }
+
+/* 顶部 header */
+body[data-theme="terra"] .feature-bar,
+body[data-theme="terra"] header {
+  font-family: Poppins, sans-serif !important;
+}
+body[data-theme="terra"] .header-title { font-family: Newsreader, Georgia, serif !important; font-weight: 500 !important; }
+body[data-theme="terra"] .header-sub { font-family: Poppins, sans-serif !important; letter-spacing: 0.02em !important; }
+
+/* 会话列表项 */
+body[data-theme="terra"] .session-item { font-family: Poppins, sans-serif !important; }
+body[data-theme="terra"] .session-item.active { border-color: var(--accent) !important; }
+
+/* 代码块 */
+body[data-theme="terra"] #chat pre,
+body[data-theme="terra"] #chat code {
+  font-family: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace !important;
+}
+body[data-theme="terra"] #chat pre { border-radius: 12px !important; }
+
+/* 日期分隔条 badge */
+body[data-theme="terra"] #chat .time-sep,
+body[data-theme="terra"] #chat .date-sep { font-family: Poppins, sans-serif !important; letter-spacing: 0.04em !important; }
+
+/* 模态/抽屉圆角 */
+body[data-theme="terra"] .modal-content,
+body[data-theme="terra"] .sheet { border-radius: 20px !important; }
+
+</style>
 </body>
 </html>
