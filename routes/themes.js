@@ -56,6 +56,18 @@ module.exports = function registerThemeRoutes(app, deps) {
   const baseDir = deps && deps.baseDir ? deps.baseDir : __dirname;
   const uploadsDir = path.join(baseDir, 'data', 'uploads');
 
+  // 2026-09-30 E1：dataURL 前缀可伪造，解码后按声明类型探测魔数，不符即拒（txt 无魔数跳过）
+  const magicOk = function (mime, b) {
+    if (b.length < 12) return false;
+    if (mime === 'image/png') return b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47; // \x89PNG
+    if (mime === 'image/jpeg') return b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF;
+    if (mime === 'image/gif') return b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46; // GIF8
+    if (mime === 'image/webp') return b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46
+      && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50; // RIFF....WEBP
+    if (mime === 'application/pdf') return b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46; // %PDF
+    return true; // text/plain 无魔数
+  };
+
   app.post('/v1/upload-image', async (req, reply) => {
     const body = req.body || {};
     const m = String(body.data || '').match(/^data:(image\/(?:png|jpeg|webp|gif)|application\/pdf|text\/plain);base64,([A-Za-z0-9+/=]+)$/);
@@ -67,6 +79,10 @@ module.exports = function registerThemeRoutes(app, deps) {
     const maxBytes = uploadMaxBytes();
     if (!buf.length || buf.length > maxBytes) {
       reply.code(413).send({ ok: false, error: '附件过大（上限 ' + Math.floor(maxBytes / 1024 / 1024 * 10) / 10 + 'MB，可在聊天页设置调整）' });
+      return;
+    }
+    if (!magicOk(m[1], buf)) {
+      reply.code(400).send({ ok: false, error: '内容与声明的文件类型不符' });
       return;
     }
     await fsp.ensureDir(uploadsDir);

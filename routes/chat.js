@@ -433,6 +433,9 @@ module.exports = function registerChatRoutes(app, deps) {
         }
         searchIndexCache.fp = fp;
         searchIndexCache.items = items;
+        // 2026-09-30 V1 修复：items 重建后旧 index 的 h.i 下标全部失效，必须随之作废——
+        // 否则下方指纹判断恒命中（fp 刚被置成当前值），旧索引被永久复用：新消息不进语义腿、语义分挂错消息。
+        searchIndexCache.index = null;
       }
       // 指纹命中时直接复用已建索引（TF-IDF 建索引是大头，不能每次请求重跑）
       let index = (searchIndexCache.fp === fp) ? searchIndexCache.index : null;
@@ -940,7 +943,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
     if (resolvedModel) body.model = resolvedModel;
     // 2026-09-30 采样参数按模型适配（与唤醒侧 routes/wake-chat.js 同一规则）：
     // kimi 系列上游只接受 temperature=1（HTTP 400 "invalid temperature: only 1 is allowed
-    // for this model"），top_p 同口径钳到 1；其他模型尊重客户端传入（设置页「对话与AI」的温度/top_p）。
+    // for this model"），top_p 只接受 0.95（同日晚实证 400 "invalid top_p: only 0.95 is allowed"，
+    // 初版误钳 1 导致 MCP 流式每轮 400 回退非流式）；其他模型尊重客户端传入（设置页「对话与AI」的温度/top_p）。
     // 此前 chat-settings.json 存的 temperature=1.5 一旦被设备透传，kimi 下聊天会与唤醒同型 400。
     // 在 handler 此处统一钳制：下方 MCP 工具循环与直连分支读同一 body，两路同时生效。
     if (/kimi/i.test(String(body.model || ""))) {
@@ -948,8 +952,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
         console.warn("[chat] kimi 模型不接受自定义 temperature，已钳到 1（原值 " + body.temperature + "）");
         body.temperature = 1;
       }
-      if (body.top_p !== undefined && body.top_p !== 1) {
-        body.top_p = 1;
+      if (body.top_p !== undefined && body.top_p !== 0.95) {
+        body.top_p = 0.95;
       }
     }
     const targetApiUrl = (prov && (prov.api_url || prov.base_url)) || readEnvValue("TARGET_API_URL");

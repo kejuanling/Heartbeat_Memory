@@ -42,10 +42,11 @@ function getWakeMcpClients(baseDir) {
 }
 
 // 2026-09-30 采样参数按模型适配：kimi 系列上游只接受 temperature=1
-// （HTTP 400 "invalid temperature: only 1 is allowed for this model"——0930 10:20 闹钟两次全败的根因），
-// top_p 同口径钳到 1；其他模型维持调用方传入值（唤醒默认 0.8/0.95）。
+// （HTTP 400 "invalid temperature: only 1 is allowed for this model"——0930 10:20 闹钟两次全败的根因）；
+// top_p 只接受 0.95（同日晚实证 400 "invalid top_p: only 0.95 is allowed for this model"，
+// 初版误钳 1 导致聊天侧流式每轮 400 回退非流式）；其他模型维持调用方传入值（唤醒默认 0.8/0.95）。
 function adaptSamplingForModel(model, temperature, topP) {
-  if (/kimi/i.test(String(model || ""))) return { temperature: 1, topP: 1 };
+  if (/kimi/i.test(String(model || ""))) return { temperature: 1, topP: 0.95 };
   return { temperature: temperature, topP: topP };
 }
 

@@ -361,7 +361,7 @@ function safeMerged(m) {
 function decide(detection, validation) {
   if (!detection.candidate) return { action: "reject", why: "detector 非候选（" + detection.kind_guess + "）" };
   if (!validation.allowed) return { action: "reject", why: "validator 硬规则命中: " + validation.matched_rules.join("/") };
-  if (detection.kind_guess === "quote") return { action: "review", why: "quote 无 judge 复核，保守进人工" };
+  if (detection.kind_guess === "quote") return { action: "review", why: "quote 基线进人工（judge 复核仅在正式通道改写动作，此为其未运行时的兜底）" };
   return { action: "admit", why: "校验通过" };
 }
 

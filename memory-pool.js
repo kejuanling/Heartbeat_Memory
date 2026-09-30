@@ -30,9 +30,8 @@ let dirty = false;
 // ⑥ 对话碎片：用户侧入池的对话关键碎片（聊天页「入池」按钮 / 管理台手动）
 // 2026-09-12 五类改造：关于她/认账/拓本 来源于 AI（memory_add 工具 / <memory> 内联标签），
 // 压缩摘要 来源于压缩替换入池，对话碎片 来源于用户侧。旧四类（关于我们/锚点/信号/对话摘要）
-// 取消——存量条目在清洗导入完成前仍带旧类名，读取/编辑放行（LEGACY_CATEGORIES），但不再新增。
+// 已取消——存量旧类名条目 2026-09-30 核对已清零（池内 0 条），LEGACY_CATEGORIES 兼容常量随之删除。
 const CATEGORIES = ["关于她", "认账", "拓本", "压缩摘要", "对话碎片"];
-const LEGACY_CATEGORIES = ["关于我们", "锚点", "信号", "对话摘要"];
 // AI 写入侧（memory_add / <memory> 标签）只允许前三类
 const AI_CATEGORIES = ["关于她", "认账", "拓本"];
 // 压缩替换入池的固定分类
@@ -1009,7 +1008,7 @@ function selectReferenceContext(chunk, refPool, topk, th) {
 
 async function cleanPool(opts) {
   opts = opts || {};
-  if (READONLY) return { ok: false, error: "只读模式（wake-up）不执行记忆池整理" };
+  if (READONLY) return { ok: false, error: "只读模式不执行记忆池整理" };
   const preview = opts.preview !== false;
   const rows = load();
   const active = rows.filter(function (r) { return r.active !== false; });
@@ -1250,7 +1249,7 @@ function applyImportFields(it, to) {
 
 async function importChanges(changes, opts) {
   opts = opts || {};
-  if (READONLY) return { ok: false, error: "只读模式（wake-up）不执行导入" };
+  if (READONLY) return { ok: false, error: "只读模式不执行导入" };
   const { valid, errors } = buildImportPlan(changes);
   const stat = { update: 0, delete: 0, merge: 0, noop: 0 };
   for (const p of valid) stat[p.op === "update" ? "update" : p.op]++;
@@ -1306,7 +1305,7 @@ module.exports = {
   retrieve, retrieveHybrid, breath, recent, ingestSummary, buildReparsePrompt,
   cleanPool, importChanges,
   setConfig, getConfig
-  // 2026-09-28 收窄：AI_CATEGORIES/COMPACTION_CATEGORY/LEGACY_CATEGORIES（内部常量，LEGACY 仅存档标记）、
+  // 2026-09-28 收窄：AI_CATEGORIES/COMPACTION_CATEGORY（内部常量；LEGACY_CATEGORIES 已于 2026-09-30 随旧分类清零删除）、
   // warmVectors/parseCategoryBlocks/reparseSummaryViaLLM（内部调用）、contentSimilarity/tokensOf/decayFactor/scoreOf、
   // buildCleanPrompt/buildImportPlan（内部调用）不再导出；poolKeywords（词云旧实现，被 context-replacements
   // extractPoolKeywords 取代）与 clearRetrievalStats（管理台按钮已撤）整函数删除。

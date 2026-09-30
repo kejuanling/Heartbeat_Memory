@@ -491,17 +491,7 @@
 
  
  
- <!-- 通用确认弹窗 -->
- <div class="modal-overlay" id="confirmModal">
-   <div class="modal" style="max-width:340px;text-align:center">
-     <h3 id="confirm-title" style="margin:0 0 10px;font-size:16px">确认操作</h3>
-     <p id="confirm-text" style="font-size:13px;color:var(--text2);line-height:1.7;margin:0 0 20px"></p>
-     <div class="modal-actions">
-       <button type="button" class="btn btn-outline" onclick="closeModal('confirmModal')">取消</button>
-       <button type="button" class="btn" id="confirm-ok" style="background:#c05050;color:#fff;border:none">确认</button>
-     </div>
-   </div>
- </div>
+<!-- 2026-09-30 V9a：通用确认弹窗 confirmModal 已删——JS 侧改用原生 confirm 后此 markup 成死代码（相关 id 在 mobile.js 零引用） -->
  
  
  <script src="/admin/mobile.js"></script>
