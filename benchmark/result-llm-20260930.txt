@@ -1,0 +1,19 @@
+benchmark: benchmark/benchmark_112.json（112 对，mode=llm）
+total=112 correct=62 overall=55.4%
+
+各 relation 分布（gold 数 / 被判为数该类次数 / 该类正确率）:
+  duplicate     gold= 51  predicted= 70  per-class-acc=88.2%
+  coexist       gold= 61  predicted= 17  per-class-acc=27.9%
+  need_review   gold=  0  predicted= 25  per-class-acc=-
+
+confusion matrix（行=gold，列=predicted）:
+gold\pred     duplicat   update contradi  coexist need_rev
+duplicate          45        0        0        0        6
+update              0        0        0        0        0
+contradiction        0        0        0        0        0
+coexist            25        0        0       17       19
+need_review         0        0        0        0        0
+
+破坏性错误（gold=coexist 被判 duplicate/update）: 25 —— llm 模式门槛 ≤2%（3 例）
+
+llm 门槛 overall ≥82%: 未达标
