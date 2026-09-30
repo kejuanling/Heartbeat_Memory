@@ -818,16 +818,9 @@ function parseLlmArray(cleaned) {
   return null;
 }
 
-function buildReparsePrompt() {
-  const system = "你是长期记忆提取器。你的任务不是总结对话，而是从对话原文中找出那些在未来再次交流时仍然有用、并且会改变你理解用户或处理方式的信息。宁可少记，也不要把聊天流水账写进长期记忆。\n" +
-    "只提取有证据支持的信息，不要根据一次行为猜测人格、心理、动机或身份；不要把你自己的解释当成用户事实。区分一次性事件与稳定倾向：‘今天吃了什么’通常不记，‘长期偏好什么’才记。\n" +
-    "优先提取：稳定偏好/习惯；用户明确要求以后遵守的交互规则；用户反复纠正并希望以后避免的行为；长期目标、项目背景和持续有效的约束；重要关系规则；只有在未来确实有用时才保留重要原话或里程碑。\n" +
-    "不要提取：当天情绪、一次性事件、普通寒暄、玩笑调侃、聊天流水账、已经明显过期的信息、单次行为推导出的性格标签、心理分析、模型自我叙事。\n" +
-    "特别注意：用户对助手的纠正、明确的‘以后不要……/以后要……/记住……’、以及会改变未来回应方式的要求，优先视为高价值规则。不要把这些规则写成对用户人格的判断。\n" +
-    "每条记忆必须独立、简洁、可执行或可验证；不要复述上下文，不要加入未出现的因果关系。quote 只有在原话本身具有长期价值时才保留，而且必须逐字来自原文，不能改写。";
-  const user = "从下面的对话原文中提取长期记忆候选。只输出 JSON 数组，不要输出解释。每项格式为 {\"text\":\"记忆内容\",\"kind\":\"fact|rule|quote|milestone\",\"importance\":0到1之间的小数}。没有真正值得长期记住的信息就输出 []。\n\n判断标准：如果删掉这条信息，未来再次与她交流时基本不会改变你的理解或行为，就不要提取。";
-  return { system, user };
-}
+// 2026-09-30：旧版 buildReparsePrompt 整函数删除——reparse 提示词的唯一实现在 server.js
+// （其 buildReparsePrompt + data/reparse_config.json 自定义覆盖），本函数自 0921 R17 删 LLM 分支后
+// 零调用方、仅剩模块导出（死导出）。导出列表同步移除。
 
 // 2026-09-21 审查 R17 + 用户拍板 (c)：本函数内的「LLM 再解析」分支已整段删除。
 // 删除依据（三条同时成立才敢删）：
@@ -836,9 +829,9 @@ function buildReparsePrompt() {
 //   ② 管理台「解析原文进 review」走的是 server.js 的 extractMemoryCandidates()——另一份实现，
 //      按提示词约定的 {text,kind} 正确解析，产出经 memoryV2Admission.submitPromotion 全落 review
 //      队列人工把关（server.js:3801 路由；b.direct 直接入池已于 2026-09-18 停用并返回 403）；
-//   ③ 被删分支内的解析器读 it.content/it.category，而提示词 buildReparsePrompt 约定的字段是
+//   ③ 被删分支内的解析器读 it.content/it.category，而提示词约定的字段是
 //      {text,kind}——两者对不上使该分支恒产出 0 条却仍返回 ok:true（R17 的根因）。
-// 保留函数名与调用签名（模块导出 reparseSummaryViaLLM 供外部引用），
+// 保留函数名与调用签名（内部被 ingestSummary 调用），
 // 行为与「删除前线上的实际行为」逐字一致：直接按【分类】块解析。
 async function reparseSummaryViaLLM(text) {
   return { ok: true, fallback: true, memories: parseCategoryBlocks(text) };
@@ -1302,7 +1295,7 @@ module.exports = {
   init, shutdown, flush,
   CATEGORIES,
   list, stats, get, add, update, remove, sink, revive,
-  retrieve, retrieveHybrid, breath, recent, ingestSummary, buildReparsePrompt,
+  retrieve, retrieveHybrid, breath, recent, ingestSummary,
   cleanPool, importChanges,
   setConfig, getConfig
   // 2026-09-28 收窄：AI_CATEGORIES/COMPACTION_CATEGORY（内部常量；LEGACY_CATEGORIES 已于 2026-09-30 随旧分类清零删除）、
