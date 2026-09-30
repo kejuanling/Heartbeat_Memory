@@ -46,10 +46,18 @@ const JUDGE_PROMPT_FILE = path.join(__dirname, "data", "judge_prompt.json");
 
 const JUDGE_TEMPLATE_DEFAULT =
   "你是记忆关系判定器。判断【候选】与【既有】两条记忆的关系，只输出规定结论。\n" +
-  "判断顺序：1) 主体是否一致；2) 是否表达同一件事；3) 值是否相同；4) 候选是否有时间/否定/变更信号。\n" +
-  "关系定义：duplicate=同主体同谓语同值（含简版与全量版本）；update=同主体同谓语且值随时间变化（候选文本必须含时间/否定/变更词）；coexist=相似但不同事、或同一内容的不同分层形态；need_review=无法确定（疑似矛盾、跨主体、证据不足时必须选它，这不算失败）。\n" +
+  "判断顺序：1) 主体是否一致；2) 表述形态是否同类——原话（带引号/说话人/口语语气）与转述（第三人称概括/事实陈述/带解读）是两种形态，一边原话一边转述=不同分层，直接判 coexist；3) 同形态下是否同一条：逐字相同，或候选完整复述了既有那条并把它并入更大的事实集合；4) 候选是否有时间/否定/变更信号。\n" +
+  "关系定义：\n" +
+  "- duplicate=同主体同谓语同值，且表述形态同类（同为原话或同为转述）；或候选是既有的全量扩展版（完整复述既有那条一遍，再并列更多同层事实）。\n" +
+  "- update=同主体同谓语且值随时间变化（候选文本必须含时间/否定/变更词）。\n" +
+  "- coexist=以下任一：①多条独立原话的拼合 vs 其中单条（拼合只是容器，每一句都是独立记忆，子项各自保留）；②一边是原话、另一边是转述/概括/带解读（同一内容的不同分层）；③相似但不同事。\n" +
+  "- need_review=无法确定（疑似矛盾、跨主体、证据不足时必须选它，这不算失败）。\n" +
+  "对照示例：\n" +
+  "- 既有「他每天早起跑步，坚持了三年」/ 候选「他作息规律：每天早起跑步坚持三年；晚上十一点前睡；周末爬山」→ duplicate（同为转述；候选完整复述了既有那条并扩展成清单）\n" +
+  "- 既有「小林：'这首歌我单曲循环了一整天。'」/ 候选「小林：'这首歌我单曲循环了一整天。' 小林：'演唱会门票抢到了。' 小林：'下次带朋友一起来。'」→ coexist（多条独立原话的拼合，既有那条是其中的独立子项，各自保留）\n" +
+  "- 既有「他说'我不吃香菜'——饮食上很固执，点菜时要注意」/ 候选「他：'我不吃香菜。'」→ coexist（带解读的完整记忆 vs 其中的裸引原话，不同分层）\n" +
   "当关系为 duplicate 或 update 时，必须输出 merged_text（把两条合并成唯一一条记忆文本）：保留两条中仍有效的信息，以候选的更新为准，删去冗余重复措辞，合并后字数不超过较长原条的 1.5 倍；禁止添加原文不存在的事实或推测。关系为 coexist 或 need_review 时，merged_text 输出 null。\n" +
-  "约束：只依据给定文本判定；禁止输出规定词之外的词；禁止输出 contradiction（疑似矛盾分不清新旧时输出 need_review）；reason 只写一句话。\n" +
+  "约束：只依据给定文本判定；字面包含关系本身不构成 duplicate 的充分理由（先检查形态与分层）；禁止输出规定词之外的词；禁止输出 contradiction（疑似矛盾分不清新旧时输出 need_review）；reason 只写一句话。\n" +
   '输出单行 JSON：{"relation":"duplicate|update|coexist|need_review","confidence":0到1的小数,"reason":"一句话","merged_text":"合并后的文本或null"}\n' +
   "【既有】（${existing_kind}）：${existing_text}\n" +
   "【候选】（${candidate_kind}）：${candidate_text}";
@@ -86,18 +94,13 @@ function interpolateJudgeTemplate(tpl, candidateText, existingText, meta = {}) {
 function buildPrompt(candidateText, existingText, meta = {}) {
   const custom = loadJudgeTemplate();
   if (custom) return interpolateJudgeTemplate(custom, candidateText, existingText, meta);
-  const ek = meta.existingKind ? `（${meta.existingKind}/${meta.existingSubject || ""}/${meta.existingStatus || ""}）` : "";
-  const ck = meta.candidateKind ? `（${meta.candidateKind}/${meta.candidateSubject || ""}）` : "";
-  return [
-    "你是记忆关系判定器。判断【候选】与【既有】两条记忆的关系，只输出规定结论。",
-    "判断顺序：1) 主体是否一致；2) 是否表达同一件事；3) 值是否相同；4) 候选是否有时间/否定/变更信号。",
-    "关系定义：duplicate=同主体同谓语同值（含简版与全量版本）；update=同主体同谓语且值随时间变化（候选文本必须含时间/否定/变更词）；coexist=相似但不同事、或同一内容的不同分层形态；need_review=无法确定（疑似矛盾、跨主体、证据不足时必须选它，这不算失败）。",
-    "当关系为 duplicate 或 update 时，必须输出 merged_text（把两条合并成唯一一条记忆文本）：保留两条中仍有效的信息，以候选的更新为准，删去冗余重复措辞，合并后字数不超过较长原条的 1.5 倍；禁止添加原文不存在的事实或推测。关系为 coexist 或 need_review 时，merged_text 输出 null。",
-    "约束：只依据给定文本判定；禁止输出规定词之外的词；禁止输出 contradiction（疑似矛盾分不清新旧时输出 need_review）；reason 只写一句话。",
-    '输出单行 JSON：{"relation":"duplicate|update|coexist|need_review","confidence":0到1的小数,"reason":"一句话","merged_text":"合并后的文本或null"}',
-    `【既有】${ek}：${existingText}`,
-    `【候选】${ck}：${candidateText}`,
-  ].join("\n");
+  // 2026-10-01 单源收敛：兜底组装直接复用 JUDGE_TEMPLATE_DEFAULT（此前这里有一份独立硬编码文案，
+  // 与常量双副本并存——改常量不动这里等于没改，benchmark 实测抓到）。富 kind 信息（subject/status）保留。
+  const ek = meta.existingKind ? `${meta.existingKind}/${meta.existingSubject || ""}/${meta.existingStatus || ""}` : "";
+  const ck = meta.candidateKind ? `${meta.candidateKind}/${meta.candidateSubject || ""}` : "";
+  return interpolateJudgeTemplate(JUDGE_TEMPLATE_DEFAULT, candidateText, existingText, {
+    existingKind: ek, candidateKind: ck,
+  });
 }
 
 // ---- 输出解析（严格：relation 必须在枚举内、confidence 必须是 0-1 数字，否则判非法）----
