@@ -16,7 +16,7 @@
     "diary_add": "新增一条你的日记。适用于：想主动记录此刻的想法、感受、想对她说的话，或给今天留下一段陪伴记录时使用。",
     "memory_search": "检索记忆工具。",
     "view_paper": "翻看自己写过的创作。不带参数调用=列出最近 10 张（序号+时间+标题/开头）；带 sn=序号 调用=看那一张的全文。",
-    "diary_view": "查看你自己写过的陪伴日记。不带参数=返回最近 1 篇全文；带 date=YYYY-MM-DD 返回那一天；带 count=N 返回最近 N 篇（默认 1，最大 30）。",
+    "diary_view": "查看你自己写过的陪伴日记。不带参数=返回最近 1 篇全文；带 date=YYYY-MM-DD 返回那一天；带 count=N 返回最近 N 天的日记（默认 1，最大 30）。",
     "context_digest": "新会话回复历史工具，输入一个指令，后台会调用AI去在过往的历史摘要中寻找出有用信息整理返回。",
     "memory_update": "直接覆盖更新一条长期记忆的正文。先用 memory_search 找到它的 id，再传 id 和新 content，正文被整体替换（不追加）。适用于：发现某条记忆内容过时/有误/需要补充修正，且新内容能完整替代旧内容时。"
   },
@@ -87,6 +87,19 @@
         "session_id": {
           "type": "string",
           "description": "内部参数：由系统自动注入，无需填写"
+        }
+      }
+    },
+    "diary_view": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "description": "可选：某天，格式 YYYY-MM-DD，如 2026-09-12"
+        },
+        "count": {
+          "type": "integer",
+          "description": "可选：不带 date 时，返回最近 N 天的日记，默认 1，最大 30"
         }
       }
     }

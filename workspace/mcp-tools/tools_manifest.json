@@ -1,6 +1,6 @@
 {
   "server": "小世界MCP工具集",
-  "generated_at": "2026-09-27 22:39:44",
+  "generated_at": "2026-09-28 23:44:20",
   "tools": [
     {
       "name": "context_digest",
@@ -286,7 +286,7 @@
     },
     {
       "name": "diary_view",
-      "description": "查看你自己写过的陪伴日记。不带参数=返回最近 1 篇全文；带 date=YYYY-MM-DD 返回那一天；带 count=N 返回最近 N 篇（默认 1，最大 30）。",
+      "description": "查看你自己写过的陪伴日记。不带参数=返回最近 1 篇全文；带 date=YYYY-MM-DD 返回那一天；带 count=N 返回最近 N 天的日记（默认 1，最大 30）。",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -296,7 +296,7 @@
           },
           "count": {
             "type": "integer",
-            "description": "可选：不带 date 时，返回最近 N 篇日记，默认 1，最大 30"
+            "description": "可选：不带 date 时，返回最近 N 天的日记，默认 1，最大 30"
           }
         }
       },
