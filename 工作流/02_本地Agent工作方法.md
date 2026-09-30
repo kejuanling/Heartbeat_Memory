@@ -100,6 +100,7 @@ scp -i $key C:\deepseek\cloud\server.js root@120.76.99.224:/opt/dylan-heartbeat/
 - 镜像不是唯一真相，以服务器为准：改→推回→pm2 restart。
 - 编辑前 `cp file file.bak-$(date +%s)`（`.bak*` 被 gitignore）。
 - 大文件：用 `sed -n 1,200p` 分段看，别整个 cat。
+- **踩坑（2026-09-30 实测）**：清理 `.bak-*` 时用 `ls *.bak-* | grep -v …` 收集清单——**shell glob 默认不匹配点开头文件**，7 个 `.env.bak-*` 全部漏网（含密钥的旧备份没清掉）；第二轮改 `find . -name "*.bak-*"` 补清。**凡涉及隐藏文件（点开头）的批量收集/清理，一律 find，别用 ls+glob**。
 - **踩坑（2026-09-22 实测）本地镜像的 git 跟踪集与服务器不一致**：`routes/chat-context.js`、`lib/wake-scheduler.js` 在 `C:\deepseek\cloud` 里是 **untracked**（`git diff -- <file>` 对它永远为空、看不到自己改了什么、也不会有 diff 输出），在服务器 `/opt/dylan-heartbeat` 里却是 **tracked**（`git status` 显示 `M`）。**判断"改动是否生效/是否与他人冲突"不能只看本地 `git diff`**——要 `git status --short -- <file>` 或直接比两端 md5。改这类文件时别被"diff 为空"骗成"没改成功"。
 - **本地 git 历史落后于服务器时，必须单独同步 `.git`**：`cloud-sync.ps1` 的排除清单含 `.git`，所以纯文件同步**不会**让本地 git 跟上；落后时本地 `git status` 会把已同步的文件误报为 `M`。恢复方式：服务器 `tar czf /tmp/hb-git.tgz .git` → scp 拉回 → 本地 `rm -rf .git && tar xzf hb-git.tgz`（约 60MB / 2.5 分钟）→ 校验 `git log --oneline -2` 能看到服务器最新提交、且目标文件 `git status` 归零。
 - **本地跑「require 线上模块」的验证脚本（2026-09-25 实测）**：`C:\deepseek\cloud` 镜像**不含 `node_modules`**，直接 `require('cloud/lib/xxx.js')` 会报 `Cannot find module 'fs-extra'`（走 `memory-engine.js`）。解法：先 `$env:NODE_PATH="c:\deepseek\_tmp_node_deps\node_modules"`（该目录已备 fs-extra）再 `node 脚本.js`。两个连带坑：①脚本里 `console.error` 的输出会被 PowerShell 包成 `NativeCommandError`（哪怕 exit code 是 0），断言时要把 `console.error` 和 `console.log` 一并捕获，否则会误判成失败；②要隔离真实数据目录，先 `require.resolve` 目标依赖模块并替换 `require.cache` 的导出（见 05 的 W-3 坑）。
