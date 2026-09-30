@@ -126,18 +126,10 @@ header{
    它们唯一的使用者是已整体删除的 hdAvatar 元素（本就被 JS/CSS 双重 display:none，从未可见），属死样式。
    注意：消息气泡头像走的是 .mav/.message-avatar，与 .avatar 无关，不受影响。 */
 .hd-mid{flex:1;min-width:0;position:relative;left:var(--header-title-x,0px);top:var(--header-title-y,0px)}
-/* 会话名称以屏幕视口为基准居中，不受左右按钮宽度影响 */
-header.hd-wx{display:grid;grid-template-columns:36px 1fr 72px;align-items:center;gap:0} header.hd-wx .hd-mid{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:max-content;align-items:center;text-align:center} header.hd-wx .hd-name-row{display:flex;align-items:center;gap:6px;white-space:nowrap} header.hd-wx .hd-name{text-align:center} header.hd-wx .hd-sub{display:none} header.hd-wx #voiceBtn{grid-column:1;grid-row:1;justify-self:start} header.hd-wx #worldBtn{grid-column:3;grid-row:1;justify-self:end;margin-right:36px} header.hd-wx #navBtn{grid-column:3;grid-row:1;justify-self:end}
-header.hd-wx .hd-name{text-align:center}
 .hd-name{font-size:var(--header-title-size,15px);font-weight:var(--header-title-weight,600);letter-spacing:var(--header-title-letter-spacing,normal);color:var(--header-title-color,var(--ink));font-family:var(--header-title-font,var(--title-font))}
 .hd-sub{font-size:var(--header-sub-size,11px);color:var(--header-sub-color,var(--ink3));letter-spacing:var(--header-sub-letter-spacing,.02em);margin-top:var(--header-sub-gap,2px)}
 /* 顶部栏按聊天布局(模板)差异化 —— 仅调整名称位置/头像与名称，保留左侧会话按钮与右侧菜单按钮 */
 .hd-mid{display:flex;flex-direction:column}
-/* 短信：名称左对齐抵左上角（保留左侧会话头像与右侧菜单） */
-/* 微信：名称左对齐抵左上角 */
-header.hd-sms .hd-mid{align-items:flex-start;text-align:left;flex:1}
-header.hd-sms .hd-name{text-align:left}
-header.hd-sms .hd-sub{display:none}
 .hd-btn{
   width:36px;height:36px;border:none;border-radius:50%;flex-shrink:0;
   background:rgba(255,255,255,.56);color:var(--ink2);
@@ -190,7 +182,7 @@ header.hd-sms .hd-sub{display:none}
   position:relative;
 }
 /* 让消息行占满列后，非气泡富内容(工具/思考/语音/操作行)保持自身宽度、不被拉满 */
-.msg .act-tok,.msg .vmsg,.msg .tok{align-self:flex-start}
+.msg .act-tok,.msg .vmsg{align-self:flex-start}
 /* 多段历史消息：完全静态显示（只有新消息才逐条弹出，打开页面不播动画） */
 .msg.multi{animation:none}
 @keyframes msgIn{
@@ -205,7 +197,6 @@ header.hd-sms .hd-sub{display:none}
 .msg .meta{align-self:center;text-align:center;font-size:10.5px;color:var(--ink3);padding:2px 12px;letter-spacing:1px;margin:3px 0;min-height:0}
 .msg.user .meta{display:none}
 .msg.ai .meta{display:none} /* 时间统一走居中时间线(renderAll), 不再贴气泡 */
-.tok .tok-c{background:var(--accent-faint);border-radius:6px;padding:1px 6px;margin-right:4px;display:inline-block}
 .act-tok{display:flex;flex-wrap:wrap;gap:6px;padding:10px 4px 4px;font-size:12px;color:var(--ink2);align-items:center}
 .act-tok .tok-c{background:var(--accent-faint);border-radius:6px;padding:2px 10px;display:inline-block}
 #editInput{min-height:340px;line-height:1.7}
@@ -380,14 +371,6 @@ header.hd-sms .hd-sub{display:none}
   padding:3px 9px;font-size:13px;margin:2px 0;
 }
 .msg.ai .chip{background:var(--accent-faint)}
-/* token 标签 */
-.tok{
-  font-size:11px;color:var(--ink3);opacity:.75;
-  padding:0 6px;margin-top:1px;
-  display:inline-flex;align-items:center;gap:4px;
-  -webkit-user-select:none;user-select:none;
-}
-.msg.user .tok{color:rgba(255,255,255,.65)}
 /* 多选选中态 */
 .msg.selectable{cursor:pointer}
 .msg .check{
@@ -634,9 +617,6 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .prov-test-btn{flex:0 0 42px;border:1px solid var(--line);border-radius:8px;background:var(--accent-faint);color:var(--ink2);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:all .12s}
 .prov-test-btn:hover{color:var(--accent-deep);border-color:var(--accent-deep)}
 .prov-test-btn:disabled{opacity:.55;cursor:wait}
-.prov-sec{font-size:11px;color:var(--ink3);margin:14px 0 8px;display:flex;align-items:center;gap:6px;letter-spacing:.5px}
-.prov-sec:first-child{margin-top:0}
-.prov-sec .tag{margin-left:2px}
 #provForm .prov-save-bar{position:sticky;bottom:-18px;margin:10px -18px -18px;padding:10px 18px calc(18px + env(safe-area-inset-bottom));background:var(--bg1);border-top:1px solid var(--line);z-index:2}
 /* 0930-02 模型列表页：行布局+定宽删除按钮 / 添加行统一样式 / 列表限高内滚 */
 #provModelsPanel .prov-model-row{flex-direction:row;align-items:center;gap:8px;margin:2px 0;padding:9px 0}
@@ -8934,7 +8914,6 @@ body:has(#chat[data-layout="wx"]) #chat .msg .mcol{gap:0!important}
 body:has(#chat[data-layout="wx"]) #chat .msg .mcol .bubble+.bubble{margin-top:0!important}
 /* 字体 */
 #chat[data-layout="wx"] .msg,#chat[data-layout="wx"] .msg .bubble,#chat[data-layout="wx"] #input,#chat[data-layout="wx"] .inputbar,#chat[data-layout="wx"] .icon-btn{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue","PingFang SC","Noto Sans CJK SC",Arial,sans-serif;font-weight:400}
-body:has(#chat[data-layout="wx"]) header.hd-wx .hd-name{font-family:"Songti SC","STSong","SimSun","Noto Serif CJK SC",serif;font-weight:400}
 /* 会话列表 */
 body:has(#chat[data-layout="wx"]) .session-item,body:has(#chat[data-layout="wx"]) .session,body:has(#chat[data-layout="wx"]) [data-session-id]{border:0!important;border-bottom:1px solid #E5E5E5!important;border-radius:0!important;box-shadow:none!important;background:transparent!important}
 body:has(#chat[data-layout="wx"]) .session-item.active,body:has(#chat[data-layout="wx"]) .session.active,body:has(#chat[data-layout="wx"]) [data-session-id].active{background:rgba(0,0,0,.06)!important;box-shadow:none!important}
