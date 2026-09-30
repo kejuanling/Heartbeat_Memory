@@ -68,7 +68,32 @@ module.exports = function registerThemeRoutes(app, deps) {
     return true; // text/plain 无魔数
   };
 
+  // 2026-09-30 M2：上传频控（每 IP 60 秒 20 次，超限 429）——/v1 虽有网关鉴权，
+  // 这是防御纵深；nginx 侧不加 limit_req（对已鉴权个人系统收益边际小、reload 改动面大）。
+  // 键取 X-Real-IP（nginx 全 location 已设，0921 核实），缺失回退 req.ip。
+  const UPLOAD_RATE_WINDOW_MS = 60000;
+  const UPLOAD_RATE_MAX = 20;
+  const _uploadHits = new Map(); // ip -> 时间戳数组
+  function uploadRateOk(ip) {
+    const now = Date.now();
+    const arr = (_uploadHits.get(ip) || []).filter(t => now - t < UPLOAD_RATE_WINDOW_MS);
+    if (arr.length >= UPLOAD_RATE_MAX) { _uploadHits.set(ip, arr); return false; }
+    arr.push(now);
+    _uploadHits.set(ip, arr);
+    if (_uploadHits.size > 1000) { // 防 Map 无限增长：顺带清过期键
+      for (const [k, v] of _uploadHits) {
+        if (!v.some(t => now - t < UPLOAD_RATE_WINDOW_MS)) _uploadHits.delete(k);
+      }
+    }
+    return true;
+  }
+  const clientIpOf = (req) => String(req.headers['x-real-ip'] || req.ip || '').trim() || 'unknown';
+
   app.post('/v1/upload-image', async (req, reply) => {
+    if (!uploadRateOk(clientIpOf(req))) {
+      reply.code(429).send({ ok: false, error: '上传过于频繁，请稍后再试' });
+      return;
+    }
     const body = req.body || {};
     const m = String(body.data || '').match(/^data:(image\/(?:png|jpeg|webp|gif)|application\/pdf|text\/plain);base64,([A-Za-z0-9+/=]+)$/);
     if (!m) {
@@ -95,6 +120,10 @@ module.exports = function registerThemeRoutes(app, deps) {
   // 通用附件转存（聊天窗口发 PDF/文本/音视频等）：body {name, mime, data(base64 无 dataURL 前缀)}
   // 上限与 /v1/upload-image 同一设置项（cfg.upload_max_mb）；前端 0910 已调用本路由但后端缺失（404），此处补齐。
   app.post('/v1/upload-file', async (req, reply) => {
+    if (!uploadRateOk(clientIpOf(req))) {
+      reply.code(429).send({ ok: false, error: '上传过于频繁，请稍后再试' });
+      return;
+    }
     const body = req.body || {};
     const b64 = String(body.data || '').replace(/^data:[^,]*,/, '');
     const m = b64.match(/^[A-Za-z0-9+/=]+$/);
