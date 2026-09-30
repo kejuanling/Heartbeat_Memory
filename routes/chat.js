@@ -938,6 +938,20 @@ app.post("/v1/chat/completions", async (req, reply) => {
     // 统一模型解析（2026-09-08）：会话级设置 → 全局默认供应商 → env 兜底，与 MCP 路径同一口径
     const { provider: prov, model: resolvedModel } = deps.resolveChatModel(sessionId, body.model);
     if (resolvedModel) body.model = resolvedModel;
+    // 2026-09-30 采样参数按模型适配（与唤醒侧 routes/wake-chat.js 同一规则）：
+    // kimi 系列上游只接受 temperature=1（HTTP 400 "invalid temperature: only 1 is allowed
+    // for this model"），top_p 同口径钳到 1；其他模型尊重客户端传入（设置页「对话与AI」的温度/top_p）。
+    // 此前 chat-settings.json 存的 temperature=1.5 一旦被设备透传，kimi 下聊天会与唤醒同型 400。
+    // 在 handler 此处统一钳制：下方 MCP 工具循环与直连分支读同一 body，两路同时生效。
+    if (/kimi/i.test(String(body.model || ""))) {
+      if (body.temperature !== undefined && body.temperature !== 1) {
+        console.warn("[chat] kimi 模型不接受自定义 temperature，已钳到 1（原值 " + body.temperature + "）");
+        body.temperature = 1;
+      }
+      if (body.top_p !== undefined && body.top_p !== 1) {
+        body.top_p = 1;
+      }
+    }
     const targetApiUrl = (prov && (prov.api_url || prov.base_url)) || readEnvValue("TARGET_API_URL");
     const targetApiKey = (prov && prov.api_key) || readEnvValue("TARGET_API_KEY");
     if (!targetApiUrl || !targetApiKey) {

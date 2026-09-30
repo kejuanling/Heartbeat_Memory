@@ -36,10 +36,27 @@ function getWakeMcpClients(baseDir) {
     });
     return target.map(c => new McpServerClient(c));
   } catch (e) {
-    console.warn("[wake-chat] 加载工具集合配置失败:", e.message);
+    wakeLogWarn("加载工具集合配置失败: " + e.message);
     return [];
   }
 }
+
+// 2026-09-30 采样参数按模型适配：kimi 系列上游只接受 temperature=1
+// （HTTP 400 "invalid temperature: only 1 is allowed for this model"——0930 10:20 闹钟两次全败的根因），
+// top_p 同口径钳到 1；其他模型维持调用方传入值（唤醒默认 0.8/0.95）。
+function adaptSamplingForModel(model, temperature, topP) {
+  if (/kimi/i.test(String(model || ""))) return { temperature: 1, topP: 1 };
+  return { temperature: temperature, topP: topP };
+}
+
+// 2026-09-30 唤醒链路错误/警告日志统一带本地时间前缀（error.log 无时间戳，此前排障需人工对照 out.log）
+function wakeNowLocal() {
+  try {
+    const tu = require("../time_utils");
+    return tu.formatDateTimeInTimeZone(new Date(), tu.resolveTimeZone());
+  } catch (e) { return new Date().toISOString(); }
+}
+function wakeLogWarn(msg) { console.warn("[wake-chat " + wakeNowLocal() + "] " + msg); }
 
 // 唤醒基础上下文：与聊天侧共用统一对话构建器（createConversationBuilder，见 chat-context.js）。
 // 同源同前缀——同一会话同一时刻，唤醒请求与聊天请求的构建器输出逐字一致，上游前缀缓存共享。
@@ -81,7 +98,7 @@ async function runWakeCompletion(deps, opts) {
           const n = ctxV2Runtime.floatMemoriesToTimeline({ appendMessages: deps.appendMessages, sessionId, mems: r.relevantHits, baseDir: deps.baseDir });
           if (n) console.log('[wake-chat] 本轮记忆浮现', n, '条');
         }
-      } catch (e) { console.warn('[wake-chat] Context V2 组装失败，回退旧上下文:', e.message); }
+      } catch (e) { wakeLogWarn("Context V2 组装失败，回退旧上下文: " + e.message); }
     }
 
     // [唤醒] 块：先落盘（追加式、原地不动、不插位），再注入本次请求末尾。
@@ -108,13 +125,13 @@ async function runWakeCompletion(deps, opts) {
               console.log(`[wake-chat] 已清理旧 [唤醒] 块 ${tl.length - kept.length} 条（session ${sessionId}）`);
             }
           } catch (e) {
-            console.warn("[wake-chat] 清理旧 [唤醒] 块失败（跳过清理，仅追加新块）:", e.message);
+            wakeLogWarn("清理旧 [唤醒] 块失败（跳过清理，仅追加新块）: " + e.message);
           }
           const created = deps.appendMessages(sessionId, [{ role: "developer", content: blockContent }]);
           wakeBlockId = (created && created[0] && created[0].id) || null;
           console.log(`[wake-chat] developer [唤醒] 块已落盘（session ${sessionId}，${blockContent.length} 字）`);
         } catch (e) {
-          console.warn("[wake-chat] [唤醒] 块落盘失败（仍注入本次请求）:", e.message);
+          wakeLogWarn("[唤醒] 块落盘失败（仍注入本次请求）: " + e.message);
         }
       }
       msgs.push({ role: "developer", content: blockContent });
@@ -151,6 +168,8 @@ async function runWakeCompletion(deps, opts) {
     const url = (prov && (prov.api_url || prov.base_url)) || deps.readEnvValue("TARGET_API_URL");
     const key = (prov && prov.api_key) || deps.readEnvValue("TARGET_API_KEY");
     if (!url || !key) throw new Error("TARGET_API_URL / TARGET_API_KEY 或 AI 供应商未配置");
+    // 2026-09-30 按最终模型适配采样参数（kimi → 1/1）
+    const sampling = adaptSamplingForModel(model, temperature, topP);
     const profile = (prov && prov.profile) || "default";
     const outbound = mapMessagesForProvider(profile, sanitized);
 
@@ -201,8 +220,8 @@ async function runWakeCompletion(deps, opts) {
           messages: outbound,
           serverClients: clients,
           sessionId,
-          temperature,
-          top_p: topP,
+          temperature: sampling.temperature,
+          top_p: sampling.topP,
           onEvent: null
         });
         if (r && typeof r.text === "string" && deps.normalizeContentToText(r.text).trim()) {
@@ -214,7 +233,7 @@ async function runWakeCompletion(deps, opts) {
           console.log(`[wake-chat] 工具循环完成：调用工具 ${toolHistory.length} 个，正文 ${text.length} 字`);
         }
       } catch (e) {
-        console.warn("[wake-chat] 工具循环失败，回退无工具直连:", e.message);
+        wakeLogWarn("工具循环失败，回退无工具直连: " + e.message);
       }
     }
 
@@ -228,7 +247,7 @@ async function runWakeCompletion(deps, opts) {
         resp = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-          body: JSON.stringify({ model, messages: outbound, temperature, top_p: topP, stream: false }),
+          body: JSON.stringify({ model, messages: outbound, temperature: sampling.temperature, top_p: sampling.topP, stream: false }),
           signal: controller.signal
         });
         // body 读取也必须在超时窗口内（2026-09-15 修复）：此前 finally 在 fetch 返回即清定时器，
