@@ -470,8 +470,17 @@ function createConversationBuilder(deps) {
     // system 人设（2026-09-24 B 方案）：服务端权威解析优先（会话级备份 -> 全局），
     // 盘上时间线里的 system 仅作兜底。前端请求带什么 system 都不再决定这里发什么。
     let systemRaw = null;
-    const authoritativeSP = (typeof resolveSessionSystemPrompt === "function")
-      ? (resolveSessionSystemPrompt(sessionId) || "") : "";
+    // 1002-11 快照优先：会话已有注入快照 → 人设取快照值（永久不变，改全局人设不影响）；
+    // 无快照走原权威解析（resolveSessionSystemPrompt 会话级 → 全局）。
+    let snapSystem = "";
+    if (typeof deps.loadSnapshot === "function") {
+      try {
+        const _sp = deps.loadSnapshot(sessionId);
+        snapSystem = _sp && typeof _sp.system_prompt === "string" ? _sp.system_prompt : "";
+      } catch (e) { snapSystem = ""; }
+    }
+    const authoritativeSP = snapSystem
+      || ((typeof resolveSessionSystemPrompt === "function") ? (resolveSessionSystemPrompt(sessionId) || "") : "");
     if (authoritativeSP.trim()) {
       systemRaw = { role: "system", content: authoritativeSP };
     } else {

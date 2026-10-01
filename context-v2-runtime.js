@@ -15,9 +15,11 @@
 // 永久在场，聊天与唤醒行为一致（0920 用户拍板）。
 
 const path = require('path');
+const fs = require('fs');
 const fsp = require('fs-extra');
 const { buildContextBlocks } = require('./context-v2-builder');
 const shadow = require('./context-v2-shadow');
+const snapStore = require('./context-snapshot');
 
 // 把 builder 输出套进消息：剔除旧 [永久上下文]/[跨窗口] developer 块 →
 // 固定块插到开头连续 system 之后；relevant_memories 单独追加到
@@ -40,30 +42,87 @@ function apply(messages, blocks) {
 // opts: { baseDir, sessionId, messages, loadTimeline, normalizeContentToText }
 // 返回 { messages, relevantHits }；失败向上抛，由调用方 catch 回退旧上下文。
 let _vecScoreWarned = false;
-async function assembleAndApply(opts) {
-  const input = shadow.assembleInput({
-    baseDir: opts.baseDir,
-    sessionId: opts.sessionId,
-    llmMessages: opts.messages,
-    loadTimeline: opts.loadTimeline,
-    normalizeContentToText: opts.normalizeContentToText,
-  });
-  // 0919 注入语义升级（聊天唤醒同款）：Relevant 打分用 bge 余弦；
-  // embed 熔断等算分失败不传 vecScores，builder 回落字面，注入不致全灭。
+// 快照模式下相关记忆动态计算的最小输入（1002-11，方案 B）：
+// 只读 memory_v2 + 浮标清单 + 当前 query，其余固定输入字段置空——固定块由快照提供，
+// 这里只为 relevant_memories 块（按本轮 user 消息浮动）与 relevantHits 服务。
+function minimalAssembleInput(opts) {
+  const dataDir = path.join(opts.baseDir, 'data');
+  let memoriesV2 = [];
+  try { memoriesV2 = JSON.parse(fs.readFileSync(path.join(dataDir, 'memory_v2.json'), 'utf8')); } catch (e) {}
+  let query = '';
+  try {
+    const llmMessages = Array.isArray(opts.messages) ? opts.messages : [];
+    for (let i = llmMessages.length - 1; i >= 0; i--) {
+      const m = llmMessages[i];
+      if (m && m.role === 'user') { query = opts.normalizeContentToText(m.content) || ''; break; }
+    }
+  } catch (e) {}
+  let excludeIds = [];
+  try {
+    const map = JSON.parse(fs.readFileSync(path.join(dataDir, 'context_v2_floated.json'), 'utf8'));
+    const arr = map[String(opts.sessionId || 'default')];
+    excludeIds = Array.isArray(arr) ? arr.map(String) : [];
+  } catch (e) {}
+  return { pinnedEntries: [], timeline: [], diaryEntries: [], memoriesV2: memoriesV2, query: query, excludeIds: excludeIds, config: { diaryCount: 0 }, map: null };
+}
+
+// 语义算分（0919 注入语义升级：Relevant 打分用 bge 余弦；失败回落字面，注入不致全灭）
+async function attachVecScores(input) {
   try {
     const activeRows = require('./memory-v2').createStore({ config: {} }).list({ status: 'active' });
     const rs = await require('./memory-v2-vectors').relevantScores(activeRows, input.query);
     if (rs && rs.ok) input.vecScores = rs.scores;
   } catch (e) {
-    // 语义算分失败按字面回落。仅首次告警：此前这里是空 catch，'../memory-v2' 的路径写错
-    // 被静默吞掉、V2 语义检索长期未生效却无人发现（2026-09-21 审查 R16）。
     if (!_vecScoreWarned) {
       _vecScoreWarned = true;
       console.warn('[context-v2] 语义算分不可用，本次起回落字面检索（后续同类失败不再重复告警）:', e && e.message);
     }
   }
-  const built = buildContextBlocks(input);
-  return { messages: apply(opts.messages, built.blocks), relevantHits: built.relevantHits || [] };
+}
+
+async function assembleAndApply(opts) {
+  const existing = snapStore.loadSnapshot(opts.baseDir, opts.sessionId);
+  let blocks;
+  let relevantHits = [];
+  if (existing && Array.isArray(existing.fixed_blocks)) {
+    // ---- 快照模式（1002-11）：人设与固定块永不重算，仅相关记忆动态 ----
+    const input = minimalAssembleInput(opts);
+    await attachVecScores(input);
+    const built = buildContextBlocks(input);
+    blocks = existing.fixed_blocks
+      .filter(function (b) { return b && b.content; })
+      .map(function (b) { return { key: b.key, title: b.title || '', content: b.content, empty: false }; });
+    const rel = built.blocks.find(function (b) { return b.key === 'relevant_memories' && !b.empty; });
+    if (rel) blocks.push(rel);
+    relevantHits = built.relevantHits || [];
+  } else {
+    // ---- 首次（新会话 / 存量会话无快照）：全量组装并固化快照 ----
+    const input = shadow.assembleInput({
+      baseDir: opts.baseDir,
+      sessionId: opts.sessionId,
+      llmMessages: opts.messages,
+      loadTimeline: opts.loadTimeline,
+      normalizeContentToText: opts.normalizeContentToText,
+    });
+    await attachVecScores(input);
+    const built = buildContextBlocks(input);
+    const sysMsg = (opts.messages || []).find(function (m) { return m && m.role === 'system'; });
+    try {
+      snapStore.saveSnapshot(opts.baseDir, opts.sessionId, {
+        created_at: new Date().toISOString(),
+        system_prompt: sysMsg && sysMsg.content ? String(sysMsg.content) : '',
+        fixed_blocks: built.blocks
+          .filter(function (b) { return b.key !== 'relevant_memories' && !b.empty; })
+          .map(function (b) { return { key: b.key, title: b.title || '', content: b.content }; }),
+      });
+      console.log('[ctx-v2] 会话注入快照已生成: session=' + opts.sessionId);
+    } catch (e) {
+      console.warn('[ctx-v2] 快照保存失败（不影响本次请求，下次重试生成）:', e && e.message);
+    }
+    blocks = built.blocks;
+    relevantHits = built.relevantHits || [];
+  }
+  return { messages: apply(opts.messages, blocks), relevantHits: relevantHits };
 }
 
 // 记忆浮现写入（S4 聊天侧实现原样搬入，0920 起两侧共用）：

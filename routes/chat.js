@@ -190,6 +190,7 @@ module.exports = function registerChatRoutes(app, deps) {
     prepareMessageForLLM,
     stripPosition,
     resolveSessionSystemPrompt,
+    loadSnapshot: (sid) => require("../context-snapshot").loadSnapshot(baseDir, sid),   // 1002-11 注入前缀快照
     incrementalContext: contextReplacements.buildIncrementalContext,   // 0929 增量：块摘要化+尾部现算
     fullCache: false   // 0929 聊天只走增量；整体缓存留给唤醒/重试（fp 不变场景）
   });
