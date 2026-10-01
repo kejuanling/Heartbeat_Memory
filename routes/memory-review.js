@@ -14,7 +14,7 @@ module.exports = function registerMemoryReviewRoutes(app, { basicAuth, admission
 
   app.get("/admin/memory-review/queue", auth, async (req, reply) => {
     if (!ready()) return reply.code(503).send({ error: "memory-v2 admission 未初始化" });
-    const items = admission.executorMain.listQueue("pending_review").map((q) => ({
+    const items = admission.executorMain.listQueue("pending_review").slice().sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || ""))).map((q) => ({
       id: q.id,
       status: q.status,
       created_at: q.created_at,
