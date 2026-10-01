@@ -6195,7 +6195,8 @@ app.get("/xie-diary/api/list", { preHandler: xieDiaryAuth }, async (req, reply) 
     const hiddenSet = readDiaryHiddenSet();
     const entries = readDiaryEntries().map(e => ({
       name: e.name, relPath: e.relPath, session: e.session, updated_at: e.updated_at, content: e.content,
-      hidden: hiddenSet.has(e.relPath) || (!e.session && hiddenSet.has(e.name))
+      hidden: hiddenSet.has(e.relPath) || (!e.session && hiddenSet.has(e.name)),
+      vc: countDiaryVersions(e.relPath)
     }));
     reply.send({ entries });
   } catch (err) {
@@ -6223,6 +6224,58 @@ app.post("/xie-diary/api/hide", { preHandler: xieDiaryAuth }, async (req, reply)
   }
 });
 
+// ========================
+// 门户日记历史版本（2026-10-02）
+// 编辑保存前把整份旧内容另存一份 → 编辑不再是不可逆覆盖。
+// 存 data/diary_versions/<safe(relPath)>/v<ISO>.md：刻意不放在 diary/ 下，
+// 因此不会被 readDiaryEntries / 跨窗口注入 / diary_view 扫到（文件名也不匹配日记正则，双保险）。
+// ========================
+const DIARY_VERSIONS_DIR = path.join(__dirname, "data", "diary_versions");
+const DIARY_VERSION_MAX = 50;   // 每篇最多留 50 份，超出删最旧
+function diaryVersionKey(rel) {
+  // rel 已过 resolveDiaryRelPath 校验（只允许「会话目录/日期.md」或「日期.md」）
+  return String(rel || "").replace(/\//g, "__").replace(/[^A-Za-z0-9_.-]/g, "_");
+}
+function diaryVersionDir(rel) { return path.join(DIARY_VERSIONS_DIR, diaryVersionKey(rel)); }
+function saveDiaryVersion(rel, content) {
+  const dir = diaryVersionDir(rel);
+  fs.mkdirSync(dir, { recursive: true });
+  const name = "v" + new Date().toISOString().replace(/[:.]/g, "-") + ".md";
+  fs.writeFileSync(path.join(dir, name), String(content == null ? "" : content), "utf-8");
+  try {   // 超出上限删最旧
+    const all = fs.readdirSync(dir).filter(n => /^v.+\.md$/.test(n)).sort();
+    for (let i = 0; i < all.length - DIARY_VERSION_MAX; i++) fs.unlinkSync(path.join(dir, all[i]));
+  } catch (e) {}
+  return name;
+}
+function listDiaryVersions(rel) {
+  const dir = diaryVersionDir(rel);
+  let names = [];
+  try { names = fs.readdirSync(dir).filter(n => /^v.+\.md$/.test(n)); } catch (e) { return []; }
+  const pad = (x) => String(x).padStart(2, "0");
+  return names.sort().reverse().map((n) => {
+    let time = n.slice(1, -3), chars = 0;
+    try {
+      const st = fs.statSync(path.join(dir, n));
+      const d = new Date(st.mtimeMs);
+      time = d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " "
+           + pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+    } catch (e) {}
+    try { chars = fs.readFileSync(path.join(dir, n), "utf-8").length; } catch (e) {}
+    return { ts: n, time, chars };
+  });
+}
+function countDiaryVersions(rel) {
+  try { return fs.readdirSync(diaryVersionDir(rel)).filter(n => /^v.+\.md$/.test(n)).length; } catch (e) { return 0; }
+}
+function findDiaryVersion(rel, ts) {
+  const n = String(ts || "");
+  if (!/^v[A-Za-z0-9_.:-]+\.md$/.test(n)) return null;    // 防目录穿越
+  const dir = diaryVersionDir(rel);
+  const full = path.join(dir, n);
+  if (full !== dir && !full.startsWith(dir + path.sep)) return null;
+  return fs.existsSync(full) ? { full, name: n } : null;
+}
 // 门户：编辑日记（2026-09-20）。与上面 update 同一套落盘+时间线同步逻辑，但走门户口令门；
 // 前端 xie-diary 页「编辑」按钮调用。content=整份文件新内容（前端负责只改本篇段落）。
 app.post("/xie-diary/api/update", { preHandler: xieDiaryAuth }, async (req, reply) => {
@@ -6239,11 +6292,59 @@ app.post("/xie-diary/api/update", { preHandler: xieDiaryAuth }, async (req, repl
       return reply.code(400).send({ error: "目标不是普通文件：" + r.rel });
     }
     const newContent = String(content === undefined ? "" : content);
+    // 2026-10-02：落盘前把整份旧内容另存为历史版本（编辑不再是不可逆覆盖）
+    try { saveDiaryVersion(r.rel, fs.readFileSync(r.full, "utf-8")); }
+    catch (e) { console.error("[xie-diary] 保存历史版本失败:", e.message); }
     atomicWriteFileSync(r.full, newContent);
     const syncedEvents = syncDiarySpecialEvents(r.fileName, newContent, r.session);
     reply.send({ success: true, file: r.rel, syncedEvents, chars: newContent.length });
   } catch (err) {
     console.error("[xie-diary] 编辑日记失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 门户：某篇日记的历史版本列表（2026-10-02）。只回时间与字数，不回正文（正文按条单独取）。
+app.get("/xie-diary/api/versions", { preHandler: xieDiaryAuth }, async (req, reply) => {
+  try {
+    const r = resolveDiaryRelPath(String(req.query.relPath || ""));
+    if (!r) return reply.code(400).send({ error: "日记路径格式不正确" });
+    reply.send({ versions: listDiaryVersions(r.rel) });
+  } catch (err) {
+    console.error("[xie-diary] 版本列表失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
+// 门户：某个历史版本的正文（点「查看」时才取，避免列表一次拉几十份全文）
+app.get("/xie-diary/api/version", { preHandler: xieDiaryAuth }, async (req, reply) => {
+  try {
+    const r = resolveDiaryRelPath(String(req.query.relPath || ""));
+    if (!r) return reply.code(400).send({ error: "日记路径格式不正确" });
+    const v = findDiaryVersion(r.rel, req.query.ts);
+    if (!v) return reply.code(404).send({ error: "历史版本不存在" });
+    reply.send({ content: fs.readFileSync(v.full, "utf-8") });
+  } catch (err) {
+    console.error("[xie-diary] 版本正文失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
+// 门户：把某篇日记恢复到指定历史版本（2026-10-02）。
+// 恢复前先把「当前内容」存为一个新版本 —— 恢复本身也可逆，永不丢内容。
+app.post("/xie-diary/api/restore", { preHandler: xieDiaryAuth }, async (req, reply) => {
+  try {
+    const body = req.body || {};
+    const r = resolveDiaryRelPath(body.relPath);
+    if (!r) return reply.code(400).send({ error: "日记路径格式不正确" });
+    if (!fs.existsSync(r.full)) return reply.code(404).send({ error: "日记文件不存在：" + r.rel });
+    const v = findDiaryVersion(r.rel, body.ts);
+    if (!v) return reply.code(404).send({ error: "历史版本不存在" });
+    saveDiaryVersion(r.rel, fs.readFileSync(r.full, "utf-8"));
+    const old = fs.readFileSync(v.full, "utf-8");
+    atomicWriteFileSync(r.full, old);
+    const syncedEvents = syncDiarySpecialEvents(r.fileName, old, r.session);
+    reply.send({ success: true, file: r.rel, chars: old.length, syncedEvents });
+  } catch (err) {
+    console.error("[xie-diary] 恢复历史版本失败:", err);
     reply.code(500).send({ error: err.message });
   }
 });

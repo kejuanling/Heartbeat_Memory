@@ -87,6 +87,16 @@ h1{
 .diary-hide-btn:hover{background:rgba(240,196,192,0.25)}
 .diary-edit-btn{background:none;border:1px solid rgba(181,131,122,0.35);border-radius:10px;color:#b5837a;font-family:inherit;font-size:0.65rem;letter-spacing:1px;padding:0.15rem 0.6rem;cursor:pointer;flex:none}
 .diary-edit-btn:hover{background:rgba(240,196,192,0.25)}
+.diary-hist-btn{background:none;border:1px solid rgba(181,131,122,0.35);border-radius:10px;color:#b5837a;font-family:inherit;font-size:0.65rem;letter-spacing:1px;padding:0.15rem 0.6rem;cursor:pointer;flex:none}
+.diary-hist-btn:hover{background:rgba(240,196,192,0.25)}
+.hist-mask{position:fixed;top:0;right:0;bottom:0;left:0;background:rgba(60,45,40,0.34);z-index:80;display:flex;align-items:center;justify-content:center;padding:1rem}
+.hist-modal{background:#fdf8f4;border-radius:14px;max-width:34rem;width:100%;max-height:78vh;overflow:auto;padding:1rem 1.1rem;box-shadow:0 12px 40px rgba(90,60,50,0.22)}
+.hist-title{font-size:0.82rem;color:#6a584a;letter-spacing:1px;margin-bottom:0.55rem;word-break:break-all}
+.hist-item{border-top:1px dashed rgba(181,131,122,0.3);padding:0.5rem 0}
+.hist-meta{font-size:0.68rem;color:#8a756a;display:flex;align-items:center;gap:0.5rem}
+.hist-ops{margin-left:auto;display:inline-flex;gap:0.35rem;flex:none}
+.hist-body{font-size:0.75rem;line-height:1.8;color:#6a584a;white-space:pre-wrap;margin:0.45rem 0 0.15rem;background:rgba(255,255,255,0.72);border-radius:8px;padding:0.5rem 0.6rem;max-height:14rem;overflow:auto}
+.hist-btn{background:none;border:1px solid rgba(181,131,122,0.35);border-radius:8px;color:#b5837a;font-family:inherit;font-size:0.62rem;letter-spacing:1px;padding:0.1rem 0.5rem;cursor:pointer}
 .ft{text-align:center;margin-top:1.8rem;color:#d4bcb0;font-size:0.62rem;letter-spacing:2px}
 </style>
 </head>
@@ -212,6 +222,7 @@ h1{
       +'<span class="diary-hidden-tag"'+(d.hidden?'':' style="display:none"')+'>已隐藏</span>'
       +'<span class="day-ops" style="margin-left:auto;display:inline-flex;gap:0.35rem;flex:none">'
       +'<button class="diary-edit-btn" data-w="'+d._wid+'">编辑</button>'
+      +(d.vc?'<button class="diary-hist-btn" data-rel="'+esc(d.relPath)+'" data-w="'+d._wid+'">历史'+(d.vc>1?'·'+d.vc:'')+'</button>':'')
       +'<button class="diary-hide-btn" data-rel="'+esc(d.relPath)+'" data-w="'+d._wid+'" data-hidden="'+(d.hidden?'1':'0')+'">'+(d.hidden?'显示':'隐藏')+'</button>'
       +'</span>'
       +'</div>'
@@ -246,7 +257,56 @@ h1{
       bindCard(fresh);
     });
   }
-  // 给一张卡（或整个列表容器）绑交互：隐藏/编辑/展开
+  // 历史版本弹层：列表只取时间/字数，点「查看」才拉正文，点「恢复」写回（恢复前当前内容会先存为新版本）
+  function openHistory(rel){
+    fetch('/xie-diary/api/versions?relPath='+encodeURIComponent(rel),{headers:authHeaders()})
+      .then(function(r){ if(r.status===401){ showKeyGate(); throw new Error('需要访问口令'); } return r.json(); })
+      .then(function(j){ renderHistory(rel,(j&&j.versions)||[]); })
+      .catch(function(e){ if(e.message!=='需要访问口令') alert('读取历史失败：'+e.message); });
+  }
+  function renderHistory(rel,vs){
+    var mask=document.createElement('div'); mask.className='hist-mask';
+    var box=document.createElement('div'); box.className='hist-modal';
+    var html='<div class="hist-title">历史版本 · '+esc(rel)+'</div>';
+    if(!vs.length) html+='<div style="font-size:0.75rem;color:#8a756a">还没有历史版本（编辑保存后会自动留下旧内容）</div>';
+    vs.forEach(function(v,i){
+      html+='<div class="hist-item" data-i="'+i+'">'
+        +'<div class="hist-meta"><span>'+esc(v.time)+'</span><span>'+(v.chars||0)+' 字</span>'
+        +'<span class="hist-ops"><button class="hist-btn hv">查看</button><button class="hist-btn hr">恢复</button></span>'
+        +'</div></div>';
+    });
+    html+='<div style="margin-top:0.85rem;text-align:right"><button class="hist-btn" id="histClose">关闭</button></div>';
+    box.innerHTML=html; mask.appendChild(box); document.body.appendChild(mask);
+    function close(){ if(mask.parentNode) mask.parentNode.removeChild(mask); }
+    mask.addEventListener('click',function(e){ if(e.target===mask) close(); });
+    box.querySelector('#histClose').addEventListener('click',close);
+    Array.prototype.forEach.call(box.querySelectorAll('.hist-item'),function(item){
+      var i=+item.getAttribute('data-i'), v=vs[i];
+      item.querySelector('.hv').addEventListener('click',function(){
+        var ex=item.querySelector('.hist-body');
+        if(ex){ ex.parentNode.removeChild(ex); item.querySelector('.hv').textContent='查看'; return; }
+        item.querySelector('.hv').textContent='收起';
+        var d=document.createElement('div'); d.className='hist-body'; d.textContent='（读取中…）';
+        item.appendChild(d);
+        fetch('/xie-diary/api/version?relPath='+encodeURIComponent(rel)+'&ts='+encodeURIComponent(v.ts),{headers:authHeaders()})
+          .then(function(r){ return r.json(); })
+          .then(function(j){ d.textContent=(j&&typeof j.content==='string')?j.content:'（读取失败）'; })
+          .catch(function(){ d.textContent='（读取失败）'; });
+      });
+      item.querySelector('.hr').addEventListener('click',function(){
+        var b=item.querySelector('.hr');
+        if(!confirm('把这篇恢复到 '+v.time+' 的版本？\n当前内容会先存为一个新版本，不会丢。')) return;
+        b.disabled=true; b.textContent='恢复中…';
+        api('/xie-diary/api/restore',{relPath:rel,ts:v.ts})
+          .then(function(j){
+            if(j&&j.success){ close(); loadList(); }
+            else { b.disabled=false; b.textContent='恢复'; alert('恢复失败：'+((j&&j.error)||'未知错误')); }
+          })
+          .catch(function(e){ b.disabled=false; b.textContent='恢复'; if(e.message!=='需要访问口令') alert('恢复失败：'+e.message); });
+      });
+    });
+  }
+  // 给一张卡（或整个列表容器）绑交互：隐藏/编辑/展开/历史
   function bindCard(root){
     Array.prototype.forEach.call(root.querySelectorAll('.group-head'),function(head){
       head.addEventListener('click',function(){ head.parentNode.classList.toggle('open'); });
@@ -302,7 +362,7 @@ h1{
             .then(function(j){
               if(j&&j.success){
                 var delta=newText.length-(d._be-d._bs);
-                d.text=newText; d._raw=newRaw; d._be+=delta;
+                d.text=newText; d._raw=newRaw; d._be+=delta; d.vc=(d.vc||0)+1;
                 // 同文件其它篇的偏移跟着平移
                 writings.forEach(function(o){ if(o!==d&&o.relPath===d.relPath){ if(o._bs>=d._be-delta) { o._bs+=delta; o._be+=delta; } } });
                 msg.textContent='';
@@ -312,6 +372,10 @@ h1{
             .catch(function(e){ sb.disabled=false; msg.textContent=(e.message==='需要访问口令')?'':('保存失败：'+e.message); if(e.message==='需要访问口令') showKeyGate(); });
         });
       });
+    });
+    // 历史版本（2026-10-02）：点开列出该篇历次编辑前的旧内容，可查看 / 恢复
+    Array.prototype.forEach.call(root.querySelectorAll('.diary-hist-btn'),function(btn){
+      btn.addEventListener('click',function(){ openHistory(btn.getAttribute('data-rel')); });
     });
     // 展开/收起：截断文本与全文整段重渲染
     Array.prototype.forEach.call(root.querySelectorAll('.expand-btn'),function(btn){
@@ -393,7 +457,8 @@ h1{
           _wid:writings.length,
           _raw:raw,
           _bs:s.bs,
-          _be:s.be
+          _be:s.be,
+          vc:e.vc||0
         });
       });
     });
