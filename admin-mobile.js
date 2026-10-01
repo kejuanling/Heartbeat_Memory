@@ -1413,7 +1413,7 @@ function updateCcStatusBar(d){
      }else{
        const idx = Number(key);
        const c = chunks.find(function(x){ return x.index === idx; });
-       if(c && !c.cached){
+       if(c){
          if(c.aiRep){
            todo.push({type: 'ai', repId: c.repId, idx: idx, label: '块 #' + idx});
          }else{
@@ -1457,6 +1457,11 @@ function updateCcStatusBar(d){
        toast(item.label + ' 生成失败：' + e.message);
        if(msg) msg.textContent = '已生成 ' + done + '/' + todo.length + '，' + item.label + ' 失败：' + e.message;
        break;
+     }
+     // 2026-10-01：批量生成每块间隔 30s，避免连续打上游模型
+     if(i < todo.length - 1){
+       if(msg) msg.textContent = '已生成 ' + (i+1) + '/' + todo.length + '，休息 30 秒…';
+       await new Promise(function(r){ setTimeout(r, 30000); });
      }
    }
    resetCcMsgCache();
