@@ -3287,9 +3287,10 @@ app.get("/internal/context-search", async (req, reply) => {
     const allSessions = req.query.all_sessions === "1" || req.query.all_sessions === "true";
     const limit = Number(req.query.limit) || undefined;
     const threshold = req.query.threshold !== undefined ? Number(req.query.threshold) : undefined;
+    const timePrefix = req.query.time_prefix !== undefined ? String(req.query.time_prefix) : undefined;
     let q = req.query.q;
     const useLatestUser = req.query.use_latest_user === "1";
-    if (useLatestUser && String(q || "").trim() === "") {
+    if (useLatestUser && String(q || "").trim() === "" && !timePrefix) {
       // MCP 工具未提供 q：取当前会话最新一条用户消息原文当检索查询。
       // 会话解析走 getLatestUserMessage → loadTimeline 的 effectiveSession 链
       //（工具回调场景由 noteMcpChatSession 的 90 秒窗口兜底）。
@@ -3299,7 +3300,7 @@ app.get("/internal/context-search", async (req, reply) => {
       }
       q = latest.content;
     }
-    const result = await contextReplacements.searchContextEnhanced(q, { mode, allSessions, limit, threshold });
+    const result = await contextReplacements.searchContextEnhanced(q, { mode, allSessions, limit, threshold, timePrefix });
     if (useLatestUser && result && result.ok) result.query_source = "latest_user";
     reply.send(result);
   } catch (err) {

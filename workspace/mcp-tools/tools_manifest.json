@@ -1,6 +1,6 @@
 {
   "server": "小世界MCP工具集",
-  "generated_at": "2026-09-28 23:44:20",
+  "generated_at": "2026-10-02 02:08:45",
   "tools": [
     {
       "name": "context_digest",
@@ -88,7 +88,11 @@
         "properties": {
           "q": {
             "type": "string",
-            "description": "检索词或描述（可选）。不提供时自动以她最新一条消息为检索内容；提供则按 q 检索（语义模式下可以是描述性语句，如她上次说难过的时候、我们聊过蓝鲸的话题）"
+            "description": "检索词或描述（可选）。与 time_prefix 至少填一个（都不填时自动以她最新一条消息为检索内容）；提供则按 q 检索（语义模式下可以是描述性语句，如她上次说难过的时候、我们聊过蓝鲸的话题）；也可与 time_prefix 组合（时间范围内内容检索）"
+          },
+          "time_prefix": {
+            "type": "string",
+            "description": "消息自带的时间缀前缀（如 2026-08-28 或 2026-08-28T19:34），按消息时间定位原文；可单独使用（q 留空），返回命中消息及 msg_id"
           },
           "limit": {
             "type": "integer",
@@ -104,13 +108,17 @@
           }
         }
       },
-      "defaultDescription": "检索原始对话：可跨所有会话搜索完整对话和导入对话，包括已经被上下文压缩替换的原文。q 可省略，省略时自动用当前会话她最新一条消息作为检索内容；也可直接提供关键词或描述性问题。结果返回相关原文及 session、msg_id（消息唯一 id）、时间、角色；相邻命中会合并，重复内容会去重，候选较多时会用旁路 LLM 精排。返回的是原文，不是改写后的记忆。需要永久保留某段原文时，可在找到 session/msg_id 后使用 context_star；需要把某段原文压缩成回忆（context_replace）时，同样把首尾两条的 msg_id 作为 start_id/end_id 传入。",
+      "defaultDescription": "检索原始对话：可跨所有会话搜索完整对话和导入对话，包括已经被上下文压缩替换的原文。两种用法：①按内容检索——q 提供关键词或描述性问题（语义检索），或 mode=keyword 做词面匹配；②按时间定位——time_prefix 填消息自带的时间缀前缀（如 2026-08-28 或 2026-08-28T19:34），直接返回该时间的消息原文及 msg_id；两者可组合（先按时间过滤再内容检索）。q 与 time_prefix 都不填时自动用当前会话她最新一条消息作为检索内容。结果返回相关原文及 session、msg_id（消息唯一 id）、时间、角色；相邻命中会合并，重复内容会去重。返回的是原文，不是改写后的记忆。需要永久保留某段原文时，可在找到 session/msg_id 后使用 context_star；需要把某段原文压缩成回忆（context_replace）时，同样把首尾两条的 msg_id 作为 start_id/end_id 传入。",
       "defaultInputSchema": {
         "type": "object",
         "properties": {
           "q": {
             "type": "string",
-            "description": "检索词或描述（可选）。不提供时自动以她最新一条消息为检索内容；提供则按 q 检索（语义模式下可以是描述性语句，如她上次说难过的时候、我们聊过蓝鲸的话题）"
+            "description": "检索词或描述（可选）。与 time_prefix 至少填一个（都不填时自动以她最新一条消息为检索内容）；提供则按 q 检索（语义模式下可以是描述性语句，如她上次说难过的时候、我们聊过蓝鲸的话题）；也可与 time_prefix 组合（时间范围内内容检索）"
+          },
+          "time_prefix": {
+            "type": "string",
+            "description": "消息自带的时间缀前缀（如 2026-08-28 或 2026-08-28T19:34），按消息时间定位原文；可单独使用（q 留空），返回命中消息及 msg_id"
           },
           "limit": {
             "type": "integer",
@@ -179,6 +187,32 @@
           "session",
           "msg_ids"
         ]
+      },
+      "enabled": true
+    },
+    {
+      "name": "context_star_list",
+      "description": "查看已标星的聊天原文——这些是被特意留下、长期保留在上下文中且不参与压缩/替换的内容。返回说话人、正文、消息自带时间，按时间从新到旧排序；不传参数默认返回全部，传 limit 则只返回最新的 N 条。同一会话内，10 分钟内已经返回过的内容不会重复出现。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "可选。只返回最新的 N 条（按时间从新到旧取前 N 条）；不传则返回全部"
+          }
+        },
+        "required": []
+      },
+      "defaultDescription": "查看已标星的聊天原文——这些是被特意留下、长期保留在上下文中且不参与压缩/替换的内容。返回说话人、正文、消息自带时间，按时间从新到旧排序；不传参数默认返回全部，传 limit 则只返回最新的 N 条。同一会话内，10 分钟内已经返回过的内容不会重复出现。",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "可选。只返回最新的 N 条（按时间从新到旧取前 N 条）；不传则返回全部"
+          }
+        },
+        "required": []
       },
       "enabled": true
     },
@@ -318,13 +352,13 @@
     },
     {
       "name": "leave_paper",
-      "description": "留一张纸：把一段创作（小故事、梦、随手写的文字等）单独保存成一张「纸」，只落盘收藏、不会进入对话上下文。适合内容较长、想留档又不打断聊天时使用；如果只是想顺手在回复里标记留档，也可以直接在回复末尾写 <paper/> 记号（整条回复会存成一张纸，可选 <paper title=\"标题\"/>）。",
+      "description": "留一张纸：你给自己写的小纸条。",
       "inputSchema": {
         "type": "object",
         "properties": {
           "content": {
             "type": "string",
-            "description": "纸的正文（故事/梦/随手创作，建议单篇一两千字以内）"
+            "description": "纸的正文（故事/梦/随手创作）"
           },
           "title": {
             "type": "string",

@@ -2340,8 +2340,9 @@ async function startMsgVectorWarmup() {
 // ── 增强版上下文搜索：支持跨会话 + 语义检索（embed-server 真语义，降级 TF-IDF） ──
 async function searchContextEnhanced(query, options) {
   const q = String(query || "").trim();
-  if (!q) return { ok: false, error: "查询不能为空" };
   const opts = options || {};
+  const timePrefix = String(opts.timePrefix || "").trim().replace(/[Tt]/g, " ") || null;
+  if (!q && !timePrefix) return { ok: false, error: "查询不能为空" };
   const mode = opts.mode === "keyword" ? "keyword" : "semantic";
   const allSessions = !!opts.allSessions;
   const maxReturn = Math.max(1, Math.min(100, Math.floor(Number(opts.limit) || 10)));
@@ -2381,8 +2382,29 @@ async function searchContextEnhanced(query, options) {
   const now = Date.now();
   const recentCutoff = now - CONTEXT_SEARCH_RECENT_EXCLUDE_MINUTES * 60000;
   var scored = [];
-  
-  if (mode === "semantic") {
+  // 1002-08: timePrefix 时间缀定位（本地 UTC+8 前缀匹配）。与 q 的关系：
+  //   q 空 + timePrefix 有 → 纯时间定位（不走语义/关键词、不精排，倒序返回命中消息）
+  //   q 有 + timePrefix 有 → 内容检索后再按时间过滤（组合）
+  //   q 空 + timePrefix 空 → 原行为（use_latest_user 由调用方控制）
+  function localTimeStr(m) {
+    const t = new Date(m.time);
+    if (isNaN(t.getTime())) return "";
+    return new Date(t.getTime() + 8 * 3600 * 1000).toISOString().slice(0, 19).replace("T", " ");
+  }
+  const pureTimeMode = !!(timePrefix && !q);
+
+  if (pureTimeMode) {
+    for (let i = 0; i < allMsgs.length; i++) {
+      const m = allMsgs[i];
+      if (!m.content || !m.time) continue;
+      const lt = localTimeStr(m);
+      if (!lt || !lt.startsWith(timePrefix)) continue;
+      scored.push({ pos: m._gidx, source: m.source, session: m.session, sidx: m.sidx,
+        record_id: m.record_id, msg_id: m.msg_id, role: m.role, time: m.time,
+        score: 100, coverage: 1, density: 100, hits: 1, hit_terms: [], content: m.content });
+    }
+    scored.sort(function (a, b) { return String(b.time || "").localeCompare(String(a.time || "")); });
+  } else if (mode === "semantic") {
     const results = await semanticSearchMessages(allMsgs, q, Math.min(maxReturn * 10, 200), threshold);
     for (let r = 0; r < results.length; r++) {
       const m = allMsgs[results[r].idx];
@@ -2446,7 +2468,17 @@ async function searchContextEnhanced(query, options) {
     scored.sort(function(a, b) { return b.coverage - a.coverage || b.density - a.density || b.hits - a.hits || a.pos - b.pos; });
   }
   
+  if (timePrefix && !pureTimeMode && scored.length) {
+    scored = scored.filter(function (x) {
+      const lt = localTimeStr(x);
+      return lt && lt.startsWith(timePrefix);
+    });
+  }
+
   const groups = [];
+  if (pureTimeMode) {
+    for (let i = 0; i < scored.length; i++) groups.push([scored[i]]);
+  } else {
   const used = new Array(scored.length).fill(false);
   for (let i = 0; i < scored.length; i++) {
     if (used[i]) continue;
@@ -2461,13 +2493,14 @@ async function searchContextEnhanced(query, options) {
     }
     groups.push(group);
   }
+  }
   
   // LLM 精排（增强层）：只要粗检索出了候选组就交给 LLM 挑真正相关的（含剔除碰巧词面
   // 相似的模糊命中）；picked 只保留 LLM 选中的组，不拿基线结果凑数。任何失败/空选择
   // 保持原排序回退——LLM 挂了工具行为与升级前完全一致。
   let orderedGroups = groups;
   let rerankMeta = null;
-  if (_contextRerank && groups.length > 0) {
+  if (!pureTimeMode && _contextRerank && groups.length > 0) {
     try {
       const rr = await _contextRerank.rerankGroupsWithLLM(q, groups, { pickMax: maxReturn });
       rerankMeta = rr && rr.meta ? rr.meta : null;
