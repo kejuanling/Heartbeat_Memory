@@ -40,7 +40,7 @@ const DEFAULT_CONFIG = {
   // Relevant 改混合打分——词面当门槛（无关闲聊的语义地板再高也进不来），混合分排序：
   // 0.55 语义 + 0.25 词面（语义为主，0920 二次拍板；重要级×衰减项已删），≥0.28 入选，最多 3 条。
   // 校准实测（旧公式口径）：相关命中 0.475-0.594、带门槛闲聊 ≤0.299；删项后相关命中约 ×0.8。vecScores 缺场回落字面（上行）。
-  relevantLitGate: 0.30,   // 0921 用户拍板 0.15→0.30：字面卡更紧宁缺毋滥；副作用=换说法的低词面记忆更易被第一道门挡掉
+  relevantLitGate: 0.20,   // 2026-10-01 用户拍板 0.30→0.20：0.30 过高，换说法的低词面记忆被第一道门挡掉（触发难）；0.15(0920)→0.30(0921)→0.20(今)。第二道门混合分 ≥0.28 仍兜底
   relevantMinHybridScore: 0.28,   // 0920 删重要级×衰减项后等比换算（原 0.35/满分1.0 → ×0.8）
   relevantHybridTopK: 3,
 };
@@ -244,7 +244,7 @@ function buildContinuity(input, cfg) {
 // [6] Possibly Relevant Memories：V2 检索（排除固定块已注入成员、anchor 置顶条、input.excludeIds
 // ——本会话已写入时间线的浮现记忆，命中后由生产链路落时间线永久在场，不再重复注入；anchor 属常驻块不二次出现），
 // score desc → id；宁缺毋滥（允许空）。条目带轻量日期后缀；超预算从尾部减条。
-// 0920 混合模式：input.vecScores（bge 余弦，调用方算好）在场时——词面 ≥0.15 当门槛 +
+// 0920 混合模式：input.vecScores（bge 余弦，调用方算好）在场时——词面 ≥relevantLitGate（现 0.20）当门槛 +
 // 混合分（0.55语义+0.25词面，语义为主）≥0.28 入选，最多 3 条；无向量条目不参与。重要级×衰减项已删。
 // vecScores 缺场回落字面（embed 熔断/shadow 诊断）。两种模式的排除逻辑完全一致。
 function buildRelevant(input, cfg, fixedIdSet) {
