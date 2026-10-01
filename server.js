@@ -2456,6 +2456,22 @@ function timelineEventEnabled() {
     return (j && j.enabled === false) ? false : true;
   } catch (e) { return true; }
 }
+// 按谓词移除时间线消息（2026-10-01 通知撤回用）。
+// 用 splice 原地删而非 filter：loadTimeline 返回的数组带 __fp（盘上指纹），
+// filter 会产出新数组丢掉该属性，可能绕过 saveTimeline 的过期快照守卫；splice 保留数组身份与指纹。
+function removeTimelineMessages(sessionId, predicate) {
+  const tl = loadTimeline(sessionId);
+  if (!Array.isArray(tl)) return 0;
+  const hit = [];
+  for (let i = tl.length - 1; i >= 0; i--) {
+    let ok = false;
+    try { ok = !!predicate(tl[i]); } catch (e) { ok = false; }
+    if (ok) hit.push(i);
+  }
+  for (const i of hit) tl.splice(i, 1);
+  if (hit.length) saveTimeline(tl, sessionId);
+  return hit.length;
+}
 function latestRequestedSessionId() {
   let best = { mtimeMs: -1, sid: "default" };
   try {
@@ -2479,6 +2495,25 @@ app.post("/internal/timeline-event", async (req, reply) => {
   try {
     const body = req.body || {};
     const type = String(body.type || "").trim();
+    // 撤回通知（2026-10-01）：涵删日记后由 unified_server.py 回调。
+    // 刻意放在通知开关判定**之前**——开关只管「要不要落新通知」，撤回是清理动作，
+    // 即使通知已关闭也要能清掉历史遗留的失效通知。
+    if (type === "diary_undo") {
+      const undoSid = latestRequestedSessionId();
+      const undoEid = (body.entry_id != null && String(body.entry_id) !== "") ? String(body.entry_id) : "";
+      const undoT = body.time ? new Date(body.time) : null;
+      const undoLabel = (undoT && !isNaN(undoT.getTime())) ? fmtEventDateTime(undoT.toISOString()) : "";
+      const refKey = undoEid ? ("han_diary:" + undoEid) : "";
+      const removed = removeTimelineMessages(undoSid, function (m) {
+        if (!m || m.role !== "developer" || m.kind !== "diary") return false;
+        // 新数据带 event_ref → 按 entry_id 精确匹配；老数据无 event_ref → 回退按时间标签匹配
+        if (refKey) return m.event_ref === refKey;
+        if (undoLabel) return String(m.content || "").indexOf("涵写了日记（" + undoLabel + "）") !== -1;
+        return false;
+      });
+      console.log("[timeline-event] diary_undo entry_id=" + (undoEid || "-") + " 会话 " + undoSid + " 撤回=" + removed);
+      return reply.send({ success: true, session: undoSid, removed: removed });
+    }
     if (!timelineEventEnabled()) {
       console.log("[timeline-event] 开关已关闭，丢弃事件 type=" + type);
       return reply.send({ success: false, disabled: true, type: type });
@@ -2487,8 +2522,10 @@ app.post("/internal/timeline-event", async (req, reply) => {
     const timeIso = isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
     const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ""));
     let content = "";
+    let eventRef = "";   // 可回溯标记：删日记时据此精确撤回本条通知
     if (type === "han_diary") {
       content = "[小世界] 涵写了日记（" + fmtEventDateTime(timeIso) + "）";
+      if (body.entry_id != null && String(body.entry_id) !== "") eventRef = "han_diary:" + String(body.entry_id);
     } else if (type === "period_start") {
       if (!isDate(body.start)) return reply.code(400).send({ error: "start 日期格式应为 YYYY-MM-DD" });
       content = "[小世界] 涵记录了经期开始（" + String(body.start).slice(5) + "）";
@@ -2500,7 +2537,7 @@ app.post("/internal/timeline-event", async (req, reply) => {
       return reply.code(400).send({ error: "未知事件类型：" + type });
     }
     const sid = latestRequestedSessionId();
-    const added = appendMessages(sid, [{ role: "developer", kind: "diary", content, time: timeIso }], { silent: true });
+    const added = appendMessages(sid, [{ role: "developer", kind: "diary", content, time: timeIso, event_ref: eventRef || undefined }], { silent: true });
     console.log("[timeline-event] " + type + " -> 会话 " + sid);
     reply.send({ success: true, session: sid, id: added[0] ? added[0].id : null });
   } catch (err) {

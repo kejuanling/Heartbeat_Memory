@@ -108,7 +108,8 @@ def diary_add_entry():
     if images: entry["images"] = images
     d["entries"].insert(0, entry)
     diary_save(d)
-    notify_timeline_event({"type": "han_diary", "time": now})
+    # 2026-10-01：带 entry_id，供删日记时精确撤回这条通知（否则 AI 会读到已失效的「写了日记」情报）
+    notify_timeline_event({"type": "han_diary", "time": now, "entry_id": entry["id"]})
     return jsonify({"ok": True, "id": entry["id"]})
 
 @diary_bp.route('/diary/api/entries/edit', methods=['POST'])
@@ -132,7 +133,12 @@ def diary_delete_entry():
             if DIARY_IMG_NAME_RE.match(fname):
                 try: os.remove(os.path.join(DIARY_UPLOAD_DIR, fname))
                 except OSError: pass
-    diary_save(d); return jsonify({"ok": True})
+    diary_save(d)
+    # 2026-10-01：删日记 → 同步撤回此前落时间线的「涵写了日记」通知。
+    # 不撤回的话 AI 重建上下文看见「涵写了日记」却读不到正文，只能臆测（实测编出「初恋提示词」）。
+    for e in removed:
+        notify_timeline_event({"type": "diary_undo", "entry_id": e.get("id"), "time": e.get("ts")})
+    return jsonify({"ok": True})
 
 @diary_bp.route('/diary/api/entries/comment', methods=['POST'])
 def diary_add_comment():
