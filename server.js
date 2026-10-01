@@ -1863,11 +1863,19 @@ function diarySessionDirs() {
   } catch (e) {}
   return out;
 }
+// 2026-10-02：日记文件名统一口径（详见下方 DIARY_FILE_RE 注释）。
+const DIARY_FILE_RE = /^\d{4}-\d{2}-\d{2}(?:_\d{4,6}(?:-\d+)?)?\.md$/i;
+// 同秒连写多篇时文件名带 -N 后缀；localeCompare 对「-」与「.」的先后不稳定，
+// 显式拆 日期 / 时分秒 / 同秒序号 三段做排序键（倒序：新在前，同秒后写的在前）。
+function diarySortKey(name) {
+  const m = String(name || "").match(/^(\d{4}-\d{2}-\d{2})(?:_(\d{4,6})(?:-(\d+))?)?\.md$/i);
+  return { d: m ? m[1] : "", t: m && m[2] ? m[2] : "", n: m && m[3] ? Number(m[3]) : 0 };
+}
 // 校验管理台传入的日记相对路径：只允许「日期.md」「日期_时分秒.md」或「会话目录/….md」；
 // 2026-09-19 批6 D1 起日记每篇一个文件（YYYY-MM-DD_HHMMSS.md），隐藏/编辑/删除按篇操作。
 function resolveDiaryRelPath(relPath) {
   const s = String(relPath || "").trim().replace(/\\/g, "/");
-  const m = s.match(/^(?:([A-Za-z0-9_-]{1,64})\/)?(\d{4}-\d{2}-\d{2}(?:_\d{4,6})?)\.md$/i);
+  const m = s.match(/^(?:([A-Za-z0-9_-]{1,64})\/)?(\d{4}-\d{2}-\d{2}(?:_\d{4,6}(?:-\d+)?)?)\.md$/i);
   if (!m) return null;
   const root = path.resolve(__dirname, "diary");
   const full = path.resolve(root, m[1] ? m[1] + path.sep + m[2] + ".md" : m[2] + ".md");
@@ -1891,7 +1899,8 @@ function recentDiaryTextBefore(sessionId, count, createdIso) {
       for (const f of fs.readdirSync(abs)) {
         // 2026-09-19 批6 D1：兼容每篇一文件的 YYYY-MM-DD_HHMMSS.md（日期取前 10 位）
         // 2026-09-20 拆篇迁移：后缀放开 4-6 位（分钟精度 4 位 = 旧日记拆篇产物，秒精度 6 位 = 批6 原生）
-        if (!/^\d{4}-\d{2}-\d{2}(_\d{4,6})?\.md$/.test(f)) continue;
+        // 2026-10-02：再放开同秒重试的 -N 后缀（DIARY_FILE_RE）
+        if (!DIARY_FILE_RE.test(f)) continue;
         files.push({ rel: relBase ? relBase + "/" + f : f, date: f.slice(0, 10) });
       }
     } catch (e) {}
@@ -1985,7 +1994,9 @@ function crossFingerprint(cfg) {
         try {
           const abs = relBase ? path.join(__dirname, "diary", relBase) : path.join(__dirname, "diary");
           for (const f of fs.readdirSync(abs)) {
-            if (!/^\d{4}-\d{2}-\d{2}\.md$/.test(f)) continue;
+            // 2026-10-02：原只认「日期.md」，批6 起日记全是「日期_时分秒.md」，
+            // 指纹里日记部分恒为空 → 写完/改完日记跨窗口快照不重建。改用统一口径。
+            if (!DIARY_FILE_RE.test(f)) continue;
             try { marks.push((relBase ? relBase + "/" : "") + f + ":" + fs.statSync(path.join(abs, f)).mtimeMs); } catch (e) {}
           }
         } catch (e) {}
@@ -2670,7 +2681,8 @@ function readDiaryEntries(limit) {
     try { names = fs.readdirSync(abs); } catch (e) { return; }
     // 只读取 .md 日记文件，避免把任意路径内容暴露到 admin 页面
     // 2026-09-19 批6 D1：兼容每篇一文件的 YYYY-MM-DD_HHMMSS.md；2026-09-20 拆篇后缀 4-6 位都认
-    for (const name of names.filter(n => /^\d{4}-\d{2}-\d{2}(_\d{4,6})?\.md$/i.test(n))) {
+    // 2026-10-02：改用统一口径，认同秒重试 -N 后缀
+    for (const name of names.filter(n => DIARY_FILE_RE.test(n))) {
       const filePath = path.join(abs, name);
       try {
         const stat = fs.statSync(filePath);
@@ -2684,7 +2696,11 @@ function readDiaryEntries(limit) {
   for (const s of diarySessionDirs()) scan(s);
   // 2026-09-13：管理台/菜单页一览改「完全按日记时间排」，按文件名日期（非修改时间）倒序，
   // 同一天多会话文件按相对路径倒序兜底；编辑旧日记不再把旧篇顶到最前。
-  out.sort((a, b) => (b.name.localeCompare(a.name)) || (String(b.relPath).localeCompare(String(a.relPath))));
+  out.sort((a, b) => {
+    const ka = diarySortKey(a.name), kb = diarySortKey(b.name);
+    return (kb.d.localeCompare(ka.d)) || (kb.t.localeCompare(ka.t)) || (kb.n - ka.n)
+      || (String(b.relPath).localeCompare(String(a.relPath)));
+  });
   return limit ? out.slice(0, limit) : out;
 }
 
@@ -2697,7 +2713,7 @@ function readDiaryEntries(limit) {
 // 传 null/undefined = 共享层日记，沿用旧行为同步默认会话时间线。
 function syncDiarySpecialEvents(fileName, newContent, sessionId) {
   // 2026-09-20 拆篇迁移：文件名放开认批6「日期_时分秒.md」（原只认 日期.md，编辑新格式文件时事件静默不同步）
-  const dateMatch = String(fileName || "").match(/^(\d{4}-\d{2}-\d{2})(?:_\d{4,6})?\.md$/i);
+  const dateMatch = String(fileName || "").match(/^(\d{4}-\d{2}-\d{2})(?:_\d{4,6}(?:-\d+)?)?\.md$/i);
   if (!dateMatch) return 0;
   const dateKey = dateMatch[1];
   const timeline = loadTimeline(sessionId || undefined);
@@ -2731,7 +2747,7 @@ function syncDiarySpecialEvents(fileName, newContent, sessionId) {
 // sessionId 语义同 syncDiarySpecialEvents：会话日记只动该会话，共享日记沿用旧行为。
 function removeDiarySpecialEvents(fileName, sessionId) {
   // 同步放开 _HHMMSS（与 syncDiarySpecialEvents 同口径）
-  const dateMatch = String(fileName || "").match(/^(\d{4}-\d{2}-\d{2})(?:_\d{4,6})?\.md$/i);
+  const dateMatch = String(fileName || "").match(/^(\d{4}-\d{2}-\d{2})(?:_\d{4,6}(?:-\d+)?)?\.md$/i);
   if (!dateMatch) return 0;
   const dateKey = dateMatch[1];
   const timeline = loadTimeline(sessionId || undefined);

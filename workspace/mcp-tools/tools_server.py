@@ -98,14 +98,20 @@ def tool_diary_add(args):
         # 每篇一个新文件（与网关 lib/diary.js 批6 同款）：文件名 = 日期_时分秒.md，wx 防覆盖（同秒重试 -1 后缀）
         base = now.strftime("%Y-%m-%d_%H%M%S")
         entry = "## %s\n\n%s\n" % (now.strftime("%Y-%m-%d %H:%M"), content)
-        diary_file = os.path.join(target_dir, base + ".md")
-        try:
-            with open(diary_file, "x", encoding="utf-8") as f:
-                f.write(entry)
-        except FileExistsError:
-            diary_file = os.path.join(target_dir, base + "-1.md")
-            with open(diary_file, "x", encoding="utf-8") as f:
-                f.write(entry)
+        # 2026-10-02：原只退让一次 -1，同一秒写第三篇会 FileExistsError 直接丢内容；
+        # 改为循环找空位 -1/-2/-3…（上限 20，防异常时打爆目录）
+        diary_file = None
+        for i in range(21):
+            cand = os.path.join(target_dir, base + ("" if i == 0 else "-%d" % i) + ".md")
+            try:
+                with open(cand, "x", encoding="utf-8") as f:
+                    f.write(entry)
+                diary_file = cand
+                break
+            except FileExistsError:
+                continue
+        if diary_file is None:
+            return {"error": "写入陪伴日记失败: 同一秒已写满 21 篇，请稍后再试"}
         return {"success": True, "file": diary_file, "session": session_token or None,
                 "time": now.strftime("%Y-%m-%d %H:%M"),
                 "message": "已写入陪伴日记"}
@@ -183,7 +189,8 @@ def _diary_collect_files():
         diary_dir = os.path.join("/opt/dylan-heartbeat", diary_dir)
     hidden = _diary_hidden_set()
     # 文件名含批6的每篇一文件格式「日期_时分秒.md」；隐藏清单命中的 rel 剔除（工具检索不到）
-    name_re = r"^\d{4}-\d{2}-\d{2}(_\d{4,6})?\.md$"
+    # 2026-10-02：放宽认同秒重试 -N 后缀（diary_add 防覆盖产物）
+    name_re = r"^\d{4}-\d{2}-\d{2}(_\d{4,6}(-\d+)?)?\.md$"
     out = []
     try:
         for f in os.listdir(diary_dir):
