@@ -474,9 +474,27 @@ function fmtWall(d) {
 // ========================
 // 数据读写
 // ========================
+// 2026-10-01 性能：REPLACEMENTS_FILE 实测 9.8MB，JSON.parse 单次约 41ms，而一次聊天请求
+// 会多次 loadItems（buildIncrementalContext / applyReplacements / 管理台等）。按 mtimeMs+size
+// 缓存解析结果（与同文件 loadMaxActiveBlocks 同款策略），命中只付一次 statSync（≈0ms）。
+// 安全性：本文件所有写路径均为「loadItems → 改 → saveItems」纯同步（见文件头并发约束），
+// 且 saveItems 会主动清缓存，故返回缓存引用不会被「改了不落盘」污染；server.js 三处外部
+// 调用（5079/5556/5965）均为 filter 只读。
+let _itemsCache = { mtime: null, size: null, value: null };
 function loadItems() {
+  try {
+    const st0 = fs.statSync(REPLACEMENTS_FILE);
+    if (_itemsCache.value && _itemsCache.mtime === st0.mtimeMs && _itemsCache.size === st0.size) {
+      return _itemsCache.value;
+    }
+  } catch (e) { /* 读不到 stat 就走原路径重新解析 */ }
   const items = readJson(REPLACEMENTS_FILE, []);
-  return Array.isArray(items) ? items : [];
+  const arr = Array.isArray(items) ? items : [];
+  try {
+    const st1 = fs.statSync(REPLACEMENTS_FILE);
+    _itemsCache = { mtime: st1.mtimeMs, size: st1.size, value: arr };
+  } catch (e) { _itemsCache = { mtime: null, size: null, value: null }; }
+  return arr;
 }
 
 // 2026-09-13 并发约束（实测核实）：本文件所有「loadItems → 改 → saveItems」调用链必须保持
@@ -484,6 +502,8 @@ function loadItems() {
 // 必须先引入写链（参照 server.js envWriteChain 的 promise 串行化）再动手，否则会产生
 // 「后写者整份覆盖前写者」的丢失更新。
 function saveItems(items) {
+  // 2026-10-01：写前主动失效缓存——不依赖 mtime 精度，且写失败时下次 load 也会重解析拿盘上真实数据
+  _itemsCache = { mtime: null, size: null, value: null };
   backupFile(REPLACEMENTS_FILE);
   writeJsonAtomic(REPLACEMENTS_FILE, items);
 }
