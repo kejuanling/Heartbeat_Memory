@@ -5357,9 +5357,11 @@ function toggleMcpEnable(i, enabled){
   body.servers[i].enabled=enabled;
   // 2026-10-01 修复：PUT 成功后必须先更新内存 _mcpServers 再重渲染——原代码只重渲染，
   // 内存里 enabled 还是旧值，「已禁用」chip 不消失、开关弹回，列表开关形同摆设
+  // 2026-10-01 修复2：开启后 connected/tools 是停用时的旧数据（GET 对停用服务器返回 connected:false, tools:[]），
+  // 必须强制重拉（loadMcpServers(true) 让服务端重新探测连接），否则开了还是「未连接」
   fetch("/heartbeat/admin/mcp/servers",{method:"PUT",headers:mcpAuthHeaders(),body:JSON.stringify(body),credentials:"include"})
     .then(function(r){return r.json();})
-    .then(function(j){ if(j&&j.ok){ _mcpServers[i].enabled=enabled; chatToast(enabled?"已启用":"已停用"); renderMcpServers(); } else { chatToast("保存失败:"+(j&&j.error||"未知错误")); renderMcpServers(); } })
+    .then(function(j){ if(j&&j.ok){ _mcpServers[i].enabled=enabled; chatToast(enabled?"已启用":"已停用"); loadMcpServers(true); } else { chatToast("保存失败:"+(j&&j.error||"未知错误")); renderMcpServers(); } })
     .catch(function(e){ chatToast("保存失败:"+(e&&e.message||e)); renderMcpServers(); });
 }
 function openMcpForm(i, tab){
