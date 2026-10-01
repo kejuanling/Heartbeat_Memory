@@ -101,10 +101,10 @@ function validate(candidate, deps = {}) {
     }
   }
 
-  // V2 quote speaker（AI 台词禁止冒充原话；缺 speaker 同拒）
-  if (c.kind === "quote" && c.speaker !== "user") {
+  // V2 quote speaker（AI 台词禁止冒充原话；缺 speaker 同拒；ai=AI 回复方原话，2026-10-01 获准入池）
+  if (c.kind === "quote" && c.speaker !== "user" && c.speaker !== "ai") {
     matched.push("V2");
-    reasons.push(`V2 quote 必须 speaker=user，got: ${c.speaker == null ? "缺失" : c.speaker}`);
+    reasons.push(`V2 quote 必须 speaker=user 或 ai，got: ${c.speaker == null ? "缺失" : c.speaker}`);
   }
 
   // V3 运行时标签残留

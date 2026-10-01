@@ -86,6 +86,9 @@ const cases = [
     const r4 = mv2.validateEntry(baseFact({ kind: "quote", subject: "user", speaker: "user", text: "只能我先说晚安" }));
     assert.strictEqual(r4.ok, true, r4.error);
     assert.strictEqual(r4.entry.speaker, "user");
+    const r5 = mv2.validateEntry(baseFact({ kind: "quote", subject: "user", speaker: "ai", text: "你今天辛苦了，记得早点休息" }));
+    assert.strictEqual(r5.ok, true, "ai 原话通过（2026-10-01 放开 AI 回复方）");
+    assert.strictEqual(r5.entry.speaker, "ai");
   }],
 
   ["milestone 联动：subject 必须 relationship 且 established_at 必填", () => {

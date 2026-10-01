@@ -27,7 +27,7 @@ const SUBJECTS = ["user", "self", "relationship", "external"];
 const STATUSES = ["active", "superseded", "archived"]; // pending_review 在队列文件，不在集合
 const ORIGINS = ["memory_tag", "tool", "manual", "promotion", "import"];
 const DIRECTIONS = ["toward_user", "about_user", "self_discipline"]; // 仅 rule 可选
-const SPEAKERS = ["user", "self"]; // 仅 quote；speaker=self 在准入层已被拒，存储层兜底
+const SPEAKERS = ["user", "self", "ai"]; // 仅 quote；speaker=self 在准入层已被拒，存储层兜底；ai=AI 回复方（界面映射：涵=user / 谢=ai）
 const PROVENANCE_METHODS = ["tag_inline", "mcp_tool", "admin_form", "summary_promotion", "diary_promotion", "migration_batch", "review_admit"];
 const SUPERSEDED_REASONS = ["updated", "merged", "contradiction_resolved", "retracted", "archived", "unknown"];
 const RELATED_RELS = ["derived_from", "pairs_with"];
@@ -154,8 +154,8 @@ function _buildEntry(input, cfg) {
   let speaker = null;
   if (kind === "quote") {
     if (subject !== "user") throw new Error("kind=quote 必须 subject=user");
-    if (input.speaker !== "user") throw new Error("kind=quote 必须 speaker=user");
-    speaker = "user";
+    if (input.speaker !== "user" && input.speaker !== "ai") throw new Error("kind=quote 必须 speaker=user 或 ai");
+    speaker = input.speaker;
   }
   if (kind === "milestone") {
     if (subject !== "relationship") throw new Error("kind=milestone 必须 subject=relationship");
@@ -416,7 +416,7 @@ function createStore(opts = {}) {
       } else if (k === "speaker") {
         if (e.kind !== "quote") return fail("speaker 仅 quote 可用");
         if (v != null && !SPEAKERS.includes(v)) return fail("speaker 非法: " + v);
-        if (v !== "user") return fail("quote 必须 speaker=user");
+        if (v !== "user" && v !== "ai") return fail("quote 必须 speaker=user 或 ai");
         e.speaker = v;
       } else if (k === "established_at") {
         e.established_at = strOrNull(v);

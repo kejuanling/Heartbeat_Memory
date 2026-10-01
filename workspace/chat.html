@@ -4483,7 +4483,8 @@ async function addToPoolMsg(){
   if(!content||!content.trim()){ showToast("这条消息没有正文，无法入池"); return; }
   try{
     // 0918 起走记忆流水线：人工发起 → V2 admission（manual_review）→ review 队列人工裁决后入库
-    const r=await fetch(ccBase()+"/memory-v2/entries",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":ccGetCookie("admin_csrf")},body:JSON.stringify({content:content,session_id:SessionStore.getCurrentSession()}),credentials:"include"});
+    const isAiMsg=(m.role==="ai"||m.role==="assistant");
+    const r=await fetch(ccBase()+"/memory-v2/entries",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":ccGetCookie("admin_csrf")},body:JSON.stringify({content:content,session_id:SessionStore.getCurrentSession(),speaker:isAiMsg?"ai":"user",msg_time:String((m&&m.time)||"")}),credentials:"include"});
     if(!r.ok){ showToast("入池失败: HTTP "+r.status); return; }
     const j=await r.json().catch(function(){return {};});
     if(j.success===false&&j.action==="reject"){ showToast("流水线拒绝："+((j.reasons||[])[0]||"不符合记忆标准")); return; }

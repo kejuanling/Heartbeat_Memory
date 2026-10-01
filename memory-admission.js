@@ -170,6 +170,9 @@ function createAdmission(opts = {}) {
       return { action: "reject", candidate: null, validation: { allowed: false, matched_rules: ["V6"], reasons: ["V6 text 为空"] }, audit_id: null, notes: "content 为空" };
     }
     const mapped = CATEGORY_MAP[b.category] || null;
+    // 2026-10-01：聊天页入池显式携带说话人（user=涵 / ai=谢），优先于分类映射
+    const explicitSpeaker = strSafe(b.speaker) || null;
+    const speakerVal = explicitSpeaker || (mapped ? mapped.speaker || null : null);
 
     // [1] candidate_detector（manual 显式类别优先，否则自动粗分）
     const detection = detect({ text, source: originVal, explicitKind: mapped ? mapped.kind : b.kind, explicitSubject: mapped ? mapped.subject : b.subject });
@@ -183,6 +186,12 @@ function createAdmission(opts = {}) {
       msgId: strSafe(ctx.msgId),
     });
     if (strSafe(b.quote)) provenance.quote = String(b.quote).slice(0, 200);
+    // 人工入池（聊天页/管理台）：整条消息即原文摘录，自动补 provenance.quote 以满足 V9（quote 必须有原文摘录）
+    if (!isPromo && detection.kind_guess === "quote" && !strSafe(provenance.quote)) {
+      provenance.quote = text.slice(0, 200);
+    }
+    // 消息时间（待审可见；入库时 _buildEntry 只保留 schema 五字段，msg_time 自然丢弃）
+    if (strSafe(b.msg_time)) provenance.msg_time = String(b.msg_time).trim();
     if (isPromo && strSafe(b.block_id)) provenance.block_id = strSafe(b.block_id);
 
     // [3] validator（仅真实候选类别需要校验；非候选直接走拒绝）
@@ -193,7 +202,7 @@ function createAdmission(opts = {}) {
         kind: detection.kind_guess,
         subject: detection.subject_guess,
         origin: originVal,
-        speaker: mapped ? mapped.speaker || null : null,
+        speaker: speakerVal,
         direction: mapped ? mapped.direction || null : null,
         provenance,
         source: originVal,
@@ -262,7 +271,7 @@ function createAdmission(opts = {}) {
       kind: detection.kind_guess,
       subject: detection.subject_guess,
       direction: mapped ? mapped.direction || null : null,
-      speaker: mapped ? mapped.speaker || null : null,
+      speaker: speakerVal,
       origin: originVal,
       provenance,
     };

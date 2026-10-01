@@ -60,6 +60,7 @@ const cases = [
   // ---- V2 quote speaker ----
   ["V2 quote speaker=self 拒绝（AI 台词不冒充原话）", () => hit(["V2"])(validate(clean({ kind: "quote", subject: "user", speaker: "self", text: "无论你怎么样我都选你", provenance: { method: "admin_form", quote: "原话" } })))],
   ["V2 quote 缺 speaker 拒绝", () => hit(["V2"])(validate(clean({ kind: "quote", subject: "user", text: "你是我的锚", provenance: { method: "admin_form", quote: "你是我的锚" } })))],
+  ["V2 quote speaker=ai 通过（2026-10-01 放开：AI 回复方原话可入池，界面显示「谢」）", () => pass(validate(clean({ kind: "quote", subject: "user", speaker: "ai", text: "你今天辛苦了", provenance: { method: "admin_form", quote: "你今天辛苦了" } })))],
   ["V2 quote speaker=user 通过；fact 无关 speaker 不受影响", () => {
     pass(validate(clean({ kind: "quote", subject: "user", speaker: "user", text: "你是我的锚", provenance: { method: "admin_form", quote: "你是我的锚" } })));
     pass(validate(clean()));

@@ -124,7 +124,7 @@ module.exports = function registerMemoryV2Admin(app, deps) {
       }
 
       const r = await admission.submitManual(
-        { content, category: b.category, kind: b.kind },
+        { content, category: b.category, kind: b.kind, speaker: b.speaker, msg_time: b.msg_time },
         { sessionId: String(b.session_id || "").trim() || null },
         "manual_review"
       );
