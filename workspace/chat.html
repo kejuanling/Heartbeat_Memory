@@ -6884,6 +6884,7 @@ function openSessMenu(sid, anchorEl, inArchive){
     +'<button class="sess-menu-item'+(lockOn?' on':'')+'" data-op="lock">唤醒'+(lockOn?' ✓':'')+'</button>'
     +'<button class="sess-menu-item" data-op="persona">设定</button>'
     +'<button class="sess-menu-item" data-op="cross">跨窗口</button>'
+    +'<button class="sess-menu-item" data-op="snaprebuild">重建快照</button>'
     +'<button class="sess-menu-item" data-op="provider">模型</button>'
     +'<button class="sess-menu-item" data-op="export">导出</button>'
     +'<button class="sess-menu-item danger" data-op="del">归档</button>';
@@ -6897,6 +6898,7 @@ function openSessMenu(sid, anchorEl, inArchive){
       else if(op==="export")exportSession(sid);
       else if(op==="persona")openSessionPersona(sid);
       else if(op==="cross")openSessionCrossInject(sid);
+      else if(op==="snaprebuild")snapRebuildSession(sid);
       else if(op==="provider")openSessionProvider(sid);
       else if(op==="lock")toggleWakeLockSession(sid);
       else if(op==="del")archiveSession(sid);
@@ -7404,6 +7406,17 @@ function createSessionWithPrompt(backupId, providerId, modelName){
 }
 
 // 删除会话：调用后端 DELETE /v1/sessions/:id 真正删除独立时间线文件
+// 重建会话注入前缀快照（1002-12）：清除快照，下一轮请求按当前人设/记忆/日记重新生成
+function snapRebuildSession(sid){
+  if(!confirm('清除该会话的注入前缀快照？下一轮请求将用当前人设/记忆/日记重新生成。'))return;
+  fetch('/v1/sessions/'+encodeURIComponent(sid)+'/snapshot/rebuild',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+api_key,'X-CSRF-Token':getCookie('admin_csrf')},credentials:'include',body:'{}'})
+    .then(function(r){return r.json().catch(function(){return {};})})
+    .then(function(d){
+      if(d&&d.error){ toast('重建快照失败: '+d.error); return; }
+      toast(d&&d.existed?'快照已清除，下一轮对话将重建':'本会话本就没有快照（下次请求自动生成）');
+    })
+    .catch(function(e){ toast('重建快照失败: '+e.message); });
+}
 async function deleteSession(id){
   if(id==="default"){showToast("主会话不能删除");return;}
   if(!confirm("确定删除这个会话？删除后无法恢复。"))return;

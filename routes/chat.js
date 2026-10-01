@@ -304,6 +304,11 @@ module.exports = function registerChatRoutes(app, deps) {
           }
         }
       } catch (e) {}
+      // 1002-12：会话删除时注入前缀快照条目一并清除（防同 id 重建继承旧快照）
+      try {
+        const sr = require('../context-snapshot').deleteSnapshot(baseDir, safe);
+        if (sr.existed) cleaned++;
+      } catch (e) {}
       console.log(`[sessions] 会话 ${safe} 已删除，周边文件清理 ${cleaned} 处`);
       reply.send({ ok: true, deleted: true, cleaned });
     } catch (err) {
@@ -646,6 +651,21 @@ module.exports = function registerChatRoutes(app, deps) {
       reply.code(500).send({ error: err.message });
     }
   });
+  // 重建会话注入前缀快照（1002-12）：清除该会话快照条目，下一轮请求按当前人设/记忆/日记重新生成
+  app.post('/v1/sessions/:id/snapshot/rebuild', async (req, reply) => {
+    try {
+      const sessionId = String(req.params.id || '').trim();
+      if (!sessionId || sessionId === 'default') return reply.code(400).send({ error: '主会话不需要重建快照' });
+      const safe = sessionId.replace(/[^A-Za-z0-9_-]/g, '');
+      if (safe !== sessionId) return reply.code(400).send({ error: '非法会话ID' });
+      const r = require('../context-snapshot').deleteSnapshot(baseDir, safe);
+      reply.send({ ok: true, session_id: safe, existed: r.existed });
+    } catch (err) {
+      console.error('[POST /v1/sessions/:id/snapshot/rebuild] error:', err.message);
+      reply.code(500).send({ error: err.message });
+    }
+  });
+
   app.post('/v1/sessions/:id/model-provider', async (req, reply) => {
     try {
       const sessionId = String(req.params.id || '').trim();

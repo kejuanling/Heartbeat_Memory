@@ -52,6 +52,25 @@ function saveSnapshot(baseDir, sessionId, data) {
   return true;
 }
 
+// 清除某会话快照（重建/会话删除用）：从文件删除该 sid 条目，原子写
+function deleteSnapshot(baseDir, sessionId) {
+  const sid = String(sessionId || "default").trim() || "default";
+  const all = loadAll(baseDir);
+  if (!(sid in all)) return { ok: true, existed: false };
+  delete all[sid];
+  const f = snapshotFile(baseDir);
+  const tmp = f + ".tmp-" + process.pid;
+  try {
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(tmp, JSON.stringify({ sessions: all }, null, 2), "utf8");
+    fs.renameSync(tmp, f);
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch (e2) {}
+    throw e;
+  }
+  return { ok: true, existed: true };
+}
+
 // 快照指纹：人设 + 固定块内容 sha1，供日志/缓存 key 使用
 function snapshotFp(s) {
   if (!s) return "";
@@ -66,4 +85,4 @@ function snapshotFp(s) {
   }
 }
 
-module.exports = { loadSnapshot, saveSnapshot, snapshotFp };
+module.exports = { loadSnapshot, saveSnapshot, deleteSnapshot, snapshotFp };
