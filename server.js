@@ -4566,7 +4566,13 @@ function pickBalance(json) {
       if (String(json[k]).trim() !== "") return { balance: json[k], currency: "USD" };
     }
   }
-  if (json.data && typeof json.data === "object") return pickBalance(json.data);
+  if (json.data && typeof json.data === "object") {
+    // Kimi 官方（2026-10-01 实测）：{code,data:{available_balance(元),cash_balance,...}}
+    if (typeof json.data.available_balance === "number") return { balance: json.data.available_balance, currency: "CNY" };
+    // OpenRouter（2026-10-01 实测）：{data:{limit_remaining,limit,usage,...}}——limit_remaining=剩余信用额度
+    if (typeof json.data.limit_remaining === "number" && typeof json.data.limit === "number") return { balance: json.data.limit_remaining, currency: "USD" };
+    return pickBalance(json.data);
+  }
   return null;
 }
 app.post("/admin/providers/balance", { preHandler: mcpManageAuth }, async (req, reply) => {
@@ -4575,7 +4581,8 @@ app.post("/admin/providers/balance", { preHandler: mcpManageAuth }, async (req, 
   if (!id) return reply.code(400).send({ ok: false, error: "缺少供应商 id" });
   const p = loadAiProviders().find(function (x) { return x && String(x.id) === id; });
   if (!p) return reply.code(404).send({ ok: false, error: "供应商不存在" });
-  const bu = String(p.balance_url || "").trim();
+  // 2026-10-01：接受前端按类型预设传来的兜底余额接口（历史保存值被 PUT 副作用抹掉/从未填写时，列表按钮也能直接查）
+  const bu = String((body.balance_url && String(body.balance_url).trim()) || p.balance_url || "").trim();
   if (!bu) return reply.send({ ok: false, error: "该供应商未配置余额接口" });
   if (!p.api_key) return reply.send({ ok: false, error: "供应商未配置 API Key" });
   const started = Date.now();

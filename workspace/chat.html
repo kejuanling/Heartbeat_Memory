@@ -5535,7 +5535,7 @@ async function checkProviderBalance(i,btn){
   const p=_providers[i]; if(!p)return;
   const _o=btn.innerHTML; btn.innerHTML="…"; btn.disabled=true;
   try{
-    const r=await fetch("/heartbeat/admin/providers/balance",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},mcpAuthHeaders()),credentials:"include",body:JSON.stringify({id:p.id})});
+    const r=await fetch("/heartbeat/admin/providers/balance",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},mcpAuthHeaders()),credentials:"include",body:JSON.stringify({id:p.id,balance_url:(p.balance_url||provPresetBalance(p.api_url)||"")})});
     const j=await r.json().catch(function(){return {};});
     if(j&&j.ok) chatToast(p.name+" 余额："+j.balance+" "+(j.currency||""));
     else chatToast(p.name+"："+(j&&j.error||"查询失败"));
@@ -5568,11 +5568,25 @@ function renderProviders(){
     inp.addEventListener('change',function(){ toggleProvEnable(+inp.dataset.sw, inp.checked); });
   });
 }
+// 2026-10-01 修复：全量 PUT 的 payload 统一构造（原 toggle/设默认/删除/保存四处重复 map 漏带 profile/balance_url，
+// 服务端按「传入非空才保留」清洗——点一次开关就把全部供应商的协议适配与余额接口从 ai-providers.json 抹掉）
+function provPayloadList(){
+  return _providers.map(function(p){ return { id:p.id, name:p.name, api_url:p.api_url, api_key:p.api_key||"", model:p.model||"", models:(Array.isArray(p.models)?p.models:[]), enabled:p.enabled!==false, is_default:!!p.is_default, profile:p.profile||"", balance_url:p.balance_url||"" }; });
+}
+// 按 api_url 前缀匹配类型预设的余额接口（余额自动填/查询兜底用；非预设供应商返回 ""）
+function provPresetBalance(url){
+  const u=String(url||"");
+  const hit=Object.keys(PROVIDER_TYPES).find(function(k){ return u.indexOf(PROVIDER_TYPES[k].base)===0; });
+  return hit? (PROVIDER_TYPES[hit].balance||"") : "";
+}
 function toggleProvEnable(i, enabled){
   const p=_providers[i]; if(!p)return;
-  const body={ providers: _providers.map(function(x){ return { id:x.id, name:x.name, api_url:x.api_url, api_key:x.api_key||"", model:x.model||"", models:(Array.isArray(x.models)?x.models:[]), enabled:x.enabled!==false, is_default:!!x.is_default }; }) };
+  const body={ providers: provPayloadList() };
   body.providers[i].enabled=enabled;
-  fetch("/heartbeat/admin/ai-providers",{method:"PUT",headers:mcpAuthHeaders(),body:JSON.stringify(body),credentials:"include"}).then(function(r){return r.json();}).then(function(){ chatToast(enabled?"已启用":"已停用"); renderProviders(); });
+  fetch("/heartbeat/admin/ai-providers",{method:"PUT",headers:mcpAuthHeaders(),body:JSON.stringify(body),credentials:"include"})
+    .then(function(r){return r.json();})
+    .then(function(j){ if(j&&j.ok){ chatToast(enabled?"已启用":"已停用"); renderProviders(); } else { chatToast("保存失败:"+(j&&j.error||"未知错误")); renderProviders(); } })
+    .catch(function(e){ chatToast("保存失败:"+(e&&e.message||e)); renderProviders(); });
 }
 let __provModels=[];      // 编辑表单中的模型列表
 let __provDefaultModel=""; // 当前选中的默认模型
@@ -5610,8 +5624,8 @@ const PROVIDER_TYPES={
   anthropic:{label:"Anthropic（Claude）", base:"https://api.anthropic.com", path:"/v1/messages", profile:"claude", balance:""},
   zhipu:{label:"智谱 GLM", base:"https://open.bigmodel.cn/api/paas/v4", path:"/chat/completions", profile:"default", balance:""},
   silicon:{label:"硅基流动", base:"https://api.siliconflow.cn/v1", path:"/chat/completions", profile:"default", balance:""},
-  openrouter:{label:"OpenRouter", base:"https://openrouter.ai/api/v1", path:"/chat/completions", profile:"default", balance:""},
-  moonshot:{label:"Kimi/月之暗面", base:"https://api.moonshot.cn/v1", path:"/chat/completions", profile:"default", balance:""},
+  openrouter:{label:"OpenRouter", base:"https://openrouter.ai/api/v1", path:"/chat/completions", profile:"default", balance:"https://openrouter.ai/api/v1/key"},
+  moonshot:{label:"Kimi/月之暗面", base:"https://api.moonshot.cn/v1", path:"/chat/completions", profile:"default", balance:"https://api.moonshot.cn/v1/users/me/balance"},
   bailian:{label:"阿里百炼", base:"https://dashscope.aliyuncs.com/compatible-mode/v1", path:"/chat/completions", profile:"default", balance:""},
   qianfan:{label:"百度千帆", base:"https://qianfan.baidubce.com/v2", path:"/chat/completions", profile:"default", balance:""}
 };
@@ -5662,6 +5676,7 @@ function openProvForm(i){
   provKey.value = p? (p.api_key||"") : "";
   provProfile=(p&&p.profile)? String(p.profile) : "default";
   const ptSel=document.getElementById("provType");
+  let _matchedType="";
   if(ptSel){
     ptSel.innerHTML='<option value="">自定义（OpenAI 兼容）</option>'+Object.keys(PROVIDER_TYPES).map(function(k){
       return '<option value="'+k+'">'+escapeHtml(PROVIDER_TYPES[k].label)+'</option>';
@@ -5670,8 +5685,10 @@ function openProvForm(i){
     let matched="";
     Object.keys(PROVIDER_TYPES).forEach(function(k){ if(!matched&&PROVIDER_TYPES[k].base===base) matched=k; });
     if(matched) ptSel.value=matched;
+    _matchedType=matched;
   }
-  const blIn=document.getElementById("provBalanceUrl"); if(blIn) blIn.value=(p&&p.balance_url)? p.balance_url : "";
+  // 2026-10-01 修复：余额接口编辑回填——保存值为空时回退到匹配类型预设的 balance（预设型供应商不必手填）
+  const blIn=document.getElementById("provBalanceUrl"); if(blIn) blIn.value=(p&&p.balance_url)? p.balance_url : (_matchedType? (PROVIDER_TYPES[_matchedType].balance||"") : "");
   __provModels = p? ((Array.isArray(p.models)&&p.models.length)? p.models.slice() : (p.model? [p.model] : [])) : [];
   __provDefaultModel = p? (p.model||__provModels[0]||"") : (__provModels[0]||"");
   renderProvModels();
@@ -5698,7 +5715,7 @@ function switchProvTab(tab){
 async function saveProviders(){
   const name=provName.value.trim(); if(!name){ provMsg.textContent="请填名称"; return; }
   const url=provFullUrl(); if(!url){ provMsg.textContent="请填接口基地址"; return; }
-  const body={ providers: _providers.map(function(p){ return { id:p.id, name:p.name, api_url:p.api_url, api_key:p.api_key||"", model:p.model||"", models:(Array.isArray(p.models)?p.models:[]), enabled:p.enabled!==false, is_default:!!p.is_default }; }) };
+  const body={ providers: provPayloadList() };
   const rawModels=__provModels.slice();
   if(!rawModels.length){ provMsg.textContent="请至少添加一个模型"; return; }
   const ei0=window.__provEditingIndex;
@@ -5716,7 +5733,8 @@ async function saveProviders(){
 }
 async function setDefaultProv(i){
   const p=_providers[i]; if(!p)return;
-  const body={ providers: _providers.map(function(x){ return { id:x.id, name:x.name, api_url:x.api_url, api_key:x.api_key||"", model:x.model||"", models:(Array.isArray(x.models)?x.models:[]), enabled:x.enabled!==false, is_default:(x.id===p.id) }; }) };
+  const body={ providers: provPayloadList() };
+  body.providers.forEach(function(x,k){ x.is_default=(_providers[k].id===p.id); });
   fetch("/heartbeat/admin/ai-providers",{method:"PUT",headers:mcpAuthHeaders(),body:JSON.stringify(body),credentials:"include"}).then(function(r){return r.json();}).then(function(){ chatToast("已设为默认供应商"); renderProviders(); });
 }
 
@@ -5779,7 +5797,7 @@ function renderModelRoles(roles){
 }
 async function deleteProv(i){
   if(!confirm("删除该 AI 供应商？")) return;
-  const body={ providers: _providers.filter(function(_,k){ return k!==i; }).map(function(p){ return { id:p.id, name:p.name, api_url:p.api_url, api_key:p.api_key||"", model:p.model||"", models:(Array.isArray(p.models)?p.models:[]), enabled:p.enabled!==false, is_default:!!p.is_default }; }) };
+  const body={ providers: provPayloadList().filter(function(_,k){ return k!==i; }) };
   try{
     const r=await fetch("/heartbeat/admin/ai-providers",{ method:"PUT", headers: mcpAuthHeaders(), body: JSON.stringify(body), credentials:"include" });
     const j=await r.json(); if(!r.ok){ provMsg.textContent=j.error||"删除失败"; return; }
