@@ -1266,11 +1266,12 @@ def tool_context_star_list(args):
             no_content += 1      # 早期只记了 markedAt、没存正文的老条目
             continue
         role = v.get("role") or ""
-        # 名字解析不到时回落中文角色名，不给模型塞裸 role（看着像系统字段而非"谁说的"）
+        # 说话人取单字简称（"谢意行"→"谢"、"涵"→"涵"）：长名字会在每条输出里反复占位，
+        # 单字既对称又好读。解析不到时回落中文角色名，不给模型塞裸 role。
         if role == "user":
-            speaker = user_name or "用户"
+            speaker = (user_name or "")[:1] or "用户"
         elif role == "assistant":
-            speaker = ai_name or "AI"
+            speaker = (ai_name or "")[:1] or "AI"
         else:
             speaker = role or "未知"
         items.append({
