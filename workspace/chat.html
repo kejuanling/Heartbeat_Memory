@@ -5355,7 +5355,12 @@ function toggleMcpEnable(i, enabled){
   const s=_mcpServers[i]; if(!s)return;
   const body={ servers: _mcpServers.map(function(x){ return { id:x.id, name:x.name, type:x.type, url:x.url, command:x.command, args:x.args||[], headers:x.headers||{}, allowTools:x.allowTools, blockTools:x.blockTools, enabled:x.enabled!==false }; }) };
   body.servers[i].enabled=enabled;
-  fetch("/heartbeat/admin/mcp/servers",{method:"PUT",headers:mcpAuthHeaders(),body:JSON.stringify(body),credentials:"include"}).then(function(r){return r.json();}).then(function(){ chatToast(enabled?"已启用":"已停用"); renderMcpServers(); });
+  // 2026-10-01 修复：PUT 成功后必须先更新内存 _mcpServers 再重渲染——原代码只重渲染，
+  // 内存里 enabled 还是旧值，「已禁用」chip 不消失、开关弹回，列表开关形同摆设
+  fetch("/heartbeat/admin/mcp/servers",{method:"PUT",headers:mcpAuthHeaders(),body:JSON.stringify(body),credentials:"include"})
+    .then(function(r){return r.json();})
+    .then(function(j){ if(j&&j.ok){ _mcpServers[i].enabled=enabled; chatToast(enabled?"已启用":"已停用"); renderMcpServers(); } else { chatToast("保存失败:"+(j&&j.error||"未知错误")); renderMcpServers(); } })
+    .catch(function(e){ chatToast("保存失败:"+(e&&e.message||e)); renderMcpServers(); });
 }
 function openMcpForm(i, tab){
   const has=(i!=null && !isNaN(i)) && _mcpServers[i];
@@ -5537,8 +5542,12 @@ async function checkProviderBalance(i,btn){
   try{
     const r=await fetch("/heartbeat/admin/providers/balance",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},mcpAuthHeaders()),credentials:"include",body:JSON.stringify({id:p.id,balance_url:(p.balance_url||provPresetBalance(p.api_url)||"")})});
     const j=await r.json().catch(function(){return {};});
-    if(j&&j.ok) chatToast(p.name+" 余额："+j.balance+" "+(j.currency||""));
-    else chatToast(p.name+"："+(j&&j.error||"查询失败"));
+    if(j&&j.ok){
+      chatToast(p.name+" 余额："+j.balance+" "+(j.currency||""));
+      // 2026-10-01：余额查询结果缓存到本地并在供应商卡片常驻显示（下次打开页面仍可见，点 ¥ 刷新）
+      try{ var _b=JSON.parse(localStorage.getItem("han_prov_balances")||"{}"); _b[p.id]={v:String(j.balance),c:(j.currency||""),t:Date.now()}; localStorage.setItem("han_prov_balances",JSON.stringify(_b)); }catch(e){}
+      renderProviders();
+    }else chatToast(p.name+"："+(j&&j.error||"查询失败"));
   }catch(e){ chatToast("余额查询失败:"+(e&&e.message||e)); }
   btn.innerHTML=_o; btn.disabled=false;
 }
@@ -5551,11 +5560,16 @@ function renderProviders(){
     const df=p.is_default?'<span class="mcp-st on">默认</span>':'';
     const sw='<label class="mcp-sw"><input type="checkbox" data-sw="'+i+'" '+(p.enabled!==false?'checked':'')+'><i></i></label>';
     const mm=((p.models&&p.models.length>1)?(p.models.length+'个模型 · '+escapeHtml(p.models[0])):(p.model?escapeHtml(p.model):'默认模型'));
+    // 2026-10-01：余额常驻显示（点 ¥ 查询成功后缓存，刷新仍可见；点 ¥ 刷新）
+    let _balChip='';
+    try{ const _b=JSON.parse(localStorage.getItem("han_prov_balances")||"{}"); const r=_b[p.id];
+      if(r&&r.v){ const _ago=r.t?Math.round((Date.now()-r.t)/60000):null;
+        _balChip='<span class="mcp-st on" title="点 ¥ 刷新余额">余额 '+escapeHtml(r.v)+(r.c?(' '+escapeHtml(r.c)):'')+(_ago!=null?(' · '+(_ago<1?'刚刚':(_ago<60?_ago+'分钟前':Math.round(_ago/60)+'小时前'))):'')+'</span>'; } }catch(e){}
     const url=p.api_url?escapeHtml(p.api_url):'';
     const _testBtn='<button data-i="'+i+'" data-act="test" title="测试连接" aria-label="测试连接" class="prov-ico">'+PROV_SVG_BOLT+'</button>';
     const _balBtn='<button data-i="'+i+'" data-act="balance" title="查询余额" aria-label="查询余额" class="prov-ico">¥</button>';
     return '<div class="mcp-item prov-item'+(p.enabled===false?' prov-off':'')+'">'
-      +'<div class="prov-head"><div class="mn">'+escapeHtml(p.name)+' '+st+' '+df+'</div>'+sw+'</div>'
+      +'<div class="prov-head"><div class="mn">'+escapeHtml(p.name)+' '+st+' '+df+' '+_balChip+'</div>'+sw+'</div>'
       +'<div class="prov-meta">'+mm+'</div>'
       +(url?'<div class="prov-url" title="'+url+'">'+url+'</div>':'')
       +'<div class="mo prov-ops">'+(p.is_default?'':'<button data-i="'+i+'" data-act="def">设为默认</button>')+'<button data-i="'+i+'" data-act="edit">编辑</button><button data-i="'+i+'" data-act="del">删除</button>'+_testBtn+_balBtn+'</div>'
@@ -5585,7 +5599,7 @@ function toggleProvEnable(i, enabled){
   body.providers[i].enabled=enabled;
   fetch("/heartbeat/admin/ai-providers",{method:"PUT",headers:mcpAuthHeaders(),body:JSON.stringify(body),credentials:"include"})
     .then(function(r){return r.json();})
-    .then(function(j){ if(j&&j.ok){ chatToast(enabled?"已启用":"已停用"); renderProviders(); } else { chatToast("保存失败:"+(j&&j.error||"未知错误")); renderProviders(); } })
+    .then(function(j){ if(j&&j.ok){ _providers[i].enabled=enabled; chatToast(enabled?"已启用":"已停用"); renderProviders(); } else { chatToast("保存失败:"+(j&&j.error||"未知错误")); renderProviders(); } })
     .catch(function(e){ chatToast("保存失败:"+(e&&e.message||e)); renderProviders(); });
 }
 let __provModels=[];      // 编辑表单中的模型列表
