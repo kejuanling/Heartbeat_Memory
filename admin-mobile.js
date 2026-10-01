@@ -3009,7 +3009,11 @@ function ccNumLiveCheck(input, max){
   if(name==='memory'){ if(!window.__memPoolInited){ initMemPoolView(); window.__memPoolInited=true; } loadReviewQueue(); }
   if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
   if(name==='prompts'){loadWakePrompt();loadContextDigestPrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadReparsePrompt();loadJudgePrompt();}
-  if(name==='config'){loadToolsConfig(); loadCrossInjectConfig();}
+  if(name==='config'){loadToolsConfig(); loadCrossInjectConfig();
+    // 2026-10-01 修复：压缩参数配置卡在配置 tab，但值依赖压缩预览先加载——原加载链只在压缩 tab/换会话/压缩操作后触发，
+    // 直接进配置 tab（含刷新后恢复停留在配置 tab）时 preview 从未拉取，十二个输入框静默全空
+    if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompactionConfig(); }
+  }
   }
  
    function renderPushLog(d){
@@ -3939,6 +3943,8 @@ function ccNumLiveCheck(input, max){
         +'</div>':'')
         +'<div class="mp-meta">'
           +'<span>来源 '+(ORIGIN[c.origin]||escapeHtml(String(c.origin||'未知')))+'</span>'
+          +(c.speaker?'<span>说话人 '+escapeHtml(c.speaker==='ai'?'谢':(c.speaker==='user'?'涵':String(c.speaker)))+'</span>':'')
+          +(it.provenance&&it.provenance.msg_time?'<span>'+escapeHtml(String(it.provenance.msg_time).slice(0,16).replace('T',' '))+'</span>':'')
           +(it.created_at?'<span>'+escapeHtml(String(it.created_at).slice(0,10))+'</span>':'')
         +'</div>'
         +(multi?'':'<div class="mp-actions">'
