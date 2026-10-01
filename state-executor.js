@@ -126,12 +126,47 @@ function createStateExecutor(opts = {}) {
     return { ok: false, error: "未知 decision: " + decision };
   }
 
+  // 1002-09 待审草稿编辑：仅改 pending_review 记录的 draft 白名单字段，不裁决不入库；
+  // 编辑痕迹 push 进 details（路由回显 reasons），rec.edited 标记供前端展示
+  function editQueue(queueId, patch = {}) {
+    if (readonly) return { ok: false, error: "readonly" };
+    const ALLOW = ["text", "kind", "subject", "speaker", "direction"];
+    const clean = {};
+    for (const k of ALLOW) {
+      if (patch[k] === undefined) continue;
+      const v = patch[k];
+      if (k === "text") {
+        const sv = String(v == null ? "" : v).trim();
+        if (!sv) return { ok: false, error: "text 不能为空" };
+        clean.text = sv;
+      } else if (k === "kind") {
+        const kv = String(v == null ? "" : v).trim();
+        if (!["fact", "rule", "quote", "milestone"].includes(kv)) return { ok: false, error: "kind 非法: " + kv };
+        clean.kind = kv;
+      } else {
+        clean[k] = v == null ? null : String(v).trim();
+      }
+    }
+    if (Object.keys(clean).length === 0) return { ok: false, error: "无可编辑字段" };
+    const q = loadQueue();
+    const idx = q.findIndex(function (x) { return x.id === queueId; });
+    if (idx < 0) return { ok: false, error: "not_found: " + queueId };
+    const rec = q[idx];
+    if (rec.status !== "pending_review") return { ok: false, error: "already_resolved: " + rec.status };
+    rec.draft = Object.assign({}, rec.draft || {}, clean);
+    rec.details = Array.isArray(rec.details) ? rec.details.slice() : [];
+    rec.details.push({ action: "edited", at: nowIso(), fields: Object.keys(clean) });
+    rec.edited = true;
+    flushQueue();
+    return { ok: true, queue_id: rec.id, draft: rec.draft, fields: Object.keys(clean) };
+  }
+
   function listQueue(status = "pending_review") {
     return loadQueue().filter((x) => x.status === status);
   }
 
   return {
-    admit, review, reject, setStatus, resolveQueue, listQueue,
+    admit, review, reject, setStatus, resolveQueue, listQueue, editQueue,
     paths: { collection: store.paths.collection, queue: queuePath },
     readonly,
   };

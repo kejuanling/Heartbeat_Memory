@@ -329,6 +329,20 @@ function createAdmission(opts = {}) {
     return { action: "skipped_v2_off", candidate: null, validation: null, audit_id: null };
   }
 
+  // 1002-09 待审草稿编辑（review 路由用）：改 draft 不裁决，动作进审计
+  function editQueue(queueId, patch = {}) {
+    const r = mainExecutor.editQueue(queueId, patch);
+    if (r.ok) {
+      audit.append(audit.buildRecord({
+        candidateText: r.draft && r.draft.text ? r.draft.text : "",
+        origin: "manual",
+        action: "review_edited",
+        notes: { queue_id: queueId, fields: r.fields || null },
+      }));
+    }
+    return r;
+  }
+
   // 人工裁决回流（review 路由用）：裁决动作本身也进审计
   function resolveReview(queueId, decision, opts2 = {}) {
     const r = mainExecutor.resolveQueue(queueId, decision, opts2);
@@ -350,6 +364,7 @@ function createAdmission(opts = {}) {
     submitPromotion,
     submitV2,
     resolveReview,
+    editQueue,
     executor: shadowExecutor,
     executorMain: mainExecutor,
     audit,

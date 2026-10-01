@@ -3887,6 +3887,7 @@ function ccNumLiveCheck(input, max){
     }catch(e){ toast('操作失败: '+e.message); }
   }
   function editMemPoolSimilar(id){
+    window.__reviewEditId=null;
     let it=null;
     (window.__similarGroups||[]).forEach(function(gr){ if(it)return; (gr.items||[]).forEach(function(x){ if(x.id===id)it=x; }); });
     if(!it){ toast('未找到该记忆'); return; }
@@ -3898,6 +3899,39 @@ function ccNumLiveCheck(input, max){
     if(ce) ce.value=it.text||'';
     document.getElementById('mempool-modal-title').textContent='编辑记忆';
     openModal('mempoolEditModal');
+  }
+  // 待审编辑：打开共用弹窗，标记当前待审条目 id（saveMemPoolEdit 分流到 saveReviewEdit）
+  function editReviewItem(id){
+    const q=window.__reviewQueue||[];
+    let it=null;
+    q.forEach(function(x){ if(x.id===id) it=x; });
+    if(!it){ toast('未找到该待审条目'); return; }
+    window.__reviewEditId=id;
+    populateMemPoolCatOptions();
+    const ce=document.getElementById('mempool-edit-content');
+    const ed=document.getElementById('mempool-edit-cat');
+    if(ce) ce.value=(it.candidate&&it.candidate.text)||'';
+    if(ed) ed.value=(it.candidate&&it.candidate.kind)||'fact';
+    const tt=document.getElementById('mempool-modal-title');
+    if(tt) tt.textContent='编辑待审记忆';
+    openModal('mempoolEditModal');
+  }
+  // 保存待审编辑：POST /admin/memory-review/queue/:id/edit，保存后刷新列表
+  async function saveReviewEdit(){
+    const content=document.getElementById('mempool-edit-content').value.trim();
+    const category=document.getElementById('mempool-edit-cat').value;
+    if(!content){ toast('记忆内容不能为空'); return; }
+    const id=window.__reviewEditId;
+    try{
+      const r=await apiRequest('POST', ADMIN_API+'/memory-review/queue/'+encodeURIComponent(id)+'/edit', {text:content, kind:category});
+      if(!r.ok){ toast('保存失败: '+(r.error||('HTTP '+r.status))); return; }
+      const d=r.data||{};
+      if(d.error){ toast('保存失败: '+d.error); return; }
+      toast('待审记忆已更新');
+      window.__reviewEditId=null;
+      closeModal('mempoolEditModal');
+      loadReviewQueue();
+    }catch(e){ toast('网络错误: '+e.message); }
   }
   async function loadReviewQueue(){
     try{
@@ -3948,6 +3982,7 @@ function ccNumLiveCheck(input, max){
           +(it.created_at?'<span>'+escapeHtml(String(it.created_at).slice(0,10))+'</span>':'')
         +'</div>'
         +(multi?'':'<div class="mp-actions">'
+          +'<button type="button" class="mp-btn ghost" onclick="editReviewItem(\''+it.id+'\')">编辑</button>'
           +'<button type="button" class="mp-btn ghost" onclick="approveReviewItem(\''+it.id+'\')">'+(it.merge&&it.merge.merged_text?'通过（合并入库）':'通过入库')+'</button>'
           +'<button type="button" class="mp-btn danger" onclick="rejectReviewItem(\''+it.id+'\')">驳回</button>'
         +'</div>')
@@ -4092,6 +4127,7 @@ function ccNumLiveCheck(input, max){
     openModal('mempoolEditModal');
   }
   async function saveMemPoolEdit(){
+    if(window.__reviewEditId){ return saveReviewEdit(); }
     const content=document.getElementById('mempool-edit-content').value.trim();
     const category=document.getElementById('mempool-edit-cat').value;
     if(!content){ toast('记忆内容不能为空'); return; }

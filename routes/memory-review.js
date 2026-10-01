@@ -42,6 +42,28 @@ module.exports = function registerMemoryReviewRoutes(app, { basicAuth, admission
     return reply.send({ success: true, action: "admit", entry_id: r.entry ? r.entry.id : null });
   });
 
+  app.post("/admin/memory-review/queue/:id/edit", auth, async (req, reply) => {
+    if (!ready()) return reply.code(503).send({ error: "memory-v2 admission 未初始化" });
+    const patch = {};
+    for (const k of ["text", "kind", "subject", "speaker", "direction"]) {
+      if ((req.body || {})[k] !== undefined) patch[k] = (req.body || {})[k];
+    }
+    const r = admission.editQueue(req.params.id, patch);
+    if (!r.ok) return reply.code(400).send({ error: r.error });
+    const q = admission.executorMain.listQueue("pending_review").find(function (x) { return x.id === req.params.id; });
+    const out = {
+      id: r.queue_id,
+      status: q ? q.status : "pending_review",
+      created_at: q ? q.created_at : null,
+      reason: q ? q.reason : null,
+      audit_id: q ? q.audit_id : null,
+      candidate: q ? { text: q.draft.text, kind: q.draft.kind, subject: q.draft.subject, speaker: q.draft.speaker || null, direction: q.draft.direction || null, origin: q.draft.origin } : null,
+      provenance: q ? q.draft.provenance || null : null,
+      reasons: q ? q.details || [] : [],
+    };
+    return reply.send({ success: true, item: out });
+  });
+
   app.post("/admin/memory-review/queue/:id/reject", auth, async (req, reply) => {
     if (!ready()) return reply.code(503).send({ error: "memory-v2 admission 未初始化" });
     const note = (req.body || {}).note || null;
