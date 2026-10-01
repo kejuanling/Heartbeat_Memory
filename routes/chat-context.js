@@ -486,7 +486,15 @@ function createConversationBuilder(deps) {
     let incResult = null;
     if (cacheable && incrementalContext) {
       incResult = incrementalContext(sessionId, timeline);
-      if (incResult && incResult.head && incResult.tailStart > 0) {
+      // 2026-10-01 修复 P0：原判定只看 tailStart>0，遇「无块会话」（head=[] 且
+      // tailStart=tl.length）会认定增量合法，结果 head/tail 双空 —— 整段历史被吞，
+      // 上下文只剩 system。可用条件收紧为：head 非空 **或** 尾部起点在末尾之前，
+      // 两者皆空即降级全量路径（下方 history 分支）。
+      const incHead = (incResult && Array.isArray(incResult.head)) ? incResult.head : null;
+      const incTailStart = (incResult && Number.isFinite(incResult.tailStart)) ? incResult.tailStart : -1;
+      const incUsable = !!incHead && incTailStart > 0 &&
+        (incHead.length > 0 || incTailStart < timeline.length);
+      if (incUsable) {
         let incKey = null;
         if (useFullCache) {
           incKey = _convCacheKey(sessionId, fp, incResult.blockFp, systemRaw);

@@ -2862,7 +2862,11 @@ function computeTailStart(sessionId, timeline) {
 // ========================
 function buildIncrementalContext(sessionId, timeline) {
   const tl = Array.isArray(timeline) ? timeline : [];
-  const out = { head: [], tailStart: tl.length, blockFp: "" };
+  // 2026-10-01 修复 P0：无可用块（会话从未压缩 / 块全被 session 或窗口过滤掉）时
+  // tailStart 必须回到 0 —— 原值 tl.length 会被调用方当成合法增量结果（head 空 + 尾部起点在末尾），
+  // head/tail 双空导致整段历史被吞掉，上下文只剩 system（实测 302 条会话转发仅 7 条）。
+  // tailStart=0 时调用方判定不可用，降级全量路径，语义与「无块＝原文透传」一致。
+  const out = { head: [], tailStart: 0, blockFp: "" };
   if (!tl.length) return out;
   try {
     const st = fs.statSync(REPLACEMENTS_FILE);
