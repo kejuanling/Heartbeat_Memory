@@ -1071,6 +1071,285 @@ TOOLS["context_star"] = {
 }
 
 
+# ===== 查看已标星原文（2026-10-02 新增） =====
+# 标星数据由网关写在 data/context_compaction_marks.json（全局，不区分会话）；
+# 每条形如 { contentKey: { markedAt, content, role, time } }。早期（2026-08-19）两条只有
+# markedAt、没有正文，无法展示，跳过并计数说明。
+STAR_MARKS_FILE = "/opt/dylan-heartbeat/data/context_compaction_marks.json"
+STAR_VIEW_RECENT_FILE = "/opt/dylan-heartbeat/data/star_view_recent.json"
+STAR_DEDUP_WINDOW_SEC = 600   # 同一会话内，10 分钟内返回过的内容不重复出现
+
+
+def _star_load_marks():
+    try:
+        with open(STAR_MARKS_FILE, encoding="utf-8") as f:
+            d = json.load(f)
+        if isinstance(d, dict):
+            marks = d.get("marks")
+            if isinstance(marks, dict):
+                return marks
+    except Exception as e:
+        print("[context_star_list] 标星读取失败:", e)
+    return {}
+
+
+def _star_parse_ts(s):
+    """ISO 时间字符串 -> 时间戳(UTC)；解析不了返回 None（排序时排最后）。
+
+    注意：本机 /usr/bin/python3 是 3.6.8，没有 datetime.fromisoformat（3.7 才加入），
+    首版用了它导致所有时间解析静默失败、排序退化成「保持原顺序」——看起来就是从旧到新。
+    改为 strptime 手动解析 + 按 UTC 计算时间戳（naive datetime 减 epoch，不用 .timestamp()
+    以免被本地时区二次偏移）。
+    """
+    if not isinstance(s, str) or not s.strip():
+        return None
+    t = s.strip()
+    try:
+        if t.endswith("Z"):
+            t = t[:-1]
+        # 分离小数秒
+        frac = 0.0
+        if "." in t:
+            head, f = t.split(".", 1)
+            digits = ""
+            for ch in f:
+                if ch.isdigit():
+                    digits += ch
+                else:
+                    break
+            if digits:
+                frac = float("0." + digits)
+            head = head + f[len(digits):]
+        else:
+            head = t
+        # 时区偏移（+08:00 / -05:00）；无偏移按 UTC 处理
+        offset = 0
+        for sign in ("+", "-"):
+            i = head.find(sign, 10)
+            if i > 0:
+                tzpart = head[i + 1:]
+                head = head[:i]
+                try:
+                    parts = tzpart.split(":")
+                    hh = int(parts[0] or "0")
+                    mm = int(parts[1]) if len(parts) > 1 else 0
+                    delta = hh * 3600 + mm * 60
+                    offset = delta if sign == "+" else -delta
+                except Exception:
+                    offset = 0
+                break
+        dt = None
+        for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+            try:
+                dt = datetime.datetime.strptime(head, fmt)
+                break
+            except Exception:
+                continue
+        if dt is None:
+            return None
+        return (dt - datetime.datetime(1970, 1, 1)).total_seconds() + frac - offset
+    except Exception:
+        return None
+
+
+def _star_session_system(session_id):
+    """读会话时间线的 system 人设，用于解析说话人名字。
+
+    session_id 由网关在工具执行时注入；直接 HTTP 调用（非网关链路）拿不到时，
+    退而取 mtime 最新的会话人设——AI 名字与人设通常是全局一致的，够用。
+    """
+    safe = "".join(ch for ch in str(session_id or "") if ch.isalnum() or ch in "_-")[:64]
+    if not safe:
+        try:
+            base = "/opt/dylan-heartbeat"
+            best, best_mt = None, -1
+            for fn in os.listdir(base):
+                if not (fn.startswith("enhanced_messages") and fn.endswith(".json")):
+                    continue
+                if ".corrupt-" in fn or ".bak" in fn:
+                    continue
+                p = os.path.join(base, fn)
+                mt = os.path.getmtime(p)
+                if mt > best_mt:
+                    best_mt, best = mt, p
+            if best:
+                with open(best, encoding="utf-8") as f:
+                    arr = json.load(f)
+                if isinstance(arr, list):
+                    for m in arr:
+                        if isinstance(m, dict) and m.get("role") == "system":
+                            c = m.get("content")
+                            if isinstance(c, str):
+                                return c
+        except Exception:
+            pass
+        return ""
+    p = "/opt/dylan-heartbeat/enhanced_messages_%s.json" % safe
+    try:
+        with open(p, encoding="utf-8") as f:
+            arr = json.load(f)
+        if isinstance(arr, list):
+            for m in arr:
+                if isinstance(m, dict) and m.get("role") == "system":
+                    c = m.get("content")
+                    if isinstance(c, str):
+                        return c
+    except Exception:
+        pass
+    return ""
+
+
+def _star_speaker_names(sysp):
+    """从人设里解析 (AI名, 用户名)；解析不到返回空串，调用方回落用 role"""
+    # 人设形如：你是陪伴型AI，名字叫“谢意行”。 / *你与涵*
+    # 注意用单引号界定字符串：字符类里含英文双引号，用双引号界定会提前终止字符串。
+    ai = ""
+    m = re.search(r'名字叫\s*[“"「『]?([^”"」』\n]{1,12})', sysp or "")
+    if m:
+        ai = m.group(1).strip()
+    user = ""
+    m2 = re.search(r'你与\s*([^\s*\n，,。]{1,12})', sysp or "")
+    if m2:
+        user = m2.group(1).strip()
+    return ai, user
+
+
+def _star_load_recent():
+    try:
+        with open(STAR_VIEW_RECENT_FILE, encoding="utf-8") as f:
+            d = json.load(f)
+        if isinstance(d, dict):
+            return d
+    except Exception:
+        pass
+    return {}
+
+
+def _star_save_recent(d):
+    try:
+        os.makedirs(os.path.dirname(STAR_VIEW_RECENT_FILE), exist_ok=True)
+        tmp = STAR_VIEW_RECENT_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False)
+        os.replace(tmp, STAR_VIEW_RECENT_FILE)
+    except Exception as e:
+        print("[context_star_list] 去重状态写入失败:", e)
+
+
+def tool_context_star_list(args):
+    # session_id 由网关在工具执行时强制注入（与 diary_add 同款，模型伪造无效）；
+    # 拿不到时不去重，但仍返回全部标星内容（功能不降级）。
+    session_id = str(args.get("session_id") or "").strip()
+    raw_limit = args.get("limit")
+    limit = None
+    if raw_limit is not None and str(raw_limit).strip() != "":
+        try:
+            limit = int(raw_limit)
+        except Exception:
+            return {"error": "limit 必须是正整数，例如 5"}
+        if limit <= 0:
+            return {"error": "limit 必须是正整数，例如 5"}
+
+    marks = _star_load_marks()
+    if not marks:
+        return {"success": True, "total_marked": 0, "returned": 0, "message": "当前没有任何已标星的原文", "items": []}
+
+    ai_name, user_name = _star_speaker_names(_star_session_system(session_id))
+
+    items = []
+    no_content = 0
+    for key, v in marks.items():
+        if not isinstance(v, dict):
+            continue
+        content = v.get("content")
+        if not isinstance(content, str) or not content.strip():
+            no_content += 1      # 早期只记了 markedAt、没存正文的老条目
+            continue
+        role = v.get("role") or ""
+        # 名字解析不到时回落中文角色名，不给模型塞裸 role（看着像系统字段而非"谁说的"）
+        if role == "user":
+            speaker = user_name or "用户"
+        elif role == "assistant":
+            speaker = ai_name or "AI"
+        else:
+            speaker = role or "未知"
+        items.append({
+            "id": key,
+            "role": role,
+            "speaker": speaker,
+            "content": content,
+            "time": v.get("time") or "",
+            "marked_at": v.get("markedAt") or "",
+        })
+
+    if not items:
+        return {"success": True, "total_marked": len(marks), "returned": 0, "no_content": no_content,
+                "message": "已标星 %d 条，但都没有正文可展示" % len(marks), "items": []}
+
+    # 按消息自带时间从新到旧；无 time 的用标记时间兜底，仍无则排最后。
+    # 用 (有无时间, 时间戳) 元组做 key：保证「无时间的」永远排在「有时间」之后，不受 reverse 影响。
+    def _star_sort_key(it):
+        ts = _star_parse_ts(it.get("time"))
+        if ts is None:
+            ts = _star_parse_ts(it.get("marked_at"))
+        return (1, ts) if ts is not None else (0, 0.0)
+    items.sort(key=_star_sort_key, reverse=True)
+
+    # 同一会话内 10 分钟去重（仅在拿得到 session_id 时生效）
+    skipped_recent = 0
+    recent = {}
+    sess = {}
+    now = time.time()
+    if session_id:
+        recent = _star_load_recent()
+        sess = recent.get(session_id) or {}
+        sess = {k: ts for k, ts in sess.items()
+                if isinstance(ts, (int, float)) and (now - ts) < STAR_DEDUP_WINDOW_SEC}
+        before = len(items)
+        items = [it for it in items if it["id"] not in sess]
+        skipped_recent = before - len(items)
+
+    picked = items if limit is None else items[:limit]
+
+    if session_id:
+        for it in picked:
+            sess[it["id"]] = now
+        recent[session_id] = sess
+        _star_save_recent(recent)
+
+    result = {
+        "success": True,
+        "total_marked": len(marks),
+        "usable": len(items),
+        "returned": len(picked),
+        "order": "按消息时间从新到旧",
+        "session": session_id or None,
+        "items": picked,
+    }
+    if no_content:
+        result["no_content"] = no_content
+        result["note"] = "另有 %d 条早期标星只记了标记时间、没存正文，已跳过" % no_content
+    if skipped_recent:
+        result["skipped_recent"] = skipped_recent
+        result["note"] = (result.get("note", "") + "；%d 条在 10 分钟内已返回过，本次跳过" % skipped_recent).strip("；")
+    if not picked:
+        result["message"] = "所有已标星原文在 10 分钟内都返回过了（共 %d 条），暂时没有新内容" % skipped_recent
+    return result
+
+
+TOOLS["context_star_list"] = {
+    "description": "查看已标星的聊天原文——这些是被特意留下、长期保留在上下文中且不参与压缩/替换的内容。返回说话人、正文、消息自带时间，按时间从新到旧排序；不传参数默认返回全部，传 limit 则只返回最新的 N 条。同一会话内，10 分钟内已经返回过的内容不会重复出现。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "limit": {"type": "integer", "description": "可选。只返回最新的 N 条（按时间从新到旧取前 N 条）；不传则返回全部"}
+        },
+        "required": []
+    },
+    "handler": tool_context_star_list
+}
+
+
 def tool_memory_pin(args):
     mid = (args.get("id") or "").strip()
     if not mid:
