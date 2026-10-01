@@ -2444,6 +2444,18 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
 // 鉴权：/internal/ 路径统一走 X-Internal-Key（见顶部 onRequest 钩子），不另设账号。
 // 最新会话口径 = 项目根 enhanced_messages*.json 中 mtime 最新者（重启不丢，与「最新请求」字面语义一致）。
 // ========================
+// 小世界事件总开关（2026-10-01 用户拍板：暂时关闭）。
+// 开关文件：data/timeline-event.json —— 写 {"enabled":false} 即丢弃全部事件
+// （不落时间线、不进模型上下文）；文件缺失或 enabled 不为 false 时保持原行为。
+// 每次请求读一次文件判定，改完即时生效，无需重启 gateway。
+function timelineEventEnabled() {
+  try {
+    const p = path.join(__dirname, "data", "timeline-event.json");
+    if (!fs.existsSync(p)) return true;
+    const j = JSON.parse(fs.readFileSync(p, "utf-8"));
+    return (j && j.enabled === false) ? false : true;
+  } catch (e) { return true; }
+}
 function latestRequestedSessionId() {
   let best = { mtimeMs: -1, sid: "default" };
   try {
@@ -2467,6 +2479,10 @@ app.post("/internal/timeline-event", async (req, reply) => {
   try {
     const body = req.body || {};
     const type = String(body.type || "").trim();
+    if (!timelineEventEnabled()) {
+      console.log("[timeline-event] 开关已关闭，丢弃事件 type=" + type);
+      return reply.send({ success: false, disabled: true, type: type });
+    }
     const parsed = body.time ? new Date(body.time) : new Date();
     const timeIso = isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
     const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ""));
