@@ -5959,23 +5959,26 @@ app.post("/admin/context-compaction/generate", { preHandler: basicAuth }, async 
     const blockLogLabel = (body.blockIndex !== undefined) ? ("块 #" + (Number(body.blockIndex) + 1)) : ("记录 " + (repId || "").slice(0, 8));
     const blockLogId = addCompactionLog({ action: "block", blockIndex: body.blockIndex, repId: repId, label: blockLogLabel, status: "pending", message: "开始生成摘要..." }).id;
     const gen = await contextCompactor.generateSummaryForRange(gStart, gEnd);
-    if (!gen.ok) return reply.send(gen);
+    if (!gen.ok) {
+      addCompactionLog({ id: blockLogId, action: block, blockIndex: body.blockIndex, repId: repId, label: blockLogLabel, status: error, message: gen.message || 生成失败 });
+      return reply.send(gen);
+    }
     let saved;
     if (writeBack === "updateReplacement") {
       saved = contextReplacements.updateReplacement(rec.id, gen.summary);
-      if (!saved.ok) return reply.send({ ok: false, message: saved.error });
+      if (!saved.ok) { addCompactionLog({ id: blockLogId, action: block, blockIndex: body.blockIndex, repId: repId, label: blockLogLabel, status: error, message: saved.error || 写回失败 }); return reply.send({ ok: false, message: saved.error }); }
       addCompactionLog({ id: blockLogId, action: "block", blockIndex: body.blockIndex, repId: repId, label: blockLogLabel, status: "success", message: "生成成功，" + gen.length + " 字" });
       return reply.send({ ok: true, action: "block", repId: rec.id, length: gen.length, message: "已重新生成替换正文（" + gen.length + " 字）。" });
     }
     if (writeBack === "manualTextById") {
       saved = contextReplacements.setManualRecordTextById(rec.id, gen.summary);
-      if (!saved.ok) return reply.send({ ok: false, message: saved.message });
+      if (!saved.ok) { addCompactionLog({ id: blockLogId, action: block, repId: repId, label: blockLogLabel, status: error, message: saved.message || 写回失败 }); return reply.send({ ok: false, message: saved.message }); }
       addCompactionLog({ id: blockLogId, action: "block", repId: repId, label: blockLogLabel, status: "success", message: "生成成功，" + gen.length + " 字" });
       return reply.send({ ok: true, action: "block", repId: rec.id, length: gen.length, message: "已重新生成替换正文（" + gen.length + " 字）。" });
     }
     const blockIndex = Number(body.blockIndex);
     saved = contextReplacements.setManualRecordText(blockIndex, gen.summary);
-    if (!saved.ok) return reply.send({ ok: false, message: saved.message });
+    if (!saved.ok) { addCompactionLog({ id: blockLogId, action: block, blockIndex: blockIndex, repId: repId, label: blockLogLabel, status: error, message: saved.message || 写回失败 }); return reply.send({ ok: false, message: saved.message }); }
     addCompactionLog({ id: blockLogId, action: "block", blockIndex: blockIndex, repId: repId, label: blockLogLabel, status: "success", message: "生成成功，" + gen.length + " 字" });
     return reply.send({ ok: true, action: "block", blockIndex: blockIndex, length: gen.length, message: "已重新生成替换正文（" + gen.length + " 字）。" });
   } catch (err) {
