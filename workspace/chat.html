@@ -3234,7 +3234,7 @@ function callRecordBubble(m){
   // 与普通消息一致的「头像+名称」结构，保证位置正常（用户靠右/AI 靠左），而不是一条全宽、无头像的横条
   // 2026-09-25：布局来源与 buildAiUnitRow/makeMsgEl/applyHeader 统一为 THEME_PRESETS[cfg.theme].layout。
   // 原用 cfg.bubble_style（默认 "sms"、applyTheme 从不写它）→ 通话记录在微信/极简/黑夜下永远走短信式（无头像无名称）。
-  const layout=(THEME_PRESETS[cfg&&cfg.theme]&&THEME_PRESETS[cfg.theme].layout)||((cfg.bubble_style)||"sms");
+  const layout=chatLayout();
   let host=d;
   if(layout!=="sms"){
     const isAI=(m.role!=="user");
@@ -3326,7 +3326,7 @@ function buildTimelineUnits(timeline, m){
 // AI 消息的「头像+名称行 + 气泡」渲染单元 DOM 工厂（makeMsgEl 重建路径与实时容器共用）。
 // 返回 {host,bubble}：host 是气泡应挂的列容器，bubble 已挂好（renderAiContent 要求先挂再渲染）。
 function buildAiUnitRow(hostMsg){
-  const layout=(THEME_PRESETS[cfg&&cfg.theme]&&THEME_PRESETS[cfg.theme].layout)||((cfg.bubble_style)||"sms");
+  const layout=chatLayout();
   if(layout==="sms"){
     // 短信：无头像无名称，气泡直接挂消息根
     const b=document.createElement("div");b.className="bubble";hostMsg.appendChild(b);
@@ -3374,7 +3374,7 @@ function makeMsgEl(m,idx){
   if(selectMode){d.classList.add("selectable");if(selectSet.has(idx))d.classList.add("selected");}
   const mt=msgTime(m);
   const isAI=(m.role==="ai"||m.role==="assistant");
-  const layout=(THEME_PRESETS[cfg&&cfg.theme]&&THEME_PRESETS[cfg.theme].layout)||((cfg.bubble_style)||"sms");
+  const layout=chatLayout();
   // 为一个气泡段落构建「头像+名称」单元，返回该段落气泡应挂载的容器。
   // QQ=微信 都是头像贴气泡侧边（.mrow）；短信=无头像无名称。
   function buildUnit(){
@@ -4850,7 +4850,7 @@ function applyHeader(){
   // 顶部显示会话名称；先设名称，再按聊天布局(模板)控制名称位置与头像/副标题是否显示
   hdName.textContent=sessionDisplayName();
   document.title=sessionDisplayName();
-  const layout=(THEME_PRESETS[cfg&&cfg.theme]&&THEME_PRESETS[cfg.theme].layout)||((cfg&&cfg.bubble_style)||"sms");
+  const layout=chatLayout();
   if(hdName){ hdName.style.cursor='pointer'; hdName.title='会话列表'; }
   const mt=document.querySelector('meta[name="apple-mobile-web-app-title"]');
   if(mt)mt.setAttribute("content",sessionDisplayName());
@@ -5101,7 +5101,7 @@ async function setAppIconFromFile(file){
     finally{ inp.value=""; }
   });
 })();
-const THEME_PRESETS={warm:{name:"暖白",layout:"sms",vars:{"--bg1":"#FCF9F7","--bg2":"#F8F3F1","--bg3":"#F0E9E7","--surface":"rgba(255,253,251,.78)","--surface-solid":"#FFFCFA","--card":"rgba(255,253,251,.78)","--card-solid":"#FFFCFA","--sheet-bg":"#FFFCFA","--chrome-rgb":"255,255,255","--chrome-item":"rgba(255,255,255,.66)","--chrome-item-hover":"rgba(255,255,255,.88)","--ink":"#55483F","--ink2":"#8F8177","--ink3":"#B4A9A1","--accent":"#C9828D","--accent-deep":"#A96876","--accent-soft":"rgba(201,130,141,.16)","--accent-faint":"rgba(201,130,141,.08)","--accent-grad":"linear-gradient(135deg,#D89AA2,#B87482)","--accent-rgb":"197,143,150","--border":"rgba(92,76,66,.09)","--border-strong":"rgba(92,76,66,.14)","--line":"rgba(92,76,66,.09)","--line-strong":"rgba(92,76,66,.14)","--shadow-soft":"0 2px 10px rgba(99,70,68,.035)","--shadow-float":"0 10px 30px rgba(99,70,68,.08)","--shadow-rgb":"80,65,55","--mask-rgb":"92,76,66","--bubble-shadow":"rgba(80,65,55,.05)","--bubble-ai":"#FFFDF9","--bubble-user":"#F3E7E5","--bubble-user1":"#F8E8E8","--bubble-user2":"#F8E8E8","--radius":"16px","--radius-sm":"11px","--panel-radius":"20px","--bg-img":"none","--bubble-opacity":"1","--bubble-blur":"0px","--cap-think-border":"#EDE2E3","--cap-think-bg":"#F8F2F1","--cap-think-text":"#B08784","--cap-tool-border":"#E6E1DA","--cap-tool-bg":"#F6F4F0","--cap-tool-text":"#9A8F80","--hd-title":"#55483F","--inputbar-bg":"transparent","--inputbar-border":"rgba(92,76,66,.10)","--input-text":"#55483F","--send-bg":"#C89098","--send-icon":"#FFFDFB","--icon-btn-bg":"transparent","--icon-btn-color":"#8F8177","--ok":"#7da188","--ok-deep":"#5f8a6d","--ok-soft":"rgba(95,138,109,.14)","--ok-rgb":"125,161,136","--warn":"#b08b4f","--warn-deep":"#8f6f3a","--warn-soft":"rgba(143,111,58,.13)","--warn-rgb":"176,139,79","--bad":"#b97f77","--bad-deep":"#9c5f57","--bad-soft":"rgba(156,95,87,.12)","--bad-rgb":"185,127,119","--bad-grad":"#bc6f66","--info":"#98a2ab","--info-rgb":"152,162,171","--field-bg":"#FFFCFA","--menu-bg":"#FFFCFA","--code-bg":"#F7F2ED","--code-ink":"#9A7E76","--glass":"10px","--font-family":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--font-size":"15px","--line-height":"1.72","--font-weight":"300","--letter-spacing":"0em","--font-family-mono":"ui-monospace,\"SF Mono\",Menlo,Consolas,monospace","--title-font":"\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--header-padding":"calc(env(safe-area-inset-top) + 10px) 14px 10px","--header-gap":"12px","--header-bg":"rgba(255,252,250,.58)","--header-border":"1px solid transparent","--header-shadow":"0 2px 7px rgba(80,65,55,.025)","--header-blur":"20px","--header-saturate":"110%","--header-title-x":"0px","--header-title-y":"0px","--header-title-size":"15px","--header-title-weight":"600","--header-title-letter-spacing":"normal","--header-title-color":"#55483F","--header-title-font":"\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--header-sub-size":"11px","--header-sub-color":"#B4A9A1","--header-sub-letter-spacing":".02em","--header-sub-gap":"2px","--header-btn-size":"36px","--header-btn-radius":"50%","--header-btn-bg":"rgba(255,255,255,.56)","--header-btn-color":"#8F8177","--header-btn-font-size":"17px","--header-btn-shadow":"0 2px 8px rgba(99,70,68,.06),inset 0 1px 0 rgba(255,255,255,.7)","--header-btn-transition":"background .2s,color .2s,transform .15s","--header-btn-hover-bg":"rgba(255,255,255,.9)","--header-btn-hover-color":"#A96876","--header-btn-active-bg":"rgba(201,130,141,.08)","--header-btn-active-color":"#A96876","--session-padding":"10px 14px","--session-margin":"3px 8px","--session-radius":"12px","--session-transition":"background .15s,border-color .15s","--session-bg":"rgba(255,255,255,.66)","--session-hover-bg":"rgba(201,130,141,.08)","--session-active-bg":"rgba(201,130,141,.16)","--session-active-border":"rgba(92,76,66,.14)","--session-title-size":"13px","--session-title-weight":"600","--session-title-color":"#55483F","--session-meta-size":"11px","--session-meta-color":"#B4A9A1","--session-action-hover-color":"#A96876","--session-action-hover-bg":"rgba(201,130,141,.08)","--call-bg":"linear-gradient(165deg,#FBF4F1 0%,#F7E9E8 55%,#F3E0DF 100%)","--bubble-font-size":"15px","--bubble-line-height":"1.72","--bubble-font-weight":"300","--bubble-letter-spacing":"0em","--bubble-para-gap":"8px","--msg-gap":"12px","--bubble-max-width":"84%","--bubble-padding":"11px 15px","--avatar-size":"34px","--avatar-radius":"50%","--inputbar-radius":"20px","--inputbar-gap":"8px","--inputbar-padding":"7px 8px 7px 15px","--inputbar-shadow":"0 1px 5px rgba(99,70,68,.025)","--inputbar-focus-border":"rgba(197,143,150,.35)","--inputbar-focus-shadow":"0 0 0 3px rgba(197,143,150,.07),0 4px 18px rgba(80,65,55,.06)","--input-font-size":"15px","--input-line-height":"1.5","--input-max-height":"120px","--input-placeholder":"#B4A9A1","--icon-btn-size":"34px","--icon-btn-radius":"50%","--icon-btn-font-size":"16px","--send-size":"34px","--send-radius":"50%","--send-font-size":"15px","--send-shadow":"0 2px 6px rgba(169,91,105,.11)","--send-hover-bg":"#A96876","--theme-dur":"0ms","--bg-blur":"0px","--user-font-color":"#4A3F3F","--ai-font-color":"#000000"}},wx:{name:"微信",layout:"wx",vars:{"--bg1":"#F5F6F7","--bg2":"#F5F6F7","--bg3":"#F5F6F7","--surface":"rgba(255,255,255,.88)","--surface-solid":"#FFFFFF","--card":"rgba(255,255,255,.88)","--card-solid":"#FFFFFF","--sheet-bg":"#FFFFFF","--chrome-rgb":"255,255,255","--chrome-item":"rgba(255,255,255,.72)","--chrome-item-hover":"rgba(255,255,255,.92)","--ink":"#111111","--ink2":"#666666","--ink3":"#999999","--accent":"#B7B7B7","--accent-deep":"#969696","--accent-soft":"rgba(0,0,0,.10)","--accent-faint":"rgba(0,0,0,.05)","--accent-grad":"linear-gradient(135deg,#BDBDBD,#9E9E9E)","--accent-rgb":"183,183,183","--border":"rgba(0,0,0,.08)","--border-strong":"rgba(0,0,0,.14)","--line":"rgba(0,0,0,.08)","--line-strong":"rgba(0,0,0,.14)","--shadow-soft":"0 1px 5px rgba(0,0,0,.035)","--shadow-float":"0 8px 24px rgba(0,0,0,.10)","--shadow-rgb":"0,0,0","--mask-rgb":"0,0,0","--bubble-shadow":"rgba(0,0,0,.04)","--bubble-ai":"#FFFFFF","--bubble-user":"#95EC69","--bubble-user1":"#95EC69","--bubble-user2":"#95EC69","--radius":"4px","--radius-sm":"8px","--panel-radius":"12px","--bg-img":"none","--bubble-opacity":"1","--bubble-blur":"0px","--cap-think-border":"#D8D8D8","--cap-think-bg":"#F7F7F7","--cap-think-text":"#777777","--cap-tool-border":"#D8D8D8","--cap-tool-bg":"#F7F7F7","--cap-tool-text":"#777777","--hd-title":"#111111","--inputbar-bg":"#FFFFFF","--inputbar-border":"rgba(0,0,0,.08)","--input-text":"#111111","--send-bg":"#B7B7B7","--send-icon":"#FFFFFF","--icon-btn-bg":"transparent","--icon-btn-color":"#666666","--ok":"#7da188","--ok-deep":"#5f8a6d","--ok-soft":"rgba(95,138,109,.14)","--ok-rgb":"125,161,136","--warn":"#b08b4f","--warn-deep":"#8f6f3a","--warn-soft":"rgba(143,111,58,.13)","--warn-rgb":"176,139,79","--bad":"#b97f77","--bad-deep":"#9c5f57","--bad-soft":"rgba(156,95,87,.12)","--bad-rgb":"185,127,119","--bad-grad":"#bc6f66","--info":"#98a2ab","--info-rgb":"152,162,171","--field-bg":"#FFFFFF","--menu-bg":"#FFFFFF","--code-bg":"#F5F5F5","--code-ink":"#666666","--glass":"0px","--font-family":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--font-size":"15px","--line-height":"1.72","--font-weight":"400","--letter-spacing":"0em","--font-family-mono":"ui-monospace,\"SF Mono\",Menlo,Consolas,monospace","--title-font":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--header-padding":"calc(env(safe-area-inset-top) + 10px) 14px 10px","--header-gap":"12px","--header-bg":"rgba(255,255,255,.94)","--header-border":"1px solid rgba(0,0,0,.06)","--header-shadow":"0 1px 4px rgba(0,0,0,.04)","--header-blur":"12px","--header-saturate":"100%","--header-title-x":"0px","--header-title-y":"0px","--header-title-size":"15px","--header-title-weight":"600","--header-title-letter-spacing":"normal","--header-title-color":"#111111","--header-title-font":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--header-sub-size":"11px","--header-sub-color":"#999999","--header-sub-letter-spacing":".02em","--header-sub-gap":"2px","--header-btn-size":"36px","--header-btn-radius":"50%","--header-btn-bg":"transparent","--header-btn-color":"#555555","--header-btn-font-size":"17px","--header-btn-shadow":"none","--header-btn-transition":"background .2s,color .2s,transform .15s","--header-btn-hover-bg":"rgba(0,0,0,.05)","--header-btn-hover-color":"#777777","--header-btn-active-bg":"rgba(0,0,0,.06)","--header-btn-active-color":"#777777","--session-padding":"10px 14px","--session-margin":"3px 8px","--session-radius":"12px","--session-transition":"background .15s,border-color .15s","--session-bg":"rgba(255,255,255,.72)","--session-hover-bg":"rgba(0,0,0,.04)","--session-active-bg":"rgba(0,0,0,.08)","--session-active-border":"rgba(0,0,0,.14)","--session-title-size":"13px","--session-title-weight":"600","--session-title-color":"#222222","--session-meta-size":"11px","--session-meta-color":"#999999","--session-action-hover-color":"#777777","--session-action-hover-bg":"rgba(0,0,0,.06)","--call-bg":"linear-gradient(165deg,#F5F5F5 0%,#EDEDED 100%)","--bubble-font-size":"15px","--bubble-line-height":"1.55","--bubble-font-weight":"400","--bubble-letter-spacing":"0em","--bubble-para-gap":"8px","--msg-gap":"18px","--bubble-max-width":"72%","--bubble-padding":"7px 12px","--avatar-size":"40px","--avatar-radius":"6px","--inputbar-radius":"12px","--inputbar-gap":"8px","--inputbar-padding":"6px 8px 6px 12px","--inputbar-shadow":"none","--inputbar-focus-border":"rgba(0,0,0,.06)","--inputbar-focus-shadow":"none","--input-font-size":"15px","--input-line-height":"1.5","--input-max-height":"120px","--input-placeholder":"#999999","--icon-btn-size":"34px","--icon-btn-radius":"4px","--icon-btn-font-size":"16px","--send-size":"34px","--send-radius":"4px","--send-font-size":"15px","--send-shadow":"none","--send-hover-bg":"#969696","--theme-dur":"0ms","--bg-blur":"0px","--user-font-color":"#111111","--ai-font-color":"#111111"}},claude:{name:"极简",layout:"claude",vars:{
+const THEME_PRESETS={warm:{name:"暖白",layout:"sms",vars:{"--bg1":"#FCF9F7","--bg2":"#F8F3F1","--bg3":"#F0E9E7","--surface":"rgba(255,253,251,.78)","--surface-solid":"#FFFCFA","--card":"rgba(255,253,251,.78)","--card-solid":"#FFFCFA","--sheet-bg":"#FFFCFA","--chrome-rgb":"255,255,255","--chrome-item":"rgba(255,255,255,.66)","--chrome-item-hover":"rgba(255,255,255,.88)","--ink":"#55483F","--ink2":"#8F8177","--ink3":"#B4A9A1","--accent":"#C9828D","--accent-deep":"#A96876","--accent-soft":"rgba(201,130,141,.16)","--accent-faint":"rgba(201,130,141,.08)","--accent-grad":"linear-gradient(135deg,#D89AA2,#B87482)","--accent-rgb":"197,143,150","--border":"rgba(92,76,66,.09)","--border-strong":"rgba(92,76,66,.14)","--line":"rgba(92,76,66,.09)","--line-strong":"rgba(92,76,66,.14)","--shadow-soft":"0 2px 10px rgba(99,70,68,.035)","--shadow-float":"0 10px 30px rgba(99,70,68,.08)","--shadow-rgb":"80,65,55","--mask-rgb":"92,76,66","--bubble-shadow":"rgba(80,65,55,.05)","--bubble-ai":"#FFFDF9","--bubble-user":"#F3E7E5","--bubble-user1":"#F8E8E8","--bubble-user2":"#F8E8E8","--radius":"16px","--radius-sm":"11px","--panel-radius":"20px","--bg-img":"none","--bubble-opacity":"1","--bubble-blur":"0px","--cap-think-border":"#EDE2E3","--cap-think-bg":"#F8F2F1","--cap-think-text":"#B08784","--cap-tool-border":"#E6E1DA","--cap-tool-bg":"#F6F4F0","--cap-tool-text":"#9A8F80","--hd-title":"#55483F","--inputbar-bg":"transparent","--inputbar-border":"rgba(92,76,66,.10)","--input-text":"#55483F","--send-bg":"#C89098","--send-icon":"#FFFDFB","--icon-btn-bg":"transparent","--icon-btn-color":"#8F8177","--ok":"#7da188","--ok-deep":"#5f8a6d","--ok-soft":"rgba(95,138,109,.14)","--ok-rgb":"125,161,136","--warn":"#b08b4f","--warn-deep":"#8f6f3a","--warn-soft":"rgba(143,111,58,.13)","--warn-rgb":"176,139,79","--bad":"#b97f77","--bad-deep":"#9c5f57","--bad-soft":"rgba(156,95,87,.12)","--bad-rgb":"185,127,119","--bad-grad":"#bc6f66","--info":"#98a2ab","--info-rgb":"152,162,171","--field-bg":"#FFFCFA","--menu-bg":"#FFFCFA","--code-bg":"#F7F2ED","--code-ink":"#9A7E76","--glass":"10px","--font-family":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--font-size":"15px","--line-height":"1.72","--font-weight":"300","--letter-spacing":"0em","--font-family-mono":"ui-monospace,\"SF Mono\",Menlo,Consolas,monospace","--title-font":"\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--header-padding":"calc(env(safe-area-inset-top) + 10px) 14px 10px","--header-gap":"12px","--header-bg":"rgba(255,252,250,.58)","--header-border":"1px solid transparent","--header-shadow":"0 2px 7px rgba(80,65,55,.025)","--header-blur":"20px","--header-saturate":"110%","--header-title-x":"0px","--header-title-y":"0px","--header-title-size":"15px","--header-title-weight":"600","--header-title-letter-spacing":"normal","--header-title-color":"#55483F","--header-title-font":"\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--header-sub-size":"11px","--header-sub-color":"#B4A9A1","--header-sub-letter-spacing":".02em","--header-sub-gap":"2px","--header-btn-size":"36px","--header-btn-radius":"50%","--header-btn-bg":"rgba(255,255,255,.56)","--header-btn-color":"#8F8177","--header-btn-font-size":"17px","--header-btn-shadow":"0 2px 8px rgba(99,70,68,.06),inset 0 1px 0 rgba(255,255,255,.7)","--header-btn-hover-bg":"rgba(255,255,255,.9)","--header-btn-hover-color":"#A96876","--header-btn-active-bg":"rgba(201,130,141,.08)","--header-btn-active-color":"#A96876","--session-padding":"10px 14px","--session-margin":"3px 8px","--session-radius":"12px","--session-bg":"rgba(255,255,255,.66)","--session-hover-bg":"rgba(201,130,141,.08)","--session-active-bg":"rgba(201,130,141,.16)","--session-active-border":"rgba(92,76,66,.14)","--session-title-size":"13px","--session-title-weight":"600","--session-title-color":"#55483F","--session-meta-size":"11px","--session-meta-color":"#B4A9A1","--session-action-hover-color":"#A96876","--session-action-hover-bg":"rgba(201,130,141,.08)","--call-bg":"linear-gradient(165deg,#FBF4F1 0%,#F7E9E8 55%,#F3E0DF 100%)","--bubble-font-size":"15px","--bubble-line-height":"1.72","--bubble-font-weight":"300","--bubble-letter-spacing":"0em","--bubble-para-gap":"8px","--msg-gap":"12px","--bubble-max-width":"84%","--bubble-padding":"11px 15px","--avatar-size":"34px","--avatar-radius":"50%","--inputbar-radius":"20px","--inputbar-gap":"8px","--inputbar-padding":"7px 8px 7px 15px","--inputbar-shadow":"0 1px 5px rgba(99,70,68,.025)","--inputbar-focus-border":"rgba(197,143,150,.35)","--inputbar-focus-shadow":"0 0 0 3px rgba(197,143,150,.07),0 4px 18px rgba(80,65,55,.06)","--input-font-size":"15px","--input-line-height":"1.5","--input-max-height":"120px","--input-placeholder":"#B4A9A1","--icon-btn-size":"34px","--icon-btn-radius":"50%","--icon-btn-font-size":"16px","--send-size":"34px","--send-radius":"50%","--send-font-size":"15px","--send-shadow":"0 2px 6px rgba(169,91,105,.11)","--send-hover-bg":"#A96876","--theme-dur":"0ms","--bg-blur":"0px","--user-font-color":"#4A3F3F","--ai-font-color":"#000000","--bubble-ai-blur":"0px","--bubble-user-blur":"0px"}},wx:{name:"微信",layout:"wx",vars:{"--bg1":"#F5F6F7","--bg2":"#F5F6F7","--bg3":"#F5F6F7","--surface":"rgba(255,255,255,.88)","--surface-solid":"#FFFFFF","--card":"rgba(255,255,255,.88)","--card-solid":"#FFFFFF","--sheet-bg":"#FFFFFF","--chrome-rgb":"255,255,255","--chrome-item":"rgba(255,255,255,.72)","--chrome-item-hover":"rgba(255,255,255,.92)","--ink":"#111111","--ink2":"#666666","--ink3":"#999999","--accent":"#B7B7B7","--accent-deep":"#969696","--accent-soft":"rgba(0,0,0,.10)","--accent-faint":"rgba(0,0,0,.05)","--accent-grad":"linear-gradient(135deg,#BDBDBD,#9E9E9E)","--accent-rgb":"183,183,183","--border":"rgba(0,0,0,.08)","--border-strong":"rgba(0,0,0,.14)","--line":"rgba(0,0,0,.08)","--line-strong":"rgba(0,0,0,.14)","--shadow-soft":"0 1px 5px rgba(0,0,0,.035)","--shadow-float":"0 8px 24px rgba(0,0,0,.10)","--shadow-rgb":"0,0,0","--mask-rgb":"0,0,0","--bubble-shadow":"rgba(0,0,0,.04)","--bubble-ai":"#FFFFFF","--bubble-user":"#95EC69","--bubble-user1":"#95EC69","--bubble-user2":"#95EC69","--radius":"4px","--radius-sm":"8px","--panel-radius":"12px","--bg-img":"none","--bubble-opacity":"1","--bubble-blur":"0px","--cap-think-border":"#D8D8D8","--cap-think-bg":"#F7F7F7","--cap-think-text":"#777777","--cap-tool-border":"#D8D8D8","--cap-tool-bg":"#F7F7F7","--cap-tool-text":"#777777","--hd-title":"#111111","--inputbar-bg":"#FFFFFF","--inputbar-border":"rgba(0,0,0,.08)","--input-text":"#111111","--send-bg":"#B7B7B7","--send-icon":"#FFFFFF","--icon-btn-bg":"transparent","--icon-btn-color":"#666666","--ok":"#7da188","--ok-deep":"#5f8a6d","--ok-soft":"rgba(95,138,109,.14)","--ok-rgb":"125,161,136","--warn":"#b08b4f","--warn-deep":"#8f6f3a","--warn-soft":"rgba(143,111,58,.13)","--warn-rgb":"176,139,79","--bad":"#b97f77","--bad-deep":"#9c5f57","--bad-soft":"rgba(156,95,87,.12)","--bad-rgb":"185,127,119","--bad-grad":"#bc6f66","--info":"#98a2ab","--info-rgb":"152,162,171","--field-bg":"#FFFFFF","--menu-bg":"#FFFFFF","--code-bg":"#F5F5F5","--code-ink":"#666666","--glass":"0px","--font-family":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--font-size":"15px","--line-height":"1.72","--font-weight":"400","--letter-spacing":"0em","--font-family-mono":"ui-monospace,\"SF Mono\",Menlo,Consolas,monospace","--title-font":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--header-padding":"calc(env(safe-area-inset-top) + 10px) 14px 10px","--header-gap":"12px","--header-bg":"rgba(255,255,255,.94)","--header-border":"1px solid rgba(0,0,0,.06)","--header-shadow":"0 1px 4px rgba(0,0,0,.04)","--header-blur":"12px","--header-saturate":"100%","--header-title-x":"0px","--header-title-y":"0px","--header-title-size":"15px","--header-title-weight":"600","--header-title-letter-spacing":"normal","--header-title-color":"#111111","--header-title-font":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--header-sub-size":"11px","--header-sub-color":"#999999","--header-sub-letter-spacing":".02em","--header-sub-gap":"2px","--header-btn-size":"36px","--header-btn-radius":"50%","--header-btn-bg":"transparent","--header-btn-color":"#555555","--header-btn-font-size":"17px","--header-btn-shadow":"none","--header-btn-hover-bg":"rgba(0,0,0,.05)","--header-btn-hover-color":"#777777","--header-btn-active-bg":"rgba(0,0,0,.06)","--header-btn-active-color":"#777777","--session-padding":"10px 14px","--session-margin":"3px 8px","--session-radius":"12px","--session-bg":"rgba(255,255,255,.72)","--session-hover-bg":"rgba(0,0,0,.04)","--session-active-bg":"rgba(0,0,0,.08)","--session-active-border":"rgba(0,0,0,.14)","--session-title-size":"13px","--session-title-weight":"600","--session-title-color":"#222222","--session-meta-size":"11px","--session-meta-color":"#999999","--session-action-hover-color":"#777777","--session-action-hover-bg":"rgba(0,0,0,.06)","--call-bg":"linear-gradient(165deg,#F5F5F5 0%,#EDEDED 100%)","--bubble-font-size":"15px","--bubble-line-height":"1.55","--bubble-font-weight":"400","--bubble-letter-spacing":"0em","--bubble-para-gap":"8px","--msg-gap":"18px","--bubble-max-width":"72%","--bubble-padding":"7px 12px","--avatar-size":"40px","--avatar-radius":"6px","--inputbar-radius":"12px","--inputbar-gap":"8px","--inputbar-padding":"6px 8px 6px 12px","--inputbar-shadow":"none","--inputbar-focus-border":"rgba(0,0,0,.06)","--inputbar-focus-shadow":"none","--input-font-size":"15px","--input-line-height":"1.5","--input-max-height":"120px","--input-placeholder":"#999999","--icon-btn-size":"34px","--icon-btn-radius":"4px","--icon-btn-font-size":"16px","--send-size":"34px","--send-radius":"4px","--send-font-size":"15px","--send-shadow":"none","--send-hover-bg":"#969696","--theme-dur":"0ms","--bg-blur":"0px","--user-font-color":"#111111","--ai-font-color":"#111111","--bubble-ai-blur":"0px","--bubble-user-blur":"0px"}},claude:{name:"极简",layout:"claude",vars:{
 "--bg1":"#fafafa","--bg2":"#fafafa","--bg3":"#fafafa",
 "--surface":"#ffffff","--surface-solid":"#ffffff","--card":"#ffffff","--card-solid":"#ffffff","--sheet-bg":"#ffffff",
 "--chrome-rgb":"255,255,255","--chrome-item":"#ffffff","--chrome-item-hover":"#f0f0f0",
@@ -5156,9 +5156,9 @@ const THEME_PRESETS={warm:{name:"暖白",layout:"sms",vars:{"--bg1":"#FCF9F7","-
 "--send-size":"36px","--send-radius":"50%","--send-font-size":"16px","--send-shadow":"none",
 "--send-hover-bg":"#333333",
 "--theme-dur":"0ms","--bg-blur":"0px",
-"--user-font-color":"#1a1a1a","--ai-font-color":"#1a1a1a"}},dark:{name:"黑夜",layout:"claude",vars:{"--bg1":"#1a1a1a","--bg2":"#1a1a1a","--bg3":"#1a1a1a","--ink":"#e8e8e8","--ink2":"#999","--ink3":"#666","--surface":"#2a2a2a","--surface-solid":"#2a2a2a","--card":"#2a2a2a","--card-solid":"#2a2a2a","--sheet-bg":"#2a2a2a","--chrome-rgb":"45,45,45","--chrome-item":"rgba(45,45,45,.8)","--chrome-item-hover":"rgba(58,58,58,.92)","--accent":"#a0a0a0","--accent-deep":"#cfcfcf","--accent-soft":"rgba(160,160,160,.14)","--accent-faint":"rgba(160,160,160,.07)","--accent-grad":"linear-gradient(135deg,#666,#333)","--accent-rgb":"160,160,160","--border":"rgba(255,255,255,.08)","--border-strong":"rgba(255,255,255,.16)","--line":"rgba(255,255,255,.08)","--line-strong":"rgba(255,255,255,.16)","--shadow-soft":"0 2px 10px rgba(0,0,0,.25)","--shadow-float":"0 10px 30px rgba(0,0,0,.45)","--shadow-rgb":"0,0,0","--mask-rgb":"0,0,0","--bubble-shadow":"none","--bubble-ai":"#2a2a2a","--bubble-user":"#2d2d2d","--bubble-user1":"#2d2d2d","--bubble-user2":"#2d2d2d","--radius":"20px","--radius-sm":"12px","--panel-radius":"24px","--bg-img":"none","--bubble-opacity":"1","--bubble-blur":"0px","--cap-think-border":"#333","--cap-think-bg":"#222","--cap-think-text":"#999","--cap-tool-border":"#333","--cap-tool-bg":"#222","--cap-tool-text":"#888","--hd-title":"#e8e8e8","--inputbar-bg":"#2d2d2d","--inputbar-border":"rgba(255,255,255,.08)","--input-text":"#e8e8e8","--send-bg":"#e8e8e8","--send-icon":"#1a1a1a","--icon-btn-bg":"transparent","--icon-btn-color":"#999","--ok":"#6fae86","--ok-deep":"#5a9470","--ok-soft":"rgba(111,174,134,.15)","--ok-rgb":"111,174,134","--warn":"#c9a05e","--warn-deep":"#a8843f","--warn-soft":"rgba(201,160,94,.15)","--warn-rgb":"201,160,94","--bad":"#d08078","--bad-deep":"#b5655d","--bad-soft":"rgba(208,128,120,.15)","--bad-rgb":"208,128,120","--bad-grad":"#d06f66","--info":"#7d8a99","--info-rgb":"125,138,153","--field-bg":"#2a2a2a","--menu-bg":"#2a2a2a","--code-bg":"#333","--code-ink":"#aaa","--glass":"10px","--font-family":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--font-size":"16px","--line-height":"1.7","--font-weight":"400","--letter-spacing":"0em","--font-family-mono":"ui-monospace,\"SF Mono\",Menlo,Consolas,monospace","--title-font":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",sans-serif","--header-padding":"calc(env(safe-area-inset-top) + 12px) 16px 10px","--header-gap":"12px","--header-bg":"#1a1a1a","--header-border":"1px solid rgba(255,255,255,.06)","--header-shadow":"none","--header-blur":"0px","--header-saturate":"100%","--header-title-x":"0px","--header-title-y":"0px","--header-title-size":"16px","--header-title-weight":"600","--header-title-letter-spacing":"normal","--header-title-color":"#e8e8e8","--header-title-font":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",sans-serif","--header-sub-size":"11px","--header-sub-color":"#666","--header-sub-letter-spacing":".02em","--header-sub-gap":"2px","--header-btn-size":"36px","--header-btn-radius":"50%","--header-btn-bg":"#2d2d2d","--header-btn-color":"#ccc","--header-btn-font-size":"17px","--header-btn-shadow":"none","--header-btn-transition":"background .2s,color .2s,transform .15s","--header-btn-hover-bg":"#3a3a3a","--header-btn-hover-color":"#fff","--header-btn-active-bg":"#333","--header-btn-active-color":"#fff","--session-padding":"10px 14px","--session-margin":"3px 8px","--session-radius":"12px","--session-transition":"background .15s,border-color .15s","--session-bg":"rgba(42,42,42,.6)","--session-hover-bg":"#333","--session-active-bg":"#333","--session-active-border":"rgba(255,255,255,.12)","--session-title-size":"14px","--session-title-weight":"500","--session-title-color":"#e8e8e8","--session-meta-size":"11px","--session-meta-color":"#666","--session-action-hover-color":"#ccc","--session-action-hover-bg":"#333","--call-bg":"linear-gradient(165deg,#1a1a1a,#242424)","--bubble-font-size":"16px","--bubble-line-height":"1.7","--bubble-font-weight":"400","--bubble-letter-spacing":"0em","--bubble-para-gap":"10px","--msg-gap":"20px","--bubble-max-width":"75%","--bubble-padding":"0","--avatar-size":"34px","--avatar-radius":"50%","--inputbar-radius":"24px","--inputbar-gap":"8px","--inputbar-padding":"10px 14px","--inputbar-shadow":"0 1px 3px rgba(0,0,0,.3)","--inputbar-focus-border":"transparent","--inputbar-focus-shadow":"none","--input-font-size":"16px","--input-line-height":"1.5","--input-max-height":"120px","--input-placeholder":"#666","--icon-btn-size":"36px","--icon-btn-radius":"50%","--icon-btn-font-size":"18px","--send-size":"36px","--send-radius":"50%","--send-font-size":"16px","--send-shadow":"none","--send-hover-bg":"#cfcfcf","--theme-dur":"0ms","--bg-blur":"0px","--user-font-color":"#e8e8e8","--ai-font-color":"#e8e8e8"}},
-glass:{name:"玻璃",layout:"sms",vars:{"--bg1":"#F7F5F2","--bg2":"#F2EFEA","--bg3":"#EAE6DF","--surface":"rgba(255,255,255,.5)","--surface-solid":"#FBFAF7","--card":"rgba(255,255,255,.5)","--card-solid":"#FBFAF7","--sheet-bg":"rgba(250,249,246,.92)","--chrome-rgb":"255,255,255","--chrome-item":"rgba(255,255,255,.5)","--chrome-item-hover":"rgba(255,255,255,.72)","--ink":"#4F4A45","--ink2":"#8C857D","--ink3":"#B3ACA3","--accent":"#8AA0AE","--accent-deep":"#6C8296","--accent-soft":"rgba(138,160,174,.16)","--accent-faint":"rgba(138,160,174,.08)","--accent-grad":"linear-gradient(135deg,#A8BBC7,#7C93A5)","--accent-rgb":"138,160,174","--border":"rgba(79,74,69,.08)","--border-strong":"rgba(79,74,69,.14)","--line":"rgba(79,74,69,.08)","--line-strong":"rgba(79,74,69,.14)","--shadow-soft":"0 2px 12px rgba(79,74,69,.04)","--shadow-float":"0 12px 32px rgba(79,74,69,.08)","--shadow-rgb":"79,74,69","--mask-rgb":"79,74,69","--bubble-shadow":"rgba(79,74,69,.05)","--bubble-ai":"#FFFDF9","--bubble-user":"#F8E8E8","--bubble-user1":"#F8E8E8","--bubble-user2":"#F8E8E8","--radius":"16px","--radius-sm":"11px","--panel-radius":"20px","--bg-img":"none","--bubble-opacity":"1","--bubble-blur":"0px","--bubble-ai-blur":"0px","--bubble-user-blur":"0px","--cap-think-border":"#D9D0C9","--cap-think-bg":"rgba(255,255,255,.55)","--cap-think-text":"#A99F95","--cap-tool-border":"#D9D0C9","--cap-tool-bg":"rgba(255,255,255,.55)","--cap-tool-text":"#A99F95","--hd-title":"#4F4A45","--inputbar-bg":"transparent","--inputbar-border":"transparent","--input-text":"#4F4A45","--send-bg":"#8AA0AE","--send-icon":"#FFFFFF","--icon-btn-bg":"rgba(255,255,255,.42)","--icon-btn-color":"#6C8296","--ok":"#7da188","--ok-deep":"#5f8a6d","--ok-soft":"rgba(95,138,109,.14)","--ok-rgb":"125,161,136","--warn":"#b08b4f","--warn-deep":"#8f6f3a","--warn-soft":"rgba(143,111,58,.13)","--warn-rgb":"176,139,79","--bad":"#b97f77","--bad-deep":"#9c5f57","--bad-soft":"rgba(156,95,87,.12)","--bad-rgb":"185,127,119","--bad-grad":"#bc6f66","--info":"#98a2ab","--info-rgb":"152,162,171","--field-bg":"rgba(255,255,255,.55)","--menu-bg":"rgba(250,249,246,.94)","--code-bg":"rgba(255,255,255,.5)","--code-ink":"#8C857D","--glass":"18px","--font-family":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Songti SC\",\"STSong\",\"Noto Serif SC\",\"SimSun\",serif","--font-size":"14px","--line-height":"1.78","--font-weight":"300","--letter-spacing":"0.01em","--font-family-mono":"ui-monospace,\"SF Mono\",Menlo,Consolas,monospace","--title-font":"\"Snell Roundhand\",\"Zapfino\",\"Segoe Script\",\"Brush Script MT\",\"Songti SC\",\"STSong\",\"Noto Serif SC\",\"SimSun\",serif","--header-padding":"calc(env(safe-area-inset-top) + 12px) 16px 10px","--header-gap":"12px","--header-bg":"rgba(255,255,255,.28)","--header-border":"1px solid transparent","--header-shadow":"none","--header-blur":"24px","--header-saturate":"150%","--header-title-x":"0px","--header-title-y":"0px","--header-title-size":"14.5px","--header-title-weight":"300","--header-title-letter-spacing":"0.04em","--header-title-color":"#4F4A45","--header-title-font":"\"Snell Roundhand\",\"Zapfino\",\"Segoe Script\",\"Brush Script MT\",\"Songti SC\",\"STSong\",\"Noto Serif SC\",\"SimSun\",serif","--header-sub-size":"10px","--header-sub-color":"#B3ACA3","--header-sub-letter-spacing":".03em","--header-sub-gap":"2px","--header-btn-size":"36px","--header-btn-radius":"50%","--header-btn-bg":"transparent","--header-btn-color":"#6C8296","--header-btn-font-size":"17px","--header-btn-shadow":"0 1px 6px rgba(79,74,69,.05)","--header-btn-transition":"background .2s,color .2s,transform .15s","--header-btn-hover-bg":"rgba(255,255,255,.7)","--header-btn-hover-color":"#4F4A45","--header-btn-active-bg":"rgba(138,160,174,.12)","--header-btn-active-color":"#6C8296","--session-padding":"10px 14px","--session-margin":"3px 8px","--session-radius":"12px","--session-transition":"background .15s,border-color .15s","--session-bg":"rgba(138,160,174,.22)","--session-hover-bg":"rgba(255,255,255,.6)","--session-active-bg":"rgba(255,255,255,.4)","--session-active-border":"rgba(79,74,69,.12)","--session-title-size":"12.5px","--session-title-weight":"300","--session-title-color":"#4F4A45","--session-meta-size":"10.5px","--session-meta-color":"#B3ACA3","--session-action-hover-color":"#6C8296","--session-action-hover-bg":"rgba(138,160,174,.1)","--call-bg":"linear-gradient(165deg,#F7F5F2 0%,#EFEAE5 100%)","--bubble-font-size":"14.5px","--bubble-line-height":"1.78","--bubble-font-weight":"300","--bubble-letter-spacing":"0.01em","--bubble-para-gap":"8px","--msg-gap":"14px","--bubble-max-width":"84%","--bubble-padding":"5px 9px","--avatar-size":"34px","--avatar-radius":"50%","--inputbar-radius":"0px","--inputbar-gap":"8px","--inputbar-padding":"4px 0","--inputbar-shadow":"none","--inputbar-focus-border":"rgba(138,160,174,.5)","--inputbar-focus-shadow":"none","--input-font-size":"14.5px","--input-line-height":"1.5","--input-max-height":"120px","--input-placeholder":"#B3ACA3","--icon-btn-size":"36px","--icon-btn-radius":"50%","--icon-btn-font-size":"15.5px","--send-size":"36px","--send-radius":"50%","--send-font-size":"14.5px","--send-shadow":"0 2px 8px rgba(108,130,150,.18)","--send-hover-bg":"#6C8296","--theme-dur":"250ms","--bg-blur":"0px","--user-font-color":"#5C554E","--ai-font-color":"#5C554E"}}, terra:{name:"暖陶",layout:"sms",vars:{"--bg1":"#faf9f5","--bg2":"#f5f4ef","--bg3":"#ede9de","--surface":"rgba(250,249,245,.78)","--surface-solid":"#faf9f5","--card":"rgba(245,244,239,.78)","--card-solid":"#f5f4ef","--sheet-bg":"#faf9f5","--chrome-rgb":"250,249,245","--chrome-item":"rgba(255,253,251,.66)","--chrome-item-hover":"rgba(255,253,251,.88)","--ink":"#3d3929","--ink2":"#6e6d68","--ink3":"#9b988c","--accent":"#c96442","--accent-deep":"#b0562f","--accent-soft":"rgba(201,100,66,.16)","--accent-faint":"rgba(201,100,66,.08)","--accent-grad":"linear-gradient(135deg,#d6866a,#b0562f)","--accent-rgb":"201,100,66","--border":"rgba(61,57,41,.09)","--border-strong":"rgba(61,57,41,.14)","--line":"rgba(61,57,41,.09)","--line-strong":"rgba(61,57,41,.14)","--shadow-soft":"0 1px 3px rgba(61,57,41,.05)","--shadow-float":"0 1px 3px rgba(61,57,41,.1),0 8px 10px -1px rgba(61,57,41,.1)","--shadow-rgb":"61,57,41","--mask-rgb":"61,57,41","--bubble-shadow":"rgba(61,57,41,.05)","--bubble-ai":"#ffffff","--bubble-user":"#c96442","--bubble-user1":"#c96442","--bubble-user2":"#c96442","--radius":"16px","--radius-sm":"12px","--panel-radius":"20px","--bg-img":"none","--bubble-opacity":"1","--bubble-blur":"0px","--cap-think-border":"#ede9de","--cap-think-bg":"#f5f4ef","--cap-think-text":"#b0562f","--cap-tool-border":"#ede9de","--cap-tool-bg":"#f5f4ef","--cap-tool-text":"#934828","--hd-title":"#3d3929","--inputbar-bg":"transparent","--inputbar-border":"rgba(61,57,41,.10)","--input-text":"#3d3929","--send-bg":"#c96442","--send-icon":"#ffffff","--icon-btn-bg":"transparent","--icon-btn-color":"#6e6d68","--ok":"#788c5d","--ok-deep":"#647649","--ok-soft":"rgba(100,118,73,.14)","--ok-rgb":"120,140,93","--warn":"#b08b4f","--warn-deep":"#8f6f3a","--warn-soft":"rgba(143,111,58,.13)","--warn-rgb":"176,139,79","--bad":"#d64545","--bad-deep":"#b83636","--bad-soft":"rgba(184,54,54,.12)","--bad-rgb":"214,69,69","--bad-grad":"#d64545","--info":"#98a2ab","--info-rgb":"152,162,171","--field-bg":"#faf9f5","--menu-bg":"#faf9f5","--code-bg":"#f5f4ef","--code-ink":"#753a22","--glass":"0px","--font-family":"Poppins,-apple-system,BlinkMacSystemFont,'SF Pro Text','PingFang SC','Noto Sans CJK SC','Microsoft YaHei',sans-serif","--font-size":"15px","--line-height":"1.72","--font-weight":"400","--letter-spacing":"0em","--font-family-mono":"'Geist Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace","--title-font":"Newsreader,Georgia,'PingFang SC','Noto Sans CJK SC',serif","--header-padding":"calc(env(safe-area-inset-top) + 10px) 14px 10px","--header-gap":"12px","--header-bg":"rgba(250,249,245,.58)","--header-border":"1px solid transparent","--header-shadow":"0 1px 3px rgba(61,57,41,.05)","--header-blur":"20px","--header-saturate":"110%","--header-title-x":"0px","--header-title-y":"0px","--header-title-size":"15px","--header-title-weight":"600","--header-title-letter-spacing":"normal","--header-title-color":"#3d3929","--header-title-font":"Newsreader,Georgia,'PingFang SC','Noto Sans CJK SC',serif","--header-sub-size":"11px","--header-sub-color":"#9b988c","--header-sub-letter-spacing":".02em","--header-sub-gap":"2px","--header-btn-size":"36px","--header-btn-radius":"50%","--header-btn-bg":"rgba(255,253,251,.56)","--header-btn-color":"#6e6d68","--header-btn-font-size":"17px","--header-btn-shadow":"0 1px 3px rgba(61,57,41,.05)","--header-btn-transition":"background .2s,color .2s,transform .15s","--header-btn-hover-bg":"rgba(255,253,251,.9)","--header-btn-hover-color":"#b0562f","--header-btn-active-bg":"rgba(201,100,66,.08)","--header-btn-active-color":"#b0562f","--session-padding":"10px 14px","--session-margin":"3px 8px","--session-radius":"12px","--session-transition":"background .15s,border-color .15s","--session-bg":"rgba(255,253,251,.66)","--session-hover-bg":"rgba(201,100,66,.08)","--session-active-bg":"rgba(201,100,66,.16)","--session-active-border":"rgba(61,57,41,.14)","--session-title-size":"13px","--session-title-weight":"600","--session-title-color":"#3d3929","--session-meta-size":"11px","--session-meta-color":"#9b988c","--session-action-hover-color":"#b0562f","--session-action-hover-bg":"rgba(201,100,66,.08)","--call-bg":"linear-gradient(165deg,#faf9f5 0%,#f5f4ef 55%,#ede9de 100%)","--bubble-font-size":"15px","--bubble-line-height":"1.72","--bubble-font-weight":"400","--bubble-letter-spacing":"0em","--bubble-para-gap":"8px","--msg-gap":"12px","--bubble-max-width":"84%","--bubble-padding":"11px 15px","--avatar-size":"34px","--avatar-radius":"50%","--inputbar-radius":"20px","--inputbar-gap":"8px","--inputbar-padding":"7px 8px 7px 15px","--inputbar-shadow":"0 1px 3px rgba(61,57,41,.05)","--inputbar-focus-border":"rgba(201,100,66,.35)","--inputbar-focus-shadow":"0 0 0 3px rgba(201,100,66,.07),0 4px 18px rgba(61,57,41,.06)","--input-font-size":"15px","--input-line-height":"1.5","--input-max-height":"120px","--input-placeholder":"#9b988c","--icon-btn-size":"34px","--icon-btn-radius":"50%","--icon-btn-font-size":"16px","--send-size":"34px","--send-radius":"50%","--send-font-size":"15px","--send-shadow":"0 2px 6px rgba(201,100,66,.11)","--send-hover-bg":"#b0562f","--theme-dur":"0ms","--bg-blur":"0px","--user-font-color":"#ffffff","--ai-font-color":"#3d3929"}}
-};
+"--user-font-color":"#1a1a1a","--ai-font-color":"#1a1a1a","--header-title-x":"0px","--header-title-y":"0px","--header-title-letter-spacing":"normal","--header-title-font":"var(--title-font)","--header-sub-letter-spacing":".02em","--header-sub-gap":"2px","--header-btn-active-color":"var(--accent-deep)","--session-active-border":"var(--line-strong)","--session-action-hover-color":"var(--accent-deep)","--session-action-hover-bg":"var(--accent-faint)","--bubble-letter-spacing":"0em","--bubble-ai-blur":"0px","--bubble-user-blur":"0px"}},dark:{name:"黑夜",layout:"claude",vars:{"--bg1":"#1a1a1a","--bg2":"#1a1a1a","--bg3":"#1a1a1a","--ink":"#e8e8e8","--ink2":"#999","--ink3":"#666","--surface":"#2a2a2a","--surface-solid":"#2a2a2a","--card":"#2a2a2a","--card-solid":"#2a2a2a","--sheet-bg":"#2a2a2a","--chrome-rgb":"45,45,45","--chrome-item":"rgba(45,45,45,.8)","--chrome-item-hover":"rgba(58,58,58,.92)","--accent":"#a0a0a0","--accent-deep":"#cfcfcf","--accent-soft":"rgba(160,160,160,.14)","--accent-faint":"rgba(160,160,160,.07)","--accent-grad":"linear-gradient(135deg,#666,#333)","--accent-rgb":"160,160,160","--border":"rgba(255,255,255,.08)","--border-strong":"rgba(255,255,255,.16)","--line":"rgba(255,255,255,.08)","--line-strong":"rgba(255,255,255,.16)","--shadow-soft":"0 2px 10px rgba(0,0,0,.25)","--shadow-float":"0 10px 30px rgba(0,0,0,.45)","--shadow-rgb":"0,0,0","--mask-rgb":"0,0,0","--bubble-shadow":"none","--bubble-ai":"#2a2a2a","--bubble-user":"#2d2d2d","--bubble-user1":"#2d2d2d","--bubble-user2":"#2d2d2d","--radius":"20px","--radius-sm":"12px","--panel-radius":"24px","--bg-img":"none","--bubble-opacity":"1","--bubble-blur":"0px","--cap-think-border":"#333","--cap-think-bg":"#222","--cap-think-text":"#999","--cap-tool-border":"#333","--cap-tool-bg":"#222","--cap-tool-text":"#888","--hd-title":"#e8e8e8","--inputbar-bg":"#2d2d2d","--inputbar-border":"rgba(255,255,255,.08)","--input-text":"#e8e8e8","--send-bg":"#e8e8e8","--send-icon":"#1a1a1a","--icon-btn-bg":"transparent","--icon-btn-color":"#999","--ok":"#6fae86","--ok-deep":"#5a9470","--ok-soft":"rgba(111,174,134,.15)","--ok-rgb":"111,174,134","--warn":"#c9a05e","--warn-deep":"#a8843f","--warn-soft":"rgba(201,160,94,.15)","--warn-rgb":"201,160,94","--bad":"#d08078","--bad-deep":"#b5655d","--bad-soft":"rgba(208,128,120,.15)","--bad-rgb":"208,128,120","--bad-grad":"#d06f66","--info":"#7d8a99","--info-rgb":"125,138,153","--field-bg":"#2a2a2a","--menu-bg":"#2a2a2a","--code-bg":"#333","--code-ink":"#aaa","--glass":"10px","--font-family":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",\"Microsoft YaHei\",sans-serif","--font-size":"16px","--line-height":"1.7","--font-weight":"400","--letter-spacing":"0em","--font-family-mono":"ui-monospace,\"SF Mono\",Menlo,Consolas,monospace","--title-font":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",sans-serif","--header-padding":"calc(env(safe-area-inset-top) + 12px) 16px 10px","--header-gap":"12px","--header-bg":"#1a1a1a","--header-border":"1px solid rgba(255,255,255,.06)","--header-shadow":"none","--header-blur":"0px","--header-saturate":"100%","--header-title-x":"0px","--header-title-y":"0px","--header-title-size":"16px","--header-title-weight":"600","--header-title-letter-spacing":"normal","--header-title-color":"#e8e8e8","--header-title-font":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Noto Sans CJK SC\",sans-serif","--header-sub-size":"11px","--header-sub-color":"#666","--header-sub-letter-spacing":".02em","--header-sub-gap":"2px","--header-btn-size":"36px","--header-btn-radius":"50%","--header-btn-bg":"#2d2d2d","--header-btn-color":"#ccc","--header-btn-font-size":"17px","--header-btn-shadow":"none","--header-btn-hover-bg":"#3a3a3a","--header-btn-hover-color":"#fff","--header-btn-active-bg":"#333","--header-btn-active-color":"#fff","--session-padding":"10px 14px","--session-margin":"3px 8px","--session-radius":"12px","--session-bg":"rgba(42,42,42,.6)","--session-hover-bg":"#333","--session-active-bg":"#333","--session-active-border":"rgba(255,255,255,.12)","--session-title-size":"14px","--session-title-weight":"500","--session-title-color":"#e8e8e8","--session-meta-size":"11px","--session-meta-color":"#666","--session-action-hover-color":"#ccc","--session-action-hover-bg":"#333","--call-bg":"linear-gradient(165deg,#1a1a1a,#242424)","--bubble-font-size":"16px","--bubble-line-height":"1.7","--bubble-font-weight":"400","--bubble-letter-spacing":"0em","--bubble-para-gap":"10px","--msg-gap":"20px","--bubble-max-width":"75%","--bubble-padding":"0","--avatar-size":"34px","--avatar-radius":"50%","--inputbar-radius":"24px","--inputbar-gap":"8px","--inputbar-padding":"10px 14px","--inputbar-shadow":"0 1px 3px rgba(0,0,0,.3)","--inputbar-focus-border":"transparent","--inputbar-focus-shadow":"none","--input-font-size":"16px","--input-line-height":"1.5","--input-max-height":"120px","--input-placeholder":"#666","--icon-btn-size":"36px","--icon-btn-radius":"50%","--icon-btn-font-size":"18px","--send-size":"36px","--send-radius":"50%","--send-font-size":"16px","--send-shadow":"none","--send-hover-bg":"#cfcfcf","--theme-dur":"0ms","--bg-blur":"0px","--user-font-color":"#e8e8e8","--ai-font-color":"#e8e8e8","--bubble-ai-blur":"0px","--bubble-user-blur":"0px"}},
+glass:{name:"玻璃",layout:"sms",vars:{"--bg1":"#F7F5F2","--bg2":"#F2EFEA","--bg3":"#EAE6DF","--surface":"rgba(255,255,255,.5)","--surface-solid":"#FBFAF7","--card":"rgba(255,255,255,.5)","--card-solid":"#FBFAF7","--sheet-bg":"rgba(250,249,246,.92)","--chrome-rgb":"255,255,255","--chrome-item":"rgba(255,255,255,.5)","--chrome-item-hover":"rgba(255,255,255,.72)","--ink":"#4F4A45","--ink2":"#8C857D","--ink3":"#B3ACA3","--accent":"#8AA0AE","--accent-deep":"#6C8296","--accent-soft":"rgba(138,160,174,.16)","--accent-faint":"rgba(138,160,174,.08)","--accent-grad":"linear-gradient(135deg,#A8BBC7,#7C93A5)","--accent-rgb":"138,160,174","--border":"rgba(79,74,69,.08)","--border-strong":"rgba(79,74,69,.14)","--line":"rgba(79,74,69,.08)","--line-strong":"rgba(79,74,69,.14)","--shadow-soft":"0 2px 12px rgba(79,74,69,.04)","--shadow-float":"0 12px 32px rgba(79,74,69,.08)","--shadow-rgb":"79,74,69","--mask-rgb":"79,74,69","--bubble-shadow":"rgba(79,74,69,.05)","--bubble-ai":"#FFFDF9","--bubble-user":"#F8E8E8","--bubble-user1":"#F8E8E8","--bubble-user2":"#F8E8E8","--radius":"16px","--radius-sm":"11px","--panel-radius":"20px","--bg-img":"none","--bubble-opacity":"1","--bubble-blur":"0px","--bubble-ai-blur":"0px","--bubble-user-blur":"0px","--cap-think-border":"#D9D0C9","--cap-think-bg":"rgba(255,255,255,.55)","--cap-think-text":"#A99F95","--cap-tool-border":"#D9D0C9","--cap-tool-bg":"rgba(255,255,255,.55)","--cap-tool-text":"#A99F95","--hd-title":"#4F4A45","--inputbar-bg":"transparent","--inputbar-border":"transparent","--input-text":"#4F4A45","--send-bg":"#8AA0AE","--send-icon":"#FFFFFF","--icon-btn-bg":"rgba(255,255,255,.42)","--icon-btn-color":"#6C8296","--ok":"#7da188","--ok-deep":"#5f8a6d","--ok-soft":"rgba(95,138,109,.14)","--ok-rgb":"125,161,136","--warn":"#b08b4f","--warn-deep":"#8f6f3a","--warn-soft":"rgba(143,111,58,.13)","--warn-rgb":"176,139,79","--bad":"#b97f77","--bad-deep":"#9c5f57","--bad-soft":"rgba(156,95,87,.12)","--bad-rgb":"185,127,119","--bad-grad":"#bc6f66","--info":"#98a2ab","--info-rgb":"152,162,171","--field-bg":"rgba(255,255,255,.55)","--menu-bg":"rgba(250,249,246,.94)","--code-bg":"rgba(255,255,255,.5)","--code-ink":"#8C857D","--glass":"18px","--font-family":"-apple-system,BlinkMacSystemFont,\"SF Pro Text\",\"PingFang SC\",\"Songti SC\",\"STSong\",\"Noto Serif SC\",\"SimSun\",serif","--font-size":"14px","--line-height":"1.78","--font-weight":"300","--letter-spacing":"0.01em","--font-family-mono":"ui-monospace,\"SF Mono\",Menlo,Consolas,monospace","--title-font":"\"Snell Roundhand\",\"Zapfino\",\"Segoe Script\",\"Brush Script MT\",\"Songti SC\",\"STSong\",\"Noto Serif SC\",\"SimSun\",serif","--header-padding":"calc(env(safe-area-inset-top) + 12px) 16px 10px","--header-gap":"12px","--header-bg":"rgba(255,255,255,.28)","--header-border":"1px solid transparent","--header-shadow":"none","--header-blur":"24px","--header-saturate":"150%","--header-title-x":"0px","--header-title-y":"0px","--header-title-size":"14.5px","--header-title-weight":"300","--header-title-letter-spacing":"0.04em","--header-title-color":"#4F4A45","--header-title-font":"\"Snell Roundhand\",\"Zapfino\",\"Segoe Script\",\"Brush Script MT\",\"Songti SC\",\"STSong\",\"Noto Serif SC\",\"SimSun\",serif","--header-sub-size":"10px","--header-sub-color":"#B3ACA3","--header-sub-letter-spacing":".03em","--header-sub-gap":"2px","--header-btn-size":"36px","--header-btn-radius":"50%","--header-btn-bg":"transparent","--header-btn-color":"#6C8296","--header-btn-font-size":"17px","--header-btn-shadow":"0 1px 6px rgba(79,74,69,.05)","--header-btn-hover-bg":"rgba(255,255,255,.7)","--header-btn-hover-color":"#4F4A45","--header-btn-active-bg":"rgba(138,160,174,.12)","--header-btn-active-color":"#6C8296","--session-padding":"10px 14px","--session-margin":"3px 8px","--session-radius":"12px","--session-bg":"rgba(138,160,174,.22)","--session-hover-bg":"rgba(255,255,255,.6)","--session-active-bg":"rgba(255,255,255,.4)","--session-active-border":"rgba(79,74,69,.12)","--session-title-size":"12.5px","--session-title-weight":"300","--session-title-color":"#4F4A45","--session-meta-size":"10.5px","--session-meta-color":"#B3ACA3","--session-action-hover-color":"#6C8296","--session-action-hover-bg":"rgba(138,160,174,.1)","--call-bg":"linear-gradient(165deg,#F7F5F2 0%,#EFEAE5 100%)","--bubble-font-size":"14.5px","--bubble-line-height":"1.78","--bubble-font-weight":"300","--bubble-letter-spacing":"0.01em","--bubble-para-gap":"8px","--msg-gap":"14px","--bubble-max-width":"84%","--bubble-padding":"5px 9px","--avatar-size":"34px","--avatar-radius":"50%","--inputbar-radius":"0px","--inputbar-gap":"8px","--inputbar-padding":"4px 0","--inputbar-shadow":"none","--inputbar-focus-border":"rgba(138,160,174,.5)","--inputbar-focus-shadow":"none","--input-font-size":"14.5px","--input-line-height":"1.5","--input-max-height":"120px","--input-placeholder":"#B3ACA3","--icon-btn-size":"36px","--icon-btn-radius":"50%","--icon-btn-font-size":"15.5px","--send-size":"36px","--send-radius":"50%","--send-font-size":"14.5px","--send-shadow":"0 2px 8px rgba(108,130,150,.18)","--send-hover-bg":"#6C8296","--theme-dur":"250ms","--bg-blur":"0px","--user-font-color":"#5C554E","--ai-font-color":"#5C554E"}}, terra:{name:"暖陶",layout:"sms",vars:{"--bg1":"#faf9f5","--bg2":"#f5f4ef","--bg3":"#ede9de","--surface":"rgba(250,249,245,.78)","--surface-solid":"#faf9f5","--card":"rgba(245,244,239,.78)","--card-solid":"#f5f4ef","--sheet-bg":"#faf9f5","--chrome-rgb":"250,249,245","--chrome-item":"rgba(255,253,251,.66)","--chrome-item-hover":"rgba(255,253,251,.88)","--ink":"#3d3929","--ink2":"#6e6d68","--ink3":"#9b988c","--accent":"#c96442","--accent-deep":"#b0562f","--accent-soft":"rgba(201,100,66,.16)","--accent-faint":"rgba(201,100,66,.08)","--accent-grad":"linear-gradient(135deg,#d6866a,#b0562f)","--accent-rgb":"201,100,66","--border":"rgba(61,57,41,.09)","--border-strong":"rgba(61,57,41,.14)","--line":"rgba(61,57,41,.09)","--line-strong":"rgba(61,57,41,.14)","--shadow-soft":"0 1px 3px rgba(61,57,41,.05)","--shadow-float":"0 1px 3px rgba(61,57,41,.1),0 8px 10px -1px rgba(61,57,41,.1)","--shadow-rgb":"61,57,41","--mask-rgb":"61,57,41","--bubble-shadow":"rgba(61,57,41,.05)","--bubble-ai":"#ffffff","--bubble-user":"#c96442","--bubble-user1":"#c96442","--bubble-user2":"#c96442","--radius":"16px","--radius-sm":"12px","--panel-radius":"20px","--bg-img":"none","--bubble-opacity":"1","--bubble-blur":"0px","--cap-think-border":"#ede9de","--cap-think-bg":"#f5f4ef","--cap-think-text":"#b0562f","--cap-tool-border":"#ede9de","--cap-tool-bg":"#f5f4ef","--cap-tool-text":"#934828","--hd-title":"#3d3929","--inputbar-bg":"transparent","--inputbar-border":"rgba(61,57,41,.10)","--input-text":"#3d3929","--send-bg":"#c96442","--send-icon":"#ffffff","--icon-btn-bg":"transparent","--icon-btn-color":"#6e6d68","--ok":"#788c5d","--ok-deep":"#647649","--ok-soft":"rgba(100,118,73,.14)","--ok-rgb":"120,140,93","--warn":"#b08b4f","--warn-deep":"#8f6f3a","--warn-soft":"rgba(143,111,58,.13)","--warn-rgb":"176,139,79","--bad":"#d64545","--bad-deep":"#b83636","--bad-soft":"rgba(184,54,54,.12)","--bad-rgb":"214,69,69","--bad-grad":"#d64545","--info":"#98a2ab","--info-rgb":"152,162,171","--field-bg":"#faf9f5","--menu-bg":"#faf9f5","--code-bg":"#f5f4ef","--code-ink":"#753a22","--glass":"0px","--font-family":"Poppins,-apple-system,BlinkMacSystemFont,'SF Pro Text','PingFang SC','Noto Sans CJK SC','Microsoft YaHei',sans-serif","--font-size":"15px","--line-height":"1.72","--font-weight":"400","--letter-spacing":"0em","--font-family-mono":"'Geist Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace","--title-font":"Newsreader,Georgia,'PingFang SC','Noto Sans CJK SC',serif","--header-padding":"calc(env(safe-area-inset-top) + 10px) 14px 10px","--header-gap":"12px","--header-bg":"rgba(250,249,245,.58)","--header-border":"1px solid transparent","--header-shadow":"0 1px 3px rgba(61,57,41,.05)","--header-blur":"20px","--header-saturate":"110%","--header-title-x":"0px","--header-title-y":"0px","--header-title-size":"15px","--header-title-weight":"600","--header-title-letter-spacing":"normal","--header-title-color":"#3d3929","--header-title-font":"Newsreader,Georgia,'PingFang SC','Noto Sans CJK SC',serif","--header-sub-size":"11px","--header-sub-color":"#9b988c","--header-sub-letter-spacing":".02em","--header-sub-gap":"2px","--header-btn-size":"36px","--header-btn-radius":"50%","--header-btn-bg":"rgba(255,253,251,.56)","--header-btn-color":"#6e6d68","--header-btn-font-size":"17px","--header-btn-shadow":"0 1px 3px rgba(61,57,41,.05)","--header-btn-hover-bg":"rgba(255,253,251,.9)","--header-btn-hover-color":"#b0562f","--header-btn-active-bg":"rgba(201,100,66,.08)","--header-btn-active-color":"#b0562f","--session-padding":"10px 14px","--session-margin":"3px 8px","--session-radius":"12px","--session-bg":"rgba(255,253,251,.66)","--session-hover-bg":"rgba(201,100,66,.08)","--session-active-bg":"rgba(201,100,66,.16)","--session-active-border":"rgba(61,57,41,.14)","--session-title-size":"13px","--session-title-weight":"600","--session-title-color":"#3d3929","--session-meta-size":"11px","--session-meta-color":"#9b988c","--session-action-hover-color":"#b0562f","--session-action-hover-bg":"rgba(201,100,66,.08)","--call-bg":"linear-gradient(165deg,#faf9f5 0%,#f5f4ef 55%,#ede9de 100%)","--bubble-font-size":"15px","--bubble-line-height":"1.72","--bubble-font-weight":"400","--bubble-letter-spacing":"0em","--bubble-para-gap":"8px","--msg-gap":"12px","--bubble-max-width":"84%","--bubble-padding":"11px 15px","--avatar-size":"34px","--avatar-radius":"50%","--inputbar-radius":"20px","--inputbar-gap":"8px","--inputbar-padding":"7px 8px 7px 15px","--inputbar-shadow":"0 1px 3px rgba(61,57,41,.05)","--inputbar-focus-border":"rgba(201,100,66,.35)","--inputbar-focus-shadow":"0 0 0 3px rgba(201,100,66,.07),0 4px 18px rgba(61,57,41,.06)","--input-font-size":"15px","--input-line-height":"1.5","--input-max-height":"120px","--input-placeholder":"#9b988c","--icon-btn-size":"34px","--icon-btn-radius":"50%","--icon-btn-font-size":"16px","--send-size":"34px","--send-radius":"50%","--send-font-size":"15px","--send-shadow":"0 2px 6px rgba(201,100,66,.11)","--send-hover-bg":"#b0562f","--theme-dur":"0ms","--bg-blur":"0px","--user-font-color":"#ffffff","--ai-font-color":"#3d3929","--bubble-ai-blur":"0px","--bubble-user-blur":"0px"}}
+};/*2026-10-01 全主题变量键全集（六主题已同构155键），applyTheme 切换前先清空防残留*/const THEME_KEYS=Object.keys(THEME_PRESETS.warm.vars);/*2026-10-01 布局来源统一收敛（原 4 处重复三元链）：布局由主题预设决定，bubble_style 仅作旧配置兜底*/function chatLayout(){return (THEME_PRESETS[cfg&&cfg.theme]&&THEME_PRESETS[cfg.theme].layout)||((cfg&&cfg.bubble_style)||"sms");}
 /* ===== 玻璃主题：气泡调节（颜色/透明度/模糊度）+ 文字自动反色 ===== */
 var GBFIELDS=[
   ["glassBubbleAiColor","glass_bubble_ai_color",{def:"#FFFDF9",suffix:""}],
@@ -5268,7 +5268,7 @@ function glassBubbleBind(){
 }
 glassBubbleBind();
 
-function applyTheme(){const name=THEME_PRESETS[cfg.theme]?cfg.theme:"warm";cfg.theme=name;const root=document.documentElement.style;Object.keys(THEME_PRESETS[name].vars).forEach(function(k){root.setProperty(k,THEME_PRESETS[name].vars[k]);});document.body.setAttribute("data-theme",name);document.body.setAttribute("data-style","classic");document.body.setAttribute("data-bgblur","0");document.body.style.fontFamily="";document.body.style.background="";
+function applyTheme(){const name=THEME_PRESETS[cfg.theme]?cfg.theme:"warm";cfg.theme=name;const root=document.documentElement.style;for(var _ti=0;_ti<THEME_KEYS.length;_ti++)root.removeProperty(THEME_KEYS[_ti]);/*2026-10-01 先清后设：上一主题注入的变量全部移除，防止残留值泄漏（此前 warm 切 claude 后 13 个变量残留 warm 值压住 CSS 兜底）*/Object.keys(THEME_PRESETS[name].vars).forEach(function(k){root.setProperty(k,THEME_PRESETS[name].vars[k]);});document.body.setAttribute("data-theme",name);document.body.setAttribute("data-style","classic");document.body.setAttribute("data-bgblur","0");document.body.style.fontFamily="";document.body.style.background="";
   // 2026-09-28：背景图/不透明度按主题独立读取
   var tBg=(cfg.bg_by_theme&&cfg.bg_by_theme[name])||"";
   if(tBg){
@@ -8866,6 +8866,7 @@ else{ initAdminCards(); }
 <!-- C0 基建：仅加载 SessionStore 桥接（暴露 window.SessionStore），不接入任何业务逻辑 -->
 <script type="module" src="../shared-runtime/bridge/session-bridge.js"></script>
 <style id="wx-layout-consolidated-20260921">
+/* 微信布局整合块 | 2026-10-01 瘦身：134 条主题覆盖规则已迁出至 theme-overrides-* 块，本块只保留微信布局(layout=wx)自身规则 */
 /* 微信布局：2026-09-21 由 21 个历史补丁块（wx-*-v1~v9 / wx-session-final / wx-live-gap-normalize 等）
    按 CSS 层叠结果合并归一，单一真源。合并依据：
      - 同优先级：后加载覆盖先加载；!important 高于普通声明；内联 important 样式最高。
@@ -8874,26 +8875,44 @@ else{ initAdminCards(); }
      - 输入框高度最终由下方 JS 驱动（40~120px），CSS 仅提供初值。 */
 /* 容器与背景 */
 #chat[data-layout="wx"]{padding-left:2%;padding-right:2%}
+
 body:has(#chat[data-layout="wx"]) footer{background:#F5F6F7;padding-left:2%;padding-right:2%}
+
 body:has(#chat[data-layout="wx"]) header{background:#FFFFFF;border-bottom-color:rgba(0,0,0,.06);box-shadow:0 1px 4px rgba(0,0,0,.04);backdrop-filter:none;-webkit-backdrop-filter:none}
+
 /* 输入栏：3 列网格（+ 号 / 输入框 / 发送）；麦克风叠在输入框内右侧 */
 body:has(#chat[data-layout="wx"]) footer .inputbar{display:grid!important;grid-template-columns:30px minmax(0,1fr) 46px!important;align-items:center!important;gap:8px!important;position:relative!important;background:transparent!important;border:0!important;border-radius:0!important;padding:3px 0!important;box-shadow:none!important;transition:none!important}
+
 body:has(#chat[data-layout="wx"]) footer .inputbar:focus-within{border:0!important;box-shadow:none!important}
+
 /* 输入栏元素 */
 body:has(#chat[data-layout="wx"]) footer .inputbar #imgBtn{grid-column:1;grid-row:1;width:30px;height:30px;border:1.5px solid #555;border-radius:50%;background:transparent;color:#555;box-sizing:border-box}
+
 body:has(#chat[data-layout="wx"]) footer .inputbar #imgBtn .ico{display:none}
+
 body:has(#chat[data-layout="wx"]) footer .inputbar #imgBtn::before{content:"+";display:block;font-size:24px;font-weight:300;line-height:1;transform:translateY(-1px);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif}
+
 body:has(#chat[data-layout="wx"]) footer .inputbar #input{grid-column:2;grid-row:1;width:100%;height:40px;min-height:40px;max-height:120px;padding:6px 10px;padding-right:48px;overflow-y:auto;background:#FFF;border:0;border-radius:6px;box-sizing:border-box;line-height:1.45;color:#111;outline:none;box-shadow:none}
+
 body:has(#chat[data-layout="wx"]) footer .inputbar #input:focus{background:#FFF;border:0;outline:none;box-shadow:none}
+
 body:has(#chat[data-layout="wx"]) footer .inputbar #micBtn{grid-column:2;grid-row:1;justify-self:end;z-index:2;width:30px;height:30px;margin-right:4px;border:0;border-radius:50%;background:transparent;color:#555;box-shadow:none;box-sizing:border-box}
+
 body:has(#chat[data-layout="wx"]) footer .inputbar #send{grid-column:3;grid-row:1;width:46px;height:34px;background:#95EC69;color:#17320f;border-radius:6px;box-shadow:none}
+
 body:has(#chat[data-layout="wx"]) footer .inputbar #send .ico{display:none!important}
+
 body:has(#chat[data-layout="wx"]) footer .inputbar #send::before{content:"发送";display:block;font-size:13px;font-weight:300;line-height:1;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue","PingFang SC","Noto Sans CJK SC",Arial,sans-serif}
+
 body:has(#chat[data-layout="wx"]) footer .inputbar .icon-btn:hover,body:has(#chat[data-layout="wx"]) footer .inputbar .icon-btn:active{background:transparent;color:#555}
+
 body:has(#chat[data-layout="wx"]) footer .inputbar #send:hover,body:has(#chat[data-layout="wx"]) footer .inputbar #send:active{background:#95EC69;color:#17320f}
+
 /* 消息气泡 */
 #chat[data-layout="wx"] .msg .bubble{font-size:14px;padding:8px 14px;border-color:transparent;border-width:0;border-style:solid;border-radius:6px}
+
 #chat[data-layout="wx"] .mrow{align-items:flex-start}
+
 /* 头像与气泡顶部对齐（.mrow 用 flex-start）；气泡整体再上移 2px，即气泡顶部比头像顶部高 2px。
    注：.mav 的 margin-top 由主样式 259 行 `#chat[data-layout] .mrow:not(:has(.mnm)) .mav{margin-top:0}`
    以更高特异性(1,4,0)锁定为 0，无法在此覆盖，故偏移加在 .mcol 侧。
@@ -8902,148 +8921,171 @@ body:has(#chat[data-layout="wx"]) footer .inputbar #send:hover,body:has(#chat[da
    气泡比头像高时会使每条消息矮 2px 并逐条累积（实测第 3 条已偏移 4px、间距由 17 缩到 15）；
    相对定位不参与布局流，高度与间距完全不变。 */
 #chat[data-layout="wx"] .mrow .mav{box-shadow:none!important;align-self:flex-start}
+
 #chat[data-layout="wx"] .mrow .mcol{align-self:flex-start;position:relative;top:-2px}
+
 #chat[data-layout="wx"] .mcol>.bubble{max-width:calc(100% - 4px)!important}
+
 #chat[data-layout="wx"] .mrow .mcol>.bubble{max-width:calc(100% - 44px)!important}
+
 /* 消息间距：统一挂在消息级，避免流式分段时每个 mrow 叠加 */
 body:has(#chat[data-layout="wx"]) #chat .mrow{margin-bottom:0!important}
+
 body:has(#chat[data-layout="wx"]) #chat .msg{margin-bottom:10px!important}
+
 body:has(#chat[data-layout="wx"]) #chat .msg.stream-in{margin-bottom:6px!important}
+
 body:has(#chat[data-layout="wx"]) #chat .msg .mrow+.mrow{margin-top:10px!important}
+
 body:has(#chat[data-layout="wx"]) #chat .msg .mcol{gap:0!important}
+
 body:has(#chat[data-layout="wx"]) #chat .msg .mcol .bubble+.bubble{margin-top:0!important}
+
 /* 字体 */
 #chat[data-layout="wx"] .msg,#chat[data-layout="wx"] .msg .bubble,#chat[data-layout="wx"] #input,#chat[data-layout="wx"] .inputbar,#chat[data-layout="wx"] .icon-btn{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue","PingFang SC","Noto Sans CJK SC",Arial,sans-serif;font-weight:400}
+
 /* 会话列表 */
 body:has(#chat[data-layout="wx"]) .session-item,body:has(#chat[data-layout="wx"]) .session,body:has(#chat[data-layout="wx"]) [data-session-id]{border:0!important;border-bottom:1px solid #E5E5E5!important;border-radius:0!important;box-shadow:none!important;background:transparent!important}
+
 body:has(#chat[data-layout="wx"]) .session-item.active,body:has(#chat[data-layout="wx"]) .session.active,body:has(#chat[data-layout="wx"]) [data-session-id].active{background:rgba(0,0,0,.06)!important;box-shadow:none!important}
+
 body:has(#chat[data-layout="wx"]) .session-item.active{border-color:transparent!important;border-radius:16px!important}
+
 body:has(#chat[data-layout="wx"]) .session-item .s-name .s-icon.pin.on{color:#111111!important;background:transparent!important}
+
 body:has(#chat[data-layout="wx"]) .session-item .s-name .s-icon.pin.on .ico{color:#111111!important;stroke:#111111!important;fill:none!important}
+
 body:has(#chat[data-layout="wx"]) .session-item .s-name .s-icon.pin:not(.on){color:#C9C9C9!important;background:transparent!important}
 
-/* ===== 极简 Claude 风主题 ===== */
-/* 0929-25 极简主题底部 35vh 留白改为主题级（不依赖 data-layout 属性，防 layout 异常时失效） */
-body[data-theme="claude"] #chat{padding-left:4%;padding-right:4%;padding-bottom:calc(env(safe-area-inset-bottom) + 35vh)}
 /* 全页上下边缘淡出罩：单条线性渐变只压上下、中间全净、左右无暗角（参考用户确认的结构）；颜色用主题背景色 */
 body:has(#chat[data-layout="claude"])::after{content:"";position:fixed;inset:0;z-index:20;pointer-events:none;background:linear-gradient(to bottom,rgba(250,250,250,.95),rgba(250,250,250,0) 10%,rgba(242,242,242,0) 80%,rgba(242,242,242,.95))}
-body[data-theme="dark"]:has(#chat[data-layout="claude"])::after{background:linear-gradient(to bottom,rgba(26,26,26,.95),rgba(26,26,26,0) 10%,rgba(26,26,26,0) 80%,rgba(26,26,26,.95))}
+
 /* 2026-09-24 P0：claude 背景规则去 !important——原 !important 会压掉 applyTheme 设置的用户背景图（内联 backgroundImage 优先于样式表），切到极简后背景图静默失效 */
 body:has(#chat[data-layout="claude"]){background:linear-gradient(180deg,#fdfdfd 0%,#f7f7f7 100%);font-family:Georgia,-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Noto Sans CJK SC","Microsoft YaHei",serif}
+
 body:has(#chat[data-layout="claude"]) header{background:transparent;border-bottom:none;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
+
 /* AI 消息：无气泡纯文字左对齐，无头像无名称 */
 #chat[data-layout="claude"] .msg.ai .bubble{background:transparent!important;box-shadow:none!important;border:none!important;padding:0!important;border-radius:0!important;color:#1a1a1a;max-width:100%!important}
+
 #chat[data-layout="claude"] .msg.ai .bubble::after{content:none}
+
 #chat[data-layout="claude"] .msg.ai .mav{display:none!important}
+
 #chat[data-layout="claude"] .msg.ai .mnm{display:none!important}
+
 /* 用户消息：浅灰大圆角气泡右对齐 */
 #chat[data-layout="claude"] .msg.user .bubble{background:#f2f2f2!important;color:#1a1a1a;border:none;border-radius:20px;padding:10px 16px;box-shadow:none;max-width:90%}
+
 #chat[data-layout="claude"] .msg.user .bubble::after{content:none}
+
 #chat[data-layout="claude"] .msg.user .mav{display:none!important}
+
 #chat[data-layout="claude"] .msg.user .mnm{display:none!important}
+
 #chat[data-layout="claude"] .msg.user .mrow{flex-direction:row-reverse}
+
 /* 消息间距 */
 #chat[data-layout="claude"] .msg{margin-bottom:20px}
+
 /* 输入栏：白色大圆角卡片悬浮底部 */
 body:has(#chat[data-layout="claude"]) footer{position:fixed;left:0;right:0;bottom:0;z-index:30;background:transparent;padding-left:4%;padding-right:4%;padding-bottom:calc(env(safe-area-inset-bottom) + 10px);transition:padding .25s ease!important}
+
 /* 2026-09-28 用户拍板：玻璃主题气泡文字改宋体（管理台同款衬线字体链）；只气泡，其他不动。原极简主题误改已撤（用户更正为玻璃主题） */
 body:has(#chat[data-layout="claude"]) footer:focus-within{padding-left:4%!important;padding-right:4%!important}
+
 body:has(#chat[data-layout="claude"]) footer .inputbar{background:rgba(255,255,255,.16)!important;backdrop-filter:blur(16px) saturate(180%);-webkit-backdrop-filter:blur(16px) saturate(180%);border:0.5px solid rgba(255,255,255,.40)!important;border-radius:30px!important;padding:4px 6px 4px 7px!important;min-height:36px!important;box-shadow:0 8px 32px rgba(0,0,0,.05),0 1px 2px rgba(0,0,0,.03)!important}
+
 body:has(#chat[data-layout="claude"]) footer .inputbar:active{transform:none!important}
+
 body:has(#chat[data-layout="claude"]) footer .inputbar{-webkit-tap-highlight-color:transparent!important}
+
 body:has(#chat[data-layout="claude"]) footer .inputbar:focus-within{box-shadow:0 8px 36px rgba(0,0,0,.10),0 1px 2px rgba(0,0,0,.05)!important}
+
 body:has(#chat[data-layout="claude"]) footer .inputbar #input{background:transparent!important;border:none!important;outline:none!important;box-shadow:none!important;color:#1a1a1a;font-size:17px;text-align:left!important}
+
 #chat[data-layout="claude"] .msg.ai{font-size:17px;line-height:1.6;color:#1a1a1a}
+
 #chat[data-layout="claude"] .msg.user .bubble{border-radius:20px!important;font-size:17px!important}
+
 body:has(#chat[data-layout="claude"]) footer .inputbar #send{background:rgba(26,26,26,.82)!important;color:#fff!important;border-radius:50%!important;width:36px!important;height:36px!important;display:flex!important;align-items:center!important;justify-content:center!important}
+
 body:has(#chat[data-layout="claude"]) footer .inputbar #send .ico{transform:rotate(-45deg)!important;transform-origin:center!important;width:24px!important;height:24px!important}
+
 body:has(#chat[data-layout="claude"]) footer .inputbar #send:active{transform:none!important}
+
 body:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn{background:transparent!important;border:none!important;border-radius:0!important;width:36px!important;height:36px!important;display:flex!important;align-items:center;justify-content:center;color:#3c3c43!important;box-sizing:border-box}
+
 body:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn .ico{display:block!important;width:28px!important;height:28px!important;stroke-width:2.2!important}
+
 body:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn::before{content:none!important}
+
 body:has(#chat[data-layout="claude"]) footer .inputbar #micBtn{background:transparent!important;border:none!important;box-sizing:border-box;color:#3c3c43!important;border-radius:0!important;width:36px!important;height:36px!important}
+
 body:has(#chat[data-layout="claude"]) footer .inputbar #micBtn .ico{width:28px!important;height:28px!important}
+
 /* 设置页滑动条美化 */
 input[type="range"]{-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;background:#e0e0e0;outline:none}
+
 input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.2);cursor:pointer}
+
 input[type="range"]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.2);cursor:pointer;border:none}
+
 /* claude 主题：长按抽屉纯毛玻璃 */
 #chat[data-layout="claude"] ~ .act-sheet, body:has(#chat[data-layout="claude"]) .act-sheet{background:rgba(255,255,255,.55)!important;backdrop-filter:blur(30px) saturate(1.6)!important;-webkit-backdrop-filter:blur(30px) saturate(1.6)!important}
+
 #chat[data-layout="claude"] ~ .act-mask, body:has(#chat[data-layout="claude"]) .act-mask{background:rgba(0,0,0,.06)!important}
+
 /* claude 主题：消息下方操作图标行 */
 .claude-msg-actions{display:none;align-items:center;gap:14px;margin-top:6px;padding-left:2px}
+
 #chat[data-layout="claude"] .claude-msg-actions{display:flex}
+
 #chat[data-layout="claude"] .msg.stream-in .claude-msg-actions{display:none}
+
 .cma-btn{background:none;border:none;padding:4px;cursor:pointer;color:#999;display:flex;align-items:center;line-height:1;border-radius:6px}
+
 .cma-btn:active{background:rgba(0,0,0,.06);color:#555}
+
 /* claude 主题：隐藏顶栏，浮动按钮 */
 body:has(#chat[data-layout="claude"]) header{display:none!important}
+
 #chat[data-layout="claude"] ~ #empty .big, body:has(#chat[data-layout="claude"]) #empty .big{display:none!important}
+
 .claude-fab-left{position:fixed;top:calc(env(safe-area-inset-top) + 10px);left:12px;z-index:50;width:46px;height:46px;border-radius:50%;background:rgba(255,255,255,.66);backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);border:1px solid rgba(0,0,0,.07);box-shadow:0 4px 16px rgba(0,0,0,.10);display:none;align-items:center;justify-content:center;cursor:pointer;color:#555}
+
 .claude-fab-right{position:fixed;top:calc(env(safe-area-inset-top) + 12px);right:12px;z-index:50;display:none;align-items:center;gap:8px}
+
 body:has(#chat[data-layout="claude"]) .claude-fab-left,
 body:has(#chat[data-layout="claude"]) .claude-fab-right{display:flex}
+
 .claude-fab-right .fab-btn{width:46px;height:46px;border-radius:50%;background:rgba(255,255,255,.66);backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);border:1px solid rgba(0,0,0,.07);box-shadow:0 4px 16px rgba(0,0,0,.10);display:flex;align-items:center;justify-content:center;cursor:pointer;color:#555}
+
 body:has(#chat[data-layout="claude"]) .claude-fab-left svg,body:has(#chat[data-layout="claude"]) .claude-fab-right .fab-btn svg{width:20px!important;height:20px!important}
+
 .claude-fab-right .fab-btn.expandable{transition:all .2s ease;opacity:0;transform:translateX(10px) scale(.8);pointer-events:none;position:absolute;right:0}
+
 .claude-fab-right.open .fab-btn.expandable{opacity:1;transform:translateX(0) scale(1);pointer-events:auto;position:relative}
+
 .claude-fab-right.open .fab-btn.expandable:nth-child(2){transition-delay:.05s}
+
 .claude-fab-right.open .fab-btn.expandable:nth-child(3){transition-delay:.1s}
+
 #chat[data-layout="claude"] .msg.ai .bubble{max-width:100%!important}
+
 #chat[data-layout="claude"] .msg.ai .bubble p{margin:0 0 8px 0;text-indent:0!important}
+
 #chat[data-layout="claude"] .msg.ai .bubble p:first-child{margin-top:0}
+
 #chat[data-layout="claude"] .msg.ai .bubble p:last-child{margin-bottom:0}
-/* dark 主题（黑夜）反色 */
-/* 2026-09-24 P0：dark 布局同样去 !important，让用户背景图在黑夜主题也能生效；无背景图时 #1a1a1a 兜底 */
-body[data-theme="dark"]:has(#chat[data-layout="claude"]){background:#1a1a1a}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) #chat{padding-bottom:calc(env(safe-area-inset-bottom) + 30vh)!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .msg.ai{color:#e8e8e8!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .msg.ai .bubble{color:#e8e8e8!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .msg.user .bubble{background:#2d2d2d!important;color:#e8e8e8!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar{background:rgba(44,44,46,.62)!important;border:1px solid rgba(255,255,255,.06)!important;box-shadow:0 8px 32px rgba(0,0,0,.35),0 1px 2px rgba(0,0,0,.3)!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .modal-card{border-color:rgba(255,255,255,.06)!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .modal-card textarea,
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .modal-card input{border-color:rgba(255,255,255,.06)!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #input{color:#e8e8e8!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #input::placeholder{color:#666!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #send{background:rgba(235,235,240,.85)!important;color:#1a1a1a!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn{background:transparent!important;border:none!important;color:#d1d1d6!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn::before{color:#d1d1d6!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #micBtn{background:transparent!important;border:none!important;color:#d1d1d6!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .claude-fab-left,
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .claude-fab-right .fab-btn{background:rgba(44,44,46,.66)!important;border-color:rgba(255,255,255,.10)!important;color:#ccc!important;box-shadow:0 4px 16px rgba(0,0,0,.4)!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .claude-msg-actions .cma-btn{color:#777!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .claude-msg-actions .cma-btn:active{background:rgba(255,255,255,.1)!important;color:#ccc!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .claude-typing-dot{background:#777!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) #empty .t1{color:#ccc!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) #empty .t2{color:#666!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .act-sheet{background:rgba(40,40,40,.75)!important;color:#e8e8e8!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) #editMask .sheet{background:rgba(30,30,30,.94)!important;border-color:rgba(255,255,255,.06)!important;color:#e8e8e8!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .act-item{color:#ccc!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .act-item.danger{color:#e57373!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .act-title{color:#888!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .act-tok .tok-c{background:rgba(255,255,255,.08)!important;color:#999!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .session-item,body[data-theme="dark"]:has(#chat[data-layout="claude"]) .session{color:#ccc!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .session-item.active,body[data-theme="dark"]:has(#chat[data-layout="claude"]) .session.active{background:#333!important}
-/* dark 设置页卡片 */
-body[data-theme="dark"] .theme-profile-block,body[data-theme="dark"] .theme-choice{background:#2a2a2a!important;border-color:rgba(255,255,255,.08)!important;color:#e8e8e8!important}
-body[data-theme="dark"] .theme-choice.active{background:#333!important;border-color:rgba(255,255,255,.15)!important}
-body[data-theme="dark"] .theme-field label,body[data-theme="dark"] .theme-section-title{color:#ccc!important}
-body[data-theme="dark"] .theme-field .theme-row input{color:#e8e8e8!important;border-bottom-color:rgba(255,255,255,.15)!important}
-body[data-theme="dark"] .theme-field .theme-row input::placeholder{color:#666!important}
-body[data-theme="dark"] .mcp-btn{background:#333!important;color:#ccc!important;border:1px solid rgba(255,255,255,.1)!important}
-body[data-theme="dark"] .mcp-btn.danger{color:#e57373!important}
-body[data-theme="dark"] .set-acc-h{color:#ccc!important}
-body[data-theme="dark"] .set-sec{color:#ccc!important}
-body[data-theme="dark"] #settingsDrawer .drawer-panel,body[data-theme="dark"] .drawer-panel{background:#1a1a1a!important;color:#e8e8e8!important}
-body[data-theme="dark"] .drawer-head{color:#ccc!important}
-body[data-theme="dark"] .drawer-close{color:#999!important}
+
 /* claude 主题：呼吸圆圈 typing 指示器 */
 /* claude 思考链光效 */
 @keyframes thoughtShimmer{
   0%{background-position:-200% 0}
   100%{background-position:200% 0}
 }
+
 #chat[data-layout="claude"] .rw-wrap .rw-h.shimmer{
   background:linear-gradient(90deg,#999 0%,#ccc 50%,#999 100%);
   background-size:200% 100%;
@@ -9051,141 +9093,332 @@ body[data-theme="dark"] .drawer-close{color:#999!important}
   -webkit-text-fill-color:transparent;
   animation:thoughtShimmer 1.5s linear infinite;
 }
+
 .claude-typing{display:flex;align-items:center;margin:4px 0}
+
 .claude-typing-dot{width:10px;height:10px;border-radius:50%;background:#999;animation:claudeBreathe 1.2s ease-in-out infinite}
+
 @keyframes claudeBreathe{0%,100%{transform:scale(.6);opacity:.4}50%{transform:scale(1.2);opacity:1}}
+
 /* claude 主题：工具卡——简洁灰色文字+图标+箭头，无卡片背景 */
 #chat[data-layout="claude"] .tool-trace{
   background:transparent!important;border:0!important;border-radius:0!important;
   padding:3px 0!important;margin:2px 0!important;width:100%!important;max-width:100%!important;
   box-shadow:none!important;overflow:visible!important;pointer-events:auto!important;
 }
+
 #chat[data-layout="claude"] .tool-trace .tt-h{
   font-size:14px!important;letter-spacing:0!important;line-height:1.3!important;color:#999!important;
   padding:2px 0!important;cursor:pointer;align-items:center;gap:6px;
   width:100%;
 }
+
 #chat[data-layout="claude"] .tool-trace{cursor:pointer}
+
 #chat[data-layout="claude"] .rw-wrap{cursor:pointer}
+
 #chat[data-layout="claude"] .tool-trace .tt-icon{display:none!important}
+
 #chat[data-layout="claude"] .tool-trace .tt-name{
   font-family:inherit!important;font-weight:400!important;color:#999!important;
   white-space:normal!important;overflow:visible!important;text-overflow:clip!important;
 }
+
 #chat[data-layout="claude"] .tool-trace .tt-a{display:none!important}
+
 #chat[data-layout="claude"] .tool-trace .tt-body{display:none!important}
+
 #chat[data-layout="claude"] .tool-trace .tt-run,
 #chat[data-layout="claude"] .tool-trace .tt-ok,
 #chat[data-layout="claude"] .tool-trace .tt-err{display:none!important}
+
 /* claude 工具卡：纯灰色文字+箭头 */
 #chat[data-layout="claude"] .tool-trace .tt-h::after{
   content:" ›";margin-left:4px;color:#bbb;font-size:16px;
 }
+
 /* claude 主题：思考链——折叠成一行，点击展开 */
 #chat[data-layout="claude"] .rw-wrap{
   background:transparent!important;border:0!important;border-radius:0!important;
   padding:0!important;margin:2px 0!important;width:auto!important;max-width:100%!important;
   box-shadow:none!important;
 }
+
 #chat[data-layout="claude"] .rw-wrap .rw-h{
   font-size:14px!important;letter-spacing:0!important;line-height:1.3!important;color:#999!important;cursor:pointer;
 }
+
 #chat[data-layout="claude"] .rw-wrap .rw{
   background:transparent!important;border:0!important;border-radius:0!important;
   padding:0!important;box-shadow:none!important;
 }
+
 #chat[data-layout="claude"] .rw-wrap .rw .rw-a{display:none!important}
+
 #chat[data-layout="claude"] .rw-wrap .rw-h::after{
   content:" ›";margin-left:4px;color:#bbb;font-size:16px;
 }
-/* dark 下工具卡/思考链颜色 */
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .tool-trace .tt-name,
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .rw-wrap .rw-h{color:#888!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheet{background:rgba(30,30,30,.85)!important;color:#e8e8e8!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheet span{color:#e8e8e8!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheetBody{color:#e8e8e8!important}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheetMask{background:rgba(0,0,0,.4)!important}
-/* 2026-09-25 ①：此处原有第二份完全相同的 tt-name/rw-h dark 规则（历史遗留重复），已删。 */
-/* 2026-09-25 ③：黑夜反色补漏——以下元素底色原是写死的浅色蒙层（rgba(255,255,255,.25~.7)），
-   与跟随主题变浅的文字叠加后在黑夜下对比度约 1~2.5:1，几乎不可读；极简下不受影响。 */
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .file-card{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.12)}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .file-card .fc-name{color:#e8e8e8}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .file-card .fc-meta{color:#888}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .file-card .fc-ico{background:rgba(255,255,255,.08);color:#ccc}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .ev-silent{background:rgba(255,255,255,.08);color:#999}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .msg.ev-diary .bubble{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.12);color:#999}
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) .ev-bubble.ev-push .ev-tag{background:#555;color:#e8e8e8}
+
 /* 会话列表 */
 body:has(#chat[data-layout="claude"]) .session-item,body:has(#chat[data-layout="claude"]) .session{background:transparent!important;border:0!important;border-radius:12px!important}
+
 body:has(#chat[data-layout="claude"]) .session-item.active,body:has(#chat[data-layout="claude"]) .session.active{background:#e8e8e8!important}
+
 /* claude 抽屉内容强制换行（pre/参数/内容 div 压掉 UA 的 white-space:pre，防长串出屏截断；2026-09-25） */
 body:has(#chat[data-layout="claude"]) #thinkSheetBody pre,
 body:has(#chat[data-layout="claude"]) #thinkSheetBody .tt-arg,
 body:has(#chat[data-layout="claude"]) #thinkSheetBody div{white-space:pre-wrap!important;word-break:break-word!important;overflow-wrap:anywhere!important}
+</style>
+<style id="theme-overrides-claude">
+/* ===== 极简(claude)主题覆盖层 | 2026-10-01 自 wx-layout-consolidated 块迁出归堆（原混在微信布局整合块内，靠!important压制基础层） ===== */
+/* ===== 极简 Claude 风主题 ===== */
+/* 0929-25 极简主题底部 35vh 留白改为主题级（不依赖 data-layout 属性，防 layout 异常时失效） */
+body[data-theme="claude"] #chat{padding-left:4%;padding-right:4%;padding-bottom:calc(env(safe-area-inset-bottom) + 35vh)}
+
 /* ===== 极简 ChatGPT mobile v4：Liquid Glass ===== */
 body[data-theme="claude"] #chat{padding-left:3.2%!important;padding-right:3.2%!important;padding-top:calc(env(safe-area-inset-top) + 82px)!important;padding-bottom:calc(env(safe-area-inset-bottom) + 30vh)!important}
+
 body[data-theme="claude"] .claude-fab-left,body[data-theme="claude"] .claude-fab-right .fab-btn{width:40px!important;height:40px!important;background:rgba(255,255,255,.48)!important;backdrop-filter:blur(26px) saturate(145%) brightness(1.05)!important;-webkit-backdrop-filter:blur(26px) saturate(145%) brightness(1.05)!important;border:1px solid rgba(255,255,255,.72)!important;box-shadow:inset 0 1px 1px rgba(255,255,255,.92),inset 0 -1px 1px rgba(0,0,0,.025),0 5px 18px rgba(0,0,0,.055)!important;color:#3b3b3b!important}
+
 body[data-theme="claude"] .claude-fab-left{top:calc(env(safe-area-inset-top) + 10px)!important;left:14px!important}
+
 body[data-theme="claude"] .claude-fab-right{top:calc(env(safe-area-inset-top) + 10px)!important;right:14px!important}
-body[data-theme="claude"] .claude-fab-left svg{width:20px!important;height:20px!important} body[data-theme="claude"] .claude-fab-right .fab-btn svg{width:20px!important;height:20px!important}
+
+body[data-theme="claude"] .claude-fab-left svg{width:20px!important;height:20px!important}
+
+body[data-theme="claude"] .claude-fab-right .fab-btn svg{width:20px!important;height:20px!important}
+
 body[data-theme="claude"]:has(#chat[data-layout="claude"])::after{background:linear-gradient(to bottom,rgba(250,250,250,.88) 0%,rgba(250,250,250,.46) 7%,rgba(250,250,250,0) 14%,rgba(250,250,250,0) 83%,rgba(250,250,250,.55) 94%,rgba(250,250,250,.90) 100%)!important}
+
 body[data-theme="claude"] #chat[data-layout="claude"] .msg.ai{font-size:17px!important;line-height:1.62!important;color:#171717!important;margin-bottom:22px!important}
+
 body[data-theme="claude"] #chat[data-layout="claude"] .msg.ai .bubble{color:#171717!important;max-width:100%!important}
-body[data-theme="claude"] #chat[data-layout="claude"] .msg.ai .bubble p{margin:0 0 11px!important} body[data-theme="claude"] #chat[data-layout="claude"] .msg.ai .bubble p:last-child{margin-bottom:0!important}
+
+body[data-theme="claude"] #chat[data-layout="claude"] .msg.ai .bubble p{margin:0 0 11px!important}
+
+body[data-theme="claude"] #chat[data-layout="claude"] .msg.ai .bubble p:last-child{margin-bottom:0!important}
+
 body[data-theme="claude"] #chat[data-layout="claude"] .msg.user{margin-bottom:22px!important}
+
 body[data-theme="claude"] #chat[data-layout="claude"] .msg.user .bubble{background:rgba(242,242,242,.88)!important;color:#171717!important;border:none!important;border-radius:20px!important;padding:10px 16px!important;max-width:90%!important;font-size:17px!important;line-height:1.55!important;box-shadow:none!important}
+
 body[data-theme="claude"] #chat[data-layout="claude"] .meta{color:#b6b6b6!important;font-size:11px!important;line-height:1.2!important;margin-top:7px!important}
+
 body[data-theme="claude"] #chat[data-layout="claude"] .claude-msg-actions{gap:5px!important;margin-top:6px!important;padding-left:0!important}
+
 body[data-theme="claude"] #chat[data-layout="claude"] .cma-btn{width:30px!important;height:28px!important;padding:4px!important;color:#a5a5a5!important;border-radius:7px!important}
+
 body[data-theme="claude"] #chat[data-layout="claude"] .cma-btn svg{width:15px!important;height:15px!important}
+
 body[data-theme="claude"] footer{padding-left:9%!important;padding-right:9%!important;padding-bottom:calc(env(safe-area-inset-bottom) + 8px)!important;transition:padding .25s ease!important}
+
 body[data-theme="claude"] footer:focus-within{padding-left:4%!important;padding-right:4%!important}
+
 body[data-theme="claude"] footer .inputbar{min-height:36px!important;background:rgba(255,255,255,.16)!important;backdrop-filter:blur(30px) saturate(190%) brightness(1.06)!important;-webkit-backdrop-filter:blur(30px) saturate(190%) brightness(1.06)!important;border:1px solid rgba(255,255,255,.32)!important;border-radius:30px!important;padding:4px 6px 4px 7px!important;box-shadow:inset 0 0 0 0.5px rgba(0,0,0,.035),inset 0 1px 0 rgba(255,255,255,.88),inset 0 -1px 0 rgba(0,0,0,.025),inset 0 1px 5px rgba(255,255,255,.32),0 6px 18px rgba(0,0,0,.045)!important;transition:transform .12s ease,background .15s,box-shadow .15s!important}
+
 body[data-theme="claude"] footer .inputbar:focus-within{background:rgba(255,255,255,.20)!important;box-shadow:inset 0 0 0 0.5px rgba(0,0,0,.035),inset 0 1px 0 rgba(255,255,255,.93),inset 0 -1px 0 rgba(0,0,0,.025),inset 0 1px 5px rgba(255,255,255,.36),0 7px 22px rgba(0,0,0,.055)!important}
+
 body[data-theme="claude"] footer .inputbar:active{transform:scale(.985)!important}
+
 body[data-theme="claude"] footer .inputbar .icon-btn#imgBtn,body[data-theme="claude"] footer .inputbar .icon-btn#micBtn{background:transparent!important;border:none!important;box-shadow:none!important;border-radius:0!important}
+
 body[data-theme="claude"] footer .inputbar .icon-btn#imgBtn:active,body[data-theme="claude"] footer .inputbar .icon-btn#micBtn:active{background:transparent!important;color:inherit!important}
+
 body[data-theme="claude"] footer .inputbar .icon-btn#imgBtn .ico,body[data-theme="claude"] footer .inputbar .icon-btn#micBtn .ico{width:20px!important;height:20px!important}
-body[data-theme="claude"] footer .inputbar #input{color:#171717!important;font-size:17px!important;line-height:1.45!important} body[data-theme="claude"] footer .inputbar #input::placeholder{color:#9d9d9d!important}
+
+body[data-theme="claude"] footer .inputbar #input{color:#171717!important;font-size:17px!important;line-height:1.45!important}
+
+body[data-theme="claude"] footer .inputbar #input::placeholder{color:#9d9d9d!important}
+
 body[data-theme="claude"] footer .inputbar #imgBtn,body[data-theme="claude"] footer .inputbar #micBtn{width:36px!important;height:36px!important;background:transparent!important;border:none!important;box-shadow:none!important;color:#3c3c43!important}
+
 body[data-theme="claude"] footer .inputbar #imgBtn::before{font-size:25px!important;color:#222!important}
+
 body[data-theme="claude"] footer .inputbar #send{width:36px!important;height:36px!important;background:#2f2f2f!important;color:#fff!important;box-shadow:0 2px 7px rgba(0,0,0,.08)!important;transition:transform .12s ease!important}
+
 body[data-theme="claude"] footer .inputbar #send .ico{transform:rotate(-45deg)!important}
+
 body[data-theme="claude"] footer .inputbar #send:active{transform:scale(.9)!important}
+
 body[data-theme="claude"] .jump-fab{width:40px!important;height:40px!important;padding:0!important;border-radius:50%!important;background:rgba(255,255,255,.44)!important;backdrop-filter:blur(24px) saturate(145%) brightness(1.06)!important;-webkit-backdrop-filter:blur(24px) saturate(145%) brightness(1.06)!important;border:1px solid rgba(255,255,255,.76)!important;box-shadow:inset 0 1px 1px rgba(255,255,255,.94),0 4px 14px rgba(0,0,0,.05)!important;color:#444!important}
+</style>
+<style id="theme-overrides-dark">
+/* ===== 黑夜(dark)主题覆盖层 | 2026-10-01 自 wx-layout-consolidated 块迁出归堆（原混在微信布局整合块内，靠!important压制基础层） ===== */
+body[data-theme="dark"]:has(#chat[data-layout="claude"])::after{background:linear-gradient(to bottom,rgba(26,26,26,.95),rgba(26,26,26,0) 10%,rgba(26,26,26,0) 80%,rgba(26,26,26,.95))}
+
+/* dark 主题（黑夜）反色 */
+/* 2026-09-24 P0：dark 布局同样去 !important，让用户背景图在黑夜主题也能生效；无背景图时 #1a1a1a 兜底 */
+body[data-theme="dark"]:has(#chat[data-layout="claude"]){background:#1a1a1a}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) #chat{padding-bottom:calc(env(safe-area-inset-bottom) + 30vh)!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .msg.ai{color:#e8e8e8!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .msg.ai .bubble{color:#e8e8e8!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .msg.user .bubble{background:#2d2d2d!important;color:#e8e8e8!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar{background:rgba(44,44,46,.62)!important;border:1px solid rgba(255,255,255,.06)!important;box-shadow:0 8px 32px rgba(0,0,0,.35),0 1px 2px rgba(0,0,0,.3)!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .modal-card{border-color:rgba(255,255,255,.06)!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .modal-card textarea,
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .modal-card input{border-color:rgba(255,255,255,.06)!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #input{color:#e8e8e8!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #input::placeholder{color:#666!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #send{background:rgba(235,235,240,.85)!important;color:#1a1a1a!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn{background:transparent!important;border:none!important;color:#d1d1d6!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn::before{color:#d1d1d6!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) footer .inputbar #micBtn{background:transparent!important;border:none!important;color:#d1d1d6!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .claude-fab-left,
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .claude-fab-right .fab-btn{background:rgba(44,44,46,.66)!important;border-color:rgba(255,255,255,.10)!important;color:#ccc!important;box-shadow:0 4px 16px rgba(0,0,0,.4)!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .claude-msg-actions .cma-btn{color:#777!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .claude-msg-actions .cma-btn:active{background:rgba(255,255,255,.1)!important;color:#ccc!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .claude-typing-dot{background:#777!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) #empty .t1{color:#ccc!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) #empty .t2{color:#666!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .act-sheet{background:rgba(40,40,40,.75)!important;color:#e8e8e8!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) #editMask .sheet{background:rgba(30,30,30,.94)!important;border-color:rgba(255,255,255,.06)!important;color:#e8e8e8!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .act-item{color:#ccc!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .act-item.danger{color:#e57373!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .act-title{color:#888!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .act-tok .tok-c{background:rgba(255,255,255,.08)!important;color:#999!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .session-item,body[data-theme="dark"]:has(#chat[data-layout="claude"]) .session{color:#ccc!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .session-item.active,body[data-theme="dark"]:has(#chat[data-layout="claude"]) .session.active{background:#333!important}
+
+/* dark 设置页卡片 */
+body[data-theme="dark"] .theme-profile-block,body[data-theme="dark"] .theme-choice{background:#2a2a2a!important;border-color:rgba(255,255,255,.08)!important;color:#e8e8e8!important}
+
+body[data-theme="dark"] .theme-choice.active{background:#333!important;border-color:rgba(255,255,255,.15)!important}
+
+body[data-theme="dark"] .theme-field label,body[data-theme="dark"] .theme-section-title{color:#ccc!important}
+
+body[data-theme="dark"] .theme-field .theme-row input{color:#e8e8e8!important;border-bottom-color:rgba(255,255,255,.15)!important}
+
+body[data-theme="dark"] .theme-field .theme-row input::placeholder{color:#666!important}
+
+body[data-theme="dark"] .mcp-btn{background:#333!important;color:#ccc!important;border:1px solid rgba(255,255,255,.1)!important}
+
+body[data-theme="dark"] .mcp-btn.danger{color:#e57373!important}
+
+body[data-theme="dark"] .set-acc-h{color:#ccc!important}
+
+body[data-theme="dark"] .set-sec{color:#ccc!important}
+
+body[data-theme="dark"] #settingsDrawer .drawer-panel,body[data-theme="dark"] .drawer-panel{background:#1a1a1a!important;color:#e8e8e8!important}
+
+body[data-theme="dark"] .drawer-head{color:#ccc!important}
+
+body[data-theme="dark"] .drawer-close{color:#999!important}
+
+/* dark 下工具卡/思考链颜色 */
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .tool-trace .tt-name,
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .rw-wrap .rw-h{color:#888!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheet{background:rgba(30,30,30,.85)!important;color:#e8e8e8!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheet span{color:#e8e8e8!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheetBody{color:#e8e8e8!important}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) #thinkSheetMask{background:rgba(0,0,0,.4)!important}
+
+/* 2026-09-25 ①：此处原有第二份完全相同的 tt-name/rw-h dark 规则（历史遗留重复），已删。 */
+/* 2026-09-25 ③：黑夜反色补漏——以下元素底色原是写死的浅色蒙层（rgba(255,255,255,.25~.7)），
+   与跟随主题变浅的文字叠加后在黑夜下对比度约 1~2.5:1，几乎不可读；极简下不受影响。 */
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .file-card{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.12)}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .file-card .fc-name{color:#e8e8e8}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .file-card .fc-meta{color:#888}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .file-card .fc-ico{background:rgba(255,255,255,.08);color:#ccc}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .ev-silent{background:rgba(255,255,255,.08);color:#999}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .msg.ev-diary .bubble{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.12);color:#999}
+
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) .ev-bubble.ev-push .ev-tag{background:#555;color:#e8e8e8}
+</style>
+<style id="theme-overrides-glass">
+/* ===== 玻璃(glass)主题覆盖层 | 2026-10-01 自 wx-layout-consolidated 块迁出归堆（原混在微信布局整合块内，靠!important压制基础层） ===== */
 /* ===== 玻璃主题（文艺 · 清透 · 毛玻璃） ===== */
 /* 2026-09-28 用户拍板：玻璃主题气泡文字改宋体（管理台同款衬线链：Noto Serif SC/Songti SC/SimSun/宋体）；只气泡（含子元素），标题/输入框/其他主题不动 */
 body[data-theme="glass"] .msg .bubble{font-family:"Noto Serif SC","Songti SC","SimSun","宋体",serif!important}
+
 body[data-theme="glass"] .msg .bubble *{font-family:"Noto Serif SC","Songti SC","SimSun","宋体",serif!important}
+
 body[data-theme="glass"]{background:linear-gradient(180deg,#F7F5F2 0%,#EDE9E2 100%);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Songti SC","STSong","Noto Serif SC","SimSun",serif;font-weight:300;letter-spacing:.01em}
+
 /* 顶栏：玻璃清透质感 */
 body[data-theme="glass"] header{background:transparent!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;border-bottom:none!important;box-shadow:none!important}
+
 /* 底部毛玻璃暗角（跟随背景反色：浅底白雾 / 深底暗角；顶部柔光已删 0927-04） */
 body[data-theme="glass"]::after{content:"";position:fixed;left:0;right:0;bottom:0;height:15vh;z-index:1;pointer-events:none;background:linear-gradient(to bottom,rgba(0,0,0,0),var(--glass-veil,rgba(255,255,255,.34)));backdrop-filter:blur(14px) saturate(160%);-webkit-backdrop-filter:blur(14px) saturate(160%);-webkit-mask-image:linear-gradient(to bottom,transparent 0%,#000 58%);mask-image:linear-gradient(to bottom,transparent 0%,#000 58%)}
+
 /* 输入区：去底栏卡片，下划线式 */
 body[data-theme="glass"] footer{position:fixed;left:0;right:0;bottom:0;z-index:30;background:transparent!important;border-top:none!important;padding:6px 16px calc(env(safe-area-inset-bottom) + 10px)!important}
+
 body[data-theme="glass"] footer .inputbar{background:transparent!important;border:none!important;border-radius:0!important;box-shadow:none!important;padding:4px 0!important}
+
 body[data-theme="glass"] footer .inputbar #input{background:transparent!important;border:none!important;outline:none!important;box-shadow:none!important;border-bottom:1px solid var(--glass-line,rgba(79,74,69,.16))!important;border-radius:0!important;padding:8px 2px!important;color:var(--ink,#4F4A45)!important;font-family:inherit;font-weight:300;font-size:var(--bubble-font-size,14px)!important}
+
 body[data-theme="glass"] footer .inputbar:focus-within #input{border-bottom-color:var(--accent,#8AA0AE)!important}
+
 body[data-theme="glass"] footer .inputbar #input::placeholder{color:var(--glass-ink2,#6E675F)!important}
+
 body[data-theme="glass"] footer .inputbar #send{background:transparent!important;border:none!important;border-radius:50%!important;width:36px!important;height:36px!important;box-shadow:none!important;color:var(--icon-btn-color,#6C8296)!important}
+
 body[data-theme="glass"] footer .inputbar #send:hover{background:transparent!important;color:var(--accent-deep,#6C8296)!important}
+
 body[data-theme="glass"] footer .inputbar #send .ico{width:19px;height:19px;transform:translateX(1.5px)}
+
 body[data-theme="glass"] header .hd-btn{background:transparent!important;border:1px solid rgba(108,130,150,.5)!important;box-shadow:none!important;color:var(--glass-ink2,#6C8296)!important}
+
 body[data-theme="glass"] header .hd-btn:hover{background:rgba(138,160,174,.12)!important;border-color:rgba(108,130,150,.5)!important;color:var(--glass-ink,#4F4A45)!important}
+
 body[data-theme="glass"] .hd-name{color:var(--glass-ink,#4F4A45)!important}
+
 body[data-theme="glass"] .hd-sub{color:var(--glass-ink2,#6E675F)!important}
+
 body[data-theme="glass"] #thinkSheet{max-height:42vh!important}
+
 body[data-theme="glass"] .session-item{background:var(--session-bg,rgba(138,160,174,.22))!important}
+
 body[data-theme="glass"] .session-item.active{background:var(--session-active-bg,rgba(255,255,255,.4))!important}
+
 body[data-theme="glass"] #chat,body[data-theme="glass"] #chat .msg .bubble,body[data-theme="glass"] footer,body[data-theme="glass"] footer .inputbar #input,body[data-theme="glass"] .rw-wrap,body[data-theme="glass"] .tool-trace{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Songti SC","STSong","Noto Serif SC","SimSun",serif}
+
 body[data-theme="glass"] #chat .msg .bubble{font-family:"Songti SC","STSong","Noto Serif SC","SimSun",serif}
+
 body[data-theme="glass"] footer .inputbar #imgBtn,body[data-theme="glass"] footer .inputbar #micBtn{background:transparent!important;border:none!important;border-radius:50%!important;width:36px!important;height:36px!important;color:var(--icon-btn-color,#6C8296)!important;box-shadow:none!important}
+
 /* 气泡：玻璃片——半透明底 + 顶部两圆角自然高光（连续渐隐，过渡自然）+ 内亮线 + 柔影 */
 body[data-theme="glass"] .msg.ai .bubble,body[data-theme="glass"] .msg.user .bubble{
   border:0.5px solid rgba(255,255,255,.34)!important;
   background:var(--bubble-ai,transparent) padding-box!important;
 }
+
 body[data-theme="glass"] .msg.ai .bubble{
   border-top-left-radius:5px!important;
   border-top-right-radius:14px!important;
@@ -9194,6 +9427,7 @@ body[data-theme="glass"] .msg.ai .bubble{
   border-color:color-mix(in srgb,var(--bubble-ai),white 22%)!important;
   box-shadow:0 3px 14px var(--bubble-ai-shadow,rgba(79,74,69,.06))!important;
 }
+
 body[data-theme="glass"] .msg.user .bubble{
   border-top-right-radius:5px!important;
   border-top-left-radius:14px!important;
@@ -9203,9 +9437,13 @@ body[data-theme="glass"] .msg.user .bubble{
   border-color:color-mix(in srgb,var(--bubble-user1),white 22%)!important;
   box-shadow:0 3px 14px var(--bubble-user-shadow,rgba(79,74,69,.06))!important;
 }
+
 body[data-theme="glass"] .msg.ai .bubble{backdrop-filter:blur(var(--bubble-ai-blur,0px));-webkit-backdrop-filter:blur(var(--bubble-ai-blur,0px))}
+
 body[data-theme="glass"] .msg.user .bubble{backdrop-filter:blur(var(--bubble-user-blur,0px));-webkit-backdrop-filter:blur(var(--bubble-user-blur,0px))}
+
 body[data-theme="glass"] #chat{padding-bottom:calc(env(safe-area-inset-bottom) + 92px)!important}
+
 /* 思考/工具胶囊：无背景，左侧小竖线，展开才有淡玻璃背景 */
 body[data-theme="glass"] .rw-wrap,body[data-theme="glass"] .tool-trace{
   background:transparent!important;border:none!important;border-left:2px solid var(--glass-line,rgba(138,160,174,.42))!important;border-radius:0!important;
@@ -9213,30 +9451,48 @@ body[data-theme="glass"] .rw-wrap,body[data-theme="glass"] .tool-trace{
   box-shadow:none!important;overflow:visible!important;pointer-events:auto!important;
   transition:background .18s ease,border-color .18s ease;
 }
+
 body[data-theme="glass"] .rw-wrap.open,body[data-theme="glass"] .tool-trace.open{
   background:transparent!important;border-left:2px solid var(--accent,#8AA0AE)!important;
   border-radius:0!important;padding:3px 0 3px 10px!important;
   max-height:42vh!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch!important;
 }
+
 body[data-theme="glass"] .rw-wrap .rw-h,body[data-theme="glass"] .tool-trace .tt-h{color:var(--glass-ink2,#6E675F)!important;font-weight:300}
+
 body[data-theme="glass"] .tool-trace .tt-name{color:var(--glass-ink2,#6E675F)!important;font-weight:400}
+
 body[data-theme="glass"] .rw{background:transparent!important;border:none!important;border-radius:0!important;padding:0!important;box-shadow:none!important}
+
 body[data-theme="glass"] .tool-trace .tt-body,body[data-theme="glass"] .rw-wrap .rw{color:var(--glass-ink,#5C554E)!important}
+
 body[data-theme="glass"] .tool-trace .tt-res{background:transparent!important;border:none!important;border-radius:0!important;padding:2px 0!important;color:var(--glass-ink2,#8C857D)!important}
+
 /* 面板玻璃化：设置卡片 / 主题选择 / 会话列表 / 抽屉 / 操作单 */
 body[data-theme="glass"] .theme-profile-block{background:rgba(255,255,255,.5)!important;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-color:rgba(79,74,69,.08)!important}
+
 body[data-theme="glass"] .theme-choice{background:rgba(255,255,255,.5)!important;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+
 body[data-theme="glass"] .theme-choice.active{background:rgba(138,160,174,.12)!important;border-color:rgba(138,160,174,.4)!important}
+
 body[data-theme="glass"] .session-item,body[data-theme="glass"] .session{background:rgba(255,255,255,.44)!important;border-color:transparent!important;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+
 body[data-theme="glass"] .session-item.active,body[data-theme="glass"] .session.active{background:rgba(138,160,174,.14)!important}
+
 body[data-theme="glass"] .act-sheet{background:rgba(255,255,255,.6)!important;backdrop-filter:blur(30px) saturate(160%);-webkit-backdrop-filter:blur(30px) saturate(160%)!important}
+
 body[data-theme="glass"] .act-mask{background:rgba(79,74,69,.08)!important}
+
 body[data-theme="glass"] .drawer-panel{background:rgba(255,255,255,.68)!important;backdrop-filter:blur(22px) saturate(160%);-webkit-backdrop-filter:blur(22px) saturate(160%)}
+
 /* 空状态与文字细节 */
 body[data-theme="glass"] #empty .t1{color:var(--glass-ink2,#8C857D)!important;font-weight:300}
+
 body[data-theme="glass"] #empty .t2{color:var(--glass-ink3,#B3ACA3)!important}
+
 body[data-theme="glass"] input[type="range"]{background:rgba(79,74,69,.12)!important}
 </style>
+
 <script id="wx-input-auto-grow-consolidated-20260921">
 /* 微信输入框自动增高：合并原 wx-input-auto-height-v1 与 wx-input-auto-grow-v3
    （两者重复绑定 input 事件，取 v3 的 setProperty important 实现，避免固定高度被主题覆盖） */
@@ -9293,9 +9549,249 @@ body[data-theme="glass"] input[type="range"]{background:rgba(79,74,69,.12)!impor
   <div id="thinkSheetBody" style="padding:8px 20px 40px;overflow-y:auto;-webkit-overflow-scrolling:touch;font-size:15px;line-height:1.7;color:#333;white-space:pre-wrap;word-break:break-word;overflow-wrap:break-word"></div>
 </div>
 <div id="thinkSheetMask" style="display:none;position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.2);backdrop-filter:blur(2px)"></div>
-<style id="terra-enhance">
+<style id="theme-overrides-terra">
 /* ===== 暖陶主题 v3：输入区按设计稿（透明容器+独立元素） ===== */
-@import url('https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=Newsreader:ital,opsz,wght@0,18..72,300;0,18..72,400;0,18..72,500;1,18..72,400&family=Geist+Mono:wght@400;500&display=swap');
+/* terra 主题字体自托管 2026-10-01：latin/latin-ext 分片，来源 Google Fonts (OFL)，替代原 @import 外链 */
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(fonts/geist-mono-normal-400-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(fonts/geist-mono-normal-400-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(fonts/geist-mono-normal-500-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(fonts/geist-mono-normal-500-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(fonts/lora-italic-400-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(fonts/lora-italic-400-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(fonts/lora-normal-400-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(fonts/lora-normal-400-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(fonts/lora-normal-500-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(fonts/lora-normal-500-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(fonts/lora-normal-600-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(fonts/lora-normal-600-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Newsreader';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(fonts/newsreader-italic-400-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Newsreader';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(fonts/newsreader-italic-400-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url(fonts/newsreader-normal-300-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url(fonts/newsreader-normal-300-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(fonts/newsreader-normal-400-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(fonts/newsreader-normal-400-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(fonts/newsreader-normal-500-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(fonts/newsreader-normal-500-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Poppins';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(fonts/poppins-italic-400-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Poppins';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(fonts/poppins-italic-400-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Poppins';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(fonts/poppins-normal-400-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Poppins';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(fonts/poppins-normal-400-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Poppins';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(fonts/poppins-normal-500-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Poppins';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(fonts/poppins-normal-500-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Poppins';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(fonts/poppins-normal-600-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Poppins';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(fonts/poppins-normal-600-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Poppins';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(fonts/poppins-normal-700-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Poppins';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(fonts/poppins-normal-700-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 
 /* --- 字体体系 --- */
 body[data-theme="terra"]{font-family:Poppins,-apple-system,BlinkMacSystemFont,'PingFang SC','Noto Sans CJK SC','Microsoft YaHei',sans-serif;}
