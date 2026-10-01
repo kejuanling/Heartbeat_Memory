@@ -123,29 +123,52 @@ async function extractAndStore(text, ctx) {
 
   }
 
-  // <memory> → V2 记忆池（2026-09-28：V1 记忆池删除，改直写 V2 主集合；memory_tag origin 合法）
+  // <memory> → V2 待审池（2026-10-02 修复+改道）：0928-42 起本分支「直写 V2 主集合」，但 provenance.method
+  //   误写 "memory_tag" 不在 PROVENANCE_METHODS 白名单（正确值 tag_inline，tests/admission 已锁定）→
+  //   每次入库在 _buildEntry 抛错且失败路径静默无日志 → memory_v2.json 里 origin=memory_tag 恒为 0。
+  //   现改为：复用 admission.executorMain 走 review 队列（人工批准才落主集合，与 V2「先审后入」一致），
+  //   主集合+待审队列双查重，失败/跳过均有日志。quote 缺说话人时兜底 speaker=ai（AI 引述多为自述，
+  //   批准时可修订；用户 2026-10-02 拍板先不深究说话人归属）。
   const V2_KIND_MAP = { "关于她": "fact", "认账": "rule", "拓本": "quote", "压缩摘要": "milestone", "对话碎片": "fact", "关于我们": "fact", "锚点": "quote", "信号": "fact", "对话摘要": "fact" };
   const V2_KINDS = ["fact", "rule", "quote"];
-  function memoryTagToV2(body, category, pinned) {
+  function getReviewExecutor() {
+    // 优先复用 admission 单例 executorMain（唯一写手，避免多实例并发覆盖队列）；未初始化时自建兜底
+    try {
+      const adm = require("./memory-admission").getAdmission();
+      if (adm && adm.executorMain) return adm.executorMain;
+    } catch (e) { /* 自建兜底 */ }
+    const { createStore } = require("./memory-v2");
+    const { createStateExecutor } = require("./state-executor");
+    return createStateExecutor({ store: createStore({ config: {} }) });
+  }
+  function memoryTagToV2(body, category, pinned, sessionId) {
     const { createStore } = require("./memory-v2");
     const store = createStore({ config: {} });
     const text = String(body || "").trim();
     if (!text) return { skipped: true };
-    // 简单去重：同正文的 active 条目已存在则跳过（对齐旧池自动去重语义）
+    // 去重1：主集合 active 同正文已存在则跳过（对齐旧池自动去重语义）
     const dup = (store.list({ status: "active" }) || []).some(function (e) { return String(e.text || "").trim() === text; });
     if (dup) return { skipped: true };
     // 分类映射：旧类名（关于她/认账/拓本）→ kind；V2 枚举直用；里程碑无 established_at 不适用（降级 fact）
     let kind = category ? (V2_KIND_MAP[category] || (V2_KINDS.includes(category) ? category : null)) : null;
     if (!kind || kind === "milestone") kind = "fact";
-    const r = store.create({
+    // 去重2：待审队列 pending_review 同正文（防 AI 每轮回复重复写同一标签堆队列）
+    const executor = getReviewExecutor();
+    let dupQueue = false;
+    try {
+      dupQueue = (executor.listQueue("pending_review") || []).some(function (r) { return r.draft && String(r.draft.text || "").trim() === text; });
+    } catch (e) { dupQueue = false; }
+    if (dupQueue) return { skipped: true };
+    const draft = {
       text: text,
       kind: kind,
-      subject: kind === "quote" ? "user" : "user",
+      subject: "user",
       origin: "memory_tag",
-      anchor: pinned === true,
-      provenance: { method: "memory_tag" },
-    });
-    return r && r.ok ? { added: 1 } : { skipped: false, error: r && r.error };
+      provenance: { method: "tag_inline", session_id: sessionId || null },
+    };
+    if (kind === "quote") draft.speaker = "ai"; // quote 铁律必填 speaker；标签引述缺说话人兜底 ai
+    const r = executor.review(draft, "AI 标签（<memory>）自动进审，待人工裁决", { details: [{ source: "memory_tag", category: category || null, pinned: pinned === true }] });
+    return r && r.ok ? { added: 1, queue_id: r.queue_id } : { skipped: false, error: r && r.error };
   }
 
   // --- <memory> 轻量辅助：AI 顺手写的重要记忆 → 记忆池（自动去重，非必需） ---
@@ -169,12 +192,14 @@ async function extractAndStore(text, ctx) {
     if (!body) continue;
     promises.push(
       Promise.resolve().then(function () {
-        return memoryTagToV2(body, category, pinned);
+        return memoryTagToV2(body, category, pinned, ctx && ctx.sessionId);
       }).then(function (r) {
         if (r && r.added) {
-          console.log("[tag-parser] <memory> 已入 V2 记忆池:", body.slice(0, 50));
+          console.log("[tag-parser] <memory> 已进待审池:", body.slice(0, 50), r.queue_id || "");
         } else if (r && r.skipped) {
           console.log("[tag-parser] <memory> 重复跳过:", body.slice(0, 50));
+        } else {
+          console.warn("[tag-parser] <memory> 进待审失败:", (r && r.error) || "unknown");
         }
         return r;
       }).catch(function (err) {

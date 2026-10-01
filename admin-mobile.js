@@ -3920,7 +3920,7 @@ function ccNumLiveCheck(input, max){
     if(!q){ el.innerHTML='<div class="loading">加载 review 队列...</div>'; return; }
     if(!q.length){ el.innerHTML='<div class="mp-empty">待审队列空，候选都处理完了</div>'; return; }
     const multi=!!window.__reviewMultiSel;
-    const ORIGIN={promotion:'压缩块解析',manual:'手动提交'};
+    const ORIGIN={promotion:'压缩块解析',manual:'手动提交',memory_tag:'AI 标签'};
     let html='<div class="mp-review-toolbar">'
       +'<span class="mp-review-total">待审候选 <b>'+q.length+'</b> 条</span>'
       +'<button type="button" class="mp-btn'+(multi?' primary':'')+'" onclick="toggleReviewMultiSelect()">'+(multi?'取消多选':'多选')+'</button>'

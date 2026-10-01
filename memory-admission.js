@@ -355,6 +355,8 @@ function createAdmission(opts = {}) {
     audit,
     paths: { main: mainStore.paths, shadow: shadowStore.paths },
   };
+  _lastAdmission = inst; // 模块级缓存最新实例：tag-parser 等轻量写者复用 executorMain（唯一写手）
+  return inst;
 }
 
 // 0928：合并文本安检——LLM 合并产物可能引入隐私/超长，命中即丢弃（调用方回退原行为）
@@ -376,4 +378,6 @@ function decide(detection, validation) {
 
 function strSafe(v) { return v == null ? null : String(v); }
 
-module.exports = { createAdmission };
+let _lastAdmission = null;
+function getAdmission() { return _lastAdmission; }
+module.exports = { createAdmission, getAdmission };
