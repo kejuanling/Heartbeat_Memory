@@ -105,6 +105,32 @@ function createStateExecutor(opts = {}) {
       }
       const r = store.create(draft);
       if (!r.ok) return { ok: false, error: r.error };
+      // 1002-22 老数据重跑（记忆改造第 5 项）：批准即「新条目入池 + 旧条目沉底」，一步到位不留重复。
+      // 用户 1002 拍板：「都放在待审，放一起；批准的话旧记忆沉底、新记忆入池」。
+      // reason 受状态机限制只有 updated/merged/contradiction_resolved：merge 用 merged，update/supplement 用 updated。
+      // create 没有旧条目（本来就是补抽）；sink 走建议列表，根本不进待审。旧条目已沉底/归档的不动。
+      let backfillInfo = null;
+      const bf = rec.draft && rec.draft.backfill;
+      if (bf && typeof bf === "object") {
+        const ids = [];
+        const pushId = function (v) {
+          const s = v == null ? "" : String(v).trim();
+          if (s && ids.indexOf(s) < 0) ids.push(s);
+        };
+        if (Array.isArray(bf.merge_ids)) bf.merge_ids.forEach(pushId);
+        pushId(bf.target_id);
+        const reason = bf.action === "merge" ? "merged" : "updated";
+        const oldList = [];
+        for (let i = 0; i < ids.length; i++) {
+          const oid = ids[i];
+          const old = store.get(oid);
+          if (!old) { oldList.push({ old_id: oid, superseded: false, reason: "missing" }); continue; }
+          if (old.status !== "active") { oldList.push({ old_id: oid, superseded: false, reason: "not_active:" + old.status }); continue; }
+          const up = store.updateStatus(oid, "superseded", { reason: reason, supersededBy: [r.entry.id] });
+          oldList.push({ old_id: oid, superseded: !!up.ok, error: up.ok ? null : (up.error || "unknown") });
+        }
+        backfillInfo = { action: bf.action || null, new_id: r.entry.id, old: oldList };
+      }
       if (rec.merge && rec.merge.merged_text && rec.merge.from_id) {
         const old = store.get(rec.merge.from_id);
         if (old && old.status === "active") {
@@ -116,7 +142,7 @@ function createStateExecutor(opts = {}) {
       }
       q.splice(idx, 1);
       flushQueue();
-      return { ok: true, action: "admit", entry: r.entry, resolved: rec, merge: mergeInfo };
+      return { ok: true, action: "admit", entry: r.entry, resolved: rec, merge: mergeInfo, backfill: backfillInfo };
     }
     if (decision === "reject_with_reason") {
       q.splice(idx, 1);

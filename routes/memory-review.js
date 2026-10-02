@@ -44,7 +44,8 @@ module.exports = function registerMemoryReviewRoutes(app, { basicAuth, admission
     const edit = (req.body || {}).edit || null; // 可选字段修订 {kind?,subject?,...}
     const r = admission.resolveReview(req.params.id, "approve", { edit });
     if (!r.ok) return reply.code(400).send({ error: r.error });
-    return reply.send({ success: true, action: "admit", entry_id: r.entry ? r.entry.id : null });
+    // 1002-22：老数据重跑的候选，把旧条目沉底结果回给前端（管理台据此提示「旧记忆 N 条已沉底」）
+    return reply.send({ success: true, action: "admit", entry_id: r.entry ? r.entry.id : null, backfill: r.backfill || null });
   });
 
   app.post("/admin/memory-review/queue/:id/edit", auth, async (req, reply) => {

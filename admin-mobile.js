@@ -4318,8 +4318,8 @@ function ccNumLiveCheck(input, max){
           +'<div style="margin-bottom:6px"><span class="mp-badge" style="background:var(--accent);color:#fff">老数据重跑 · '+(BF_ACTION[c.backfill.action]||escapeHtml(String(c.backfill.action||'')))+'</span></div>'
           +(c.backfill.old_text?'<div><span style="color:var(--mp-cat)">改前</span>：'+escapeHtml(c.backfill.old_text)+'</div>'
             +'<div style="margin-top:4px;color:var(--accent)"><b>改后</b>：'+escapeHtml(c.text||'')+'</div>':'')
-          +(c.backfill.merge_ids&&c.backfill.merge_ids.length?'<div style="margin-top:4px">由 '+c.backfill.merge_ids.length+' 条合并（' +escapeHtml(String(c.backfill.merge_ids.join('、')))+'）——通过后旧条目要手动沉底</div>':'')
-          +(c.backfill.target_id?'<div style="margin-top:4px">目标条目 '+escapeHtml(String(c.backfill.target_id))+'——通过后旧条目要手动沉底</div>':'')
+          +(c.backfill.merge_ids&&c.backfill.merge_ids.length?'<div style="margin-top:4px">由 '+c.backfill.merge_ids.length+' 条合并（'+escapeHtml(String(c.backfill.merge_ids.join('、')))+'）——通过后这 '+c.backfill.merge_ids.length+' 条自动沉底</div>':'')
+          +(c.backfill.target_id?'<div style="margin-top:4px">目标条目 '+escapeHtml(String(c.backfill.target_id))+'——通过后该条自动沉底</div>':'')
           +(c.backfill.reason?'<div style="margin-top:4px">理由：'+escapeHtml(c.backfill.reason)+'</div>':'')
         +'</div>':'')
         +(it.merge&&it.merge.merged_text?'<div class="mp-merge" style="margin:8px 0 0;padding:8px;border:1px dashed var(--text3);border-radius:8px;font-size:12px;color:var(--text3);line-height:1.7">'
@@ -4335,7 +4335,7 @@ function ccNumLiveCheck(input, max){
         +'</div>'
         +(multi?'':'<div class="mp-actions">'
           +'<button type="button" class="mp-btn ghost" onclick="editReviewItem(\''+it.id+'\')">编辑</button>'
-          +'<button type="button" class="mp-btn ghost" onclick="approveReviewItem(\''+it.id+'\')">'+(it.merge&&it.merge.merged_text?'通过（合并入库）':'通过入库')+'</button>'
+          +'<button type="button" class="mp-btn ghost" onclick="approveReviewItem(\''+it.id+'\')">'+(it.merge&&it.merge.merged_text?'通过（合并入库）':(c.backfill&&(c.backfill.merge_ids||c.backfill.target_id)?'通过（旧条沉底）':'通过入库'))+'</button>'
           +'<button type="button" class="mp-btn danger" onclick="rejectReviewItem(\''+it.id+'\')">驳回</button>'
         +'</div>')
       +'</div>';
@@ -4415,7 +4415,7 @@ function ccNumLiveCheck(input, max){
       :'将通过入库选中的 '+ids.length+' 条候选？入库后可在记忆池查看。')) return;
     window.__reviewBatchBusy=true;
     updateReviewMultiBar();
-    let ok=0, fail=0;
+    let ok=0, fail=0, sunk=0;
     for(let i=0;i<ids.length;i++){
       const cnt=document.getElementById('review-multi-count');
       if(cnt) cnt.textContent='处理中 '+(i+1)+'/'+ids.length+'…';
@@ -4424,12 +4424,13 @@ function ccNumLiveCheck(input, max){
         const j=await r.json();
         if(j.error) throw new Error(j.error);
         ok++;
+        if(j.backfill&&j.backfill.old) sunk+=j.backfill.old.filter(function(x){return x.superseded;}).length;
       }catch(e){ fail++; }
     }
     window.__reviewBatchBusy=false;
     window.__reviewMultiSel=false;
     window.__reviewSel={};
-    toast('批量'+(isReject?'驳回':'通过入库')+'完成：成功 '+ok+' 条'+(fail?' / 失败 '+fail+' 条':''));
+    toast('批量'+(isReject?'驳回':'通过入库')+'完成：成功 '+ok+' 条'+(sunk?'，旧条目沉底 '+sunk+' 条':'')+(fail?' / 失败 '+fail+' 条':''));
     loadReviewQueue();
   }
   async function approveReviewItem(id){
@@ -4437,7 +4438,13 @@ function ccNumLiveCheck(input, max){
       const r=await fetch(ADMIN_API + '/memory-review/queue/'+encodeURIComponent(id)+'/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
       const j=await r.json();
       if(j.error) throw new Error(j.error);
-      toast('已通过入库，可在记忆池查看');
+      const bf=j.backfill;
+      if(bf&&bf.old&&bf.old.length){
+        const n=bf.old.filter(function(x){return x.superseded;}).length;
+        toast('已通过入库，旧条目 '+n+'/'+bf.old.length+' 条已沉底'+(n<bf.old.length?'（其余已不在生效状态）':''));
+      }else{
+        toast('已通过入库，可在记忆池查看');
+      }
     }catch(e){ toast('通过失败: '+e.message); }
     loadReviewQueue();
   }
