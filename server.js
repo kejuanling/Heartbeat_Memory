@@ -3515,6 +3515,10 @@ try {
     baseDir: __dirname,
     addCompactionLog: addCompactionLog,
     persistCompactionLogs: persistCompactionLogs,
+    // 3.3 预取通道：与 MCP 工具 context_search 同源（都是 contextReplacements.searchContextEnhanced）
+    searchContext: function (q, o) { return contextReplacements.searchContextEnhanced(q, o); },
+    // 3.6 落待审通道：Memory V2 admission 单例（promotion 通道一律进 review，不直接入池）
+    admission: memoryV2Admission,
   });
 } catch (err) {
   console.warn("[memory-distill] 初始化失败，蒸馏停用:", err.message);
