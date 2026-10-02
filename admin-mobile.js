@@ -3099,6 +3099,9 @@ function ccNumLiveCheck(input, max){
   if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
   if(name==='prompts'){loadWakePrompt();loadContextDigestPrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadReparsePrompt();loadJudgePrompt();loadDistillPrompt();loadSummaryPrompt();loadBackfillPrompt();}
   if(name==='config'){loadToolsConfig(); loadCrossInjectConfig();
+    // 1003：记忆蒸馏 / 两块总结 / 老数据重跑三张设置卡已搬到本页（跨窗口注入卡片下方）。
+    // 三个 load 原本挂在 initMemPoolView（只跑一次且必须先进记忆页才触发），搬走后若从配置页直接进来会加载不到 → 输入框全空。
+    loadDistillConfig(); loadSummaryConfig(); loadBackfillConfig();
     // 2026-10-01 修复：压缩参数配置卡在配置 tab，但值依赖压缩预览先加载——原加载链只在压缩 tab/换会话/压缩操作后触发，
     // 直接进配置 tab（含刷新后恢复停留在配置 tab）时 preview 从未拉取，十二个输入框静默全空
     if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompactionConfig(); }
@@ -3882,9 +3885,7 @@ function ccNumLiveCheck(input, max){
     window.__memShowSimilar=false;
     populateMemPoolCatOptions();
     loadMemPool();
-    loadDistillConfig();
-    loadSummaryConfig();
-    loadBackfillConfig();
+    // 1003：记忆蒸馏/两块总结/老数据重跑三张设置卡已搬去配置页，加载随之移到 switchTab 的 config 分支。
   }
 
   function populateMemPoolCatOptions(){

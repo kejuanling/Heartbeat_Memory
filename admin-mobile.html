@@ -67,70 +67,6 @@
        <div id="cross-inject-config-msg" class="cc-cfg-msg"></div>
      </div>
    </div>
-   <div class="card" data-collapse-id="cc-config" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>压缩参数配置</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
-     <div class="card-body">
-       <div class="cc-cfg-grid">
-         <label class="cc-cfg-field">保留最近 N 条不压缩
-           <input type="number" id="cc-cfg-keep" min="0" step="1"></label>
-         <label class="cc-cfg-field">消息少于 N 条时不压缩
-           <input type="number" id="cc-cfg-min" min="0" step="1"></label>
-         <label class="cc-cfg-field">摘要最少字数
-           <input type="number" id="cc-cfg-sum-min" min="0" step="1"></label>
-         <label class="cc-cfg-field">摘要最多字数
-           <input type="number" id="cc-cfg-sum-max" min="0" step="1"></label>
-         <label class="cc-cfg-field">自动分块间隔（分钟）
-           <input type="number" id="cc-cfg-gap" min="1" step="1"></label>
-         <label class="cc-cfg-field">自动分块目标条数
-           <input type="number" id="cc-cfg-chunk" min="1" step="1"></label>
-         <label class="cc-cfg-field">块最少条数
-           <input type="number" id="cc-cfg-chunk-min" min="1" step="1"></label>
-         <label class="cc-cfg-field">块最多条数
-           <input type="number" id="cc-cfg-chunk-max" min="1" step="1"></label>
-         <label class="cc-cfg-field">活跃块上限<span class="hint-i" onclick="event.preventDefault();event.stopPropagation();showHintText(this,'活跃块上限','手动+AI 合计保留最近 N 个块，0=不限。超限的最早块仅隐藏、不注入上下文，块的摘要数据不动，调大即恢复。')">i</span>
-           <input type="number" id="cc-cfg-max-blocks" min="0" step="1"></label>
-         <label class="cc-cfg-field">上下文容量上限<span class="hint-i" onclick="event.preventDefault();event.stopPropagation();showHintText(this,'上下文容量上限','按 token 估算，0=不限。超过时网关塞一条隐藏提醒，让 AI 自己压缩上下文。')">i</span>
-           <input type="number" id="cc-cfg-ctx-limit" min="0" step="1000"></label>
-         <label class="cc-cfg-field">提醒上限<span class="hint-i" onclick="event.preventDefault();event.stopPropagation();showHintText(this,'提醒上限','后台提醒卡的超限门槛（token 估算），0=不提醒。只管提醒显示，与容量提醒/自动压缩无关。')">i</span>
-           <input type="number" id="cc-cfg-alert-limit" min="0" step="1000"></label>
-         <label class="cc-cfg-field cc-cfg-check">容量提醒开关
-           <input type="checkbox" id="cc-cfg-ctx-remind"></label>
-         <label class="cc-cfg-field">AI 压缩保护最近条数（AI 建的替换块不许覆盖最近 N 条，0=不保护）
-           <input type="number" id="cc-cfg-protect-recent" min="0" step="1"></label>
-       </div>
-        <div class="cc-cfg-hint hint-body" id="cc-config-hint"><b>生效范围提醒</b>：「保留最近 / 消息少于 N 条 / 摘要字数 / 分块间隔」作用于「整段对话的自动压缩计划」；<b>「自动分块目标 / 最少 / 最多条数」</b>同时作用于「整段对话自动压缩计划」和「未覆盖区·自动分块」。请保持：摘要最少 ≤ 摘要最多；块最少 ≤ 目标 ≤ 块最多。</div>
-
-       <div class="cc-cfg-btns">
-         <button type="button" class="cc-btn primary" onclick="saveCompactionConfig()">保存参数</button>
-         <button type="button" class="cc-btn secondary" onclick="renderCompactionConfig()">重新载入</button>
-       </div>
-       <div id="cc-config-msg" class="cc-cfg-msg"></div>
-     </div>
-   </div>
-   <div class="card" data-collapse-id="tools-config" data-default="collapsed" style="margin-bottom:14px">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>工具集（小世界MCP）</span><span class="tools-manifest-time" id="tools-manifest-time" style="font-size:10px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--text3);margin-left:auto;margin-right:8px"></span><span class="collapse-arrow">▾</span></div>
-     <div class="card-body">
-       <div id="tools-list"><div class="loading">加载中...</div></div>
-       <div class="tools-actions">
-         <button type="button" class="cc-btn primary" onclick="saveToolsConfig()" style="flex:1">保存全部改动（即时生效）</button>
-         <button type="button" class="cc-btn secondary" onclick="loadToolsConfig()">刷新</button>
-       </div>
-       <div id="tools-msg" class="tools-msg"></div>
-     </div>
-   </div>
-
-</div>
-
-<!-- Tab 3: 记忆 -->
-<div class="tab-content" id="tab-memory" style="position:relative">
-   <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:12px 0 0;padding:0 2px">
-     <div style="flex-shrink:0"><h2 style="font-family:'Noto Serif SC',serif;font-size:27px;font-weight:700;color:var(--tab-active);letter-spacing:4px;margin:0;line-height:1.35">记忆池</h2>
-     <div style="width:38px;height:4px;border-radius:2px;background:var(--accent);margin-top:10px;box-shadow:0 2px 8px rgba(200,144,152,.30)"></div></div>
-     <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
-       <button type="button" class="mp-import-pair" id="mempool-batch-import-btn" onclick="openMemPoolBatchImportPanel()" title="批量导入记忆（JSON，全部进待审队列）" aria-label="导入">导入</button>
-       <button type="button" class="mp-btn primary mp-add-ghost" onclick="openMemPoolAdd()" style="flex-shrink:0">＋ 新增记忆</button>
-     </div>
-   </div>
    <div class="card" data-collapse-id="distill-config" data-default="collapsed">
      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆蒸馏 · 定时设置</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
      <div class="hint-card">
@@ -207,6 +143,70 @@
          <button type="button" class="cc-btn secondary" id="bf-dry-btn" onclick="runBackfillNow(true)">试试组装（不调模型）</button>
        </div>
        <div id="bf-config-msg" class="cc-cfg-msg"></div>
+     </div>
+   </div>
+   <div class="card" data-collapse-id="cc-config" data-default="collapsed">
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>压缩参数配置</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-body">
+       <div class="cc-cfg-grid">
+         <label class="cc-cfg-field">保留最近 N 条不压缩
+           <input type="number" id="cc-cfg-keep" min="0" step="1"></label>
+         <label class="cc-cfg-field">消息少于 N 条时不压缩
+           <input type="number" id="cc-cfg-min" min="0" step="1"></label>
+         <label class="cc-cfg-field">摘要最少字数
+           <input type="number" id="cc-cfg-sum-min" min="0" step="1"></label>
+         <label class="cc-cfg-field">摘要最多字数
+           <input type="number" id="cc-cfg-sum-max" min="0" step="1"></label>
+         <label class="cc-cfg-field">自动分块间隔（分钟）
+           <input type="number" id="cc-cfg-gap" min="1" step="1"></label>
+         <label class="cc-cfg-field">自动分块目标条数
+           <input type="number" id="cc-cfg-chunk" min="1" step="1"></label>
+         <label class="cc-cfg-field">块最少条数
+           <input type="number" id="cc-cfg-chunk-min" min="1" step="1"></label>
+         <label class="cc-cfg-field">块最多条数
+           <input type="number" id="cc-cfg-chunk-max" min="1" step="1"></label>
+         <label class="cc-cfg-field">活跃块上限<span class="hint-i" onclick="event.preventDefault();event.stopPropagation();showHintText(this,'活跃块上限','手动+AI 合计保留最近 N 个块，0=不限。超限的最早块仅隐藏、不注入上下文，块的摘要数据不动，调大即恢复。')">i</span>
+           <input type="number" id="cc-cfg-max-blocks" min="0" step="1"></label>
+         <label class="cc-cfg-field">上下文容量上限<span class="hint-i" onclick="event.preventDefault();event.stopPropagation();showHintText(this,'上下文容量上限','按 token 估算，0=不限。超过时网关塞一条隐藏提醒，让 AI 自己压缩上下文。')">i</span>
+           <input type="number" id="cc-cfg-ctx-limit" min="0" step="1000"></label>
+         <label class="cc-cfg-field">提醒上限<span class="hint-i" onclick="event.preventDefault();event.stopPropagation();showHintText(this,'提醒上限','后台提醒卡的超限门槛（token 估算），0=不提醒。只管提醒显示，与容量提醒/自动压缩无关。')">i</span>
+           <input type="number" id="cc-cfg-alert-limit" min="0" step="1000"></label>
+         <label class="cc-cfg-field cc-cfg-check">容量提醒开关
+           <input type="checkbox" id="cc-cfg-ctx-remind"></label>
+         <label class="cc-cfg-field">AI 压缩保护最近条数（AI 建的替换块不许覆盖最近 N 条，0=不保护）
+           <input type="number" id="cc-cfg-protect-recent" min="0" step="1"></label>
+       </div>
+        <div class="cc-cfg-hint hint-body" id="cc-config-hint"><b>生效范围提醒</b>：「保留最近 / 消息少于 N 条 / 摘要字数 / 分块间隔」作用于「整段对话的自动压缩计划」；<b>「自动分块目标 / 最少 / 最多条数」</b>同时作用于「整段对话自动压缩计划」和「未覆盖区·自动分块」。请保持：摘要最少 ≤ 摘要最多；块最少 ≤ 目标 ≤ 块最多。</div>
+
+       <div class="cc-cfg-btns">
+         <button type="button" class="cc-btn primary" onclick="saveCompactionConfig()">保存参数</button>
+         <button type="button" class="cc-btn secondary" onclick="renderCompactionConfig()">重新载入</button>
+       </div>
+       <div id="cc-config-msg" class="cc-cfg-msg"></div>
+     </div>
+   </div>
+   <div class="card" data-collapse-id="tools-config" data-default="collapsed" style="margin-bottom:14px">
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>工具集（小世界MCP）</span><span class="tools-manifest-time" id="tools-manifest-time" style="font-size:10px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--text3);margin-left:auto;margin-right:8px"></span><span class="collapse-arrow">▾</span></div>
+     <div class="card-body">
+       <div id="tools-list"><div class="loading">加载中...</div></div>
+       <div class="tools-actions">
+         <button type="button" class="cc-btn primary" onclick="saveToolsConfig()" style="flex:1">保存全部改动（即时生效）</button>
+         <button type="button" class="cc-btn secondary" onclick="loadToolsConfig()">刷新</button>
+       </div>
+       <div id="tools-msg" class="tools-msg"></div>
+     </div>
+   </div>
+
+</div>
+
+<!-- Tab 3: 记忆 -->
+<div class="tab-content" id="tab-memory" style="position:relative">
+   <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:12px 0 0;padding:0 2px">
+     <div style="flex-shrink:0"><h2 style="font-family:'Noto Serif SC',serif;font-size:27px;font-weight:700;color:var(--tab-active);letter-spacing:4px;margin:0;line-height:1.35">记忆池</h2>
+     <div style="width:38px;height:4px;border-radius:2px;background:var(--accent);margin-top:10px;box-shadow:0 2px 8px rgba(200,144,152,.30)"></div></div>
+     <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+       <button type="button" class="mp-import-pair" id="mempool-batch-import-btn" onclick="openMemPoolBatchImportPanel()" title="批量导入记忆（JSON，全部进待审队列）" aria-label="导入">导入</button>
+       <button type="button" class="mp-btn primary mp-add-ghost" onclick="openMemPoolAdd()" style="flex-shrink:0">＋ 新增记忆</button>
      </div>
    </div>
    <div id="mem-mempool-wrap">
