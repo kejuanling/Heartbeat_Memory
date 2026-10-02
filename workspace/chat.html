@@ -4731,15 +4731,13 @@ selExport.addEventListener("click",exportSelectedMessages);
 /* 多选导出：把选中的消息按对话文本导出（头部行用完整日期，可与「导入」的纯文本解析格式兼容再导入） */
 function exportSelectedMessages(){
   if(!selectSet.size){ showToast("请先选择要导出的消息"); return; }
-  const aiName=cfg.ai_name||"谢意行";
-  const uname=cfg.user_name||"我";
   const lines=[];
   lines.push(sessionDisplayName()||"已选对话");
   const idxs=[...selectSet].sort(function(a,b){return a-b;});
   idxs.forEach(function(i){
     const m=msgs[i]; if(!m)return;
     const isAI=(m.role==="assistant"||m.role==="ai");
-    const name=isAI?aiName:uname;
+    const name=isAI?"assistant":"user";
     const d=(m.time)?new Date(m.time):new Date();
     const head=pad(d.getFullYear())+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())+" "+pad(d.getHours())+":"+pad(d.getMinutes());
     lines.push("---");
