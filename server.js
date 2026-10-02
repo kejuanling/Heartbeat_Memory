@@ -1831,58 +1831,6 @@ function sessionCreatedAtOf(sessionId) {
   return null;
 }
 
-// ── 日记隐藏清单（2026-09-09）：管理台「日记阅览」可逐篇隐藏 ──
-// 作用范围仅「跨窗口注入」(recentDiaryTextBefore)：隐藏篇不参与注入、也不占注入份数（顺位前移补足 count 篇）。
-// 不影响：写日记会话时间线里的「醒来写了日记」特殊事件（2026-09-12 前旧事件为「自动写了日记」，识别两种兼容）（仍按时间线进上下文）、日记文件本身仍可查看/编辑。
-const DIARY_HIDDEN_FILE = path.join(__dirname, "data", "diary_hidden.json");
-function readDiaryHiddenSet() {
-  try {
-    const arr = fs.readJsonSync(DIARY_HIDDEN_FILE);
-    if (Array.isArray(arr)) return new Set(arr.filter(function (x) { return typeof x === "string" && x; }));
-  } catch (e) {}
-  return new Set();
-}
-function writeDiaryHiddenSet(set) {
-  try {
-    fs.ensureDirSync(path.dirname(DIARY_HIDDEN_FILE));
-    fs.writeJsonSync(DIARY_HIDDEN_FILE, Array.from(set).sort());
-  } catch (e) { console.warn("[diary] 写隐藏清单失败:", e.message); }
-}
-
-// ── 日记按会话分开保存（2026-09-12）──
-// 新日记写到 diary/<会话目录>/YYYY-MM-DD.md（目录名与 safeSessionToken 同一套规则）；
-// diary 根目录的日期文件 = 共享层（旧日记 + 拿不到会话时的兜底）。注入读取仍不分会话：全目录合并候选。
-// 只认安全字符的子目录，防止把任意目录当会话扫进来。
-function diarySessionDirs() {
-  const root = path.join(__dirname, "diary");
-  let out = [];
-  try {
-    out = fs.readdirSync(root, { withFileTypes: true })
-      .filter(d => d.isDirectory() && /^[A-Za-z0-9_-]{1,64}$/.test(d.name))
-      .map(d => d.name);
-  } catch (e) {}
-  return out;
-}
-// 2026-10-02：日记文件名统一口径（详见下方 DIARY_FILE_RE 注释）。
-const DIARY_FILE_RE = /^\d{4}-\d{2}-\d{2}(?:_\d{4,6}(?:-\d+)?)?\.md$/i;
-// 同秒连写多篇时文件名带 -N 后缀；localeCompare 对「-」与「.」的先后不稳定，
-// 显式拆 日期 / 时分秒 / 同秒序号 三段做排序键（倒序：新在前，同秒后写的在前）。
-function diarySortKey(name) {
-  const m = String(name || "").match(/^(\d{4}-\d{2}-\d{2})(?:_(\d{4,6})(?:-(\d+))?)?\.md$/i);
-  return { d: m ? m[1] : "", t: m && m[2] ? m[2] : "", n: m && m[3] ? Number(m[3]) : 0 };
-}
-// 校验管理台传入的日记相对路径：只允许「日期.md」「日期_时分秒.md」或「会话目录/….md」；
-// 2026-09-19 批6 D1 起日记每篇一个文件（YYYY-MM-DD_HHMMSS.md），隐藏/编辑/删除按篇操作。
-function resolveDiaryRelPath(relPath) {
-  const s = String(relPath || "").trim().replace(/\\/g, "/");
-  const m = s.match(/^(?:([A-Za-z0-9_-]{1,64})\/)?(\d{4}-\d{2}-\d{2}(?:_\d{4,6}(?:-\d+)?)?)\.md$/i);
-  if (!m) return null;
-  const root = path.resolve(__dirname, "diary");
-  const full = path.resolve(root, m[1] ? m[1] + path.sep + m[2] + ".md" : m[2] + ".md");
-  if (full !== root && !full.startsWith(root + path.sep)) return null;
-  return { rel: (m[1] ? m[1] + "/" : "") + m[2] + ".md", session: m[1] || null, fileName: m[2] + ".md", full };
-}
-
 // 日记跨窗口注入（批注 2026-09-04，2026-09-08 收紧）：只注入"本会话创建日期之前"（严格早于）的日记，
 // 按日期升序（旧在前新在后）取最近 count 篇；2026-09-08 起仅严格早于（不含当天）。
 // 边界口径：日记文件名与 cutoff 都用 TIME_ZONE 本地日期（YYYY-MM-DD，严格小于当天）。
@@ -1891,31 +1839,6 @@ function resolveDiaryRelPath(relPath) {
 // 同一天既有共享残留又有会话文件时内容合并为一篇（注入份按"天"计，与旧口径一篇一天一致）。
 // 隐藏清单兼容：旧 key（纯文件名）只命中共享层；新 key（完整相对路径）精确命中所在文件。
 function recentDiaryTextBefore(sessionId, count, createdIso) {
-  const diaryDir = path.join(__dirname, "diary");
-  let files = [];   // { rel, date }
-  const scanDir = (relBase) => {
-    try {
-      const abs = relBase ? path.join(diaryDir, relBase) : diaryDir;
-      for (const f of fs.readdirSync(abs)) {
-        // 2026-09-19 批6 D1：兼容每篇一文件的 YYYY-MM-DD_HHMMSS.md（日期取前 10 位）
-        // 2026-09-20 拆篇迁移：后缀放开 4-6 位（分钟精度 4 位 = 旧日记拆篇产物，秒精度 6 位 = 批6 原生）
-        // 2026-10-02：再放开同秒重试的 -N 后缀（DIARY_FILE_RE）
-        if (!DIARY_FILE_RE.test(f)) continue;
-        files.push({ rel: relBase ? relBase + "/" + f : f, date: f.slice(0, 10) });
-      }
-    } catch (e) {}
-  };
-  scanDir("");
-  for (const s of diarySessionDirs()) scanDir(s);
-  if (!files.length) return "";
-  // 2026-09-29：按「日期+时间戳」排序（原只按日期+rel 字符串：同天多篇或带会话子目录时时间错位）。
-  // 文件名 YYYY-MM-DD(_HHMM|_HHMMSS).md → 时间戳取 basename 第 11 位后（空=当天最早）。
-  const diarySortKey = function (f) {
-    const base = f.rel.slice(f.rel.lastIndexOf("/") + 1);
-    const ts = (base.slice(11, -3) || "").replace(/_/g, "").padEnd(4, "0");
-    return f.date + "_" + ts + "_" + f.rel;
-  };
-  files.sort((a, b) => (diarySortKey(a) < diarySortKey(b) ? -1 : 1)); // 升序：旧在前新在后
   let cutoff = "";
   try {
     const d = new Date(createdIso);
@@ -1925,21 +1848,20 @@ function recentDiaryTextBefore(sessionId, count, createdIso) {
     }
   } catch (e) {}
   if (!cutoff) return "";
-  // 只留 日记日期 < 会话创建日期，且未被隐藏（隐藏篇不注入也不占份数，顺位前移）
-  const hiddenDiary = readDiaryHiddenSet();
-  const before = files.filter(f => f.date < cutoff && !hiddenDiary.has(f.rel) && !(f.rel === f.date + ".md" && hiddenDiary.has(f.date + ".md")));
+  // 2026-10-03：日记改读 data/diary.json（diary-store）；hidden 用字段；本地日期严格早于 cutoff。
+  // 输出口径不变：按天合并、「### 日期」头、时间正序。
+  const before = diaryStore.listEntries(__dirname)
+    .filter(e => !e.hidden)
+    .map(e => {
+      const p = getDatePartsInTimeZone(new Date(e.created_at), TIME_ZONE);
+      return { id: e.id, date: `${p.year}-${p.month}-${p.day}`, content: e.content };
+    })
+    .filter(f => f.date < cutoff);
   if (!before.length) return "";
   const pickedDates = Array.from(new Set(before.map(f => f.date))).slice(-Math.max(1, Number(count) || 3));
   const out = [];
   for (const d of pickedDates) {
-    const parts = [];
-    for (const f of before) {
-      if (f.date !== d) continue;
-      try {
-        const t = fs.readFileSync(path.join(diaryDir, f.rel), "utf-8").trim();
-        if (t) parts.push(t);
-      } catch (e) {}
-    }
+    const parts = before.filter(f => f.date === d).map(f => String(f.content || "").trim()).filter(Boolean);
     if (parts.length) out.push("### " + d + "\n" + parts.join("\n\n"));
   }
   return out.join("\n\n");
@@ -1987,26 +1909,11 @@ function crossFingerprint(cfg) {
   } catch (e) {}
   try {
     if (cfg.cross_inject_diary !== false) {
-      // 2026-09-12：日记按会话分目录保存，指纹改为扫描「共享层 + 各会话目录」全部日记文件的
-      // 相对路径 + mtime（文件级，比目录 mtime 可靠：追加写不更新目录 mtime），任一变化即重建快照。
-      const marks = [];
-      const scanDir = (relBase) => {
-        try {
-          const abs = relBase ? path.join(__dirname, "diary", relBase) : path.join(__dirname, "diary");
-          for (const f of fs.readdirSync(abs)) {
-            // 2026-10-02：原只认「日期.md」，批6 起日记全是「日期_时分秒.md」，
-            // 指纹里日记部分恒为空 → 写完/改完日记跨窗口快照不重建。改用统一口径。
-            if (!DIARY_FILE_RE.test(f)) continue;
-            try { marks.push((relBase ? relBase + "/" : "") + f + ":" + fs.statSync(path.join(abs, f)).mtimeMs); } catch (e) {}
-          }
-        } catch (e) {}
-      };
-      scanDir("");
-      for (const s of diarySessionDirs()) scanDir(s);
-      marks.push("count:" + (Number(cfg.cross_inject_diary_count) || 3));
-      marks.sort();
-      // 2026-09-09：隐藏清单变化（隐藏/取消隐藏）也要触发快照重建，否则旧快照里的日记内容不会更新
-      parts.push("diary:" + marks.join(",") + "|hidden:" + Array.from(readDiaryHiddenSet()).sort().join(","));
+      // 2026-10-03：日记改存 data/diary.json，指纹 = 该文件 mtime+size（任一写入/隐藏变化即变）
+      try {
+        const st = fs.statSync(diaryStore.storePath(__dirname));
+        parts.push("diaryjson:" + st.mtimeMs + ":" + st.size + ":count" + (Number(cfg.cross_inject_diary_count) || 3));
+      } catch (e) {}
     }
   } catch (e) {}
   return crypto.createHash("md5").update(parts.join("|")).digest("hex");
@@ -2631,6 +2538,8 @@ function readEnvValueOrDefault(key, fallback) {
 // lib/wake-scheduler.js 同一实现（lib/diary.js），杜绝三路径口径漂移。
 // 依赖 readEnvValue，故在 .env 读取区之后初始化；请求期才被 handleMcpRequest 调用。
 const diaryLib = require("./lib/diary")({ baseDir: __dirname, readEnvValue });
+// 2026-10-03：日记 JSON 存储（data/diary.json）统一读写模块
+const diaryStore = require("./lib/diary-store");
 
 function normalizePositiveInteger(value, key, fallback) {
   const n = Number(value);
@@ -2665,42 +2574,9 @@ function normalizeWeatherUnits(value) {
   return readEnvValueOrDefault("WEATHER_UNITS", "metric");
 }
 
-function diaryDirectoryPath() {
-  const configured = readEnvValueOrDefault("DIARY_DIR", "diary");
-  return path.isAbsolute(configured) ? configured : path.join(process.cwd(), configured);
-}
-
 function readDiaryEntries(limit) {
-  const dir = diaryDirectoryPath();
-  // 2026-09-12：日记按会话分目录保存，管理台一览改为扫「共享层 + 各会话目录」，
-  // 每条带 relPath（相对 diary/ 的完整路径，管理台编辑/删除/隐藏的操作键）与 session（null=共享层）。
-  const out = [];
-  const scan = (relBase) => {
-    const abs = relBase ? path.join(dir, relBase) : dir;
-    let names = [];
-    try { names = fs.readdirSync(abs); } catch (e) { return; }
-    // 只读取 .md 日记文件，避免把任意路径内容暴露到 admin 页面
-    // 2026-09-19 批6 D1：兼容每篇一文件的 YYYY-MM-DD_HHMMSS.md；2026-09-20 拆篇后缀 4-6 位都认
-    // 2026-10-02：改用统一口径，认同秒重试 -N 后缀
-    for (const name of names.filter(n => DIARY_FILE_RE.test(n))) {
-      const filePath = path.join(abs, name);
-      try {
-        const stat = fs.statSync(filePath);
-        if (!stat.isFile()) continue;
-        const content = fs.readFileSync(filePath, "utf-8").slice(0, 24000);
-        out.push({ name, relPath: relBase ? relBase + "/" + name : name, session: relBase || null, updated_at: stat.mtime.toISOString(), content });
-      } catch (e) {}
-    }
-  };
-  scan("");
-  for (const s of diarySessionDirs()) scan(s);
-  // 2026-09-13：管理台/菜单页一览改「完全按日记时间排」，按文件名日期（非修改时间）倒序，
-  // 同一天多会话文件按相对路径倒序兜底；编辑旧日记不再把旧篇顶到最前。
-  out.sort((a, b) => {
-    const ka = diarySortKey(a.name), kb = diarySortKey(b.name);
-    return (kb.d.localeCompare(ka.d)) || (kb.t.localeCompare(ka.t)) || (kb.n - ka.n)
-      || (String(b.relPath).localeCompare(String(a.relPath)));
-  });
+  // 2026-10-03：日记改存 data/diary.json（lib/diary-store）；返回 id 倒序（最新在前，兼容旧行为）
+  const out = diaryStore.listEntries(__dirname).slice().sort((a, b) => b.id - a.id);
   return limit ? out.slice(0, limit) : out;
 }
 
@@ -2742,32 +2618,6 @@ function syncDiarySpecialEvents(fileName, newContent, sessionId) {
   }
   return updated;
 }
-
-// 删除日记时同步移除时间线里同日的「醒来写了日记」特殊事件（旧事件「自动写了日记」同样匹配）；
-// sessionId 语义同 syncDiarySpecialEvents：会话日记只动该会话，共享日记沿用旧行为。
-function removeDiarySpecialEvents(fileName, sessionId) {
-  // 同步放开 _HHMMSS（与 syncDiarySpecialEvents 同口径）
-  const dateMatch = String(fileName || "").match(/^(\d{4}-\d{2}-\d{2})(?:_\d{4,6}(?:-\d+)?)?\.md$/i);
-  if (!dateMatch) return 0;
-  const dateKey = dateMatch[1];
-  const timeline = loadTimeline(sessionId || undefined);
-  const before = timeline.length;
-  const next = timeline.filter(msg => {
-    if (!msg || msg.role !== "assistant" || typeof msg.content !== "string") return true;
-    const text = msg.content;
-    if (!/醒来写了日记|自动写了日记/.test(text)) return true;
-    const head = text.match(/^（\s*(\d{4}-\d{2}-\d{2})(?:\s+\d{1,2}:\d{2})?\s*(?:醒来写了日记|自动写了日记)[:：]?\s*/);
-    return !(head && head[1] === dateKey);
-  });
-  const removed = before - next.length;
-  if (removed > 0) {
-    saveTimeline(next, sessionId);
-    console.log(`[diary] 已删除 ${removed} 条日记特殊事件（${fileName}）`);
-  }
-  return removed;
-}
-
-
 
 // ========================
 // HTTP Basic Auth
@@ -6359,14 +6209,11 @@ app.post("/admin/context-compaction/generate", { preHandler: basicAuth }, async 
 app.get("/admin/env", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const diaryEntries = readDiaryEntries();
-    const diaryHiddenSet = readDiaryHiddenSet();
-    // 2026-09-12：日记按会话分目录保存，每条带 relPath（操作键）与 session（null=共享层）；
-    // 隐藏判定：新 key 精确匹配相对路径，旧 key（纯文件名）只对共享层文件生效（与旧单层行为一致）
+    // 2026-10-03：日记改 data/diary.json，字段 id/session/hidden/created_at/content
     const diaryData = diaryEntries.map(e => ({
-      name: e.name, relPath: e.relPath, session: e.session,
-      time: formatDateTimeInTimeZone(new Date(e.updated_at), TIME_ZONE),
-      content: e.content,
-      hidden: diaryHiddenSet.has(e.relPath) || (!e.session && diaryHiddenSet.has(e.name))
+      id: e.id, session: e.session,
+      time: formatDateTimeInTimeZone(new Date(e.created_at), TIME_ZONE),
+      content: e.content, hidden: e.hidden
     }));
     reply.send({
       uptime: Math.floor(process.uptime()),
@@ -6475,13 +6322,59 @@ function xieDiaryAuth(req, reply, done) {
   reply.code(401).send({ error: "需要访问口令" });
 }
 
+// 日记特殊事件同步（按 id）：从 entry.created_at 生成匹配用文件名，复用 syncDiarySpecialEvents 原逻辑
+function syncDiarySpecialEventsById(entry, newContent) {
+  const p = getDatePartsInTimeZone(new Date(entry.created_at), TIME_ZONE);
+  const fileName = `${p.year}-${p.month}-${p.day}_${p.hour}${p.minute}${p.second}.md`;
+  return syncDiarySpecialEvents(fileName, newContent, entry.session || undefined);
+}
+
+// ===== MCP 工具（tools_server.py）经内部接口读写日记（2026-10-03）=====
+// 写操作集中在网关单进程，避免多进程并发写 diary.json；鉴权由全局 /internal 钩子处理。
+app.post("/internal/diary", async (req, reply) => {
+  try {
+    const body = req.body || {};
+    const ok = diaryLib.appendDiaryEntry(body.content, body.session_id);
+    reply.send({ success: ok });
+  } catch (err) {
+    console.error("[internal/diary] 写日记失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
+// 读日记：只返回正文（自带「## 时间」头 = 时间+正文），不带会话编号/文件路径
+app.get("/internal/diary/view", async (req, reply) => {
+  try {
+    const all = diaryStore.listEntries(__dirname).filter(e => !e.hidden);
+    const date = String(req.query.date || "").trim();
+    if (date) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply.code(400).send({ error: "date 格式应为 YYYY-MM-DD" });
+      const day = all.filter(e => {
+        const p = getDatePartsInTimeZone(new Date(e.created_at), TIME_ZONE);
+        return `${p.year}-${p.month}-${p.day}` === date;
+      });
+      if (!day.length) return reply.code(404).send({ error: "没有 " + date + " 的日记" });
+      return reply.send({ date, content: day.map(e => String(e.content).trim()).join("\n\n") });
+    }
+    let count = 1;
+    try { count = Math.max(1, Math.min(Number(req.query.count) || 1, 30)); } catch (e) {}
+    const picked = all.slice(-count);
+    return reply.send({
+      entries: picked.map(e => ({ content: String(e.content).trim() })),
+      count: picked.length,
+      message: "共 " + all.length + " 篇日记，返回最近 " + picked.length + " 篇；带 date=YYYY-MM-DD 可看某天",
+    });
+  } catch (err) {
+    console.error("[internal/diary/view] 读日记失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
 app.get("/xie-diary/api/list", { preHandler: xieDiaryAuth }, async (req, reply) => {
   try {
-    const hiddenSet = readDiaryHiddenSet();
-    const entries = readDiaryEntries().map(e => ({
-      name: e.name, relPath: e.relPath, session: e.session, updated_at: e.updated_at, content: e.content,
-      hidden: hiddenSet.has(e.relPath) || (!e.session && hiddenSet.has(e.name)),
-      vc: countDiaryVersions(e.relPath)
+    // 2026-10-03：日记改 data/diary.json，按 id 点名；list 回 id/session/hidden/created_at/content/vc
+    const entries = diaryStore.listEntries(__dirname).slice().sort((a, b) => b.id - a.id).map(e => ({
+      id: e.id, session: e.session, hidden: e.hidden, created_at: e.created_at,
+      content: e.content, vc: countDiaryVersions(e.id)
     }));
     reply.send({ entries });
   } catch (err) {
@@ -6494,15 +6387,12 @@ app.get("/xie-diary/api/list", { preHandler: xieDiaryAuth }, async (req, reply) 
 // 与已删的管理台 /admin/diary/hide（2026-09-20 清理）曾操作同一份 data/diary_hidden.json，语义=不参与跨窗口注入、可恢复。
 app.post("/xie-diary/api/hide", { preHandler: xieDiaryAuth }, async (req, reply) => {
   try {
-    const { relPath, hidden } = req.body || {};
-    const r = resolveDiaryRelPath(relPath);
-    if (!r) return reply.code(400).send({ error: "日记路径格式不正确（应为 日期.md、日期_时分秒.md 或 会话目录/….md）" });
-    if (!fs.existsSync(r.full)) return reply.code(404).send({ error: "日记文件不存在：" + r.rel });
-    const wantHidden = hidden !== false;
-    const set = readDiaryHiddenSet();
-    if (wantHidden) set.add(r.rel); else set.delete(r.rel);
-    writeDiaryHiddenSet(set);
-    reply.send({ success: true, file: r.rel, hidden: wantHidden });
+    const body = req.body || {};
+    const e = diaryStore.getEntry(__dirname, body.id);
+    if (!e) return reply.code(404).send({ error: "日记不存在：id=" + body.id });
+    const wantHidden = body.hidden !== false;
+    diaryStore.updateEntry(__dirname, e.id, { hidden: wantHidden });
+    reply.send({ success: true, id: e.id, hidden: wantHidden });
   } catch (err) {
     console.error("[xie-diary] 切换隐藏失败:", err);
     reply.code(500).send({ error: err.message });
@@ -6510,20 +6400,16 @@ app.post("/xie-diary/api/hide", { preHandler: xieDiaryAuth }, async (req, reply)
 });
 
 // ========================
-// 门户日记历史版本（2026-10-02）
+// 门户日记历史版本（2026-10-02；2026-10-03 改按日记 id 归档）
 // 编辑保存前把整份旧内容另存一份 → 编辑不再是不可逆覆盖。
-// 存 data/diary_versions/<safe(relPath)>/v<ISO>.md：刻意不放在 diary/ 下，
-// 因此不会被 readDiaryEntries / 跨窗口注入 / diary_view 扫到（文件名也不匹配日记正则，双保险）。
+// 存 data/diary_versions/d<id>/v<ISO>.md：刻意不放在 diary 下，
+// 不会被跨窗口注入扫到（文件名也不匹配日记正则，双保险）。
 // ========================
 const DIARY_VERSIONS_DIR = path.join(__dirname, "data", "diary_versions");
 const DIARY_VERSION_MAX = 50;   // 每篇最多留 50 份，超出删最旧
-function diaryVersionKey(rel) {
-  // rel 已过 resolveDiaryRelPath 校验（只允许「会话目录/日期.md」或「日期.md」）
-  return String(rel || "").replace(/\//g, "__").replace(/[^A-Za-z0-9_.-]/g, "_");
-}
-function diaryVersionDir(rel) { return path.join(DIARY_VERSIONS_DIR, diaryVersionKey(rel)); }
-function saveDiaryVersion(rel, content) {
-  const dir = diaryVersionDir(rel);
+function diaryVersionDir(id) { return path.join(DIARY_VERSIONS_DIR, "d" + id); }
+function saveDiaryVersion(id, content) {
+  const dir = diaryVersionDir(id);
   fs.mkdirSync(dir, { recursive: true });
   const name = "v" + new Date().toISOString().replace(/[:.]/g, "-") + ".md";
   fs.writeFileSync(path.join(dir, name), String(content == null ? "" : content), "utf-8");
@@ -6533,8 +6419,8 @@ function saveDiaryVersion(rel, content) {
   } catch (e) {}
   return name;
 }
-function listDiaryVersions(rel) {
-  const dir = diaryVersionDir(rel);
+function listDiaryVersions(id) {
+  const dir = diaryVersionDir(id);
   let names = [];
   try { names = fs.readdirSync(dir).filter(n => /^v.+\.md$/.test(n)); } catch (e) { return []; }
   const pad = (x) => String(x).padStart(2, "0");
@@ -6550,51 +6436,46 @@ function listDiaryVersions(rel) {
     return { ts: n, time, chars };
   });
 }
-function countDiaryVersions(rel) {
-  try { return fs.readdirSync(diaryVersionDir(rel)).filter(n => /^v.+\.md$/.test(n)).length; } catch (e) { return 0; }
+function countDiaryVersions(id) {
+  try { return fs.readdirSync(diaryVersionDir(id)).filter(n => /^v.+\.md$/.test(n)).length; } catch (e) { return 0; }
 }
-function findDiaryVersion(rel, ts) {
+function findDiaryVersion(id, ts) {
   const n = String(ts || "");
   if (!/^v[A-Za-z0-9_.:-]+\.md$/.test(n)) return null;    // 防目录穿越
-  const dir = diaryVersionDir(rel);
+  const dir = diaryVersionDir(id);
   const full = path.join(dir, n);
   if (full !== dir && !full.startsWith(dir + path.sep)) return null;
   return fs.existsSync(full) ? { full, name: n } : null;
 }
-// 门户：编辑日记（2026-09-20）。与上面 update 同一套落盘+时间线同步逻辑，但走门户口令门；
-// 前端 xie-diary 页「编辑」按钮调用。content=整份文件新内容（前端负责只改本篇段落）。
+// 门户：编辑日记（2026-09-20；2026-10-03 改 id + 只提交正文，头行按 created_at 保持）。
 app.post("/xie-diary/api/update", { preHandler: xieDiaryAuth }, async (req, reply) => {
   try {
-    const { relPath, content } = req.body || {};
-    const r = resolveDiaryRelPath(relPath);
-    if (!r) {
-      return reply.code(400).send({ error: "日记路径格式不正确（应为 日期.md、日期_时分秒.md 或 会话目录/….md）" });
-    }
-    if (!fs.existsSync(r.full)) {
-      return reply.code(404).send({ error: "日记文件不存在：" + r.rel });
-    }
-    if (!fs.statSync(r.full).isFile()) {
-      return reply.code(400).send({ error: "目标不是普通文件：" + r.rel });
-    }
-    const newContent = String(content === undefined ? "" : content);
-    // 2026-10-02：落盘前把整份旧内容另存为历史版本（编辑不再是不可逆覆盖）
-    try { saveDiaryVersion(r.rel, fs.readFileSync(r.full, "utf-8")); }
-    catch (e) { console.error("[xie-diary] 保存历史版本失败:", e.message); }
-    atomicWriteFileSync(r.full, newContent);
-    const syncedEvents = syncDiarySpecialEvents(r.fileName, newContent, r.session);
-    reply.send({ success: true, file: r.rel, syncedEvents, chars: newContent.length });
+    const body = req.body || {};
+    const e = diaryStore.getEntry(__dirname, body.id);
+    if (!e) return reply.code(404).send({ error: "日记不存在：id=" + body.id });
+    const newText = String(body.text === undefined ? "" : body.text).trim();
+    if (!newText) return reply.code(400).send({ error: "正文不能为空" });
+    // 落盘前把整份旧内容另存为历史版本（编辑不再是不可逆覆盖）
+    try { saveDiaryVersion(e.id, e.content); }
+    catch (ve) { console.error("[xie-diary] 保存历史版本失败:", ve.message); }
+    // 头行保持 created_at 的本地时间（与原格式一致），正文替换
+    const p = getDatePartsInTimeZone(new Date(e.created_at), TIME_ZONE);
+    const newContent = `## ${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}\n\n${newText}\n`;
+    diaryStore.updateEntry(__dirname, e.id, { content: newContent });
+    const syncedEvents = syncDiarySpecialEventsById(e, newContent);
+    reply.send({ success: true, id: e.id, syncedEvents, chars: newContent.length });
   } catch (err) {
     console.error("[xie-diary] 编辑日记失败:", err);
     reply.code(500).send({ error: err.message });
   }
 });
 
-// 门户：某篇日记的历史版本列表（2026-10-02）。只回时间与字数，不回正文（正文按条单独取）。
+// 门户：某篇日记的历史版本列表（2026-10-02；2026-10-03 改 id）。只回时间与字数，不回正文。
 app.get("/xie-diary/api/versions", { preHandler: xieDiaryAuth }, async (req, reply) => {
   try {
-    const r = resolveDiaryRelPath(String(req.query.relPath || ""));
-    if (!r) return reply.code(400).send({ error: "日记路径格式不正确" });
-    reply.send({ versions: listDiaryVersions(r.rel) });
+    const e = diaryStore.getEntry(__dirname, req.query.id);
+    if (!e) return reply.code(404).send({ error: "日记不存在：id=" + req.query.id });
+    reply.send({ versions: listDiaryVersions(e.id) });
   } catch (err) {
     console.error("[xie-diary] 版本列表失败:", err);
     reply.code(500).send({ error: err.message });
@@ -6603,9 +6484,9 @@ app.get("/xie-diary/api/versions", { preHandler: xieDiaryAuth }, async (req, rep
 // 门户：某个历史版本的正文（点「查看」时才取，避免列表一次拉几十份全文）
 app.get("/xie-diary/api/version", { preHandler: xieDiaryAuth }, async (req, reply) => {
   try {
-    const r = resolveDiaryRelPath(String(req.query.relPath || ""));
-    if (!r) return reply.code(400).send({ error: "日记路径格式不正确" });
-    const v = findDiaryVersion(r.rel, req.query.ts);
+    const e = diaryStore.getEntry(__dirname, req.query.id);
+    if (!e) return reply.code(404).send({ error: "日记不存在：id=" + req.query.id });
+    const v = findDiaryVersion(e.id, req.query.ts);
     if (!v) return reply.code(404).send({ error: "历史版本不存在" });
     reply.send({ content: fs.readFileSync(v.full, "utf-8") });
   } catch (err) {
@@ -6613,21 +6494,20 @@ app.get("/xie-diary/api/version", { preHandler: xieDiaryAuth }, async (req, repl
     reply.code(500).send({ error: err.message });
   }
 });
-// 门户：把某篇日记恢复到指定历史版本（2026-10-02）。
+// 门户：把某篇日记恢复到指定历史版本（2026-10-02；2026-10-03 改 id）。
 // 恢复前先把「当前内容」存为一个新版本 —— 恢复本身也可逆，永不丢内容。
 app.post("/xie-diary/api/restore", { preHandler: xieDiaryAuth }, async (req, reply) => {
   try {
     const body = req.body || {};
-    const r = resolveDiaryRelPath(body.relPath);
-    if (!r) return reply.code(400).send({ error: "日记路径格式不正确" });
-    if (!fs.existsSync(r.full)) return reply.code(404).send({ error: "日记文件不存在：" + r.rel });
-    const v = findDiaryVersion(r.rel, body.ts);
+    const e = diaryStore.getEntry(__dirname, body.id);
+    if (!e) return reply.code(404).send({ error: "日记不存在：id=" + body.id });
+    const v = findDiaryVersion(e.id, body.ts);
     if (!v) return reply.code(404).send({ error: "历史版本不存在" });
-    saveDiaryVersion(r.rel, fs.readFileSync(r.full, "utf-8"));
+    saveDiaryVersion(e.id, e.content);
     const old = fs.readFileSync(v.full, "utf-8");
-    atomicWriteFileSync(r.full, old);
-    const syncedEvents = syncDiarySpecialEvents(r.fileName, old, r.session);
-    reply.send({ success: true, file: r.rel, chars: old.length, syncedEvents });
+    diaryStore.updateEntry(__dirname, e.id, { content: old });
+    const syncedEvents = syncDiarySpecialEventsById(e, old);
+    reply.send({ success: true, id: e.id, chars: old.length, syncedEvents });
   } catch (err) {
     console.error("[xie-diary] 恢复历史版本失败:", err);
     reply.code(500).send({ error: err.message });

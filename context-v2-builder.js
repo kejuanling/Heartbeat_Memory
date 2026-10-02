@@ -227,9 +227,10 @@ function buildUnderstanding(input, cfg) {
 // 生产同源管理台 cross_inject_diary_count），按时间升序；预算装不下的篇从最旧丢。
 // 质量优先（0918 拍板）：日记是对抗压缩块劣化的原话保真通道，全量注入。
 function buildContinuity(input, cfg) {
+  // 2026-10-03：日记改按 id（创建顺序）排序，取 id 最大的 n 篇（原按 date 字符串）
   const diary = (Array.isArray(input.diaryEntries) ? input.diaryEntries : [])
     .slice()
-    .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+    .sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
   const n = Math.max(1, Number(cfg.diaryCount) || 3);
   const recent = diary.slice(-n);
   const budget = cfg.budgets.conversation_continuity;

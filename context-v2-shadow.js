@@ -25,6 +25,7 @@
 const fs = require("fs");
 const path = require("path");
 const { getDatePartsInTimeZone, resolveTimeZone } = require("./time_utils");
+const diaryStore = require("./lib/diary-store");
 
 const TARGETS = ["assembly", "identity", "retire", "instructions"];
 
@@ -142,39 +143,14 @@ function appendFloatIds(file, sessionId, memIds) {
 // 未进 context_v2_pinned_map.json 的 pinned 条目按 retire 处理（不进任何注入块，报告可见）。
 // ============================================================
 
-/** 扫描 diary/ 全部日记（会话子目录收一层），按日期升序；rel=相对 diary/ 的路径（隐藏清单键） */
+/** 读 data/diary.json 全部日记（diary-store）；id 升序=创建顺序；date=created_at 的本地日期；hidden 为字段 */
 function readDiaryEntriesForShadow(baseDir) {
-  const out = [];
-  const scan = (relBase, depth) => {
-    const root = relBase ? path.join(baseDir, 'diary', relBase) : path.join(baseDir, 'diary');
-    let entries = [];
-    try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch (e) { return; }
-    for (const ent of entries) {
-      if (ent.isFile() && /^\d{4}-\d{2}-\d{2}(_\d{4,6})?\.md$/.test(ent.name)) { // 0929：时间戳放开 4-6 位（实际日记为 _HHMM 4 位）
-        const rel = relBase ? relBase + '/' + ent.name : ent.name;
-        try { out.push({ rel, date: ent.name.slice(0, 10), content: fs.readFileSync(path.join(root, ent.name), 'utf8') }); } catch (e) {}
-      } else if (ent.isDirectory() && depth < 1) {
-        scan(relBase ? relBase + '/' + ent.name : ent.name, depth + 1); // 会话子目录收一层
-      }
-    }
-  };
-  scan('', 0);
-  // 2026-09-29：按「日期+时间戳」排序（原只按日期+rel 字符串，同天多篇/子目录时间错位）
-  const sortKey = function (e) {
-    const base = e.rel.slice(e.rel.lastIndexOf("/") + 1);
-    const ts = (base.slice(11, -3) || "").replace(/_/g, "").padEnd(4, "0");
-    return e.date + "_" + ts + "_" + e.rel;
-  };
-  return out.sort((a, b) => (sortKey(a) < sortKey(b) ? -1 : 1));
-}
-
-// 隐藏清单（data/diary_hidden.json，rel 路径数组）：隐藏篇不注入也不占份数（与旧版 recentDiaryTextBefore 同口径）
-function readDiaryHiddenSetForShadow(dataDir) {
-  try {
-    const arr = JSON.parse(fs.readFileSync(path.join(dataDir, 'diary_hidden.json'), 'utf8'));
-    if (Array.isArray(arr)) return new Set(arr.filter(x => typeof x === 'string' && x));
-  } catch (e) {}
-  return new Set();
+  // 2026-10-03：日记改 JSON 单存储；输出字段 id/date/content/hidden/session
+  const tz = resolveTimeZone();
+  return diaryStore.listEntries(baseDir).map(e => {
+    const p = getDatePartsInTimeZone(new Date(e.created_at), tz);
+    return { id: e.id, date: `${p.year}-${p.month}-${p.day}`, content: e.content, hidden: e.hidden, session: e.session };
+  });
 }
 
 // 会话创建日期（与旧版 server.js sessionCreatedAtOf + recentDiaryTextBefore 同口径）：
@@ -268,10 +244,10 @@ function assembleInput(opts) {
   // map 挂在 v2Input 上供溯源（builder 只读已知字段，多余键无害）
   // 日记过滤（2026-09-20 恢复旧注入边界，用户拍板）：只留「严格早于会话创建日期」且未被隐藏的篇，
   // 创建之后写的日记由本会话时间线的日记特殊事件自然覆盖，不再跨窗口重复注入；边界缺失时不注入任何日记。
-  const hiddenDiary = readDiaryHiddenSetForShadow(dataDir);
   const cutoffDate = sessionDiaryCutoffDate(opts.sessionId, opts.loadTimeline);
+  // 2026-10-03：hidden 用日记字段（不再读 diary_hidden.json）
   const diaryEntries = cutoffDate
-    ? readDiaryEntriesForShadow(opts.baseDir).filter(e => e.date < cutoffDate && !hiddenDiary.has(e.rel))
+    ? readDiaryEntriesForShadow(opts.baseDir).filter(e => e.date < cutoffDate && !e.hidden)
     : [];
   return { pinnedEntries, timeline, diaryEntries, memoriesV2, query, excludeIds, map: shadowMap, config: { diaryCount }, summaryBlocks: readSummaryBlocks(dataDir) };
 }

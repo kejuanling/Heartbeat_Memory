@@ -51,6 +51,34 @@ def api_post(url, data, timeout=6):
     except Exception as e:
         return {"_error": str(e)}
 
+def api_get_key(url, timeout=8):
+    """带内部密钥的 GET（/internal/*）"""
+    try:
+        req = urllib.request.Request(url, headers={'x-internal-key': INTERNAL_KEY})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        try: body = e.read().decode('utf-8')
+        except Exception: body = str(e)
+        return {"_error": "HTTP %s %s" % (e.code, body)}
+    except Exception as e:
+        return {"_error": str(e)}
+
+def api_post_key(url, data, timeout=8):
+    """带内部密钥的 POST（/internal/*）"""
+    try:
+        req = urllib.request.Request(url,
+            data=json.dumps(data).encode('utf-8'),
+            headers={'Content-Type': 'application/json', 'x-internal-key': INTERNAL_KEY})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        try: body = e.read().decode('utf-8')
+        except Exception: body = str(e)
+        return {"_error": "HTTP %s %s" % (e.code, body)}
+    except Exception as e:
+        return {"_error": str(e)}
+
 def run_cmd(cmd, timeout=10):
     # 安全加固（2026-09-08）：shell=True 允许 shell 语法注入，存在 RCE 风险；
     # 改为参数化执行（shlex.split + shell=False），不再支持管道/重定向/通配符等 shell 特性。
@@ -80,43 +108,15 @@ def tool_diary_add(args):
     content = (args.get("content") or "").strip()
     if not content:
         return {"error": "content 必填：要写入陪伴日记的正文"}
-    # 与 wake_up.js 一致：DIARY_DIR 默认 diary（相对 /opt/dylan-heartbeat），按天一个 md 文件，追加写入
-    diary_dir = (os.environ.get("DIARY_DIR", "") or "").strip() or "diary"
-    if not os.path.isabs(diary_dir):
-        diary_dir = os.path.join("/opt/dylan-heartbeat", diary_dir)
-    # 日记按会话分开保存（2026-09-12）：session_id 由网关在工具执行时强制注入（模型伪造无效），
-    # 写入 diary/<会话目录>/日期.md；拿不到会话时兜底写共享根目录（与旧日记同层，不丢数据）。
+    # 2026-10-03：日记改 data/diary.json，写操作统一走网关内部接口（根治多进程并发写）
     session_id = str(args.get("session_id") or "").strip()
-    session_token = ""
-    if session_id:
-        session_token = "".join(ch for ch in session_id if ch.isalnum() or ch in "_-")[:64] or ""
-    target_dir = os.path.join(diary_dir, session_token) if session_token else diary_dir
-    try:
-        os.makedirs(target_dir, exist_ok=True)
-        now = _diary_now()
-        date_str = now.strftime("%Y-%m-%d")
-        # 每篇一个新文件（与网关 lib/diary.js 批6 同款）：文件名 = 日期_时分秒.md，wx 防覆盖（同秒重试 -1 后缀）
-        base = now.strftime("%Y-%m-%d_%H%M%S")
-        entry = "## %s\n\n%s\n" % (now.strftime("%Y-%m-%d %H:%M"), content)
-        # 2026-10-02：原只退让一次 -1，同一秒写第三篇会 FileExistsError 直接丢内容；
-        # 改为循环找空位 -1/-2/-3…（上限 20，防异常时打爆目录）
-        diary_file = None
-        for i in range(21):
-            cand = os.path.join(target_dir, base + ("" if i == 0 else "-%d" % i) + ".md")
-            try:
-                with open(cand, "x", encoding="utf-8") as f:
-                    f.write(entry)
-                diary_file = cand
-                break
-            except FileExistsError:
-                continue
-        if diary_file is None:
-            return {"error": "写入陪伴日记失败: 同一秒已写满 21 篇，请稍后再试"}
-        return {"success": True, "file": diary_file, "session": session_token or None,
-                "time": now.strftime("%Y-%m-%d %H:%M"),
-                "message": "已写入陪伴日记"}
-    except Exception as e:
-        return {"error": "写入陪伴日记失败: %s" % e}
+    data = api_post_key("%s:3000/internal/diary" % BASE_URL,
+                        {"content": content, "session_id": session_id or None})
+    if "_error" in data:
+        return {"error": "写入陪伴日记失败: %s" % data["_error"]}
+    if not data.get("success"):
+        return {"error": "写入陪伴日记失败: %s" % data}
+    return {"success": True, "message": "已写入陪伴日记"}
 
 def tool_diary_list(args):
     count = args.get("count", 5)
@@ -168,92 +168,23 @@ TOOLS["diary_add"] = {
     "handler": tool_diary_add
 }
 
-# ── 查看谢的日记（2026-09-16）：不带参数=最近一篇；date=某天；count=最近 N 篇（默认 1）──
-# 读取口径与 server.js 注入一致：候选 = diary 根（共享层）+ 所有安全会话子目录合并，
-# 同一天多个文件（共享+各会话）内容合并为一篇，按日期降序取。
-def _diary_hidden_set():
-    # 隐藏清单（2026-09-20）：与网关 data/diary_hidden.json 同一份，隐藏篇工具也检索不到。
-    # 每次调用现读（文件小），门户页隐藏后无需重启本服务即生效。
-    try:
-        with open("/opt/dylan-heartbeat/data/diary_hidden.json", encoding="utf-8") as f:
-            arr = json.load(f)
-        if isinstance(arr, list):
-            return set(x for x in arr if isinstance(x, str) and x)
-    except Exception:
-        pass
-    return set()
-
-def _diary_collect_files():
-    diary_dir = (os.environ.get("DIARY_DIR", "") or "").strip() or "diary"
-    if not os.path.isabs(diary_dir):
-        diary_dir = os.path.join("/opt/dylan-heartbeat", diary_dir)
-    hidden = _diary_hidden_set()
-    # 文件名含批6的每篇一文件格式「日期_时分秒.md」；隐藏清单命中的 rel 剔除（工具检索不到）
-    # 2026-10-02：放宽认同秒重试 -N 后缀（diary_add 防覆盖产物）
-    name_re = r"^\d{4}-\d{2}-\d{2}(_\d{4,6}(-\d+)?)?\.md$"
-    out = []
-    try:
-        for f in os.listdir(diary_dir):
-            if re.match(name_re, f):
-                if f in hidden:
-                    continue
-                out.append({"rel": f, "date": f[:10]})
-    except Exception as e:
-        return [], "读取日记目录失败: %s" % e
-    try:
-        for d in os.listdir(diary_dir):
-            if not re.match(r"^[A-Za-z0-9_-]{1,64}$", d):
-                continue
-            sub = os.path.join(diary_dir, d)
-            if not os.path.isdir(sub):
-                continue
-            for f in os.listdir(sub):
-                if re.match(name_re, f):
-                    rel = d + "/" + f
-                    if rel in hidden:
-                        continue
-                    out.append({"rel": rel, "date": f[:10]})
-    except Exception:
-        pass
-    return out, None
-
+# ── 查看谢的日记（2026-09-16；2026-10-03 改走网关内部接口）──
+# 只返回正文（自带「## 时间」头 = 时间+正文），不再拼会话编号/文件路径；隐藏篇由网关字段过滤。
 def tool_diary_view(args):
-    files, err = _diary_collect_files()
-    if err:
-        return {"error": err}
-    if not files:
-        return {"entries": [], "message": "还没有写过的日记"}
-    diary_dir = (os.environ.get("DIARY_DIR", "") or "").strip() or "diary"
-    if not os.path.isabs(diary_dir):
-        diary_dir = os.path.join("/opt/dylan-heartbeat", diary_dir)
-    def read_one(rel):
-        try:
-            with open(os.path.join(diary_dir, rel), encoding="utf-8") as f:
-                return f.read()
-        except Exception as e:
-            return "（读取失败: %s）" % e
+    qs = {}
     date = (args.get("date") or "").strip()
     if date:
         if not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
             return {"error": "date 格式应为 YYYY-MM-DD，如 2026-09-12"}
-        day = sorted([f for f in files if f["date"] == date], key=lambda x: x["rel"])
-        if not day:
-            return {"error": "没有 %s 的日记" % date}
-        return {"date": date, "content": "\n\n".join("【%s】\n%s" % (f["rel"], read_one(f["rel"])) for f in day),
-                "files": [f["rel"] for f in day]}
-    try:
-        count = max(1, min(int(args.get("count", 1) or 1), 30))
-    except Exception:
-        count = 1
-    all_dates = sorted({f["date"] for f in files}, reverse=True)
-    dates = all_dates[:count]
-    entries = []
-    for d in dates:
-        day = sorted([f for f in files if f["date"] == d], key=lambda x: x["rel"])
-        entries.append({"date": d, "files": [f["rel"] for f in day],
-                        "content": "\n\n".join("【%s】\n%s" % (f["rel"], read_one(f["rel"])) for f in day)})
-    return {"entries": entries, "count": len(entries),
-            "message": "共 %d 天有日记，返回最近 %d 篇；带 date=YYYY-MM-DD 可看某天" % (len(all_dates), len(entries))}
+        qs["date"] = date
+    else:
+        try: qs["count"] = max(1, min(int(args.get("count", 1) or 1), 30))
+        except Exception: qs["count"] = 1
+    url = "%s:3000/internal/diary/view?%s" % (BASE_URL, urllib.parse.urlencode(qs))
+    data = api_get_key(url)
+    if "_error" in data:
+        return {"error": data["_error"]}
+    return data
 
 TOOLS["diary_view"] = {
     "description": "查看谢自己写过的陪伴日记。不带参数=返回最近 1 篇全文；带 date=YYYY-MM-DD 返回那一天；带 count=N 返回最近 N 篇（默认 1，最大 30）。日记按天存放，同一天的多个窗口内容会合并展示。",

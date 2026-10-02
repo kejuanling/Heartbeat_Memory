@@ -104,7 +104,7 @@ h1{
 <div class="wrap">
 <a class="back" href="/">‹ 小世界</a>
 <h1>谢的日记</h1>
-<div class="sub">醒来后写的 · 完全按时间排 · 最新在前</div>
+<div class="sub">醒来后写的 · 按编号排列 · 最新在前</div>
 
 <div class="search-box">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
@@ -129,10 +129,10 @@ h1{
 <script>
 (function(){
   var API='/xie-diary/api/list';
-  var writings=[];  // 每次书写一卡（文件按「##」分篇头拆开）：{date, time, src, text, relPath, hidden, _raw, _bs, _be}
+  var writings=[];  // 一篇一卡（data/diary.json 按 id 倒序返回）：{id,date,time,src,text,hidden,vc}
   var EXCERPT_LEN=160;
 
-  // ── 访问口令（2026-09-20：xie-diary 接口加口令门，与 GATEWAY_API_KEY 同值）──
+  // ── 访问口令（与 GATEWAY_API_KEY 同值）──
   function getKey(){ try{ return localStorage.getItem('xie_diary_key')||''; }catch(e){ return ''; } }
   function getCsrf(){ var m=/(?:^|;\s*)admin_csrf=([^;]+)/.exec(document.cookie||''); return m?decodeURIComponent(m[1]):''; }
   function authHeaders(extra){
@@ -155,50 +155,21 @@ h1{
   function esc(s){
     return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
-  // 关键词高亮：先转义，再把转义后的明文关键词替换成 <mark>
+  // 关键词高亮
   function highlight(escapedHtml, kw){
     if(!kw) return escapedHtml;
     var e=esc(kw).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
     return escapedHtml.replace(new RegExp(e,'gi'),function(m){return '<mark>'+m+'</mark>';});
   }
-  // 正文渲染：段落直出。「##」分篇头已在拆篇时剥掉，时间只在卡头出现一次
+  // 正文渲染：段落直出
   function renderParas(text, kw){
     var paras=String(text||'').split(/\n{2,}/).map(function(p){return p.trim();}).filter(Boolean);
     return paras.map(function(p){ return '<p>'+highlight(esc(p).replace(/\n/g,'<br>'),kw)+'</p>'; }).join('');
   }
-  // 截断：到字数直接断文加省略号（不用渐变淡出）
   function clipText(t){
     return String(t||'').slice(0,EXCERPT_LEN).replace(/\s+$/,'')+'…';
   }
-  // 把一个日记文件按「##」分篇头拆成多次书写：
-  //   「## 日期 时间 [附注]」「## 时间 [· 附注]」（日期取文件名）；无头文件整体算一次；
-  //   头行只取日期与时间（附注不显示），「###」及以下是正文不是分篇头。
-  function splitWritings(e){
-    var raw=String(e.content||'').replace(/\r\n/g,'\n').trim();
-    var fileDate=String(e.name||'').slice(0,10);
-    var re=/^##[ \t]+(.+?)[ \t]*$/gm, m, marks=[];
-    while((m=re.exec(raw))!==null){
-      var t=m[1];
-      var dm=t.match(/^(\d{4}-\d{2}-\d{2})(?:\s+(\d{1,2}:\d{2}))?/);
-      var tm=dm?null:t.match(/^(\d{1,2}:\d{2})/);
-      if(dm) marks.push({at:m.index,date:dm[1],time:dm[2]||''});
-      else if(tm) marks.push({at:m.index,date:fileDate,time:tm[1]});
-      else marks.push({at:m.index,date:fileDate,time:''});
-    }
-    var segs=[];
-    if(!marks.length){ segs.push({date:fileDate,time:'',body:raw,bs:0,be:raw.length}); }
-    else{
-      if(marks[0].at>0) segs.push({date:fileDate,time:'',body:raw.slice(0,marks[0].at),bs:0,be:marks[0].at});
-      for(var i=0;i<marks.length;i++){
-        var end=(i+1<marks.length)?marks[i+1].at:raw.length;
-        var lineEnd=raw.indexOf('\n',marks[i].at);
-        var bodyStart=(lineEnd===-1||lineEnd>=end)?end:lineEnd+1;
-        segs.push({date:marks[i].date,time:marks[i].time,body:raw.slice(bodyStart,end),bs:bodyStart,be:end});
-      }
-    }
-    return segs;
-  }
-  // 时间补零：「9:5」→「09:05」；空值原样返回
+  // 时间补零
   function normTime(t){
     var p=String(t||'').split(':');
     if(p.length!==2) return String(t||'');
@@ -207,47 +178,54 @@ h1{
     if(m.length<2) m='0'+m;
     return h+':'+m;
   }
-  // 无分篇头时间时的兜底：文件名 _HHMMSS（日期对得上才用）→ 文件修改时间
-  function fallbackTime(e, date){
-    var fm=/^(\d{4}-\d{2}-\d{2})_(\d{2})(\d{2})/.exec(String(e.name||''));
-    if(fm&&fm[1]===date) return fm[2]+':'+fm[3];
-    return (e.updated_at||'').slice(11,16);
+
+  // 一篇日记 → 卡片数据：头行「## YYYY-MM-DD HH:MM」解析日期/时间，其余为正文（2026-10-03：不再拆篇，一篇=一条 entry）
+  function parseEntry(e){
+    var raw=String(e.content||'').replace(/\r\n/g,'\n');
+    var m=/^##[ \t]+(\d{4}-\d{2}-\d{2})(?:[ \t]+(\d{1,2}:\d{2}))?[^\n]*\n/.exec(raw);
+    var date, time, body;
+    if(m){
+      date=m[1]; time=m[2]||'';
+      body=raw.slice(m[0].length).replace(/^\n+/,'').replace(/\s+$/,'');
+    } else { date=''; time=''; body=raw.replace(/^\n+/,'').replace(/\s+$/,''); }
+    return { id:e.id, date:date, time:normTime(time),
+      src:e.session?('窗口 '+e.session):'', text:body, hidden:!!e.hidden, vc:e.vc||0 };
   }
 
-  // 单张卡的 HTML（render 与就地更新共用）；bodyId 用于展开/收起与编辑定位
+  // 单张卡 HTML
   function cardHtml(d, bodyId, kw, needClip){
-    return '<div class="day-card'+(kw?' match':'')+(d.hidden?' diary-is-hidden':'')+'" data-rel="'+esc(d.relPath)+'" data-w="'+d._wid+'">'
-      +'<div class="day-head"><span class="day-time">'+esc(d.time)+'</span>'
+    return '<div class="day-card'+(kw?' match':'')+(d.hidden?' diary-is-hidden':'')+'" data-id="'+esc(d.id)+'">'
+      +'<div class="day-head"><span class="day-time">#'+esc(d.id)+(d.time?' · '+esc(d.time):'')+'</span>'
       +(d.src?'<span class="day-src">'+esc(d.src)+'</span>':'')
       +'<span class="diary-hidden-tag"'+(d.hidden?'':' style="display:none"')+'>已隐藏</span>'
       +'<span class="day-ops" style="margin-left:auto;display:inline-flex;gap:0.35rem;flex:none">'
-      +'<button class="diary-edit-btn" data-w="'+d._wid+'">编辑</button>'
-      +(d.vc?'<button class="diary-hist-btn" data-rel="'+esc(d.relPath)+'" data-w="'+d._wid+'">历史'+(d.vc>1?'·'+d.vc:'')+'</button>':'')
-      +'<button class="diary-hide-btn" data-rel="'+esc(d.relPath)+'" data-w="'+d._wid+'" data-hidden="'+(d.hidden?'1':'0')+'">'+(d.hidden?'显示':'隐藏')+'</button>'
+      +'<button class="diary-edit-btn" data-id="'+esc(d.id)+'">编辑</button>'
+      +(d.vc?'<button class="diary-hist-btn" data-id="'+esc(d.id)+'">历史'+(d.vc>1?'·'+d.vc:'')+'</button>':'')
+      +'<button class="diary-hide-btn" data-id="'+esc(d.id)+'" data-hidden="'+(d.hidden?'1':'0')+'">'+(d.hidden?'显示':'隐藏')+'</button>'
       +'</span>'
       +'</div>'
       +'<div class="day-body" id="'+bodyId+'">'+renderParas(needClip?clipText(d.text):d.text,kw)+'</div>'
       +(needClip?'<button class="expand-btn" data-for="'+bodyId+'">展开全文</button>':'')
       +'</div>';
   }
-  // 就地更新某张卡的隐藏状态（不重建列表，折叠/滚动位置不动）
-  function applyHiddenRel(rel, toHidden){
-    writings.forEach(function(d){ if(d.relPath===rel) d.hidden=toHidden; });
-    Array.prototype.forEach.call(document.querySelectorAll('#list .day-card[data-rel]'),function(card){
-      if(card.getAttribute('data-rel')!==rel) return;
+  // 就地更新隐藏状态
+  function applyHidden(id, toHidden){
+    writings.forEach(function(d){ if(String(d.id)===String(id)) d.hidden=toHidden; });
+    Array.prototype.forEach.call(document.querySelectorAll('#list .day-card[data-id]'),function(card){
+      if(card.getAttribute('data-id')!==String(id)) return;
       card.classList.toggle('diary-is-hidden',toHidden);
       var tag=card.querySelector('.diary-hidden-tag'); if(tag) tag.style.display=toHidden?'':'none';
       var hb=card.querySelector('.diary-hide-btn'); if(hb){ hb.textContent=toHidden?'显示':'隐藏'; hb.setAttribute('data-hidden',toHidden?'1':'0'); hb.disabled=false; }
     });
   }
-  // 把某张卡（按 _wid 定位）就地换回只读渲染；编辑保存后用
+  // 保存后就地重渲某张卡
   function rerenderCard(d){
-    var wid=String(d._wid);
+    var id=String(d.id);
     var idx=writings.indexOf(d);
     var kw=document.getElementById('searchInput').value.trim();
     Array.prototype.forEach.call(document.querySelectorAll('#list .day-card'),function(card){
-      if(card.getAttribute('data-w')!==wid) return;
-      var bodyId='db-r'+idx+'-'+wid;
+      if(card.getAttribute('data-id')!==id) return;
+      var bodyId='db-r'+idx+'-'+id;
       var needClip=!kw && d.text.length>EXCERPT_LEN;
       if(needClip) clipMap[bodyId]={text:d.text,expanded:false}; else delete clipMap[bodyId];
       var tmp=document.createElement('div');
@@ -257,17 +235,17 @@ h1{
       bindCard(fresh);
     });
   }
-  // 历史版本弹层：列表只取时间/字数，点「查看」才拉正文，点「恢复」写回（恢复前当前内容会先存为新版本）
-  function openHistory(rel){
-    fetch('/xie-diary/api/versions?relPath='+encodeURIComponent(rel),{headers:authHeaders()})
+  // 历史版本弹层
+  function openHistory(id){
+    fetch('/xie-diary/api/versions?id='+encodeURIComponent(id),{headers:authHeaders()})
       .then(function(r){ if(r.status===401){ showKeyGate(); throw new Error('需要访问口令'); } return r.json(); })
-      .then(function(j){ renderHistory(rel,(j&&j.versions)||[]); })
+      .then(function(j){ renderHistory(id,(j&&j.versions)||[]); })
       .catch(function(e){ if(e.message!=='需要访问口令') alert('读取历史失败：'+e.message); });
   }
-  function renderHistory(rel,vs){
+  function renderHistory(id,vs){
     var mask=document.createElement('div'); mask.className='hist-mask';
     var box=document.createElement('div'); box.className='hist-modal';
-    var html='<div class="hist-title">历史版本 · '+esc(rel)+'</div>';
+    var html='<div class="hist-title">#'+esc(id)+' · 历史版本</div>';
     if(!vs.length) html+='<div style="font-size:0.75rem;color:#8a756a">还没有历史版本（编辑保存后会自动留下旧内容）</div>';
     vs.forEach(function(v,i){
       html+='<div class="hist-item" data-i="'+i+'">'
@@ -288,7 +266,7 @@ h1{
         item.querySelector('.hv').textContent='收起';
         var d=document.createElement('div'); d.className='hist-body'; d.textContent='（读取中…）';
         item.appendChild(d);
-        fetch('/xie-diary/api/version?relPath='+encodeURIComponent(rel)+'&ts='+encodeURIComponent(v.ts),{headers:authHeaders()})
+        fetch('/xie-diary/api/version?id='+encodeURIComponent(id)+'&ts='+encodeURIComponent(v.ts),{headers:authHeaders()})
           .then(function(r){ return r.json(); })
           .then(function(j){ d.textContent=(j&&typeof j.content==='string')?j.content:'（读取失败）'; })
           .catch(function(){ d.textContent='（读取失败）'; });
@@ -297,7 +275,7 @@ h1{
         var b=item.querySelector('.hr');
         if(!confirm('把这篇恢复到 '+v.time+' 的版本？\n当前内容会先存为一个新版本，不会丢。')) return;
         b.disabled=true; b.textContent='恢复中…';
-        api('/xie-diary/api/restore',{relPath:rel,ts:v.ts})
+        api('/xie-diary/api/restore',{id:id,ts:v.ts})
           .then(function(j){
             if(j&&j.success){ close(); loadList(); }
             else { b.disabled=false; b.textContent='恢复'; alert('恢复失败：'+((j&&j.error)||'未知错误')); }
@@ -306,32 +284,31 @@ h1{
       });
     });
   }
-  // 给一张卡（或整个列表容器）绑交互：隐藏/编辑/展开/历史
+  // 绑交互
   function bindCard(root){
     Array.prototype.forEach.call(root.querySelectorAll('.group-head'),function(head){
       head.addEventListener('click',function(){ head.parentNode.classList.toggle('open'); });
     });
-    // 隐藏/恢复按文件粒度（隐藏=不注入给 AI、工具 diary_view 也检索不到）：同一文件拆出的多张卡共用一个状态
+    // 隐藏/恢复（按篇=按 id）
     Array.prototype.forEach.call(root.querySelectorAll('.diary-hide-btn'),function(btn){
       btn.addEventListener('click',function(){
-        var rel=btn.getAttribute('data-rel');
+        var id=btn.getAttribute('data-id');
         var toHidden=btn.getAttribute('data-hidden')!=='1';
         btn.disabled=true;
-        api('/xie-diary/api/hide',{relPath:rel,hidden:toHidden})
+        api('/xie-diary/api/hide',{id:id,hidden:toHidden})
           .then(function(j){
-            if(j&&j.success){ applyHiddenRel(rel,toHidden); }   // 就地更新，不重建列表
+            if(j&&j.success){ applyHidden(id,toHidden); }
             else { alert('操作失败：'+((j&&j.error)||'未知错误')); btn.disabled=false; }
           })
           .catch(function(e){ if(e.message!=='需要访问口令') alert('操作失败：'+e.message); btn.disabled=false; });
       });
     });
-    // 编辑：卡内正文换 textarea，保存=重建整份文件内容（只替换本篇段落，篇头与同文件其它篇不动）
+    // 编辑
     Array.prototype.forEach.call(root.querySelectorAll('.diary-edit-btn'),function(btn){
       btn.addEventListener('click',function(){
-        var wid=btn.getAttribute('data-w');
-        // 按 _wid 精确查找：删除会用 filter 重建数组，按下标取会错位打开别的篇
+        var id=btn.getAttribute('data-id');
         var d=null;
-        Array.prototype.forEach.call(writings,function(o){ if(!d && String(o._wid)===String(wid)) d=o; });
+        Array.prototype.forEach.call(writings,function(o){ if(!d && String(o.id)===String(id)) d=o; });
         if(!d) return;
         var card=btn.closest('.day-card');
         var body=card.querySelector('.day-body');
@@ -355,16 +332,12 @@ h1{
         body.querySelector('.diary-save-btn').addEventListener('click',function(){
           var newText=ta.value.replace(/\s+$/,'');
           if(!newText.trim()){ alert('正文不能为空'); return; }
-          var newRaw=d._raw.slice(0,d._bs)+newText+d._raw.slice(d._be);
           var sb=body.querySelector('.diary-save-btn'), msg=body.querySelector('.diary-edit-msg');
           sb.disabled=true; msg.textContent='保存中…';
-          api('/xie-diary/api/update',{relPath:d.relPath,content:newRaw})
+          api('/xie-diary/api/update',{id:d.id,text:newText})
             .then(function(j){
               if(j&&j.success){
-                var delta=newText.length-(d._be-d._bs);
-                d.text=newText; d._raw=newRaw; d._be+=delta; d.vc=(d.vc||0)+1;
-                // 同文件其它篇的偏移跟着平移
-                writings.forEach(function(o){ if(o!==d&&o.relPath===d.relPath){ if(o._bs>=d._be-delta) { o._bs+=delta; o._be+=delta; } } });
+                d.text=newText; d.vc=(d.vc||0)+1;
                 msg.textContent='';
                 rerenderCard(d);
               } else { sb.disabled=false; msg.textContent='保存失败：'+((j&&j.error)||'未知错误'); }
@@ -373,11 +346,11 @@ h1{
         });
       });
     });
-    // 历史版本（2026-10-02）：点开列出该篇历次编辑前的旧内容，可查看 / 恢复
+    // 历史
     Array.prototype.forEach.call(root.querySelectorAll('.diary-hist-btn'),function(btn){
-      btn.addEventListener('click',function(){ openHistory(btn.getAttribute('data-rel')); });
+      btn.addEventListener('click',function(){ openHistory(btn.getAttribute('data-id')); });
     });
-    // 展开/收起：截断文本与全文整段重渲染
+    // 展开/收起
     Array.prototype.forEach.call(root.querySelectorAll('.expand-btn'),function(btn){
       btn.addEventListener('click',function(){
         var st=clipMap[btn.getAttribute('data-for')];
@@ -389,7 +362,7 @@ h1{
       });
     });
   }
-  var clipMap={};   // bodyId -> {text, expanded}：截断卡片的展开/收起状态（模块级，rerenderCard 复用）
+  var clipMap={};
   function render(kw){
     var list=document.getElementById('list');
     var meta=document.getElementById('metaLine');
@@ -398,13 +371,14 @@ h1{
     if(kw){
       var k=kw.toLowerCase();
       shown=writings.filter(function(d){
-        return d.date.indexOf(kw)!==-1 || d.time.indexOf(kw)!==-1 || d.src.toLowerCase().indexOf(k)!==-1 || d.text.toLowerCase().indexOf(k)!==-1;
+        return String(d.id).indexOf(kw)!==-1 || d.date.indexOf(kw)!==-1 || d.time.indexOf(kw)!==-1
+          || d.src.toLowerCase().indexOf(k)!==-1 || d.text.toLowerCase().indexOf(k)!==-1;
       });
     }
     if(!writings.length){ list.innerHTML='<div class="empty">日记本还是空的</div>'; meta.textContent=''; return; }
     if(!shown.length){ list.innerHTML='<div class="empty">没有匹配「'+esc(kw)+'」的日记</div>'; meta.textContent='0 篇 · 搜索中'; return; }
-    meta.textContent=(kw?('匹配 '+shown.length+' 篇 · '):('共 '+writings.length+' 篇 · '))+'最新 '+shown[0].date;
-    // 按天分组：日期作组头，点组头展开/收起；默认全部收起，搜索时全展开
+    meta.textContent=(kw?('匹配 '+shown.length+' 篇 · '):('共 '+writings.length+' 篇 · '))+'最新 #'+shown[0].id;
+    // 按天分组（组头显日期，卡头显编号+时间）
     var groups=[];
     shown.forEach(function(d){
       var g=groups[groups.length-1];
@@ -420,7 +394,7 @@ h1{
         return cardHtml(d,bodyId,kw,needClip);
       }).join('');
       return '<div class="day-group'+(kw?' open':'')+'">'
-        +'<div class="group-head" data-g="'+gi+'"><span class="g-date">'+esc(g.date)+'</span>'
+        +'<div class="group-head" data-g="'+gi+'"><span class="g-date">'+esc(g.date||'未标注')+'</span>'
         +'<span class="g-count">'+g.items.length+' 篇</span>'
         +'<svg class="g-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>'
         +'</div>'
@@ -435,46 +409,16 @@ h1{
       if(r.status===401){ showKeyGate(); throw new Error('需要访问口令'); }
       return r.json();
     }).then(function(j){
-    var files=(j&&j.entries)||[];
-    // 每次书写一卡：文件按「##」分篇头拆开（旧的一天多篇文件也拆），时间取各篇头行，
-    // 取不到时退回文件名 _HHMMSS，再退回文件修改时间；空段丢弃；完全按时间倒序。
-    writings=[];
-    files.forEach(function(e){
-      var src=e.session?('窗口 '+e.session):'';
-      var rel=e.relPath||e.name;
-      var hidden=!!e.hidden;
-      var raw=String(e.content||'').replace(/\r\n/g,'\n').trim();
-      splitWritings(e).forEach(function(s){
-        var text=String(s.body||'').trim();
-        if(!text) return;
-        writings.push({
-          date:s.date,
-          time:normTime(s.time)||fallbackTime(e,s.date),
-          src:src,
-          text:text,
-          relPath:rel,
-          hidden:hidden,
-          _wid:writings.length,
-          _raw:raw,
-          _bs:s.bs,
-          _be:s.be,
-          vc:e.vc||0
-        });
-      });
+      var entries=(j&&j.entries)||[];
+      writings=entries.map(parseEntry);   // list 已按 id 倒序（最新在前）
+      render('');
+    }).catch(function(e){
+      if(e.message!=='需要访问口令') document.getElementById('list').innerHTML='<div class="empty">加载失败：'+esc(e.message)+'</div>';
     });
-    writings.sort(function(a,b){
-      if(a.date!==b.date) return a.date<b.date?1:-1;
-      var ka=a.date+' '+a.time, kb=b.date+' '+b.time;
-      return ka<kb?1:-1;
-    });
-    render('');
-  }).catch(function(e){
-    if(e.message!=='需要访问口令') document.getElementById('list').innerHTML='<div class="empty">加载失败：'+esc(e.message)+'</div>';
-  });
   }
   loadList();
 
-  // 口令门：解锁后记住（localStorage），重拉列表
+  // 口令门：解锁后记住，重拉列表
   document.getElementById('keySave').addEventListener('click',function(){
     var v=document.getElementById('keyInput').value.trim();
     var msg=document.getElementById('keyMsg');
