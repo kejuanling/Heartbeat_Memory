@@ -739,55 +739,6 @@ TOOLS["phone_state"] = {
 
 
 # ── 上下文记忆替换 ──
-def tool_context_replace(args):
-    memory = (args.get("memory") or "").strip()
-    if not memory:
-        return {"error": "memory 必填：AI 自己写好的第一人称回忆记忆正文"}
-    rng = {}
-    for k in ("start_id", "end_id"):
-        v = args.get(k)
-        if v is not None and str(v).strip() != "":
-            rng[k] = str(v).strip()
-    if not rng:
-        return {"error": "请提供替换范围：start_id 和 end_id（消息 id）——先用 context_search 检索原文，取首尾两条的 msg_id 传入"}
-    if len(rng) < 2:
-        return {"error": "start_id 和 end_id 都必填（消息 id）——先用 context_search 检索原文，取首尾两条的 msg_id 传入"}
-    url = f"{BASE_URL}:3000/internal/context-replacements/apply"
-    req = urllib.request.Request(url,
-        data=json.dumps({"range": rng, "memory": memory}).encode("utf-8"),
-        headers={"Content-Type": "application/json", "x-internal-key": INTERNAL_KEY},
-        method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        try:
-            data = json.loads(e.read().decode("utf-8"))
-        except Exception:
-            data = {"error": f"HTTP {e.code}"}
-    except Exception as e:
-        return {"error": str(e)}
-    if data.get("ok"):
-        return {"success": True, "id": data.get("id"), "count": data.get("count"),
-                "range_label": data.get("range_label"), "message": data.get("message", "已替换")}
-    return {"error": data.get("error", "替换失败")}
-
-
-TOOLS["context_replace"] = {
-    "description": "把一段原始对话替换成 AI 自己写的回忆，用于压缩上下文而不是写入长期记忆池。使用前先用 context_search 检索到目标原文，取首尾两条消息的 msg_id 作为 start_id/end_id 传入（消息 id 唯一且不会因对话增删而错位），再提供一段基于真实对话写成的第一人称回忆。原始对话文件不会被删除，仍可检索；之后发送给 AI 的上下文会用这段回忆代替原文。",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "start_id": {"type": "string", "description": "替换范围起始消息的 id（context_search 返回的 msg_id）"},
-            "end_id": {"type": "string", "description": "替换范围结束消息的 id（context_search 返回的 msg_id），需与 start_id 同一会话"},
-            "memory": {"type": "string", "description": "AI 自己写的第一人称回忆记忆正文（有温度，像在回忆里写下的自己的话；按真实对话写，不编造）"}
-        },
-        "required": ["start_id", "end_id", "memory"]
-    },
-    "handler": tool_context_replace
-}
-
-
 def tool_context_search(args):
     q = (args.get("q") or "").strip()
     time_prefix = (args.get("time_prefix") or "").strip()
@@ -842,7 +793,7 @@ def tool_context_search(args):
 
 
 TOOLS["context_search"] = {
-    "description": "检索原始对话：可跨所有会话搜索完整对话和导入对话，包括已经被上下文压缩替换的原文。两种用法：①按内容检索——q 提供关键词或描述性问题（语义检索），或 mode=keyword 做词面匹配；②按时间定位——time_prefix 填消息自带的时间缀前缀（如 2026-08-28 或 2026-08-28T19:34），直接返回该时间的消息原文及 msg_id；两者可组合（先按时间过滤再内容检索）。q 与 time_prefix 都不填时自动用当前会话她最新一条消息作为检索内容。结果返回相关原文及 session、msg_id（消息唯一 id）、时间、角色；相邻命中会合并，重复内容会去重。返回的是原文，不是改写后的记忆。需要永久保留某段原文时，可在找到 session/msg_id 后使用 context_star；需要把某段原文压缩成回忆（context_replace）时，同样把首尾两条的 msg_id 作为 start_id/end_id 传入。",
+    "description": "检索原始对话：可跨所有会话搜索完整对话和导入对话，包括已经被上下文压缩替换的原文。两种用法：①按内容检索——q 提供关键词或描述性问题（语义检索），或 mode=keyword 做词面匹配；②按时间定位——time_prefix 填消息自带的时间缀前缀（如 2026-08-28 或 2026-08-28T19:34），直接返回该时间的消息原文及 msg_id；两者可组合（先按时间过滤再内容检索）。q 与 time_prefix 都不填时自动用当前会话她最新一条消息作为检索内容。结果返回相关原文及 session、msg_id（消息唯一 id）、时间、角色；相邻命中会合并，重复内容会去重。返回的是原文，不是改写后的记忆。需要永久保留某段原文时，可在找到 session/msg_id 后使用 context_star。",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -904,18 +855,14 @@ TOOLS["context_digest"] = {
 
 def tool_memory_search(args):
     q = (args.get("q") or "").strip()
-    category = (args.get("category") or "").strip()
-    # 「最近/已置顶」是浏览式查看，可不带关键词；其余情况仍要求 q
-    if not q and category not in ("最近", "已置顶"):
-        return {"error": "q 必填：检索记忆池的关键词或想问的问题（category=最近/已置顶 时可不填）"}
+    if not q:
+        return {"error": "q 必填：检索记忆池的关键词或想问的问题"}
     limit = args.get("limit") or 5
     try:
         limit = max(1, min(50, int(limit)))
     except (TypeError, ValueError):
         limit = 5
     url = f"{BASE_URL}:3000/internal/memory-pool/retrieve?q=" + urllib.parse.quote(q) + "&limit=" + str(limit)
-    if category:
-        url += "&category=" + urllib.parse.quote(category)
     req = urllib.request.Request(url, headers={"x-internal-key": INTERNAL_KEY})
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -943,77 +890,16 @@ def tool_memory_search(args):
 
 
 TOOLS["memory_search"] = {
-    "description": "检索长期记忆池。支持关键词、完整问题或模糊描述，并可按分类过滤；系统负责按相关性等因素排序。分类只有四类：fact（稳定事实）、rule（承诺/边界）、quote（重要原话）、milestone（关系里程碑）；另有特殊值「最近」和「已置顶」用于浏览。返回记忆内容及唯一 id，id 可交给 memory_pin。这里查到的是已经进入长期记忆池的记忆，不是原始对话；需要找原文时使用 context_search。",
+    "description": "检索长期记忆池：输入关键词、完整问题或模糊描述，系统按相关性排序返回最相关的几条。返回记忆正文与唯一 id——id 交给 memory_pin 置顶/沉底，或交给 memory_update 改正文。这里查到的是已经进入长期记忆池的记忆，不是原始对话；要找原文用 context_search。",
     "inputSchema": {
         "type": "object",
         "properties": {
-            "q": {"type": "string", "description": "检索关键词、问题或描述；category=最近/已置顶 时可不填"},
-            "category": {"type": "string", "description": "分类过滤：fact=稳定事实、rule=承诺/边界、quote=重要原话、milestone=关系里程碑；特殊值：最近、已置顶"},
+            "q": {"type": "string", "description": "检索关键词、问题或描述"},
             "limit": {"type": "integer", "description": "返回条数，默认5，最大50"}
-        }
+        },
+        "required": ["q"]
     },
     "handler": tool_memory_search
-}
-
-
-def tool_memory_add(args):
-    content = (args.get("content") or "").strip()
-    if not content:
-        return {"error": "content 必填：要写入记忆池的记忆正文"}
-    category = (args.get("category") or "").strip()
-    importance = args.get("importance")
-    data = {"content": content}
-    if category:
-        data["category"] = category
-    if importance is not None:
-        try:
-            data["importance"] = max(0.0, min(1.0, float(importance)))
-        except (TypeError, ValueError):
-            return {"error": "importance 必须是 0~1 的数字"}
-    if args.get("pin"):
-        data["pinned"] = True
-    url = f"{BASE_URL}:3000/internal/memory-pool/add"
-    req = urllib.request.Request(url,
-        data=json.dumps(data).encode("utf-8"),
-        headers={"Content-Type": "application/json", "x-internal-key": INTERNAL_KEY},
-        method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            out = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        try:
-            out = json.loads(e.read().decode("utf-8"))
-        except Exception:
-            out = {"error": f"HTTP {e.code}"}
-    except Exception as e:
-        return {"error": str(e)}
-    if out.get("success"):
-        entry = out.get("entry") or {}
-        return {
-            "success": True,
-            "dup": bool(out.get("dup")),
-            "id": entry.get("id"),
-            "category": entry.get("category") or "",
-            "content": entry.get("content") or "",
-            "important": entry.get("importance"),
-            "message": "已写入记忆池" + ("（与已有记忆合并/去重）" if out.get("dup") else "（新增）")
-        }
-    return {"error": out.get("error", "写入失败")}
-
-
-TOOLS["memory_add"] = {
-    "description": "提交一条你想长期留下的记忆。只要你觉得某件事以后可能值得记得，就可以提交，不需要先替系统判断它是否应该进入记忆池；所有提交都会经过后续记忆流水线的筛选、去重、合并等处理，提交不代表一定会最终保留。分类只有四类：fact（稳定事实）、rule（承诺/边界）、quote（重要原话）、milestone（关系里程碑）。这是长期记忆的提交入口，不等同于永久注入，也不用于压缩当前上下文。",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "content": {"type": "string", "description": "想留下的记忆内容；基于真实对话，不编造"},
-            "category": {"type": "string", "enum": ["fact", "rule", "quote", "milestone"], "description": "可选：fact=稳定事实、rule=承诺/边界、quote=重要原话、milestone=关系里程碑"},
-            "importance": {"type": "number", "description": "重要级 0~1，可选；仅作为提交信息，最终是否保留由记忆流水线决定"},
-            "pin": {"type": "boolean", "description": "可选；请求将这条提交同时置顶。默认 false"}
-        },
-        "required": ["content"]
-    },
-    "handler": tool_memory_add
 }
 
 
@@ -1456,7 +1342,7 @@ def tool_memory_update(args):
 
 
 TOOLS["memory_update"] = {
-    "description": "直接覆盖更新一条长期记忆的正文。先用 memory_search 找到它的 id，再传 id 和新 content，正文被整体替换（不追加）。适用于：发现某条记忆内容过时/有误/需要补充修正，且新内容能完整替代旧内容时。如果只是想补充新事实，优先用 memory_add 新增一条，让流水线去重合并；本工具是「确认旧条目该被这句替换」时的直改通道。",
+    "description": "直接覆盖更新一条长期记忆的正文。先用 memory_search 找到它的 id，再传 id 和新 content，正文被整体替换（不追加）。适用于：发现某条记忆内容过时/有误/需要补充修正，且新内容能完整替代旧内容时。本工具是「确认旧条目该被这句替换」时的直改通道；发现某条已经过时、失效，改用 memory_pin 沉底。",
     "inputSchema": {
         "type": "object",
         "properties": {
