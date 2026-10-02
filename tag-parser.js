@@ -84,7 +84,7 @@ async function extractAndStore(text, ctx) {
         const body = stripTags(text).trim();
         if (!body) return null;
         const r = papers.savePaper({ sessionId: ctx && ctx.sessionId, content: body, title });
-        if (r && r.ok) console.log("[tag-parser] <paper> 已留纸:", r.relPath, title ? ("标题=" + title) : "");
+        if (r && r.ok) console.log("[tag-parser] <paper> 已留纸: id=" + r.id, title ? ("标题=" + title) : "");
         else console.warn("[tag-parser] <paper> 留纸失败:", (r && r.error) || "unknown");
         return r;
       }).catch(function (err) {

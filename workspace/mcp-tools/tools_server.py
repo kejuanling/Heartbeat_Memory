@@ -94,16 +94,6 @@ def run_cmd(cmd, timeout=10):
 TOOLS = {}
 
 # ── 2. 日记 ──
-def _diary_now():
-    """与 wake_up.js appendDiaryEntry 对齐：TIME_ZONE（默认 Asia/Shanghai）取当前时刻；
-    zoneinfo 不可用（如 Python 3.8）时回退东八区。"""
-    tzname = (os.environ.get("TIME_ZONE", "") or "").strip() or "Asia/Shanghai"
-    try:
-        from zoneinfo import ZoneInfo
-        return datetime.datetime.now(ZoneInfo(tzname))
-    except Exception:
-        return datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
-
 def tool_diary_add(args):
     content = (args.get("content") or "").strip()
     if not content:
@@ -198,43 +188,21 @@ TOOLS["diary_view"] = {
     "handler": tool_diary_view
 }
 
-# ── 留纸（2026-09-12）：AI 写故事/梦/随手创作，只落盘保存、不注入对话上下文 ──
-def _paper_target_dir():
-    papers_dir = (os.environ.get("PAPERS_DIR", "") or "").strip() or "papers"
-    if not os.path.isabs(papers_dir):
-        papers_dir = os.path.join("/opt/dylan-heartbeat", papers_dir)
-    return papers_dir
-
+# ── 留纸（2026-09-12；2026-10-03 改走网关内部接口 data/papers.json）──
 def tool_leave_paper(args):
     content = (args.get("content") or "").strip()
     if not content:
         return {"error": "content 必填：要留纸的正文（故事/梦/随手创作等）"}
     title = (args.get("title") or "").strip()[:100]
     session_id = str(args.get("session_id") or "").strip()
-    session_token = ""
-    if session_id:
-        session_token = "".join(ch for ch in session_id if ch.isalnum() or ch in "_-")[:64] or ""
-    papers_dir = _paper_target_dir()
-    target_dir = os.path.join(papers_dir, session_token) if session_token else os.path.join(papers_dir, "_shared")
-    try:
-        os.makedirs(target_dir, exist_ok=True)
-        now = _diary_now()
-        base = now.strftime("%Y-%m-%d_%H%M")
-        name = base + ".md"
-        n = 2
-        while os.path.exists(os.path.join(target_dir, name)):
-            name = "%s-%d.md" % (base, n)
-            n += 1
-        body = content[:30000]
-        header = ("# " + title + "\n\n") if title else ""
-        header += "（" + now.strftime("%Y-%m-%d %H:%M") + (" · " + session_token if session_token else "") + "）\n\n"
-        with open(os.path.join(target_dir, name), "w", encoding="utf-8") as f:
-            f.write(header + body + "\n")
-        return {"success": True, "file": os.path.join(session_token or "_shared", name),
-                "title": title, "chars": len(body),
-                "message": ("已留纸：" + title) if title else "已留一张纸（只保存，不会进入对话上下文）"}
-    except Exception as e:
-        return {"error": "留纸失败: %s" % e}
+    data = api_post_key("%s:3000/internal/paper" % BASE_URL,
+                        {"content": content, "title": title, "session_id": session_id or None})
+    if "_error" in data:
+        return {"error": "留纸失败: %s" % data["_error"]}
+    if not data.get("success"):
+        return {"error": "留纸失败: %s" % data}
+    return {"success": True, "id": data.get("id"), "title": data.get("title"),
+            "message": ("已留纸：" + data.get("title", "")) if data.get("title") else "已留一张纸（只保存，不会进入对话上下文）"}
 
 TOOLS["leave_paper"] = {
     "description": "留一张纸：把一段创作（小故事、梦、随手写的文字等）单独保存成一张「纸」，只落盘收藏、不会进入对话上下文。适合内容较长、想留档又不打断聊天时使用；如果只是想顺手在回复里标记留档，也可以直接在回复末尾写 <paper/> 记号（整条回复会存成一张纸，可选 <paper title=\"标题\"/>）。",
@@ -250,67 +218,35 @@ TOOLS["leave_paper"] = {
     "handler": tool_leave_paper
 }
 
-# ── 翻看留过的纸（2026-09-12）：不带参数=列表（序号+时间+标题），带 sn=看对应那张全文 ──
-def _paper_read_title(full_path):
-    try:
-        with open(full_path, encoding="utf-8") as f:
-            lines = [l.rstrip() for l in f.read().splitlines()]
-    except Exception:
-        return "", ""
-    title = ""
-    body = lines
-    if lines and lines[0].startswith("# "):
-        title = lines[0][2:].strip()
-        body = lines[1:]
-    first = ""
-    for l in body:
-        s = l.strip()
-        if s and not s.startswith("（") and not s.startswith("#"):
-            first = s
-            break
-    return title, first[:40]
-
+# ── 翻看留过的纸（2026-09-12；2026-10-03 改内部接口）：不带参数=列表（序号+时间+标题），带 sn=看对应那张全文 ──
 def tool_view_paper(args):
-    session_id = str(args.get("session_id") or "").strip()
-    token = "".join(ch for ch in session_id if ch.isalnum() or ch in "_-")[:64]
-    papers_dir = _paper_target_dir()
-    entries = []
-    for d in [x for x in (token, "_shared") if x]:
-        p = os.path.join(papers_dir, d)
-        if not os.path.isdir(p):
-            continue
-        for name in os.listdir(p):
-            if re.match(r"^\d{4}-\d{2}-\d{2}_\d{4}(-\d+)?\.md$", name):
-                entries.append(d + "/" + name)
-    entries.sort(reverse=True)  # 时间倒序：最新的序号在前
-    if not entries:
-        return {"papers": [], "message": "还没有留过纸"}
     if args.get("sn") in (None, ""):
+        data = api_get_key("%s:3000/internal/paper/view" % BASE_URL)
+        if "_error" in data:
+            return {"error": data["_error"]}
+        papers = data.get("papers") or []
         items = []
-        for i, rel in enumerate(entries[:10], 1):
-            title, first = _paper_read_title(os.path.join(papers_dir, rel))
-            label = title or first or "(无标题)"
-            d, name = rel.split("/", 1)
-            items.append({"sn": i, "file": rel,
-                          "time": name[0:10] + " " + name[11:13] + ":" + name[13:15],
-                          "title": label,
-                          "session": "(共享)" if d == "_shared" else d})
-        return {"papers": items, "total": len(entries),
-                "message": "带 sn=序号 再调一次可看对应那张的全文" + ("" if len(entries) <= 10 else "（当前只列最近 10 张，共 %d 张）" % len(entries))}
+        for i, p in enumerate(papers, 1):
+            items.append({"sn": i, "id": p.get("id"), "time": p.get("time"),
+                          "title": p.get("title") or "(无标题)",
+                          "session": p.get("session") or "(共享)"})
+        return {"papers": items, "total": data.get("total") or len(items),
+                "message": "带 sn=序号 再调一次可看对应那张的全文"}
     try:
         sn = int(args.get("sn"))
     except Exception:
         return {"error": "sn 需为列表返回的序号数字"}
-    limit = min(10, len(entries))
-    if sn < 1 or sn > limit:
-        return {"error": "序号超出范围（1~%d），请先不带参数调一次拿最新列表" % limit}
-    rel = entries[sn - 1]
-    try:
-        with open(os.path.join(papers_dir, rel), encoding="utf-8") as f:
-            content = f.read()
-    except Exception as e:
-        return {"error": "读取失败: %s" % e}
-    return {"file": rel, "content": content}
+    data = api_get_key("%s:3000/internal/paper/view" % BASE_URL)
+    if "_error" in data:
+        return {"error": data["_error"]}
+    papers = data.get("papers") or []
+    if sn < 1 or sn > len(papers):
+        return {"error": "序号超出范围（1~%d），请先不带参数调一次拿最新列表" % max(1, len(papers))}
+    pid = papers[sn - 1].get("id")
+    full = api_get_key("%s:3000/internal/paper/view?id=%s" % (BASE_URL, pid))
+    if "_error" in full:
+        return {"error": full["_error"]}
+    return {"file": pid, "content": full.get("content")}
 
 TOOLS["view_paper"] = {
     "description": "翻看自己留过的纸（leave_paper/<paper> 写的收藏）。不带参数调用=列出本窗口最近 10 张（序号+时间+标题/开头）；带 sn=序号 调用=看那一张的全文。",

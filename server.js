@@ -6279,9 +6279,10 @@ app.get("/admin/env", { preHandler: basicAuth }, async (req, reply) => {
 // 小世界门户「留纸」页 API（2026-09-12）：与站点其它门户 API 同口径公开（单人流站点，nginx SSL 层）
 app.get("/papers/api/list", async (req, reply) => {
   try {
+    // 2026-10-03：留纸改 data/papers.json，接口按 id 点名
     const papers = require("./papers");
     const list = papers.listPapers().slice(0, 100).map(e => ({
-      name: e.name, relPath: e.relPath, session: e.session, title: e.title, time: e.time
+      id: e.id, session: e.session, title: e.title, time: e.time
     }));
     reply.send({ papers: list });
   } catch (err) {
@@ -6292,13 +6293,49 @@ app.get("/papers/api/list", async (req, reply) => {
 
 app.get("/papers/api/read", async (req, reply) => {
   try {
-    const papers = require("./papers");
-    const r = papers.resolvePaperRelPath((req.query || {}).file);
-    if (!r) return reply.code(400).send({ error: "非法路径" });
-    if (!fs.existsSync(r.full)) return reply.code(404).send({ error: "纸不存在" });
-    reply.send({ file: r.rel, content: fs.readFileSync(r.full, "utf-8") });
+    const paperStore = require("./lib/paper-store");
+    const e = paperStore.getEntry(__dirname, (req.query || {}).id);
+    if (!e) return reply.code(404).send({ error: "纸不存在" });
+    reply.send({ id: e.id, title: e.title, content: e.content });
   } catch (err) {
     console.error("[papers] 门户读取失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// ===== MCP 工具（tools_server.py）经内部接口读写留纸（2026-10-03）=====
+// 写操作集中在网关单进程，避免多进程并发写 papers.json；鉴权由全局 /internal 钩子处理。
+app.post("/internal/paper", async (req, reply) => {
+  try {
+    const body = req.body || {};
+    const r = require("./papers").savePaper({
+      content: body.content, title: body.title, sessionId: body.session_id,
+    });
+    if (!r || !r.ok) return reply.code(400).send({ error: (r && r.error) || "留纸失败" });
+    reply.send({ success: true, id: r.id, title: r.title, chars: r.chars, time: r.time, session: r.session });
+  } catch (err) {
+    console.error("[internal/paper] 留纸失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
+// 读留纸：不带参=最近 10 张列表（id/标题/时间/会话）；带 id=N=那一张全文
+app.get("/internal/paper/view", async (req, reply) => {
+  try {
+    const papers = require("./papers");
+    const id = String((req.query || {}).id || "").trim();
+    if (id) {
+      const paperStore = require("./lib/paper-store");
+      const e = paperStore.getEntry(__dirname, id);
+      if (!e) return reply.code(404).send({ error: "纸不存在：id=" + id });
+      return reply.send({ id: e.id, title: e.title, content: String(e.content || "").trim() });
+    }
+    const list = papers.listPapers().slice(0, 10).map(e => ({
+      id: e.id, title: e.title, time: e.time, session: e.session,
+    }));
+    reply.send({ papers: list, total: papers.listPapers().length,
+      message: "带 id=编号 可看对应那张全文" });
+  } catch (err) {
+    console.error("[internal/paper/view] 读留纸失败:", err);
     reply.code(500).send({ error: err.message });
   }
 });

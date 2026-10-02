@@ -101,7 +101,7 @@ function load(){
     el.innerHTML=PAPERS.map(function(p,i){
       var t=p.title||'(无标题)';
       var tag=p.session?'<em>窗口 '+esc(p.session.slice(0,10))+'</em>':'<em>共享</em>';
-      return '<div class="paper" onclick="openPaper('+i+')"><div class="t">'+esc(t)+'</div><div class="m">'+esc(p.time||'')+' '+tag+'</div></div>';
+      return '<div class="paper" onclick="openPaper('+i+')"><div class="t">#'+esc(p.id)+' · '+esc(t)+'</div><div class="m">'+esc(p.time||'')+' '+tag+'</div></div>';
     }).join('');
   }).catch(function(){
     document.getElementById('list').innerHTML='<div class="empty">加载失败，刷新重试</div>';
@@ -109,7 +109,7 @@ function load(){
 }
 function openPaper(i){
   var p=PAPERS[i];if(!p)return;
-  fetch('/papers/api/read?file='+encodeURIComponent(p.relPath))
+  fetch('/papers/api/read?id='+encodeURIComponent(p.id))
     .then(function(r){return r.json()})
     .then(function(j){
       document.getElementById('sh-t').textContent=p.title||'留纸';
