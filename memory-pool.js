@@ -848,8 +848,8 @@ async function ingestSummary(summaryText, opts) {
   const isCompactionSource = source === "compaction" || source === "compaction-direct";
   const fixedCategory = isCompactionSource ? COMPACTION_CATEGORY : null;
   // 一键入池(compaction-direct)按摘要【分类】标签落真实类别；批量解析(compaction)仍固定压缩摘要
-  // 0919：memory_tag 额外接受 V2 枚举名（fact/rule/quote/milestone）——AI 按新分类写标签直接落池，迁移时 category 即 kind
-  const allowedCats = source === "compaction-direct" ? CATEGORIES : (fixedCategory ? [fixedCategory] : (source === "memory_tag" ? AI_CATEGORIES.concat(["fact", "rule", "quote", "milestone"]) : AI_CATEGORIES));
+  // 0919：memory_tag 额外接受 V2 枚举名（1002-14 起仅 fact/rule）——AI 按新分类写标签直接落池，迁移时 category 即 kind
+  const allowedCats = source === "compaction-direct" ? CATEGORIES : (fixedCategory ? [fixedCategory] : (source === "memory_tag" ? AI_CATEGORIES.concat(["fact", "rule"]) : AI_CATEGORIES));
   // 直接分类/重要级：memory 标签里写了 {category,importance} 时，跳过 LLM 再解析，直接入库。
   const directCategory = opts.directCategory ? String(opts.directCategory).trim() : "";
   const directPinned = opts.directPinned === true;

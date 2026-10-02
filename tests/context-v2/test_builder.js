@@ -17,11 +17,11 @@ function blockOf(res, key) {
   return res.blocks.find(b => b.key === key);
 }
 
-// ---- 共享 fixture（0918 修订后 target 四枚举）----
+// ---- 共享 fixture（1002-14：moments_anchor 随块删除，target 三枚举）----
 const pinnedFull = [
   { id: "pin1", title: "记忆标签", content: "如果想存记忆，用记忆内联标签。", target: "instructions" },
   { id: "pin2", content: "回复她要简短有温度", target: "identity" },
-  { id: "pin3", content: "你是我的锚", target: "moments_anchor" },
+  { id: "pin3", content: "你是我的锚", target: "retire" },
   { id: "pin4", content: "只会越轨的旧置顶", target: "retire" },
 ];
 
@@ -106,32 +106,6 @@ ok("understanding: 无注入上限（0920 拍板），全量注入", () => {
   const res = buildContextBlocks({ memoriesV2: mems });
   const b = blockOf(res, "long_term_understanding");
   assert.ok(b.content.includes("甲") && b.content.includes("乙") && b.content.includes("丙"), "全部注入，无截断");
-});
-
-// ============================================================
-// [3] Meaningful Moments
-// ============================================================
-ok("moments: pinned anchor+V2 anchor(milestone/quote) 进；非 anchor 不进；事件时间升序；日期后缀", () => {
-  const res = buildContextBlocks({ pinnedEntries: pinnedFull, memoriesV2: memFull });
-  const b = blockOf(res, "meaningful_moments");
-  assert.ok(b, "块应存在");
-  assert.ok(b.content.includes("你是我的锚"), "pinned anchor 进");
-  assert.ok(b.content.includes("07-14 我们成为恋人"), "V2 milestone anchor 进");
-  assert.ok(!b.content.includes("标签什么的说了就死了"), "非 anchor quote 不进");
-  const i恋 = b.content.indexOf("07-14 我们成为恋人");
-  const i锚 = b.content.indexOf("你是我的锚");
-  assert.ok(i恋 < i锚, "事件时间升序，无时间者排尾");
-  assert.ok(/07-14 我们成为恋人（2026-07-14）/.test(b.content), "established_at 日期后缀");
-});
-
-ok("moments: 无条数上限（0920 拍板），7 条全注入", () => {
-  const mems = [];
-  for (let i = 1; i <= 7; i++) {
-    mems.push({ id: "q" + i, text: "原话第" + i + "条", kind: "quote", status: "active", anchor: true, established_at: "2026-08-0" + i + "T00:00:00+08:00" });
-  }
-  const res = buildContextBlocks({ memoriesV2: mems });
-  const b = blockOf(res, "meaningful_moments");
-  assert.ok(b.content.includes("原话第1条") && b.content.includes("原话第7条"), "全部注入");
 });
 
 // ============================================================

@@ -2,7 +2,7 @@
 
 // ========================
 // Memory V2 存储层（C1）
-// 六轴单集合记忆：kind(fact/rule/quote/milestone) × subject(user/self/relationship/external)
+// 六轴单集合记忆：kind(fact/rule) × subject(user/self/relationship/external)（1002-14 删除 quote/milestone 两类）
 // × status(active/superseded/archived) × confidence × origin × provenance。（priority/重要级已删，0920 用户拍板）
 // 设计契约：gpt串口/13.txt（Schema v1.0 冻结稿）、17.txt（MVP Plan C1）。
 // 铁律：
@@ -22,12 +22,12 @@ const READONLY = process.env.MEMORY_V2_READONLY === "1";
 
 // ---- Schema v1.0 常量（冻结：改动任何枚举/语义必须升 schema_ver 并走迁移说明） ----
 const SCHEMA_VER = 1;
-const KINDS = ["fact", "rule", "quote", "milestone"];
+const KINDS = ["fact", "rule"];
 const SUBJECTS = ["user", "self", "relationship", "external"];
 const STATUSES = ["active", "superseded", "archived"]; // pending_review 在队列文件，不在集合
 const ORIGINS = ["memory_tag", "tool", "manual", "promotion", "import"];
 const DIRECTIONS = ["toward_user", "about_user", "self_discipline"]; // 仅 rule 可选
-const SPEAKERS = ["user", "self", "ai"]; // 仅 quote；speaker=self 在准入层已被拒，存储层兜底；ai=AI 回复方（界面映射：涵=user / 谢=ai）
+const SPEAKERS = ["user", "self", "ai"]; // 历史字段：原 kind=quote 专用，1002-14 分类删除后不再有 kind 联动（界面映射：涵=user / 谢=ai）
 const PROVENANCE_METHODS = ["tag_inline", "mcp_tool", "admin_form", "summary_promotion", "diary_promotion", "migration_batch", "review_admit"];
 const SUPERSEDED_REASONS = ["updated", "merged", "contradiction_resolved", "retracted", "archived", "unknown"];
 const RELATED_RELS = ["derived_from", "pairs_with"];
@@ -125,7 +125,7 @@ function idArrayOrNull(v, field) {
 
 // ---------------- Schema 校验（纯函数，可独立单测） ----------------
 // 输入：写入方提交的 partial entry；输出：{ok, entry} 或 {ok:false, error}
-// 职责：枚举校验、kind 联动铁律（quote/milestone）、默认值补齐、字段规范化。
+// 职责：枚举校验、默认值补齐、字段规范化。（1002-14：quote/milestone 分类与其联动铁律已删）
 // 注意：status 在创建时恒为 active；schema_ver/id/时间戳由系统生成，传入值一律忽略。
 
 function validateEntry(input, cfg) {
@@ -150,16 +150,12 @@ function _buildEntry(input, cfg) {
   const origin = input.origin;
   if (!ORIGINS.includes(origin)) throw new Error(`origin 非法: ${origin}（允许 ${ORIGINS.join("/")}）`);
 
-  // kind 联动铁律（Schema 冻结 4：AI 台词不得冒充原话；里程碑属于关系）
+  // 1002-14：kind=quote/milestone 已删除（用户拍板），两条联动铁律随之取消。
+  // speaker 保留为历史字段（存量数据仍有值），新写入可显式指定，只校验枚举。
   let speaker = null;
-  if (kind === "quote") {
-    if (subject !== "user") throw new Error("kind=quote 必须 subject=user");
-    if (input.speaker !== "user" && input.speaker !== "ai") throw new Error("kind=quote 必须 speaker=user 或 ai");
+  if (input.speaker != null) {
+    if (!SPEAKERS.includes(input.speaker)) throw new Error(`speaker 非法: ${input.speaker}（允许 ${SPEAKERS.join("/")}）`);
     speaker = input.speaker;
-  }
-  if (kind === "milestone") {
-    if (subject !== "relationship") throw new Error("kind=milestone 必须 subject=relationship");
-    if (!strOrNull(input.established_at)) throw new Error("kind=milestone 必须提供 established_at");
   }
 
   let direction = null;
@@ -401,26 +397,20 @@ function createStore(opts = {}) {
         e.note = n;
       } else if (k === "kind") {
         if (!KINDS.includes(v)) return fail("kind 非法: " + v);
-        // 0920 用户拍板：放开 kind 切换限制（原 quote/milestone 不可切换），管理台可自由改分类；
-        // quote 的 speaker/subject 联动约束仅在仍为 quote 时校验，切走后字段原样保留
+        // 1002-14：quote/milestone 分类已删，kind 仅 fact/rule；speaker 保留为历史字段
         e.kind = v;
       } else if (k === "subject") {
         if (!SUBJECTS.includes(v)) return fail("subject 非法: " + v);
-        if (e.kind === "quote" && v !== "user") return fail("quote 必须 subject=user");
-        if (e.kind === "milestone" && v !== "relationship") return fail("milestone 必须 subject=relationship");
         e.subject = v;
       } else if (k === "direction") {
         if (e.kind !== "rule") return fail("direction 仅 rule 可用");
         if (v != null && !DIRECTIONS.includes(v)) return fail("direction 非法: " + v);
         e.direction = v == null ? null : v;
       } else if (k === "speaker") {
-        if (e.kind !== "quote") return fail("speaker 仅 quote 可用");
         if (v != null && !SPEAKERS.includes(v)) return fail("speaker 非法: " + v);
-        if (v !== "user" && v !== "ai") return fail("quote 必须 speaker=user 或 ai");
         e.speaker = v;
       } else if (k === "established_at") {
         e.established_at = strOrNull(v);
-        if (e.kind === "milestone" && !e.established_at) return fail("milestone 必须有 established_at");
       } else if (k === "related_subjects") {
         if (!Array.isArray(v)) return fail("related_subjects 必须是数组");
         for (const x of v) if (!SUBJECTS.includes(x)) return fail("related_subjects 项非法: " + x);

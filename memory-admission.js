@@ -11,8 +11,8 @@
 // 决策策略（2026-09-19 起 LLM judge 正式启用，业务语义见 14.txt）：
 //   detector 非候选 → reject；validator 硬规则命中 → reject；
 //   找到相似既有记忆 → judge LLM 判关系：duplicate→reject、update/need_review→review、
-//   coexist→admit（quote 亦然——「quote 无 judge 复核」的前提已消除）；
-//   没有相似既有 → 无需判定，quote→review、其余 admit（原保守路径）；
+//   coexist→admit（1002-14：quote 类已删，此注同步）；
+//   没有相似既有 → 无需判定，直接 admit（原 quote→review 保守路径随分类删除）；
 //   judge 失败/非法输出 → 回退上述保守路径并在 why 标注。
 //   promotion/manual_review 通道 R7 不变：judge 只注解进 review 队列，不改变首入 review。
 //   judge_mode 配置（memory_v2_config.json）：llm（默认）/ mock / off。
@@ -103,7 +103,7 @@ async function defaultCallLLM(prompt) {
 const CATEGORY_MAP = {
   "关于她": { kind: "fact", subject: "user" },
   "认账": { kind: "rule", subject: "self", direction: "self_discipline" },
-  "拓本": { kind: "quote", subject: "user", speaker: "user" },
+  "拓本": { kind: "fact", subject: "user" },
 };
 
 function readConfigFile(file) {
@@ -186,8 +186,9 @@ function createAdmission(opts = {}) {
       msgId: strSafe(ctx.msgId),
     });
     if (strSafe(b.quote)) provenance.quote = String(b.quote).slice(0, 200);
-    // 人工入池（聊天页/管理台）：整条消息即原文摘录，自动补 provenance.quote 以满足 V9（quote 必须有原文摘录）
-    if (!isPromo && detection.kind_guess === "quote" && !strSafe(provenance.quote)) {
+    // 人工入池（聊天页/管理台）：整条消息即原文摘录，自动补 provenance.quote 供溯源
+    // （1002-14：原 V9 强制「quote 必须附原文」已废，改为无条件补，溯源信息不丢）
+    if (!isPromo && !strSafe(provenance.quote)) {
       provenance.quote = text.slice(0, 200);
     }
     // 消息时间（待审可见；入库时 _buildEntry 只保留 schema 五字段，msg_time 自然丢弃）
@@ -387,7 +388,6 @@ function safeMerged(m) {
 function decide(detection, validation) {
   if (!detection.candidate) return { action: "reject", why: "detector 非候选（" + detection.kind_guess + "）" };
   if (!validation.allowed) return { action: "reject", why: "validator 硬规则命中: " + validation.matched_rules.join("/") };
-  if (detection.kind_guess === "quote") return { action: "review", why: "quote 基线进人工（judge 复核仅在正式通道改写动作，此为其未运行时的兜底）" };
   return { action: "admit", why: "校验通过" };
 }
 

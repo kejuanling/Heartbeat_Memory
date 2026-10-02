@@ -57,13 +57,11 @@ const cases = [
   }],
   ["V1 「她问我密码」不误杀（宁可漏的设计）", () => pass(validate(clean({ text: "她问我密码忘了我笑她" })))],
 
-  // ---- V2 quote speaker ----
-  ["V2 quote speaker=self 拒绝（AI 台词不冒充原话）", () => hit(["V2"])(validate(clean({ kind: "quote", subject: "user", speaker: "self", text: "无论你怎么样我都选你", provenance: { method: "admin_form", quote: "原话" } })))],
-  ["V2 quote 缺 speaker 拒绝", () => hit(["V2"])(validate(clean({ kind: "quote", subject: "user", text: "你是我的锚", provenance: { method: "admin_form", quote: "你是我的锚" } })))],
-  ["V2 quote speaker=ai 通过（2026-10-01 放开：AI 回复方原话可入池，界面显示「谢」）", () => pass(validate(clean({ kind: "quote", subject: "user", speaker: "ai", text: "你今天辛苦了", provenance: { method: "admin_form", quote: "你今天辛苦了" } })))],
-  ["V2 quote speaker=user 通过；fact 无关 speaker 不受影响", () => {
-    pass(validate(clean({ kind: "quote", subject: "user", speaker: "user", text: "你是我的锚", provenance: { method: "admin_form", quote: "你是我的锚" } })));
-    pass(validate(clean()));
+  // ---- V2（1002-14 已废：quote 分类删除，speaker 不再是 kind 联动硬约束）----
+  ["1002-14：V2 已废——kind=quote 改由 V7 枚举拒绝", () => hit(["V7"])(validate(clean({ kind: "quote", subject: "user", speaker: "self", text: "无论你怎么样我都选你", provenance: { method: "admin_form", quote: "原话" } })))],
+  ["1002-14：speaker 仅剩 V7 枚举校验，fact 带 speaker 正常放行", () => {
+    pass(validate(clean({ kind: "fact", subject: "user", speaker: "ai", text: "你今天辛苦了", provenance: { method: "admin_form", quote: "你今天辛苦了" } })));
+    pass(validate(clean({ kind: "fact", subject: "user", speaker: "user", text: "你是我的锚", provenance: { method: "admin_form", quote: "你是我的锚" } })));
   }],
 
   // ---- V3 运行时标签 ----
@@ -126,27 +124,15 @@ const cases = [
     pass(validate(clean({ origin: "memory_tag", provenance: { method: "review_admit", session_id: "s" } })));
   }],
 
-  // ---- V9 quote 完整性 ----
-  ["V9 quote 缺 provenance.quote 拒绝", () => hit(["V9"])(validate(clean({ kind: "quote", subject: "user", speaker: "user", text: "你是我的锚", provenance: { method: "admin_form" } })))],
-  ["V9b 接线比对：一致通过 / 改写拒绝 / 查不到跳过不硬拒", () => {
-    const deps = { resolveOriginalText: (id) => (id === "m_1" ? "她说：你是我的锚" : null) };
-    pass(validate(clean({ kind: "quote", subject: "user", speaker: "user", text: "你是我的锚", provenance: { method: "admin_form", msg_id: "m_1", quote: "你是我的锚" } }), deps));
-    hit(["V9"])(validate(clean({ kind: "quote", subject: "user", speaker: "user", text: "你是我的锚", provenance: { method: "admin_form", msg_id: "m_1", quote: "你是我的灯塔" } }), deps));
-    const skip = validate(clean({ kind: "quote", subject: "user", speaker: "user", text: "你是我的锚", provenance: { method: "admin_form", msg_id: "m_404", quote: "你是我的锚" } }), deps);
-    pass(skip);
-    assert.ok(skip.reasons.some((x) => x.includes("V9.b 跳过")), "应留跳过说明: " + JSON.stringify(skip.reasons));
+  // ---- V9 / V10（1002-14 已废：quote / milestone 分类删除）----
+  ["1002-14：V9/V10 已废——quote、milestone 均由 V7 枚举拒绝", () => {
+    hit(["V7"])(validate(clean({ kind: "quote", subject: "user", speaker: "user", text: "你是我的锚", provenance: { method: "admin_form" } })));
+    hit(["V7"])(validate(clean({ kind: "milestone", subject: "user", text: "成为恋人" })));
   }],
-  ["V9b 未接线（无 deps）时跳过不硬拒", () => {
-    const r = validate(clean({ kind: "quote", subject: "user", speaker: "user", text: "你是我的锚", provenance: { method: "admin_form", quote: "你是我的锚" } }));
-    pass(r);
-    assert.ok(r.reasons.some((x) => x.includes("V9.b 跳过")));
-  }],
-  ["V9 非 quote 类不受影响", () => pass(validate(clean()))],
-
-  // ---- V10 milestone ----
-  ["V10 milestone subject=user 拒绝；relationship 通过", () => {
-    hit(["V10"])(validate(clean({ kind: "milestone", subject: "user", text: "成为恋人" })));
-    pass(validate(clean({ kind: "milestone", subject: "relationship", text: "07-14 成为恋人" })));
+  ["1002-14：原 quote/milestone 内容转 fact 后正常放行（provenance.quote 仍作可选溯源）", () => {
+    pass(validate(clean({ kind: "fact", subject: "user", text: "你是我的锚", provenance: { method: "admin_form", quote: "你是我的锚" } })));
+    pass(validate(clean({ kind: "fact", subject: "relationship", text: "07-14 成为恋人" })));
+    pass(validate(clean({ kind: "fact", subject: "user", text: "她说过的话" })));
   }],
 
   // ---- 预筛路由 ----

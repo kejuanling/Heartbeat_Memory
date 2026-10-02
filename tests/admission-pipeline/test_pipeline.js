@@ -60,29 +60,37 @@ const cases = [
     fs.removeSync(tmpDir);
   }],
 
-  ["review queue：quote 无 judge 复核 → 挂起，队列文件有 pending 记录", async () => {
+  ["review queue：显式挂起 → 队列文件有 pending 记录（1002-14：quote 自动挂起路径随分类删除）", async () => {
     const { adm, tmpDir } = makeTmpAdmission("review");
-    const r = await adm.submitManual({ content: "涵：「只能我先说晚安」", category: "拓本", quote: "只能我先说晚安" });
-    assert.strictEqual(r.action, "review", JSON.stringify(r));
+    const r = adm.executor.review(
+      { text: "涵：「只能我先说晚安」", kind: "fact", subject: "user", origin: "manual", provenance: { method: "admin_form", quote: "只能我先说晚安" } },
+      "1002-14 显式挂起"
+    );
+    assert.strictEqual(r.ok, true, r.error);
     assert.ok(r.queue_id, "有 queue_id");
     const queue = fs.readJsonSync(adm.paths.shadow.review_queue);
     assert.strictEqual(queue.length, 1);
     assert.strictEqual(queue[0].status, "pending_review");
-    assert.strictEqual(queue[0].draft.kind, "quote");
+    assert.strictEqual(queue[0].draft.kind, "fact");
     assert.strictEqual(queue[0].draft.subject, "user");
-    assert.strictEqual(queue[0].draft.speaker, "user");
     assert.strictEqual(shadowCount(adm), 0, "挂起不进集合");
     fs.removeSync(tmpDir);
   }],
 
   ["review 回流：approve → 直通落集合；reject_with_reason → 移出队列", async () => {
     const { adm, tmpDir } = makeTmpAdmission("resolve");
-    const r1 = await adm.submitManual({ content: "涵：「只能我先说晚安」", category: "拓本", quote: "只能我先说晚安" });
+    const r1 = adm.executor.review(
+      { text: "涵：「只能我先说晚安」", kind: "fact", subject: "user", origin: "manual", provenance: { method: "admin_form", quote: "只能我先说晚安" } },
+      "1002-14 显式挂起"
+    );
     const ok = adm.executor.resolveQueue(r1.queue_id, "approve");
     assert.strictEqual(ok.ok, true, ok.error);
     assert.strictEqual(fs.readJsonSync(adm.paths.shadow.collection).length, 1, "approve 后落集合");
     assert.strictEqual(adm.executor.listQueue().length, 0, "队列清空");
-    const r2 = await adm.submitManual({ content: "涵：「你是我的锚」", category: "拓本", quote: "你是我的锚" });
+    const r2 = adm.executor.review(
+      { text: "涵：「你是我的锚」", kind: "fact", subject: "user", origin: "manual", provenance: { method: "admin_form", quote: "你是我的锚" } },
+      "1002-14 显式挂起"
+    );
     const rj = adm.executor.resolveQueue(r2.queue_id, "reject_with_reason", { note: "AI 台词存疑" });
     assert.strictEqual(rj.ok, true);
     assert.strictEqual(fs.readJsonSync(adm.paths.shadow.collection).length, 1, "驳回不落集合");
@@ -128,7 +136,10 @@ const cases = [
     };
     const adm1 = createAdmission({ rootDir: tmpDir, config: cfg });
     await adm1.submitManual({ content: "她习惯睡前看书", category: "关于她" });
-    const r = await adm1.submitManual({ content: "涵：「你是我的锚」", category: "拓本", quote: "你是我的锚" });
+    const r = adm1.executor.review(
+      { text: "涵：「你是我的锚」", kind: "fact", subject: "user", origin: "manual", provenance: { method: "admin_form", quote: "你是我的锚" } },
+      "1002-14 显式挂起"
+    );
     // 模拟重启
     const adm2 = createAdmission({ rootDir: tmpDir, config: cfg });
     assert.strictEqual(fs.readJsonSync(adm2.paths.shadow.collection).length, 1, "影子集合持久化");

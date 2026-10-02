@@ -3529,7 +3529,7 @@ function ccNumLiveCheck(input, max){
   if(v==='cloud')loadMemCloud();
   else if(v==='mempool')initMemPoolView();
  }
-   // ============ 记忆池（现走 Memory V2，编辑/筛选只认 fact/rule/quote/milestone 四类） ============
+   // ============ 记忆池（现走 Memory V2，编辑/筛选只认 fact/rule 两类；1002-14 删 quote/milestone） ============
   // 存量兼容：0912 五类（关于她/认账/拓本/压缩摘要/对话碎片）与更早旧四类仍会出现在列表里，
   // 统一暗灰显示、由后台清洗迁移逐步消化；颜色表保留两套键。
   const MP_CAT_COLORS={fact:'#2980b9',rule:'#c0392b',quote:'#8e44ad',milestone:'#f39c12',关于她:'#2980b9',认账:'#c0392b',拓本:'#8e44ad',压缩摘要:'#7f8c8d',对话碎片:'#f39c12',关于我们:'#95a5a6',锚点:'#95a5a6',信号:'#95a5a6',对话摘要:'#95a5a6'};
@@ -3548,7 +3548,7 @@ function ccNumLiveCheck(input, max){
   function populateMemPoolCatOptions(){
     const sel=document.getElementById('mempool-cat');
     const ed=document.getElementById('mempool-edit-cat');
-    const cats=['fact','rule','quote','milestone'];
+    const cats=['fact','rule'];
     // 筛选与编辑统一只允许 V2 四类；旧分类存量由后台迁移处理，不再暴露为可选项。
     if(sel){ sel.innerHTML='<option value="">全部分类</option>'+cats.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join(''); }
     if(ed){ ed.innerHTML=cats.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join(''); }
@@ -3722,13 +3722,13 @@ function ccNumLiveCheck(input, max){
     try{ arr=JSON.parse(raw); }catch(e){ failed.push({idx:1, err:'JSON 解析失败: '+e.message, text:String(raw||'').slice(0,60)}); return {entries:entries, failed:failed}; }
     if(arr && !Array.isArray(arr) && Array.isArray(arr.items)) arr=arr.items;
     if(!Array.isArray(arr)){ failed.push({idx:1, err:'顶层必须是数组或 {items:[...]}', text:String(raw||'').slice(0,60)}); return {entries:entries, failed:failed}; }
-    const okCats={fact:1, rule:1, quote:1, milestone:1, '关于她':1, '认账':1, '拓本':1};
+    const okCats={fact:1, rule:1, '关于她':1, '认账':1, '拓本':1};
     arr.forEach(function(it, i){
       if(!it || typeof it!=='object'){ failed.push({idx:i+1, err:'条目不是对象', text:String(it).slice(0,40)}); return; }
       const content=String(it.content||'').trim();
       if(!content){ failed.push({idx:i+1, err:'content 为空', text:''}); return; }
       const cat=String(it.category||'').trim();
-      if(cat && !okCats[cat]){ failed.push({idx:i+1, err:'category 非法（fact/rule/quote/milestone 或 关于她/认账/拓本，可省略=自动识别）', text:content.slice(0,40)}); return; }
+      if(cat && !okCats[cat]){ failed.push({idx:i+1, err:'category 非法（fact/rule 或 关于她/认账/拓本，可省略=自动识别）', text:content.slice(0,40)}); return; }
       entries.push({category: cat || '', content: content});
     });
     return {entries:entries, failed:failed};

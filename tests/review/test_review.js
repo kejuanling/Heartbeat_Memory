@@ -69,27 +69,33 @@ function baseCfg() {
 }
 
 const cases = [
-  ["review 列表：候选摘要/provenance/reasons/audit_id 齐备", async () => {
+  ["review 列表：候选摘要/provenance/reasons 齐备（1002-14：quote 自动挂起路径随分类删除，改显式入队）", async () => {
     const { admission, handlers, tmpDir } = makeSetup("list", { v2_enabled: true });
-    const sub = await admission.submitV2({ content: "涵：「只能我先说晚安」", category: "拓本", quote: "只能我先说晚安" });
-    assert.strictEqual(sub.action, "review", JSON.stringify(sub));
+    const sub = admission.executorMain.review(
+      { text: "涵：「只能我先说晚安」", kind: "fact", subject: "user", origin: "manual", provenance: { method: "admin_form", quote: "只能我先说晚安" } },
+      "1002-14：原话类内容归 fact，显式挂起验证队列流程",
+      { details: [{ source: "test", note: "原 quote 自动挂起路径已删" }] }
+    );
+    assert.strictEqual(sub.ok, true, sub.error);
     const reply = await queueList(handlers);
     assert.strictEqual(reply._code, 200);
     assert.strictEqual(reply._body.total, 1);
     const item = reply._body.items[0];
     assert.strictEqual(item.id, sub.queue_id);
     assert.strictEqual(item.candidate.text, "涵：「只能我先说晚安」");
-    assert.strictEqual(item.candidate.kind, "quote");
-    assert.strictEqual(item.candidate.speaker, "user");
+    assert.strictEqual(item.candidate.kind, "fact");
+    assert.strictEqual(item.candidate.subject, "user");
     assert.ok(item.provenance && item.provenance.method === "admin_form");
-    assert.ok(item.audit_id, "audit_id 已关联");
-    assert.ok(Array.isArray(item.reasons) && item.reasons.length > 0, "reasons 可见");
+    assert.ok(item.reason, "挂起原因可见");
     fs.removeSync(tmpDir);
   }],
 
   ["approve：经 state_executor 落 memory_v2，队列清空，审计记 review_approved", async () => {
     const { admission, handlers, tmpDir } = makeSetup("approve", { v2_enabled: true });
-    const sub = await admission.submitV2({ content: "涵：「只能我先说晚安」", category: "拓本", quote: "只能我先说晚安" });
+    const sub = admission.executorMain.review(
+      { text: "涵：「只能我先说晚安」", kind: "fact", subject: "user", origin: "manual", provenance: { method: "admin_form", quote: "只能我先说晚安" } },
+      "1002-14 显式挂起"
+    );
     const reply = fakeReply();
     await handlers["POST /admin/memory-review/queue/:id/approve"]({ params: { id: sub.queue_id }, body: {} }, reply);
     assert.strictEqual(reply._code, 200);
@@ -105,7 +111,10 @@ const cases = [
 
   ["reject：记录 reason、移出队列、主集合不变、审计记 review_rejected", async () => {
     const { admission, handlers, tmpDir } = makeSetup("rejectq", { v2_enabled: true });
-    const sub = await admission.submitV2({ content: "涵：「你是我的锚」", category: "拓本", quote: "你是我的锚" });
+    const sub = admission.executorMain.review(
+      { text: "涵：「你是我的锚」", kind: "fact", subject: "user", origin: "manual", provenance: { method: "admin_form", quote: "你是我的锚" } },
+      "1002-14 显式挂起"
+    );
     const reply = fakeReply();
     await handlers["POST /admin/memory-review/queue/:id/reject"]({ params: { id: sub.queue_id }, body: { note: "AI 台词存疑" } }, reply);
     assert.strictEqual(reply._code, 200);
@@ -120,12 +129,17 @@ const cases = [
 
   ["audit 关联：队列记录的 audit_id 能回查到审计行", async () => {
     const { admission, tmpDir } = makeSetup("link", { v2_enabled: true });
-    const sub = await admission.submitV2({ content: "涵：「给我亲一口」", category: "拓本", quote: "给我亲一口" });
+    const admitted = await admission.submitV2({ content: "她习惯睡前看书", category: "关于她" });
+    admission.executorMain.review(
+      { text: "涵：「给我亲一口」", kind: "fact", subject: "user", origin: "manual", provenance: { method: "admin_form", quote: "给我亲一口" } },
+      "1002-14 显式挂起",
+      { auditId: admitted.audit_id }
+    );
     const audits = requireAudit(admission);
-    const line = audits.find((x) => x.id === sub.audit_id);
+    const line = audits.find((x) => x.id === admitted.audit_id);
     assert.ok(line, "audit_id 对应审计行存在");
     const queue = admission.executorMain.listQueue()[0];
-    assert.strictEqual(queue.audit_id, sub.audit_id);
+    assert.strictEqual(queue.audit_id, admitted.audit_id);
     fs.removeSync(tmpDir);
   }],
 

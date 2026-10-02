@@ -17,12 +17,12 @@ function ok(name, fn) {
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ctxv2map-"));
 function codes(v) { return v.errors.map(e => e.code); }
 
-ok("合法映射通过（version/reason 齐全，target 三枚举）", () => {
+ok("合法映射通过（version/reason 齐全，target 四枚举：1002-14 删 moments_anchor、增 assembly）", () => {
   const v = validatePinnedMap({
     version: 3,
     entries: [
       { pinnedId: "a", target: "identity", reason: "沟通规训" },
-      { pinnedId: "b", target: "moments_anchor", reason: "关系锚点原话" },
+      { pinnedId: "b", target: "assembly", reason: "顶层引导" },
       { pinnedId: "c", target: "retire", reason: "琐碎置顶" },
     ],
   });

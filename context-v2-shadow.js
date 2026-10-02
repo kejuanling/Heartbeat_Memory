@@ -14,7 +14,7 @@
 //   "updatedAt": "2026-09-17T…",         // 可选， ISO 时间
 //   "entries": [
 //     { "pinnedId": "…",                 // 对应 pinned.json 条目 id
-//       "target": "identity" | "moments_anchor" | "retire" | "instructions",
+//       "target": "assembly" | "identity" | "retire" | "instructions",
 //       "reason": "一句话归类理由" }
 //   ]
 // }
@@ -26,7 +26,7 @@ const fs = require("fs");
 const path = require("path");
 const { getDatePartsInTimeZone, resolveTimeZone } = require("./time_utils");
 
-const TARGETS = ["identity", "moments_anchor", "retire", "instructions"];
+const TARGETS = ["assembly", "identity", "retire", "instructions"];
 
 // ============================================================
 // pinned 映射校验
@@ -214,8 +214,11 @@ function assembleInput(opts) {
     const byId = new Map((shadowMap && Array.isArray(shadowMap.entries) ? shadowMap.entries : []).map(e => [e.pinnedId, e.target]));
     pinnedEntries = (Array.isArray(pinned) ? pinned : []).map(p => ({
       id: p && p.id, title: p && p.title, content: p && p.content,
+      order: p && p.order,
       target: byId.get(p && p.id) || 'retire',
     }));
+    // 1002-14：按 pinned.order 升序（与 memory-engine.getPinnedMemories 同口径），缺省 0
+    pinnedEntries.sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
   } catch (e) {}
   let timeline = [];
   try {

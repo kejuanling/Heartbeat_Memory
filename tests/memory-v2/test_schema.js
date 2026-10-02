@@ -76,29 +76,25 @@ const cases = [
     }
   }],
 
-  ["quote 联动：subject 非 user / speaker=self / 缺 speaker 均拒绝", () => {
-    const r1 = mv2.validateEntry(baseFact({ kind: "quote", subject: "self", speaker: "user", text: "你是我的锚" }));
-    assert.strictEqual(r1.ok, false, "quote subject 必须 user");
-    const r2 = mv2.validateEntry(baseFact({ kind: "quote", subject: "user", speaker: "self", text: "AI 台词" }));
-    assert.strictEqual(r2.ok, false, "AI 台词禁止冒充原话");
-    const r3 = mv2.validateEntry(baseFact({ kind: "quote", subject: "user", text: "缺 speaker" }));
-    assert.strictEqual(r3.ok, false, "缺 speaker 必须拒绝");
-    const r4 = mv2.validateEntry(baseFact({ kind: "quote", subject: "user", speaker: "user", text: "只能我先说晚安" }));
-    assert.strictEqual(r4.ok, true, r4.error);
-    assert.strictEqual(r4.entry.speaker, "user");
-    const r5 = mv2.validateEntry(baseFact({ kind: "quote", subject: "user", speaker: "ai", text: "你今天辛苦了，记得早点休息" }));
-    assert.strictEqual(r5.ok, true, "ai 原话通过（2026-10-01 放开 AI 回复方）");
-    assert.strictEqual(r5.entry.speaker, "ai");
-  }],
-
-  ["milestone 联动：subject 必须 relationship 且 established_at 必填", () => {
-    const r1 = mv2.validateEntry(baseFact({ kind: "milestone", subject: "user", established_at: "2026-07-14", text: "成为恋人" }));
-    assert.strictEqual(r1.ok, false, "milestone subject 必须 relationship");
-    const r2 = mv2.validateEntry(baseFact({ kind: "milestone", subject: "relationship", text: "成为恋人" }));
-    assert.strictEqual(r2.ok, false, "milestone 必须 established_at");
-    const r3 = mv2.validateEntry(baseFact({ kind: "milestone", subject: "relationship", established_at: "2026-07-14", text: "成为恋人" }));
+  ["1002-14：quote/milestone 分类已删——两种 kind 一律非法", () => {
+    const r1 = mv2.validateEntry(baseFact({ kind: "quote", subject: "user", speaker: "user", text: "只能我先说晚安" }));
+    assert.strictEqual(r1.ok, false, "quote 已废，应拒绝");
+    assert.ok(/kind 非法/.test(r1.error), r1.error);
+    const r2 = mv2.validateEntry(baseFact({ kind: "milestone", subject: "relationship", established_at: "2026-07-14", text: "成为恋人" }));
+    assert.strictEqual(r2.ok, false, "milestone 已废，应拒绝");
+    const r3 = mv2.validateEntry(baseFact({ kind: "fact", subject: "relationship", established_at: "2026-07-14", text: "成为恋人" }));
     assert.strictEqual(r3.ok, true, r3.error);
     assert.strictEqual(r3.entry.established_at, "2026-07-14");
+  }],
+
+  ["speaker 保留为历史字段（1002-14）：无 kind 联动，只校验枚举", () => {
+    const r1 = mv2.validateEntry(baseFact({ kind: "fact", subject: "user", speaker: "user", text: "她说过的话" }));
+    assert.strictEqual(r1.ok, true, r1.error);
+    assert.strictEqual(r1.entry.speaker, "user");
+    const r2 = mv2.validateEntry(baseFact({ kind: "fact", subject: "user", speaker: "ai", text: "我回的话" }));
+    assert.strictEqual(r2.ok, true, r2.error);
+    const r3 = mv2.validateEntry(baseFact({ kind: "fact", subject: "user", speaker: "xxx", text: "非法说话人" }));
+    assert.strictEqual(r3.ok, false, "speaker 非法应拒绝");
   }],
 
   ["rule 的 direction：缺省通过 / 非法拒绝 / 合法保留", () => {

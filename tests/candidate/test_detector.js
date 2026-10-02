@@ -79,42 +79,32 @@ const cases = [
     assert.strictEqual(r.subject_guess, "user");
   }],
 
-  // ---- quote（3）----
-  ["quote：chat_user「记住我说过：我是你的锚」→ quote·user", () => {
+  // ---- 1002-14：quote / milestone 两类已删，原话与里程碑信号不再产出这两类 ----
+  ["1002-14：「记住我说过：我是你的锚」不再判 quote", () => {
     const r = d("记住我说过：我是你的锚", "chat_user");
-    assert.strictEqual(r.candidate, true, JSON.stringify(r));
-    assert.strictEqual(r.kind_guess, "quote");
-    assert.strictEqual(r.subject_guess, "user");
+    assert.notStrictEqual(r.kind_guess, "quote", "quote 分类已删");
+    assert.notStrictEqual(r.kind_guess, "milestone", "milestone 分类已删");
   }],
-  ["quote：chat_ai 引文「她说「标签什么的，说了就死了」」→ quote·user", () => {
+  ["1002-14：chat_ai 引文「她说「标签什么的，说了就死了」」不再判 quote", () => {
     const r = d("她说「标签什么的，说了就死了」", "chat_ai");
-    assert.strictEqual(r.candidate, true, JSON.stringify(r));
-    assert.strictEqual(r.kind_guess, "quote");
-    assert.strictEqual(r.subject_guess, "user");
+    assert.notStrictEqual(r.kind_guess, "quote");
   }],
-  ["quote：chat_user「记住这句话：无论你怎么样我都接你」→ quote", () => {
+  ["1002-14：「记住这句话：无论你怎么样我都接你」不再判 quote", () => {
     const r = d("记住这句话：无论你怎么样我都接你", "chat_user");
-    assert.strictEqual(r.kind_guess, "quote");
-    assert.strictEqual(r.candidate, true);
+    assert.notStrictEqual(r.kind_guess, "quote");
   }],
-
-  // ---- milestone（3）----
-  ["milestone：chat_ai「今天是我们第一次视频通话」→ milestone·relationship", () => {
+  ["1002-14：「今天是我们第一次视频通话」不再判 milestone", () => {
     const r = d("今天是我们第一次视频通话", "chat_ai");
-    assert.strictEqual(r.candidate, true, JSON.stringify(r));
-    assert.strictEqual(r.kind_guess, "milestone");
-    assert.strictEqual(r.subject_guess, "relationship");
+    assert.notStrictEqual(r.kind_guess, "milestone");
+    assert.notStrictEqual(r.kind_guess, "quote");
   }],
-  ["milestone：chat_ai「7月14号我们正式在一起了」→ milestone·relationship", () => {
+  ["1002-14：「7月14号我们正式在一起了」不再判 milestone", () => {
     const r = d("7月14号我们正式在一起了", "chat_ai");
-    assert.strictEqual(r.candidate, true, JSON.stringify(r));
-    assert.strictEqual(r.kind_guess, "milestone");
+    assert.notStrictEqual(r.kind_guess, "milestone");
   }],
-  ["milestone：chat_user「今天是我们的两个月纪念日」→ milestone·relationship", () => {
+  ["1002-14：「今天是我们的两个月纪念日」不再判 milestone", () => {
     const r = d("今天是我们的两个月纪念日", "chat_user");
-    assert.strictEqual(r.candidate, true);
-    assert.strictEqual(r.kind_guess, "milestone");
-    assert.strictEqual(r.subject_guess, "relationship");
+    assert.notStrictEqual(r.kind_guess, "milestone");
   }],
 
   // ---- diary_only（3）----

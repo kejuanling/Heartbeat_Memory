@@ -6,7 +6,7 @@ const path = require("path");
 const { createStore } = require("../memory-v2");
 const v2vectors = require("../memory-v2-vectors");
 
-const KIND_MAP = { "关于她": "fact", "认账": "rule", "拓本": "quote", fact: "fact", rule: "rule", quote: "quote", milestone: "milestone" }; // 旧池类名 → V2 kind（管理台表单仍传类名，落库前翻译）
+const KIND_MAP = { "关于她": "fact", "认账": "rule", "拓本": "fact", fact: "fact", rule: "rule" }; // 旧池类名 → V2 kind（管理台表单仍传类名，落库前翻译；1002-14 删 quote/milestone）
 
 module.exports = function registerMemoryV2Admin(app, deps) {
   const { basicAuth, admission, baseDir } = deps;
@@ -111,7 +111,7 @@ module.exports = function registerMemoryV2Admin(app, deps) {
 
       if (b.direct === true) {
         const kind = KIND_MAP[String(b.category || "").trim()];
-        if (!kind) return reply.code(400).send({ error: "category 必须是 fact/rule/quote/milestone" });
+        if (!kind) return reply.code(400).send({ error: "category 必须是 fact/rule" });
         const r2 = store().create({
           text: content, kind,
           subject: String(b.subject || "user"),
@@ -150,7 +150,7 @@ module.exports = function registerMemoryV2Admin(app, deps) {
       if (b.content != null) patch.text = String(b.content);
       if (b.category != null) {
         const kind = KIND_MAP[String(b.category).trim()];
-        if (!kind) return reply.code(400).send({ error: "category 非法（fact/rule/quote/milestone）" });
+        if (!kind) return reply.code(400).send({ error: "category 非法（fact/rule）" });
         patch.kind = kind;
       }
       if (b.pinned != null) patch.anchor = !!b.pinned;

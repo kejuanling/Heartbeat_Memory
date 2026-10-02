@@ -127,10 +127,9 @@ async function extractAndStore(text, ctx) {
   //   误写 "memory_tag" 不在 PROVENANCE_METHODS 白名单（正确值 tag_inline，tests/admission 已锁定）→
   //   每次入库在 _buildEntry 抛错且失败路径静默无日志 → memory_v2.json 里 origin=memory_tag 恒为 0。
   //   现改为：复用 admission.executorMain 走 review 队列（人工批准才落主集合，与 V2「先审后入」一致），
-  //   主集合+待审队列双查重，失败/跳过均有日志。quote 缺说话人时兜底 speaker=ai（AI 引述多为自述，
-  //   批准时可修订；用户 2026-10-02 拍板先不深究说话人归属）。
-  const V2_KIND_MAP = { "关于她": "fact", "认账": "rule", "拓本": "quote", "压缩摘要": "milestone", "对话碎片": "fact", "关于我们": "fact", "锚点": "quote", "信号": "fact", "对话摘要": "fact" };
-  const V2_KINDS = ["fact", "rule", "quote"];
+  //   主集合+待审队列双查重，失败/跳过均有日志。（1002-14：quote 类已删，speaker 兜底逻辑随之移除）
+  const V2_KIND_MAP = { "关于她": "fact", "认账": "rule", "拓本": "fact", "压缩摘要": "fact", "对话碎片": "fact", "关于我们": "fact", "锚点": "fact", "信号": "fact", "对话摘要": "fact" };
+  const V2_KINDS = ["fact", "rule"];
   function getReviewExecutor() {
     // 优先复用 admission 单例 executorMain（唯一写手，避免多实例并发覆盖队列）；未初始化时自建兜底
     try {
@@ -149,9 +148,9 @@ async function extractAndStore(text, ctx) {
     // 去重1：主集合 active 同正文已存在则跳过（对齐旧池自动去重语义）
     const dup = (store.list({ status: "active" }) || []).some(function (e) { return String(e.text || "").trim() === text; });
     if (dup) return { skipped: true };
-    // 分类映射：旧类名（关于她/认账/拓本）→ kind；V2 枚举直用；里程碑无 established_at 不适用（降级 fact）
+    // 分类映射：旧类名 → kind；V2 枚举（fact/rule）直用（1002-14：quote/milestone 已删）
     let kind = category ? (V2_KIND_MAP[category] || (V2_KINDS.includes(category) ? category : null)) : null;
-    if (!kind || kind === "milestone") kind = "fact";
+    if (!kind) kind = "fact";
     // 去重2：待审队列 pending_review 同正文（防 AI 每轮回复重复写同一标签堆队列）
     const executor = getReviewExecutor();
     let dupQueue = false;
@@ -166,7 +165,6 @@ async function extractAndStore(text, ctx) {
       origin: "memory_tag",
       provenance: { method: "tag_inline", session_id: sessionId || null },
     };
-    if (kind === "quote") draft.speaker = "ai"; // quote 铁律必填 speaker；标签引述缺说话人兜底 ai
     const r = executor.review(draft, "AI 标签（<memory>）自动进审，待人工裁决", { details: [{ source: "memory_tag", category: category || null, pinned: pinned === true }] });
     return r && r.ok ? { added: 1, queue_id: r.queue_id } : { skipped: false, error: r && r.error };
   }

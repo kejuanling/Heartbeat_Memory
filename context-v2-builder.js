@@ -5,9 +5,9 @@
 // 纯函数：全部数据由参数传入，不读任何文件、不写任何文件、零副作用；
 // S2 shadow 层负责从生产读数组装输入，S4 正式接线时输出直接映射为 developer 块。
 //
-// 块顺序（0918 修订冻结）：
+// 块顺序（0918 修订冻结；1002-14 删 meaningful_moments）：
 //   system_instructions → core_identity → long_term_understanding
-//   → meaningful_moments → conversation_continuity → relevant_memories
+//   → conversation_continuity → relevant_memories
 //
 // 0918 修订要点（用户拍板）：
 //   1. header 一行式：`## 名称 — 一句英文解释`，换行直接是内容；
@@ -51,7 +51,6 @@ const BLOCK_DEFS = [
   { key: "system_instructions", title: "System Instructions" },
   { key: "core_identity", title: "Core Identity" },
   { key: "long_term_understanding", title: "Long-term Understanding" },
-  { key: "meaningful_moments", title: "Meaningful Moments" },
   { key: "conversation_continuity", title: "Earlier Days" },
   { key: "relevant_memories", title: "Possibly Relevant Memories" },
 ];
@@ -79,9 +78,6 @@ Use it to understand communication preferences, stable boundaries, and persisten
 ## Long-term Understanding — what you know about her, for reading between the lines.
 Patterns that have remained meaningful over time. Do not blindly apply every item; consider the current situation first.
 
-## Meaningful Moments — milestones and her own words.
-Use them when relevant. Do not bring them up merely because they exist. Their purpose is emotional and contextual continuity, not storytelling.
-
 ## Earlier Days — excerpts from your own diary, kept so the conversation does not start from zero.
 Not a complete transcript; do not over-prioritize them over the current conversation.
 
@@ -91,12 +87,29 @@ These may relate to the current conversation; ignore whatever does not fit. When
 ## Memory Handling Rule
 Memory is a tool for understanding, not a replacement for her current words. Her current message has the highest priority. When old information conflicts with new information — trust the current conversation, update your understanding, avoid defending outdated assumptions. A good memory system should make conversation feel more natural, not more constrained.`;
 
+// [0] Context Assembly 顶层引导（1002-14 外置）：pinned(assembly) 按 order 升序拼接。
+// 外置目的：文案可在管理端随其他固定块一起改，不再改代码。
+// 无 assembly 条目或内容全空时回落内置 ASSEMBLY_OVERVIEW（防误删把引导块整块弄丢）。
+// 不加 [标题] 前缀：内容自带 ## 小节标题。
+function buildContextAssembly(input) {
+  const pinned = (Array.isArray(input.pinnedEntries) ? input.pinnedEntries : [])
+    .filter(p => p && p.target === "assembly")
+    .slice()
+    .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+  const lines = [];
+  for (const p of pinned) {
+    const c = strSafe(p.content);
+    if (c) lines.push(c);
+  }
+  if (!lines.length) lines.push(ASSEMBLY_OVERVIEW);
+  return { lines: lines, fixedIds: [] };
+}
+
 // ---- 各内容块标题（说明已上移顶层引导，块内只留一行标题）----
 const HEADERS = {
   system_instructions: "## System Instructions",
   core_identity: "## Core Identity",
   long_term_understanding: "## Long-term Understanding",
-  meaningful_moments: "## Meaningful Moments",
   conversation_continuity: "## Earlier Days",
   relevant_memories: "## Possibly Relevant Memories",
 };
@@ -195,26 +208,6 @@ function buildUnderstanding(input, cfg) {
     .filter(m => m && m.status === "active" && m.kind === "fact" && m.anchor === true)
     .sort(byCreatedAt)
     .map(m => { if (m.id != null) fixedIds.push(String(m.id)); return entryLine(m.text, null); });
-  return { lines, fixedIds };
-}
-
-// [4] Meaningful Moments anchor 层：pinned(moments_anchor) ＋ V2 quote/milestone(active 且 anchor=true)；
-// 合并按事件时间（iso，缺失排尾）升序。0920 用户拍板去掉条数上限（原 max=5 截断）——置顶记忆全量注入。其余 quote/milestone 走检索池不在此。
-function buildMoments(input, cfg) {
-  const lines = [];
-  const fixedIds = [];
-  const pinned = (Array.isArray(input.pinnedEntries) ? input.pinnedEntries : [])
-    .filter(p => p && p.target === "moments_anchor")
-    .map(p => ({ text: strSafe(p.content), iso: null, id: p.id != null ? String(p.id) : null }));
-  const v2m = (Array.isArray(input.memoriesV2) ? input.memoriesV2 : [])
-    .filter(m => m && m.status === "active" && (m.kind === "quote" || m.kind === "milestone") && m.anchor === true)
-    .map(m => ({ text: m.text, iso: strSafe(m.established_at) || strSafe(m.created_at), id: m.id != null ? String(m.id) : null }));
-  const merged = pinned.concat(v2m)
-    .sort((a, b) => (a.iso || "9999") < (b.iso || "9999") ? -1 : (a.iso || "9999") > (b.iso || "9999") ? 1 : 0);
-  for (const e of merged) {
-    lines.push(entryLine(e.text, e.iso));
-    if (e.id) fixedIds.push(e.id);
-  }
   return { lines, fixedIds };
 }
 
@@ -323,18 +316,16 @@ function buildContextBlocks(input, opts) {
   const sysIns = buildSystemInstructions(input_, cfg);
   const identity = buildCoreIdentity(input_, cfg);
   const understanding = buildUnderstanding(input_, cfg);
-  const moments = buildMoments(input_, cfg);
-  const fixedIdSet = new Set([].concat(sysIns.fixedIds, identity.fixedIds, understanding.fixedIds, moments.fixedIds));
+  const fixedIdSet = new Set([].concat(sysIns.fixedIds, identity.fixedIds, understanding.fixedIds));
   const continuity = buildContinuity(input_, cfg);
   const relevant = buildRelevant(input_, cfg, fixedIdSet);
   const relevantHits = relevant.hits || [];
 
   const byKey = {
-    context_assembly: { lines: [ASSEMBLY_OVERVIEW], fixedIds: [] }, // 顶层引导：静态全文，恒注入
+    context_assembly: buildContextAssembly(input_), // 顶层引导：pinned(assembly) 外置，缺省回落内置
     system_instructions: sysIns,
     core_identity: identity,
     long_term_understanding: understanding,
-    meaningful_moments: moments,
     conversation_continuity: continuity,
     relevant_memories: relevant,
   };

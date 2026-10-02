@@ -3368,7 +3368,7 @@ app.post("/internal/context-mark", async (req, reply) => {
 // 检索公式（0920 删重要级/时间衰减，用户拍板）：0.55 语义余弦(bge-small-zh) + 0.20 字面；
 // embed-server 不可用自动降级纯字面（0.6/0.4）。category 兼容旧分类名 → V2 kind。
 // 恒只读：不计数、不自动置顶（旧池检索写状态的污染在 V2 结构性根除）。
-const MEMORY_CATEGORY_TO_KIND = { "关于她": "fact", "认账": "rule", "拓本": "quote", "压缩摘要": "milestone", "对话碎片": "fact", "关于我们": "fact", "锚点": "quote", "信号": "fact", "对话摘要": "fact" };
+const MEMORY_CATEGORY_TO_KIND = { "关于她": "fact", "认账": "rule", "拓本": "fact", "压缩摘要": "fact", "对话碎片": "fact", "关于我们": "fact", "锚点": "fact", "信号": "fact", "对话摘要": "fact" };
 app.get("/internal/memory-pool/retrieve", async (req, reply) => {
   try {
     const { createStore } = require("./memory-v2");
@@ -3819,11 +3819,11 @@ function readReparseConfig() {
 function buildReparsePrompt() {
   const system = "你是长期记忆提取器。你的任务不是总结对话，而是从对话原文中找出那些在未来再次交流时仍然有用、并且会改变你理解用户或处理方式的信息。宁可少记，也不要把聊天流水账写进长期记忆。\n" +
     "只提取有证据支持的信息，不要根据一次行为猜测人格、心理、动机或身份；不要把你自己的解释当成用户事实。区分一次性事件与稳定倾向：‘今天吃了什么’通常不记，‘长期偏好什么’才记。\n" +
-    "优先提取：稳定偏好/习惯；用户明确要求以后遵守的交互规则；用户反复纠正并希望以后避免的行为；长期目标、项目背景和持续有效的约束；重要关系规则；只有在未来确实有用时才保留重要原话或里程碑。\n" +
+    "优先提取：稳定偏好/习惯；用户明确要求以后遵守的交互规则；用户反复纠正并希望以后避免的行为；长期目标、项目背景和持续有效的约束；重要关系规则；只有在未来确实有用时才保留重要原话。\n" +
     "不要提取：当天情绪、一次性事件、普通寒暄、玩笑调侃、聊天流水账、已经明显过期的信息、单次行为推导出的性格标签、心理分析、模型自我叙事。\n" +
     "特别注意：用户对助手的纠正、明确的‘以后不要……/以后要……/记住……’、以及会改变未来回应方式的要求，优先视为高价值规则。不要把这些规则写成对用户人格的判断。\n" +
-    "每条记忆必须独立、简洁、可执行或可验证；不要复述上下文，不要加入未出现的因果关系。quote 只有在原话本身具有长期价值时才保留，而且必须逐字来自原文，不能改写。";
-  const user = "从下面的对话原文中提取长期记忆候选。只输出 JSON 数组，不要输出解释。每项格式为 {\"text\":\"记忆内容\",\"kind\":\"fact|rule|quote|milestone\"}。没有真正值得长期记住的信息就输出 []。\n\n判断标准：如果删掉这条信息，未来再次与她交流时基本不会改变你的理解或行为，就不要提取。";
+    "每条记忆必须独立、简洁、可执行或可验证；不要复述上下文，不要加入未出现的因果关系。";
+  const user = "从下面的对话原文中提取长期记忆候选。只输出 JSON 数组，不要输出解释。每项格式为 {\"text\":\"记忆内容\",\"kind\":\"fact|rule\"}。没有真正值得长期记住的信息就输出 []。\n\n判断标准：如果删掉这条信息，未来再次与她交流时基本不会改变你的理解或行为，就不要提取。";
   return { system, user };
 }
 function saveReparseConfig(patch) {
@@ -3868,7 +3868,7 @@ async function extractMemoryCandidates(sourceText) {
   try { arr = JSON.parse(cleaned); } catch (e) { throw new Error("LLM 输出非 JSON"); }
   if (!Array.isArray(arr)) arr = arr && Array.isArray(arr.memories) ? arr.memories : null;
   if (!Array.isArray(arr)) throw new Error("LLM 输出非数组");
-  const KINDS = ["fact", "rule", "quote", "milestone"];
+  const KINDS = ["fact", "rule"];
   return arr
     .map(x => (x && typeof x === "object" ? { text: String(x.text || "").trim(), kind: KINDS.includes(x.kind) ? x.kind : "fact" } : null))
     .filter(x => x && x.text.length >= 4 && x.text.length <= 500);

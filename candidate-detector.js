@@ -7,13 +7,13 @@
 // 输入：{ text, source?, explicitKind?, explicitSubject? }
 //   source: chat_user | chat_ai | manual | tool_output | diary | summary
 // 输出（冻结）：{ candidate, kind_guess, subject_guess, confidence, reasons[] }
-//   kind_guess: fact|rule|quote|milestone|diary_only|history_only|unknown
+//   kind_guess: fact|rule|diary_only|history_only|unknown（1002-14 删 quote/milestone）
 //   subject_guess: user|self|relationship|external|unknown
-// 规则层级（命中即短路，从强到弱）：来源路由 → 人工显式 → 引用 → 里程碑 → 行为规则
+// 规则层级（命中即短路，从强到弱）：来源路由 → 人工显式 → 行为规则
 //   → 当日状态(diary) → 流水账(history) → 长篇叙事(diary) → 稳定谓词(fact) → 闲聊兜底
 // ========================
 
-const KIND_GUESSES = ["fact", "rule", "quote", "milestone", "diary_only", "history_only", "unknown"];
+const KIND_GUESSES = ["fact", "rule", "diary_only", "history_only", "unknown"];
 const SUBJECT_GUESSES = ["user", "self", "relationship", "external", "unknown"];
 
 // 行为规则信号（未来指向）
@@ -67,20 +67,6 @@ function detect(input = {}) {
   // 1) 人工/入口显式标记：直接采信（显式判断即隐式准入，validator 仍会复检）
   if (input.explicitKind && KIND_GUESSES.includes(input.explicitKind)) {
     return out(true, input.explicitKind, input.explicitSubject || guessSubject(text, source), 0.95, ["入口显式标记 kind=" + input.explicitKind]);
-  }
-
-  // 2) 引用：明确要求保存原话 / 引文结构
-  const quotedSpan = QUOTED_SPAN_RE.test(text);
-  if (QUOTE_REQUEST_RE.test(text) || (quotedSpan && /说|问|回答|讲/.test(text))) {
-    let subject = "user";
-    if (/我(说|讲|问)/.test(text)) subject = source === "chat_ai" ? "self" : "user";
-    else if (!/她|涵/.test(text) && source === "chat_ai") subject = "user";
-    return out(true, "quote", subject, 0.8, ["引用信号：要求保存原话/含引文结构"]);
-  }
-
-  // 3) 里程碑：节点词 + 关系上下文双条件（裸「第一次」不够格）
-  if (MILESTONE_RE.test(text) && MILESTONE_CONTEXT_RE.test(text)) {
-    return out(true, "milestone", "relationship", 0.75, ["里程碑信号：" + (text.match(MILESTONE_RE) || []).join("/") + " + 关系上下文"]);
   }
 
   // 4) 行为规则：未来指向词

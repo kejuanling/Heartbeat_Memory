@@ -6,11 +6,11 @@
 // 输出契约（冻结）：{ allowed, reasons[], matched_rules[] } —— 全部命中规则一次性收集，不只报第一个。
 // 规则总表：
 //   V1  隐私/凭据模式（review 不可豁免）        V6  文本卫生（空/仅标点/超长）
-//   V2  quote 必须 speaker=user                 V7  枚举白名单（kind/subject/origin/direction/speaker）
+//   V2  （已废 1002-14：quote 类已删）          V7  枚举白名单（kind/subject/origin/direction/speaker）
 //   V3  运行时标签残留                          V8  tag/tool 来源必须有 provenance 锚点
 //   V4  instruction 禁止进入 Memory             V8b origin×method 一致性（含 import 仅 migration_batch）
-//   V5  工具输出原文                            V9  quote 必须附 provenance.quote；可与时间线原文比对
-//   PREF.diary / PREF.history                   V10 milestone 必须 subject=relationship
+//   V5  工具输出原文                            V9  （已废 1002-14：quote 类已删；provenance.quote 仍作可选溯源）
+//   PREF.diary / PREF.history                   V10 （已废 1002-14：milestone 类已删）
 // 红线：V1 永远不能被 review 豁免；本模块只判「硬拒/放行」，review 触发属 R 系列（C3+）。
 // ========================
 
@@ -101,12 +101,6 @@ function validate(candidate, deps = {}) {
     }
   }
 
-  // V2 quote speaker（AI 台词禁止冒充原话；缺 speaker 同拒；ai=AI 回复方原话，2026-10-01 获准入池）
-  if (c.kind === "quote" && c.speaker !== "user" && c.speaker !== "ai") {
-    matched.push("V2");
-    reasons.push(`V2 quote 必须 speaker=user 或 ai，got: ${c.speaker == null ? "缺失" : c.speaker}`);
-  }
-
   // V3 运行时标签残留
   if (RUNTIME_TAG_RE.test(text)) {
     matched.push("V3");
@@ -180,33 +174,6 @@ function validate(candidate, deps = {}) {
         reasons.push(`V8b origin(${c.origin}) 与 provenance.method(${prov.method}) 不匹配（允许 ${base ? base.join("/") : "该 origin 无合法 method"}）`);
       }
     }
-  }
-
-  // V9 quote 完整性（必须附原文摘录；接线了时间线通道则做一字不改比对）
-  if (c.kind === "quote") {
-    if (!prov || !strOrNull(prov.quote)) {
-      matched.push("V9");
-      reasons.push("V9 quote 必须附 provenance.quote 原文摘录");
-    } else if (typeof deps.resolveOriginalText === "function" && strOrNull(prov.msg_id)) {
-      const original = deps.resolveOriginalText(prov.msg_id);
-      if (original != null) {
-        const norm = (s) => String(s).replace(/\s+/g, "");
-        if (!norm(original).includes(norm(prov.quote))) {
-          matched.push("V9");
-          reasons.push("V9 引语与时间线原文比对不一致（疑似改写）");
-        }
-      } else {
-        reasons.push("V9.b 跳过：msg_id 在时间线不可得（不硬拒，留待人工核对）");
-      }
-    } else {
-      reasons.push("V9.b 跳过：未提供时间线比对通道（不硬拒，留待人工核对）");
-    }
-  }
-
-  // V10 milestone subject
-  if (c.kind === "milestone" && c.subject !== "relationship") {
-    matched.push("V10");
-    reasons.push(`V10 milestone 必须 subject=relationship，got: ${c.subject}`);
   }
 
   // 预筛路由拒绝（Rulebook §2.1：diary/history 内容不入 Memory）

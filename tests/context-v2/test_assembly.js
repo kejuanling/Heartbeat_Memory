@@ -13,16 +13,16 @@ function ok(name, fn) {
 
 const EXPECTED_ORDER = [
   "context_assembly", "system_instructions", "core_identity", "long_term_understanding",
-  "meaningful_moments", "conversation_continuity", "relevant_memories",
+  "conversation_continuity", "relevant_memories",
 ];
 
-// 满配 fixture（六块全非空）
+// 满配 fixture（六块全非空；1002-14 删 meaningful_moments 后为六块）
 function fullInput() {
   return {
     pinnedEntries: [
       { id: "pin1", title: "记忆标签", content: "如果想存记忆，用记忆内联标签。", target: "instructions" },
       { id: "pin2", content: "回复她要简短有温度", target: "identity" },
-      { id: "pin3", content: "你是我的锚", target: "moments_anchor" },
+      { id: "pin3", content: "你是我的锚", target: "retire" }, // 1002-14：moments_anchor target 随块一并删除
     ],
     diaryEntries: [
       { date: "2026-09-10", content: "聊了很多。" },
@@ -32,14 +32,14 @@ function fullInput() {
       // 0920 删重要级后注入判定只认 anchor（priority 遗留字段已清）
       { id: "mv2_r1", text: "睡前不许催她", kind: "rule", status: "active", anchor: true, created_at: "2026-09-02T00:00:00+08:00" },
       { id: "mv2_f1", text: "她膝盖受过伤", kind: "fact", status: "active", anchor: true, created_at: "2026-09-03T00:00:00+08:00" },
-      { id: "mv2_q1", text: "无论你怎么样我都选择接你", kind: "quote", status: "active", anchor: true, established_at: "2026-07-14T00:00:00+08:00", created_at: "2026-09-04T00:00:00+08:00" },
+      { id: "mv2_q1", text: "无论你怎么样我都选择接你", kind: "fact", status: "active", anchor: true, established_at: "2026-07-14T00:00:00+08:00", created_at: "2026-09-04T00:00:00+08:00" }, // 1002-14：原 quote，随分类删除并入 fact
       { id: "mv2_q2", text: "她对薄荷过敏", kind: "fact", status: "active", created_at: "2026-09-05T00:00:00+08:00" },
     ],
     query: "她对薄荷过敏吗",
   };
 }
 
-ok("块顺序 = 0918 修订冻结顺序（六块）", () => {
+ok("块顺序 = 0918 修订冻结顺序（1002-14 删 meaningful_moments，六块）", () => {
   const res = buildContextBlocks(fullInput());
   const keys = res.blocks.map(b => b.key);
   assert.deepStrictEqual(keys, EXPECTED_ORDER, "实际输出顺序");
@@ -58,33 +58,27 @@ ok("schema：每块五键，非空块 tokens>0；current_state/recent_experience
   }
 });
 
-ok("V2 空仓降级：Understanding/Moments/Relevant 省略；System Instructions/Identity/Continuity 由 pinned+diary 支撑", () => {
+ok("V2 空仓降级：Understanding/Relevant 省略；System Instructions/Identity/Continuity 由 pinned+diary 支撑", () => {
   const input = fullInput();
   input.memoriesV2 = [];
   input.query = "";
-  input.pinnedEntries = input.pinnedEntries.filter(p => p.target !== "moments_anchor"); // 无 anchor 来源
   const res = buildContextBlocks(input);
   const keys = res.blocks.map(b => b.key);
   assert.ok(keys.includes("system_instructions"), "pinned 工具文档仍提供");
   assert.ok(keys.includes("core_identity"), "pinned 规训仍提供");
   assert.ok(keys.includes("conversation_continuity"));
   assert.ok(!keys.includes("long_term_understanding"), "V2 空仓省略");
-  assert.ok(!keys.includes("meaningful_moments"), "无任何 anchor 来源省略");
   assert.ok(!keys.includes("relevant_memories"), "V2 空仓省略");
-
-  // pinned 有 anchor 时：V2 空仓 Moments 仍由 pinned anchor 支撑
-  const res2 = buildContextBlocks({ ...input, pinnedEntries: fullInput().pinnedEntries });
-  const m2 = res2.blocks.find(b => b.key === "meaningful_moments");
-  assert.ok(m2 && m2.content.includes("你是我的锚"), "pinned anchor 降级支撑");
+  assert.ok(!keys.includes("meaningful_moments"), "1002-14：块已删除");
 });
 
-ok("空块省略（默认，仅剩顶层引导）+ includeEmpty=true 时七块全在（empty:true, content:'', tokens:0）", () => {
+ok("空块省略（默认，仅剩顶层引导）+ includeEmpty=true 时六块全在（empty:true, content:'', tokens:0）", () => {
   const empty = { pinnedEntries: [], diaryEntries: [], memoriesV2: [], query: "" };
   const def = buildContextBlocks(empty).blocks;
   assert.strictEqual(def.length, 1, "全空输入仅剩恒注入的顶层引导");
   assert.strictEqual(def[0].key, "context_assembly");
   const res = buildContextBlocks(empty, { includeEmpty: true });
-  assert.strictEqual(res.blocks.length, 7);
+  assert.strictEqual(res.blocks.length, 6);
   for (const b of res.blocks) {
     if (b.key === "context_assembly") { assert.strictEqual(b.empty, false); continue; }
     assert.strictEqual(b.empty, true);
@@ -132,13 +126,13 @@ ok("条目标题 [xxx] 格式（0918：【】→[]）", () => {
   assert.ok(!sys.content.includes("【记忆标签】"), "旧【】格式已废");
 });
 
-ok("去重集成：anchor quote 在 Moments、rule 在 Identity、工具文档在 Instructions，均不入 Relevant", () => {
+ok("去重集成：Understanding anchor（原 quote）、rule 在 Identity、工具文档在 Instructions，均不入 Relevant", () => {
   const input = fullInput();
   input.query = "无论你怎么样 我都选择接你 睡前不许催她 薄荷 如果想存记忆";
   const res = buildContextBlocks(input);
   const rel = res.blocks.find(b => b.key === "relevant_memories");
   assert.ok(rel, "检索块存在（薄荷条目应命中）");
-  assert.ok(!rel.content.includes("无论你怎么样我都选择接你"), "Moments anchor 去重");
+  assert.ok(!rel.content.includes("无论你怎么样我都选择接你"), "Understanding anchor 去重（原 Moments）");
   assert.ok(!rel.content.includes("睡前不许催她"), "Identity rule 去重");
   assert.ok(!rel.content.includes("如果想存记忆"), "Instructions 去重");
   assert.ok(rel.content.includes("她对薄荷过敏"), "检索池条目正常");

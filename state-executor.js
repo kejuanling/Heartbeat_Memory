@@ -141,7 +141,7 @@ function createStateExecutor(opts = {}) {
         clean.text = sv;
       } else if (k === "kind") {
         const kv = String(v == null ? "" : v).trim();
-        if (!["fact", "rule", "quote", "milestone"].includes(kv)) return { ok: false, error: "kind 非法: " + kv };
+        if (!["fact", "rule"].includes(kv)) return { ok: false, error: "kind 非法: " + kv };
         clean.kind = kv;
       } else {
         clean[k] = v == null ? null : String(v).trim();
