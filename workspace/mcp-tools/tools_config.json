@@ -18,7 +18,8 @@
     "view_paper": "翻看自己写过的创作。不带参数调用=列出最近 10 张（序号+时间+标题/开头）；带 sn=序号 调用=看那一张的全文。",
     "diary_view": "查看你自己写过的陪伴日记。不带参数=返回最近 1 篇全文；带 date=YYYY-MM-DD 返回那一天；带 count=N 返回最近 N 天的日记（默认 1，最大 30）。",
     "context_digest": "新会话回复历史工具，输入一个指令，后台会调用AI去在过往的历史摘要中寻找出有用信息整理返回。",
-    "memory_update": "直接覆盖更新一条长期记忆的正文。先用 memory_search 找到它的 id，再传 id 和新 content，正文被整体替换（不追加）。适用于：发现某条记忆内容过时/有误/需要补充修正，且新内容能完整替代旧内容时。"
+    "memory_update": "直接覆盖更新一条长期记忆的正文。先用 memory_search 找到它的 id，再传 id 和新 content，正文被整体替换（不追加）。适用于：发现某条记忆内容过时/有误/需要补充修正，且新内容能完整替代旧内容时。",
+    "leave_paper": "留一张纸：你给自己写的小纸条。"
   },
   "schemas": {
     "context_replace": {
@@ -62,7 +63,7 @@
       "properties": {
         "content": {
           "type": "string",
-          "description": "纸的正文（故事/梦/随手创作，建议单篇一两千字以内）"
+          "description": "纸的正文（故事/梦/随手创作）"
         },
         "title": {
           "type": "string",

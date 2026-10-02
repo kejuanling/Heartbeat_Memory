@@ -466,6 +466,19 @@ async function generateSummaryForRange(start, end) {
   return { ok: true, summary: summary, length: summary.length, count: chunk.count };
 }
 
+// 2026-10-01：直接对给定消息数组生成摘要（批量重生成已替换块用）。
+// 与 generateSummaryForRange 的区别：不从 compressibleItems 切片段，而是直接吃 matched 快照——
+// 老块的 range.start_index 是历史序号，时间线已变迁，序号定位永久失效，只能用块里存的原文快照。
+async function generateSummaryForMessages(msgs) {
+  const cfg = loadConfig();
+  if (!Array.isArray(msgs) || !msgs.length) return { ok: false, message: "消息数组为空" };
+  const items = msgs.map((m, i) => ({ msg: m, idx: i }));
+  const chunk = makeChunk(items, 0, true, true);
+  const built = buildCompactionPrompt(chunk, cfg);
+  const summary = await callCompactionLLM(built, "块");
+  return { ok: true, summary: summary, length: summary.length, count: chunk.count };
+}
+
 // 2026-09-22 审查 §3.4：原为两份独立副本（注释自称「改动需两处同步」，实际已开始漂移——
 // 本副本每次裸 readFileSync 无缓存，context-replacements 那份走 readJson 的 mtime 缓存）。
 // 收敛为单一实现委托，杜绝第三处口径。
@@ -545,4 +558,5 @@ module.exports = {
   resetCompactionPromptConfig,
   rangePreview,
   generateSummaryForRange,
+  generateSummaryForMessages,
 };
