@@ -201,8 +201,19 @@ function sessionDiaryCutoffDate(sessionId, loadTimeline) {
  * opts: { baseDir, sessionId, llmMessages, loadTimeline, normalizeContentToText }
  * llmMessages 仅用于提取 query（Relevant 检索用），预览场景传 [] 即可。
  */
-function assembleInput(opts) {
-  const dataDir = path.join(opts.baseDir, 'data');
+// 1002 §8 第 6 项：两块 LLM 总结缓存（每晚定时按记忆池指纹更新）。
+// 缓存为空/不存在 → 返回 null，builder 自动回落「直注条目原文」的老逻辑（降级链最底一档）。
+function readSummaryBlocks(dataDir) {
+  try {
+    const c = JSON.parse(fs.readFileSync(path.join(dataDir, 'memory_summary_cache.json'), 'utf8'));
+    const ci = (c && c.core_identity && Array.isArray(c.core_identity.lines)) ? c.core_identity.lines : [];
+    const un = (c && c.understanding && Array.isArray(c.understanding.lines)) ? c.understanding.lines : [];
+    return (ci.length || un.length) ? { core_identity: ci, understanding: un } : null;
+  } catch (e) { return null; }
+}
+
+// 固定块来源（pinned.json + 目标映射）。快照模式的 minimal 输入也要用它，故抽出并导出。
+function readPinnedEntries(dataDir) {
   let pinnedEntries = [];
   let shadowMap = null;
   try {
@@ -220,6 +231,14 @@ function assembleInput(opts) {
     // 1002-14：按 pinned.order 升序（与 memory-engine.getPinnedMemories 同口径），缺省 0
     pinnedEntries.sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
   } catch (e) {}
+  return { pinnedEntries, map: shadowMap };
+}
+
+function assembleInput(opts) {
+  const dataDir = path.join(opts.baseDir, 'data');
+  const pinnedData = readPinnedEntries(dataDir);
+  const pinnedEntries = pinnedData.pinnedEntries;
+  const shadowMap = pinnedData.map;
   let timeline = [];
   try {
     timeline = (opts.loadTimeline(opts.sessionId) || []).map(m => ({
@@ -254,7 +273,7 @@ function assembleInput(opts) {
   const diaryEntries = cutoffDate
     ? readDiaryEntriesForShadow(opts.baseDir).filter(e => e.date < cutoffDate && !hiddenDiary.has(e.rel))
     : [];
-  return { pinnedEntries, timeline, diaryEntries, memoriesV2, query, excludeIds, map: shadowMap, config: { diaryCount } };
+  return { pinnedEntries, timeline, diaryEntries, memoriesV2, query, excludeIds, map: shadowMap, config: { diaryCount }, summaryBlocks: readSummaryBlocks(dataDir) };
 }
 
 module.exports = {
@@ -262,4 +281,6 @@ module.exports = {
   loadPinnedMap,
   appendFloatIds,
   assembleInput,
+  readPinnedEntries,
+  readSummaryBlocks,
 };

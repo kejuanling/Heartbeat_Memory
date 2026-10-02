@@ -156,6 +156,34 @@
        <div id="distill-config-msg" class="cc-cfg-msg"></div>
      </div>
    </div>
+
+   <div class="card" data-collapse-id="summary-config" data-default="collapsed">
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>两块总结 · 定时设置</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+     <div class="hint-card">
+       <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px;">每次对话开头那两块：Core Identity（写「规矩」，取材记忆池全部活跃 rule 条目）与 Long-term Understanding（写「理解」，取材全部活跃 fact 条目）——不是置顶那几条。每晚到点检查一次：记忆池没变化就完全不动（比对指纹，不调模型），变了才重新生成并写缓存。模型挂了沿用上一版，连上一版都没有才回退直注原始条目。开「增量生成」时，变化不多就只把「上一版 + 新增/改动/移除」喂给模型；关掉则每次全量重生成。</div>
+     </div>
+     <div class="card-body">
+       <div class="cc-cfg-grid">
+         <label class="cc-cfg-item"><span>每晚自动检查</span>
+           <span class="switch"><input type="checkbox" id="summary-enabled"><span class="slider"></span></span>
+         </label>
+         <label class="cc-cfg-item"><span>检查时间</span>
+           <input type="time" id="summary-time" step="60" style="width:120px">
+         </label>
+         <label class="cc-cfg-item"><span>增量生成</span>
+           <span class="switch"><input type="checkbox" id="summary-incremental"><span class="slider"></span></span>
+         </label>
+       </div>
+       <div id="summary-status" style="font-size:11px;color:var(--text3);margin:8px 0 2px;line-height:1.8;white-space:pre-wrap;"></div>
+       <div class="cc-cfg-btns">
+         <button type="button" class="cc-btn primary" onclick="saveSummaryConfig()">保存</button>
+         <button type="button" class="cc-btn secondary" onclick="loadSummaryConfig()">重新载入</button>
+         <button type="button" class="cc-btn" id="summary-run-btn" onclick="runSummaryNow(false)">立即生成</button>
+         <button type="button" class="cc-btn" id="summary-force-btn" onclick="runSummaryNow(true)">强制重生成</button>
+       </div>
+       <div id="summary-config-msg" class="cc-cfg-msg"></div>
+     </div>
+   </div>
    <div id="mem-mempool-wrap">
       <div class="mp-head">
         <div id="mempool-clean-msg" style="width:100%;font-size:11px;color:var(--text3);min-height:0;margin-top:0"></div>
@@ -317,6 +345,40 @@
           <button type="button" class="cc-btn primary" onclick="saveDistillPrompt()">保存提示词</button>
           <button type="button" class="cc-btn secondary" onclick="loadDistillPrompt()">重新载入</button>
           <button type="button" class="cc-btn secondary" onclick="resetDistillPrompt()">恢复内置默认</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" data-collapse-id="ci-prompt-config" data-default="collapsed">
+      <div class="card-title collapsible" onclick="toggleCard(this)"><span>两块总结·Core Identity 提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+      <div class="card-body">
+        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:6px;">把记忆池里全部活跃的 rule 条目压成「我该怎么当这个伴侣」那一块（祈使语气，按 self / relationship / user 分段）。可用占位符：${MEMORY_COUNT} 条数、${PREVIOUS_BLOCK} 上一版、${DELTA_BLOCK} 增量变化、${MEMORY_LIST} 条目清单——运行时自动填充，清单会拼在 User 提示词之后。两边留空即用内置默认。</div>
+        <div class="cc-cfg-msg" id="summary-prompt-msg" style="margin-bottom:8px"></div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">System 提示词（角色、分段格式、取舍标准）</div>
+        <textarea id="ci-sys-prompt" rows="12" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;line-height:1.6;margin-bottom:10px;min-height:220px;max-height:420px;resize:vertical;"></textarea>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">User 提示词</div>
+        <textarea id="ci-user-prompt" rows="6" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;line-height:1.6;margin-bottom:10px;resize:vertical;"></textarea>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button type="button" class="cc-btn primary" onclick="saveSummaryPrompt()">保存两块提示词</button>
+          <button type="button" class="cc-btn secondary" onclick="loadSummaryPrompt()">重新载入</button>
+          <button type="button" class="cc-btn secondary" onclick="resetSummaryPrompt()">恢复内置默认</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" data-collapse-id="und-prompt-config" data-default="collapsed">
+      <div class="card-title collapsible" onclick="toggleCard(this)"><span>两块总结·Long-term Understanding 提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+      <div class="card-body">
+        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:6px;">把记忆池里全部活跃的 fact 条目压成「关于她 / 关于我们」那一块（陈述语气）。占位符与上一块相同：${MEMORY_COUNT} ${PREVIOUS_BLOCK} ${DELTA_BLOCK} ${MEMORY_LIST}。★ 内置默认里明写「两块之间、两段之间都不得重复同一条信息」——改提示词时这句别删，删了会两头重复。</div>
+        <div class="cc-cfg-msg" id="summary-prompt-msg2" style="margin-bottom:8px"></div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">System 提示词</div>
+        <textarea id="und-sys-prompt" rows="12" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;line-height:1.6;margin-bottom:10px;min-height:220px;max-height:420px;resize:vertical;"></textarea>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">User 提示词</div>
+        <textarea id="und-user-prompt" rows="6" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;line-height:1.6;margin-bottom:10px;resize:vertical;"></textarea>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button type="button" class="cc-btn primary" onclick="saveSummaryPrompt()">保存两块提示词</button>
+          <button type="button" class="cc-btn secondary" onclick="loadSummaryPrompt()">重新载入</button>
+          <button type="button" class="cc-btn secondary" onclick="resetSummaryPrompt()">恢复内置默认</button>
         </div>
       </div>
     </div>

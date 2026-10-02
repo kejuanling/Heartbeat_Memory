@@ -3510,6 +3510,7 @@ try {
 // 记忆蒸馏调度器（1002 记忆改造 §8 第 3 项）：配置 data/memory_distill_config.json；路由 /admin/memory-distill/*
 // 3.1 配置+调度骨架+手动触发；3.2 起分批/预取/抽取/校验/落待审接入
 let memoryDistill = null;
+let memorySummary = null;
 try {
   memoryDistill = require("./lib/memory-distill")({
     baseDir: __dirname,
@@ -3520,9 +3521,18 @@ try {
     // 3.6 落待审通道：Memory V2 admission 单例（promotion 通道一律进 review，不直接入池）
     admission: memoryV2Admission,
   });
-} catch (err) {
-  console.warn("[memory-distill] 初始化失败，蒸馏停用:", err.message);
-}
+  } catch (err) { console.warn("[memory-distill] 初始化失败，蒸馏停用:", err.message); }
+
+  // 两块 LLM 总结调度器（1002 记忆改造 §8 第 6 项）：Core Identity / Long-term Understanding
+  // 选材 = 记忆池全部活跃记忆（rule→Core，fact→Understanding），不是置顶几条；
+  // 每晚定时按指纹判断：池子没变就不调 LLM，变了才重生成并写缓存。
+  try {
+    memorySummary = require("./lib/memory-summary")({
+      baseDir: __dirname,
+      addCompactionLog: addCompactionLog,
+      persistCompactionLogs: persistCompactionLogs,
+    });
+  } catch (err) { console.warn("[memory-summary] 初始化失败，两块总结停用:", err.message); }
 
 // 2026-09-28：V1 记忆池删除——旧池静默迁移（startMemoryBackgroundMigration）与 routes/memory-pool 挂载已移除
 
@@ -3992,6 +4002,87 @@ app.delete("/admin/memory-distill/prompt", { preHandler: basicAuth }, async (req
   if (!requireDistill(reply)) return;
   try {
     reply.send(memoryDistill.savePromptConfig({ distill_system_prompt: "", distill_user_prompt: "" }));
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+// ========================
+// 两块 LLM 总结配置 / 手动生成 / 状态 / 提示词（1002 记忆改造 §8 第 6 项）
+// ========================
+function requireSummary(reply) {
+  if (memorySummary) return true;
+  reply.code(500).send({ error: "两块总结模块未初始化" });
+  return false;
+}
+
+app.get("/admin/memory-summary/config", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireSummary(reply)) return;
+  try { reply.send(memorySummary.readConfig()); }
+  catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+app.post("/admin/memory-summary/config", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireSummary(reply)) return;
+  try {
+    const b = req.body || {};
+    const patch = {};
+    if (b.enabled !== undefined) patch.enabled = !!b.enabled;
+    if (b.time !== undefined) patch.time = String(b.time);
+    if (b.incremental !== undefined) patch.incremental = !!b.incremental;
+    reply.send(memorySummary.saveConfig(patch));
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+// 立即生成一次：不受 enabled 约束；force=true 时忽略指纹（池子没变也重生成）
+app.post("/admin/memory-summary/run", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireSummary(reply)) return;
+  try {
+    if (memorySummary.status().running) {
+      return reply.code(409).send({ error: "已有生成在跑", status: memorySummary.status() });
+    }
+    const b = req.body || {};
+    const r = await memorySummary.runNow({ force: !!b.force });
+    reply.send(r);
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+app.get("/admin/memory-summary/status", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireSummary(reply)) return;
+  try { reply.send(memorySummary.status()); }
+  catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+// 两块提示词：留空 = 回落内置默认；DELETE = 清空自定义
+app.get("/admin/memory-summary/prompt", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireSummary(reply)) return;
+  try {
+    const c = memorySummary.readPromptConfig();
+    const out = { custom_set: false };
+    for (const k of ["core_identity", "understanding"]) {
+      out[k + "_system_prompt"] = c[k + "_system_prompt"] || "";
+      out[k + "_user_prompt"] = c[k + "_user_prompt"] || "";
+      out["default_" + k + "_system_prompt"] = memorySummary.defaultSystemPrompt(k);
+      out["default_" + k + "_user_prompt"] = memorySummary.defaultUserPrompt(k);
+      if (c[k + "_system_prompt"] || c[k + "_user_prompt"]) out.custom_set = true;
+    }
+    reply.send(out);
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+app.post("/admin/memory-summary/prompt", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireSummary(reply)) return;
+  try {
+    const b = req.body || {};
+    reply.send(memorySummary.savePromptConfig(b));
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+app.delete("/admin/memory-summary/prompt", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireSummary(reply)) return;
+  try {
+    reply.send(memorySummary.savePromptConfig({
+      core_identity_system_prompt: "", core_identity_user_prompt: "",
+      understanding_system_prompt: "", understanding_user_prompt: "",
+    }));
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
@@ -7110,6 +7201,7 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err, address) => {
       wakeScheduler.start();
       wakeUpLastHeartbeat = Date.now();
       try { if (memoryDistill) memoryDistill.start(); } catch (e) { console.error("[memory-distill] 启动失败:", e && e.message); }
+      try { if (memorySummary) memorySummary.start(); } catch (e) { console.error("[memory-summary] 启动失败:", e && e.message); }
       console.log('心跳状态已恢复');
     } catch (e) {
       console.error("[wake-scheduler] 启动失败:", e && e.message);

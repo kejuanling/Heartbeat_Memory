@@ -190,6 +190,14 @@ function buildCoreIdentity(input, cfg) {
       if (p.id != null) fixedIds.push(String(p.id));
     }
   }
+  // 1002 §8 第 6 项：有 LLM 总结就用总结（选材 = 全部活跃 rule，不是置顶几条），
+  // 不再直注条目原文；无缓存（首次生成前 / 生成失败）回落原来的 anchor 直注。
+  const sum = (input.summaryBlocks && Array.isArray(input.summaryBlocks.core_identity))
+    ? input.summaryBlocks.core_identity : null;
+  if (sum && sum.length) {
+    for (const l of sum) lines.push(String(l));
+    return { lines, fixedIds };
+  }
   const rules = (Array.isArray(input.memoriesV2) ? input.memoriesV2 : [])
     .filter(m => m && m.status === "active" && m.kind === "rule" && m.anchor === true)
     .sort(byCreatedAt);
@@ -204,6 +212,10 @@ function buildCoreIdentity(input, cfg) {
 // 排列按准入时间正序。0920 用户拍板去掉注入上限（原 400 token 超限淘汰更旧、保底 1 条）——置顶记忆全量注入
 function buildUnderstanding(input, cfg) {
   const fixedIds = [];
+  // 1002 §8 第 6 项：有 LLM 总结就用总结（选材 = 全部活跃 fact）；无缓存回落 anchor 直注。
+  const sum = (input.summaryBlocks && Array.isArray(input.summaryBlocks.understanding))
+    ? input.summaryBlocks.understanding : null;
+  if (sum && sum.length) return { lines: sum.map(String), fixedIds: [] };
   const lines = (Array.isArray(input.memoriesV2) ? input.memoriesV2 : [])
     .filter(m => m && m.status === "active" && m.kind === "fact" && m.anchor === true)
     .sort(byCreatedAt)

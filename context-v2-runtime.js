@@ -63,7 +63,10 @@ function minimalAssembleInput(opts) {
     const arr = map[String(opts.sessionId || 'default')];
     excludeIds = Array.isArray(arr) ? arr.map(String) : [];
   } catch (e) {}
-  return { pinnedEntries: [], timeline: [], diaryEntries: [], memoriesV2: memoriesV2, query: query, excludeIds: excludeIds, config: { diaryCount: 0 }, map: null };
+  // 1002 §8 第 6 项：快照模式也要能重建两块总结（不能被快照冻住），故 pinned 与总结缓存都要读。
+  // pinned 进 Core Identity 块（手工固定的人设常驻内容保留），总结替代条目原文直注。
+  const pinnedData = shadow.readPinnedEntries(dataDir);
+  return { pinnedEntries: pinnedData.pinnedEntries, timeline: [], diaryEntries: [], memoriesV2: memoriesV2, query: query, excludeIds: excludeIds, config: { diaryCount: 0 }, map: null, summaryBlocks: shadow.readSummaryBlocks(dataDir) };
 }
 
 // 语义算分（0919 注入语义升级：Relevant 打分用 bge 余弦；失败回落字面，注入不致全灭）
@@ -92,6 +95,17 @@ async function assembleAndApply(opts) {
     blocks = existing.fixed_blocks
       .filter(function (b) { return b && b.content; })
       .map(function (b) { return { key: b.key, title: b.title || '', content: b.content, empty: false }; });
+    // 1002 §8 第 6 项：两块 LLM 总结不能被快照冻住——记忆池一变总结就重生成，
+    // 而快照只重算 relevant。故固定块里这两块永远用本次实时构建的结果覆盖/插入。
+    ['core_identity', 'long_term_understanding'].forEach(function (key) {
+      const nb = built.blocks.find(function (b) { return b.key === key && !b.empty; });
+      if (!nb) return;
+      const i = blocks.findIndex(function (b) { return b.key === key; });
+      if (i >= 0) { blocks[i] = nb; return; }
+      // 老快照里没这块（当时为空）：插在 Earlier Days 之后、Relevant 之前，保住块序
+      const j = blocks.findIndex(function (b) { return b.key === 'conversation_continuity'; });
+      if (j >= 0) blocks.splice(j + 1, 0, nb); else blocks.push(nb);
+    });
     const rel = built.blocks.find(function (b) { return b.key === 'relevant_memories' && !b.empty; });
     if (rel) blocks.push(rel);
     relevantHits = built.relevantHits || [];

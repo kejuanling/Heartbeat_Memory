@@ -733,6 +733,60 @@ function toast(msg){
       toast('已恢复内置默认');
     }catch(e){ if(msg) msg.textContent='恢复失败: '+e.message; }
   }
+  // ============ 两块总结·提示词（1002 记忆改造 §8 6.5：两块各一套 system/user，留空回落内置默认） ============
+  async function loadSummaryPrompt(){
+    const m1=document.getElementById('summary-prompt-msg');
+    const m2=document.getElementById('summary-prompt-msg2');
+    try{
+      const r=await fetch(ADMIN_API+'/memory-summary/prompt');
+      const c=await r.json();
+      if(c.error) throw new Error(c.error);
+      const set=function(id,v,dv){ const el=document.getElementById(id); if(el) el.value=(v!=null&&v!=='')?v:(dv||''); };
+      set('ci-sys-prompt',c.core_identity_system_prompt,c.default_core_identity_system_prompt);
+      set('ci-user-prompt',c.core_identity_user_prompt,c.default_core_identity_user_prompt);
+      set('und-sys-prompt',c.understanding_system_prompt,c.default_understanding_system_prompt);
+      set('und-user-prompt',c.understanding_user_prompt,c.default_understanding_user_prompt);
+      const tip=c.custom_set?'当前为自定义版本；「恢复内置默认」可回退。':'当前为内置默认（自定义为空）。';
+      if(m1) m1.textContent=tip;
+      if(m2) m2.textContent=tip;
+    }catch(e){
+      if(m1) m1.textContent='读取两块提示词失败: '+e.message;
+      if(m2) m2.textContent='';
+    }
+  }
+  async function saveSummaryPrompt(){
+    const m1=document.getElementById('summary-prompt-msg');
+    const m2=document.getElementById('summary-prompt-msg2');
+    const g=function(id){ const el=document.getElementById(id); return el?el.value:''; };
+    const payload={
+      core_identity_system_prompt:g('ci-sys-prompt').trim(),
+      core_identity_user_prompt:g('ci-user-prompt').trim(),
+      understanding_system_prompt:g('und-sys-prompt').trim(),
+      understanding_user_prompt:g('und-user-prompt').trim()
+    };
+    try{
+      const r=await fetch(ADMIN_API+'/memory-summary/prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const d=await r.json();
+      if(d.error){ if(m1) m1.textContent='保存失败: '+d.error; toast('保存失败: '+d.error); return; }
+      let tip='已保存，下一次生成（定时或手动）即生效。';
+      if(d.warnings&&d.warnings.length) tip='⚠ '+d.warnings.join(' ')+'（其余已保存）';
+      if(m1) m1.textContent=tip;
+      if(m2) m2.textContent=tip;
+      toast('两块提示词已保存');
+    }catch(e){ if(m1) m1.textContent='保存失败: '+e.message; }
+  }
+  async function resetSummaryPrompt(){
+    if(!confirm('恢复内置默认的两块总结提示词？两张卡的自定义内容都会被清空。'))return;
+    const m1=document.getElementById('summary-prompt-msg');
+    const m2=document.getElementById('summary-prompt-msg2');
+    try{
+      const r=await fetch(ADMIN_API+'/memory-summary/prompt',{method:'DELETE'});
+      const d=await r.json();
+      if(d.error){ if(m1) m1.textContent='恢复失败: '+d.error; return; }
+      await loadSummaryPrompt();
+      toast('已恢复内置默认');
+    }catch(e){ if(m1) m1.textContent='恢复失败: '+e.message; }
+  }
   // ============ 记忆与唤醒参数 ============
   // 跨窗口注入参数（日记条数，V2 Earlier Days 篇数同源；0928 V1 memory_pool_config 归档后独立存储）
   async function loadCrossInjectConfig(){
@@ -3043,7 +3097,7 @@ function ccNumLiveCheck(input, max){
    document.querySelector('.tab-item[data-tab="'+name+'"]').classList.add('active');
   if(name==='memory'){ if(!window.__memPoolInited){ initMemPoolView(); window.__memPoolInited=true; } loadReviewQueue(); }
   if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
-  if(name==='prompts'){loadWakePrompt();loadContextDigestPrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadReparsePrompt();loadJudgePrompt();loadDistillPrompt();}
+  if(name==='prompts'){loadWakePrompt();loadContextDigestPrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadReparsePrompt();loadJudgePrompt();loadDistillPrompt();loadSummaryPrompt();}
   if(name==='config'){loadToolsConfig(); loadCrossInjectConfig();
     // 2026-10-01 修复：压缩参数配置卡在配置 tab，但值依赖压缩预览先加载——原加载链只在压缩 tab/换会话/压缩操作后触发，
     // 直接进配置 tab（含刷新后恢复停留在配置 tab）时 preview 从未拉取，十二个输入框静默全空
@@ -3625,6 +3679,97 @@ function ccNumLiveCheck(input, max){
     finally{ if(btn){ btn.disabled=false; btn.textContent='立即跑一次'; } }
   }
 
+  // ============ 两块总结配置（1002 记忆改造 §8 6.5：Core Identity / Long-term Understanding 缓存 + 每晚定时检查） ============
+  // 取材口径：记忆池里「全部活跃」的 rule（Core Identity）与 fact（Long-term Understanding）条目，不是置顶那几条。
+  const SUM_LABEL={core_identity:'Core Identity',understanding:'Long-term Understanding'};
+  const SUM_MODE={full:'全量重生成',incremental:'增量更新',skipped:'记忆池没变，未动',empty:'无条目可总结',failed:'生成失败',would_generate:'待生成'};
+  function renderSummaryStatus(s){
+    const el=document.getElementById('summary-status');
+    if(!el||!s) return;
+    const L=[];
+    L.push('本地时间 '+s.local_now+'（'+(s.ran_today?'今天已跑过':'今天还没跑')+'）'+(s.schedulerOn?' · 调度已挂':' · 调度未挂'));
+    ['core_identity','understanding'].forEach(function(k){
+      const b=s.blocks&&s.blocks[k]; if(!b) return;
+      let t=SUM_LABEL[k]+'：'+b.count+' 条 → ';
+      if(b.cached){
+        t+=b.lines+' 行 / '+b.chars+' 字';
+        if(b.mode) t+='（'+(SUM_MODE[b.mode]||b.mode)+'）';
+        t+=b.fresh?'，已是最新':'，记忆池已变，待更新';
+        if(b.updated_at) t+=' · 更新于 '+new Date(b.updated_at).toLocaleString('zh-CN');
+      }else t+='尚无缓存（对话里回退直注原始条目）';
+      if(b.error) t+=' · 上次失败：'+b.error;
+      L.push(t);
+    });
+    el.textContent=L.join('\n');
+  }
+  async function loadSummaryConfig(){
+    const msg=document.getElementById('summary-config-msg');
+    try{
+      const r=await fetch(ADMIN_API+'/memory-summary/status');
+      const s=await r.json();
+      if(s.error){ if(msg) msg.textContent='读取失败: '+s.error; return; }
+      const en=document.getElementById('summary-enabled'); if(en) en.checked=!!s.enabled;
+      const tm=document.getElementById('summary-time'); if(tm) tm.value=s.time||'03:30';
+      const inc=document.getElementById('summary-incremental'); if(inc) inc.checked=!!s.incremental;
+      renderSummaryStatus(s);
+      if(msg){
+        const lr=s.last_run_result||{};
+        if(s.last_run_at){
+          let tail='';
+          if(lr&&lr.ok===false&&lr.error) tail='（失败：'+lr.error+'）';
+          else tail='（'+(lr&&lr.blocks?lr.blocks.map(function(b){return (SUM_LABEL[b.block]||b.block)+':'+(SUM_MODE[b.mode]||b.mode);}).join('，'):'')+'）';
+          msg.textContent='上次运行：'+new Date(s.last_run_at).toLocaleString('zh-CN')+tail;
+        }else msg.textContent='还没跑过。';
+      }
+    }catch(e){ if(msg) msg.textContent='读取失败: '+e.message; }
+  }
+  async function saveSummaryConfig(){
+    const msg=document.getElementById('summary-config-msg');
+    if(msg) msg.textContent='保存中...';
+    const en=document.getElementById('summary-enabled');
+    const tm=document.getElementById('summary-time');
+    const inc=document.getElementById('summary-incremental');
+    const time=(tm&&tm.value)||'03:30';
+    if(!/^\d{1,2}:\d{2}$/.test(time)){ if(msg) msg.textContent='时间格式不对（应为 HH:MM）'; toast('时间格式不对'); return; }
+    const payload={enabled:en?!!en.checked:false,time:time,incremental:inc?!!inc.checked:true};
+    try{
+      const r=await fetch(ADMIN_API+'/memory-summary/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const d=await r.json();
+      if(d.error){ if(msg) msg.textContent='保存失败: '+d.error; toast('保存失败: '+d.error); return; }
+      if(msg) msg.textContent='已保存：'+(d.enabled?('每天 '+d.time+' 检查一次，记忆池没变就不动'):'自动检查已关闭（仍可手动生成）')+'。';
+      toast('两块总结设置已保存');
+      loadSummaryConfig();
+    }catch(e){ if(msg) msg.textContent='保存失败: '+e.message; toast('保存失败: '+e.message); }
+  }
+  async function runSummaryNow(force){
+    const btn=document.getElementById(force?'summary-force-btn':'summary-run-btn');
+    const msg=document.getElementById('summary-config-msg');
+    if(btn){ btn.disabled=true; btn.textContent='生成中…'; }
+    if(msg) msg.textContent=force?'正在强制重生成两块（约 1–2 分钟，别关页面）…':'正在生成两块（池子没变会直接跳过）…';
+    try{
+      const r=await fetch(ADMIN_API+'/memory-summary/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({force:!!force})});
+      const d=await r.json();
+      if(d.error && d.status){ renderSummaryStatus(d.status); if(msg) msg.textContent='已有生成在跑，等它结束再看。'; }
+      else if(d.error){ if(msg) msg.textContent='生成失败: '+d.error; toast('生成失败'); }
+      else{
+        const parts=[];
+        ['core_identity','understanding'].forEach(function(k){
+          const b=d.blocks&&d.blocks[k]; if(!b) return;
+          let t=SUM_LABEL[k]+'：'+(SUM_MODE[b.mode]||b.mode);
+          if(b.lines) t+='（'+b.lines+' 行 / '+(b.chars||0)+' 字）';
+          if(b.error) t+=' · '+b.error;
+          parts.push(t);
+        });
+        if(msg) msg.textContent='完成（'+Math.round((d.duration_ms||0)/1000)+'s）：'+parts.join('；');
+        toast('两块总结已生成');
+      }
+    }catch(e){ if(msg) msg.textContent='生成失败: '+e.message; toast('生成失败: '+e.message); }
+    finally{
+      try{ await loadSummaryConfig(); }catch(_){}
+      if(btn){ btn.disabled=false; btn.textContent=force?'强制重生成':'立即生成'; }
+    }
+  }
+
   // ============ 记忆池（现走 Memory V2，编辑/筛选只认 fact/rule 两类；1002-14 删 quote/milestone） ============
   // 存量兼容：0912 五类（关于她/认账/拓本/压缩摘要/对话碎片）与更早旧四类仍会出现在列表里，
   // 统一暗灰显示、由后台清洗迁移逐步消化；颜色表保留两套键。
@@ -3640,6 +3785,7 @@ function ccNumLiveCheck(input, max){
     populateMemPoolCatOptions();
     loadMemPool();
     loadDistillConfig();
+    loadSummaryConfig();
   }
 
   function populateMemPoolCatOptions(){
