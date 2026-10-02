@@ -84,20 +84,24 @@ async function attachVecScores(input) {
 }
 
 async function assembleAndApply(opts) {
+  // 相关记忆开关（1002 拍板）：关=不检索、不注入、不写时间线、不调 embed。
+  const relOn = relevantEnabled(opts.baseDir);
   const existing = snapStore.loadSnapshot(opts.baseDir, opts.sessionId);
   let blocks;
   let relevantHits = [];
   if (existing && Array.isArray(existing.fixed_blocks)) {
     // ---- 快照模式（1002-11）：人设与固定块永不重算，仅相关记忆动态 ----
     const input = minimalAssembleInput(opts);
-    await attachVecScores(input);
+    // 关闭时 query 置空：buildRelevant 首行即返回空 → 无块、无 hits（顺带跳过 embed 请求）
+    if (relOn) await attachVecScores(input); else input.query = '';
     const built = buildContextBlocks(input);
     blocks = existing.fixed_blocks
       .filter(function (b) { return b && b.content; })
       .map(function (b) { return { key: b.key, title: b.title || '', content: b.content, empty: false }; });
-    // 1002 §8 第 6 项：两块 LLM 总结不能被快照冻住——记忆池一变总结就重生成，
-    // 而快照只重算 relevant。故固定块里这两块永远用本次实时构建的结果覆盖/插入。
-    ['core_identity', 'long_term_understanding'].forEach(function (key) {
+    // 1002 §8 第 6 项 + 1002-20：两块 LLM 总结与顶层引导都不能被快照冻住——
+    // 记忆池一变总结就重生成、pinned(assembly) 文案一改就应即时生效，
+    // 而快照只重算 relevant。故这些块永远用本次实时构建的结果覆盖/插入。
+    ['context_assembly', 'core_identity', 'long_term_understanding'].forEach(function (key) {
       const nb = built.blocks.find(function (b) { return b.key === key && !b.empty; });
       if (!nb) return;
       const i = blocks.findIndex(function (b) { return b.key === key; });
@@ -118,7 +122,7 @@ async function assembleAndApply(opts) {
       loadTimeline: opts.loadTimeline,
       normalizeContentToText: opts.normalizeContentToText,
     });
-    await attachVecScores(input);
+    if (relOn) await attachVecScores(input); else input.query = '';
     const built = buildContextBlocks(input);
     const sysMsg = (opts.messages || []).find(function (m) { return m && m.role === 'system'; });
     try {
@@ -173,4 +177,19 @@ function floatMemoriesToTimeline(opts) {
 // V2 总闸：memory_v2_config.json 的 ctx_v2_enabled（缺文件=false）
 function enabled(baseDir) { try { return fsp.readJsonSync(path.join(baseDir, 'data', 'memory_v2_config.json')).ctx_v2_enabled === true; } catch (_) { return false; } }
 
-module.exports = { assembleAndApply, apply, floatMemoriesToTimeline, enabled };
+// ── 相关记忆（Relevant）自动注入开关（2026-10-02 用户拍板关闭）──
+// 背景（实测，见诊断报告）：184 条 active 记忆两两 bge 余弦 median 0.586 / p10 0.502，
+// 而入选门槛换算只需 sem ≥0.41——门槛低于库内随机配对基线，"宁缺毋滥"在设计上不成立；
+// 抽查 33 组命中约 65-70% 与当轮话题无关，且每轮硬取 3 条（1 真相关 + 2 凑数）。
+// 另实测：77 条被浮现过的记忆里 75 条（97%）的信息已被 Core Identity / Long-term
+// Understanding 两块总结覆盖，0 条是总结里没有的 → 自动检索属重复劳动。
+// 关闭后：① 不生成 relevant_memories 块 ② 不写时间线浮现 ③ 省掉每轮一次 embed 请求。
+// 兜底：模型仍可用 memory_search 工具主动检索。开关置 true 即恢复原行为。
+// 缺省=true（保持向后兼容，显式 false 才关）。
+function relevantEnabled(baseDir) {
+  try {
+    return fsp.readJsonSync(path.join(baseDir, 'data', 'memory_v2_config.json')).ctx_v2_relevant_enabled !== false;
+  } catch (_) { return true; }
+}
+
+module.exports = { assembleAndApply, apply, floatMemoriesToTimeline, enabled, relevantEnabled };
