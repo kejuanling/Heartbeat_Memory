@@ -191,29 +191,30 @@ function toItem(r) {
   };
 }
 
+// 1003-08 用户拍板：memory_search 完全按关键词命中（去语义余弦）：
+// q 分词后逐条统计命中词元数（hits），0 命中不返回；排序 = 命中数降序，同级按最新在前。
+// 返回只保留 {id, content}（id 供 memory_pin/update；其余字段工具不再透传）。
 async function retrieveHybrid(rows, query, opts = {}) {
   const q = String(query || "").trim();
   if (!q) return [];
   const topK = Math.max(1, Number(opts.topK) || 5);
   const pool = rows.filter(r => (!opts.pinnedOnly || r.anchor === true) && (!opts.kind || r.kind === opts.kind));
   if (!pool.length) return [];
-  const qt = tokenize(q);
-  const ready = await ensureVectors(pool);
-  let qv = null;
-  if (ready) {
-    const v = await embedClient.embedBatch([q], true, 8000); // 查询侧按 BGE 约定加指令前缀
-    if (v && v[0] && v[0].length) qv = v[0];
-  }
-  const m = vecMap();
+  // 1003-08 补充：只按双字及以上词元命中（tokenize 含中文单字，单字如"不/在/面"到处命中，纯噪音）
+  const qt = new Set([...tokenize(q)].filter(function (x) { return x.length >= 2; }));
+  if (!qt.size) return [];
   const scored = pool.map(r => {
-    const vec = (m[r.id] || {}).v;
-    const sem = qv && vec ? Math.max(0, cosine(qv, vec)) : 0; // 均已归一化，点积即余弦
-    const lit = qt.size ? similarity(qt, r.text + " " + (r.kind || "")) : 0;
-    const score = qv ? (0.55 * sem + 0.20 * lit) : lit;
-    return { r, sem, score };
+    const tw = new Set([...tokenize(r.text + " " + (r.kind || ""))].filter(function (x) { return x.length >= 2; }));
+    let hits = 0;
+    for (const x of qt) if (tw.has(x)) hits++;
+    return { r, hits };
   });
-  scored.sort((a, b) => b.score - a.score || b.sem - a.sem);
-  return scored.slice(0, topK).map(p => toItem(p.r));
+  scored.sort((a, b) => {
+    if (b.hits !== a.hits) return b.hits - a.hits;
+    const ua = String(a.r.content_updated_at || a.r.created_at || ""), ub = String(b.r.content_updated_at || b.r.created_at || "");
+    return ua < ub ? 1 : (ua > ub ? -1 : 0);
+  });
+  return scored.filter(s => s.hits > 0).slice(0, topK).map(s => ({ id: s.r.id, content: s.r.text }));
 }
 
 // 最近列表：按正文更新时间倒序（V2 无检索计数污染，content_updated_at 只在正文变化时刷）

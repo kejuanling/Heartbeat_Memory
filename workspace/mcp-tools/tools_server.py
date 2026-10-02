@@ -742,8 +742,7 @@ def tool_memory_search(args):
     except Exception as e:
         return {"error": str(e)}
     if data.get("ok"):
-        # 内容/分类/重要度给 AI 读；id+pinned 一并透传（id 供 memory_pin 按 id 置顶，pinned 供模型知道哪条已置顶）；
-        # 时间戳类字段无用（updated_at 每次检索都会被刷成当前时间，纯噪声），并防内容重复
+        # 1003-08 用户拍板：只透传 id+content（id 供 memory_pin/update；其余字段不再返回）；内容去重
         seen = set()
         items = []
         for it in data.get("items", []):
@@ -751,13 +750,13 @@ def tool_memory_search(args):
             if not c or c in seen:
                 continue
             seen.add(c)
-            items.append({"id": it.get("id"), "content": c, "category": it.get("category"), "importance": it.get("importance"), "pinned": bool(it.get("pinned"))})
+            items.append({"id": it.get("id"), "content": c})
         return {"total": len(items), "items": items}
     return {"error": data.get("error", "检索失败")}
 
 
 TOOLS["memory_search"] = {
-    "description": "检索长期记忆池：输入关键词、完整问题或模糊描述，系统按相关性排序返回最相关的几条。返回记忆正文与唯一 id——id 交给 memory_pin 置顶/沉底，或交给 memory_update 改正文。这里查到的是已经进入长期记忆池的记忆，不是原始对话；要找原文用 context_search。",
+    "description": "检索长期记忆池：纯关键词命中，返回命中记忆的正文与 id（无命中返回空列表）。排序=命中的关键词数多的在前，命中数相同按最新在前。id 交给 memory_pin 置顶/沉底，或交给 memory_update 改正文。这里查到的是已经进入长期记忆池的记忆，不是原始对话；要找原文用 context_search。",
     "inputSchema": {
         "type": "object",
         "properties": {
