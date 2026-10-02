@@ -698,6 +698,41 @@ function toast(msg){
       toast('已恢复内置默认');
     }catch(e){ if(msg) msg.textContent='恢复失败: '+e.message; }
   }
+  // ============ 记忆蒸馏·抽取提示词（1002 记忆改造 §8 3.4） ============
+  async function loadDistillPrompt(){
+    const msg=document.getElementById('distill-prompt-msg');
+    try{
+      const r=await fetch(ADMIN_API + '/memory-distill/prompt');
+      const c=await r.json();
+      if(c.error) throw new Error(c.error);
+      const s=document.getElementById('distill-sys-prompt'); if(s) s.value=c.distill_system_prompt||c.default_distill_system_prompt||'';
+      const u=document.getElementById('distill-user-prompt'); if(u) u.value=c.distill_user_prompt||c.default_distill_user_prompt||'';
+      if(msg) msg.textContent=c.custom_set?'当前为自定义版本；「恢复内置默认」可回退。':'当前为内置默认（自定义为空）。';
+    }catch(e){ if(msg) msg.textContent='读取蒸馏提示词失败: '+e.message; }
+  }
+  async function saveDistillPrompt(){
+    const msg=document.getElementById('distill-prompt-msg');
+    const s=document.getElementById('distill-sys-prompt').value;
+    const u=document.getElementById('distill-user-prompt').value;
+    try{
+      const r=await fetch(ADMIN_API+'/memory-distill/prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({distill_system_prompt:s.trim(),distill_user_prompt:u.trim()})});
+      const d=await r.json();
+      if(d.error){ if(msg) msg.textContent='保存失败: '+d.error; toast('保存失败: '+d.error); return; }
+      if(msg) msg.textContent='已保存，下一次蒸馏（定时或手动）即生效。';
+      toast('蒸馏提示词已保存');
+    }catch(e){ if(msg) msg.textContent='保存失败: '+e.message; }
+  }
+  async function resetDistillPrompt(){
+    if(!confirm('恢复内置默认蒸馏提示词？自定义内容会被清空。'))return;
+    const msg=document.getElementById('distill-prompt-msg');
+    try{
+      const r=await fetch(ADMIN_API+'/memory-distill/prompt',{method:'DELETE'});
+      const d=await r.json();
+      if(d.error){ if(msg) msg.textContent='恢复失败: '+d.error; return; }
+      await loadDistillPrompt();
+      toast('已恢复内置默认');
+    }catch(e){ if(msg) msg.textContent='恢复失败: '+e.message; }
+  }
   // ============ 记忆与唤醒参数 ============
   // 跨窗口注入参数（日记条数，V2 Earlier Days 篇数同源；0928 V1 memory_pool_config 归档后独立存储）
   async function loadCrossInjectConfig(){
@@ -3008,7 +3043,7 @@ function ccNumLiveCheck(input, max){
    document.querySelector('.tab-item[data-tab="'+name+'"]').classList.add('active');
   if(name==='memory'){ if(!window.__memPoolInited){ initMemPoolView(); window.__memPoolInited=true; } loadReviewQueue(); }
   if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
-  if(name==='prompts'){loadWakePrompt();loadContextDigestPrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadReparsePrompt();loadJudgePrompt();}
+  if(name==='prompts'){loadWakePrompt();loadContextDigestPrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadReparsePrompt();loadJudgePrompt();loadDistillPrompt();}
   if(name==='config'){loadToolsConfig(); loadCrossInjectConfig();
     // 2026-10-01 修复：压缩参数配置卡在配置 tab，但值依赖压缩预览先加载——原加载链只在压缩 tab/换会话/压缩操作后触发，
     // 直接进配置 tab（含刷新后恢复停留在配置 tab）时 preview 从未拉取，十二个输入框静默全空

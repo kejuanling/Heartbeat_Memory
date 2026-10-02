@@ -3962,6 +3962,39 @@ app.get("/admin/memory-distill/status", { preHandler: basicAuth }, async (req, r
   catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
+// 蒸馏抽取提示词（System + User）：留空 = 回落内置默认；DELETE = 清空自定义回到内置
+app.get("/admin/memory-distill/prompt", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireDistill(reply)) return;
+  try {
+    const c = memoryDistill.readPromptConfig();
+    reply.send({
+      distill_system_prompt: c.distill_system_prompt || "",
+      distill_user_prompt: c.distill_user_prompt || "",
+      default_distill_system_prompt: memoryDistill.defaultSystemPrompt(),
+      default_distill_user_prompt: memoryDistill.defaultUserPrompt(),
+      custom_set: !!(c.distill_system_prompt || c.distill_user_prompt),
+    });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+app.post("/admin/memory-distill/prompt", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireDistill(reply)) return;
+  try {
+    const b = req.body || {};
+    const patch = {};
+    if (b.distill_system_prompt !== undefined) patch.distill_system_prompt = String(b.distill_system_prompt).trim();
+    if (b.distill_user_prompt !== undefined) patch.distill_user_prompt = String(b.distill_user_prompt).trim();
+    reply.send(memoryDistill.savePromptConfig(patch));
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+app.delete("/admin/memory-distill/prompt", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireDistill(reply)) return;
+  try {
+    reply.send(memoryDistill.savePromptConfig({ distill_system_prompt: "", distill_user_prompt: "" }));
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
 // ========================
 // 推送管理（时间线里的推送回显）
 // ========================

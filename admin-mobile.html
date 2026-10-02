@@ -304,6 +304,23 @@
       </div>
     </div>
 
+    <div class="card" data-collapse-id="distill-prompt-config" data-default="collapsed">
+      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆蒸馏·抽取提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+      <div class="card-body">
+        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:6px;">后台蒸馏每批把「若干篇日记 + 按日期检索到的当天对话原文」打包喂给模型，用它抽取值得长期记住的候选——产出全部进记忆待审队列，不直接入池。占位符 ${DIARY_COUNT} 运行时替换为本次日记篇数；「上一批已提取的记忆」与「=== 材料 ===」由运行时自动拼在 User 提示词之后，不需要自己写。两边都留空即用内置默认；点「恢复内置默认」清空自定义。</div>
+        <div class="cc-cfg-msg" id="distill-prompt-msg" style="margin-bottom:8px"></div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">System 提示词（角色、字段定义、取舍标准）</div>
+        <textarea id="distill-sys-prompt" rows="12" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;line-height:1.6;margin-bottom:10px;min-height:220px;max-height:420px;resize:vertical;"></textarea>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">User 提示词（可用占位符 ${DIARY_COUNT}）</div>
+        <textarea id="distill-user-prompt" rows="6" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;line-height:1.6;margin-bottom:10px;resize:vertical;"></textarea>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button type="button" class="cc-btn primary" onclick="saveDistillPrompt()">保存提示词</button>
+          <button type="button" class="cc-btn secondary" onclick="loadDistillPrompt()">重新载入</button>
+          <button type="button" class="cc-btn secondary" onclick="resetDistillPrompt()">恢复内置默认</button>
+        </div>
+      </div>
+    </div>
+
 </div>
 
 <!-- 通用说明（问号图标） -->
