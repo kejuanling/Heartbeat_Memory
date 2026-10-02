@@ -3529,7 +3529,68 @@ function ccNumLiveCheck(input, max){
   if(v==='cloud')loadMemCloud();
   else if(v==='mempool')initMemPoolView();
  }
-   // ============ 记忆池（现走 Memory V2，编辑/筛选只认 fact/rule 两类；1002-14 删 quote/milestone） ============
+   // ============ 记忆蒸馏配置（1002 记忆改造 §8 3.1：定时开关 / 时间 / 批次 / 立即跑一次） ============
+  async function loadDistillConfig(){
+    const msg=document.getElementById('distill-config-msg');
+    try{
+      const r=await fetch(ADMIN_API+'/memory-distill/config');
+      const c=await r.json();
+      if(c.error){ if(msg) msg.textContent='读取失败: '+c.error; return; }
+      const en=document.getElementById('distill-enabled'); if(en) en.checked=!!c.enabled;
+      const tm=document.getElementById('distill-time'); if(tm) tm.value=c.time||'03:00';
+      const bs=document.getElementById('distill-batch-size'); if(bs) bs.value=(c.batch_size!=null?c.batch_size:5);
+      if(msg){
+        if(c.last_run_at){
+          const lr=c.last_run_result||{};
+          let tail='';
+          if(lr.error) tail='（失败：'+lr.error+'）';
+          else if(lr.note) tail='（'+lr.note+'）';
+          else tail='（候选 '+(lr.candidates||0)+' 条 / 进待审 '+(lr.queued||0)+' 条）';
+          msg.textContent='上次运行：'+new Date(c.last_run_at).toLocaleString('zh-CN')+tail;
+        } else msg.textContent='还没跑过。';
+      }
+    }catch(e){ if(msg) msg.textContent='读取失败: '+e.message; }
+  }
+  async function saveDistillConfig(){
+    const msg=document.getElementById('distill-config-msg');
+    if(msg) msg.textContent='保存中...';
+    const en=document.getElementById('distill-enabled');
+    const tm=document.getElementById('distill-time');
+    const bs=document.getElementById('distill-batch-size');
+    const payload={
+      enabled: en?!!en.checked:false,
+      time: (tm&&tm.value)||'03:00',
+      batch_size: Math.max(1, Number(bs&&bs.value)||5)
+    };
+    if(!/^\d{1,2}:\d{2}$/.test(payload.time)){ if(msg) msg.textContent='时间格式不对（应为 HH:MM）'; toast('时间格式不对'); return; }
+    try{
+      const r=await fetch(ADMIN_API+'/memory-distill/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const d=await r.json();
+      if(d.error){ if(msg) msg.textContent='保存失败: '+d.error; toast('保存失败: '+d.error); return; }
+      if(msg) msg.textContent='已保存：'+(d.enabled?('每天 '+d.time+' 自动蒸馏，每批 '+d.batch_size+' 篇'):'自动蒸馏已关闭（仍可点「立即跑一次」手动跑')+'。';
+      toast('蒸馏设置已保存');
+    }catch(e){ if(msg) msg.textContent='保存失败: '+e.message; toast('保存失败: '+e.message); }
+  }
+  async function runDistillNow(){
+    const btn=document.getElementById('distill-run-btn');
+    const msg=document.getElementById('distill-config-msg');
+    if(btn){ btn.disabled=true; btn.textContent='运行中…'; }
+    if(msg) msg.textContent='正在跑一次蒸馏…';
+    try{
+      const r=await fetch(ADMIN_API+'/memory-distill/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+      const d=await r.json();
+      if(d.error){ if(msg) msg.textContent='跑失败: '+d.error; toast('跑失败: '+d.error); }
+      else{
+        const tail=d.note||('候选 '+(d.candidates||0)+' 条 / 进待审 '+(d.queued||0)+' 条');
+        if(msg) msg.textContent='已完成：'+tail+'（用时 '+Math.round((d.durationMs||0)/1000)+'s）';
+        toast('蒸馏跑完一次');
+      }
+      loadDistillConfig();
+    }catch(e){ if(msg) msg.textContent='跑失败: '+e.message; toast('跑失败: '+e.message); }
+    finally{ if(btn){ btn.disabled=false; btn.textContent='立即跑一次'; } }
+  }
+
+  // ============ 记忆池（现走 Memory V2，编辑/筛选只认 fact/rule 两类；1002-14 删 quote/milestone） ============
   // 存量兼容：0912 五类（关于她/认账/拓本/压缩摘要/对话碎片）与更早旧四类仍会出现在列表里，
   // 统一暗灰显示、由后台清洗迁移逐步消化；颜色表保留两套键。
   const MP_CAT_COLORS={fact:'#2980b9',rule:'#c0392b',quote:'#8e44ad',milestone:'#f39c12',关于她:'#2980b9',认账:'#c0392b',拓本:'#8e44ad',压缩摘要:'#7f8c8d',对话碎片:'#f39c12',关于我们:'#95a5a6',锚点:'#95a5a6',信号:'#95a5a6',对话摘要:'#95a5a6'};
@@ -3543,6 +3604,7 @@ function ccNumLiveCheck(input, max){
     window.__memShowSimilar=false;
     populateMemPoolCatOptions();
     loadMemPool();
+    loadDistillConfig();
   }
 
   function populateMemPoolCatOptions(){

@@ -3507,6 +3507,19 @@ try {
   console.warn("[memory-v2] admission 初始化失败，V2 停用:", err.message);
 }
 
+// 记忆蒸馏调度器（1002 记忆改造 §8 第 3 项）：配置 data/memory_distill_config.json；路由 /admin/memory-distill/*
+// 3.1 配置+调度骨架+手动触发；3.2 起分批/预取/抽取/校验/落待审接入
+let memoryDistill = null;
+try {
+  memoryDistill = require("./lib/memory-distill")({
+    baseDir: __dirname,
+    addCompactionLog: addCompactionLog,
+    persistCompactionLogs: persistCompactionLogs,
+  });
+} catch (err) {
+  console.warn("[memory-distill] 初始化失败，蒸馏停用:", err.message);
+}
+
 // 2026-09-28：V1 记忆池删除——旧池静默迁移（startMemoryBackgroundMigration）与 routes/memory-pool 挂载已移除
 
 // 记忆流水线 judge 判定提示词（提示词页配置，2026-09-19）
@@ -3898,6 +3911,51 @@ app.post("/admin/reparse/config", { preHandler: basicAuth }, async (req, reply) 
     if (b.reparse_merge_max_chars !== undefined) patch.reparse_merge_max_chars = Number(b.reparse_merge_max_chars) || 8000;
     reply.send(saveReparseConfig(patch));
   } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+// ========================
+// 记忆蒸馏配置 / 手动触发 / 状态（1002 记忆改造 §8 3.1）
+// ========================
+function requireDistill(reply) {
+  if (memoryDistill) return true;
+  reply.code(500).send({ error: "蒸馏模块未初始化" });
+  return false;
+}
+
+app.get("/admin/memory-distill/config", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireDistill(reply)) return;
+  try { reply.send(memoryDistill.readConfig()); }
+  catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+app.post("/admin/memory-distill/config", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireDistill(reply)) return;
+  try {
+    const b = req.body || {};
+    const patch = {};
+    if (b.enabled !== undefined) patch.enabled = !!b.enabled;
+    if (b.time !== undefined) patch.time = String(b.time);
+    if (b.batch_size !== undefined) patch.batch_size = Number(b.batch_size);
+    reply.send(memoryDistill.saveConfig(patch));
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+// 立即跑一次：不受 enabled 约束（关着也能手动跑）；单飞，已在跑返回 409
+app.post("/admin/memory-distill/run", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireDistill(reply)) return;
+  try {
+    if (memoryDistill.status().running) {
+      return reply.code(409).send({ error: "已有蒸馏在跑", status: memoryDistill.status() });
+    }
+    const r = await memoryDistill.runNow("manual");
+    reply.send(r);
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+app.get("/admin/memory-distill/status", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireDistill(reply)) return;
+  try { reply.send(memoryDistill.status()); }
+  catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
 // ========================
@@ -7014,6 +7072,7 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err, address) => {
     try {
       wakeScheduler.start();
       wakeUpLastHeartbeat = Date.now();
+      try { if (memoryDistill) memoryDistill.start(); } catch (e) { console.error("[memory-distill] 启动失败:", e && e.message); }
       console.log('心跳状态已恢复');
     } catch (e) {
       console.error("[wake-scheduler] 启动失败:", e && e.message);

@@ -131,6 +131,31 @@
        <button type="button" class="mp-btn primary mp-add-ghost" onclick="openMemPoolAdd()" style="flex-shrink:0">＋ 新增记忆</button>
      </div>
    </div>
+   <div class="card" data-collapse-id="distill-config" data-default="collapsed">
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆蒸馏 · 定时设置</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+     <div class="hint-card">
+       <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px;">每天在设定时间把「涵的日记」分批喂给模型抽取记忆候选，产出全部进待审队列等你裁决，不会直接入库。开关关掉就不自动跑；「立即跑一次」不受开关约束，随时可以手动跑。保存后写入 data/memory_distill_config.json，立即生效。</div>
+     </div>
+     <div class="card-body">
+       <div class="cc-cfg-grid">
+         <label class="cc-cfg-item"><span>自动蒸馏</span>
+           <span class="switch"><input type="checkbox" id="distill-enabled"><span class="slider"></span></span>
+         </label>
+         <label class="cc-cfg-item"><span>每天运行时间</span>
+           <input type="time" id="distill-time" step="60" style="width:120px">
+         </label>
+         <label class="cc-cfg-item"><span>每批日记篇数</span>
+           <input type="number" id="distill-batch-size" min="1" max="20" step="1" style="width:80px">
+         </label>
+       </div>
+       <div class="cc-cfg-btns">
+         <button type="button" class="cc-btn primary" onclick="saveDistillConfig()">保存</button>
+         <button type="button" class="cc-btn secondary" onclick="loadDistillConfig()">重新载入</button>
+         <button type="button" class="cc-btn" id="distill-run-btn" onclick="runDistillNow()">立即跑一次</button>
+       </div>
+       <div id="distill-config-msg" class="cc-cfg-msg"></div>
+     </div>
+   </div>
    <div id="mem-mempool-wrap">
       <div class="mp-head">
         <div id="mempool-clean-msg" style="width:100%;font-size:11px;color:var(--text3);min-height:0;margin-top:0"></div>
