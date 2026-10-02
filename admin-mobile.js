@@ -3095,26 +3095,14 @@ function ccNumLiveCheck(input, max){
    document.querySelectorAll('.tab-item').forEach(el=>el.classList.remove('active'));
    document.getElementById('tab-'+name).classList.add('active');
    document.querySelector('.tab-item[data-tab="'+name+'"]').classList.add('active');
-  if(name==='memory'){ if(!window.__memPoolInited){ initMemPoolView(); window.__memPoolInited=true; } loadReviewQueue(); renderMemStatCards(); }
+  if(name==='memory'){ if(!window.__memPoolInited){ initMemPoolView(); window.__memPoolInited=true; } loadReviewQueue(); }
   if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
   if(name==='prompts'){loadWakePrompt();loadContextDigestPrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadReparsePrompt();loadJudgePrompt();loadDistillPrompt();loadSummaryPrompt();loadBackfillPrompt();}
-  if(name==='config'){loadToolsConfig(); loadCrossInjectConfig(); loadMemStatCardsForConfig();
+  if(name==='config'){loadToolsConfig(); loadCrossInjectConfig();
     // 2026-10-01 修复：压缩参数配置卡在配置 tab，但值依赖压缩预览先加载——原加载链只在压缩 tab/换会话/压缩操作后触发，
     // 直接进配置 tab（含刷新后恢复停留在配置 tab）时 preview 从未拉取，十二个输入框静默全空
     if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompactionConfig(); }
   }
-  }
-
-  // 1003：配置页顶的「记忆库」卡片数据源分散在三个接口（pool-view / review queue / similar-groups），
-  // 且记忆池页可能还没被访问过 → 直接拉一遍再重绘。三个都是无副作用 GET，可并发。
-  async function loadMemStatCardsForConfig(){
-    if(window.__memPoolData) window.__memActiveTotal=(window.__memPoolData.stats||{}).active;
-    renderMemStatCards();
-    await Promise.all([
-      loadReviewQueue().catch(function(){}),
-      loadSimilarGroups().catch(function(){}),
-    ]);
-    renderMemStatCards();
   }
  
    function renderPushLog(d){
@@ -3961,9 +3949,21 @@ function ccNumLiveCheck(input, max){
       return ra-rb || String(b.updated_at||'').localeCompare(String(a.updated_at||''));
     });
     window.__memPoolItems=items;
-    // 1003：统计卡片已搬到配置页顶部，这里只更新数据缓存，由 renderMemStatCards 统一重绘
-    window.__memActiveTotal=stats.active;
-    renderMemStatCards();
+    const st=document.getElementById('mempool-stats');
+    if(st){
+      st.innerHTML=''
+        +'<div class="mp-stat-cards">'
+        +'<div class="mp-stat-card'+(window.__memShowActive?' on':'')+'" onclick="toggleMemPoolActive()" role="button" title="只看活跃记忆；再点回到全部">'
+          +'<div class="mp-stat-card-label">活跃</div><div class="mp-stat-card-num">'+stats.active+'</div>'
+        +'</div>'
+        +'<div class="mp-stat-card'+(window.__memShowReview?' on':'')+'" onclick="toggleMemPoolReview()" role="button" title="人工裁决解析出的记忆候选：通过入库 / 驳回">'
+          +'<div class="mp-stat-card-label">待审</div><div class="mp-stat-card-num">'+(window.__reviewTotal!=null?window.__reviewTotal:'…')+'</div>'
+        +'</div>'
+        +'<div class="mp-stat-card'+(window.__memShowSimilar?' on':'')+'" onclick="toggleMemPoolSimilar()" role="button" title="向量相近的记忆一组一组列出，挑重复的沉底">'
+          +'<div class="mp-stat-card-label">相似</div><div class="mp-stat-card-num">'+(window.__similarGroupCount!=null?window.__similarGroupCount:'…')+'</div>'
+        +'</div>'
+        +'</div>';
+    }
     const el=document.getElementById('mempool-list');
     if(!el)return;
     const ctr=document.getElementById('mempool-controls');
@@ -4144,40 +4144,6 @@ function ccNumLiveCheck(input, max){
   }
   function rerenderMemPoolView(){ if(window.__memShowReview){ loadReviewQueue(); return; } if(window.__memPoolData){ renderMemPool(window.__memPoolData); } else { loadMemPool(); } }
   // 0927 统计卡片（活跃）：开关式切换——点一下只看活跃，再点回到全部；进入时下拉同步回「最新」
-  // 1003：三张统计卡片（活跃/待审/相似）从记忆池页顶搬到配置页顶部。
-  // 抽成独立渲染函数：两个页面容器都渲染（当前只有配置页 config-mem-stats 有容器，
-  // 记忆池页已移除 mempool-stats），任一页数据刷新后调一次即可两处同步。
-  function renderMemStatCards(){
-    const el=document.getElementById('config-mem-stats');
-    if(!el)return;
-    el.innerHTML=''
-      +'<div class="mp-stat-cards">'
-      +'<div class="mp-stat-card'+(window.__memShowActive?' on':'')+'" onclick="jumpMemPool(\'active\')" role="button" title="只看活跃记忆；再点回到全部">'
-        +'<div class="mp-stat-card-label">活跃</div><div class="mp-stat-card-num">'+(window.__memActiveTotal!=null?window.__memActiveTotal:'…')+'</div>'
-      +'</div>'
-      +'<div class="mp-stat-card'+(window.__memShowReview?' on':'')+'" onclick="jumpMemPool(\'review\')" role="button" title="人工裁决解析出的记忆候选：通过入库 / 驳回">'
-        +'<div class="mp-stat-card-label">待审</div><div class="mp-stat-card-num">'+(window.__reviewTotal!=null?window.__reviewTotal:'…')+'</div>'
-      +'</div>'
-      +'<div class="mp-stat-card'+(window.__memShowSimilar?' on':'')+'" onclick="jumpMemPool(\'similar\')" role="button" title="向量相近的记忆一组一组列出，挑重复的沉底">'
-        +'<div class="mp-stat-card-label">相似</div><div class="mp-stat-card-num">'+(window.__similarGroupCount!=null?window.__similarGroupCount:'…')+'</div>'
-      +'</div>'
-      +'</div>';
-  }
-  // 配置页点卡片 → 切到记忆池页并落到对应视图。
-  // 不直接调 toggle*：那些函数是「取反」语义，从配置页进来时状态未知，取反会跳到相反视图。
-  function jumpMemPool(mode){
-    window.__memShowActive=false; window.__memShowPinned=false;
-    window.__memShowSunk=false; window.__memShowReview=false; window.__memShowSimilar=false;
-    if(mode==='active') window.__memShowActive=true;
-    else if(mode==='review') window.__memShowReview=true;
-    else if(mode==='similar') window.__memShowSimilar=true;
-    renderMemStatCards();
-    switchTab('memory');
-    // switchTab 里 loadReviewQueue 会覆盖 __reviewTotal，落到记忆页后再重绘一次保证数字同步
-    if(mode==='review'){ loadReviewQueue(); rerenderMemPoolView(); }
-    else if(mode==='similar'){ loadSimilarGroups().then(function(){ rerenderMemPoolView(); }); }
-    else rerenderMemPoolView();
-  }
   function toggleMemPoolActive(){
     window.__memShowActive=!window.__memShowActive;
     if(window.__memShowActive){ window.__memShowPinned=false; window.__memShowSunk=false; window.__memShowReview=false; window.__memShowSimilar=false; const so=document.getElementById('mempool-sort'); if(so) so.value='recent'; }

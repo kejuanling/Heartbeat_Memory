@@ -42,14 +42,6 @@
 
 <!-- Tab 2: 配置 -->
 <div class="tab-content" id="tab-config">
-   <div class="card" data-collapse-id="memory-lib-overview" data-default="expanded">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆库</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
-     <div class="hint-card">
-       <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px;">三个数字分别是当前活跃记忆数、待你裁决的候选数、按语义向量判定为相近的记忆组数。点卡片可跳到记忆库对应视图。</div>
-     </div>
-     <div id="config-mem-stats"><span class="mp-stat">统计中...</span></div>
-   </div>
-
    <div class="card"><div class="card-title">环境变量</div><div id="env-list"></div>
      <button type="button" class="btn btn-primary" onclick="openEnvEditor()">编辑环境变量</button>
    </div>
@@ -221,7 +213,8 @@
       <div class="mp-head">
         <div id="mempool-clean-msg" style="width:100%;font-size:11px;color:var(--text3);min-height:0;margin-top:0"></div>
       </div>
-       <div class="mp-controls" id="mempool-controls">
+       <div id="mempool-stats" class="mp-stats" style="margin-top:14px"><span class="mp-stat">统计中...</span></div>
+      <div class="mp-controls" id="mempool-controls">
         <input type="text" id="mempool-search" placeholder="搜索记忆（关键词）..." oninput="mempoolSearchInput(this.value)">
         <select id="mempool-cat" onchange="loadMemPool()"><option value="">全部分类</option></select>
         <select id="mempool-sort" onchange="loadMemPool()"><option value="recent">最新</option><option value="oldest">最旧</option><option value="pinned">已pin</option><option value="sunk">已沉底</option></select>
