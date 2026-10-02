@@ -3096,6 +3096,7 @@ function ccNumLiveCheck(input, max){
    document.getElementById('tab-'+name).classList.add('active');
    document.querySelector('.tab-item[data-tab="'+name+'"]').classList.add('active');
   if(name==='memory'){ if(!window.__memPoolInited){ initMemPoolView(); window.__memPoolInited=true; } loadReviewQueue(); }
+  if(name!=='config' && typeof stopBackfillWatch==='function'){ stopBackfillWatch(); }
   if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
   if(name==='prompts'){loadWakePrompt();loadContextDigestPrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadReparsePrompt();loadJudgePrompt();loadDistillPrompt();loadSummaryPrompt();loadBackfillPrompt();}
   if(name==='config'){loadToolsConfig(); loadCrossInjectConfig();
@@ -3792,6 +3793,8 @@ function ccNumLiveCheck(input, max){
         }else t+=' \n还没跑过。';
         if(s.last_error) t+=' \n上次失败：'+s.last_error;
         msg.textContent=t;
+        // 1003-05③：进页面/重新载入时若后台正在跑（切走再回来、或手动刷新），自动接上进度轮询
+        if(s.running) startBackfillWatch(msg);
       }
     }catch(e){ if(msg) msg.textContent='读取失败: '+e.message; }
   }
@@ -3813,14 +3816,34 @@ function ccNumLiveCheck(input, max){
       loadBackfillConfig();
     }catch(e){ if(msg) msg.textContent='保存失败: '+e.message; toast('保存失败: '+e.message); }
   }
+  // 1003-05①：run 是长耗时同步接口（单批约 2-6 分钟），nginx /heartbeat/ 读超时 300s。
+  // 超时后 nginx 返回自己的 HTML 错误页，原代码直接 r.json() 会抛 "Unexpected token '<'"，
+  // 而后端其实已在后台跑完并推进了 done——报错误导用户重复点、白花钱。
+  // 改为：先取 text 再尝试解析；解析失败按内容分流，并回查 /status 判定任务真实结果。
+  async function parseRunResponse(res){
+    const txt = await res.text();
+    try { return { ok:true, data:JSON.parse(txt) }; }
+    catch(e){
+      const head=txt.slice(0,200).toLowerCase();
+      const isHtml=/<!doctype|<html|<head|<title|502|504|timeout/.test(head);
+      return { ok:false, html:isHtml, status:res.status, raw:txt.slice(0,120) };
+    }
+  }
   async function runBackfillNow(dry){
     const btn=document.getElementById(dry?'bf-dry-btn':'bf-run-btn');
     const msg=document.getElementById('bf-config-msg');
     if(btn){ btn.disabled=true; btn.textContent='跑中…'; }
-    if(msg) msg.textContent=dry?'正在组装材料（不调模型）…':'正在跑一批（约 2 分钟，别关页面）…';
+    if(msg) msg.textContent=dry?'正在组装材料（不调模型）…':'正在跑一批（约 2-6 分钟，别关页面）…';
+    if(!dry) startBackfillWatch(msg);
     try{
       const r=await fetch(ADMIN_API+'/memory-backfill/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dry_run:!!dry})});
-      const d=await r.json();
+      const parsed=await parseRunResponse(r);
+      if(!parsed.ok){
+        // 响应不是 JSON（多为 nginx 超时/网关错误页）——回查真实状态再下结论
+        await reportRunUncertain(msg, r.status);
+        return;
+      }
+      const d=parsed.data;
       if(d.error){ if(msg) msg.textContent='跑失败: '+d.error; toast('跑失败'); }
       else if(d.mode==='dry_run'){ if(msg) msg.textContent='dryRun：本批 '+d.count+' 条记忆，材料 '+d.prompt_chars+' 字（未调模型）'; }
       else{
@@ -3831,11 +3854,60 @@ function ccNumLiveCheck(input, max){
         if(msg) msg.textContent='完成（'+Math.round((d.duration_ms||0)/1000)+'s）：本批 '+d.count+' 条 → 待审 '+d.queued+' 条 / 建议沉底 '+d.sink+' 条'+(parts.length?'\n'+parts.join('\n'):'');
         toast('跑完一批');
       }
-    }catch(e){ if(msg) msg.textContent='跑失败: '+e.message; }
+    }catch(e){
+      // 网络层异常（断网/连接被掐）同样不代表任务失败，走同一套回查
+      await reportRunUncertain(msg, 0);
+    }
     finally{
+      stopBackfillWatch();
       try{ await loadBackfillConfig(); }catch(_){}
       if(btn){ btn.disabled=false; btn.textContent=dry?'试试组装（不调模型）':'立即跑一批'; }
     }
+  }
+  // 回查 /status 判定「请求失败但任务是否真的跑完」，并给出可执行的下一步
+  async function reportRunUncertain(msg, status){
+    if(msg) msg.textContent='连接中断（HTTP '+(status||'网络异常')+'），正在核对后台是否已跑完…';
+    let s=null;
+    try{
+      const r=await fetch(ADMIN_API+'/memory-backfill/status');
+      const p=await parseRunResponse(r);
+      if(p.ok) s=p.data;
+    }catch(_){}
+    if(s){
+      const runningNow = !!s.running;
+      if(runningNow){
+        if(msg) msg.textContent='任务仍在后台运行中，请稍等几分钟后点「重新载入」看进度——不要重复点，否则会并发跑多批。';
+      }else if(s.last_run_at){
+        const lr=s.last_run_result||{};
+        if(msg) msg.textContent='连接中断，但后台已跑完（'+new Date(s.last_run_at).toLocaleString('zh-CN')+'）：本批 '+(lr.count||0)+' 条 → 待审 '+(lr.queued||0)+' 条 / 建议沉底 '+(lr.sink||0)+' 条\n已处理 '+s.done_count+' 条 / 还剩 '+s.remaining+' 条';
+        toast('已在后台完成');
+      }else{
+        if(msg) msg.textContent='连接中断，且后台没有本次运行记录——任务可能未启动或已失败，可点「重新载入」看最后错误。';
+      }
+    }else{
+      if(msg) msg.textContent='连接中断（HTTP '+(status||'网络异常')+'），且无法回查后台状态。请点「重新载入」确认进度，不要重复点。';
+    }
+  }
+  // 1003-05③：跑批期间轮询 /status，让用户看到实时进度，而不必干等请求超时
+  function startBackfillWatch(msg){
+    stopBackfillWatch();
+    const tick=async function(){
+      try{
+        const r=await fetch(ADMIN_API+'/memory-backfill/status');
+        const p=await parseRunResponse(r);
+        if(!p.ok) return;
+        const s=p.data;
+        if(msg && s.running){
+          msg.textContent='后台运行中… 已处理 '+s.done_count+' 条 / 还剩 '+s.remaining+' 条（可切走，本页会继续刷新）';
+        }
+        if(!s.running){ stopBackfillWatch(); }
+      }catch(_){}
+    };
+    window.__bfWatchTimer=setInterval(tick, 8000);
+    tick();
+  }
+  function stopBackfillWatch(){
+    if(window.__bfWatchTimer){ clearInterval(window.__bfWatchTimer); window.__bfWatchTimer=null; }
   }
   // ============ 老数据重跑·提示词（留空 = 回落内置默认） ============
   async function loadBackfillPrompt(){
