@@ -1917,7 +1917,14 @@ function applyReplacements(messages, source) {
     searchStart = ei + 1;
   });
 
-  if (replacements.length === 0) { logNoReplace(out.length, source); return messages; }
+  if (replacements.length === 0) {
+    // 1002-21：增量路径下 buildIncrementalContext 已摘要化的块不在此重复记 replaced:0
+    // （增量摘要日志由 buildIncrementalContext 写入，避免替换记录被"0 块"覆盖真实替换）。
+    // 非增量路径（messages 无增量摘要消息）保持原样留痕，便于排查哪些请求未触发替换。
+    const hasIncrementalSummary = out.some(isReplacementMemoryMessage);
+    if (!hasIncrementalSummary) logNoReplace(out.length, source);
+    return messages;
+  }
   replacements.sort(function (a, b) { return a.startIdx - b.startIdx; });
 
   const final = [];
@@ -3024,6 +3031,33 @@ function buildIncrementalContext(sessionId, timeline) {
     if (loc.e > lastEnd) lastEnd = loc.e;
   }
   out.tailStart = lastEnd + 1;
+  // 1002-21：增量路径真实替换留痕。此前增量摘要完成后 applyReplacements 兜底对已摘要化消息
+  // 定位不到原文锚点 → 记 replaced:0，替换记录被"0 块"噪声覆盖真实替换数。
+  // 现在由本处按实际摘要化的块数写日志；applyReplacements 兜底处检测到增量已处理则静默。
+  const appliedBlocks = located.filter(function (l) { return !hiddenIds.has(l.it.id) && !truncatedIds.has(l.it.id); });
+  if (appliedBlocks.length > 0) {
+    try {
+      appendReplaceLog({
+        time: nowIso(),
+        source: "对话",
+        session: curSession,
+        before: tl.length,
+        after: out.head.length + (tl.length - out.tailStart),
+        replaced: appliedBlocks.length,
+        applied: appliedBlocks.map(function (l) {
+          return {
+            id: l.it.id,
+            title: l.it.title || "",
+            startIdx: l.s,
+            endIdx: l.e,
+            contentLen: String(recordText(l.it) || "").length
+          };
+        })
+      });
+    } catch (e) {
+      console.warn("[context-replacements] 增量替换日志记录失败:", e.message);
+    }
+  }
   return out;
 }
 
