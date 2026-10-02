@@ -184,6 +184,31 @@
        <div id="summary-config-msg" class="cc-cfg-msg"></div>
      </div>
    </div>
+
+   <div class="card" data-collapse-id="backfill-config" data-default="collapsed">
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>老数据重跑 · 逐批整理</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+     <div class="hint-card">
+       <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px;">把记忆池里已有的活跃记忆一批一批过一遍，让模型判断该怎么整理：润色改写 / 补充信息 / 合并碎片 / 补抽漏掉的 / 建议沉底。**产出一律进待审**，不会自己动池子。每条都会先回原文取证，原文对不上的一律不动。「建议沉底」是删除级动作，不进待审，单独列出来等你定夺。</div>
+     </div>
+     <div class="card-body">
+       <div class="cc-cfg-grid">
+         <label class="cc-cfg-item"><span>每晚自动跑一批</span>
+           <span class="switch"><input type="checkbox" id="bf-enabled"><span class="slider"></span></span>
+         </label>
+         <label class="cc-cfg-item"><span>跑的时间</span>
+           <input type="time" id="bf-time" step="60" style="width:120px">
+         </label>
+         <label class="cc-cfg-item"><span>每批条数</span>
+           <input type="number" id="bf-batch-size" min="1" max="60" step="1" style="width:90px">
+         </label>
+       </div>
+       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+         <button type="button" class="cc-btn" id="bf-run-btn" onclick="runBackfillNow(false)">立即跑一批</button>
+         <button type="button" class="cc-btn secondary" id="bf-dry-btn" onclick="runBackfillNow(true)">试试组装（不调模型）</button>
+       </div>
+       <div id="bf-config-msg" class="cc-cfg-msg"></div>
+     </div>
+   </div>
    <div id="mem-mempool-wrap">
       <div class="mp-head">
         <div id="mempool-clean-msg" style="width:100%;font-size:11px;color:var(--text3);min-height:0;margin-top:0"></div>
@@ -379,6 +404,23 @@
           <button type="button" class="cc-btn primary" onclick="saveSummaryPrompt()">保存两块提示词</button>
           <button type="button" class="cc-btn secondary" onclick="loadSummaryPrompt()">重新载入</button>
           <button type="button" class="cc-btn secondary" onclick="resetSummaryPrompt()">恢复内置默认</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" data-collapse-id="bf-prompt-config" data-default="collapsed">
+      <div class="card-title collapsible" onclick="toggleCard(this)"><span>老数据重跑·整理提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+      <div class="card-body">
+        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:6px;">决定模型怎么对待那些老记忆：什么该润色、什么该合并、什么该沉底。可用占位符：${MEM_COUNT} 本批条数、${MATERIALS} 记忆与原文清单。★ 内置默认里的铁律「不确定就 keep」「原文对不上就 keep」别删——删了它会开始乱改。</div>
+        <div class="cc-cfg-msg" id="bf-prompt-msg" style="margin-bottom:8px"></div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">System 提示词（动作定义 + 铁律）</div>
+        <textarea id="bf-sys-prompt" rows="14" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;line-height:1.6;margin-bottom:10px;min-height:260px;max-height:460px;resize:vertical;"></textarea>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">User 提示词</div>
+        <textarea id="bf-user-prompt" rows="8" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;line-height:1.6;margin-bottom:10px;resize:vertical;"></textarea>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button type="button" class="cc-btn primary" onclick="saveBackfillPrompt()">保存提示词</button>
+          <button type="button" class="cc-btn secondary" onclick="loadBackfillPrompt()">重新载入</button>
+          <button type="button" class="cc-btn secondary" onclick="resetBackfillPrompt()">恢复内置默认</button>
         </div>
       </div>
     </div>

@@ -3097,7 +3097,7 @@ function ccNumLiveCheck(input, max){
    document.querySelector('.tab-item[data-tab="'+name+'"]').classList.add('active');
   if(name==='memory'){ if(!window.__memPoolInited){ initMemPoolView(); window.__memPoolInited=true; } loadReviewQueue(); }
   if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
-  if(name==='prompts'){loadWakePrompt();loadContextDigestPrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadReparsePrompt();loadJudgePrompt();loadDistillPrompt();loadSummaryPrompt();}
+  if(name==='prompts'){loadWakePrompt();loadContextDigestPrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadReparsePrompt();loadJudgePrompt();loadDistillPrompt();loadSummaryPrompt();loadBackfillPrompt();}
   if(name==='config'){loadToolsConfig(); loadCrossInjectConfig();
     // 2026-10-01 修复：压缩参数配置卡在配置 tab，但值依赖压缩预览先加载——原加载链只在压缩 tab/换会话/压缩操作后触发，
     // 直接进配置 tab（含刷新后恢复停留在配置 tab）时 preview 从未拉取，十二个输入框静默全空
@@ -3770,6 +3770,104 @@ function ccNumLiveCheck(input, max){
     }
   }
 
+  // ============ 老数据重跑配置（1002 记忆改造 §8 第 5 项：逐批处理已有活跃记忆，产出一律进待审） ============
+  async function loadBackfillConfig(){
+    const msg=document.getElementById('bf-config-msg');
+    try{
+      const r=await fetch(ADMIN_API+'/memory-backfill/status');
+      const s=await r.json();
+      if(s.error){ if(msg) msg.textContent='读取失败: '+s.error; return; }
+      const en=document.getElementById('bf-enabled'); if(en) en.checked=!!s.enabled;
+      const tm=document.getElementById('bf-time'); if(tm) tm.value=s.time||'04:00';
+      const bs=document.getElementById('bf-batch-size'); if(bs) bs.value=(s.batch_size!=null?s.batch_size:15);
+      if(msg){
+        let t='已处理 '+s.done_count+' 条 / 还剩 '+s.remaining+' 条';
+        if(s.sink_suggestions) t+=' · 建议沉底 '+s.sink_suggestions+' 条待你定夺';
+        if(s.last_run_at){
+          const lr=s.last_run_result||{};
+          t+=' \n上次运行：'+new Date(s.last_run_at).toLocaleString('zh-CN')+'（本批 '+lr.count+' 条 → 待审 '+lr.queued+' 条 / 建议沉底 '+lr.sink+' 条）';
+        }else t+=' \n还没跑过。';
+        if(s.last_error) t+=' \n上次失败：'+s.last_error;
+        msg.textContent=t;
+      }
+    }catch(e){ if(msg) msg.textContent='读取失败: '+e.message; }
+  }
+  async function saveBackfillConfig(){
+    const msg=document.getElementById('bf-config-msg');
+    if(msg) msg.textContent='保存中...';
+    const en=document.getElementById('bf-enabled');
+    const tm=document.getElementById('bf-time');
+    const bs=document.getElementById('bf-batch-size');
+    const time=(tm&&tm.value)||'04:00';
+    if(!/^\d{1,2}:\d{2}$/.test(time)){ if(msg) msg.textContent='时间格式不对（应为 HH:MM）'; toast('时间格式不对'); return; }
+    const payload={enabled:en?!!en.checked:false,time:time,batch_size:Math.max(1,Math.min(60,Number(bs&&bs.value)||15))};
+    try{
+      const r=await fetch(ADMIN_API+'/memory-backfill/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const d=await r.json();
+      if(d.error){ if(msg) msg.textContent='保存失败: '+d.error; toast('保存失败: '+d.error); return; }
+      if(msg) msg.textContent='已保存：'+(d.enabled?('每天 '+d.time+' 跑一批（每批 '+d.batch_size+' 条）'):'自动重跑已关闭（仍可手动跑一批）')+'。';
+      toast('老数据重跑设置已保存');
+      loadBackfillConfig();
+    }catch(e){ if(msg) msg.textContent='保存失败: '+e.message; toast('保存失败: '+e.message); }
+  }
+  async function runBackfillNow(dry){
+    const btn=document.getElementById(dry?'bf-dry-btn':'bf-run-btn');
+    const msg=document.getElementById('bf-config-msg');
+    if(btn){ btn.disabled=true; btn.textContent='跑中…'; }
+    if(msg) msg.textContent=dry?'正在组装材料（不调模型）…':'正在跑一批（约 2 分钟，别关页面）…';
+    try{
+      const r=await fetch(ADMIN_API+'/memory-backfill/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dry_run:!!dry})});
+      const d=await r.json();
+      if(d.error){ if(msg) msg.textContent='跑失败: '+d.error; toast('跑失败'); }
+      else if(d.mode==='dry_run'){ if(msg) msg.textContent='dryRun：本批 '+d.count+' 条记忆，材料 '+d.prompt_chars+' 字（未调模型）'; }
+      else{
+        const parts=[];
+        (d.items||[]).forEach(function(it){
+          parts.push((it.action==='sink'?'沉底':'待审')+'：'+String(it.text||it.id||'').slice(0,40));
+        });
+        if(msg) msg.textContent='完成（'+Math.round((d.duration_ms||0)/1000)+'s）：本批 '+d.count+' 条 → 待审 '+d.queued+' 条 / 建议沉底 '+d.sink+' 条'+(parts.length?'\n'+parts.join('\n'):'');
+        toast('跑完一批');
+      }
+    }catch(e){ if(msg) msg.textContent='跑失败: '+e.message; }
+    finally{
+      try{ await loadBackfillConfig(); }catch(_){}
+      if(btn){ btn.disabled=false; btn.textContent=dry?'试试组装（不调模型）':'立即跑一批'; }
+    }
+  }
+  // ============ 老数据重跑·提示词（留空 = 回落内置默认） ============
+  async function loadBackfillPrompt(){
+    const m=document.getElementById('bf-prompt-msg');
+    try{
+      const r=await fetch(ADMIN_API+'/memory-backfill/prompt');
+      const c=await r.json();
+      if(c.error) throw new Error(c.error);
+      const s=document.getElementById('bf-sys-prompt'); if(s) s.value=c.system_prompt||c.default_system_prompt||'';
+      const u=document.getElementById('bf-user-prompt'); if(u) u.value=c.user_prompt||c.default_user_prompt||'';
+      if(m) m.textContent=c.custom_set?'当前为自定义版本；「恢复内置默认」可回退。':'当前为内置默认（自定义为空）。';
+    }catch(e){ if(m) m.textContent='读取重跑提示词失败: '+e.message; }
+  }
+  async function saveBackfillPrompt(){
+    const m=document.getElementById('bf-prompt-msg');
+    const g=function(id){ const el=document.getElementById(id); return el?el.value:''; };
+    try{
+      const r=await fetch(ADMIN_API+'/memory-backfill/prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({system_prompt:g('bf-sys-prompt').trim(),user_prompt:g('bf-user-prompt').trim()})});
+      const d=await r.json();
+      if(d.error){ if(m) m.textContent='保存失败: '+d.error; toast('保存失败: '+d.error); return; }
+      if(m) m.textContent='已保存，下一批重跑即生效。';
+      toast('重跑提示词已保存');
+    }catch(e){ if(m) m.textContent='保存失败: '+e.message; }
+  }
+  async function resetBackfillPrompt(){
+    if(!confirm('恢复内置默认的老数据重跑提示词？自定义内容会被清空。'))return;
+    const m=document.getElementById('bf-prompt-msg');
+    try{
+      const r=await fetch(ADMIN_API+'/memory-backfill/prompt',{method:'DELETE'});
+      const d=await r.json();
+      if(d.error){ if(m) m.textContent='恢复失败: '+d.error; return; }
+      await loadBackfillPrompt();
+      toast('已恢复内置默认');
+    }catch(e){ if(m) m.textContent='恢复失败: '+e.message; }
+  }
   // ============ 记忆池（现走 Memory V2，编辑/筛选只认 fact/rule 两类；1002-14 删 quote/milestone） ============
   // 存量兼容：0912 五类（关于她/认账/拓本/压缩摘要/对话碎片）与更早旧四类仍会出现在列表里，
   // 统一暗灰显示、由后台清洗迁移逐步消化；颜色表保留两套键。
@@ -3786,6 +3884,7 @@ function ccNumLiveCheck(input, max){
     loadMemPool();
     loadDistillConfig();
     loadSummaryConfig();
+    loadBackfillConfig();
   }
 
   function populateMemPoolCatOptions(){
@@ -4198,6 +4297,7 @@ function ccNumLiveCheck(input, max){
     if(!q.length){ el.innerHTML='<div class="mp-empty">待审队列空，候选都处理完了</div>'; return; }
     const multi=!!window.__reviewMultiSel;
     const ORIGIN={promotion:'压缩块解析',manual:'手动提交',memory_tag:'AI 标签'};
+    const BF_ACTION={update:'润色改写',supplement:'补充信息',merge:'合并碎片',create:'补抽新记忆',sink:'建议沉底'};
     let html='<div class="mp-review-toolbar">'
       +'<span class="mp-review-total">待审候选 <b>'+q.length+'</b> 条</span>'
       +'<button type="button" class="mp-btn'+(multi?' primary':'')+'" onclick="toggleReviewMultiSelect()">'+(multi?'取消多选':'多选')+'</button>'
@@ -4213,13 +4313,22 @@ function ccNumLiveCheck(input, max){
           +'<span class="mp-badges"><span class="mp-badge">待审</span></span>'
         +'</div>'
         +'<div class="mp-body">'+escapeHtml(c.text||'')+'</div>'
+        // 1002 第 5 项：老数据重跑的候选，改前改后同卡上下对照（②-A），并把动作与理由摆在最显眼处
+        +(c.backfill?'<div class="mp-merge" style="margin:8px 0 0;padding:8px;border:1px dashed var(--text3);border-radius:8px;font-size:12px;color:var(--text3);line-height:1.7">'
+          +'<div style="margin-bottom:6px"><span class="mp-badge" style="background:var(--accent);color:#fff">老数据重跑 · '+(BF_ACTION[c.backfill.action]||escapeHtml(String(c.backfill.action||'')))+'</span></div>'
+          +(c.backfill.old_text?'<div><span style="color:var(--mp-cat)">改前</span>：'+escapeHtml(c.backfill.old_text)+'</div>'
+            +'<div style="margin-top:4px;color:var(--accent)"><b>改后</b>：'+escapeHtml(c.text||'')+'</div>':'')
+          +(c.backfill.merge_ids&&c.backfill.merge_ids.length?'<div style="margin-top:4px">由 '+c.backfill.merge_ids.length+' 条合并（' +escapeHtml(String(c.backfill.merge_ids.join('、')))+'）——通过后旧条目要手动沉底</div>':'')
+          +(c.backfill.target_id?'<div style="margin-top:4px">目标条目 '+escapeHtml(String(c.backfill.target_id))+'——通过后旧条目要手动沉底</div>':'')
+          +(c.backfill.reason?'<div style="margin-top:4px">理由：'+escapeHtml(c.backfill.reason)+'</div>':'')
+        +'</div>':'')
         +(it.merge&&it.merge.merged_text?'<div class="mp-merge" style="margin:8px 0 0;padding:8px;border:1px dashed var(--text3);border-radius:8px;font-size:12px;color:var(--text3);line-height:1.7">'
           +'<div><span style="color:var(--mp-cat)">既有</span>：'+escapeHtml(it.merge.from_text||'')+'</div>'
           +'<div style="margin-top:4px"><span style="color:var(--mp-cat)">候选</span>：'+escapeHtml(c.text||'')+'</div>'
           +'<div style="margin-top:4px;color:var(--accent)"><b>合并后</b>：'+escapeHtml(it.merge.merged_text||'')+'</div>'
         +'</div>':'')
         +'<div class="mp-meta">'
-          +'<span>来源 '+(ORIGIN[c.origin]||escapeHtml(String(c.origin||'未知')))+'</span>'
+          +'<span>来源 '+(c.backfill?'老数据重跑':(ORIGIN[c.origin]||escapeHtml(String(c.origin||'未知'))))+'</span>'
           +(c.speaker?'<span>说话人 '+escapeHtml(c.speaker==='ai'?'谢':(c.speaker==='user'?'涵':String(c.speaker)))+'</span>':'')
           +(it.provenance&&it.provenance.msg_time?'<span>'+escapeHtml(String(it.provenance.msg_time).slice(0,16).replace('T',' '))+'</span>':'')
           +(it.created_at?'<span>'+escapeHtml(String(it.created_at).slice(0,10))+'</span>':'')

@@ -3511,6 +3511,7 @@ try {
 // 3.1 配置+调度骨架+手动触发；3.2 起分批/预取/抽取/校验/落待审接入
 let memoryDistill = null;
 let memorySummary = null;
+let memoryBackfill = null;
 try {
   memoryDistill = require("./lib/memory-distill")({
     baseDir: __dirname,
@@ -3533,6 +3534,20 @@ try {
       persistCompactionLogs: persistCompactionLogs,
     });
   } catch (err) { console.warn("[memory-summary] 初始化失败，两块总结停用:", err.message); }
+
+  // 老数据重跑（1002 记忆改造 §8 第 5 项）：逐批把已有活跃记忆过一遍，产出一律进待审；
+  // 五动作 update / supplement / merge / create 落待审，sink（沉底，删除级）写进独立建议列表。
+  try {
+    memoryBackfill = require("./lib/memory-backfill")({
+      baseDir: __dirname,
+      addCompactionLog: addCompactionLog,
+      persistCompactionLogs: persistCompactionLogs,
+      // 与蒸馏同源：context_search 的检索能力，回原文取证（原文对不上的一律不动）
+      searchContext: function (q, o) { return contextReplacements.searchContextEnhanced(q, o); },
+      // 3.6 同款落待审通道：Memory V2 admission 单例（promotion 通道一律进 review）
+      admission: memoryV2Admission,
+    });
+  } catch (err) { console.warn("[memory-backfill] 初始化失败，老数据重跑停用:", err.message); }
 
 // 2026-09-28：V1 记忆池删除——旧池静默迁移（startMemoryBackgroundMigration）与 routes/memory-pool 挂载已移除
 
@@ -4084,6 +4099,90 @@ app.delete("/admin/memory-summary/prompt", { preHandler: basicAuth }, async (req
       understanding_system_prompt: "", understanding_user_prompt: "",
     }));
   } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+// ========================
+// 老数据重跑（1002 记忆改造 §8 第 5 项）
+// ========================
+function requireBackfill(reply) {
+  if (memoryBackfill) return true;
+  reply.code(500).send({ error: "老数据重跑模块未初始化" });
+  return false;
+}
+
+app.get("/admin/memory-backfill/config", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireBackfill(reply)) return;
+  try { reply.send(memoryBackfill.readConfig()); }
+  catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+app.post("/admin/memory-backfill/config", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireBackfill(reply)) return;
+  try {
+    const b = req.body || {};
+    const patch = {};
+    if (b.enabled !== undefined) patch.enabled = !!b.enabled;
+    if (b.time !== undefined) patch.time = String(b.time);
+    if (b.batch_size !== undefined) patch.batch_size = Number(b.batch_size);
+    reply.send(memoryBackfill.saveConfig(patch));
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+// 跑一批：body.batch_size 可临时改批量；body.dry_run=true 只组装材料不调模型
+app.post("/admin/memory-backfill/run", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireBackfill(reply)) return;
+  try {
+    if (memoryBackfill.status().running) return reply.code(409).send({ error: "已有重跑在跑" });
+    const b = req.body || {};
+    const r = await memoryBackfill.runNow({ batch_size: b.batch_size, dryRun: !!b.dry_run });
+    reply.send(r);
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+app.get("/admin/memory-backfill/status", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireBackfill(reply)) return;
+  try { reply.send(memoryBackfill.status()); }
+  catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+// 建议沉底列表（sink 是删除级，不混进新增候选；这里只列，不自动执行）
+app.get("/admin/memory-backfill/sink-suggestions", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireBackfill(reply)) return;
+  try { reply.send(memoryBackfill.readSinkSuggestions()); }
+  catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+app.delete("/admin/memory-backfill/sink-suggestions/:id", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireBackfill(reply)) return;
+  try { reply.send(memoryBackfill.clearSinkSuggestion(req.params.id)); }
+  catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+// 重跑提示词：留空 = 回落内置默认；DELETE = 清空自定义
+app.get("/admin/memory-backfill/prompt", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireBackfill(reply)) return;
+  try {
+    const c = memoryBackfill.readPromptConfig();
+    reply.send({
+      system_prompt: c.system_prompt || "",
+      user_prompt: c.user_prompt || "",
+      default_system_prompt: memoryBackfill.defaultSystemPrompt(),
+      default_user_prompt: memoryBackfill.defaultUserPrompt(),
+      custom_set: !!(c.system_prompt || c.user_prompt),
+    });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+app.post("/admin/memory-backfill/prompt", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireBackfill(reply)) return;
+  try { reply.send(memoryBackfill.savePromptConfig(req.body || {})); }
+  catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+app.delete("/admin/memory-backfill/prompt", { preHandler: basicAuth }, async (req, reply) => {
+  if (!requireBackfill(reply)) return;
+  try { reply.send(memoryBackfill.savePromptConfig({ system_prompt: "", user_prompt: "" })); }
+  catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
 // ========================
@@ -7202,6 +7301,7 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err, address) => {
       wakeUpLastHeartbeat = Date.now();
       try { if (memoryDistill) memoryDistill.start(); } catch (e) { console.error("[memory-distill] 启动失败:", e && e.message); }
       try { if (memorySummary) memorySummary.start(); } catch (e) { console.error("[memory-summary] 启动失败:", e && e.message); }
+      try { if (memoryBackfill) memoryBackfill.start(); } catch (e) { console.error("[memory-backfill] 启动失败:", e && e.message); }
       console.log('心跳状态已恢复');
     } catch (e) {
       console.error("[wake-scheduler] 启动失败:", e && e.message);

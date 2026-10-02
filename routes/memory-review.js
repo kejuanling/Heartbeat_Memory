@@ -27,7 +27,12 @@ module.exports = function registerMemoryReviewRoutes(app, { basicAuth, admission
         speaker: q.draft.speaker || null,
         direction: q.draft.direction || null,
         origin: q.draft.origin,
+        // 1002 第 5 项：老数据重跑的动作元信息（action/old_text/merge_ids/target_id/reason），
+        // 管理台据此显示「改前 / 改后」对照——不映射出来前端只能看到光秃秃的新正文，没法审。
+        backfill: q.draft.backfill || null,
       },
+      // 0928 合并草稿：此前一直没被映射出来，管理台那段「既有 / 候选 / 合并后」对照是死代码
+      merge: q.merge || null,
       provenance: q.draft.provenance || null,
       reasons: q.details || [],
     }));

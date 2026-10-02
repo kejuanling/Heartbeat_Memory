@@ -283,6 +283,9 @@ function createAdmission(opts = {}) {
     for (const k of ["source", "scope", "valid_from", "valid_to", "sensitive", "triggers", "action_hint"]) {
       if (b[k] !== undefined) draft[k] = b[k];
     }
+    // 1002 第 5 项：老数据重跑的动作元信息（{action,target_id,merge_ids,old_text,reason,evidence}）。
+    // 只供待审队列展示「改前改后对照 / 由哪几条合并 / 为什么」——入库时 _buildEntry 忽略未知字段，不进 schema。
+    if (b.backfill !== undefined) draft.backfill = b.backfill;
 
     let execResult, auditRec;
     if (action === "review") {
