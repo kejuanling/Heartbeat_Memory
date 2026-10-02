@@ -35,6 +35,17 @@ const TEXT_MAX = 2000;
 const PROVENANCE_QUOTE_MAX = 200;
 const NOTE_MAX = 200;
 
+// ---- 1002 记忆改造 §8 第 4 项：schema 演进新增字段（全部可选，缺按默认值补，向后兼容） ----
+// source：这条记忆从哪来；scope：适用范围；valid_from/to：生效/失效时间
+// sensitive：高敏（注入前脱敏）；triggers：命中即优先浮现的触发词；action_hint：命中时该怎么做
+// last_hit_at：最后被检索命中时间（系统字段，评估用，写入方不可指定）
+const SOURCE_TYPES = ["diary", "paper", "chat", "distill", "backfill"];
+const SOURCE_REF_MAX = 200;
+const SCOPE_MAX = 200;
+const TRIGGER_MAX = 40;
+const TRIGGERS_MAX = 12;
+const ACTION_HINT_MAX = 300;
+
 // 状态机（13.txt 第四节）：非法迁移一律拒绝。
 //   active → superseded（原因必填：updated/merged/contradiction_resolved）
 //   active → archived（原因必填：retracted/archived）
@@ -217,6 +228,35 @@ function _buildEntry(input, cfg) {
     if (note && note.length > NOTE_MAX) throw new Error(`note 超长（>${NOTE_MAX}）`);
   }
 
+  // 1002 第 4 项：新增字段（全部可选；传了必须合法，非法报错而非静默丢弃）
+  let source = null;
+  if (input.source != null) {
+    const so = input.source;
+    if (!so || typeof so !== "object") throw new Error("source 必须是对象 {type, ref}");
+    if (!SOURCE_TYPES.includes(so.type)) throw new Error(`source.type 非法: ${so.type}（允许 ${SOURCE_TYPES.join("/")}）`);
+    const ref = strOrNull(so.ref);
+    if (ref && ref.length > SOURCE_REF_MAX) throw new Error(`source.ref 超长（>${SOURCE_REF_MAX}）`);
+    source = { type: so.type, ref };
+  }
+
+  const scope = strOrNull(input.scope);
+  if (scope && scope.length > SCOPE_MAX) throw new Error(`scope 超长（>${SCOPE_MAX}）`);
+
+  const valid_from = strOrNull(input.valid_from);
+  const valid_to = strOrNull(input.valid_to);
+  const sensitive = !!input.sensitive;
+
+  let triggers = [];
+  if (input.triggers != null) {
+    if (!Array.isArray(input.triggers)) throw new Error("triggers 必须是字符串数组");
+    const arr = input.triggers.map((t) => strOrNull(t)).filter(Boolean);
+    for (const t of arr) if (t.length > TRIGGER_MAX) throw new Error(`triggers 项超长（>${TRIGGER_MAX}）`);
+    triggers = [...new Set(arr)].slice(0, TRIGGERS_MAX);
+  }
+
+  const action_hint = strOrNull(input.action_hint);
+  if (action_hint && action_hint.length > ACTION_HINT_MAX) throw new Error(`action_hint 超长（>${ACTION_HINT_MAX}）`);
+
   const now = nowIso();
   return {
     id: newId(),
@@ -240,6 +280,14 @@ function _buildEntry(input, cfg) {
     superseded_at: null,
     related_memories,
     note,
+    source,
+    scope,
+    valid_from,
+    valid_to,
+    sensitive,
+    triggers,
+    action_hint,
+    last_hit_at: null, // 系统字段：检索命中时由 markHit 更新，写入方不可指定
   };
 }
 
@@ -295,12 +343,44 @@ function createStore(opts = {}) {
     if (!Array.isArray(rows)) {
       throw new Error(`memory_v2 集合格式非法（应为数组）: ${collectionPath}`);
     }
+    // 1002 第 4 项：存量条目补齐新增字段默认值（缺字段不报错），补齐后延迟落盘一次
+    if (hydrateRows(rows) > 0) scheduleFlush();
     return rows;
   }
 
   function flush() {
     if (readonly) return;
     atomicWriteJson(collectionPath, rows);
+  }
+
+  // 延迟合并落盘：2s 内的多次变更只写一次盘。用于 last_hit_at 打点与存量补字段迁移，
+  // 避免高频检索触发全量 flush。（进程内 timer 丢失最多丢一次打点，评估字段无伤）
+  let flushTimer = null;
+  function scheduleFlush() {
+    if (readonly || !rows) return;
+    if (flushTimer) return;
+    flushTimer = setTimeout(() => {
+      flushTimer = null;
+      try { flush(); } catch (_) { /* 打点落盘失败不影响主链路 */ }
+    }, 2000);
+    if (flushTimer.unref) flushTimer.unref();
+  }
+
+  // 向后兼容：老条目缺新增字段时在内存补齐默认值；返回补齐的字段数
+  function hydrateRows(arr) {
+    let missing = 0;
+    for (const e of arr) {
+      if (!e || typeof e !== "object") continue;
+      if (e.source === undefined) { e.source = null; missing++; }
+      if (e.scope === undefined) { e.scope = null; missing++; }
+      if (e.valid_from === undefined) { e.valid_from = null; missing++; }
+      if (e.valid_to === undefined) { e.valid_to = null; missing++; }
+      if (e.sensitive === undefined) { e.sensitive = false; missing++; }
+      if (!Array.isArray(e.triggers)) { e.triggers = []; missing++; }
+      if (e.action_hint === undefined) { e.action_hint = null; missing++; }
+      if (e.last_hit_at === undefined) { e.last_hit_at = null; missing++; }
+    }
+    return missing;
   }
 
   function ensureFiles() {
@@ -376,7 +456,9 @@ function createStore(opts = {}) {
   }
 
   // 管理台人工编辑（0919）：白名单字段直改；text 变化刷 content_updated_at；枚举与 kind 联动铁律同 create
-  const UPDATABLE_FIELDS = ["text", "note", "kind", "subject", "direction", "speaker", "established_at", "related_subjects", "anchor"];
+  // 1002 第 4 项：新增字段纳入人工可编辑；last_hit_at 为系统字段，不开放编辑
+  const UPDATABLE_FIELDS = ["text", "note", "kind", "subject", "direction", "speaker", "established_at", "related_subjects", "anchor",
+    "source", "scope", "valid_from", "valid_to", "sensitive", "triggers", "action_hint"];
   function updateFields(id, patch) {
     if (readonly) return fail("readonly 模式拒绝写入");
     const e = get(id);
@@ -418,11 +500,58 @@ function createStore(opts = {}) {
         e.related_subjects = [...new Set(v)];
       } else if (k === "anchor") {
         e.anchor = !!v; // 注入层扩展字段（anchor 表待办）：true=常驻 Meaningful Moments/Identity 分层
+      } else if (k === "source") {
+        if (v == null) { e.source = null; }
+        else {
+          if (!v || typeof v !== "object") return fail("source 必须是对象 {type, ref}");
+          if (!SOURCE_TYPES.includes(v.type)) return fail("source.type 非法: " + v.type);
+          const ref = strOrNull(v.ref);
+          if (ref && ref.length > SOURCE_REF_MAX) return fail("source.ref 超长");
+          e.source = { type: v.type, ref };
+        }
+      } else if (k === "scope") {
+        const sv = strOrNull(v);
+        if (sv && sv.length > SCOPE_MAX) return fail("scope 超长");
+        e.scope = sv;
+      } else if (k === "valid_from") {
+        e.valid_from = strOrNull(v);
+      } else if (k === "valid_to") {
+        e.valid_to = strOrNull(v);
+      } else if (k === "sensitive") {
+        e.sensitive = !!v;
+      } else if (k === "triggers") {
+        if (v == null) { e.triggers = []; }
+        else {
+          if (!Array.isArray(v)) return fail("triggers 必须是字符串数组");
+          const arr = v.map((x) => strOrNull(x)).filter(Boolean);
+          for (const x of arr) if (x.length > TRIGGER_MAX) return fail("triggers 项超长");
+          e.triggers = [...new Set(arr)].slice(0, TRIGGERS_MAX);
+        }
+      } else if (k === "action_hint") {
+        const hv = strOrNull(v);
+        if (hv && hv.length > ACTION_HINT_MAX) return fail("action_hint 超长");
+        e.action_hint = hv;
       }
     }
     flush();
     if (textChanged) scheduleVector(id); // 2026-09-28：正文变化即重算向量（异步）
     return { ok: true, entry: e };
+  }
+
+  // 1002 第 4 项：检索命中打点（评估用）。ids 可为单个 id 或数组；返回实际打点条数。
+  // 只改内存 + 延迟合并落盘，不阻塞检索。
+  function markHit(ids) {
+    if (readonly) return 0;
+    const arr = Array.isArray(ids) ? ids : [ids];
+    const set = new Set(arr.filter(Boolean).map(String));
+    if (!set.size) return 0;
+    const now = nowIso();
+    let n = 0;
+    for (const e of load()) {
+      if (e && set.has(e.id)) { e.last_hit_at = now; n++; }
+    }
+    if (n) scheduleFlush();
+    return n;
   }
 
   function stats() {
@@ -458,6 +587,7 @@ function createStore(opts = {}) {
     hardDelete,
     stats,
     flush,
+    markHit,
     validate: (input) => validateEntry(input, cfg),
   };
 }
@@ -470,5 +600,6 @@ module.exports = {
     SCHEMA_VER, KINDS, SUBJECTS, STATUSES, ORIGINS, DIRECTIONS, SPEAKERS,
     PROVENANCE_METHODS, SUPERSEDED_REASONS, RELATED_RELS,
     TRANSITIONS, TRANSITION_REASONS, TEXT_MAX, PROVENANCE_QUOTE_MAX, NOTE_MAX,
+    SOURCE_TYPES, SOURCE_REF_MAX, SCOPE_MAX, TRIGGER_MAX, TRIGGERS_MAX, ACTION_HINT_MAX,
   },
 };

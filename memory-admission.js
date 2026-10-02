@@ -278,6 +278,11 @@ function createAdmission(opts = {}) {
     };
     // 0920：重要级（importance）设定整体删除，不再映射 confidence（两者语义不同轴，历史映射一并移除）
     if (b.established_at) draft.established_at = String(b.established_at);
+    // 1002 第 4 项：schema 新字段透传（可选）。上游（蒸馏 / 老数据重跑 / 管理台）可带 source、triggers 等，
+    // 校验交给 memory-v2._buildEntry，非法值明确报错而非静默丢弃。
+    for (const k of ["source", "scope", "valid_from", "valid_to", "sensitive", "triggers", "action_hint"]) {
+      if (b[k] !== undefined) draft[k] = b[k];
+    }
 
     let execResult, auditRec;
     if (action === "review") {
@@ -370,6 +375,12 @@ function createAdmission(opts = {}) {
     executorMain: mainExecutor,
     audit,
     paths: { main: mainStore.paths, shadow: shadowStore.paths },
+    // 1002 第 4 项：检索命中打点（评估用）。两个集合都打（影子库命中同样计），
+    // 复用本实例持有的 store（不新建），避免多实例并发写覆盖。
+    markHit: (ids) => {
+      try { return (mainStore.markHit(ids) || 0) + (shadowStore.markHit(ids) || 0); }
+      catch (_) { return 0; }
+    },
   };
   _lastAdmission = inst; // 模块级缓存最新实例：tag-parser 等轻量写者复用 executorMain（唯一写手）
   return inst;

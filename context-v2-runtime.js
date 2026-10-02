@@ -122,6 +122,14 @@ async function assembleAndApply(opts) {
     blocks = built.blocks;
     relevantHits = built.relevantHits || [];
   }
+  // 1002 第 4 项：相关记忆命中打点 → entry.last_hit_at（评估用）。
+  // builder 是纯函数，副作用只在运行时做；打点失败静默，绝不影响上下文组装。
+  try {
+    const adm = require('./memory-admission').getAdmission();
+    if (adm && typeof adm.markHit === 'function' && relevantHits.length) {
+      adm.markHit(relevantHits.map(function (h) { return h && h.id; }));
+    }
+  } catch (_) { /* 打点失败不影响主链路 */ }
   return { messages: apply(opts.messages, blocks), relevantHits: relevantHits };
 }
 
