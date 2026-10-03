@@ -3908,8 +3908,17 @@ app.post("/admin/memory-summary/run", { preHandler: basicAuth }, async (req, rep
       return reply.code(409).send({ error: "已有生成在跑", status: memorySummary.status() });
     }
     const b = req.body || {};
-    const r = await memorySummary.runNow({ force: !!b.force });
-    reply.send(r);
+    const force = !!b.force;
+    // 1003-15：改后台异步——全量（可能 5-20 分钟）不再占 HTTP 连接（nginx 读超时 620s 兜不住），
+    // 接口立即返回 started，前端轮询 /admin/memory-summary/status 直到跑完。
+    setImmediate(function () {
+      memorySummary.runNow({ force: force }).then(function (r) {
+        console.log("[memory-summary] 后台生成完成:", JSON.stringify(r && { ok: r.ok, error: r.error, tool_rounds: r.tool_rounds, blocks: r.blocks }));
+      }).catch(function (e) {
+        console.error("[memory-summary] 后台生成异常:", e && e.message);
+      });
+    });
+    reply.send({ ok: true, started: true, force: force });
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
@@ -3924,15 +3933,13 @@ app.get("/admin/memory-summary/prompt", { preHandler: basicAuth }, async (req, r
   if (!requireSummary(reply)) return;
   try {
     const c = memorySummary.readPromptConfig();
-    const out = { custom_set: false };
-    for (const k of ["core_identity", "understanding"]) {
-      out[k + "_system_prompt"] = c[k + "_system_prompt"] || "";
-      out[k + "_user_prompt"] = c[k + "_user_prompt"] || "";
-      out["default_" + k + "_system_prompt"] = memorySummary.defaultSystemPrompt(k);
-      out["default_" + k + "_user_prompt"] = memorySummary.defaultUserPrompt(k);
-      if (c[k + "_system_prompt"] || c[k + "_user_prompt"]) out.custom_set = true;
-    }
-    reply.send(out);
+    reply.send({
+      system_prompt: c.system_prompt || "",
+      user_prompt: c.user_prompt || "",
+      default_system_prompt: memorySummary.defaultCombinedSystem(),
+      default_user_prompt: memorySummary.defaultCombinedUser(),
+      custom_set: !!(c.system_prompt || c.user_prompt),
+    });
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
@@ -3947,10 +3954,7 @@ app.post("/admin/memory-summary/prompt", { preHandler: basicAuth }, async (req, 
 app.delete("/admin/memory-summary/prompt", { preHandler: basicAuth }, async (req, reply) => {
   if (!requireSummary(reply)) return;
   try {
-    reply.send(memorySummary.savePromptConfig({
-      core_identity_system_prompt: "", core_identity_user_prompt: "",
-      understanding_system_prompt: "", understanding_user_prompt: "",
-    }));
+    reply.send(memorySummary.savePromptConfig({ system_prompt: "", user_prompt: "" }));
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 

@@ -374,15 +374,15 @@
       </div>
     </div>
 
-    <div class="card" data-collapse-id="ci-prompt-config" data-default="collapsed">
-      <div class="card-title collapsible" onclick="toggleCard(this)"><span>两块总结·Core Identity 提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+    <div class="card" data-collapse-id="summary-prompt-config" data-default="collapsed">
+      <div class="card-title collapsible" onclick="toggleCard(this)"><span>两块总结·合并提示词（1003-15）</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
       <div class="card-body">
-        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:6px;">把记忆池里全部活跃的 rule 条目压成「我该怎么当这个伴侣」那一块（祈使语气，按 self / relationship / user 分段）。可用占位符：${MEMORY_COUNT} 条数、${PREVIOUS_BLOCK} 上一版、${DELTA_BLOCK} 增量变化、${MEMORY_LIST} 条目清单——运行时自动填充，清单会拼在 User 提示词之后。两边留空即用内置默认。</div>
+        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:6px;">一次 LLM 调用同时生成两块（Core Identity + Long-term Understanding），模型根据全部材料自己分配，两块不重复。占位符（运行时自动填充）：${RULE_COUNT} 规则类条数、${RULE_PREVIOUS_BLOCK} 上一版、${RULE_DELTA_BLOCK} 增量、${RULE_MEMORY_LIST} 规则类清单，${FACT_*} 同义为事实类。全量模式两块材料都喂；增量模式只喂「上一版 + 增量记忆」，模型可调用关键词检索工具补充材料（最多 4 轮）。两边都留空即用内置默认；点「恢复内置默认」清空自定义。</div>
         <div class="cc-cfg-msg" id="summary-prompt-msg" style="margin-bottom:8px"></div>
-        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">System 提示词（角色、分段格式、取舍标准）</div>
-        <textarea id="ci-sys-prompt" rows="12" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;line-height:1.6;margin-bottom:10px;min-height:220px;max-height:420px;resize:vertical;"></textarea>
-        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">User 提示词</div>
-        <textarea id="ci-user-prompt" rows="6" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;line-height:1.6;margin-bottom:10px;resize:vertical;"></textarea>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">System 提示词（一次生成两块的角色与规则、块标记【CORE_IDENTITY】【UNDERSTANDING】）</div>
+        <textarea id="summary-sys-prompt" rows="14" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;line-height:1.6;margin-bottom:10px;min-height:300px;max-height:520px;resize:vertical;"></textarea>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">User 提示词（两块材料分节，可用占位符 ${RULE_*} ${FACT_*}）</div>
+        <textarea id="summary-user-prompt" rows="8" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;line-height:1.6;margin-bottom:10px;resize:vertical;"></textarea>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button type="button" class="cc-btn primary" onclick="saveSummaryPrompt()">保存两块提示词</button>
           <button type="button" class="cc-btn secondary" onclick="loadSummaryPrompt()">重新载入</button>
@@ -391,21 +391,6 @@
       </div>
     </div>
 
-    <div class="card" data-collapse-id="und-prompt-config" data-default="collapsed">
-      <div class="card-title collapsible" onclick="toggleCard(this)"><span>两块总结·Long-term Understanding 提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
-      <div class="card-body">
-        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:6px;">把记忆池里全部活跃的 fact 条目压成「关于她 / 关于我们」那一块（陈述语气）。占位符与上一块相同：${MEMORY_COUNT} ${PREVIOUS_BLOCK} ${DELTA_BLOCK} ${MEMORY_LIST}。★ 内置默认里明写「两块之间、两段之间都不得重复同一条信息」——改提示词时这句别删，删了会两头重复。</div>
-        <div class="cc-cfg-msg" id="summary-prompt-msg2" style="margin-bottom:8px"></div>
-        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">System 提示词</div>
-        <textarea id="und-sys-prompt" rows="12" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;line-height:1.6;margin-bottom:10px;min-height:220px;max-height:420px;resize:vertical;"></textarea>
-        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">User 提示词</div>
-        <textarea id="und-user-prompt" rows="6" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;line-height:1.6;margin-bottom:10px;resize:vertical;"></textarea>
-        <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <button type="button" class="cc-btn primary" onclick="saveSummaryPrompt()">保存两块提示词</button>
-          <button type="button" class="cc-btn secondary" onclick="loadSummaryPrompt()">重新载入</button>
-          <button type="button" class="cc-btn secondary" onclick="resetSummaryPrompt()">恢复内置默认</button>
-        </div>
-      </div>
     </div>
 
     <div class="card" data-collapse-id="bf-prompt-config" data-default="collapsed">

@@ -742,11 +742,9 @@ function toast(msg){
       const c=await r.json();
       if(c.error) throw new Error(c.error);
       const set=function(id,v,dv){ const el=document.getElementById(id); if(el) el.value=(v!=null&&v!=='')?v:(dv||''); };
-      set('ci-sys-prompt',c.core_identity_system_prompt,c.default_core_identity_system_prompt);
-      set('ci-user-prompt',c.core_identity_user_prompt,c.default_core_identity_user_prompt);
-      set('und-sys-prompt',c.understanding_system_prompt,c.default_understanding_system_prompt);
-      set('und-user-prompt',c.understanding_user_prompt,c.default_understanding_user_prompt);
-      const tip=c.custom_set?'当前为自定义版本；「恢复内置默认」可回退。':'当前为内置默认（自定义为空）。';
+      set('summary-sys-prompt',c.system_prompt,c.default_system_prompt);
+      set('summary-user-prompt',c.user_prompt,c.default_user_prompt);
+      const tip=c.custom_set?'当前为自定义版本（1003-15 已自动把旧两块提示词合并成一份）；「恢复内置默认」可回退。':'当前为内置默认（自定义为空）。';
       if(m1) m1.textContent=tip;
       if(m2) m2.textContent=tip;
     }catch(e){
@@ -759,10 +757,8 @@ function toast(msg){
     const m2=document.getElementById('summary-prompt-msg2');
     const g=function(id){ const el=document.getElementById(id); return el?el.value:''; };
     const payload={
-      core_identity_system_prompt:g('ci-sys-prompt').trim(),
-      core_identity_user_prompt:g('ci-user-prompt').trim(),
-      understanding_system_prompt:g('und-sys-prompt').trim(),
-      understanding_user_prompt:g('und-user-prompt').trim()
+      system_prompt:g('summary-sys-prompt').trim(),
+      user_prompt:g('summary-user-prompt').trim()
     };
     try{
       const r=await fetch(ADMIN_API+'/memory-summary/prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
@@ -776,7 +772,7 @@ function toast(msg){
     }catch(e){ if(m1) m1.textContent='保存失败: '+e.message; }
   }
   async function resetSummaryPrompt(){
-    if(!confirm('恢复内置默认的两块总结提示词？两张卡的自定义内容都会被清空。'))return;
+    if(!confirm('恢复内置默认的两块总结提示词？当前合并版自定义内容会被清空。'))return;
     const m1=document.getElementById('summary-prompt-msg');
     const m2=document.getElementById('summary-prompt-msg2');
     try{
@@ -3745,33 +3741,54 @@ function ccNumLiveCheck(input, max){
       loadSummaryConfig();
     }catch(e){ if(msg) msg.textContent='保存失败: '+e.message; toast('保存失败: '+e.message); }
   }
+  // 1003-15：run 改后台异步（全量可能 5-20 分钟，不再占 HTTP 连接），提交后轮询 status 直到跑完
   async function runSummaryNow(force){
     const btn=document.getElementById(force?'summary-force-btn':'summary-run-btn');
     const msg=document.getElementById('summary-config-msg');
-    if(btn){ btn.disabled=true; btn.textContent='生成中…'; }
-    if(msg) msg.textContent=force?'正在强制重生成两块（约 1–2 分钟，别关页面）…':'正在生成两块（池子没变会直接跳过）…';
+    if(btn){ btn.disabled=true; btn.textContent='提交中…'; }
+    if(msg) msg.textContent='正在提交…';
+    const done=function(){
+      if(btn){ btn.disabled=false; btn.textContent=force?'强制重生成':'立即生成'; }
+    };
+    const finish=async function(){
+      try{ await loadSummaryConfig(); }catch(_){}
+      done();
+    };
+    let pollTimer=null;
     try{
       const r=await fetch(ADMIN_API+'/memory-summary/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({force:!!force})});
       const d=await r.json();
-      if(d.error && d.status){ renderSummaryStatus(d.status); if(msg) msg.textContent='已有生成在跑，等它结束再看。'; }
-      else if(d.error){ if(msg) msg.textContent='生成失败: '+d.error; toast('生成失败'); }
-      else{
-        const parts=[];
-        ['core_identity','understanding'].forEach(function(k){
-          const b=d.blocks&&d.blocks[k]; if(!b) return;
-          let t=SUM_LABEL[k]+'：'+(SUM_MODE[b.mode]||b.mode);
-          if(b.lines) t+='（'+b.lines+' 行 / '+(b.chars||0)+' 字）';
-          if(b.error) t+=' · '+b.error;
-          parts.push(t);
-        });
-        if(msg) msg.textContent='完成（'+Math.round((d.duration_ms||0)/1000)+'s）：'+parts.join('；');
-        toast('两块总结已生成');
+      if(d.error && d.status){ renderSummaryStatus(d.status); if(msg) msg.textContent='已有生成在跑，等它结束再看。'; done(); }
+      else if(d.error){ if(msg) msg.textContent='提交失败: '+d.error; toast('提交失败: '+d.error); done(); }
+      else if(d.started){
+        if(msg) msg.textContent='已提交，后台运行中（'+(force?'全量重新生成，约 5–15 分钟':'增量，约 1–5 分钟')+'；期间可关页面，完成后状态自动更新）…';
+        let tries=0;
+        const poll=async function(){
+          try{
+            const rs=await fetch(ADMIN_API+'/memory-summary/status');
+            const st=await rs.json();
+            if(st.error){ if(msg) msg.textContent='查询状态失败: '+st.error; finish(); return; }
+            renderSummaryStatus(st);
+            if(st.running){
+              if(msg) msg.textContent='后台生成中…（'+(force?'全量，约 5–15 分钟':'增量，约 1–5 分钟')+'，可关页面）';
+            }else{
+              const lr=st.last_run_result||{};
+              const parts=(lr.blocks||[]).map(function(b){ return (SUM_LABEL[b.block]||b.block)+'：'+(SUM_MODE[b.mode]||b.mode)+'（'+(b.chars||0)+' 字）'; });
+              if(msg) msg.textContent='后台生成完成（'+Math.round((lr.duration_ms||0)/1000)+'s'+(lr.tool_rounds?('，工具 '+lr.tool_rounds+' 轮'):'')+'）：'+parts.join('；')+(lr.ok===false?(' · 失败：'+lr.error):'');
+              toast(lr.ok===false?'两块总结生成有失败块':'两块总结已生成');
+              finish();
+              return;
+            }
+          }catch(e){ if(msg) msg.textContent='轮询失败: '+e.message; }
+          tries++;
+          if(tries>240){ if(msg) msg.textContent='等待超时（20 分钟），可刷新页面查看最新状态。'; finish(); return; }
+          pollTimer=setTimeout(poll,5000);
+        };
+        pollTimer=setTimeout(poll,2000);
+      }else{
+        if(msg) msg.textContent='提交失败（未知响应）'; toast('提交失败'); done();
       }
-    }catch(e){ if(msg) msg.textContent='生成失败: '+e.message; toast('生成失败: '+e.message); }
-    finally{
-      try{ await loadSummaryConfig(); }catch(_){}
-      if(btn){ btn.disabled=false; btn.textContent=force?'强制重生成':'立即生成'; }
-    }
+    }catch(e){ if(msg) msg.textContent='提交失败: '+e.message; toast('提交失败: '+e.message); done(); }
   }
 
   // ============ 老数据重跑配置（1002 记忆改造 §8 第 5 项：逐批处理已有活跃记忆，产出一律进待审） ============
