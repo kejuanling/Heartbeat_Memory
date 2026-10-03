@@ -1066,11 +1066,15 @@
   // 所以第一块可能是 156 条这种非整数），但 dryRun:true 只算不建——真建块会撞状态的重叠断言。
   // preview 区间 = 建议区间：建议切哪段，原文就显示哪段的全部，没有条数上限。
   function csChunkCfg() {
-    var cfg = { gapMinutes: 60, chunkSize: 100, chunkMin: 100, chunkMax: 200 };
+    // 兜底默认对齐 context-replacements.js 的内置默认（100/40/160 口径），
+    // 不要再用 config.json 当时的值——1003-33 踩过：最少=100 会让 100~200 条的会话
+    // 切不开（每段都≥100，总长落在区间内 ⇒ 唯一解是整段一块），「目标100」形同虚设。
+    // 权威值是压缩页「压缩参数配置」里的四个旋钮，这里只是配置缺失时的兜底。
+    var cfg = { gapMinutes: 60, chunkSize: 100, chunkMin: 40, chunkMax: 200 };
     try {
       var gap = $('cc-cfg-gap'); if (gap && gap.value) cfg.gapMinutes = +gap.value || 60;
       var cs = $('cc-cfg-chunk'); if (cs && cs.value) cfg.chunkSize = +cs.value || 100;
-      var cm = $('cc-cfg-chunk-min'); if (cm && cm.value) cfg.chunkMin = +cm.value || 100;
+      var cm = $('cc-cfg-chunk-min'); if (cm && cm.value) cfg.chunkMin = +cm.value || 40;
       var cx = $('cc-cfg-chunk-max'); if (cx && cx.value) cfg.chunkMax = +cx.value || 200;
     } catch (e) { }
     return cfg;
