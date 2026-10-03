@@ -489,6 +489,15 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
 
  document.addEventListener('DOMContentLoaded', function(){
    initLogFab();
+   // 1003-23：配置页三个定时开关拨动即自动保存（原来必须手点「保存」，拨完刷新恢复原状）
+   const _bindAutoSave = function(id, fn){
+     const el = document.getElementById(id);
+     if (el) el.addEventListener('change', function(){ try{ fn(); }catch(e){ toast('保存失败: ' + e.message); } });
+   };
+   _bindAutoSave('distill-enabled', saveDistillConfig);
+   _bindAutoSave('summary-enabled', saveSummaryConfig);
+   _bindAutoSave('summary-incremental', saveSummaryConfig);
+   _bindAutoSave('bf-enabled', saveBackfillConfig);
    loadCompactionLogs();
    startLogPolling();
    // 2026-09-27 悬浮球仅压缩页显示：初始按当前激活 tab 设置（initApp 恢复 tab 也可能已切到 compaction）
