@@ -5212,20 +5212,13 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
   chunks.sort(function (a, b) { return a.pos - b.pos; });
   chunks.forEach(function (c, i) { c.index = i + 1; c.pos = undefined; });
 
-  // 活跃块上限：与发送侧 applyReplacements 同口径（手动+AI 合计保留时间线上最近 N 个）。
-  // 手动隐藏块不占活跃名额；超限的最早块与手动隐藏块同样标记 hidden：摘要与区间原文都不进
-  // 上下文（2026-09-15 与发送侧统一——此前截断块原文会漏进上下文）；enabled/摘要数据不动。
-  const previewMaxActive = Math.max(0, Math.floor(Number(contextCompactor.loadConfig().compaction_max_active_blocks) || 0));
+  // 隐藏块：与发送侧 applyReplacements 同口径——手动隐藏块标记 hidden，摘要与区间原文都不进上下文。
+  // 2026-10-04：原先这里还有「活跃块上限」截断（previewMaxActive），随旧压缩系统一并下线。
+  // 只剩手动隐藏这一条用户可控路径。
   let hiddenCount = 0;
-  const activeChunks = [];
   chunks.forEach(function (c) {
-    if (c.manualHidden) { c.hidden = true; return; }
-    activeChunks.push(c);
+    if (c.manualHidden) { c.hidden = true; hiddenCount++; }
   });
-  if (previewMaxActive > 0 && activeChunks.length > previewMaxActive) {
-    hiddenCount = activeChunks.length - previewMaxActive;
-    for (let i = 0; i < hiddenCount; i++) activeChunks[i].hidden = true;
-  }
 
   // 手工块序号：直接用 manualRecordsSorted()（按会话过滤+排序）的下标，与 blocks 路由同源；
   // 服务端保证每个通过会话过滤的手工 chunk 都能查到序号（records 与 manualRecordsSorted 过滤口径一致）
@@ -5354,7 +5347,6 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
       estCompressedChars: estCompressedChars,
       hiddenCount: hiddenCount,
       manualHiddenCount: chunks.filter(function (c) { return c.manualHidden; }).length,
-      maxActiveBlocks: previewMaxActive,
       estSavedChars: Math.max(0, totalChars - estCompressedChars),
       estUncoveredTokens: uncoveredTokens,
       markedTokens: markedTokens,
@@ -5477,47 +5469,6 @@ app.post("/admin/context-compaction/config", { preHandler: basicAuth }, async (r
   }
 });
 
-
-
-
-// 保存手动编辑后的替换正文（统一替换：写入手工记录 text）——优先按记录 id 精确命中
-app.post("/admin/context-compaction/update", { preHandler: basicAuth }, async (req, reply) => {
-  const body = req.body || {};
-  const chunkIndex = Number(body.chunkIndex);
-  const recId = String(body.id || "").trim();
-  const summary = String(body.summary || "").trim();
-  try {
-    if (!summary) return reply.code(400).send({ error: "替换正文不能为空" });
-    if (recId) {
-      const r = contextReplacements.setManualRecordTextById(recId, summary, true);
-      if (!r.ok) return reply.code(400).send({ error: r.message });
-      return reply.send({ ok: true, summary: summary, length: r.length });
-    }
-    const preview = buildUnifiedReplacementPreview(false);
-    const chunk = (preview.chunks || []).find(function (c) { return c.index === chunkIndex && c.source === "manual"; });
-    if (!chunk) return reply.code(404).send({ error: "块 #" + chunkIndex + " 不存在" });
-    const r = contextReplacements.setManualRecordText(chunk.blockIndex, summary, true);
-    if (!r.ok) return reply.code(400).send({ error: r.message });
-    reply.send({ ok: true, summary: summary, length: r.length });
-  } catch (err) {
-    reply.code(400).send({ error: err.message });
-  }
-});
-
-// 批量导入摘要（压缩页右上角「导入」：前端按消息 id 边界/块号匹配块后，按记录 id 批量写入手写摘要；
-// 旧摘要自动归档历史（最多 8 条），块状态置 enabled=false 回到「待替换/已停用」，需手动替换才生效）
-app.post("/admin/context-compaction/import-summaries", { preHandler: basicAuth }, async (req, reply) => {
-  const body = req.body || {};
-  const items = Array.isArray(body.items) ? body.items : [];
-  try {
-    const r = contextReplacements.importSummariesByItems(items);
-    if (!r.ok) return reply.code(400).send({ error: r.error });
-    return reply.send({ ok: true, okCount: r.okCount, failCount: r.failCount, results: r.results });
-  } catch (err) {
-    reply.code(400).send({ error: err.message });
-  }
-});
-
 // 重要内容标记（恢复：前端按消息 key 标记，引擎 buildCompactionPrompt 会重点保留）
 app.post("/admin/context-compaction/mark", { preHandler: basicAuth }, async (req, reply) => {
   const body = req.body || {};
@@ -5576,33 +5527,6 @@ app.post("/admin/context-compaction/marked/update", { preHandler: basicAuth }, a
   }
 });
 
-// 压缩上下文提示词（生成摘要时使用，恢复管理台编辑）
-app.get("/admin/logs/compaction-prompt", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    reply.send(contextCompactor.getCompactionPromptForDisplay());
-  } catch (err) {
-    reply.send({ error: err.message });
-  }
-});
-
-app.post("/admin/logs/compaction-prompt", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const cfg = contextCompactor.saveCompactionPromptConfig(req.body && req.body.system, req.body && req.body.template);
-    reply.send({ ok: true, system: cfg.system, template: cfg.template });
-  } catch (err) {
-    reply.code(400).send({ error: err.message });
-  }
-});
-
-app.delete("/admin/logs/compaction-prompt", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const cfg = contextCompactor.resetCompactionPromptConfig();
-    reply.send({ ok: true, system: cfg.system, template: cfg.template });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
-
 // 容量提醒提示词（会话超上限时塞给 AI 的整条提醒；独立配置，与压缩提示词互不关联）
 app.get("/admin/context-compaction/ctx-limit-prompt", { preHandler: basicAuth }, async (req, reply) => {
   try {
@@ -5631,7 +5555,10 @@ app.delete("/admin/context-compaction/ctx-limit-prompt", { preHandler: basicAuth
   }
 });
 
-// 历史版本恢复/删除（恢复：前端压缩页历史版本按钮使用）
+// 块摘要的历史版本管理（恢复 / 删除某一份历史）。
+// 2026-10-04 说明：旧压缩系统下线时一度把这两条一起删了，随后复核判定它们属「保留」侧——
+// 存量旧块的摘要可能同时有现用版 + 若干历史版，用户要能翻回去或删掉某一份，
+// 这与「生成新摘要」不是一回事（不调模型，只在已存档的版本之间切换）。
 app.post("/admin/context-compaction/restore", { preHandler: basicAuth }, async (req, reply) => {
   const body = req.body || {};
   const chunkIndex = Number(body.chunkIndex);
@@ -5665,7 +5592,7 @@ app.post("/admin/context-compaction/history/delete", { preHandler: basicAuth }, 
 });
 
 // ========================
-// 会话状态机（2026-10-03 新增，lib/conversation-state.js）
+// 会话状态机（2026-10-03 新增， lib/conversation-state.js）
 //
 // 与上面那套 /admin/context-compaction/* 是两条独立的路：老的仍是「块」语义（并列摘要），
 // 新的是「状态」语义（每会话一份持续演化的状态）。阶段一两条并存，存量不动。
@@ -5822,17 +5749,8 @@ app.post("/admin/context-compaction/blocks", { preHandler: basicAuth }, async (r
       if (!r.ok) return reply.send({ ok: false, message: r.message });
       return reply.send({ ok: true, action: "remove_at" });
     }
-    // 按范围添加手工块（编号范围 1-based → 内部转 0-based；默认不启用，点「替换」后生效）
-    if (action === "add_range") {
-      const start = Number(body.start);
-      const end = Number(body.end);
-      if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
-        return reply.code(400).send({ error: "start/end 必须是 start<=end 的正整数（编号 1-based）" });
-      }
-      const r = contextReplacements.addManualRecord(start - 1, end - 1, false);
-      if (!r.ok) return reply.send({ ok: false, message: r.message });
-      return reply.send({ ok: true, action: "add_range", removedCount: r.removedCount || 0 });
-    }
+    // 按范围添加手工块 —— 2026-10-04 下线：压缩改由状态机承担，新块不再从「块」这条路产生。
+    // 存量旧块照常工作（toggle/hide/remove_at/reset 都在），只是不能再新建。
     // 开关某块的替换（enabled）——优先按记录 id，旧前端回退序号
     if (action === "toggle") {
       const recId = String(body.id || "").trim();
@@ -5865,42 +5783,17 @@ app.post("/admin/context-compaction/blocks", { preHandler: basicAuth }, async (r
       if (!r.ok) return reply.send({ ok: false, message: r.message });
       return reply.send({ ok: true, action: "hide", block: r.record });
     }
-    // 更新指定手工块的起止范围（编号 1-based → 内部 0-based，编号只在输入此刻解析成消息 id 落库）——优先按记录 id
-    if (action === "update_range") {
-      const recId = String(body.id || "").trim();
-      const start = Number(body.start);
-      const end = Number(body.end);
-      if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
-        return reply.code(400).send({ error: "start/end 必须是 start<=end 的正整数（编号 1-based）" });
-      }
-      const r = recId
-        ? contextReplacements.updateManualRecordRangeById(recId, start - 1, end - 1)
-        : (function () {
-            const blockIndex = Number(body.blockIndex);
-            if (!Number.isInteger(blockIndex) || blockIndex < 0) {
-              return { ok: false, message: "blockIndex 必须是 >=0 的整数" };
-            }
-            return contextReplacements.updateManualRecordRange(blockIndex, start - 1, end - 1);
-          })();
-      if (!r.ok) return reply.send({ ok: false, message: r.message });
-      return reply.send({ ok: true, action: "update_range", removedCount: r.removedCount || 0 });
-    }
-    // 更新指定 AI 块的编号范围（1-based → 内部 0-based；保留时间范围存储，只改自身不吞并）
-    if (action === "update_ai_range") {
-      const repId = String(body.repId || "").trim();
-      const start = Number(body.start);
-      const end = Number(body.end);
-      if (!repId) return reply.code(400).send({ error: "repId 不能为空" });
-      if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
-        return reply.code(400).send({ error: "start/end 必须是 start<=end 的正整数（编号 1-based）" });
-      }
-      const r = contextReplacements.updateAiRecordRange(repId, start - 1, end - 1);
-      if (!r.ok) return reply.send({ ok: false, message: r.message });
-      return reply.send({ ok: true, action: "update_ai_range", count: r.count });
-    }
+    // 更新块边界（update_range / update_ai_range）—— 2026-10-04 下线：
+    // 旧块的区间一旦被状态机并入吃掉就由状态接管，边界调整这条路随之关闭；
+    // 存量块仍可 toggle（启停）/ hide / remove_at / reset。
 
-    // 按时间间隔自动切分：只切 [start,end] 范围，间隔超过 gapMinutes 分钟自然切成多个手工块
+    // 按时间间隔自动切分 —— 2026-10-04 起**只允许 dryRun**（只算切点不建块）：
+    // 唯一在用的是状态机的「自动分块」按钮（admin-mobile.html），它要的是切点边界。
+    // 建块模式下线：真建块会与状态记录的重叠断言打架，且压缩已不再走块语义。
     if (action === "split_range") {
+      if (body.dryRun !== true) {
+        return reply.code(400).send({ error: "自动分块已下线建块模式，只支持 dryRun（只算切点，供状态机并入用）" });
+      }
       const start = Number(body.start);
       const end = Number(body.end);
       const gapMinutes = Number(body.gapMinutes);
@@ -5913,22 +5806,21 @@ app.post("/admin/context-compaction/blocks", { preHandler: basicAuth }, async (r
         chunkSize: Number(body.chunkSize) || Number(ccCfg.compaction_chunk_size) || 100,
         chunkMin: Number(body.chunkMin) || Number(ccCfg.compaction_chunk_min) || 40,
         chunkMax: Number(body.chunkMax) || Number(ccCfg.compaction_chunk_max) || 160,
-        // 2026-10-03 状态机「自动分块」用：只算切点不建块（真建块会撞状态的重叠断言）
-        dryRun: body.dryRun === true
+        dryRun: true
       });
       if (!r.ok) return reply.send({ ok: false, message: r.message });
       return reply.send({
         ok: true, action: "split_range", count: r.count, gapMinutes: gapMinutes,
-        // dryRun 时额外回切点边界（0-based 闭区间）；旧前端只读 count，不受影响
         segments: r.segments || [],
-        dryRun: !!r.dryRun
+        dryRun: true
       });
     }
     // 旧式自动分块操作已下线（统一替换）
-    if (action === "add" || action === "remove") {
-      return reply.send({ ok: false, message: "旧式自动分块已下线（统一替换后不再使用）" });
+    if (action === "add" || action === "remove" || action === "add_range" ||
+        action === "update_range" || action === "update_ai_range") {
+      return reply.send({ ok: false, message: "该操作已随旧压缩系统下线（2026-10-04）：压缩改由会话状态机承担，存量旧块仍可启停/隐藏/移除。" });
     }
-    return reply.code(400).send({ error: "action 必须是 remove_at / add_range / toggle / hide / update_range / split_range / reset" });
+    return reply.code(400).send({ error: "action 必须是 remove_at / toggle / hide / split_range(dryRun) / reset" });
   } catch (err) {
     reply.code(500).send({ error: err.message });
   }
@@ -5993,184 +5885,6 @@ function addCompactionLog(entry) {
 
 app.get("/admin/context-compaction/logs", { preHandler: basicAuth }, (req, reply) => {
   reply.send({ logs: compactionLogs, max: compactionLogs.length });
-});
-
-app.post("/admin/context-compaction/generate", { preHandler: basicAuth }, async (req, reply) => {
-  const body = req.body || {};
-  try {
-    if (body.action === "gap") {
-      const start = Number(body.start);
-      const end = Number(body.end);
-      if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
-        return reply.code(400).send({ error: "start/end 必须是 start<=end 的正整数（编号 1-based）" });
-      }
-      // 未覆盖区生成：前端编号来自预览（已按内容锚点纠偏的块边界）。时间线增删后，某些旧块的
-      // 存储 range 会与实际可压缩下标错位（见 preview 的 storedValid 判定），未覆盖区编号与之同源。
-      // 若直接把前端编号当 compressible 下标建块，会与内容锚点定位后的相邻块重叠、顶掉已覆盖区
-      //（用户现象：生成摘要后上面一块内容变成未覆盖区）。因此先取该区间消息，再按内容反查真实区间。
-      const rp = contextCompactor.rangePreview(start, end);
-      const rpItems = (rp && Array.isArray(rp.items)) ? rp.items : [];
-      if (!rpItems.length) return reply.send({ ok: false, message: "该未覆盖区无可压缩消息，无法生成摘要" });
-      const compItems = contextReplacements.compressibleItems();
-      function keyRange(m) {
-        const t = String((m && m.content) || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-        const role = m && m.role ? m.role : "";
-        return role + "\u0000" + t;
-      }
-      const firstKey = keyRange(rpItems[0]);
-      const lastKey = keyRange(rpItems[rpItems.length - 1]);
-      // 纯内容 key 匹配在同文多次出现时会跨区间误匹配（giStart 取第一次/giEnd 取最后一次 → 范围错位）。
-      // 改为在 [start-1, end-1] 附近窗口内反查：giStart 取窗口内 firstKey 最后一次出现（最接近区间起点）、
-      // giEnd 取 giStart 之后 lastKey 第一次出现（最接近区间末尾），窗口限制避免误取区间外的重复内容。
-      const wantStart = start - 1;
-      const wantEnd = end - 1;
-      const W = 8;
-      const lo = Math.max(0, wantStart - W);
-      const hi = Math.min(compItems.length - 1, wantEnd + W);
-      let giStart = -1;
-      let giEnd = -1;
-      for (let i = hi; i >= lo; i--) {
-        if (keyRange(compItems[i].msg) === firstKey) { giStart = i; break; }
-      }
-      if (giStart >= 0) {
-        for (let i = giStart; i <= hi; i++) {
-          if (keyRange(compItems[i].msg) === lastKey) { giEnd = i; break; }
-        }
-      }
-      if (giStart < 0 || giEnd < giStart) {
-        return reply.send({ ok: false, message: "该未覆盖区在当前时间线定位失败，请刷新后重试" });
-      }
-      const added = contextReplacements.addManualRecord(giStart, giEnd, false);
-      if (!added.ok) return reply.send(added);
-      const manual = contextReplacements.manualRecordsSorted();
-      const idx = manual.findIndex(function (b) {
-        return b.range && Number(b.range.start_index) === giStart;
-      });
-      if (idx === -1) return reply.code(500).send({ error: "块创建失败，请刷新后重试" });
-      const logId = addCompactionLog({ action: "gap", startIdx: start, endIdx: end, label: "消息" + start + "-" + end + "块", status: "pending", message: "开始生成摘要..." }).id;
-      let gen;
-      try {
-        gen = await contextCompactor.generateSummaryForRange(giStart, giEnd);
-      } catch (err) {
-        addCompactionLog({ id: logId, action: "gap", startIdx: start, endIdx: end, label: "消息" + start + "-" + end + "块", status: "error", message: err.message });
-        contextReplacements.removeManualRecord(idx); // 生成失败回滚新建的块
-        throw err;
-      }
-      if (!gen.ok) {
-        contextReplacements.removeManualRecord(idx);
-        return reply.send(gen);
-      }
-      const saved = contextReplacements.setManualRecordText(idx, gen.summary);
-      if (!saved.ok) {
-        contextReplacements.removeManualRecord(idx);
-        return reply.send({ ok: false, message: saved.message });
-      }
-      addCompactionLog({ id: logId, action: "gap", startIdx: start, endIdx: end, label: "消息" + start + "-" + end + "块", status: "success", message: "生成成功，" + gen.length + " 字" });
-      return reply.send({
-        ok: true,
-        action: "gap",
-        blockIndex: idx,
-        startIdx: start,
-        endIdx: end,
-        length: gen.length,
-        message: "已生成替换正文（" + gen.length + " 字），点块上的「替换」后生效。"
-      });
-    }
-    // 支持手动块（记录 id 或 blockIndex）或任意记录（repId，含 AI 块）重新生成摘要
-    const blocks = contextReplacements.manualRecordsSorted();
-    let rec = null;
-    let writeBack = null;
-    let isManual = true;
-    const repId = String(body.repId || body.id || "").trim();
-    if (repId) {
-      const items = contextReplacements.loadItems();
-      rec = (items || []).filter(it => !it.removed).find(it => String(it.id || "") === repId) || null;
-      if (!rec) return reply.send({ ok: false, message: "记录不存在" });
-      isManual = rec.source === "manual";
-      writeBack = isManual ? "manualTextById" : "updateReplacement";
-    } else {
-      const blockIndex = Number(body.blockIndex);
-      if (!Number.isInteger(blockIndex) || blockIndex < 0) {
-        return reply.code(400).send({ error: "blockIndex 必须是 >=0 的整数" });
-      }
-      rec = blocks[blockIndex];
-      if (!rec) return reply.send({ ok: false, message: "块不存在" });
-      writeBack = "manualText";
-    }
-    // 计算要传给压缩器的 compressible 序号区间
-    // 手动块：range.start_index/end_index 即 compressible 序号；
-    // AI 块 / 时间范围块：range 无 start_index，先按 matched[].id 反查（id 唯一不撞键），
-    // id 缺失才回退内容首现匹配
-    let gStart = Number(rec.range.start_index);
-    let gEnd = Number(rec.range.end_index);
-    if (!Number.isInteger(gStart) || !Number.isInteger(gEnd) || gStart < 0 || gEnd < gStart) {
-      const matched = (Array.isArray(rec.matched) && rec.matched.length > 0) ? rec.matched : null;
-      if (!matched) return reply.send({ ok: false, message: "块没有可用的序号范围，无法重新生成" });
-      const comp = contextReplacements.compressibleItems();
-      const idToComp = new Map();
-      comp.forEach(function (e, ci) {
-        if (e.msg && e.msg.id != null && e.msg.id !== "") idToComp.set(String(e.msg.id), ci);
-      });
-      const mS = matched[0];
-      const mL = matched[matched.length - 1];
-      const sId = mS && mS.id != null && mS.id !== "" ? String(mS.id) : "";
-      const eId = mL && mL.id != null && mL.id !== "" ? String(mL.id) : "";
-      let fi = sId ? idToComp.get(sId) : undefined;
-      let li = eId ? idToComp.get(eId) : undefined;
-      if (fi === undefined || li === undefined || li < fi) {
-        function keyRange(m) {
-          const t = String((m && m.content) || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-          const role = m && m.role ? m.role : "";
-          return role + "\u0000" + t;
-        }
-        const firstKey = keyRange(matched[0]);
-        const lastKey = keyRange(matched[matched.length - 1]);
-        fi = -1;
-        li = -1;
-        for (let ci = 0; ci < comp.length; ci++) {
-          const ck = keyRange(comp[ci].msg);
-          if (ck === firstKey && fi === -1) fi = ci;
-          if (ck === lastKey) li = ci;
-        }
-        if (fi < 0 || li < fi) return reply.send({ ok: false, message: "块内消息在当前时间线定位失败，无法重新生成" });
-      }
-      gStart = fi;
-      gEnd = li;
-    }
-    const blockLogLabel = (body.blockIndex !== undefined) ? ("块 #" + (Number(body.blockIndex) + 1)) : ("记录 " + (repId || "").slice(0, 8));
-    const blockLogId = addCompactionLog({ action: "block", blockIndex: body.blockIndex, repId: repId, label: blockLogLabel, status: "pending", message: "开始生成摘要..." }).id;
-    const gen = await contextCompactor.generateSummaryForRange(gStart, gEnd);
-    if (!gen.ok) {
-      addCompactionLog({ id: blockLogId, action: block, blockIndex: body.blockIndex, repId: repId, label: blockLogLabel, status: error, message: gen.message || 生成失败 });
-      return reply.send(gen);
-    }
-    let saved;
-    if (writeBack === "updateReplacement") {
-      saved = contextReplacements.updateReplacement(rec.id, gen.summary);
-      if (!saved.ok) { addCompactionLog({ id: blockLogId, action: block, blockIndex: body.blockIndex, repId: repId, label: blockLogLabel, status: error, message: saved.error || 写回失败 }); return reply.send({ ok: false, message: saved.error }); }
-      addCompactionLog({ id: blockLogId, action: "block", blockIndex: body.blockIndex, repId: repId, label: blockLogLabel, status: "success", message: "生成成功，" + gen.length + " 字" });
-      return reply.send({ ok: true, action: "block", repId: rec.id, length: gen.length, message: "已重新生成替换正文（" + gen.length + " 字）。" });
-    }
-    if (writeBack === "manualTextById") {
-      saved = contextReplacements.setManualRecordTextById(rec.id, gen.summary);
-      if (!saved.ok) { addCompactionLog({ id: blockLogId, action: block, repId: repId, label: blockLogLabel, status: error, message: saved.message || 写回失败 }); return reply.send({ ok: false, message: saved.message }); }
-      addCompactionLog({ id: blockLogId, action: "block", repId: repId, label: blockLogLabel, status: "success", message: "生成成功，" + gen.length + " 字" });
-      return reply.send({ ok: true, action: "block", repId: rec.id, length: gen.length, message: "已重新生成替换正文（" + gen.length + " 字）。" });
-    }
-    const blockIndex = Number(body.blockIndex);
-    saved = contextReplacements.setManualRecordText(blockIndex, gen.summary);
-    if (!saved.ok) { addCompactionLog({ id: blockLogId, action: block, blockIndex: blockIndex, repId: repId, label: blockLogLabel, status: error, message: saved.message || 写回失败 }); return reply.send({ ok: false, message: saved.message }); }
-    addCompactionLog({ id: blockLogId, action: "block", blockIndex: blockIndex, repId: repId, label: blockLogLabel, status: "success", message: "生成成功，" + gen.length + " 字" });
-    return reply.send({ ok: true, action: "block", blockIndex: blockIndex, length: gen.length, message: "已重新生成替换正文（" + gen.length + " 字）。" });
-  } catch (err) {
-    console.error("[context-compactor] 摘要生成失败:", err.message);
-    // 失败日志（如果已有开始日志则更新，否则新建）
-    try {
-      const label = (body.action === "gap") ? ("消息" + body.start + "-" + body.end + "块") : ((body.blockIndex !== undefined) ? ("块 #" + (Number(body.blockIndex) + 1)) : ("记录 " + (body.repId || "").slice(0, 8)));
-      addCompactionLog({ action: body.action || "unknown", blockIndex: body.blockIndex, repId: body.repId, startIdx: body.start, endIdx: body.end, label: label, status: "error", message: err.message });
-    } catch(e) { /* ignore */ }
-    reply.code(500).send({ error: "摘要生成失败: " + err.message });
-  }
 });
 
 

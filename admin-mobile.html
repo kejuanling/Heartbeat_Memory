@@ -149,14 +149,6 @@
      <div class="card-title collapsible" onclick="toggleCard(this)"><span>压缩参数配置</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
      <div class="card-body">
        <div class="cc-cfg-grid">
-         <label class="cc-cfg-field">保留最近 N 条不压缩
-           <input type="number" id="cc-cfg-keep" min="0" step="1"></label>
-         <label class="cc-cfg-field">消息少于 N 条时不压缩
-           <input type="number" id="cc-cfg-min" min="0" step="1"></label>
-         <label class="cc-cfg-field">摘要最少字数
-           <input type="number" id="cc-cfg-sum-min" min="0" step="1"></label>
-         <label class="cc-cfg-field">摘要最多字数
-           <input type="number" id="cc-cfg-sum-max" min="0" step="1"></label>
          <label class="cc-cfg-field">自动分块间隔（分钟）
            <input type="number" id="cc-cfg-gap" min="1" step="1"></label>
          <label class="cc-cfg-field">自动分块目标条数
@@ -165,8 +157,6 @@
            <input type="number" id="cc-cfg-chunk-min" min="1" step="1"></label>
          <label class="cc-cfg-field">块最多条数
            <input type="number" id="cc-cfg-chunk-max" min="1" step="1"></label>
-         <label class="cc-cfg-field">活跃块上限<span class="hint-i" onclick="event.preventDefault();event.stopPropagation();showHintText(this,'活跃块上限','手动+AI 合计保留最近 N 个块，0=不限。超限的最早块仅隐藏、不注入上下文，块的摘要数据不动，调大即恢复。')">i</span>
-           <input type="number" id="cc-cfg-max-blocks" min="0" step="1"></label>
          <label class="cc-cfg-field">上下文容量上限<span class="hint-i" onclick="event.preventDefault();event.stopPropagation();showHintText(this,'上下文容量上限','按 token 估算，0=不限。超过时网关塞一条隐藏提醒，让 AI 自己压缩上下文。')">i</span>
            <input type="number" id="cc-cfg-ctx-limit" min="0" step="1000"></label>
          <label class="cc-cfg-field">提醒上限<span class="hint-i" onclick="event.preventDefault();event.stopPropagation();showHintText(this,'提醒上限','后台提醒卡的超限门槛（token 估算），0=不提醒。只管提醒显示，与容量提醒/自动压缩无关。')">i</span>
@@ -229,14 +219,12 @@
          <h2 class="cc-head-h2">上下文压缩</h2>
          <div class="cc-head-underline"></div>
        </div>
-       <button type="button" class="cc-import-btn" id="cc-import-btn" onclick="openCcImportPanel()" title="批量导入手写摘要（按消息 id 边界对号入座，旧摘要自动进历史）">＋ 导入</button>
        <div class="cc-head-actions">
          <label class="cc-session-sel" title="选择要操作的会话（默认跟随聊天页当前会话）">
            <select id="adm-session-sel" onchange="onAdminSessionChange()" aria-label="选择会话"></select>
          </label>
          <button type="button" class="cc-btn secondary" onclick="loadCompactionPreview()">刷新</button>
          <button type="button" class="cc-btn secondary" id="cc-expandall-btn" onclick="toggleCcExpandAll()">全部展开</button>
-         <button type="button" class="cc-btn secondary" id="cc-multiselect-btn" onclick="toggleCcMultiSelect()">多选</button>
        </div>
      </div>
          <div class="cc-statusbar" id="cc-statusbar">
@@ -326,23 +314,6 @@
      <div id="compaction-msg" style="margin-top:12px;font-size:12px;color:var(--accent);min-height:18px;text-align:center" aria-live="polite"></div>
      <div id="compaction-cfg-tip" style="margin-top:8px;font-size:12px;color:var(--text3);text-align:center"></div>
     <!-- 底部多选操作栏 -->
-    <div class="cc-multi-bar" id="cc-multi-bar">
-      <div class="cc-multi-bar-top">
-        <div class="cc-multi-bar-left">
-          <span class="cc-multi-count" id="cc-multi-count">已选 0 项</span>
-          <label class="cc-multi-select-all"><input type="checkbox" id="cc-multi-select-all" onclick="toggleSelectAllCc()">全选</label>
-        </div>
-        <button type="button" class="cc-multi-cancel" onclick="toggleCcMultiSelect()">取消</button>
-      </div>
-      <div class="cc-multi-bar-actions">
-        <button type="button" class="cc-btn primary" id="cc-multi-gen-btn" onclick="batchGenerateSummaries()">生成摘要</button>
-        <button type="button" class="cc-btn soft" id="cc-multi-replace-btn" onclick="batchReplaceBlocks()">替换</button>
-        <button type="button" class="cc-btn soft" id="cc-multi-reparse-btn" onclick="batchReparseToPool()">解析</button>
-        <button type="button" class="cc-btn secondary" id="cc-multi-export-btn" onclick="batchExportBlocks()">导出</button>
-        <button type="button" class="cc-btn secondary" id="cc-multi-sumexport-btn" onclick="batchExportSummaries()">导出摘要</button>
-        <button type="button" class="cc-btn danger" id="cc-multi-remove-btn" onclick="batchRemoveBlocks()">移除</button>
-      </div>
-    </div>
 
 </div>
 
@@ -369,21 +340,6 @@
            <button type="button" class="btn btn-outline" onclick="resetContextDigestPrompt()" style="flex:1">恢复默认</button>
          </div>
          <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px;">context_digest 工具的整理提示词。模板须含 ${instruction}（AI 的整理指令）与 ${materials}（召回的摘要材料）两个占位符；保存后写入 data/context_digest_prompt.json，下次调用即生效。</div>
-     </div>
-   </div>
-   <div class="card" data-collapse-id="cc-prompt" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>压缩上下文提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
-     <div class="card-body">
-       <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">System（身份提示）</div>
-       <textarea id="cc-prompt-system-edit" rows="12" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;line-height:1.6;font-family:monospace;min-height:240px;max-height:420px;resize:vertical;"></textarea>
-       <div class="hint-body" style="font-size:11px;color:var(--text3);margin:8px 0 4px;">User Prompt 模板占位符：${PERSONA}=人设、${chunkInfo}=块时间段、${conversationText}=对话原文、${normalChars}=基准字数、${maxChars}=上限字数。</div>
-       <textarea id="cc-prompt-edit" rows="10" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;font-family:monospace;line-height:1.6;resize:vertical;"></textarea>
-       <div class="env-row" style="margin-top:8px;gap:8px;">
-         <button type="button" class="btn btn-primary" onclick="saveCompactionPrompt()" style="flex:1;background:var(--accent)">保存</button>
-         <button type="button" class="btn btn-outline" onclick="loadCompactionPrompt()" style="flex:1">重新载入</button>
-         <button type="button" class="btn btn-outline" onclick="resetCompactionPrompt()" style="flex:1">恢复默认</button>
-       </div>
-       <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 data/compaction_prompt.json，下次生成压缩摘要即生效。</div>
      </div>
    </div>
    <div class="card" data-collapse-id="ctx-limit-prompt" data-default="collapsed">
@@ -541,23 +497,6 @@
     <div class="log-panel-empty">暂无生成记录</div>
   </div>
 </div>
-
-
- 
- <!-- 摘要编辑放大窗口 -->
- <div class="modal-overlay" id="ccEditModal">
-   <div class="modal" style="max-width:min(94vw,760px);padding:18px 20px">
-     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-       <h3 style="font-family:'Noto Serif SC',serif;font-size:16px;font-weight:600;color:var(--tab-active);margin:0">编辑摘要</h3>
-       <button type="button" onclick="closeCcEditModal()" title="收起" style="background:rgba(0,0,0,0.04);border:none;font-size:18px;color:var(--text2);cursor:pointer;padding:2px 8px;border-radius:8px;line-height:1">&times;</button>
-     </div>
-     <textarea id="cc-edit-modal-sel" rows="16" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:13px;font-family:monospace;line-height:1.7;resize:vertical;min-height:50vh"></textarea>
-     <div style="display:flex;gap:8px;margin-top:12px">
-       <button type="button" class="btn btn-primary" onclick="saveCcEditModal()" style="flex:1;background:var(--accent)">保存修改</button>
-       <button type="button" class="btn btn-outline" onclick="closeCcEditModal()" style="flex:1">取消</button>
-     </div>
-   </div>
- </div>
  
  <!-- Env Editor Modal -->
  <div class="modal-overlay" id="envModal">
@@ -594,27 +533,6 @@
        <button type="button" class="btn btn-primary" onclick="ccSaveAiEdit()" style="flex:1;background:var(--accent)">保存</button>
        <button type="button" class="btn btn-outline" onclick="closeModal('ccAiEditModal')" style="flex:1">取消</button>
      </div>
-   </div>
- </div>
-
- <div class="modal-overlay" id="ccImportModal">
-   <div class="modal modal-edit-mem" style="max-width:min(94vw,720px)">
-     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-shrink:0">
-       <h3 style="margin:0;font-size:16px">批量导入手写摘要</h3>
-       <button type="button" onclick="closeModal('ccImportModal')" style="background:rgba(0,0,0,0.04);border:none;font-size:16px;color:var(--text2);cursor:pointer;padding:6px 10px;border-radius:8px;line-height:1">&times;</button>
-     </div>
-     <div style="font-size:11px;color:var(--text3);line-height:1.7;margin-bottom:8px;background:rgba(200,144,152,.08);border:1px solid rgba(200,144,152,.25);border-radius:8px;padding:8px 10px">
-       每段以 <b>边界: 首消息id..尾消息id</b>（推荐，稳定不漂移）、<b>[首id..尾id]</b> 或 <b>块 #N</b> 开头，正文接其后可多行，段间空行分隔。<br>
-       工作流：用「导出」生成文件 → 让 AI 保留每块第一行的边界标记并重写摘要 → 粘贴回来点「解析预览」→ 确认后「导入」。<br>
-       导入后：旧摘要自动进<b>历史版本</b>（最多 8 条，可查看/恢复），块变为<b>待替换</b>（需手动点替换才生效）。
-     </div>
-     <textarea id="cc-import-ta" rows="10" placeholder="边界: a123..b456&#10;这是这块的摘要正文，可多行……&#10;&#10;块 #3 另一块的摘要……" style="width:100%;box-sizing:border-box;padding:12px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,0.85);font-size:13px;line-height:1.5;color:var(--text2);resize:vertical;font-family:inherit"></textarea>
-     <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
-       <button type="button" class="btn btn-outline" onclick="previewCcImport()" style="flex:1;min-width:120px">解析预览</button>
-       <button type="button" class="btn btn-primary" id="cc-import-do-btn" onclick="doCcImport()" disabled style="flex:1;min-width:120px;background:var(--accent)">导入</button>
-       <button type="button" class="btn btn-outline" onclick="closeModal('ccImportModal');resetCcImportState()" style="flex:1;min-width:120px">取消</button>
-     </div>
-     <div id="cc-import-preview" style="margin-top:10px;max-height:34vh;overflow:auto;font-size:11px;color:var(--text2);line-height:1.6"></div>
    </div>
  </div>
  
@@ -860,7 +778,6 @@
     // 旧块视图的块列表和多选栏在状态机模式下让位；
     // 「搜索原文」两种模式都保留——状态机模式下它就是看原文的入口（搜原文、按时间段搜都行）
     $('compaction-chunks').style.display = CS.mode === 'block' ? '' : 'none';
-    $('cc-multi-bar').style.display = CS.mode === 'block' ? '' : 'none';
     var searchWrap = document.querySelector('.cc-orig-search-wrap');
     if (searchWrap) searchWrap.style.display = '';
     $('cs-mode-hint').textContent = CS.mode === 'state'

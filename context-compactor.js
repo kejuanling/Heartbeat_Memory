@@ -2,15 +2,16 @@
 
 // ============================================================
 // 上下文压缩引擎 v1
-// 现职（2026-09-15 统一替换后）：压缩参数配置读写 / 压缩与容量提醒提示词 /
-// token 估算 / 可压缩区间编号预览(rangePreview) / 摘要生成(generateSummaryForRange)。
-// 「发送前自动压缩」的旧路径已停用（由 context-replacements 统一处理），
-// makeChunk 等分块函数仅服务于摘要生成的切片。
+// 现职（2026-10-04 旧压缩系统下线后）：压缩参数配置读写 / 容量提醒提示词 /
+// token 估算 / 可压缩区间编号预览(rangePreview)。
+// 已下线：旧摘要生成（generateSummaryForRange/ForMessages）、旧压缩提示词
+//   （data/compaction_prompt.json 那套）、makeChunk/callCompactionLLM。
+//   压缩改由 lib/conversation-state.js 的状态机承担（每会话一份持续演化的状态）。
+// 「发送前自动压缩」的旧路径早已停用（由 context-replacements 统一处理）。
 // ============================================================
 
 const fs = require("fs");
 const path = require("path");
-const crypto = require("crypto");
 const { resolveTimeZone, zonedWallTimeToDate, formatDateTimeInTimeZone, parseMsgTimestamp } = require("./time_utils");
 const { writeJsonAtomic } = require("./json_atomic"); // V10 收敛：三处内联原子写已删
 const contextReplacements = require("./context-replacements");
@@ -18,7 +19,6 @@ const contextReplacements = require("./context-replacements");
 const DATA_DIR = path.join(__dirname, "data");
 const TIME_ZONE = resolveTimeZone();
 const TIMELINE_FILE = path.join(__dirname, "enhanced_messages.json");
-const COMPACTION_PROMPT_FILE = path.join(DATA_DIR, "compaction_prompt.json");
 const CTX_LIMIT_PROMPT_FILE = path.join(DATA_DIR, "ctx_limit_prompt.json");
 // 2026-09-22 审查 §3.4：MARKS_FILE 随 contentKey/loadMarks 收敛到 context-replacements 后已无使用点，删除
 // 2026-09-13 死代码清理：CACHE_MAX_ENTRIES / SUMMARY_HISTORY_MAX 已删——声明后全仓无引用
@@ -27,16 +27,14 @@ const DEFAULT_CONFIG = {
   compaction_chunk_size: 100,
   compaction_chunk_min: 40,
   compaction_chunk_max: 160,
-  compaction_keep_recent_messages: 0,
-  compaction_min_messages: 0,
+  // 2026-10-04 下线：compaction_keep_recent_messages / compaction_min_messages /
+//   compaction_summary_min_chars / compaction_summary_max_chars / compaction_max_active_blocks
+//   ——前四项只服务旧自动压缩计划与旧摘要生成；max_active_blocks 是「块太多」时的权宜手段，
+//   且对状态记录危险（按时间线排最前会被先截，状态消失、原文回灌）。
+  //   compaction_chunk_size/min/max 与 compaction_gap_minutes 保留——状态机的「自动分块」在用
+  //   （切点按时间间隔找自然边界，dryRun 模式只算切点不建块）。
   compaction_gap_minutes: 30,
-  compaction_summary_max_chars: 1200,
-  compaction_summary_min_chars: 250,
-  // 活跃块上限：手动+AI 块合计只保留时间线上最近的 N 个进入上下文（0=不限，默认关）。
-  // 超限的最早块仅隐藏不注入，块的 enabled/摘要数据不动，调大即恢复。
-  compaction_max_active_blocks: 0,
-  // 会话上下文容量提醒：发给 AI 的上下文字符超过该值时，网关往时间线塞一条隐藏提醒事件，
-  // 让 AI 自己调 context_replace 压缩（0=不限）。
+  // 会话上下文容量提醒：发给 AI 的上下文字符超过该值时，网关往时间线塞一条隐藏提醒事件（0=不限）。
   compaction_context_limit_chars: 30000,
   // 容量提醒总开关：关掉后不再检测和塞提醒。
   compaction_context_remind_enabled: true,
@@ -45,23 +43,6 @@ const DEFAULT_CONFIG = {
   // AI 替换区间保护：AI 建的替换块不许覆盖最近 N 条近期对话（0=不保护），越界会被拒绝。
   compaction_protect_recent_messages: 40
 };
-
-const DEFAULT_COMPACTION_SYSTEM =
-  "请以你的身份和口吻，根据对话内容写出第一人称的上下文压缩摘要；称呼对方为她，不要使用「用户」。";
-
-const DEFAULT_COMPACTION_TEMPLATE =
-  "你是一位有完整人设的 AI。下面是你的一段人设：\n" +
-  "${PERSONA}\n\n" +
-  "请把你在下面时间段内与对方的对话，压缩成一段「上下文摘要」。这段摘要会替代原始对话，交给未来的你阅读。\n\n" +
-  "对话范围：${chunkInfo}\n\n" +
-  "对话原文（只保留正文）：\n${conversationText}\n\n" +
-  "请用你的第一人称口吻写这段摘要。要求：\n" +
-  "1. 只依据上面的对话原文，不编造、不补全原文没有的事实，不推测未发生的事。\n" +
-  "2. 称呼对方时用你们之间的称呼，不要使用「用户」。\n" +
-  "3. 保留关键事实、时间、情绪转折、未完成事项、人名/昵称、重要约定；舍弃寒暄和流水账。\n" +
-  "4. 长度按信息量把握：通常 ${normalChars} 字左右，信息特别密集时可写到 ${maxChars} 字；不注水、不硬凑，也不要因为短而丢掉重要信息。\n" +
-  "5. 写出有温度、有「记忆感」的摘要，像自己真正记得这些事，而不是干巴巴的日志。\n\n" +
-  "我的上下文摘要：";
 
 // ---------------- 配置 / 数据 ----------------
 
@@ -106,38 +87,8 @@ function saveConfig(updates) {
   return { ok: true, config: loadConfig() };
 }
 
-function loadPersona() {
-  // 人设来源（2026-09-19 用户拍板）：优先前端聊天设置的默认人设（chat-settings.json 的 system_prompt）；
-  // 设置为空/缺失时退回时间线首条 system（旧行为），最后用内置兜底。
-  try {
-    const cs = JSON.parse(fs.readFileSync(path.join(__dirname, "chat-settings.json"), "utf-8"));
-    const sp = String(cs && cs.system_prompt || "").trim();
-    if (sp) return sp;
-  } catch (err) { /* 设置文件缺失时继续走时间线 */ }
-  try {
-    const data = JSON.parse(fs.readFileSync(TIMELINE_FILE, "utf-8"));
-    const sys = (Array.isArray(data) ? data : []).find(function (m) { return m && m.role === "system"; });
-    const content = sys && sys.content ? String(sys.content).trim() : "";
-    if (content) return content;
-  } catch (err) { /* 人设文件缺失时使用兜底 */ }
-  return "你是一个理性但有温度、表面温柔内心有主见的 AI。你有一位重要的对话伙伴。";
-}
 
-// ---------------- 消息判断 ----------------
 
-// 「记忆浮现」：记忆池注入的永久记忆事件，不参与摘要；被摘要时段内的会直接从上下文删除
-function isMemoryFlash(msg) {
-  if (!msg || msg.role !== "assistant") return false;
-  // 2026-09-22 审查 §3.5：原只做 indexOf——正文里正常提到「记忆浮现」四个字的真实回复会被
-  // 误判成注入事件、被排除出摘要。改为先过 isSpecialEvent（结构化前缀识别），
-  // 与 context-replacements.js 的同名判定同口径（isSpecialEvent 在本文件下方定义，函数声明提升）。
-  return isSpecialEvent(msg) && String(msg.content || "").indexOf("记忆浮现") !== -1;
-}
-
-function isSpecialEvent(msg) {
-  // 委托给统一模块：用结构化前缀识别，避免把真实对话里提到“记忆碎片/推送”等词误判成事件
-  return contextReplacements.isSpecialEvent(msg);
-}
 
 function contentToText(msg) {
   if (msg && msg.deleted === true) return ""; // 软删除内容对摘要/签名不可见
@@ -165,80 +116,6 @@ function formatTime(d) {
   return formatDateTimeInTimeZone(d, TIME_ZONE);
 }
 
-function snippet(text, max) {
-  const t = String(text || "").replace(/\s+/g, " ").trim();
-  return t.length > max ? t.slice(0, max) + "…" : t;
-}
-
-// ---------------- 分块（软目标 + 自然边界） ----------------
-
-// 把一段 items 构造成 chunk 对象：首尾压缩下标/时间范围/字数/首尾摘要/签名
-// （签名只计普通对话，特殊事件不计入，防后台增删事件导致缓存摘要失配）；
-// includeMsgs 时附带逐条原文与标星态，供摘要生成与压缩页展示
-function makeChunk(items, index, includeMsgs, manual) {
-  // 签名只统计普通对话内容：特殊事件（记忆浮现/推送/共影/唤醒等）会被后台流程增删移动，
-  // 若计入签名会导致块签名漂移、缓存摘要全部失配。
-  const sigTexts = items.filter(function (it) { return !isSpecialEvent(it.msg); }).map(function (it) { return contentToText(it.msg); });
-  const texts = items.map(function (it) { return contentToText(it.msg); });
-  const sig = crypto.createHash("sha256").update(sigTexts.join("\u0001")).digest("hex").slice(0, 32);
-  const times = items.map(function (it) { return msgTime(it.msg); }).filter(Boolean);
-  let minT = null;
-  let maxT = null;
-  times.forEach(function (d) {
-    const t = d.getTime();
-    if (minT === null || t < minT) minT = t;
-    if (maxT === null || t > maxT) maxT = t;
-  });
-  const chars = texts.reduce(function (s, t) { return s + t.length; }, 0);
-  const chunk = {
-    index: index,
-    firstIdx: items[0].idx,
-    lastIdx: items[items.length - 1].idx,
-    count: items.length,
-    chars: chars,
-    startTime: minT !== null ? formatTime(new Date(minT)) : "",
-    endTime: maxT !== null ? formatTime(new Date(maxT)) : "",
-    head: snippet(texts[0], 40),
-    tail: snippet(texts[texts.length - 1], 40),
-    signature: sig,
-    // 2026-09-23 审查清理：原 cached/summary/generatedAt/mode 四个历史预留字段已删除——
-    // 全仓 grep 确认零消费者（admin-mobile.js 与 server.js 读的是 preview 自行构造的 chunks，
-    // 与本函数的 chunk 无关），保留只会让维护者误以为这里承载摘要状态。
-    manual: !!manual
-  };
-  if (includeMsgs) {
-    const marks = loadMarks();
-    chunk.msgs = items.map(function (it) {
-      const m = it.msg;
-      const t = msgTime(m);
-      return {
-        role: m.role,
-        content: contentToText(m),
-        // 2026-09-28 修正：时间线思考链字段是 reasoning（thinking 恒为空，此前压缩模型拿不到思考链）
-        reasoning: (m && typeof m.reasoning === "string" && m.reasoning) ? m.reasoning : "",
-        time: t ? formatTime(t) : "",
-        key: contentKey(m),
-        marked: !!marks[contentKey(m)]
-      };
-    });
-  }
-  return chunk;
-}
-
-// ---------------- 缓存（内容寻址） ----------------
-
-function loadCompactionPromptConfig() {
-  try {
-    const cfg = JSON.parse(fs.readFileSync(COMPACTION_PROMPT_FILE, "utf-8"));
-    if (cfg && typeof cfg.template === "string" && cfg.template.trim()) {
-      return {
-        system: typeof cfg.system === "string" && cfg.system.trim() ? cfg.system : DEFAULT_COMPACTION_SYSTEM,
-        template: cfg.template
-      };
-    }
-  } catch (err) { /* 缺失时使用默认 */ }
-  return { system: DEFAULT_COMPACTION_SYSTEM, template: DEFAULT_COMPACTION_TEMPLATE };
-}
 
 // ---------------- 容量提醒提示词（独立配置，管理台压缩页编辑，与压缩提示词互不关联） ----------------
 
@@ -308,176 +185,12 @@ function resetCtxLimitPrompt() {
   return { ok: true, template: DEFAULT_CTX_LIMIT_PROMPT };
 }
 
-function buildCompactionPrompt(chunk, cfg) {
-  const persona = loadPersona();
-  // 2026-09-28 思考链总量预算（闭包）：限制附给压缩模型的思考链总字数，防 prompt 无界膨胀
-  let _reasoningTotal = 0;
-  const MAX_REASONING_TOTAL = 12000;
-  const _reasoningBudget = function () { return MAX_REASONING_TOTAL - _reasoningTotal; };
-  const _reasoningSpend = function (n) { _reasoningTotal += n; };
-  const maxChars = Number(cfg.compaction_summary_max_chars) || 1200;
-  const minChars = Number(cfg.compaction_summary_min_chars) || 250;
-  const normalChars = Math.max(minChars, Math.min(maxChars, Math.round((chunk.chars || 0) / 50)));
-  const promptCfg = loadCompactionPromptConfig();
-  const msgs = chunk.msgs || [];
-  // 浮现的记忆不参与摘要（它们是记忆池注入内容，不是对话本身）；整块只有记忆浮现时退回原文保底
-  const usable = msgs.filter(function (m) { return !isMemoryFlash(m); });
-  const targetMsgs = usable.length > 0 ? usable : msgs;
-  const lines = targetMsgs.map(function (m) {
-    // 2026-09-28 developer 参与压缩后（判定记录/日记通知等）：标签标「系统」，不再误显为「我」
-    const role = m.role === "user" ? (process.env.USER_DISPLAY_NAME || "对方") : (m.role === "developer" ? "系统" : "我");
-    const body = contentToText(m);
-    // 2026-09-28 思考链参考（用户需求）：把被压缩消息的思考链（reasoning）附在消息行后，
-    // 让压缩模型写摘要时贴合真实 AI 的思考/风格；摘要正文本身不含思考段（模型按模板只输出摘要）。
-    // 每条截断 MAX_REASONING_EACH 字防 prompt 爆炸；总量超 MAX_REASONING_TOTAL 即停（后面消息不再附）。
-    const r = (m && m.role === "assistant" && typeof m.reasoning === "string") ? m.reasoning.trim() : "";
-    if (r) {
-      const MAX_EACH = 600;
-      const cut = r.length > MAX_EACH ? r.slice(0, MAX_EACH) + "…（思考链已截断）" : r;
-      if ((_reasoningBudget() - cut.length) >= 0) {
-        _reasoningSpend(cut.length);
-        return "[" + role + "] " + body + "\n[思考] " + cut;
-      }
-    }
-    return "[" + role + "] " + body;
-  });
-  let conversationText = lines.join("\n\n");
-  if (usable.length > 0 && usable.length !== msgs.length) {
-    conversationText += "\n\n（注：本段内有 " + (msgs.length - usable.length) + " 条「记忆浮现」系统事件，属于记忆池注入内容，未纳入摘要；被摘要时它们会直接从上下文中移除。）";
-  }
-  const chunkInfo = (chunk.startTime || "未知") + " ~ " + (chunk.endTime || "未知") + "，共 " + chunk.count + " 条";
-  return {
-    // ${PERSONA} 在 system 与 user 模板里都要替换（自定义英文模板把人设写在 system：「You are ${PERSONA}.」）
-    system: String(promptCfg.system).replace("${PERSONA}", persona),
-    prompt: promptCfg.template
-      .replace("${PERSONA}", persona)
-      .replace("${chunkInfo}", chunkInfo)
-      .replace("${conversationText}", conversationText)
-      .replace("${normalChars}", String(normalChars))
-      .replace("${maxChars}", String(maxChars))
-  };
-}
 
-// ---------------- 压缩提示词（管理台编辑） ----------------
 
-function getCompactionPromptForDisplay() {
-  const cfg = loadCompactionPromptConfig();
-  return {
-    system: cfg.system,
-    template: cfg.template,
-    prompt: cfg.template
-      .replace("${PERSONA}", loadPersona())
-      .replace("${chunkInfo}", "2026-07-27 00:00 ~ 2026-08-01 23:59，共 100 条")
-      .replace("${conversationText}", "【此处为待摘要的对话原文】")
-      .replace("${normalChars}", "300")
-      .replace("${maxChars}", "1200")
-  };
-}
 
-function saveCompactionPromptConfig(system, template) {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  const cfg = {
-    system: String(system || "").trim(),
-    template: String(template || "")
-  };
-  if (!cfg.template.trim()) throw new Error("模板不能为空");
-  writeJsonAtomic(COMPACTION_PROMPT_FILE, cfg);
-  return cfg;
-}
 
-function resetCompactionPromptConfig() {
-  if (fs.existsSync(COMPACTION_PROMPT_FILE)) fs.unlinkSync(COMPACTION_PROMPT_FILE);
-  return { system: DEFAULT_COMPACTION_SYSTEM, template: DEFAULT_COMPACTION_TEMPLATE };
-}
 
-// ---------------- 摘要生成（调用上游模型） ----------------
 
-// 调用上游模型生成摘要文本（不含落盘）：手动块与未覆盖区生成共用
-async function callCompactionLLM(built, label) {
-  const { provider, model } = require("./model-router").resolveRoleModel("compaction");
-  const targetUrl = provider && (provider.api_url || provider.base_url);
-  const targetKey = provider && provider.api_key;
-  if (!targetUrl || !targetKey || !model) {
-    throw new Error("模型未配置（role=compaction：请在设置里给「压缩摘要」选模型或启用一个默认供应商）");
-  }
-  const outputBudgets = [16000, 32000, 50000];
-  let lastErr = null;
-  for (let attempt = 0; attempt < outputBudgets.length; attempt++) {
-    const controller = new AbortController();
-    const timeout = setTimeout(function () { controller.abort(); }, 300 * 1000);
-    try {
-      const resp = await fetch(targetUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer " + targetKey
-        },
-        body: JSON.stringify({
-          model: model,
-          messages: [
-            { role: "system", content: built.system },
-            { role: "user", content: built.prompt }
-          ],
-          temperature: 0.4,
-          max_tokens: outputBudgets[attempt],
-          stream: false
-        }),
-        signal: controller.signal
-      });
-      if (!resp.ok) throw new Error("上游返回 HTTP " + resp.status);
-      const data = await resp.json();
-      const finishReason = data.choices && data.choices[0] && data.choices[0].finish_reason;
-      const raw = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-      const summary = raw ? String(raw).trim() : "";
-      if (!summary || finishReason === "length") {
-        const why = !summary ? "上游返回空摘要" : "摘要被截断（finish_reason=length）";
-        if (attempt >= outputBudgets.length - 1) {
-          throw new Error(why);
-        }
-        console.warn("[context-compactor] " + (label || "摘要") + " " + why + "，增大输出预算重试");
-        lastErr = new Error(why);
-        continue;
-      }
-      return summary;
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-  throw lastErr || new Error("摘要生成失败");
-}
-
-async function generateSummaryForRange(start, end) {
-  const cfg = loadConfig();
-  // 编号与前端/块存储同源：复用 contextReplacements.compressibleItems()。
-  // 否则 compactor 对软删除消息"保留占位"会让编号漂移约 8 条，导致切片错位。
-  const items = contextReplacements.compressibleItems();
-  const minMessages = Number(cfg.compaction_min_messages) || 0;
-  // 与前端 rangePreview 一致：展示完整可压缩区间，不做 keepRecent/minMessages 截断
-  const compactCount = items.length;
-  if (items.length < minMessages) return { ok: false, message: "当前没有可压缩内容" };
-  const s = Math.max(0, Math.floor(Number(start) || 0));
-  let e = Math.floor(Number(end));
-  if (!Number.isInteger(e) || e < s) e = s;
-  if (s >= compactCount) return { ok: false, message: "起始编号超出当前可压缩范围" };
-  e = Math.min(e, compactCount - 1);
-  const chunk = makeChunk(items.slice(s, e + 1), 0, true, true);
-  const built = buildCompactionPrompt(chunk, cfg);
-  const summary = await callCompactionLLM(built, "块");
-  return { ok: true, summary: summary, length: summary.length, count: chunk.count };
-}
-
-// 2026-10-01：直接对给定消息数组生成摘要（批量重生成已替换块用）。
-// 与 generateSummaryForRange 的区别：不从 compressibleItems 切片段，而是直接吃 matched 快照——
-// 老块的 range.start_index 是历史序号，时间线已变迁，序号定位永久失效，只能用块里存的原文快照。
-async function generateSummaryForMessages(msgs) {
-  const cfg = loadConfig();
-  if (!Array.isArray(msgs) || !msgs.length) return { ok: false, message: "消息数组为空" };
-  const items = msgs.map((m, i) => ({ msg: m, idx: i }));
-  const chunk = makeChunk(items, 0, true, true);
-  const built = buildCompactionPrompt(chunk, cfg);
-  const summary = await callCompactionLLM(built, "块");
-  return { ok: true, summary: summary, length: summary.length, count: chunk.count };
-}
 
 // 2026-09-22 审查 §3.4：原为两份独立副本（注释自称「改动需两处同步」，实际已开始漂移——
 // 本副本每次裸 readFileSync 无缓存，context-replacements 那份走 readJson 的 mtime 缓存）。
@@ -552,11 +265,5 @@ module.exports = {
   loadCtxLimitPrompt,
   saveCtxLimitPrompt,
   resetCtxLimitPrompt,
-  getCompactionPromptForDisplay,
-  buildCompactionPrompt,
-  saveCompactionPromptConfig,
-  resetCompactionPromptConfig,
   rangePreview,
-  generateSummaryForRange,
-  generateSummaryForMessages,
 };

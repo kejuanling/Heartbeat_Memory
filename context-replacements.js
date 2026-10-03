@@ -24,27 +24,6 @@ const MEMORY_POOL_CONFIG_FILE = path.join(DATA_DIR, "memory_pool_config.json");
 const MAX_MEMORY_CHARS = 100000;
 
 // ========================
-// 活跃块上限（compaction_max_active_blocks，存在 data/config.json，属压缩模块配置）。
-// 这里不能 require context-compactor（对方已 require 本模块，会循环依赖），直接读单键。
-// 带文件 mtime 缓存，每次请求至多一次磁盘读小文件。
-// ========================
-let _maxActiveCache = { mtime: -1, value: 0 };
-function loadMaxActiveBlocks() {
-  try {
-    const st = fs.statSync(CONFIG_FILE);
-    const mtime = st.mtimeMs;
-    if (_maxActiveCache.mtime !== mtime) {
-      const cfg = readJson(CONFIG_FILE, {});
-      const v = Math.max(0, Math.floor(Number(cfg && cfg.compaction_max_active_blocks) || 0));
-      _maxActiveCache = { mtime: mtime, value: v };
-    }
-    return _maxActiveCache.value;
-  } catch (e) {
-    return 0;
-  }
-}
-
-// ========================
 // 每次请求的替换/压缩记录（供管理台查看；含对话/共影/唤醒等所有来源）
 // ========================
 const REPLACE_LOG_FILE = path.join(DATA_DIR, "context_replace_log.json");
@@ -476,7 +455,7 @@ function fmtWall(d) {
 // ========================
 // 2026-10-01 性能：REPLACEMENTS_FILE 实测 9.8MB，JSON.parse 单次约 41ms，而一次聊天请求
 // 会多次 loadItems（buildIncrementalContext / applyReplacements / 管理台等）。按 mtimeMs+size
-// 缓存解析结果（与同文件 loadMaxActiveBlocks 同款策略），命中只付一次 statSync（≈0ms）。
+// 缓存解析结果（mtime+size 双键），命中只付一次 statSync（≈0ms）。
 // 安全性：本文件所有写路径均为「loadItems → 改 → saveItems」纯同步（见文件头并发约束），
 // 且 saveItems 会主动清缓存，故返回缓存引用不会被「改了不落盘」污染；server.js 三处外部
 // 调用（5079/5556/5965）均为 filter 只读。
@@ -958,31 +937,6 @@ function buildManualRecord(start, end, enabled) {
   };
 }
 
-// 新增手工块（吞并重叠的旧手工块；默认 enabled=false，点「替换」才生效）
-function addManualRecord(start, end, enabled) {
-  const built = buildManualRecord(start, end, enabled);
-  if (!built.ok) return built;
-  const items = loadItems();
-  const filtered = [];
-  let removedCount = 0;
-  const compItems = compressibleItems();
-  for (const it of items) {
-    // 只吞并同会话（或无 session 的通用旧块）的重叠手工块，跨会话块序号互不重叠、不能误吞
-    if (it.source === "manual" && (!it.session || it.session === built.record.session)) {
-      // 吞并判定用「当前真实覆盖区间」而非存储 range：时间线增删后旧块的存储编号会漂移，
-      // 按过期存储编号判断会误吞内容已移动到别处的块，导致被顶块的内容退回未覆盖区（边界被顶）。
-      const cur = recordCompRange(it, compItems);
-      if (cur && cur.start <= built.endIndex && cur.end >= built.startIndex) {
-        removedCount++;
-        continue;
-      }
-    }
-    filtered.push(it);
-  }
-  filtered.push(built.record);
-  saveItems(filtered);
-  return { ok: true, record: built.record, removedCount: removedCount };
-}
 
 function removeManualRecord(index) {
   const found = manualRecordAt(index);
@@ -1035,108 +989,9 @@ function setManualRecordHiddenById(id, hidden) {
   return { ok: true, record: publicItem(it) };
 }
 
-function updateManualRecordRange(index, start, end) {
-  const found = manualRecordAt(index);
-  if (!found) return { ok: false, message: "块不存在" };
-  return updateManualRecordRangeById(found.record.id, start, end);
-}
-
-function updateManualRecordRangeById(id, start, end) {
-  const found = manualRecordById(id);
-  if (!found) return { ok: false, message: "块不存在" };
-  const items = loadItems();
-  const cur = items.find(function (x) { return x.id === found.record.id; });
-  if (!cur) return { ok: false, message: "块不存在" };
-  const compItems = compressibleItems();
-  const curRange = recordCompRange(cur, compItems);
-  if (!curRange) return { ok: false, message: "无法定位该块的原文范围" };
-  // 收缩支持：新范围端点即目标边界（改小结尾 = 尾部让出，退回未覆盖区）；
-  // 再吸收所有与 [start,end] 真正重叠的其他块（手工 + AI）
-  let mergedStart = start;
-  let mergedEnd = end;
-  const absorbed = [];
-  for (const it of items) {
-    if (it.id === cur.id || it.removed) continue;
-    // 只吞并同会话（或无 session 的通用旧块）的块，跨会话块定位撞上也不能误吞（与 addManualRecord 同口径）
-    if (it.session && it.session !== cur.session) continue;
-    const r = recordCompRange(it, compItems);
-    if (!r) continue;
-    if (r.start <= mergedEnd && r.end >= mergedStart) {
-      absorbed.push({ it: it, r: r });
-      if (r.end > mergedEnd) mergedEnd = r.end;
-      if (r.start < mergedStart) mergedStart = r.start;
-    }
-  }
-  const built = buildRangeFields(compItems, mergedStart, mergedEnd);
-  if (!built.ok) return built;
-  // 摘要拼接：当前块 + 被吸收块（按原文位置顺序）
-  absorbed.sort(function (a, b) { return a.r.start - b.r.start; });
-  const parts = [recordText(cur)].concat(absorbed.map(function (a) { return recordText(a.it); })).filter(Boolean);
-  const mergedText = parts.join("\n\n");
-  cur.range = built.range;
-  cur.range_label = built.range_label;
-  cur.matched = built.matched;
-  cur.count = built.count;
-  cur.enabled = cur.enabled !== false;
-  if (mergedText) { cur.text = mergedText; cur.memory = mergedText; }
-  cur.updated_at = nowIso();
-  const filtered = items.filter(function (it) { return !absorbed.some(function (a) { return a.it.id === it.id; }); });
-  saveItems(filtered);
-  return { ok: true, record: publicItem(cur), removedCount: absorbed.length, merged: absorbed.map(function (a) { return a.it.id; }) };
-}
 
 
-// AI 块：按消息 id 范围更新覆盖区间（前端管理台用，编号入参由路由层换算）。
-// 保留 source=ai；只改自身，不吞并其他块。
-function updateAiRecordRange(repId, startIdx, endIdx) {
-  const items = compressibleItems();
-  if (!repId) return { ok: false, message: '缺少记录 id' };
-  const s = Math.floor(Number(startIdx));
-  const e = Math.floor(Number(endIdx));
-  if (!Number.isInteger(s) || !Number.isInteger(e) || s < 0 || e < s) return { ok: false, message: '无效的编号范围' };
-  if (s >= items.length) return { ok: false, message: '起始编号超出当前消息总数' };
-  const ee = Math.min(e, items.length - 1);
-  const list = loadItems();
-  const idx = list.findIndex(it => it && it.id === repId && !it.removed);
-  if (idx < 0) return { ok: false, message: '记录不存在' };
-  const rec = list[idx];
-  const curRange = recordCompRange(rec, items);
-  if (!curRange) return { ok: false, message: '无法定位该块的原文范围' };
-  // 收缩支持：新范围端点即目标边界（改小结尾 = 尾部让出，退回未覆盖区）；
-  // 再吸收所有与 [s, ee] 真正重叠的其他块（手工 + AI）
-  let mergedStart = s;
-  let mergedEnd = ee;
-  const absorbed = [];
-  for (const it of list) {
-    if (it.id === repId || it.removed) continue;
-    // 只吞并同会话（或无 session 的通用旧块）的块，跨会话块定位撞上也不能误吞（与 addManualRecord 同口径）
-    if (it.session && it.session !== rec.session) continue;
-    const r = recordCompRange(it, items);
-    if (!r) continue;
-    if (r.start <= mergedEnd && r.end >= mergedStart) {
-      absorbed.push({ it: it, r: r });
-      if (r.end > mergedEnd) mergedEnd = r.end;
-      if (r.start < mergedStart) mergedStart = r.start;
-    }
-  }
-  // 2026-09-22 审查 R13：与手工块共用 buildRangeFields 单一实现（原为逐字重复的第二份，
-  // 且此处额外保留了「至少 1 条」与 id 锚点校验，语义与 helper 完全一致）
-  const built = buildRangeFields(items, mergedStart, mergedEnd);
-  if (!built.ok) return built;
-  rec.range = built.range;
-  rec.range_label = built.range_label;
-  rec.matched = built.matched;
-  rec.count = built.count;
-  // 摘要拼接：当前块 + 被吸收块（按原文位置顺序）
-  absorbed.sort(function (a, b) { return a.r.start - b.r.start; });
-  const parts = [recordText(rec)].concat(absorbed.map(function (a) { return recordText(a.it); })).filter(Boolean);
-  const mergedText = parts.join("\n\n");
-  if (mergedText) { rec.text = mergedText; rec.memory = mergedText; }
-  rec.updated_at = nowIso();
-  const filtered = list.filter(function (it) { return !absorbed.some(function (a) { return a.it.id === it.id; }); });
-  saveItems(filtered);
-  return { ok: true, count: built.count, record: publicItem(rec), removedCount: absorbed.length, merged: absorbed.map(function (a) { return a.it.id; }) };
-}
+
 
 // 按时间间隔自动切分 [start,end]（1-based 转 0-based），生成多个手工块
 // ---- 自动分块评分：时间间隔 + 话题切换 + 说话人切换 ----
@@ -1939,24 +1794,15 @@ function applyReplacements(messages, source) {
       return true;
     })
     .sort(function (a, b) { return tlPos.get(a.id) - tlPos.get(b.id); });
-  // 活跃块上限：手动+AI 块合计只保留时间线上最近的 N 个（0=不限）。
-  // 超限的最早块与手动隐藏块（hidden=true）同样处理：区间仍按锚点定位校验，但摘要不注入、
-  // 区间原文也从上下文剔除（2026-09-15 与预览统计统一口径——此前截断块原文会漏进上下文）；
-  // 块的 enabled/摘要数据不动，调大上限或取消隐藏即恢复。
+  // 2026-10-04：compaction_max_active_blocks（活跃块上限）随旧压缩系统下线。
+  // 它是「块太多」时的权宜手段，且对状态记录危险——按时间线排最前会先被砍掉，
+  // 表现为「状态消失、原文回灌」。原先下面那段截断逻辑（truncatedItems）一并移除。
+  // 现只保留「手动隐藏」这一条用户可控的路径（hidden=true 的块不注入，可随时取消恢复）。
   const manualHiddenItems = items.filter(function (it) { return it.hidden === true; });
   items = items.filter(function (it) { return it.hidden !== true; });
-  const maxActiveBlocks = loadMaxActiveBlocks();
-  let truncatedItems = [];
-  if (maxActiveBlocks > 0 && items.length > maxActiveBlocks) {
-    truncatedItems = items.slice(0, items.length - maxActiveBlocks);
-    truncatedItems.forEach(function (it) {
-      skipped.push({ id: it.id, reason: "活跃块上限截断(" + maxActiveBlocks + ")" });
-    });
-    items = items.slice(items.length - maxActiveBlocks);
-  }
-  // 删除型块（手动隐藏/超限截断）：重新并入处理队列走同一套锚点校验，锚点失配则照常 skipped 兜底（原文保留）
-  const omitIds = new Set(manualHiddenItems.concat(truncatedItems).map(function (it) { return it.id; }));
-  items = items.concat(manualHiddenItems, truncatedItems);
+  // 删除型块（手动隐藏）：重新并入处理队列走同一套锚点校验，锚点失配则照常 skipped 兜底（原文保留）
+  const omitIds = new Set(manualHiddenItems.map(function (it) { return it.id; }));
+  items = items.concat(manualHiddenItems);
   if (items.length === 0) return messages;
 
   const replacements = [];
@@ -3217,7 +3063,6 @@ function buildIncrementalContext(sessionId, timeline) {
   }
 
   const windowStartMs = currentWindowStartMs(tl);
-  const maxActive = loadMaxActiveBlocks();
 
   // 定位区间：优先用 matched 首尾非特殊事件消息的 id（与 applyReplacements 完全同口径——
   // 块记录里 range 是创建时快照，matched 会随消息编辑/边界微调更新，两者可能不一致）；
@@ -3251,14 +3096,11 @@ function buildIncrementalContext(sessionId, timeline) {
   if (!located.length) return out;
   located.sort(function (a, b) { return a.s - b.s; });
 
-  // 隐藏块/超限截断块（区间原文从上下文剔除，与 applyReplacements 同口径）
+  // 隐藏块（区间原文从上下文剔除，与 applyReplacements 同口径）。
+  // 2026-10-04：原先这里还有一段「活跃块上限」截断（maxActive），随旧压缩系统一并下线。
   const hiddenIds = new Set(items.filter(function (it) { return it.hidden === true; }).map(function (it) { return it.id; }));
-  let activeLocs = located.filter(function (l) { return !hiddenIds.has(l.it.id); });
-  let truncatedIds = new Set();
-  if (maxActive > 0 && activeLocs.length > maxActive) {
-    const drop = activeLocs.slice(0, activeLocs.length - maxActive);
-    truncatedIds = new Set(drop.map(function (l) { return l.it.id; }));
-  }
+  const activeLocs = located.filter(function (l) { return !hiddenIds.has(l.it.id); });
+  const truncatedIds = new Set();
 
   const marks = loadMarks();
   let cur = 0;
@@ -3353,16 +3195,12 @@ module.exports = {
   computeTailStart,
   buildMemoryMessage,
   // 手工记录管理
-  addManualRecord,
   removeManualRecord,
   removeManualRecordById,
   toggleManualRecord,
   toggleManualRecordById,
   setManualRecordHidden,
   setManualRecordHiddenById,
-  updateManualRecordRange,
-  updateManualRecordRangeById,
-  updateAiRecordRange,
   splitRangeByGaps,
   setManualRecordText,
   setManualRecordTextById,

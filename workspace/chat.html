@@ -6624,7 +6624,7 @@ async function loadSessionCc(id){
     if(!chunks.length&&!gaps.length){ body.innerHTML='<div class="adm-empty">该会话暂无压缩块</div>'; return; }
     let html='<div class="cc-summary">实际约 <b>'+(t.estCompressedChars||0)+'</b> 字 · '+(t.chunkCount||0)+' 块 · 共 '+(t.totalChars||0)+' 字</div>';
     if(t.hiddenCount>0){
-      html+='<div class="cc-hidden-tip">最早 <b>'+t.hiddenCount+'</b> 块已隐藏、未进入上下文（活跃块上限 '+(t.maxActiveBlocks||'?')+'，手动+AI 合计保留最近 N 个）；如需保留信息，建议去管理台将其入池。</div>';
+      html+='<div class="cc-hidden-tip">有 <b>'+t.hiddenCount+'</b> 块被手动隐藏、未进入上下文；取消隐藏即可恢复。</div>';
     }
     html+=chunks.map(function(c){
       const isAi=!!c.aiRep;

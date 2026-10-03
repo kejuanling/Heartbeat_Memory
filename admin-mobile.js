@@ -139,8 +139,6 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
   ccGapPageOffset: {},             // 未覆盖区分页偏移
   ccGapHasMore: {},                // 未覆盖区是否还有下一页
   ccGapLoadingKey: null,           // 正在加载消息的 gkey
-  ccGapGenerating: new Set(),      // 正在生成摘要的 gkey
-  ccBlockGenerating: new Set(),    // 正在重新生成摘要的块 index
   ccAiSummaryOpen: new Set(),      // 已展开的 AI 摘要面板
   ccAnimateOpen: new Set(),        // 待播放展开动画的节点 id
   ccAiEditTarget: null,            // AI 摘要编辑中的块 index
@@ -1078,7 +1076,7 @@ function ccBuildSummaryStatsHtml(d, t){
     +'<span class="cc-mini-item'+(t.estTotalTokens?'':' zero')+'" title="实际发送 token 估算 = 未覆盖积压 + 摘要块 + 标星原句 + 图片 + 置顶记忆（永久上下文）。估算口径：中文≈1字/token、英文≈4字符/token、图片每张约1000。"><b>'+fmtCcNum(t.estTotalTokens||0)+'</b><i>总tok</i></span>'
     +((t.hiddenCount>0||t.manualHiddenCount>0)?'<span class="cc-mini-item zero"><b>'+((t.hiddenCount||0)+(t.manualHiddenCount||0))+'</b><i>隐藏</i></span>':'')
     +'</div>'
-    +(t.hiddenCount>0?'<div class="cc-hidden-tip">最早 <b>'+(t.hiddenCount||0)+'</b> 块已隐藏、未进入上下文（活跃块上限 '+(t.maxActiveBlocks||'?')+'，手动+AI 合计保留最近 N 个）；如需保留信息，建议将块解析入池。</div>':'')
+    +(t.hiddenCount>0?'<div class="cc-hidden-tip">有 <b>'+(t.hiddenCount||0)+'</b> 块被你手动隐藏、未进入上下文；取消隐藏即可恢复。</div>':'')
     ;
 }
 
@@ -1128,10 +1126,7 @@ function ccBuildSummaryStatsHtml(d, t){
          +'</div>'
          +(AppState.ccGapCollapsed.has(gkey)?'':renderCcGapMessages(g))
          +'<div class="cc-uncovered-actions">'
-         +'<button class="cc-btn secondary" onclick="autoSplitGap('+g.startIdx+','+g.endIdx+')">自动分块</button>'
-         +'<button class="cc-btn soft" onclick="generateGapSummary('+g.startIdx+','+g.endIdx+')"'+(AppState.ccGapGenerating.has(gkey)?' disabled':'')+'>'+(AppState.ccGapGenerating.has(gkey)?'生成中…':'生成摘要')+'</button>'
          +'<input type="text" id="cc-add-range-'+g.startIdx+'-'+g.endIdx+'" placeholder="如 '+g.startIdx+'-'+g.endIdx+'" oninput="ccRangeWarn(this,'+g.startIdx+','+g.endIdx+')">'
-         +'<button class="cc-btn secondary" onclick="addBlockByRange('+g.startIdx+','+g.endIdx+')">切分</button>'
          +'</div>'
          +'</div>';
        return;
@@ -1173,7 +1168,7 @@ function ccBuildSummaryStatsHtml(d, t){
          ? (manualHidden
             ? '<button class="cc-btn cc-head-toggle" onclick="event.stopPropagation();unhideBlock('+c.index+','+blockIndex+','+(isAi?1:0)+',\''+(c.id||'')+'\')" title="取消手动隐藏，块恢复参与上下文">取消隐藏</button>'
             : '')
-         : '<button class="cc-btn cc-head-toggle'+(enabled?' on':'')+(c.cached?'':' gen')+'" onclick="event.stopPropagation();'+(c.cached?'toggleCcReplace('+c.index+','+blockIndex+','+(isAi?1:0)+',\''+(c.id||'')+'\')':'regenerateBlockSummary('+c.index+','+blockIndex+',\''+(c.id||'')+'\')')+'"'+((!c.cached&&AppState.ccBlockGenerating.has(c.index))?' disabled':'')+'>'+(c.cached?(enabled?'取消替换':'替换'):(AppState.ccBlockGenerating.has(c.index)?'生成中…':'✦ 生成摘要'))+'</button>')
+         : '<button class="cc-btn cc-head-toggle'+(enabled?' on':'')+'" onclick="event.stopPropagation();toggleCcReplace('+c.index+','+blockIndex+','+(isAi?1:0)+',\''+(c.id||'')+'\')">'+(enabled?'取消替换':'替换')+'</button>')
        +'</div>'
        +(hidden?'':
        '<div class="cc-meta">第 '+start+'~'+end+' 条 · '+escHtml(timeLabel)+'</div>'
@@ -1181,21 +1176,15 @@ function ccBuildSummaryStatsHtml(d, t){
          +(!isAi ? '<div id="cc-addman-'+c.index+'"></div>' : '')
  +(!isAi
          ? '<div class="cc-boundary">'
-           +'<input class="cc-num" type="number" min="1" max="'+d.totalCompressible+'" value="'+start+'" title="开头" oninput="ccNumLiveCheck(this,'+d.totalCompressible+')" onchange="updateCompactionBoundary(\''+(c.id||'')+'\',0,this.value)" onblur="clampCcInput(this,\''+(c.id||'')+'\',0,'+d.totalCompressible+')">'
            +'<span class="cc-boundary-arrow">→</span>'
-           +'<input class="cc-num" type="number" min="1" max="'+d.totalCompressible+'" value="'+end+'" title="结尾" oninput="ccNumLiveCheck(this,'+d.totalCompressible+')" onchange="updateCompactionBoundary(\''+(c.id||'')+'\',1,this.value)" onblur="clampCcInput(this,\''+(c.id||'')+'\',1,'+d.totalCompressible+')">'
            +'</div>'
          : '<div class="cc-boundary">'
-          +'<input class="cc-num" type="number" min="1" max="'+d.totalCompressible+'" value="'+(((typeof c.blockStart==='number'?c.blockStart:0)+1))+'" title="开头" oninput="ccNumLiveCheck(this,'+d.totalCompressible+')" onchange="updateAiBoundary('+c.index+',0,this.value)" onblur="clampAiCcInput(this,'+c.index+',0,'+d.totalCompressible+')">'
            +'<span class="cc-boundary-arrow">→</span>'
-          +'<input class="cc-num" type="number" min="1" max="'+d.totalCompressible+'" value="'+(((typeof c.blockEnd==='number'?c.blockEnd:0)+1))+'" title="结尾" oninput="ccNumLiveCheck(this,'+d.totalCompressible+')" onchange="updateAiBoundary('+c.index+',1,this.value)" onblur="clampAiCcInput(this,'+c.index+',1,'+d.totalCompressible+')">'
           +'</div>')
-       +(expanded?renderCcMessagesLazy(c):'')+(!isAi&&!c.cached&&expanded?'<div class="cc-manual-entry" style="padding:8px 0 4px;border-bottom:1px solid var(--border);margin-bottom:6px"><button class="cc-btn secondary" onclick="event.stopPropagation();openCcAddManual('+c.index+','+blockIndex+')" style="font-size:11px">＋ 手动填写摘要</button></div>':'')
        +(isAi
          ? '<div class="cc-ai-summary-wrap">'
            +'<div class="cc-sum-toggle-row">'
            +'<div class="cc-summary-toggle" onclick="toggleCcAiSummary('+c.index+')">'+(AppState.ccAiSummaryOpen.has(c.index)?'▾ 收起摘要':'▸ 查看摘要')+'</div>'
-           +'<button class="cc-sum-toggle-btn" onclick="event.stopPropagation();regenerateAiBlockSummary(\''+c.repId+'\','+c.index+')"'+(AppState.ccBlockGenerating.has(c.index)?' disabled':'')+'>'+(AppState.ccBlockGenerating.has(c.index)?'生成中…':'✦ 重新生成摘要')+'</button>'
            +'</div>'
            +'<div id="cc-collapse-ai-'+c.index+'" class="cc-collapse'+(AppState.ccAiSummaryOpen.has(c.index)&&(prevOpenCol['cc-collapse-ai-'+c.index]||!AppState.ccAnimateOpen.has('cc-collapse-ai-'+c.index))?' open':'')+'"><div class="cc-collapse-inner">'+renderCcAiSummary(c)+'</div></div>'
            +'</div>'
@@ -1204,9 +1193,7 @@ function ccBuildSummaryStatsHtml(d, t){
          ? '<div class="cc-ai-summary-wrap">'
            +'<div class="cc-sum-toggle-row">'
            +'<div class="cc-summary-toggle" onclick="toggleCcSummary('+c.index+')">'+(AppState.ccSummaryOpen.has(c.index)?'▾ 收起摘要':'▸ 查看摘要')+(c.history&&c.history.length?'（共 '+(c.history.length+1)+' 版）':'')+'</div>'
-           +'<button class="cc-sum-toggle-btn" onclick="event.stopPropagation();regenerateBlockSummary('+c.index+','+blockIndex+',\''+(c.id||'')+'\')"'+(AppState.ccBlockGenerating.has(c.index)?' disabled':'')+'>'+(AppState.ccBlockGenerating.has(c.index)?'生成中…':'✦ 重新生成摘要')+'</button>'
            +'</div>'
-           +'<div id="cc-collapse-sum-'+c.index+'" class="cc-collapse'+(AppState.ccSummaryOpen.has(c.index)&&(prevOpenCol['cc-collapse-sum-'+c.index]||!AppState.ccAnimateOpen.has('cc-collapse-sum-'+c.index))?' open':'')+'"><div class="cc-collapse-inner">'+renderCcSummaryEditor(c, blockIndex)+renderCcHistory(c)+'</div></div>'
            +'</div>'
          : ''))
        +'</div>'
@@ -1317,12 +1304,6 @@ function updateCcStatusBar(d){
     +'<span class="cc-chip '+(pending?'done':'muted')+'" onclick="toggleCcFilter(\'pending\')"'+(AppState.ccFilter==='pending'?' data-filter="pending"':'')+'><i class="cc-dot"></i>待生成 <b>'+pending+'</b></span>'
     +'<span class="cc-chip '+(toReplace?'warn':'muted')+'" onclick="toggleCcFilter(\'replace\')"'+(AppState.ccFilter==='replace'?' data-filter="replace"':'')+'><i class="cc-dot"></i>待替换 <b>'+toReplace+'</b></span>'
     +'<span class="cc-chip '+(replaced?'done':'muted')+'" onclick="toggleCcFilter(\'replaced\')"'+(AppState.ccFilter==='replaced'?' data-filter="replaced"':'')+'><i class="cc-dot"></i>已替换 <b>'+replaced+'</b></span>';
-  const genBtn=document.getElementById('cc-gen-all-btn');
-  if(genBtn) genBtn.disabled=gaps.length===0 || AppState.ccGapGenerating.size>0;
-  const repBtn=document.getElementById('cc-replace-all-btn');
-  if(repBtn) repBtn.disabled=toReplace===0 || AppState.ccBlockGenerating.size>0;
-  const rpBtn=document.getElementById('cc-reparse-btn');
-  if(rpBtn) rpBtn.disabled=replaced===0;
 }
 
  // ===== 多选模式 =====
@@ -1426,7 +1407,6 @@ function updateCcStatusBar(d){
    AppState.ccSelectedChunks.forEach(function(key){
      if(String(key).startsWith('gap-')){
        canGenerate++; // 未覆盖区可以生成摘要
-       // 未覆盖区本身不能移除，不计入 canRemove（否则按钮可点但 batchRemoveBlocks 会跳过，数量对不上）
      }else{
        const idx = Number(key);
        const c = chunks.find(function(x){ return x.index === idx; });
@@ -1440,7 +1420,6 @@ function updateCcStatusBar(d){
        }
      }
    });
-   if(genBtn) genBtn.disabled = canGenerate === 0;
    if(replaceBtn) replaceBtn.disabled = canReplace === 0;
    if(reparseBtn) reparseBtn.disabled = canReparse === 0;
    if(exportBtn) exportBtn.disabled = canExport === 0;
@@ -1488,180 +1467,6 @@ function updateCcStatusBar(d){
  * 批量生成摘要：对选中的块/未覆盖区逐个调用生成接口，
  * 期间禁用按钮并展示进度，结束后刷新预览。
  */
- async function batchGenerateSummaries(){
-   if(!AppState.ccSelectedChunks.size) return;
-   const d = AppState.compactionPlan;
-   if(!d) return;
-   const chunks = d.chunks || [];
-   const gaps = (d.uncovered && d.uncovered.gaps) || [];
-   const genBtn = document.getElementById('cc-multi-gen-btn');
-   const barBtns = document.querySelectorAll('#cc-multi-bar .cc-btn');
-   // 收集需要生成的：未生成摘要的块 + 未覆盖区
-   const todo = [];
-   AppState.ccSelectedChunks.forEach(function(key){
-     if(String(key).startsWith('gap-')){
-       const gkey = String(key).replace('gap-', '');
-       const parts = gkey.split('-');
-       const g = gaps.find(function(x){ return (x.startIdx||0) === Number(parts[0]) && (x.endIdx||0) === Number(parts[1]); });
-       if(g) todo.push({type: 'gap', start: g.startIdx, end: g.endIdx, label: '未覆盖区 ' + g.startIdx + '–' + g.endIdx + ' 条'});
-     }else{
-       const idx = Number(key);
-       const c = chunks.find(function(x){ return x.index === idx; });
-       if(c){
-         if(c.aiRep){
-           todo.push({type: 'ai', repId: c.repId, idx: idx, label: '块 #' + idx});
-         }else{
-           todo.push({type: 'block', id: c.id||'', blockIndex: (typeof c.blockIndex==='number')?c.blockIndex:-1, idx: idx, label: '块 #' + idx});
-         }
-       }
-     }
-   });
-   if(!todo.length){ toast('没有可生成摘要的项'); return; }
-   if(!confirm('为选中的 ' + todo.length + ' 项生成摘要？可能耗时较长。')) return;
-   // 进入loading状态
-   const origText = genBtn ? genBtn.textContent : '';
-   if(genBtn){ genBtn.disabled = true; genBtn.textContent = '生成中…'; }
-   barBtns.forEach(function(b){ if(b.id !== 'cc-multi-gen-btn') b.disabled = true; });
-   const msg = document.getElementById('compaction-msg');
-   let done = 0;
-   for(let i = 0; i < todo.length; i++){
-     const item = todo[i];
-     if(msg) msg.textContent = '正在生成 ' + item.label + ' 摘要（' + (i+1) + '/' + todo.length + '）…';
-     try{
-       let url, body;
-       if(item.type === 'gap'){
-         url = ADMIN_API + '/context-compaction/generate';
-         body = JSON.stringify({action: 'gap', start: item.start, end: item.end});
-       }else if(item.type === 'ai'){
-         url = ADMIN_API + '/context-compaction/generate';
-         body = JSON.stringify({repId: item.repId});
-       }else{
-         url = ADMIN_API + '/context-compaction/generate';
-         body = JSON.stringify({action: 'block', id: item.id, blockIndex: item.blockIndex});
-       }
-       const r = await fetch(url, {
-         method: 'POST', headers: {'Content-Type': 'application/json'}, body: body
-       });
-       const j = await r.json();
-       if(j.error) throw new Error(j.error);
-       if(j.ok === false) throw new Error(j.message || '生成失败');
-       done++;
-     }catch(e){
-       console.error('生成失败:', item.label, e);
-       toast(item.label + ' 生成失败：' + e.message);
-       if(msg) msg.textContent = '已生成 ' + done + '/' + todo.length + '，' + item.label + ' 失败：' + e.message;
-       break;
-     }
-     // 2026-10-01：批量生成每块间隔 30s，避免连续打上游模型
-     if(i < todo.length - 1){
-       if(msg) msg.textContent = '已生成 ' + (i+1) + '/' + todo.length + '，休息 30 秒…';
-       await new Promise(function(r){ setTimeout(r, 30000); });
-     }
-   }
-   resetCcMsgCache();
-   await loadCompactionPreview();
-   // 恢复按钮
-   if(genBtn){ genBtn.textContent = origText || '生成摘要'; }
-   updateMultiSelectBar();
-   if(done === todo.length && done > 0){
-     toast('✓ 已生成 ' + done + ' 个摘要');
-     if(msg) msg.textContent = '✓ 已生成 ' + done + ' 个摘要';
-   }else if(done > 0){
-     if(msg) msg.textContent = '部分完成：' + done + '/' + todo.length + ' 个生成成功';
-   }
- }
-
- // 批量替换
- async function batchReplaceBlocks(){
-   if(!AppState.ccSelectedChunks.size) return;
-   const d = AppState.compactionPlan;
-   if(!d) return;
-   const chunks = d.chunks || [];
-   // 收集选中块：未替换→替换，已替换→取消替换
-   const todo = [];
-   AppState.ccSelectedChunks.forEach(function(key){
-     if(String(key).startsWith('gap-')) return; // 未覆盖区不能替换
-     const idx = Number(key);
-     const c = chunks.find(function(x){ return x.index === idx; });
-       if(c && c.cached){
-         if(c.aiRep){
-           todo.push({type: 'ai', repId: c.repId, idx: idx, label: '块 #' + idx});
-         }else{
-           todo.push({type: 'manual', id: c.id||'', blockIndex: (typeof c.blockIndex==='number')?c.blockIndex:-1, idx: idx, label: '块 #' + idx});
-         }
-       }
-   });
-   if(!todo.length){ toast('没有可转换的块'); return; }
-   if(!confirm('将选中的 ' + todo.length + ' 个块按当前状态执行替换/取消替换？')) return;
-   const msg = document.getElementById('compaction-msg');
-   let done = 0;
-   for(let i = 0; i < todo.length; i++){
-     const item = todo[i];
-     if(msg) msg.textContent = '正在替换 ' + item.label + '（第 ' + (i+1) + '/' + todo.length + '）…';
-     try{
-       let url, body;
-       if(item.type === 'ai'){
-         url = ADMIN_API + '/context-replacements/toggle';
-         const c0 = chunks.find(function(x){ return x.index === item.idx; });
-         body = JSON.stringify({id: item.repId, enabled: !(c0 && c0.enabled === true)});
-       }else{
-         url = ADMIN_API + '/context-compaction/blocks';
-         const c0 = chunks.find(function(x){ return x.index === item.idx; });
-         body = JSON.stringify({action: 'toggle', id: item.id, blockIndex: item.blockIndex, enabled: !(c0 && c0.enabled === true)});
-       }
-       const r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: body});
-       const j = await r.json();
-       if(j.error || j.ok === false) throw new Error(j.message || j.error || '替换失败');
-       done++;
-     }catch(e){
-       if(msg) msg.textContent = item.label + ' 替换失败：' + e.message;
-       toast('替换失败：' + e.message);
-       break;
-     }
-   }
-   resetCcMsgCache();
-   await loadCompactionPreview();
-   if(msg) msg.textContent = '已完成 ' + done + '/' + todo.length + ' 块状态转换。';
-   updateMultiSelectBar();
- }
-
- // 批量解析入池
- async function batchReparseToPool(){
-   if(!AppState.ccSelectedChunks.size) return;
-   const d = AppState.compactionPlan;
-   if(!d) return;
-   const chunks = d.chunks || [];
-   // 收集已替换的块
-   const selectedIds = [];
-   AppState.ccSelectedChunks.forEach(function(key){
-     if(String(key).startsWith('gap-')) return;
-     const idx = Number(key);
-     const c = chunks.find(function(x){ return x.index === idx; });
-     if(c && c.enabled !== false) selectedIds.push(c.id);
-   });
-   if(!selectedIds.length){ toast('没有已替换的块可解析'); return; }
-   const isMerge = selectedIds.length > 1;
-   if(!confirm(isMerge
-     ? '将选中的 ' + selectedIds.length + ' 个块的「时间线原文」交给 AI 提取记忆候选，全部进 review 队列人工把关？'
-     : '将选中的 1 个块的「时间线原文」交给 AI 提取记忆候选，进 review 队列人工把关？')) return;
-   const msg = document.getElementById('compaction-msg');
-   if(msg) msg.textContent = '正在解析时间线原文并提取记忆候选…';
-   try{
-     const r = await fetch(ADMIN_API + '/memory-pool/reparse', {
-       method: 'POST', headers: {'Content-Type': 'application/json'},
-       body: JSON.stringify({chunkIds: selectedIds, merge: isMerge})
-     });
-     const j = await r.json();
-     if(j.error) throw new Error(j.error);
-     const s = '已解析 ' + j.processed + ' 块 -> 候选 ' + j.reviewed + ' 条进 review 队列 / 门卫拒 ' + j.rejected + ' / 失败 ' + j.failed + (j.degraded ? ' / ' + j.degraded + ' 块原文缺失退用摘要' : '') + '。请在记忆 review 页人工裁决。';
-     if(msg) msg.textContent = s;
-     toast(s);
-   }catch(e){
-     if(msg) msg.textContent = '解析失败: ' + e.message;
-     toast('解析失败: ' + e.message);
-   }
-   updateMultiSelectBar();
- }
 
   // 左滑单块「解析」（0918）：该压缩块覆盖区间的时间线原文 → LLM 提候选 → review 队列人工裁决
   async function reparseSingleBlock(cid){
@@ -1736,102 +1541,11 @@ function updateCcStatusBar(d){
     }
   }
 
- // 批量导出
- function batchExportBlocks(){
-   if(!AppState.ccSelectedChunks.size) return;
-   const d = AppState.compactionPlan;
-   if(!d) return;
-   const chunks = d.chunks || [];
-   // 收集选中的块
-   const selected = [];
-   AppState.ccSelectedChunks.forEach(function(key){
-     if(String(key).startsWith('gap-')) return;
-     const idx = Number(key);
-     const c = chunks.find(function(x){ return x.index === idx; });
-     if(c) selected.push(c);
-   });
-   if(!selected.length){ toast('没有可导出的块'); return; }
-   // 检查是否都加载了原文
-   let needLoad = [];
-   selected.forEach(function(c){
-     const msgs = c.msgs || AppState.ccMsgBySig[c.signature] || [];
-     if(!msgs.length) needLoad.push(c);
-   });
-   if(needLoad.length){
-     toast('有 ' + needLoad.length + ' 个块尚未加载原文，请先展开它们再导出');
-     return;
-   }
-   if(!confirm('导出选中的 ' + selected.length + ' 个块的原文？')) return;
-   let allTxt = '';
-   selected.sort(function(a, b){ return a.index - b.index; });
-   selected.forEach(function(c){
-     const msgs = c.msgs || AppState.ccMsgBySig[c.signature] || [];
-     const baseNum = (typeof c.blockStart === 'number' && c.blockStart >= 0) ? c.blockStart : ((typeof c.firstIdx === 'number' && c.firstIdx >= 0) ? c.firstIdx : null);
-     allTxt += '块 #' + c.index + (c.range_label ? (' ' + c.range_label) : '') + '\n';
-     if(c.first_id && c.last_id) allTxt += '边界: ' + c.first_id + '..' + c.last_id + '\n';
-     allTxt += '========================================\n\n';
-     msgs.forEach(function(m, i){
-       const role = m.role === 'user' ? '她' : '我';
-       const num = (m && ('num' in m)) ? ((typeof m.num === 'number' && m.num >= 0) ? ('# ' + (m.num + 1) + ' ') : '') : (baseNum === null ? '' : ('# ' + (baseNum + i + 1) + ' '));
-       const t = m.time ? (' [' + m.time + ']') : '';
-       allTxt += num + role + t + '：' + (m.content || '') + '\n\n';
-     });
-     allTxt += '\n\n';
-   });
-   const blob = new Blob([allTxt], {type: 'text/plain;charset=utf-8'});
-   const url = URL.createObjectURL(blob);
-   const a = document.createElement('a');
-   a.href = url; a.download = 'selected_blocks_' + selected.length + '.txt';
-   document.body.appendChild(a); a.click();
-   setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 60);
- }
- // 批量导出摘要（2026-09-27 用户拍板：范围=选中块中已替换生效的、内容=仅摘要文本）
- function batchExportSummaries(){
-   if(!AppState.ccSelectedChunks.size) return;
-   const d = AppState.compactionPlan;
-   if(!d) return;
-   const chunks = d.chunks || [];
-   const selected = [];
-   AppState.ccSelectedChunks.forEach(function(key){
-     if(String(key).startsWith('gap-')) return;
-     const idx = Number(key);
-     const c = chunks.find(function(x){ return x.index === idx; });
-     if(c && c.enabled === true && c.summary) selected.push(c);
-   });
-   if(!selected.length){ toast('选中的块中没有已替换生效的摘要'); return; }
-   if(!confirm('导出选中的 ' + selected.length + ' 个已替换块的摘要？')) return;
-   let allTxt = '';
-   selected.sort(function(a, b){ return a.index - b.index; });
-   selected.forEach(function(c){
-     allTxt += '块 #' + c.index + (c.range_label ? (' ' + c.range_label) : '') + '\n';
-     if(c.first_id && c.last_id) allTxt += '边界: ' + c.first_id + '..' + c.last_id + '\n';
-     allTxt += '========================================\n';
-     allTxt += (c.summary || '').trim() + '\n\n';
-   });
-   const blob = new Blob([allTxt], {type: 'text/plain;charset=utf-8'});
-   const url = URL.createObjectURL(blob);
-   const a = document.createElement('a');
-   a.href = url; a.download = 'selected_summaries_' + selected.length + '.txt';
-   document.body.appendChild(a); a.click();
-   setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 60);
- }
-
  // ==================== 批量导入手写摘要（2026-09-27） ====================
  // 格式：每段以「边界: 首消息id..尾消息id」（推荐，与导出格式对称）/[首id..尾id]/「块 #N」/[a:b] 开头，
  // 正文接其后可多行，段间空行分隔；匹配到块后按记录 id 批量写入（后端归档历史+置 enabled=false=待替换）
  let ccImportMatched = [];  // [{entry, chunk}]
  let ccImportFailed = [];   // [{entry}]
- function openCcImportPanel(){
-   ccImportMatched = [];
-   ccImportFailed = [];
-   const ta = document.getElementById('cc-import-ta');
-   if(ta) ta.value = '';
-   const pv = document.getElementById('cc-import-preview');
-   if(pv) pv.innerHTML = '';
-   const btn = document.getElementById('cc-import-do-btn');
-   if(btn) btn.disabled = true;
-   openModal('ccImportModal');
- }
  function resetCcImportState(){ ccImportMatched = []; ccImportFailed = []; }
  function parseCcImportText(text){
    const lines = String(text||'').split(/\r?\n/);
@@ -1910,97 +1624,6 @@ function updateCcStatusBar(d){
    if(btn) btn.disabled = ccImportMatched.length === 0;
    renderCcImportPreview();
  }
- async function doCcImport(){
-   if(!ccImportMatched.length) return;
-   const items = ccImportMatched.map(function(item){
-     const c = item.chunk;
-     return { id: c.id || c.repId || '', summary: item.entry.summary };
-   });
-   const pv = document.getElementById('cc-import-preview');
-   if(pv) pv.innerHTML = '<div class="cc-import-item">正在导入 ' + items.length + ' 条…</div>';
-   try{
-     const r = await fetch(ADMIN_API + '/context-compaction/import-summaries', {
-       method:'POST', headers:{'Content-Type':'application/json'},
-       body: JSON.stringify({ items: items }), credentials:'include'
-     });
-     const j = await r.json();
-     if(!r.ok || j.error){ if(pv) pv.innerHTML = '<div class="cc-import-item fail">导入失败：' + escHtml(j.error||'未知错误') + '</div>'; return; }
-     let html = '<div style="margin-bottom:6px">导入完成：成功 <b style="color:#5c8a4e">' + j.okCount + '</b> 条，失败 <b style="color:#c05050">' + (j.failCount||0) + '</b> 条。旧摘要已自动归档历史版本，块已置为待替换。</div>';
-     (j.results || []).forEach(function(res, i){
-       if(res && res.ok) return;
-       const item = items[i] || {};
-       html += '<div class="cc-import-item fail"><span class="cc-import-meta">块 ' + escHtml(item.id||'') + '</span> <span class="cc-import-err">' + escHtml((res&&res.error)||'失败') + '</span></div>';
-     });
-     if(pv) pv.innerHTML = html;
-     resetCcMsgCache();
-     loadCompactionPreview();
-     toast('批量导入完成：成功 ' + j.okCount + ' 条' + ((j.failCount||0) ? ('，失败 ' + j.failCount + ' 条') : ''));
-   }catch(e){
-     if(pv) pv.innerHTML = '<div class="cc-import-item fail">导入失败：' + escHtml(e.message) + '</div>';
-   }
- }
- // 批量移除
- async function batchRemoveBlocks(){
-   if(!AppState.ccSelectedChunks.size) return;
-   const d = AppState.compactionPlan;
-   if(!d) return;
-   const chunks = d.chunks || [];
-   // 收集可移除的块
-   const todo = [];
-   AppState.ccSelectedChunks.forEach(function(key){
-     if(String(key).startsWith('gap-')) return; // 未覆盖区不能移除
-     const idx = Number(key);
-     const c = chunks.find(function(x){ return x.index === idx; });
-     if(c){
-       if(c.aiRep){
-         todo.push({type: 'ai', repId: c.repId, idx: idx, label: '块 #' + idx});
-       }else{
-         // 按记录 id 精确移除：移除过程中其他块增删不再导致序号漂移误删
-         todo.push({type: 'manual', id: c.id||'', idx: idx, label: '块 #' + idx});
-       }
-     }
-   });
-   if(!todo.length){ toast('没有可移除的块'); return; }
-   if(!confirm('移除选中的 ' + todo.length + ' 个块？移除后内容退回未覆盖区。')) return;
-   const msg = document.getElementById('compaction-msg');
-   let done = 0;
-   // 注意：移除会改变索引，所以从后往前移除
-   todo.sort(function(a, b){ return b.idx - a.idx; });
-   for(let i = 0; i < todo.length; i++){
-     const item = todo[i];
-     if(msg) msg.textContent = '正在移除 ' + item.label + '（第 ' + (i+1) + '/' + todo.length + '）…';
-     try{
-       if(item.type === 'ai'){
-         const r = await fetch(ADMIN_API + '/context-replacements/undo', {
-           method: 'POST', headers: {'Content-Type': 'application/json'},
-           body: JSON.stringify({id: item.repId})
-         });
-         const j = await r.json();
-         if(j.error || j.ok === false) throw new Error(j.message || j.error || '移除失败');
-       }else{
-         const r = await fetch(ADMIN_API + '/context-compaction/blocks', {
-           method: 'POST', headers: {'Content-Type': 'application/json'},
-           body: JSON.stringify({action: 'remove_at', id: item.id})
-         });
-         const j = await r.json();
-         if(j.error || j.ok === false) throw new Error(j.message || j.error || '移除失败');
-       }
-       done++;
-       if(i < todo.length - 1){
-         await loadCompactionPreview();
-       }
-     }catch(e){
-       if(msg) msg.textContent = item.label + ' 移除失败：' + e.message;
-       toast('移除失败：' + e.message);
-       break;
-     }
-   }
-   AppState.ccSelectedChunks.clear();
-   resetCcMsgCache();
-   await loadCompactionPreview();
-   if(msg) msg.textContent = '已移除 ' + done + '/' + todo.length + ' 块。';
-   updateMultiSelectBar();
- }
 
     
 
@@ -2055,47 +1678,6 @@ function removeSingleBlock(idx, blockIndex, isAi, recId){
    }).catch(function(e){ if(msg) msg.textContent='操作失败: '+e.message; });
  }
  
- // 在未覆盖区按编号范围添加块
- function addBlockByRange(gstart, gend){
-   const input=document.getElementById('cc-add-range-'+(gstart||0)+'-'+(gend||0));
-   if(!input){
-     // 兼容旧的单个输入框
-     const input0=document.getElementById('cc-add-range');
-     if(input0) input=input0; else return;
-   }
-   const val=input.value.trim();
-   const m=String(val).match(/^\s*(\d+)\s*[-~至到]\s*(\d+)\s*$/);
-   if(!m){
-     const msg=document.getElementById('compaction-msg');
-     if(msg) msg.textContent='格式不对，请输入「起始-结束」，如 51-100。';
-     return;
-   }
-   const start=parseInt(m[1],10), end=parseInt(m[2],10);
-   if(end<start){
-     const msg=document.getElementById('compaction-msg');
-     if(msg) msg.textContent='结束编号要 ≥ 起始编号。';
-     return;
-   }
-   const d=AppState.compactionPlan;
-   if(d && end>(d.totalCompressible||0)){
-     const msg=document.getElementById('compaction-msg');
-     if(msg) msg.textContent='结束编号超过消息总数（最大 '+(d.totalCompressible||0)+'）。';
-     return;
-   }
-   const msg=document.getElementById('compaction-msg');
-   if(msg) msg.textContent='正在添加块 '+start+'-'+end+' ...';
-   fetch(ADMIN_API + '/context-compaction/blocks',{
-     method:'POST',headers:{'Content-Type':'application/json'},
-     body:JSON.stringify({action:'add_range', start: start, end: end})
-   }).then(function(r){return r.json()}).then(function(d){
-     if(d && d.error){ if(msg) msg.textContent='添加失败: '+d.error; return; }
-     if(d && d.ok===false){ if(msg) msg.textContent=(d.message||'操作未完成'); return; }
-     if(msg) msg.textContent='已添加块 '+start+'-'+end+'。'+(d.removedCount?('（自动合并 '+d.removedCount+' 个重叠块）'):'');
-     resetCcMsgCache();
-     loadCompactionPreview();
-   }).catch(function(e){ if(msg) msg.textContent='添加失败: '+e.message; });
- }
- 
   // 文本 → 话题 token 集：去停用词的中文字/相邻字 bigram + 英数词，供相邻消息相似度比较
  function ccGapTopicTokens(text){
   const STOP=new Set("的了我是你他它她这在在有也就说都还被把让跟和与或但而而且还再不没这那们个种些去来到上下前后时次天点会能要想觉得自己什么怎么这样那样现在然后因为所以但是如果感觉时候东西应该可以已经知道看到听到想到".split(""));
@@ -2113,61 +1695,6 @@ function removeSingleBlock(idx, blockIndex, isAi, recId){
   });
   return out;
 }
-// 未覆盖区内启发式找切分点：相邻消息时间空档(5分)/话题相似度低(4分)/用户开新话题(2分)，
-// 总分 ≥4 即推荐为候选切点（点绿点按该条切开成两块）
-function ccGapSuggestCuts(key){
-  const msgs=AppState.ccGapMsgByKey[key];
-  if(!msgs || msgs.length<2) return [];
-  const cfgGap=(AppState.compactionPlan&&AppState.compactionPlan.config&&Number(AppState.compactionPlan.config.compaction_gap_minutes))||30;
-  const gapMs=cfgGap*60*1000;
-  const toks=msgs.map(function(m){ return ccGapTopicTokens(m.content); });
-  const out=[];
-  for(let i=0;i<msgs.length-1;i++){
-    const a=msgs[i], b=msgs[i+1];
-    let t0=null,t1=null;
-    try{ t0=new Date(String(a.time||'').replace(' ','T')+':00+08:00'); }catch(e){}
-    try{ t1=new Date(String(b.time||'').replace(' ','T')+':00+08:00'); }catch(e){}
-    let score=0, reason='';
-    if(t0 && t1 && !isNaN(t0.getTime()) && !isNaN(t1.getTime()) && Math.abs(t1.getTime()-t0.getTime())>=gapMs){ score+=5; reason='时间空档'; }
-    let inter=0; const A=toks[i], B=toks[i+1];
-    A.forEach(function(x){ if(B.has(x)) inter++; });
-    const union=A.size+B.size-inter;
-    const sim=union? inter/union : 0;
-    if(sim<0.12){ score+=4; reason=reason?reason:'话题转折'; }
-    else if(sim<0.3){ score+=2; }
-    if(b.role==='user' && sim<0.35){ score+=2; reason=reason?reason:'用户发起新话题'; }
-    if(score>=4){ out.push({ cut:Number(a.num), after:Number(a.num), reason:reason||'建议切分' }); }
-  }
-  return out;
-}
-async function ccDoCutRange(gStart,leftEnd,rightStart,gEnd){
-  const msg=document.getElementById('compaction-msg');
-  if(msg) msg.textContent='正在切分 '+gStart+'~'+gEnd+' ...';
-  try{
-    const r1=await fetch(ADMIN_API+'/context-compaction/blocks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'add_range',start:gStart,end:leftEnd})});
-    const j1=await r1.json();
-    if(j1.error||j1.ok===false) throw new Error(j1.message||j1.error||'切分失败');
-    const r2=await fetch(ADMIN_API+'/context-compaction/blocks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'add_range',start:rightStart,end:gEnd})});
-    const j2=await r2.json();
-    if(j2.error||j2.ok===false) throw new Error(j2.message||j2.error||'切分失败');
-    resetCcMsgCache();
-    await loadCompactionPreview();
-    if(msg) msg.textContent='已切分 '+gStart+'~'+gEnd+' 为两个块。';
-  }catch(e){
-    if(msg) msg.textContent='切分失败: '+e.message;
-    toast('切分失败: '+e.message);
-  }
-}
-function ccGapCutAt(key,n){
-  const m=String(n==null?'':n).trim();
-  const val=Math.floor(Number(m));
-  const part=String(key).split('-');
-  const gs=Number(part[0]), ge=Number(part[1]);
-  if(!(val>=1)||!(gs>=1)||!(ge>=gs)){ toast('编号无效'); return; }
-  if(val<gs || val>=ge){ toast('编号需在该未覆盖区之间（'+gs+'~'+ge+'）'); return; }
-  if(!confirm('在第 '+val+' 条后切开，形成两个块？')) return;
-  ccDoCutRange(gs, val, val+1, ge);
-}
 // ccGapCutAtInput / ccDoCutSegments / ccGapToggleCuts（切点输入框/批量切分/切点开关）
 // 已于 2026-09-28 删除：零引用（UI 不再生成切点输入与开关入口）
 function ccFindGap(gs, ge){
@@ -2175,7 +1702,7 @@ function ccFindGap(gs, ge){
   for(let i=0;i<d.uncovered.gaps.length;i++){ const g=d.uncovered.gaps[i]; if((g.startIdx||0)===gs && (g.endIdx||0)===ge) return g; }
   return null;
 }
-function ccGapItemHtml(key, m, cuts, idx){
+function ccGapItemHtml(key, m, idx){
   return '<div class="cc-gap-item'+(m.marked?' marked':'')+'" id="cc-gap-item-'+key+'-'+idx+'" title="点击展开/收起">'
     +'<div class="cc-gap-item-head">'
     +'<span class="cc-gap-left">'
@@ -2188,7 +1715,6 @@ function ccGapItemHtml(key, m, cuts, idx){
     +'</div>'
     +'<div class="cc-gap-body" onclick="toggleCcGapExpand(\''+key+'\','+idx+')">'+escHtml(m.content)+'</div>'
     +'</div>'
-    +(cuts.some(function(c){return c.cut===m.num;})?'<div class="cc-gap-cut-dot" title="点击在第 '+m.num+' 条后切分（会形成两个块）" onclick="ccGapCutAt(\''+key+'\','+m.num+')"><i></i></div>':'');
 }
 function ccGapMoreWrapHtml(key, gs, ge){
   if(!AppState.ccGapHasMore[key]) return '';
@@ -2229,9 +1755,7 @@ function renderCcGapMessages(g){
     return '<div class="cc-gap-scroll"><div style="padding:14px;text-align:center;font-size:12px;color:var(--text3)">消息加载中...</div></div>';
   }
   if(!msgs.length) return '<div class="cc-gap-scroll"><div style="padding:14px;text-align:center;font-size:12px;color:var(--text3)">（该范围无可展开内容）</div></div>';
-  const cuts=ccGapSuggestCuts(key);
   let html='<div class="cc-gap-scroll" id="cc-gap-scroll-'+key+'">';
-  msgs.forEach(function(m,i){ html+=ccGapItemHtml(key,m,cuts,i); });
   html+='</div>';
   html+=ccGapMoreWrapHtml(key, g.startIdx, g.endIdx);
   return html;
@@ -2257,8 +1781,6 @@ function loadGapPage(key, startIdx, endIdx){
     AppState.ccGapHasMore[key]=!!(d&&d.hasMore);
     const liveBox=document.getElementById('cc-gap-scroll-'+key);
     if(liveBox){
-      const cuts=ccGapSuggestCuts(key);
-      liveBox.insertAdjacentHTML('beforeend', arr.map(function(m,j){ return ccGapItemHtml(key,m,cuts,prevLen+j); }).join(''));
       const wrap=document.getElementById('cc-gap-more-wrap-'+key);
       if(wrap){ const nh=ccGapMoreWrapHtml(key, startIdx, endIdx); if(nh) wrap.outerHTML=nh; else wrap.remove(); }
       ccArmGapAutoLoad(key, startIdx, endIdx);
@@ -2298,28 +1820,6 @@ function ccArmAllGapAutoLoad(){
    input.classList.toggle('warn', !ok);
  }
  
- // 自动分块：只分这个未覆盖区，按配置的时间间隔 + 目标/最少/最多条数自然切分
- function autoSplitGap(start, end){
-   const cfg=(AppState.compactionPlan&&AppState.compactionPlan.config)||{};
-   const cfgGap=Number(cfg.compaction_gap_minutes)||30;
-   const chunkSize=Number(cfg.compaction_chunk_size)||100;
-   const chunkMin=Number(cfg.compaction_chunk_min)||40;
-   const chunkMax=Number(cfg.compaction_chunk_max)||160;
-   if(!confirm('按 '+cfgGap+' 分钟间隔 + 话题/说话人切换，并遵循 目标 '+chunkSize+' / 最少 '+chunkMin+' / 最多 '+chunkMax+' 条，自动分块第 '+start+'–'+end+' 条？会生成多个块，每块可再改范围/加摘要/替换。')) return;
-   const msg=document.getElementById('compaction-msg');
-   if(msg) msg.textContent='正在按 '+cfgGap+' 分钟间隔 / 目标 '+chunkSize+' 条自动分块 '+start+'-'+end+' ...';
-   fetch(ADMIN_API + '/context-compaction/blocks',{
-     method:'POST',headers:{'Content-Type':'application/json'},
-     body:JSON.stringify({action:'split_range', start:start, end:end, gapMinutes: cfgGap, chunkSize: chunkSize, chunkMin: chunkMin, chunkMax: chunkMax})
-   }).then(function(r){return r.json()}).then(function(d){
-     if(d && d.error){ if(msg) msg.textContent='自动分块失败: '+d.error; return; }
-     if(d && d.ok===false){ if(msg) msg.textContent=(d.message||'操作未完成'); return; }
-     if(msg) msg.textContent='已自动分成 '+d.count+' 块。';
-     resetCcMsgCache();
-     loadCompactionPreview();
-   }).catch(function(e){ if(msg) msg.textContent='自动分块失败: '+e.message; });
- }
- 
   // 导出块原文 txt：优先用块内已加载的 msgs，空则提示先展开
   function exportBlockTxt(idx){
     const c=(AppState.compactionPlan&&AppState.compactionPlan.chunks||[]).find(function(x){return x.index===idx;});
@@ -2342,98 +1842,6 @@ function ccArmAllGapAutoLoad(){
     document.body.appendChild(a); a.click();
     setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },60);
   }
-
- // 未覆盖区：一键生成摘要（新建手动块 + 调模型生成；生成后点块上的「替换」才生效）
-
- function generateGapSummary(start, end){
-   const key=(start||0)+'-'+(end||0);
-   if(AppState.ccGapGenerating.has(key)) return;
-   if(!confirm('为第 '+start+'–'+end+' 条生成摘要？将新建一个手动块覆盖该范围，并调模型按压缩提示词生成摘要；生成后需点块上的「替换」才生效。')) return;
-   AppState.ccGapGenerating.add(key);
-   renderCompaction();
-   const msg=document.getElementById('compaction-msg');
-   if(msg) msg.textContent='正在为第 '+start+'–'+end+' 条生成摘要（约几十秒）…';
-   fetch(ADMIN_API + '/context-compaction/generate',{
-     method:'POST',headers:{'Content-Type':'application/json'},
-     body:JSON.stringify({action:'gap', start:start, end:end})
-   }).then(function(r){return r.json()}).then(function(d){
-     AppState.ccGapGenerating.delete(key);
-     if(d && d.error){ toast('生成失败：'+d.error); if(msg) msg.textContent='生成失败: '+d.error; renderCompaction(); return; }
-     if(d && d.ok===false){ toast('生成失败：'+(d.message||'未知原因')); if(msg) msg.textContent=(d.message||'生成失败'); renderCompaction(); return; }
-     if(msg) msg.textContent='已生成摘要（'+d.length+' 字），该块当前为「待替换」，点「替换」后生效。';
-     resetCcMsgCache();
-     loadCompactionPreview();
-   }).catch(function(e){
-     AppState.ccGapGenerating.delete(key);
-     renderCompaction();
-     toast('生成失败：'+e.message);
-     if(msg) msg.textContent='生成失败: '+e.message;
-   });
- }
- 
- // 手动块：重新生成摘要（调模型重写，旧摘要保留进历史版本）
-  // 手动块：直接新增/填写摘要（不调模型），适用于切分后尚未写摘要的块
-  function openCcAddManual(idx, blockIndex){
-    const w=document.getElementById('cc-addman-'+idx);
-    if(!w) return;
-    if(w.dataset.open==='1'){ w.innerHTML=''; w.dataset.open='0'; return; }
-    w.dataset.open='1';
-    const c=ccFindChunk(idx);
-    const cur=((c&&c.summary)||(AppState.ccDraft[idx]||''));
-    w.innerHTML='<div class="cc-sum-ta-wrap">'
-      +'<textarea id="cc-edit-sel-'+idx+'" rows="6" oninput="AppState.ccDraft['+idx+']=this.value;updateCcCharCount('+idx+')" class="cc-sum-ta" placeholder="填写摘要内容（不调模型）">'+escHtml(cur)+'</textarea>'
-      +'</div>'
-      +'<div class="cc-sum-editor-btns">'
-      +'<span class="cc-sum-count" id="cc-edit-count-'+idx+'">'+cur.length+' 字</span>'
-      +'<button class="cc-btn primary" onclick="saveCcSummaryEdit('+idx+')">保存</button>'
-      +'<button class="cc-btn secondary" onclick="openCcAddManual('+idx+','+blockIndex+')">收起</button>'
-      +'</div>';
-    const ta=document.getElementById('cc-edit-sel-'+idx);
-    if(ta){ ta.focus(); }
-  }
-
- function regenerateBlockSummary(idx, blockIndex, recId){
-   if(blockIndex===undefined || blockIndex===null || blockIndex<0) return;
-   if(!confirm('重新生成块 #'+idx+' 的摘要？现有摘要会保留在历史版本里。')) return;
-   const msg=document.getElementById('compaction-msg');
-   AppState.ccBlockGenerating.add(idx);
-   renderCompaction();
-   if(msg) msg.textContent='块 #'+idx+'：正在重新生成摘要（约几十秒）…';
-   fetch(ADMIN_API + '/context-compaction/generate',{
-     method:'POST',headers:{'Content-Type':'application/json'},
-     body:JSON.stringify({action:'block', blockIndex: blockIndex, id: recId||''})
-   }).then(function(r){return r.json()}).then(function(d){
-     AppState.ccBlockGenerating.delete(idx);
-     if(d && d.error){ toast('生成失败：'+d.error); if(msg) msg.textContent='生成失败: '+d.error; return; }
-     if(d && d.ok===false){ toast('生成失败：'+(d.message||'未知原因')); if(msg) msg.textContent=(d.message||'生成失败'); return; }
-     AppState.ccDraft[idx]=undefined;
-     AppState.ccSummaryOpen.add(idx);
-     AppState.ccAnimateOpen.add('cc-collapse-sum-'+idx);
-     if(msg) msg.textContent='块 #'+idx+' 摘要已重新生成（'+d.length+' 字）。';
-     resetCcMsgCache();
-   }).catch(function(e){ toast('生成失败：'+e.message); if(msg) msg.textContent='生成失败: '+e.message; }).finally(function(){ loadCompactionPreview(); });
- }
- 
- function regenerateAiBlockSummary(repId, idx){
-   if(!repId) return;
-   if(!confirm('重新生成块 #'+idx+'（AI 记忆）的摘要？现有摘要会保留在历史版本里。')) return;
-   const msg=document.getElementById('compaction-msg');
-   AppState.ccBlockGenerating.add(idx);
-   renderCompaction();
-   if(msg) msg.textContent='块 #'+idx+'：正在重新生成摘要（约几十秒）…';
-   fetch(ADMIN_API + '/context-compaction/generate',{
-     method:'POST',headers:{'Content-Type':'application/json'},
-     body:JSON.stringify({action:'block', repId: repId})
-   }).then(function(r){return r.json()}).then(function(d){
-     AppState.ccBlockGenerating.delete(idx);
-     if(d && d.error){ toast('生成失败：'+d.error); if(msg) msg.textContent='生成失败: '+d.error; return; }
-     if(d && d.ok===false){ toast('生成失败：'+(d.message||'未知原因')); if(msg) msg.textContent=(d.message||'生成失败'); return; }
-     AppState.ccAiSummaryOpen.add(idx);
-     AppState.ccAnimateOpen.add('cc-collapse-ai-'+idx);
-     if(msg) msg.textContent='块 #'+idx+' 摘要已重新生成（'+d.length+' 字）。';
-     resetCcMsgCache();
-   }).catch(function(e){ toast('生成失败：'+e.message); if(msg) msg.textContent='生成失败: '+e.message; }).finally(function(){ loadCompactionPreview(); });
- }
 
 // AI 块：查看摘要
  function toggleCcAiSummary(idx){
@@ -2498,15 +1906,13 @@ function ccArmAllGapAutoLoad(){
    if(!d || !d.config) return;
    const c=d.config;
    const fields={
-     'cc-cfg-keep':c.compaction_keep_recent_messages,
-     'cc-cfg-min':c.compaction_min_messages,
-     'cc-cfg-sum-min':c.compaction_summary_min_chars,
-     'cc-cfg-sum-max':c.compaction_summary_max_chars,
+     // 2026-10-04 旧压缩系统下线，移除：cc-cfg-keep / cc-cfg-min（保留最近/最少条数，只服务旧自动压缩计划）、
+     //   cc-cfg-sum-min / cc-cfg-sum-max（摘要字数，状态机提示词写死 2000~5000）、
+     //   cc-cfg-max-blocks（活跃块上限，对状态记录危险：按时间线排最前会被先砍掉）
      'cc-cfg-gap':c.compaction_gap_minutes,
      'cc-cfg-chunk':c.compaction_chunk_size,
      'cc-cfg-chunk-min':c.compaction_chunk_min,
      'cc-cfg-chunk-max':c.compaction_chunk_max,
-     'cc-cfg-max-blocks':c.compaction_max_active_blocks,
      'cc-cfg-ctx-limit':(c.compaction_context_limit_chars!==undefined?c.compaction_context_limit_chars:30000),
      'cc-cfg-alert-limit':(c.ctx_limit_alert_tokens!==undefined?c.ctx_limit_alert_tokens:0),
      'cc-cfg-protect-recent':(c.compaction_protect_recent_messages!==undefined?c.compaction_protect_recent_messages:40)
@@ -2523,10 +1929,7 @@ function ccArmAllGapAutoLoad(){
  async function saveCompactionConfig(){
   const get=function(id){ const el=document.getElementById(id); return el?el.value:''; };
   const getC=function(id){ const el=document.getElementById(id); return el?el.checked:false; };
-  let keep=Math.max(0, Math.floor(Number(get('cc-cfg-keep'))||0));
-  let minMsg=Math.max(0, Math.floor(Number(get('cc-cfg-min'))||0));
-  let sumMin=Math.max(0, Math.floor(Number(get('cc-cfg-sum-min'))||0));
-  let sumMax=Math.max(0, Math.floor(Number(get('cc-cfg-sum-max'))||0));
+  // 2026-10-04 旧压缩系统下线：keep / minMsg / sumMin / sumMax / maxActiveBlocks 五项随之下线
   let gap=Math.max(1, Math.floor(Number(get('cc-cfg-gap'))||30));
   let chunkSize=Math.max(1, Math.floor(Number(get('cc-cfg-chunk'))||100));
   let chunkMin=Math.max(1, Math.floor(Number(get('cc-cfg-chunk-min'))||40));
@@ -2534,23 +1937,16 @@ function ccArmAllGapAutoLoad(){
   const setVal=function(id,v){ const el=document.getElementById(id); if(el) el.value=v; };
   const notes=[];
   const hint=document.getElementById('cc-config-hint');
-  if(sumMin>sumMax){ sumMax=sumMin; setVal('cc-cfg-sum-max',sumMax); notes.push('摘要最少字数大于最多字数，已把“最多”调成=最少'); }
-  else{ setVal('cc-cfg-sum-min',sumMin); setVal('cc-cfg-sum-max',sumMax); }
   if(chunkMin>chunkMax){ chunkMax=chunkMin; setVal('cc-cfg-chunk-max',chunkMax); notes.push('块最少条数大于最多条数，已把“最多”调成=最少'); }
   else{ setVal('cc-cfg-chunk-min',chunkMin); setVal('cc-cfg-chunk-max',chunkMax); }
   if(chunkMin>chunkSize){ notes.push('块最少条数('+chunkMin+')大于目标条数('+chunkSize+')，实际会以“最少”为准，块偏大'); }
-  setVal('cc-cfg-keep',keep); setVal('cc-cfg-min',minMsg); setVal('cc-cfg-gap',gap); setVal('cc-cfg-chunk',chunkSize);
+  setVal('cc-cfg-gap',gap); setVal('cc-cfg-chunk',chunkSize);
   if(hint) hint.classList.toggle('warn', notes.length>0);
   const body={
-    compaction_keep_recent_messages: keep,
-    compaction_min_messages: minMsg,
-    compaction_summary_min_chars: sumMin,
-    compaction_summary_max_chars: sumMax,
     compaction_gap_minutes: gap,
     compaction_chunk_size: chunkSize,
     compaction_chunk_min: chunkMin,
     compaction_chunk_max: chunkMax,
-    compaction_max_active_blocks: Math.max(0, Math.floor(Number(get('cc-cfg-max-blocks'))||0)),
     compaction_context_limit_chars: Math.max(0, Math.floor(Number(get('cc-cfg-ctx-limit'))||0)),
     ctx_limit_alert_tokens: Math.max(0, Math.floor(Number(get('cc-cfg-alert-limit'))||0)),
     compaction_context_remind_enabled: getC('cc-cfg-ctx-remind'),
@@ -2569,7 +1965,6 @@ function ccArmAllGapAutoLoad(){
       const setC=function(id,b){ const el=document.getElementById(id); if(el) el.checked=!!b; };
       if(j.config.compaction_context_limit_chars!==undefined) setV('cc-cfg-ctx-limit', j.config.compaction_context_limit_chars);
       if(j.config.ctx_limit_alert_tokens!==undefined) setV('cc-cfg-alert-limit', j.config.ctx_limit_alert_tokens);
-      if(j.config.compaction_max_active_blocks!==undefined) setV('cc-cfg-max-blocks', j.config.compaction_max_active_blocks);
       setC('cc-cfg-ctx-remind', j.config.compaction_context_remind_enabled!==false);
     }
     if(msg) msg.textContent=(notes.length?('已自动修正：'+notes.join('；')+'。'):'已保存。')+' 下次预览/请求生效。';
@@ -2579,127 +1974,13 @@ function ccArmAllGapAutoLoad(){
   }catch(e){ if(msg) msg.textContent='保存失败: '+e.message; toast('保存失败'); }
 }
 
-function ccNumLiveCheck(input, max){
-   const v=Number(input.value);
-   const ok=!input.value||(v>=1&&v<=Number(max));
-   input.classList.toggle('warn', !ok);
+ // 块索引查找 / 历史版本重编号（2026-10-04 复核补回：历史版本恢复与 AI 记忆编辑仍在用）
+ function ccFindChunk(idx){
+   return ((AppState.compactionPlan && AppState.compactionPlan.chunks)||[]).find(function(x){return x.index===idx;});
  }
- 
- function clampCcInput(input, i, field, max){
-   const before=input.value;
-   const raw=Number(input.value);
-   const clamped=Math.min(Math.max(1, Math.floor(raw)||1), Number(max)||1);
-   if(String(clamped)!==String(before)){
-     input.value=clamped;
-     const msg=document.getElementById('compaction-msg');
-     if(msg){ setTimeout(function(){ msg.textContent='输入超出范围，已自动修正为第 '+clamped+' 条。'; }, 0); }
-     // 只有值被修正过才补发更新：onchange 已为未修正的值发过一次，onblur 再发就是重复 POST
-     updateCompactionBoundary(i, field, input.value);
-   }
+ function ccRenumberHistory(h){
+   return h.map(function(x,i){ return { index:i, summary:x.summary, generatedAt:x.generatedAt, mode:x.mode, manual:x.manual }; }).slice(0,8);
  }
- 
- function updateCompactionBoundary(i, field, raw){
-   const v=Math.max(1, Math.floor(Number(raw)||1));
-   const d=AppState.compactionPlan;
-   if(!d) return;
-   // 按记录 id 精确找块（id 全局唯一，不受块增删导致的序号漂移影响）；找不到再按旧的手工块序号兜底
-   let chunk=(d.chunks||[]).find(function(c){return !c.aiRep && c.id && String(c.id)===String(i);});
-   if(!chunk){
-     const ccList=(d.chunks||[]).filter(function(c){return !c.aiRep;});
-     chunk=ccList[Number(i)];
-   }
-   if(!chunk) return;
-   // 当前块的显示范围（1-based）
-   let curStart, curEnd;
-   if(typeof chunk.blockStart==='number'){
-     curStart=chunk.blockStart+1;
-     curEnd=chunk.blockEnd+1;
-   }else{
-     // 自动分块的纯预览块：用它的 firstIdx/lastIdx 推算当前范围
-     curStart=(chunk.firstIdx>=0?chunk.firstIdx:0)+1;
-     curEnd=(chunk.lastIdx>=0?chunk.lastIdx:curStart-1)+1;
-   }
-   let newStart=curStart, newEnd=curEnd;
-   if(field===0) newStart=v; else newEnd=v;
-   if(newStart>newEnd){
-     const msg=document.getElementById('compaction-msg');
-     if(msg) msg.textContent='开头不能大于结尾。';
-     loadCompactionPreview();
-     return;
-   }
-   if(newEnd>d.totalCompressible){ newEnd=d.totalCompressible; }
-   if(newStart<1){ newStart=1; }
-   const msg=document.getElementById('compaction-msg');
-   if(msg) msg.textContent='正在'+(typeof chunk.blockStart==='number'?'更新块':'把自动分块固化为手动块')+' #'+chunk.index+' 为 '+newStart+'-'+newEnd+' ...';
-   // 自动分块 → 用 add_range 固化；手动块 → 用 update_range 更新（按记录 id 精确命中）
-   const payload = (typeof chunk.blockStart==='number')
-     ? {action:'update_range', id: chunk.id||'', blockIndex: chunk.blockIndex, start:newStart, end:newEnd}
-     : {action:'add_range', start:newStart, end:newEnd};
-   fetch(ADMIN_API + '/context-compaction/blocks',{
-     method:'POST',headers:{'Content-Type':'application/json'},
-     body:JSON.stringify(payload)
-   }).then(function(r){return r.json()}).then(function(d){
-     if(d && d.error){ if(msg) msg.textContent='操作失败: '+d.error; return; }
-     if(d && d.ok===false){ if(msg) msg.textContent=(d.message||'操作未完成'); return; }
-     if(msg) msg.textContent='块 #'+chunk.index+' 已保存为 '+newStart+'-'+newEnd+'。'+(d.removedCount?('（自动合并 '+d.removedCount+' 个重叠块）'):'');
-     resetCcMsgCache();
-     loadCompactionPreview();
-   }).catch(function(e){ if(msg) msg.textContent='操作失败: '+e.message; });
- }
- 
- 
-  function clampAiCcInput(input, index, field, max){
-    const before=input.value;
-    const raw=Number(input.value);
-    const clamped=Math.min(Math.max(1, Math.floor(raw)||1), Number(max)||1);
-    if(String(clamped)!==String(before)){
-      input.value=clamped;
-      const msg=document.getElementById('compaction-msg');
-      if(msg){ setTimeout(function(){ msg.textContent='输入超出范围，已自动修正为第 '+clamped+' 条。'; }, 0); }
-      // 只有值被修正过才补发更新：onchange 已发过一次，onblur 再发就是重复 POST
-      updateAiBoundary(index, field, input.value);
-    }
-  }
-
-  function updateAiBoundary(index, field, raw){
-    const d=AppState.compactionPlan;
-    if(!d) return;
-    const chunk=(d.chunks||[]).find(function(x){ return x.index===index; });
-    if(!chunk || !chunk.repId) return;
-    const repId=chunk.repId;
-    const v=Math.max(1, Math.floor(Number(raw)||1));
-    if(!chunk) return;
-    let curStart, curEnd;
-    if(typeof chunk.blockStart==='number'){
-      curStart=chunk.blockStart+1;
-      curEnd=chunk.blockEnd+1;
-    }else{
-      curStart=(chunk.firstIdx>=0?chunk.firstIdx:0)+1;
-      curEnd=(chunk.lastIdx>=0?chunk.lastIdx:curStart-1)+1;
-    }
-    let newStart=curStart, newEnd=curEnd;
-    if(field===0) newStart=v; else newEnd=v;
-    if(newStart>newEnd){
-      const msg=document.getElementById('compaction-msg');
-      if(msg) msg.textContent='开头不能大于结尾。';
-      loadCompactionPreview();
-      return;
-    }
-    if(newEnd>d.totalCompressible){ newEnd=d.totalCompressible; }
-    if(newStart<1){ newStart=1; }
-    const msg=document.getElementById('compaction-msg');
-    if(msg) msg.textContent='正在更新 AI 块 #'+chunk.index+' 为 '+newStart+'-'+newEnd+' ...';
-    fetch(ADMIN_API + '/context-compaction/blocks',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:'update_ai_range', repId:repId, start:newStart, end:newEnd})
-    }).then(function(r){return r.json()}).then(function(d2){
-      if(d2 && d2.error){ if(msg) msg.textContent='操作失败: '+d2.error; return; }
-      if(d2 && d2.ok===false){ if(msg) msg.textContent=(d2.message||'操作未完成'); return; }
-      if(msg) msg.textContent='AI 块 #'+chunk.index+' 已保存为 '+newStart+'-'+newEnd+'（'+d2.count+' 条）。'+(d2.removedCount?('（自动合并 '+d2.removedCount+' 个重叠块）'):'');
-      resetCcMsgCache();
-      loadCompactionPreview();
-    }).catch(function(e){ if(msg) msg.textContent='操作失败: '+e.message; });
-  }
 
  function renderCcHistory(c){
    const h=c.history||[];
@@ -2799,111 +2080,6 @@ function ccNumLiveCheck(input, max){
    renderCompaction();
  }
  
- function ccSummaryValue(c){
-   return (AppState.ccDraft[c.index]!==undefined)?AppState.ccDraft[c.index]:c.summary;
- }
- 
- function ccFindChunk(idx){
-   return ((AppState.compactionPlan && AppState.compactionPlan.chunks)||[]).find(function(x){return x.index===idx;});
- }
- 
- function ccRenumberHistory(h){
-   return h.map(function(x,i){ return { index:i, summary:x.summary, generatedAt:x.generatedAt, mode:x.mode, manual:x.manual }; }).slice(0,8);
- }
- 
- function renderCcSummaryEditor(c, blockIndex){
-   const cur=ccSummaryValue(c)||'';
-   return '<div class="cc-sum-ta-wrap">'
-     +'<textarea id="cc-edit-sel-'+c.index+'" rows="6" oninput="AppState.ccDraft['+c.index+']=this.value;updateCcCharCount('+c.index+')" class="cc-sum-ta">'+escHtml(cur)+'</textarea>'
-     +'<button class="cc-sum-zoom" onclick="openCcEditModal('+c.index+')" title="放大编辑">放大</button>'
-     +'</div>'
-     +'<div class="cc-sum-editor-btns">'
-     +'<span class="cc-sum-count" id="cc-edit-count-'+c.index+'">'+cur.length+' 字</span>'
-     +'<button class="cc-btn primary" onclick="saveCcSummaryEdit('+c.index+')">保存</button>'
-     +'<button class="cc-btn secondary" onclick="revertCcSummaryDraft('+c.index+')">还原</button>'
-     +'<button class="cc-btn secondary" onclick="regenerateBlockSummary('+c.index+','+blockIndex+',\''+(c.id||'')+'\')"'+(AppState.ccBlockGenerating.has(c.index)?' disabled':'')+'>'+(AppState.ccBlockGenerating.has(c.index)?'生成中…':'重新生成')+'</button>'
-     +'</div>';
- }
- 
- function updateCcCharCount(idx){
-   const ta=document.getElementById('cc-edit-sel-'+idx);
-   const cnt=document.getElementById('cc-edit-count-'+idx);
-   if(ta && cnt) cnt.textContent=ta.value.length+' 字';
- }
- 
- function saveCcSummaryEdit(idx){
-   const ta=document.getElementById('cc-edit-sel-'+idx);
-   if(!ta) return;
-   saveCcSummaryText(idx, ta.value);
- }
- 
- let ccEditModalIdx=null;
- function saveCcSummaryText(idx, text){
-   if(!text.trim()){ toast('摘要内容不能为空'); return; }
-   const msg=document.getElementById('compaction-msg');
-   if(msg) msg.textContent='正在保存块 #'+idx+' 的摘要修改...';
-   fetch(ADMIN_API + '/context-compaction/update',{
-     method:'POST',headers:{'Content-Type':'application/json'},
-     body:JSON.stringify({chunkIndex:idx, id:(ccFindChunk(idx)||{}).id||'', summary:text})
-   }).then(function(r){return r.json()}).then(function(d){
-     if(d && d.error){ if(msg) msg.textContent='保存失败: '+d.error; return; }
-     AppState.ccDraft[idx]=undefined;
-     AppState.ccSummaryOpen.add(idx);
-     closeModal('ccEditModal');
-     ccEditModalIdx=null;
-     const chunk=ccFindChunk(idx);
-     const wasForce=!!(chunk&&chunk.forceReplaced);
-     if(chunk){
-       const cur={ summary:chunk.summary, generatedAt:chunk.generatedAt, mode:chunk.mode, manual:chunk.manual };
-       chunk.history=ccRenumberHistory([cur].concat(chunk.history||[]));
-       chunk.summary=text;
-       chunk.generatedAt=new Date().toISOString();
-       chunk.mode='edited';
-       chunk.manual=true;
-       chunk.cached=true;
-       chunk.enabled=false; // 手写保存后回到「待替换」，与批量导入口径一致，需手动点替换才生效
-       if(wasForce){
-         chunk.forceReplaced=false;
-       }
-     }
-     if(msg) msg.textContent='块 #'+idx+' 摘要已保存修改（'+d.length+' 字），已变为待替换，点块上「替换」后生效。';
-     renderCompaction();
-   }).catch(function(e){
-     if(msg) msg.textContent='保存失败: '+e.message;
-   });
- }
- 
- function openCcEditModal(idx){
-   const inline=document.getElementById('cc-edit-sel-'+idx);
-   const ta=document.getElementById('cc-edit-modal-sel');
-   if(!ta) return;
-   ta.value=inline ? inline.value : (((AppState.compactionPlan.chunks||[]).find(function(x){return x.index===idx;})||{}).summary||'');
-   ccEditModalIdx=idx;
-   openModal('ccEditModal');
-   setTimeout(function(){ ta.focus(); }, 80);
- }
- 
- function closeCcEditModal(){
-   const idx=ccEditModalIdx;
-   if(idx!==null){
-     const inline=document.getElementById('cc-edit-sel-'+idx);
-     const ta=document.getElementById('cc-edit-modal-sel');
-     if(inline && ta){ inline.value=ta.value; AppState.ccDraft[idx]=ta.value; }
-   }
-   ccEditModalIdx=null;
-   closeModal('ccEditModal');
- }
- 
- function saveCcEditModal(){
-   const ta=document.getElementById('cc-edit-modal-sel');
-   if(ccEditModalIdx===null || !ta) return;
-   saveCcSummaryText(ccEditModalIdx, ta.value);
- }
- 
- function revertCcSummaryDraft(idx){
-   AppState.ccDraft[idx]=undefined;
-   renderCompaction();
- }
 
  function toggleCcExpand(cidx){
    if(AppState.ccExpanded.has(cidx)) AppState.ccExpanded.delete(cidx); else AppState.ccExpanded.add(cidx);
@@ -3103,7 +2279,7 @@ function ccNumLiveCheck(input, max){
   if(name==='memory'){ if(!window.__memPoolInited){ initMemPoolView(); window.__memPoolInited=true; } loadReviewQueue(); }
   if(name!=='config' && typeof stopBackfillWatch==='function'){ stopBackfillWatch(); }
   if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
-  if(name==='prompts'){loadWakePrompt();loadContextDigestPrompt();loadCompactionPrompt();loadCtxLimitPrompt();loadReparsePrompt();loadJudgePrompt();loadDistillPrompt();loadSummaryPrompt();loadBackfillPrompt();}
+  if(name==='prompts'){loadWakePrompt();loadContextDigestPrompt();loadCtxLimitPrompt();loadReparsePrompt();loadJudgePrompt();loadDistillPrompt();loadSummaryPrompt();loadBackfillPrompt();}
   if(name==='config'){loadToolsConfig(); loadCrossInjectConfig();
     // 1003：记忆蒸馏 / 两块总结 / 老数据重跑三张设置卡已搬到本页（跨窗口注入卡片下方）。
     // 三个 load 原本挂在 initMemPoolView（只跑一次且必须先进记忆页才触发），搬走后若从配置页直接进来会加载不到 → 输入框全空。
@@ -3253,42 +2429,6 @@ function ccNumLiveCheck(input, max){
      const j=await r.json();
      if(j.ok){ toast('已恢复默认'); loadContextDigestPrompt(); }
      else toast('操作失败: '+(j.error||''));
-   }catch(e){toast('网络错误')}
- }
- 
- 
- // 压缩上下文提示词
- async function loadCompactionPrompt(){
-   const se=document.getElementById('cc-prompt-system-edit');
-   const pe=document.getElementById('cc-prompt-edit');
-   if(!se||!pe)return;
-   try{
-     const r=await fetch(ADMIN_API + '/logs/compaction-prompt');
-     const j=await r.json();
-     se.value=j.system||'';
-     pe.value=j.template||j.prompt||'';
-   }catch(e){se.value='加载失败';pe.value=''}
- }
- 
- async function saveCompactionPrompt(){
-   const se=document.getElementById('cc-prompt-system-edit');
-   const pe=document.getElementById('cc-prompt-edit');
-   if(!pe.value.trim()){toast('模板不能为空');return}
-   try{
-     const r=await fetch(ADMIN_API + '/logs/compaction-prompt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({system:se.value,template:pe.value})});
-     const j=await r.json();
-     if(j.ok) toast('已保存，生成压缩摘要时生效');
-     else toast('保存失败: '+(j.error||''));
-   }catch(e){toast('网络错误')}
- }
- 
- async function resetCompactionPrompt(){
-   if(!confirm('恢复默认压缩上下文提示词？'))return;
-   try{
-     const r=await fetch(ADMIN_API + '/logs/compaction-prompt',{method:'DELETE'});
-     const j=await r.json();
-     if(j.ok){toast('已恢复默认');loadCompactionPrompt();}
-     else toast('失败: '+(j.error||''));
    }catch(e){toast('网络错误')}
  }
  
