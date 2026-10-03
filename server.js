@@ -3664,7 +3664,11 @@ app.post("/admin/memory-distill/run", { preHandler: basicAuth }, async (req, rep
     if (memoryDistill.status().running) {
       return reply.code(409).send({ error: "已有蒸馏在跑", status: memoryDistill.status() });
     }
-    const r = await memoryDistill.runNow("manual");
+    // 1004：支持 dryRun / noQueue 透传——改选材后第一次试跑要先「不落库」看质量，
+    // 免得抽出来的东西直接灌进待审队列、还要人工一条条删
+    const o = (req && req.body && typeof req.body === "object") ? req.body : {};
+    const runOpts = { dryRun: !!o.dryRun, noQueue: !!o.noQueue };
+    const r = await memoryDistill.runNow("manual", runOpts);
     reply.send(r);
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
