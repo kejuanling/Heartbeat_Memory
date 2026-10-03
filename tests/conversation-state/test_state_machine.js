@@ -1,39 +1,34 @@
 'use strict';
 // tests/conversation-state/test_state_machine.js
-// 状态机纯逻辑单测：不调 LLM、不碰真实 data/。
-// 做法：require 前把 ../context-replacements 塞进 require.cache 当桩，
-// 于是 lib/conversation-state.js 拿到的是可控的假后端，跑完删掉 data 下两个测试文件。
+// 状态机纯逻辑单测：不调 LLM。
+// 隔离双保险（1003-30 两次误删生产状态后的根治）：
+//   ① require 前把 ../context-replacements 塞进 require.cache 当桩（可控假后端）；
+//   ② CONVERSATION_STATE_DIR 指向临时目录——状态机模块的 data 读写全部落在临时目录，
+//      生产 data/conversation_state.json 从此与测试物理无关，跑测试不再需要任何 rm。
 
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
+
+// ★ 必须在 require lib/conversation-state 之前设置（模块读 env 定数据目录）
+const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "cs-state-test-"));
+process.env.CONVERSATION_STATE_DIR = TEST_DATA_DIR;
 
 const ROOT = path.join(__dirname, "..", "..");
-const DATA = path.join(ROOT, "data");
-const STATE_FILE = path.join(DATA, "conversation_state.json");
-const VERSIONS_FILE = path.join(DATA, "conversation_state_versions.json");
 const TEST_STATE = "test-state-sess-A";
 const TEST_STATE2 = "test-state-sess-B";
 const TEST_STATE3 = "test-state-sess-C";
 const TEST_STATE4 = "test-state-sess-D";
 const TEST_STATE5 = "test-state-sess-E";
 
-// ---- 记录真实存在过哪些测试文件，跑完原样恢复 ----
-// 注册在 exit 上：中途断言抛错也要还原，否则崩溃一次就留下一堆脏状态，
-// 下一轮跑出来的失败全是上一轮的残留（踩过一次）。
-const BACKUP = {};
-[STATE_FILE, VERSIONS_FILE].forEach(function (f) {
-  BACKUP[f] = fs.existsSync(f) ? { existed: true, content: fs.readFileSync(f, "utf8") } : { existed: false };
-});
-let restored = false;
-function restoreFiles() {
-  if (restored) return;
-  restored = true;
-  Object.keys(BACKUP).forEach(function (f) {
-    if (BACKUP[f].existed) fs.writeFileSync(f, BACKUP[f].content);
-    else { try { fs.unlinkSync(f); } catch (e) { /* 本来就没有 */ } }
-  });
+// 跑完删临时目录（exit 上挂，崩溃也清理）
+let cleaned = false;
+function cleanupDir() {
+  if (cleaned) return;
+  cleaned = true;
+  try { fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true }); } catch (e) { /* 忽略 */ }
 }
-process.on("exit", restoreFiles);
+process.on("exit", cleanupDir);
 
 let passed = 0;
 const failures = [];
@@ -276,7 +271,8 @@ eq("连续并入后覆盖终点推进到第 16 条（0-based 15）", cr5b.end_in
 eq("起点仍锚在第 1 条（连续前缀）", cr5b.start_index, 0);
 
 // ================= 恢复现场 =================
-restoreFiles();
+// 数据全在临时目录（CONVERSATION_STATE_DIR），exit 钩子统一删除；生产 data/ 从未被碰。
+cleanupDir();
 
 console.log("\n通过 " + passed + " 项");
 if (failures.length) {
