@@ -296,6 +296,8 @@ const contextCompactor = require("./context-compactor");
 const contextReplacements = require("./context-replacements");
 const contextDigest = require("./context-digest");
 const conversationState = require("./lib/conversation-state");
+// 状态机日志接进压缩页悬浮球（addCompactionLog 是函数声明，提升可用；闭包隔开 compactionLogs 的 TDZ）
+conversationState.setLogFn(function (entry) { return addCompactionLog(entry); });
 
 const DEFAULT_BODY_LIMIT_MB = 50;
 

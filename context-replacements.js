@@ -1930,7 +1930,11 @@ function applyReplacements(messages, source) {
 
     // 区间膨胀校验：匹配区间远大于块自身消息数 → 首尾锚点之一误匹配到远处重复内容，
     // 会把相邻块的地盘整段吞进本块（重叠去重还会按创建时间丢弃被吞的邻块），直接拒绝。
-    if (matched.length > 0 && (ei - si + 1) > matched.length * 1.5 + 20) {
+    // 2026-10-04 id 路径豁免：膨胀校验防的是「内容匹配锚到远处重复内容」——id 路径锚点
+    // 就是存储时记下的消息 id，身份即真相，不存在误匹配；状态机记录（source=state）的
+    // matched 本来就只存首尾两条锚点（覆盖 100 条的记录 matched=2），按内容路径口径必被
+    // 膨胀拒掉（实测：状态永不注入）。与下方钥匙校验的「id 路径降为告警」同一原则。
+    if (!idPath && matched.length > 0 && (ei - si + 1) > matched.length * 1.5 + 20) {
       skipped.push({ id: item.id, reason: "区间膨胀(" + (ei - si + 1) + "条>块" + matched.length + "条上限)" });
       console.warn("[context-replacements] 块跳过 id=" + item.id + " 原因=区间膨胀 ei-si+1=" + (ei - si + 1) + " 远超块消息数 " + matched.length);
       return;
