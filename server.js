@@ -5947,6 +5947,12 @@ function persistCompactionLogs() {
 }
 function addCompactionLog(entry) {
   const now = new Date().toISOString();
+  // 1003-25：防字符串入参（memory-summary/backfill 的 log 曾直接传字符串，
+  // 被 Object.assign 按字符索引拆成 {"0":"[","1":"m"...} 垃圾，前端显示「未知操作进行中」）
+  if (entry == null) return null;
+  if (typeof entry !== "object") {
+    entry = { label: "后台任务", status: "success", message: String(entry) };
+  }
   // 2026-09-29 修复：带 id 的 entry 是"更新已有日志"（生成任务的 pending→success/error 翻状态），
   // 原实现总是 unshift 新建 → 同一次生成产生 pending+success 两条、且前端 trackedGenId 只匹配
   // logs[0]，多点几次生成后 id 错位 → 消息栏永远"进行中"。更新时原地替换并移到最前
