@@ -20,6 +20,7 @@ const fsp = require('fs-extra');
 const { buildContextBlocks } = require('./context-v2-builder');
 const shadow = require('./context-v2-shadow');
 const snapStore = require('./context-snapshot');
+const { createSessionCfg } = require('./lib/session-cfg');   // 2026-10-03：会话级跨窗口开关
 
 // 把 builder 输出套进消息：剔除旧 [永久上下文]/[跨窗口] developer 块 →
 // 固定块插到开头连续 system 之后；relevant_memories 单独追加到
@@ -148,6 +149,19 @@ async function assembleAndApply(opts) {
       adm.markHit(relevantHits.map(function (h) { return h && h.id; }));
     }
   } catch (_) { /* 打点失败不影响主链路 */ }
+  // 会话级跨窗口开关（1003-19 用户拍板「让它生效」）：override=false 时本会话不注入 Earlier Days
+  //（= 其它会话写的日记，块 key conversation_continuity）。
+  //
+  // 为什么放这里而不是 context-v2-shadow 的日记过滤点：快照模式下 minimalAssembleInput 返回的
+  // diaryEntries 恒为 []（固定块来自 data/session_inject_snapshots.json），在 shadow 里过滤对
+  // 「已有快照的存量会话」完全无效——实测 12 个会话全部已固化 conversation_continuity。
+  // 放这里则首次组装与快照复用两条路径都生效，切换开关下一轮请求即刻见效。
+  //
+  // 只过滤本次输出、不改快照文件：关掉再打开能恢复，不会像「重建快照」那样把记忆冻死。
+  // true / null（跟随全局）一律放行——V2 没有全局总开关，跟随即等于现有行为。
+  if (createSessionCfg(opts.baseDir).sessionCrossInjectOverride(opts.sessionId) === false) {
+    blocks = blocks.filter(function (b) { return b && b.key !== 'conversation_continuity'; });
+  }
   return { messages: apply(opts.messages, blocks), relevantHits: relevantHits };
 }
 

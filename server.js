@@ -19,6 +19,11 @@ const doubaoAsr = require("./doubao-asr");
 // Context V2 组装（预览接口与主聊天同源，2026-09-19）
 const { buildContextBlocks } = require("./context-v2-builder");
 const ctxV2Shadow = require("./context-v2-shadow");
+// 会话级配置读写（2026-10-03 从下方抽出）：跨窗口开关要真正生效，
+// context-v2-runtime.js 也得读同一份实现，而它是本文件 require 的——只能走 lib，不能反向引用。
+const { createSessionCfg } = require("./lib/session-cfg");
+const sessionCfg = createSessionCfg(__dirname);
+const { sessionCrossInjectOverride, saveSessionCrossInjectOverride } = sessionCfg;
 
 // === MCP 工具循环接入（隔离式，ENABLE_MCP=true 才生效）===
 const mcp = require("./mcp-tool-loop");
@@ -290,6 +295,7 @@ const { writeJsonAtomic: _writeJsonAtomicBase } = require("./json_atomic");
 const contextCompactor = require("./context-compactor");
 const contextReplacements = require("./context-replacements");
 const contextDigest = require("./context-digest");
+const conversationState = require("./lib/conversation-state");
 
 const DEFAULT_BODY_LIMIT_MB = 50;
 
@@ -308,9 +314,13 @@ const app = Fastify({
 app.register(require("@fastify/formbody"));
 
 // 多会话：压缩/上下文替换按会话时间线工作。对 /admin/context-compaction/* 与 /admin/context-replacements/* 请求，从 query 的 session_id 设置活跃会话；响应后复位（无 session_id 则回退主会话）。
+// 2026-10-03：/admin/conversation-state/*（状态机）也按会话工作，接进同一个机制——
+// 否则 compressibleItems()/loadTimeline() 读到的是「上一个请求留下的活跃会话」，
+// 并入的原文会取错会话。对已有两个前缀的行为零改动（它们只传 session_id）。
 app.addHook("onRequest", async (req, reply) => {
-  if (req.url && (req.url.startsWith("/admin/context-compaction") || req.url.startsWith("/admin/context-replacements"))) {
-    const sid = (req.query && req.query.session_id) ? String(req.query.session_id) : null;
+  if (req.url && (req.url.startsWith("/admin/context-compaction") || req.url.startsWith("/admin/context-replacements") || req.url.startsWith("/admin/conversation-state"))) {
+    const sidRaw = req.query && (req.query.session_id !== undefined ? req.query.session_id : req.query.session);
+    const sid = sidRaw ? String(sidRaw) : null;
     req.__ctxWasSet = sid != null;
     contextReplacements.setActiveSession(sid);
   }
@@ -1737,7 +1747,6 @@ require("./routes/chat")(app, {
   beginPendingReply,
   waitPendingReply,
   clearPendingReply,
-  buildCrossMemorySnapshot,
   sessionCrossInjectOverride,
   saveSessionCrossInjectOverride,
   prepareMessageForLLM,
@@ -1792,7 +1801,6 @@ const wakeChatDeps = {
   isSpecialEvent,
   normalizeContentToText,
   stripPosition,
-  buildCrossMemorySnapshot,
   resolveChatModel,
   resolveSessionSystemPrompt,
   readEnvValue,
@@ -1826,137 +1834,14 @@ const wakeScheduler = require("./lib/wake-scheduler")({
 // ========================
 // Chat Completions
 // ========================
+// 会话级配置（模型供应商 / 模型名 / 跨窗口注入开关）读写：
+// 实现已搬到 lib/session-cfg.js——跨窗口开关 1003-19 起真正生效，context-v2-runtime.js 也要读同一份。
+// 2026-10-03：V1「跨窗口自动注入」整条链路（跨窗口记忆快照 data/cross_snapshot_<sid>.json +
+// 相关记忆/近期日记文本计算）随 ctx_v2 全面启用一并删除，此处不再有注入实现。
+// 现存注入只有 V2 的 conversation_continuity（Earlier Days）块，见 context-v2-runtime.js。
+// 历史沿革：标星「记忆碎片」注入 2026-09-05 移除；跨窗口快照 2026-08-30 引入、09-28 拆除。
 // ========================
-// 跨窗口自动注入：日记 + 高重要级记忆（标星「记忆碎片」注入已于 2026-09-05 移除，改为记忆池「对话碎片」置顶）
-// ========================
-// 会话创建时刻：取该会话时间线第一条真实用户消息的时间（首条非 system 且有 time 的消息）。
-// 用于日记跨窗口注入的边界：只注入"创建日期之前"（严格早于当天）的日记。
-// 2026-09-09 修复：不再用文件 birthtime。原因——时间线文件每次保存都用「临时文件+rename」覆盖，
-// rename 会把 birthtime 刷新成那次写入时刻，导致活跃会话的"创建边界"不断漂移到当前、
-// 把后来写的日记也注入（曾让 09-06 建立的会话注入了 09-07/09-08 的日记）。
-// 改用首条消息时间后，该值不随文件重写变化，边界稳定。
-function sessionCreatedAtOf(sessionId) {
-  try {
-    const tl = loadTimeline(sessionId || "default");
-    for (const m of tl) {
-      if (m && m.role !== "system" && m.time) return m.time;
-    }
-  } catch (e) {}
-  return null;
-}
-
-// 日记跨窗口注入（批注 2026-09-04，2026-09-08 收紧）：只注入"本会话创建日期之前"（严格早于）的日记，
-// 按日期升序（旧在前新在后）取最近 count 篇；2026-09-08 起仅严格早于（不含当天）。
-// 边界口径：日记文件名与 cutoff 都用 TIME_ZONE 本地日期（YYYY-MM-DD，严格小于当天）。
-// 2026-09-09 增：管理台隐藏的日记先剔除再取最近 count 篇（隐藏篇不注入、不占份数）。
-// 2026-09-12 增：日记按会话分开保存后，候选 = 共享层（diary 根）+ 所有会话目录合并，仍不分会话、按日期统一排；
-// 同一天既有共享残留又有会话文件时内容合并为一篇（注入份按"天"计，与旧口径一篇一天一致）。
-// 隐藏清单兼容：旧 key（纯文件名）只命中共享层；新 key（完整相对路径）精确命中所在文件。
-function recentDiaryTextBefore(sessionId, count, createdIso) {
-  let cutoff = "";
-  try {
-    const d = new Date(createdIso);
-    if (!isNaN(d.getTime())) {
-      const p = getDatePartsInTimeZone(d, TIME_ZONE);
-      cutoff = p.year + "-" + p.month + "-" + p.day;
-    }
-  } catch (e) {}
-  if (!cutoff) return "";
-  // 2026-10-03：日记改读 data/diary.json（diary-store）；hidden 用字段。
-  // 1003-12 用户拍板：注入「创建日当天及之前」（date <= cutoff），排除本会话自己写的（session 匹配）。
-  // 输出口径不变：按天合并、「### 日期」头、时间正序。
-  const selfSession = (function () { const t = safeSessionToken(sessionId || "default"); return t === "default" ? null : t; })();
-  const before = diaryStore.listEntries(__dirname)
-    .filter(e => !e.hidden && e.session !== selfSession)
-    .map(e => {
-      const p = getDatePartsInTimeZone(new Date(e.created_at), TIME_ZONE);
-      return { id: e.id, date: `${p.year}-${p.month}-${p.day}`, content: e.content };
-    })
-    .filter(f => f.date <= cutoff);
-  if (!before.length) return "";
-  const pickedDates = Array.from(new Set(before.map(f => f.date))).slice(-Math.max(1, Number(count) || 3));
-  const out = [];
-  for (const d of pickedDates) {
-    const parts = before.filter(f => f.date === d).map(f => String(f.content || "").trim()).filter(Boolean);
-    if (parts.length) out.push("### " + d + "\n" + parts.join("\n\n"));
-  }
-  return out.join("\n\n");
-}
-
-// ── 记忆碎片（标星内容）跨窗口注入已移除（2026-09-05）──
-// 用户改为在记忆池「对话碎片」分类手动置顶管理，标星内容不再自动注入新会话。
-
-// ========================
-// 跨窗口记忆快照（每会话固定）
-// 批注 2026-08-30：相关记忆(置顶) + 标星(记忆碎片) + 近期日记 不再每次实时重建，
-// 而是"开新会话时抓一次快照并固定不变"。快照按 sessionId 存到 data/cross_snapshot_<sid>.json。
-// 2026-08-29 批注：相关记忆改为「只固定置顶记忆(手动+多次检索自动置顶)」，去掉按分类抽高重要级，
-// 话题相关交给 surface_memory 按需召回。加了 version 以让旧快照(旧格式)在下次请求时自动重建。
-// 2026-09-04 批注：近期日记只注入"本会话创建日期之前"的日记（快照存 created_at 固化边界），
-// 2026-09-08 批注：按用户要求收紧为"严格早于创建日期"（去掉等于，当天不再注入快照）。
-// 当天日记在"写日记会话的时间线特殊事件"与"新会话跨窗口快照"两条路径都可能出现，属预期：二者所在会话不同。
-// 注：跨窗口边界以「每个新会话自身创建日期」为相对 cutoff，并非全局按今天/以后一刀切：
-// 对写日记会话 S，当天日记只进 S 自身时间线、不进 S 的跨窗口快照；
-// 但对创建日期严格晚于该日记的新会话 T，该日记对 T 属更早，仍会进 T 的跨窗口快照。
-// ========================
-const CROSS_SNAPSHOT_DIR = path.join(__dirname, "data");
-const SESSION_CFG_DIR = path.join(__dirname, "data", "session_cfg");   // 会话级配置（如跨窗口注入覆盖）；无文件=跟随全局
-const CROSS_SNAPSHOT_VERSION = 10;  // 升版本(2026-09-09)：会话创建时刻改回「时间线首条真实消息时间」，弃用易漂移的(birthtime)，旧快照(含被漂移边界污染的)自动重建
-function crossSnapshotFile(sessionId) {
-  // 与 timelineFileFor 用同一套会话名规则（safeSessionToken）：保证同一会话的时间线与快照归属一致
-  const token = safeSessionToken(sessionId || "default");
-  return path.join(CROSS_SNAPSHOT_DIR, "cross_snapshot_" + token + ".json");
-}
-// 2026-09-28：V1 记忆池已删除，回退路径（ctx_v2=false）的跨窗口注入改用 V2 anchor 记忆
-function v2AnchorList() {
-  try {
-    return require("./memory-v2").createStore({ config: {} }).list({ status: "active" }).filter(function (m) { return m.anchor === true; });
-  } catch (e) { return []; }
-}
-function crossFingerprint(cfg) {
-  // 跨窗口快照指纹：置顶记忆 + 标星 + 日记目录 mtime 任一变化即重建。
-  // 只算轻量指纹（id/长度/keys/mtime），不拼正文，避免每请求 O(n) 重建。
-  const parts = [];
-  try {
-    if (cfg.cross_inject_memory !== false) {
-      const pinned = v2AnchorList();
-      parts.push("mem:" + pinned.map(function (m) { return m.id + ":" + String(m.text || "").length; }).join(","));
-    }
-  } catch (e) {}
-  try {
-    if (cfg.cross_inject_diary !== false) {
-      // 2026-10-03：日记改存 data/diary.json，指纹 = 该文件 mtime+size（任一写入/隐藏变化即变）
-      try {
-        const st = fs.statSync(diaryStore.storePath(__dirname));
-        parts.push("diaryjson:" + st.mtimeMs + ":" + st.size + ":count" + (Number(cfg.cross_inject_diary_count) || 3));
-      } catch (e) {}
-    }
-  } catch (e) {}
-  return crypto.createHash("md5").update(parts.join("|")).digest("hex");
-}
-function sessionCrossInjectOverride(sessionId) {
-  // 会话级跨窗口注入覆盖：true=本会话强制注入, false=本会话关闭, null=跟随全局
-  const token = safeSessionToken(sessionId || "default");
-  const file = path.join(SESSION_CFG_DIR, token + ".json");
-  try {
-    if (fs.existsSync(file)) {
-      const o = fs.readJsonSync(file);
-      if (o && typeof o.cross_inject_enabled === "boolean") return o.cross_inject_enabled;
-    }
-  } catch (e) { console.warn("[session-cfg] 读取覆盖失败:", e.message); }
-  return null;
-}
-function saveSessionCrossInjectOverride(sessionId, enabled) {
-  const token = safeSessionToken(sessionId || "default");
-  const file = path.join(SESSION_CFG_DIR, token + ".json");
-  let o = {};
-  try { if (fs.existsSync(file)) o = fs.readJsonSync(file) || {}; } catch (e) { o = {}; }
-  if (enabled === null || enabled === undefined) delete o.cross_inject_enabled;
-  else o.cross_inject_enabled = !!enabled;
-  fs.ensureDirSync(SESSION_CFG_DIR);
-  fs.writeJsonSync(file, o);
-  return o;
-}
+const SESSION_CFG_DIR = sessionCfg.SESSION_CFG_DIR;   // 2026-10-03 随会话级配置读写一起搬到 lib/session-cfg.js
 // 会话级模型供应商覆盖：返回该会话指定的供应商 id，null=跟随全局。
 function sessionModelProviderOverride(sessionId) {
   const token = safeSessionToken(sessionId || "default");
@@ -2022,65 +1907,6 @@ function saveCrossInjectConfig(patch) {
   writeJsonFileAtomic(CROSS_INJECT_CONFIG_FILE, { cross_inject_diary_count: cur.cross_inject_diary_count });
   return cur;
 }
-function buildCrossMemorySnapshot(sessionId) {
-  // 2026-09-28：V1 记忆池删除后回退路径固定启用跨窗口注入（V2 生产路径不受本开关控制）；
-  // 日记条数从 data/cross_inject_config.json 读取（管理台配置页可调）
-  const cfg = readCrossInjectConfig();
-  // 会话级覆盖：本会话显式关闭 → 不注入；显式开启 → 继续，但要遵从全局总开关（全局关=全关）
-  const cfgOverride = sessionCrossInjectOverride(sessionId);
-  if (cfgOverride === false) return "";
-  if (cfg.cross_inject_enabled === false) return "";
-  const file = crossSnapshotFile(sessionId);
-  const fp = crossFingerprint(cfg);
-  // 会话创建时刻：优先时间线首条消息；其次旧快照里固化过的 created_at（防边界漂移）；都没有则用当前时刻（首次请求≈创建时刻）。
-  let createdIso = sessionCreatedAtOf(sessionId);
-  // 已有快照：版本相符 + 指纹未变 才复用（批注 2026-09-04：去掉 TTL 超时重建，指纹不变即永久复用）；否则重建（置顶/标星/日记变化即更新）。
-  try {
-    if (fs.existsSync(file)) {
-      const snap = fs.readJsonSync(file);
-      if (!createdIso && snap && snap.created_at) createdIso = snap.created_at;
-      if (snap && snap.version === CROSS_SNAPSHOT_VERSION && typeof snap.text === "string" && snap.text
-          && snap.fingerprint === fp) {
-        return snap.text;
-      }
-    }
-  } catch (e) { console.warn("[cross-snapshot] 读取快照失败:", e.message); }
-  if (!createdIso) createdIso = new Date().toISOString();
-  const text = computeCrossMemoryText(cfg, createdIso, sessionId);
-  // 只有非空才落盘（有内容才固定；空则下次重试，避免把永远为空的会话锁死）
-  if (text) {
-    try {
-      fs.ensureDirSync(CROSS_SNAPSHOT_DIR);
-      // 2026-09-13 审查修复：改原子写——此前裸 writeJsonSync 是全仓唯一非原子写，
-      // 写盘窗口进程被杀会留下半截快照，下次读取解析失败走重建（浪费一次计算且丢 created_at 固化）
-      writeJsonFileAtomic(file, { session: sessionId || "default", created_at: createdIso, captured_at: new Date().toISOString(), version: CROSS_SNAPSHOT_VERSION, fingerprint: fp, text });
-    } catch (e) { console.warn("[cross-snapshot] 写入快照失败:", e.message); }
-  }
-  return text;
-}
-
-// 跨窗口注入正文实时计算（不读不写快照）：置顶记忆 + 截至会话创建日的近期日记。
-// 2026-09-13 增：菜单页「跨窗口注入」预览改用本函数每次实时重算，不再显示开窗口时固定的旧快照。
-function computeCrossMemoryText(cfg, createdIso, sessionId) {
-  const parts = [];
-  if (cfg.cross_inject_memory !== false) {
-    // 相关记忆：只固定 V2 anchor 记忆（管理台手动置顶），不限制条数。
-    // 话题相关交给对话中 Relevant 语义检索按需召回。
-    const pinnedMems = v2AnchorList();
-    if (pinnedMems.length) {
-      parts.push("## 相关记忆\n" + pinnedMems.map(function (m) { return "【" + m.kind + "】" + m.text; }).join("\n"));
-    }
-  }
-  // 日记：跨窗口注入（快照的一部分），注入"创建日当天及之前"的日记，排除本会话自己写的（1003-12）。
-  if (cfg.cross_inject_diary !== false) {
-    const dt = recentDiaryTextBefore(sessionId, Number(cfg.cross_inject_diary_count) || 3, createdIso);
-    if (dt) parts.push("## 近期日记\n" + dt);
-  }
-  return parts.join("\n\n");
-}
-
-
-
 // === MCP_TOOL_LOOP_BEGIN ===
 // MCP 工具循环入口：如果启用，则用 mcp-tool-loop 处理；返回 true 表示已处理并写完响应。
 // messages 为已处理好的 sanitizedMessages（含记忆/时间线/替换/裁剪）
@@ -4063,48 +3889,26 @@ function isPushEchoContent(s) {
 require("./routes/push-events")(app, { basicAuth, baseDir: __dirname, loadTimeline, saveTimeline });
 app.get("/admin/cross-window-inject", { preHandler: basicAuth }, async (req, reply) => {
   try {
-    // 2026-09-19：S4 后生产实际注入=V2 固定六块（旧 [永久上下文]/[跨窗口] 已被剥除），预览随总闸双轨——
-    // ctx_v2_enabled=true 时与主聊天同一 assembleInput+buildContextBlocks 实时拼真实注入内容
-    //（Relevant 块依赖当轮用户消息，预览不含；不受 cross_inject 开关控制，与 V2 生产路径同口径）。
-    // false/配置缺失=回滚态，保持旧逻辑（computeCrossMemoryText，含 cross_inject 总开关/会话覆盖门）。
+    // 2026-10-19：V1 预览分支（mode:"legacy"）随 V1 死代码一并删除。生产恒为
+    // ctx_v2_enabled=true，预览与主聊天同源：同一 assembleInput + buildContextBlocks 实时拼注入内容
+    //（Relevant 块依赖当轮用户消息，预览不含）。前端 workspace/chat.html 只把 mode 用于一行 tip 文案，
+    // 恒为 "v2" 不影响任何渲染逻辑。
     const sid = String(req.query && req.query.session_id ? req.query.session_id : "").trim() || "default";
-    let v2Cfg = null;
-    try { v2Cfg = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "memory_v2_config.json"), "utf8")); } catch (e) {}
-    if (v2Cfg && v2Cfg.ctx_v2_enabled === true) {
-      let v2Text = "";
-      try {
-        const v2Input = ctxV2Shadow.assembleInput({
-          baseDir: __dirname,
-          sessionId: sid,
-          llmMessages: [],
-          loadTimeline: loadTimeline,
-          normalizeContentToText: normalizeContentToText,
-        });
-        const built = buildContextBlocks(v2Input);
-        v2Text = (built.blocks || [])
-          .filter(function (b) { return b && !b.empty && b.key !== "relevant_memories"; })
-          .map(function (b) { return b.content; }).join("\n\n");
-      } catch (cx) { console.warn("[cross-inject] V2 预览失败:", cx.message); }
-      return reply.send({ text: v2Text, session_id: sid, mode: "v2" });
-    }
-    // 2026-09-13：预览改「每次实时重算」（computeCrossMemoryText），不再复用开窗口时落盘固定的旧快照；
-    // 边界仍用本会话创建日（优先时间线首条消息，其次旧快照固化的 created_at），与实际注入同口径，只算不落盘。
-    let text = "";
+    let v2Text = "";
     try {
-      const cfg = readCrossInjectConfig();
-      const cfgOverride = sessionCrossInjectOverride(sid);
-      if (cfgOverride !== false && cfg.cross_inject_enabled !== false) {
-        let createdIso = sessionCreatedAtOf(sid);
-        if (!createdIso) {
-          try {
-            const snapFile = crossSnapshotFile(sid);
-            if (fs.existsSync(snapFile)) createdIso = (fs.readJsonSync(snapFile) || {}).created_at;
-          } catch (e) {}
-        }
-        text = computeCrossMemoryText(cfg, createdIso, sid);
-      }
-    } catch (cx) { console.warn("[cross-inject] 预览失败:", cx.message); }
-    reply.send({ text: text, session_id: sid, mode: "legacy" });
+      const v2Input = ctxV2Shadow.assembleInput({
+        baseDir: __dirname,
+        sessionId: sid,
+        llmMessages: [],
+        loadTimeline: loadTimeline,
+        normalizeContentToText: normalizeContentToText,
+      });
+      const built = buildContextBlocks(v2Input);
+      v2Text = (built.blocks || [])
+        .filter(function (b) { return b && !b.empty && b.key !== "relevant_memories"; })
+        .map(function (b) { return b.content; }).join("\n\n");
+    } catch (cx) { console.warn("[cross-inject] V2 预览失败:", cx.message); }
+    reply.send({ text: v2Text, session_id: sid, mode: "v2" });
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 
@@ -5848,6 +5652,127 @@ app.post("/admin/context-compaction/history/delete", { preHandler: basicAuth }, 
     const r = contextReplacements.removeHistory(chunk.id, historyIndex);
     if (!r.ok) return reply.code(400).send({ error: r.error || r.message });
     reply.send({ ok: true, remaining: r.remaining });
+  } catch (err) {
+    reply.code(400).send({ error: err.message });
+  }
+});
+
+// ========================
+// 会话状态机（2026-10-03 新增，lib/conversation-state.js）
+//
+// 与上面那套 /admin/context-compaction/* 是两条独立的路：老的仍是「块」语义（并列摘要），
+// 新的是「状态」语义（每会话一份持续演化的状态）。阶段一两条并存，存量不动。
+// 压缩页用 mode=state 时走这里，mode=block 时走老的那套。
+// ========================
+
+function _csSessionOf(req) {
+  const q = req.query || {};
+  const b = req.body || {};
+  return String(q.session || q.session_id || b.session || b.session_id || "").trim();
+}
+
+app.get("/admin/conversation-state", { preHandler: basicAuth }, async (req, reply) => {
+  const sid = _csSessionOf(req);
+  if (!sid) return reply.code(400).send({ error: "缺少 session 参数" });
+  try {
+    reply.send(conversationState.getState(sid));
+  } catch (err) {
+    reply.code(400).send({ error: err.message });
+  }
+});
+
+app.get("/admin/conversation-state/version", { preHandler: basicAuth }, async (req, reply) => {
+  const sid = _csSessionOf(req);
+  const v = Number((req.query || {}).version);
+  if (!sid || !Number.isInteger(v)) return reply.code(400).send({ error: "缺少 session 或 version" });
+  try {
+    reply.send(conversationState.getVersionText(sid, v));
+  } catch (err) {
+    reply.code(400).send({ error: err.message });
+  }
+});
+
+// 预览：调 LLM 出候选状态 + 操作清单，**不落盘**。前端拿去做 diff 面板。
+app.post("/admin/conversation-state/preview", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  const sid = _csSessionOf(req);
+  if (!sid) return reply.code(400).send({ error: "缺少 session 参数" });
+  try {
+    const r = await conversationState.previewMerge({
+      session: sid,
+      start: body.start,
+      end: body.end,
+    });
+    reply.send(r);
+  } catch (err) {
+    reply.code(400).send({ error: (err && err.message) || String(err) });
+  }
+});
+
+// 确认并入：blocked 里列出的 remove 不生效（前端「阻止删除」）
+app.post("/admin/conversation-state/commit", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  const sid = _csSessionOf(req);
+  if (!sid) return reply.code(400).send({ error: "缺少 session 参数" });
+  try {
+    const r = conversationState.commitMerge({
+      session: sid,
+      state: body.state,
+      ops: body.ops,
+      blocked: body.blocked,
+      start_msg: body.start_msg,
+      end_msg: body.end_msg,
+      range_label: body.range_label,
+      label_start: body.label_start,
+      label_end: body.label_end,
+      count: body.count,
+      source: body.source,
+    });
+    reply.send(r);
+  } catch (err) {
+    reply.code(400).send({ error: (err && err.message) || String(err) });
+  }
+});
+
+app.post("/admin/conversation-state/rollback", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  const sid = _csSessionOf(req);
+  if (!sid) return reply.code(400).send({ error: "缺少 session 参数" });
+  try {
+    reply.send(conversationState.rollback({ session: sid, version: body.version }));
+  } catch (err) {
+    reply.code(400).send({ error: (err && err.message) || String(err) });
+  }
+});
+
+// 撤销最后一次并入：覆盖区间退回，被吃掉的那段原文回到未覆盖区
+app.post("/admin/conversation-state/undo", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  const sid = _csSessionOf(req);
+  if (!sid) return reply.code(400).send({ error: "缺少 session 参数" });
+  try {
+    reply.send(conversationState.undoLastMerge({ session: sid }));
+  } catch (err) {
+    reply.code(400).send({ error: (err && err.message) || String(err) });
+  }
+});
+
+// 状态机提示词：读 / 存 / 恢复默认
+app.get("/admin/conversation-state/prompt", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    reply.send(conversationState.loadPromptConfig());
+  } catch (err) {
+    reply.code(400).send({ error: err.message });
+  }
+});
+
+app.post("/admin/conversation-state/prompt", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  try {
+    if (String(body.action || "") === "reset") {
+      return reply.send(conversationState.resetPromptConfig());
+    }
+    reply.send(conversationState.savePromptConfig(body.system, body.user_template));
   } catch (err) {
     reply.code(400).send({ error: err.message });
   }

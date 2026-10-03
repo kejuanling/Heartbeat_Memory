@@ -6973,7 +6973,7 @@ async function openSessionCrossInject(sid){
   const opts='<option value="">跟随全局</option><option value="1"'+(cur==="1"?" selected":"")+'>开启</option><option value="0"'+(cur==="0"?" selected":"")+'>关闭</option>';
   openEditModal("跨窗口 · "+nm,
     '<div class="field"><label>本会话是否注入跨窗口内容</label><select class="np-sel" id="xj-cross">'+opts+'</select>'
-    +'<div class="np-tip">跨窗口内容 = 其它会话的置顶相关记忆 + 近期日记。「跟随全局」则按设置页跨窗口注入总开关生效。</div></div>',
+    +'<div class="np-tip">跨窗口内容 = 其它会话写的日记（上下文里的 Earlier Days 块）。「开启」= 本会话照常注入；「关闭」= 本会话不注入；「跟随全局」= 未单独设置过。</div></div>',
     function(){
       const v=(document.getElementById("xj-cross")||{}).value||"";
       const enabled = v==="1"?true:(v==="0"?false:null);
@@ -7105,7 +7105,7 @@ async function doMergeSessions(){
       +'<div class="field" style="margin-top:12px"><label>本会话使用的模型</label><select class="np-sel" id="np-provider">'+provOpts+'</select></div>'
       +'<div class="field" style="margin-top:8px"><label>模型</label><select class="np-sel" id="np-model">'+modelOptsFor("")+'</select>'
       +'<div class="np-tip">选定后这个会话单独走该供应商；「默认」跟随全局。</div></div>'
-      +'<div class="field" style="margin-top:12px"><label>注入跨窗口记忆</label><select class="np-sel" id="np-cross"><option value="">跟随全局</option><option value="1">开启</option><option value="0">关闭</option></select>'
+      +'<div class="field" style="margin-top:12px"><label>注入跨窗口日记</label><select class="np-sel" id="np-cross"><option value="">跟随全局</option><option value="1">开启</option><option value="0">关闭</option></select>'
       +'<div class="np-tip">该会话是否注入其它会话的置顶记忆 / 近期日记。</div></div>',
       async function(){
         try{
@@ -7360,7 +7360,7 @@ async function newSession(){
       +'<div class="field" style="margin-top:12px"><label>本会话使用的模型</label><select class="np-sel" id="np-provider">'+provOpts+'</select></div>'
       +'<div class="field" style="margin-top:8px"><label>模型</label><select class="np-sel" id="np-model">'+modelOptsFor("")+'</select>'
       +'<div class="np-tip">选定后这个会话单独走该供应商；「默认」跟随全局。供应商停用或删除会自动回退全局。</div></div>'
-      +'<div class="field" style="margin-top:12px"><label>注入跨窗口记忆</label><select class="np-sel" id="np-cross"><option value="">跟随全局</option><option value="1">开启</option><option value="0">关闭</option></select>'
+      +'<div class="field" style="margin-top:12px"><label>注入跨窗口日记</label><select class="np-sel" id="np-cross"><option value="">跟随全局</option><option value="1">开启</option><option value="0">关闭</option></select>'
       +'<div class="np-tip">该会话是否注入其它会话的置顶记忆 / 近期日记。「跟随全局」则按设置页跨窗口注入总开关生效。</div></div>',
       function(){ try{
         const pid=(document.getElementById("np-provider")||{}).value||"";

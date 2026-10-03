@@ -154,7 +154,8 @@ function readDiaryEntriesForShadow(baseDir) {
   });
 }
 
-// 会话创建日期（与旧版 server.js sessionCreatedAtOf + recentDiaryTextBefore 同口径）：
+// 会话创建日期（2026-10-03：原注释所指的 server.js sessionCreatedAtOf / recentDiaryTextBefore 已随 V1 删除，
+// 本函数是唯一实现，以下口径即当前口径）：
 // 创建时刻=时间线首条非 system 且带 time 的消息 → 时区化日期；无时间线=当前时刻；解析失败=空串（不注入日记）。
 function sessionDiaryCutoffDate(sessionId, loadTimeline) {
   let createdIso = '';
