@@ -927,68 +927,6 @@ def _star_parse_ts(s):
         return None
 
 
-def _star_session_system(session_id):
-    """读会话时间线的 system 人设，用于解析说话人名字。
-
-    session_id 由网关在工具执行时注入；直接 HTTP 调用（非网关链路）拿不到时，
-    退而取 mtime 最新的会话人设——AI 名字与人设通常是全局一致的，够用。
-    """
-    safe = "".join(ch for ch in str(session_id or "") if ch.isalnum() or ch in "_-")[:64]
-    if not safe:
-        try:
-            base = "/opt/dylan-heartbeat"
-            best, best_mt = None, -1
-            for fn in os.listdir(base):
-                if not (fn.startswith("enhanced_messages") and fn.endswith(".json")):
-                    continue
-                if ".corrupt-" in fn or ".bak" in fn:
-                    continue
-                p = os.path.join(base, fn)
-                mt = os.path.getmtime(p)
-                if mt > best_mt:
-                    best_mt, best = mt, p
-            if best:
-                with open(best, encoding="utf-8") as f:
-                    arr = json.load(f)
-                if isinstance(arr, list):
-                    for m in arr:
-                        if isinstance(m, dict) and m.get("role") == "system":
-                            c = m.get("content")
-                            if isinstance(c, str):
-                                return c
-        except Exception:
-            pass
-        return ""
-    p = "/opt/dylan-heartbeat/enhanced_messages_%s.json" % safe
-    try:
-        with open(p, encoding="utf-8") as f:
-            arr = json.load(f)
-        if isinstance(arr, list):
-            for m in arr:
-                if isinstance(m, dict) and m.get("role") == "system":
-                    c = m.get("content")
-                    if isinstance(c, str):
-                        return c
-    except Exception:
-        pass
-    return ""
-
-
-def _star_speaker_names(sysp):
-    """从人设里解析 (AI名, 用户名)；解析不到返回空串，调用方回落用 role"""
-    # 人设形如：你是陪伴型AI，名字叫“谢意行”。 / *你与涵*
-    # 注意用单引号界定字符串：字符类里含英文双引号，用双引号界定会提前终止字符串。
-    ai = ""
-    m = re.search(r'名字叫\s*[“"「『]?([^”"」』\n]{1,12})', sysp or "")
-    if m:
-        ai = m.group(1).strip()
-    user = ""
-    m2 = re.search(r'你与\s*([^\s*\n，,。]{1,12})', sysp or "")
-    if m2:
-        user = m2.group(1).strip()
-    return ai, user
-
-
 def _star_load_recent():
     try:
         with open(STAR_VIEW_RECENT_FILE, encoding="utf-8") as f:
@@ -1029,8 +967,6 @@ def tool_context_star_list(args):
     if not marks:
         return {"success": True, "total_marked": 0, "returned": 0, "message": "当前没有任何已标星的原文", "items": []}
 
-    ai_name, user_name = _star_speaker_names(_star_session_system(session_id))
-
     items = []
     no_content = 0
     for key, v in marks.items():
@@ -1041,18 +977,11 @@ def tool_context_star_list(args):
             no_content += 1      # 早期只记了 markedAt、没存正文的老条目
             continue
         role = v.get("role") or ""
-        # 说话人取单字简称（"谢意行"→"谢"、"涵"→"涵"）：长名字会在每条输出里反复占位，
-        # 单字既对称又好读。解析不到时回落中文角色名，不给模型塞裸 role。
-        if role == "user":
-            speaker = (user_name or "")[:1] or "用户"
-        elif role == "assistant":
-            speaker = (ai_name or "")[:1] or "AI"
-        else:
-            speaker = role or "未知"
+        # 内部记录保留 id（marks 的 key）与 marked_at：前者供 10 分钟去重与回写，
+        # 后者供排序兜底；两者都不外泄，输出前统一裁成 role/content/time 三个字段。
         items.append({
             "id": key,
             "role": role,
-            "speaker": speaker,
             "content": content,
             "time": v.get("time") or "",
             "marked_at": v.get("markedAt") or "",
@@ -1100,7 +1029,7 @@ def tool_context_star_list(args):
         "returned": len(picked),
         "order": "按消息时间从新到旧",
         "session": session_id or None,
-        "items": picked,
+        "items": [{"role": it["role"], "content": it["content"], "time": it["time"]} for it in picked],
     }
     if no_content:
         result["no_content"] = no_content
@@ -1114,7 +1043,7 @@ def tool_context_star_list(args):
 
 
 TOOLS["context_star_list"] = {
-    "description": "查看已标星的聊天原文——这些是被特意留下、长期保留在上下文中且不参与压缩/替换的内容。返回说话人、正文、消息自带时间，按时间从新到旧排序；不传参数默认返回全部，传 limit 则只返回最新的 N 条。同一会话内，10 分钟内已经返回过的内容不会重复出现。",
+    "description": "查看已标星的聊天原文——这些是被特意留下、长期保留在上下文中且不参与压缩/替换的内容。返回角色、正文、消息时间，按时间从新到旧排序；不传参数默认返回全部，传 limit 则只返回最新的 N 条。同一会话内，10 分钟内已经返回过的内容不会重复出现。",
     "inputSchema": {
         "type": "object",
         "properties": {
