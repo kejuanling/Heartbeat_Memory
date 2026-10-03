@@ -44,6 +44,19 @@ function _injectSessionArg(name, args, sessionId) {
   }
 }
 
+// diary_add 写日记 → 时间线落库。工具端只把正文写进日记存储、回执不返正文，服务端无从从回执里
+// 提取 [DIARY] 落库，AI 重建上下文时就看不到自己写过什么（keh3 9-28 三篇全缺）。由调用方传
+// onDiaryWritten 回调补一条 kind=diary 隐藏消息（isRealDiary 保护，永不压缩）。
+// 2026-10-03：原先这段只写在 executeToolCalls（非流式兜底路径）里，streamToolLoop —— 也就是生产
+// 主路径 —— 完全没有，导致流式对话里用 diary_add 工具写的日记从不落时间线。现由两条循环共用本函数，
+// 判定口径只有这一处，不会再漂移。
+function _notifyDiaryWritten(name, args, error, onDiaryWritten, sessionId) {
+  if (name !== "diary_add" || error || typeof onDiaryWritten !== "function") return;
+  const dText = (args && typeof args.content === "string" && args.content.trim()) ? args.content.trim() : "";
+  if (!dText) return;
+  try { onDiaryWritten(sessionId, dText); } catch (e) { mcpLogWarn("[diary] 时间线落库回调失败: " + e.message); }
+}
+
 
 /**
  * 执行带工具的多轮对话。
@@ -55,6 +68,7 @@ function _injectSessionArg(name, args, sessionId) {
  *  - temperature / top_p / max_tokens : 可选
  *  - maxToolRounds : 工具循环上限
  *  - fetch : 可注入的 fetch（测试用），默认全局 fetch
+ *  - onDiaryWritten : 可选回调 (sessionId, 正文)，diary_add 工具成功后调用，把日记落时间线
  * @returns {Promise<{text:string, rounds:number, usage:any, reasoning:string, toolHistory:Array}>}
  */
 
@@ -131,13 +145,17 @@ async function runWithTools({
   fetchFn = fetch,
   resume = null,
   onEvent = null,
-  sessionId = null
+  sessionId = null,
+  onDiaryWritten = null
 }) {
   // 1. 加载 MCP 工具，转成 OpenAI tools[]
   const routes = await loadTools(serverClients);
   const allRoutes = routes || [];
   const openaiTools = toOpenAITools(allRoutes);
-  const toolCtx = { serverClients, routes, upstreamUrl, upstreamKey, model, sessionId };
+  // 2026-10-03：onDiaryWritten 必须进 toolCtx —— executeToolCalls 读的是 ctx.onDiaryWritten，
+  // 而本函数的参数表此前根本不接受它、toolCtx 也不带，server.js 传的回调在签名这层就被丢掉，
+  // 0929-03 那次「修复」实际从未生效：diary_add 写的日记两条路径都没落过时间线。
+  const toolCtx = { serverClients, routes, upstreamUrl, upstreamKey, model, sessionId, onDiaryWritten };
 
   let working = messages.slice();
   let totalUsage = null;
@@ -343,15 +361,7 @@ async function executeToolCalls(toolCalls, working, toolHistory, ctx, onEvent, n
       error,
       afterSeg: (typeof afterSeg === "number") ? afterSeg : -1   // 方案2刷新：该工具位于第 afterSeg 段正文之后（-1=最前）
     });
-    // 2026-09-29：diary_add 写日记 → 时间线落库。工具端只把正文写进 diary/ 文件、回执不返正文，
-    // 服务端无从提取 [DIARY] 落库，导致 AI 上下文里缺日记（keh3 9-28 三篇全缺）。由 server 侧
-    // onDiaryWritten 回调写盘（kind=diary，isRealDiary 保护永不压缩）。
-    if (name === "diary_add" && !error && typeof ctx.onDiaryWritten === "function") {
-      const dText = (args && typeof args.content === "string" && args.content.trim()) ? args.content.trim() : "";
-      if (dText) {
-        try { ctx.onDiaryWritten(ctx.sessionId, dText); } catch (e) { mcpLogWarn("[diary] 时间线落库回调失败: " + e.message); }
-      }
-    }
+    _notifyDiaryWritten(name, args, error, ctx.onDiaryWritten, ctx.sessionId);
     if (typeof onEvent === "function") onEvent({ type: "tool_end", index, id, name, args, result: resTrunc, error, ok: !error, afterSeg: (typeof afterSeg === "number") ? afterSeg : -1 });
   }
 }
@@ -436,7 +446,8 @@ async function streamToolLoop({
   maxToolRounds = DEFAULT_MAX_TOOL_ROUNDS,
   onEvent = null,
   fetchFn = fetch,
-  sessionId = null
+  sessionId = null,
+  onDiaryWritten = null
 }) {
   const routes = await loadTools(serverClients);
   const openaiTools = toOpenAITools(routes || []);
@@ -633,6 +644,8 @@ async function streamToolLoop({
       // 来源标记：与 executeToolCalls 同一格式（工具名+调用时间+状态+结果，空/失败显式）
       working.push({ role: "tool", tool_call_id: id, content: buildToolResultContent({ name, time: toolTime, error, markdown: _truncateResult(result.markdown || "", MAX_TOOL_RESULT_CHARS) }) });
       toolHistory.push({ name, args, time: toolTime, result: resTrunc, error });
+      // 2026-10-03：与 executeToolCalls 同口径补齐——流式主路径此前漏写，diary_add 日记不落时间线
+      _notifyDiaryWritten(name, args, error, onDiaryWritten, sessionId);
       const timelineTool = streamTimeline.find(function (n) { return n && n.type === "tool" && n.tool && n.tool.index === index; });
       if (timelineTool && timelineTool.tool) {
         // 工具名/ID 可能在流的早期尚未到齐；终态必须把完整身份回填到 canonical timeline。

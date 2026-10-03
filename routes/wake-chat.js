@@ -223,7 +223,9 @@ async function runWakeCompletion(deps, opts) {
           sessionId,
           temperature: sampling.temperature,
           top_p: sampling.topP,
-          onEvent: null
+          onEvent: null,
+          // 2026-10-03：与对话侧同一实现——唤醒时用 diary_add 工具写的日记同样要落时间线
+          onDiaryWritten: deps.onDiaryWritten || null
         });
         if (r && typeof r.text === "string" && deps.normalizeContentToText(r.text).trim()) {
           text = r.text;

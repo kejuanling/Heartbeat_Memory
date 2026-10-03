@@ -1770,6 +1770,19 @@ require("./routes/chat")(app, {
 // （原 POST /internal/wake-completions HTTP 端点零消费者，2026-09-21 审查清理删除）
 // ========================
 const wakeChatModule = require("./routes/wake-chat");
+
+// diary_add 工具写日记 → 时间线落库（2026-09-29 起，2026-10-03 提为具名函数）。
+// 日记正文只在工具参数 args.content 里，工具端回执不返正文，服务端必须自己补一条 kind=diary
+// 隐藏消息，否则 AI 重建上下文时看不到自己写过什么（isRealDiary 让它永不压缩）。
+// 对话侧两条工具循环（streamToolLoop 主路径 + runWithTools 兜底）与唤醒侧工具循环共用这一个实现。
+// 注：diaryLib 在下方 .env 读取区之后才初始化（const 有 TDZ），本函数只在请求期被调用，运行期安全。
+function onDiaryToolWritten(sid, dContent) {
+  try {
+    appendMessages(sid, [{ role: "assistant", content: diaryLib.wrapDiaryTag(dContent), kind: "diary", time: new Date().toISOString() }], { silent: true });
+    console.log("[diary] diary_add 已落库时间线 (session=" + sid + ", chars=" + dContent.length + ")");
+  } catch (e) { console.warn("[diary] diary_add 落库时间线失败:", e.message); }
+}
+
 const wakeChatDeps = {
   baseDir: __dirname,
   loadTimeline,
@@ -1788,6 +1801,7 @@ const wakeChatDeps = {
   splitMultimodalContent,
   prepareMessageForLLM,
   extractTimestampWithMemory,   // 2026-09-22 审查 §3.5：唤醒侧时间反查与对话侧统一口径（原只认 tm.time）
+  onDiaryWritten: onDiaryToolWritten,   // 2026-10-03：唤醒侧 streamToolLoop 与对话侧同一实现，不再漏 diary_add 日记
   incrementalContext: contextReplacements.buildIncrementalContext,   // 0929 增量：块摘要化+尾部现算
   fullCache: true   // 0929 唤醒/重试：整体缓存直接命中（聊天侧 fullCache=false 只走增量）
 };
@@ -2143,7 +2157,8 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         top_p: body.top_p,
         max_tokens: body.max_tokens,
         onEvent: (body.stream === true) ? onEvent : null,
-        sessionId
+        sessionId,
+        onDiaryWritten: onDiaryToolWritten
       });
     } catch (toolLoopErr) {
       // 一旦已经向客户端发出 SSE，就不能再从头跑一遍 runWithTools：
@@ -2158,14 +2173,7 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         serverClients: clients,
         onEvent: (body.stream === true) ? onEvent : null,
         sessionId,
-        // 2026-09-29：diary_add 工具直写日记文件、正文不回传 → 时间线缺 [DIARY]（AI 上下文缺日记）。
-        // 工具循环成功调用后回调：正文落库时间线 kind=diary 隐藏消息（isRealDiary 保护、上下文重建可见）。
-        onDiaryWritten: (sid, dContent) => {
-          try {
-            appendMessages(sid, [{ role: "assistant", content: diaryLib.wrapDiaryTag(dContent), kind: "diary", time: new Date().toISOString() }], { silent: true });
-            console.log("[diary] diary_add 已落库时间线 (session=" + sid + ", chars=" + dContent.length + ")");
-          } catch (e) { console.warn("[diary] diary_add 落库时间线失败:", e.message); }
-        }
+        onDiaryWritten: onDiaryToolWritten
       });
     }
 
