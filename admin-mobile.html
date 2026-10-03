@@ -297,6 +297,7 @@
         <button type="button" class="cs-btn primary" id="cs-preview-btn" onclick="csPreview()">▸ 并入状态</button>
       </div>
       <div class="cs-msg" id="cs-msg" aria-live="polite"></div>
+      <div class="cs-sec-title hide" id="cs-preview-title"></div>
       <div class="cs-preview-msgs" id="cs-preview-msgs"></div>
 
       <!-- 归档 -->
@@ -1023,14 +1024,16 @@
         if (!el) return;
         if (!cr || typeof cr.end_index !== 'number') {
           el.innerHTML = '本会话可压缩 <b>' + CS_TOTAL + '</b> 条。填一个区间，或点「自动分块」。';
-          return;
+        } else {
+          var from0 = cr.end_index + 2;   // end_index 是 0-based 的「最后一条已覆盖」在可压缩列表里的下标
+          if (from0 > CS_TOTAL) {
+            el.innerHTML = '全部 <b>' + CS_TOTAL + '</b> 条都已并入状态。要再并入得先撤销，或换个会话。';
+          } else {
+            el.innerHTML = '状态已吃掉第 1~' + (from0 - 1) + ' 条，<b>还没并入的是第 ' + from0 + '~' + CS_TOTAL + ' 条</b>。';
+          }
         }
-        var from = cr.end_index + 2;   // end_index 是 0-based 的「最后一条已覆盖」在可压缩列表里的下标
-        if (from > CS_TOTAL) {
-          el.innerHTML = '全部 <b>' + CS_TOTAL + '</b> 条都已并入状态。要再并入得先撤销，或换个会话。';
-          return;
-        }
-        el.innerHTML = '状态已吃掉第 1~' + (from - 1) + ' 条，<b>还没并入的是第 ' + from + '~' + CS_TOTAL + ' 条</b>。';
+        // 进页面就把未并入区的原文亮出来（默认最新 50 条），不用填区间也不用点按钮
+        csAutoShowUncovered();
       }).catch(function () { });
   }
 
@@ -1136,7 +1139,23 @@
         var el = $('cs-preview-msgs');
         el.innerHTML = h.join('');
         el.scrollTop = 0;
+        // 标题随内容走：默认是未并入区的原文，填了区间就显示所选区间
+        var tt = $('cs-preview-title');
+        if (tt) {
+          tt.textContent = '原文预览 · 第 ' + r.start + '~' + r.end + ' 条' + (j.items && j.items.length ? '（显示 ' + j.items.length + ' 条）' : '');
+          tt.classList.remove('hide');
+        }
       }).catch(function () { });
+  }
+
+  // 进页面就亮出原文：默认显示未并入区最新一段（最多 50 条），不用填任何东西
+  function csAutoShowUncovered() {
+    var cr = CS.state && CS.state.covered_range;
+    var from = (cr && typeof cr.end_index === 'number') ? cr.end_index + 2 : 1;
+    var total = CS_TOTAL;
+    if (!total || from > total) { show($('cs-preview-title'), false); return; }
+    var end = Math.min(total, from + 49);
+    renderPreviewMsgs({ start: from, end: end });
   }
 
   function renderDiff(j) {
@@ -1182,6 +1201,7 @@
     CS.preview = null;
     show($('cs-diff'), false);
     $('cs-preview-msgs').innerHTML = '';
+    show($('cs-preview-title'), false);
     msg('已取消，原文保留在未覆盖区');
   };
 
@@ -1208,6 +1228,7 @@
       CS.preview = null;
       show($('cs-diff'), false);
       $('cs-preview-msgs').innerHTML = '';
+      show($('cs-preview-title'), false);
       $('cs-range-input').value = '';
       btn.disabled = false; btn.textContent = '确认并入';
       msg('已并入，状态 → v' + r.version, 'ok');
