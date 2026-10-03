@@ -1536,6 +1536,146 @@ function upsertSpanRecord(options) {
 }
 
 // ========================
+// 旧块自动退役（2026-10-04 新增，供 lib/conversation-state.js 用）
+//
+// 为什么需要：状态机的连续性/重叠两道断言与「存量旧块不迁移」直接冲突。
+// 以 ke h3 为例：12 个启用旧块覆盖第 1798~5567 条，状态机从第 1 条并入吃到
+// 第 1798 条就撞墙被拒 —— 不退役旧块，状态机在存量会话里基本并不动。
+// 退役 = enabled=false（数据一行不删、随时可恢复），因此存量会在日常使用中
+// 被一段段自然消化，不需要专门的迁移批次。
+//
+// 三条硬约束：
+//   1. 只退役 source !== "state" 的旧块。另一条状态记录与本次区间相交属于
+//      逻辑错误（一个会话只该有一条状态），那种情况必须拒绝而不是替它退役。
+//   2. 返回原 enabled 值供回滚。commitMerge 后续任一步失败会用 restoreRetiredBlocks 复原。
+//   3. 写后立即读回核对（_itemsCache 缓存键是 mtimeMs+size，同一毫秒内的连续写
+//      可能命中过期缓存；不核对就会拿着「改了没落盘」的数组继续走）。
+//      这是 1003-27 那类「内存态与盘上不一致」的同款问题的预防。
+//
+// 全程同步：与本文件所有写路径一致（见文件头并发约束），同步段在事件循环内原子。
+// ========================
+
+// 找出与 [s,e] 区间相交的活跃旧块（不含本记录、不含状态记录）。
+// 只读，不改任何东西。位置用 matched 首尾锚点的 id 现查时间线，不信 range 快照
+// （range 是写入时刻的下标，时间线增删后会漂）。
+function findOverlappingLegacyBlocks(options) {
+  const opts = options || {};
+  const session = String(opts.session || "").trim();
+  const excludeId = String(opts.excludeId || "").trim();
+  const s = Number(opts.startIndex);
+  const e = Number(opts.endIndex);
+  if (!Number.isInteger(s) || !Number.isInteger(e) || e < s) {
+    return { ok: false, error: "区间下标不合法" };
+  }
+
+  const tl = Array.isArray(loadTimeline()) ? loadTimeline() : [];
+  const idPos = new Map();
+  for (let i = 0; i < tl.length; i++) {
+    const id = tl[i] && tl[i].id ? String(tl[i].id) : null;
+    if (id && !idPos.has(id)) idPos.set(id, i);
+  }
+
+  const hits = [];
+  const stateConflicts = [];
+  loadItems().forEach(function (it) {
+    if (!it || it.removed || it.id === excludeId) return;
+    if (it.session && it.session !== session) return;
+    if (it.enabled === false || it.hidden === true) return;
+    const m = Array.isArray(it.matched) && it.matched.length ? it.matched : null;
+    if (!m) return;
+    let a = null, b = null;
+    for (let i = 0; i < m.length; i++) { if (!isSpecialEvent(m[i])) { a = m[i]; break; } }
+    for (let i = m.length - 1; i >= 0; i--) { if (!isSpecialEvent(m[i])) { b = m[i]; break; } }
+    if (!a || !b || !a.id || !b.id) return;
+    const os = idPos.get(String(a.id));
+    const oe = idPos.get(String(b.id));
+    if (os === undefined || oe === undefined) return;   // 定位不到当不相交（与注入侧兜底一致）
+    if (os > e || oe < s) return;                       // 不相交
+    if (it.source === "state") { stateConflicts.push(it.id); return; }
+    hits.push({ id: it.id, source: it.source || "ai", prevEnabled: it.enabled !== false, range_label: it.range_label || "" });
+  });
+
+  return { ok: true, legacy: hits, stateConflicts: stateConflicts };
+}
+
+// 退役与 [startId,endId] 相交的旧块。返回 {ok, retired:[{id, prevEnabled, ...}], stateConflicts}。
+// 无冲突时不写盘（避免无谓的 18MB 重写 + 备份）。
+function retireOverlappingLegacyBlocks(options) {
+  const opts = options || {};
+  const session = String(opts.session || "").trim();
+  const startId = String(opts.startId || "");
+  const endId = String(opts.endId || "");
+  if (!session || !startId || !endId) return { ok: false, error: "缺少 session / startId / endId" };
+
+  const tl = Array.isArray(loadTimeline()) ? loadTimeline() : [];
+  const idPos = new Map();
+  for (let i = 0; i < tl.length; i++) {
+    const id = tl[i] && tl[i].id ? String(tl[i].id) : null;
+    if (id && !idPos.has(id)) idPos.set(id, i);
+  }
+  const s = idPos.get(startId);
+  const e = idPos.get(endId);
+  if (s === undefined) return { ok: false, error: "区间起点消息不在当前会话时间线里" };
+  if (e === undefined) return { ok: false, error: "区间终点消息不在当前会话时间线里" };
+  if (e < s) return { ok: false, error: "区间首尾顺序颠倒" };
+
+  const found = findOverlappingLegacyBlocks({ session: session, startIndex: s, endIndex: e, excludeId: opts.excludeId || "" });
+  if (!found.ok) return found;
+  // 状态记录相交是逻辑错误（一个会话只该有一条状态链），不替它退役，直接拒。
+  if (found.stateConflicts.length) {
+    return {
+      ok: false,
+      error: "区间与本会话已有的状态记录重叠（" + found.stateConflicts.slice(0, 3).join("、") +
+        "）。这说明状态链被分叉了，请先在管理台核对并入记录。",
+    };
+  }
+  if (!found.legacy.length) return { ok: true, retired: [], stateConflicts: [] };
+
+  const ids = new Set(found.legacy.map(function (x) { return x.id; }));
+  const items = loadItems();
+  items.forEach(function (it) {
+    if (it && ids.has(it.id)) it.enabled = false;   // 只翻开关，正文/区间/matched 一律不动
+  });
+  saveItems(items);
+
+  // 写后读回核对：确认盘上这批块真的已经是停用状态。
+  const after = new Set(loadItems().filter(function (it) {
+    return it && ids.has(it.id) && it.enabled === false;
+  }).map(function (it) { return it.id; }));
+  const missing = found.legacy.filter(function (x) { return !after.has(x.id); }).map(function (x) { return x.id; });
+  if (missing.length) {
+    console.error("[context-replacements] 退役写后核对失败（盘上未生效）：" + missing.join("、"));
+    return { ok: false, error: "退役写盘后核对不一致（" + missing.slice(0, 3).join("、") + "），已中止", retired: [] };
+  }
+
+  console.log("[context-replacements] 已自动退役 " + found.legacy.length + " 个旧块：" +
+    found.legacy.map(function (x) { return x.id; }).join("、"));
+  return { ok: true, retired: found.legacy, stateConflicts: [] };
+}
+
+// 复原被退役的旧块（commitMerge 中途失败时调用）。只按清单复原，不做区间重算。
+function restoreRetiredBlocks(retired) {
+  const list = Array.isArray(retired) ? retired : [];
+  if (!list.length) return { ok: true, restored: 0 };
+  const ids = new Set(list.map(function (x) { return String(x.id); }));
+  const items = loadItems();
+  let n = 0;
+  items.forEach(function (it) {
+    if (!it || !ids.has(String(it.id))) return;
+    it.enabled = true;
+    n++;
+  });
+  saveItems(items);
+  const back = loadItems().filter(function (it) { return it && ids.has(String(it.id)); }).length;
+  if (back !== list.length) {
+    console.error("[context-replacements] 退役复原核对不一致：期望 " + list.length + " 条，实际 " + back + " 条");
+    return { ok: false, error: "退役复原核对不一致", restored: n };
+  }
+  console.log("[context-replacements] 已复原 " + n + " 个旧块（并入失败回滚）");
+  return { ok: true, restored: n };
+}
+
+// ========================
 // 应用到发送给 AI 的上下文（统一生效逻辑）
 // ========================
 function buildMemoryMessage(item) {
@@ -3196,6 +3336,10 @@ module.exports = {
   updateReplacement,
   // 2026-10-03 状态机写入通道（lib/conversation-state.js 用）
   upsertSpanRecord,
+  // 2026-10-04 状态机撞块自动退役（存量旧块不迁移，退役=停用不删）
+  findOverlappingLegacyBlocks,
+  retireOverlappingLegacyBlocks,
+  restoreRetiredBlocks,
   applyReplacements,
   getReplaceLog,
   searchContextEnhanced,

@@ -43,6 +43,8 @@ function eq(name, actual, expected) {
 // ---- 桩后端 ----
 const spanWrites = [];
 let tl = [];
+// 2026-10-04：存量旧块模拟集（撞块自动退役用例用）。{id, source, s, e, enabled, hidden}
+let legacyBlocks = [];
 const crPath = require.resolve(path.join(ROOT, "context-replacements.js"));
 const stub = {
   compressibleItems: function () {
@@ -70,6 +72,41 @@ const stub = {
     const i = spanWrites.findIndex(function (w) { return w.recordId === id; });
     if (i >= 0) spanWrites.splice(i, 1);
     return { ok: true };
+  },
+  // 2026-10-04 撞块自动退役：桩里用 legacyBlocks 模拟存量旧块。
+  // 语义对齐真实实现——只退役 source!=="state" 的相交块、状态记录相交直接拒、
+  // 返回原 enabled 供复原。
+  retireOverlappingLegacyBlocks: function (o) {
+    const si = tl.findIndex(function (m) { return m && m.id === o.startId; });
+    const ei = tl.findIndex(function (m) { return m && m.id === o.endId; });
+    if (si === -1 || ei === -1) return { ok: false, error: "锚点不在时间线" };
+    const hits = [];
+    const stateConflicts = [];
+    legacyBlocks.forEach(function (b) {
+      if (b.id === o.excludeId) return;
+      if (b.enabled === false || b.hidden === true) return;
+      if (b.s > ei || b.e < si) return;
+      if (b.source === "state") { stateConflicts.push(b.id); return; }
+      hits.push({ id: b.id, source: b.source || "manual", prevEnabled: b.enabled !== false });
+    });
+    if (stateConflicts.length) {
+      return { ok: false, error: "区间与本会话已有的状态记录重叠（" + stateConflicts.join("、") + "）" };
+    }
+    if (!hits.length) return { ok: true, retired: [], stateConflicts: [] };
+    hits.forEach(function (h) {
+      const b = legacyBlocks.find(function (x) { return x.id === h.id; });
+      if (b) b.enabled = false;
+    });
+    return { ok: true, retired: hits, stateConflicts: [] };
+  },
+  restoreRetiredBlocks: function (list) {
+    const arr = Array.isArray(list) ? list : [];
+    let n = 0;
+    arr.forEach(function (r) {
+      const b = legacyBlocks.find(function (x) { return x.id === r.id; });
+      if (b) { b.enabled = true; n++; }
+    });
+    return { ok: true, restored: n };
   },
 };
 require.cache[crPath] = { id: crPath, filename: crPath, loaded: true, exports: stub };
@@ -325,6 +362,72 @@ eq("连续时状态已更新", cs.getState(TEST_STATE5).text, "接着来的");
 const cr5b = cs.getState(TEST_STATE5).covered_range;
 eq("连续并入后覆盖终点推进到第 16 条（0-based 15）", cr5b.end_index, 15);
 eq("起点仍锚在第 1 条（连续前缀）", cr5b.start_index, 0);
+
+// ================= 10. 撞块自动退役（2026-10-04）=================
+// 背景：存量旧块不迁移，状态机却在真跑。连续前缀从第 1 条起推必然撞上旧块，
+// 原来 upsertSpanRecord 的重叠断言会直接拒 → 存量会话里状态机基本并不动。
+// 改为：先把相交的旧块停用（数据不删、可恢复），再写状态；失败即复原。
+//
+// ★ 下标口径：桩里 legacyBlocks 的 s/e 是 compressibleItems() 序位（0-based），
+//   与 retireOverlappingLegacyBlocks 内部用 loadTimeline 下标查区间一致（本测试里
+//   compressibleItems 与 loadTimeline 同序，因为 mkMsgs 不含 system 消息）。
+const TEST_RETIRE = "test-state-sess-retire";
+{
+  tl = mkMsgs(30, "r");
+  legacyBlocks = [
+    { id: "legacy-A", source: "manual", s: 5, e: 9, enabled: true },
+    { id: "legacy-B", source: "manual", s: 12, e: 15, enabled: true },
+    { id: "legacy-far", source: "manual", s: 25, e: 29, enabled: true },  // 不该被撞
+  ];
+  const a0 = tl[0], a19 = tl[19], a29 = tl[29];
+  r = cs.commitMerge({ session: TEST_RETIRE, state: "退役测试 v1", ops: [], start_msg: a0, end_msg: a19 });
+  check("撞上旧块仍并入成功（不再被重叠断言拒）", r.ok === true, JSON.stringify(r));
+  eq("两个相交旧块已退役", legacyBlocks.filter(function (b) { return b.enabled === false; }).length, 2);
+  eq("区间外的旧块不动", legacyBlocks.find(function (b) { return b.id === "legacy-far"; }).enabled, true);
+  eq("退役计数进入状态", r.retired_count, 2);
+  eq("退役清单记录了两个 id", r.retired_refs.map(function (x) { return x.id; }).sort().join(","), "legacy-A,legacy-B");
+
+  // 往后推一段（连续前缀）：start_msg 是**本次新增段**的起点（紧接覆盖范围之后），
+  // 覆盖前缀的起点由 commitMerge 自己从上一版 cover 继承。
+  r = cs.commitMerge({ session: TEST_RETIRE, state: "退役测试 v2", ops: [], start_msg: tl[20], end_msg: a29 });
+  check("继续往后并入成功", r.ok === true, JSON.stringify(r));
+  eq("再退役了新相交的 legacy-far", r.retired_count, 3);
+  eq("旧块全部停用", legacyBlocks.filter(function (b) { return b.enabled === false; }).length, 3);
+  const crR = cs.getState(TEST_RETIRE).covered_range;
+  eq("覆盖前缀终点推进到第 30 条（0-based 29）", crR.end_index, 29);
+  eq("覆盖前缀起点仍锚在第 1 条", crR.start_index, 0);
+
+  // 状态记录相交必须拒绝，而不是替它退役。
+  // 换到新会话（该会话已有状态记录 legacy-state-x 与本次区间相交），
+  // 用别的会话会被连续性断言先拦掉、轮不到重叠检测，测不到这条分支。
+  const TEST_FORK = "test-state-sess-fork";
+  tl = mkMsgs(30, "k");
+  legacyBlocks = [{ id: "legacy-state-x", source: "state", s: 0, e: 3, enabled: true }];
+  const k0 = tl[0], k10 = tl[10];
+  const rState = cs.commitMerge({ session: TEST_FORK, state: "不该成功", ops: [], start_msg: k0, end_msg: k10 });
+  check("与另一条状态记录相交时被拒", rState.ok === false, JSON.stringify(rState));
+  check("拒绝理由点明状态链分叉", /状态记录重叠|分叉/.test(rState.error || ""), rState.error);
+  eq("被拒时该会话没有产生状态", cs.getState(TEST_FORK).exists, false);
+  eq("另一条状态记录未被替它停用", legacyBlocks[0].enabled, true);
+  legacyBlocks = [];
+}
+
+// ================= 11. 撤销整条状态 → 旧块复原 =================
+// 撤销把覆盖范围完全缩回，被退役的旧块必须重新生效，否则「撤销」把两边一起弄没了。
+const TEST_UNDO_RETIRE = "test-state-sess-undoretire";
+{
+  tl = mkMsgs(20, "u");
+  legacyBlocks = [{ id: "legacy-U", source: "manual", s: 3, e: 8, enabled: true }];
+  const u0 = tl[0], u15 = tl[15];
+  r = cs.commitMerge({ session: TEST_UNDO_RETIRE, state: "待撤销", ops: [], start_msg: u0, end_msg: u15 });
+  check("并入成功且退役了旧块", r.ok === true && legacyBlocks[0].enabled === false, JSON.stringify(r));
+  r = cs.undoLastMerge({ session: TEST_UNDO_RETIRE });
+  check("撤销整条状态成功", r.ok === true, JSON.stringify(r));
+  check("撤销返回复原数量", r.restoredBlocks === 1, JSON.stringify(r));
+  eq("旧块已重新生效", legacyBlocks[0].enabled, true);
+  check("状态已清空", cs.getState(TEST_UNDO_RETIRE).exists === false);
+  legacyBlocks = [];
+}
 
 // ================= 恢复现场 =================
 // 数据全在临时目录（CONVERSATION_STATE_DIR），exit 钩子统一删除；生产 data/ 从未被碰。
