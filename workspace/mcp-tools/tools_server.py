@@ -609,6 +609,11 @@ TOOLS["phone_state"] = {
 def tool_context_search(args):
     q = (args.get("q") or "").strip()
     time_prefix = (args.get("time_prefix") or "").strip()
+    latest = args.get("latest") or 0
+    try:
+        latest = max(1, min(100, int(latest)))
+    except (TypeError, ValueError):
+        latest = 0
     limit = args.get("limit") or 8
     try:
         limit = max(1, min(50, int(limit)))
@@ -618,7 +623,10 @@ def tool_context_search(args):
     scope = args.get("scope", "all")  # all | current
     all_sessions = "1" if scope == "all" else "0"
     params = {"limit": str(limit), "mode": mode, "all_sessions": all_sessions}
-    if q:
+    if latest:
+        # 1003-13: 填数字 = 忽略 q/time_prefix，直接返回最近 N 条原文（按时间倒序，最新在前）
+        params["latest"] = str(latest)
+    elif q:
         params["q"] = q
     elif time_prefix:
         # 1002-08: 纯时间定位——按消息时间缀前缀直接返回该时间消息（含 msg_id）
@@ -660,12 +668,13 @@ def tool_context_search(args):
 
 
 TOOLS["context_search"] = {
-    "description": "检索原始对话：可跨所有会话搜索完整对话和导入对话，包括已经被上下文压缩替换的原文。两种用法：①按内容检索——q 提供关键词或描述性问题（语义检索），或 mode=keyword 做词面匹配；②按时间定位——time_prefix 填消息自带的时间缀前缀（如 2026-08-28 或 2026-08-28T19:34），直接返回该时间的消息原文及 msg_id；两者可组合（先按时间过滤再内容检索）。q 与 time_prefix 都不填时自动用当前会话她最新一条消息作为检索内容。结果返回相关原文及 session、msg_id（消息唯一 id）、时间、角色；相邻命中会合并，重复内容会去重。返回的是原文，不是改写后的记忆。需要永久保留某段原文时，可在找到 session/msg_id 后使用 context_star。",
+    "description": "检索原始对话：可跨所有会话搜索完整对话和导入对话，包括已经被上下文压缩替换的原文。三种用法：①按内容检索——q 提供关键词或描述性问题（语义检索），或 mode=keyword 做词面匹配；②按时间定位——time_prefix 填消息自带的时间缀前缀（如 2026-08-28 或 2026-08-28T19:34），直接返回该时间的消息原文及 msg_id；③最近原文——latest 填数字 N 时忽略 q 与 time_prefix，直接返回最近（最后一次请求的）最多 N 条原文，按时间倒序（最新在前）。q 与 time_prefix、latest 都不填时自动用当前会话她最新一条消息作为检索内容。结果返回相关原文及 session、msg_id（消息唯一 id）、时间、角色；相邻命中会合并，重复内容会去重。返回的是原文，不是改写后的记忆。需要永久保留某段原文时，可在找到 session/msg_id 后使用 context_star。",
     "inputSchema": {
         "type": "object",
         "properties": {
-            "q": {"type": "string", "description": "检索词或描述（可选）。与 time_prefix 至少填一个（都不填时自动以她最新一条消息为检索内容）；提供则按 q 检索（语义模式下可以是描述性语句，如她上次说难过的时候、我们聊过蓝鲸的话题）；也可与 time_prefix 组合（时间范围内内容检索）"},
+            "q": {"type": "string", "description": "检索词或描述（可选）。与 time_prefix、latest 至少填一个（都不填时自动以她最新一条消息为检索内容）；提供则按 q 检索（语义模式下可以是描述性语句，如她上次说难过的时候、我们聊过蓝鲸的话题）；也可与 time_prefix 组合（时间范围内内容检索）"},
             "time_prefix": {"type": "string", "description": "消息自带的时间缀前缀（如 2026-08-28 或 2026-08-28T19:34），按消息时间定位原文；可单独使用（q 留空），返回命中消息及 msg_id"},
+            "latest": {"type": "integer", "description": "填数字 N（1-100）：忽略 q 与 time_prefix，直接返回最近（最后一次请求的）最多 N 条原文对话，按时间倒序（最新在前）；最常用于先拿最近对话上下文再按需翻更早的"},
             "limit": {"type": "integer", "description": "返回条数，默认8，最大50"},
             "mode": {"type": "string", "description": "检索模式：semantic=语义检索（默认，推荐，意思相近也能搜到） | keyword=关键词精确匹配"},
             "scope": {"type": "string", "description": "搜索范围：all=跨所有会话（默认，最全） | current=仅当前会话"}

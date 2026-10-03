@@ -2349,7 +2349,8 @@ async function searchContextEnhanced(query, options) {
   const q = String(query || "").trim();
   const opts = options || {};
   const timePrefix = String(opts.timePrefix || "").trim().replace(/[Tt]/g, " ") || null;
-  if (!q && !timePrefix) return { ok: false, error: "查询不能为空" };
+  const latestCount = Math.max(0, Math.min(100, Math.floor(Number(opts.latest) || 0))); // 1003-13：填数字=返回最近 N 条原文
+  if (!q && !timePrefix && !latestCount) return { ok: false, error: "查询不能为空" };
   const mode = opts.mode === "keyword" ? "keyword" : "semantic";
   const allSessions = !!opts.allSessions;
   const maxReturn = Math.max(1, Math.min(100, Math.floor(Number(opts.limit) || 10)));
@@ -2399,8 +2400,18 @@ async function searchContextEnhanced(query, options) {
     return new Date(t.getTime() + 8 * 3600 * 1000).toISOString().slice(0, 19).replace("T", " ");
   }
   const pureTimeMode = !!(timePrefix && !q);
+  const latestMode = !!(latestCount > 0 && !q && !timePrefix);
 
-  if (pureTimeMode) {
+  if (latestMode) {
+    // 1003-13 用户拍板：不检索、不过滤，直接按时间倒序（最新在前）取最近 N 条原文
+    const pool = allMsgs.filter(function (m) { return m && m.content; });
+    pool.sort(function (a, b) { return String(b.time || "").localeCompare(String(a.time || "")); });
+    scored = pool.slice(0, latestCount).map(function (m) {
+      return { pos: m._gidx, source: m.source, session: m.session, sidx: m.sidx,
+        record_id: m.record_id, msg_id: m.msg_id, role: m.role, time: m.time,
+        score: 100, coverage: 1, density: 100, hits: 1, hit_terms: [], content: m.content };
+    });
+  } else if (pureTimeMode) {
     for (let i = 0; i < allMsgs.length; i++) {
       const m = allMsgs[i];
       if (!m.content || !m.time) continue;
@@ -2483,7 +2494,7 @@ async function searchContextEnhanced(query, options) {
   }
 
   const groups = [];
-  if (pureTimeMode) {
+  if (pureTimeMode || latestMode) {
     for (let i = 0; i < scored.length; i++) groups.push([scored[i]]);
   } else {
   const used = new Array(scored.length).fill(false);
@@ -2507,7 +2518,7 @@ async function searchContextEnhanced(query, options) {
   // 保持原排序回退——LLM 挂了工具行为与升级前完全一致。
   let orderedGroups = groups;
   let rerankMeta = null;
-  if (!pureTimeMode && _contextRerank && groups.length > 0) {
+  if (!pureTimeMode && !latestMode && _contextRerank && groups.length > 0) {
     try {
       const rr = await _contextRerank.rerankGroupsWithLLM(q, groups, { pickMax: maxReturn });
       rerankMeta = rr && rr.meta ? rr.meta : null;
