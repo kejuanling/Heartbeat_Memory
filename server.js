@@ -5753,10 +5753,19 @@ app.post("/admin/conversation-state/rollback", { preHandler: basicAuth }, async 
 });
 
 // 撤销最后一次并入：覆盖区间退回，被吃掉的那段原文回到未覆盖区
+//
+// 2026-10-04 加 confirm 闸（1004-03 事故的根因修复）：
+//   原实现只凭 URL 的 session_id 就能执行——一个空 body 的 POST 就会把整条状态删掉。
+//   探测接口存在性（curl 空 body 看返回码）这种完全无害的操作，真的会删生产数据。
+//   undo 删的是不可逆的东西（版本链虽保留，但用户视角状态直接消失），所以要求调用方
+//   显式声明「我知道这会撤销」，前端在 confirm 弹窗通过后带 confirm:true。
 app.post("/admin/conversation-state/undo", { preHandler: basicAuth }, async (req, reply) => {
   const body = req.body || {};
   const sid = _csSessionOf(req);
   if (!sid) return reply.code(400).send({ error: "缺少 session 参数" });
+  if (body.confirm !== true) {
+    return reply.code(400).send({ error: "撤销需要显式确认：请带 confirm:true（撤销会移除当前状态，被吃掉的那段原文回到未覆盖区）" });
+  }
   try {
     reply.send(conversationState.undoLastMerge({ session: sid }));
   } catch (err) {

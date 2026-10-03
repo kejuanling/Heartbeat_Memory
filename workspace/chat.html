@@ -954,6 +954,23 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .cc-uncovered-body .cc-msg{white-space:pre-wrap;word-break:break-all;margin-bottom:6px}
 .cc-uncovered-body .cc-msg:last-child{margin-bottom:0}
 .cc-uncovered-body .cc-msg u{color:var(--accent-deep);font-weight:600;text-decoration:none;margin-right:6px}
+/* ===== 会话压缩弹窗 · 状态机视图（2026-10-04）=====
+   全部复用既有 .cc-* 与 CSS 变量，不引新样式体系；只补状态机独有的几个件。 */
+.cc-retired-tip{font-size:11px;color:var(--warn-deep);background:var(--warn-soft);border:1px dashed rgba(var(--warn-rgb),.4);border-radius:8px;padding:7px 10px;margin:6px 0 8px;line-height:1.5}
+.cs-sec{font-size:11.5px;color:var(--ink3);letter-spacing:1px;margin:14px 0 4px;padding-top:8px;border-top:1px solid var(--line)}
+.cs-range-row{display:flex;gap:6px;align-items:center;margin:6px 0}
+.cs-range-row input[type=text]{flex:1;min-width:0;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:7px 10px;font-size:12.5px;outline:none}
+.cs-range-row input[type=text]:focus{border-color:var(--accent-deep)}
+.cs-range-row .cc-act{flex-shrink:0}
+.cs-hint{font-size:11px;color:var(--ink3);line-height:1.6;margin:2px 0 4px}
+.cs-msg{font-size:11.5px;color:var(--ink2);line-height:1.6;min-height:16px;margin:4px 0}
+.cs-msg .cs-err{color:var(--bad-deep)}
+.cs-ops{margin-top:8px;font-size:11.5px;line-height:1.7}
+.cs-op{padding:3px 8px;border-radius:6px;margin-bottom:3px;border-left:2px solid var(--line-strong);background:var(--accent-faint);color:var(--ink2)}
+.cs-op.add{border-left-color:var(--ok)}
+.cs-op.upd{border-left-color:var(--warn-deep)}
+.cs-op.del{border-left-color:var(--bad)}
+.cs-acts{display:flex;gap:8px;margin:12px 0 4px;flex-wrap:wrap}
 /* 压缩页头部工具条 + 配置提示（对齐 admin 压缩 tab 结构） */
 .session-item{
   display:flex;flex-direction:column;gap:2px;padding:10px 14px;margin:3px 8px;border-radius:12px;
@@ -6597,6 +6614,13 @@ async function loadSessionCc(id){
     if(!r.ok){ body.innerHTML='<div class="adm-empty">加载失败: '+(j.error||r.status)+'</div>'; return; }
     const chunks=(j&&j.chunks)||[], gaps=((j&&j.uncovered&&j.uncovered.gaps)||[]);
     const t=(j&&j.totals)||{};
+
+    // 2026-10-04 分流：会话里还有非 state 的旧块 → 旧块视图；一条不剩 → 状态机视图。
+    // 判定直接用 preview 已返回的 chunks[].source，不新增接口。
+    // 过渡期是常态（存量会话按需逐个并入后自动切换），两个视图长期并存。
+    var hasLegacy = chunks.some(function(c){ return c.source !== "state"; });
+    if(!hasLegacy){ return loadSessionCcState(id); }
+
     if(!chunks.length&&!gaps.length){ body.innerHTML='<div class="adm-empty">该会话暂无压缩块</div>'; return; }
     let html='<div class="cc-summary">实际约 <b>'+(t.estCompressedChars||0)+'</b> 字 · '+(t.chunkCount||0)+' 块 · 共 '+(t.totalChars||0)+' 字</div>';
     if(t.hiddenCount>0){
@@ -6662,6 +6686,242 @@ async function loadSessionCc(id){
   }catch(e){ body.innerHTML='<div class="adm-empty">加载失败: '+escapeHtml(e.message)+'</div>'; }
 }
 function repIdOf(c){ return (c&&c.repId)?c.repId:''; }
+
+// ===== 会话压缩弹窗 · 状态机视图（2026-10-04）=====
+// 定位：轻量。只做「看状态 / 看并入记录 / 填区间并入 / 回滚」，
+// diff 预览那套重交互留在管理台压缩页（点下方跳转）。
+// 路由复用 /admin/conversation-state/*（server.js:5668 起，已通）。
+var CS_BASE = null;
+function csBase(){
+  if(CS_BASE===null) CS_BASE = (location.pathname.indexOf('/heartbeat/')===0) ? '/heartbeat/admin/conversation-state' : '/admin/conversation-state';
+  return CS_BASE;
+}
+function csReq(path, opts){
+  opts = opts || {};
+  var url = csBase()+path+(opts.query||"");
+  return fetch(url, {
+    method: opts.method || "GET",
+    headers: Object.assign({"X-CSRF-Token":ccGetCookie("admin_csrf")}, opts.method==="POST" ? {"Content-Type":"application/json"} : {}),
+    credentials: "include",
+    body: opts.body ? JSON.stringify(opts.body) : undefined
+  }).then(function(r){ return r.json(); });
+}
+// 未覆盖区间在弹窗里以「第 X~Y 条」呈现：covered_range 是 0-based，这里 +1
+function csRangeText(cr){
+  if(!cr || typeof cr.start_index!=="number") return "";
+  return "第 "+(cr.start_index+1)+"~"+(cr.end_index+1)+" 条";
+}
+async function loadSessionCcState(id){
+  var body=document.getElementById("ccBody");
+  if(!body) return;
+  var sid = id || "default";
+  var st;
+  try{
+    st = await csReq("", {query:"?session_id="+encodeURIComponent(sid)});
+  }catch(e){
+    body.innerHTML='<div class="adm-empty">状态加载失败：'+escapeHtml(e.message)+'</div>'; return;
+  }
+  if(!st || st.ok===false){
+    body.innerHTML='<div class="adm-empty">'+(st&&st.error?escapeHtml(st.error):"这个会话还没有状态")+'</div>';
+    return;
+  }
+
+  var exists = !!st.exists;
+  var text = String(st.text||"");
+  var cv = (st.cover||{});
+  var coverTxt = (cv.label_start||cv.label_end) ? ((cv.label_start||"")+" ~ "+(cv.label_end||"")).replace(/^\s*~\s*$/,"") : "";
+  var retiredN = st.retired_count||0;
+  var html="";
+
+  if(!exists){
+    html+='<div class="cc-summary">这个会话还没有状态。下面填一段还没并入的原文区间，点「并入状态」开始。</div>';
+  }else{
+    html+='<div class="cc-summary">状态 <b>v'+st.version+'</b> · '+text.length+' 字'+
+      (coverTxt?' · 覆盖 '+escapeHtml(coverTxt):'')+'</div>';
+    if(retiredN>0){
+      html+='<div class="cc-retired-tip">这份状态顶掉了 <b>'+retiredN+'</b> 个旧块（并入那段原文时自动停用，数据仍留着；回滚这一版会把它们放回来）。</div>';
+    }
+    html+='<div class="cc-block"><div class="cc-block-h"><span style="font-weight:600">当前状态</span>'+
+      '<span class="st on">v'+st.version+'</span></div>'+
+      '<div class="cc-block-b cc-collapse"><div class="cc-fade">'+escapeHtml(text.slice(0,300))+'</div>'+
+      '<div class="cc-full" style="display:none">'+escapeHtml(text)+'</div>'+
+      '<div class="cc-toggle">展开全文 ▾</div></div></div>';
+
+    // 并入记录（版本链）：显示各版与它吃掉的那段原文
+    var vs = st.versions||[];
+    if(vs.length){
+      html+='<div class="cs-sec">并入记录</div>';
+      html+=vs.map(function(v){
+        var mark = v.status==="current" ? '<span class="st on">当前</span>'
+                : v.status==="undone" ? '<span class="st todo">已撤销·可恢复</span>'
+                : '<span class="st off">旧版</span>';
+        var rng = csRangeText(v.range) || (v.cover && v.cover.label_start ? (v.cover.label_start+" ~ "+(v.cover.label_end||"")) : "");
+        return '<div class="cc-block"><div class="cc-block-h"><span style="font-weight:600">v'+v.version+'</span>'+mark+
+          '<span style="color:var(--ink3)">'+(rng?escapeHtml(rng):'')+' · '+v.chars+' 字</span>'+
+          '<span style="margin-left:auto"></span>'+
+          (v.status==="current" ? '' : '<button class="cc-act" data-csact="rollback" data-ver="'+v.version+'">切回这版</button>')+
+          '</div></div>';
+      }).join("");
+    }
+  }
+
+  // 还没并入的原文：建议起点 = 已覆盖区之后（管理台的规则：并入必须紧接覆盖范围）
+  var cr = st.covered_range;
+  if(cr && typeof cr.end_index==="number"){
+    html+='<div class="cs-sec">还没并入的原文</div>';
+    html+='<div class="cs-range-row">'+
+      '<input type="text" id="csRangeInput" placeholder="如 '+(cr.end_index+2)+'-'+(cr.end_index+51)+'" inputmode="numeric">'+
+      '<button class="cc-act" data-csact="preview">▸ 并入状态</button></div>';
+    html+='<div class="cs-hint">已吃掉第 '+(cr.start_index+1)+'~'+(cr.end_index+1)+' 条。填一段紧接其后的区间（不能跳段，跳过的原文会被状态吞掉而模型从没读过）。</div>';
+    html+='<div class="cs-msg" id="csMsg"></div>';
+    html+='<div id="csPreviewBox"></div>';
+  }else{
+    html+='<div class="cs-sec">还没并入的原文</div>';
+    html+='<div class="cs-range-row">'+
+      '<input type="text" id="csRangeInput" placeholder="如 1-50" inputmode="numeric">'+
+      '<button class="cc-act" data-csact="preview">▸ 并入状态</button></div>';
+    html+='<div class="cs-hint">从第 1 条开始填一段区间。生成约需 1~5 分钟。</div>';
+    html+='<div class="cs-msg" id="csMsg"></div>';
+    html+='<div id="csPreviewBox"></div>';
+  }
+
+  if(exists){
+    html+='<div class="cs-acts"><button class="cc-act" data-csact="undo">撤销最后一次并入</button></div>';
+  }
+  html+='<a class="cc-goto-admin" href="/heartbeat/admin/mobile?tab=compaction&session='+encodeURIComponent(sid)+'" target="_blank">去管理台压缩页 <span class="arrow">→</span></a>';
+
+  body.innerHTML=html;
+  bindCcCollapse(body);
+
+  body.querySelectorAll('[data-csact]').forEach(function(b){
+    b.addEventListener("click", function(){ csAct(b, sid); });
+  });
+}
+
+async function csAct(btn, sid){
+  var act = btn.dataset.csact;
+  var msg = document.getElementById("csMsg");
+  var box = document.getElementById("csPreviewBox");
+  var say = function(t, err){ if(msg){ msg.innerHTML = t ? ('<span class="'+(err?"cs-err":"")+'">'+t+'</span>') : ""; } };
+
+  if(act==="preview"){
+    var v = String((document.getElementById("csRangeInput")||{}).value||"").trim();
+    var m = v.match(/^(\d+)\s*[-~]\s*(\d+)$/);
+    if(!m){ say("区间格式不对，例：101-150", true); return; }
+    var start=parseInt(m[1],10), end=parseInt(m[2],10);
+    if(!(start>=1&&end>=start)){ say("起点要 ≥1，且终点不能小于起点", true); return; }
+    btn.disabled=true; btn.textContent="算状态中…";
+    say("正在算新状态（要调模型，通常 1~5 分钟）。这次并入如果撞上旧块会自动停用它们。");
+    try{
+      var r = await csReq("/preview", {method:"POST", query:"?session_id="+encodeURIComponent(sid),
+        body:{ session: sid, start: start, end: end }});
+      if(!r || r.ok===false){
+        say(escapeHtml((r&&r.error)||"算状态失败"), true);
+        btn.disabled=false; btn.textContent="▸ 并入状态";
+        return;
+      }
+      say("算好了：状态 "+String(r.state||"").length+" 字"+
+          (r.search_rounds?("，检索 "+r.search_rounds+" 轮"):"")+"。下面是这次要并入的内容，确认后生效。");
+      box.innerHTML =
+        '<div class="cc-block"><div class="cc-block-h"><span style="font-weight:600">新状态候选 v'+(r.prev_version+1)+'</span>'+
+        '<span class="st todo">未生效</span>'+
+        '<span style="color:var(--ink3)">'+escapeHtml(r.range.range_label||"")+'</span></div>'+
+        '<div class="cc-block-b"><div class="cc-fade">'+escapeHtml(String(r.state||"").slice(0,300))+'</div>'+
+        '<div class="cc-full" style="display:none">'+escapeHtml(String(r.state||""))+'</div>'+
+        '<div class="cc-toggle">展开全文 ▾</div></div>'+
+        ((r.ops&&r.ops.length) ? '<div class="cs-ops">'+r.ops.map(function(o){
+            return '<div class="cs-op '+(o.type==="remove"?"del":(o.type==="update"?"upd":"add"))+'">'+
+              (o.type==="add"?"新增":o.type==="update"?"改写":"删除")+'：'+escapeHtml(o.desc)+
+              (o.reason?'（'+escapeHtml(o.reason)+'）':'')+'</div>';
+          }).join("")+'</div>' : '')+
+        '</div>'+
+        '<div class="cs-acts"><button class="cc-act off" data-csact="cancel">取消，原文留着</button>'+
+        '<button class="cc-act" data-csact="commit">确认并入</button></div>';
+      bindCcCollapse(box);
+      box.querySelectorAll('[data-csact]').forEach(function(b2){
+        b2.addEventListener("click", function(){ csCommit(b2, sid, r); });
+      });
+    }catch(e){
+      say("算状态失败："+escapeHtml(e.message), true);
+    }
+    btn.disabled=false; btn.textContent="▸ 并入状态";
+    return;
+  }
+
+  if(act==="commit"||act==="cancel"){ return; }   // 由 csCommit 处理
+
+  if(act==="rollback"){
+    var ver = btn.dataset.ver;
+    btn.disabled=true;
+    try{
+      var r = await csReq("/rollback", {method:"POST", query:"?session_id="+encodeURIComponent(sid), body:{ session: sid, version: Number(ver) }});
+      if(!r||r.ok===false){ alert("切回失败："+((r&&r.error)||"未知")); }
+    }catch(e){ alert("切回失败："+e.message); }
+    btn.disabled=false;
+    loadSessionCcState(sid);
+    return;
+  }
+
+  if(act==="undo"){
+    if(!confirm("撤销最后一次并入？\n\n覆盖区间会退回，那段原文回到上下文里（可再次并入）。如果这一版顶掉过旧块，它们会一并放回来。")) return;
+    btn.disabled=true;
+    try{
+      var r = await csReq("/undo", {method:"POST", query:"?session_id="+encodeURIComponent(sid), body:{ session: sid, confirm: true }});
+      if(!r||r.ok===false){ alert("撤销失败："+((r&&r.error)||"未知")); }
+    }catch(e){ alert("撤销失败："+e.message); }
+    btn.disabled=false;
+    loadSessionCcState(sid);
+    return;
+  }
+}
+
+async function csCommit(btn, sid, cand){
+  var act = btn.dataset.csact;
+  if(act==="cancel"){ document.getElementById("csPreviewBox").innerHTML=""; var mm=document.getElementById("csMsg"); if(mm) mm.innerHTML="已取消，原文留着。"; return; }
+  if(act!=="commit") return;
+  btn.disabled=true; btn.textContent="并入中…";
+  try{
+    var r = await csReq("/commit", {method:"POST", query:"?session_id="+encodeURIComponent(sid), body:{
+      session: sid,
+      state: cand.state,
+      ops: cand.ops || [],
+      start_msg: cand.range.start_msg,
+      end_msg: cand.range.end_msg,
+      start_id: cand.range.start_id,
+      end_id: cand.range.end_id,
+      range_label: cand.range.range_label,
+      label_start: cand.range.label_start,
+      label_end: cand.range.label_end,
+      count: cand.range.count
+    }});
+    if(!r||r.ok===false){
+      var m=document.getElementById("csMsg");
+      if(m) m.innerHTML='<span class="cs-err">'+escapeHtml((r&&r.error)||"并入失败")+'</span>';
+      btn.disabled=false; btn.textContent="确认并入";
+      return;
+    }
+  }catch(e){
+    var m2=document.getElementById("csMsg");
+    if(m2) m2.innerHTML='<span class="cs-err">并入失败：'+escapeHtml(e.message)+'</span>';
+    btn.disabled=false; btn.textContent="确认并入";
+    return;
+  }
+  loadSessionCcState(sid);
+}
+function bindCcCollapse(root){
+  root.querySelectorAll('.cc-collapse').forEach(function(el){
+    if(el.__csBound) return; el.__csBound=true;
+    el.addEventListener("click",function(ev){ ev.stopPropagation();
+      var full=el.querySelector(".cc-full"), fade=el.querySelector(".cc-fade"), tg=el.querySelector(".cc-toggle");
+      if(full&&fade&&tg){
+        var open=full.style.display!=="none";
+        full.style.display=open?"none":"block";
+        fade.style.display=open?"block":"none";
+        tg.textContent=open?"展开全文 ▾":"收起全文 ▴";
+      }
+    });
+  });
+}
 
 // 从后端拉会话列表
 async function loadSessions(){

@@ -1022,7 +1022,8 @@
     if (!sid) return;
     if (!confirm('撤销最后一次并入？\n\n被吃掉的那段原文会回到「还没并入」区；这一版会标「已撤销」留在并入记录里，随时可原样恢复（不调模型）。')) return;
     msg('撤销中…');
-    req(CS_API + '/undo?session=' + encodeURIComponent(sid), { method: 'POST', body: {} })
+    // 2026-10-04：服务端 undo 加了 confirm 闸（空 body POST 曾真的删掉生产状态，1004-03 事故）
+    req(CS_API + '/undo?session=' + encodeURIComponent(sid), { method: 'POST', body: { confirm: true } })
       .then(function (j) {
         msg(j.removedAll ? '已整条撤销，原文全部回到未覆盖区' : ('已退回到 v' + j.rolled_to), 'ok');
         CS.preview = null; show($('cs-diff'), false);
