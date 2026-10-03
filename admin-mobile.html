@@ -272,7 +272,7 @@
           <button type="button" class="cs-btn danger" onclick="csUndo()">撤销最后一次并入</button>
         </div>
         <div class="cs-chain" id="cs-chain"></div>
-        <div class="cs-chain-hint">点任一版可预览 · 再点一次回滚到那一版并从那里继续并入</div>
+        <div class="cs-chain-hint">点任一版可预览 · 再点一次切到那一版（已撤销的划线版 = 恢复，不调模型；所有版本都保留）</div>
       </div>
 
       <!-- 迁移期提示（种子状态才显示） -->
@@ -726,7 +726,11 @@
   background:var(--card,#fff);color:var(--text2,#6b625e);cursor:pointer}
 .cs-chain .v.cur{background:var(--accent,#c2185b);border-color:var(--accent,#c2185b);color:#fff}
 .cs-chain .v.pv{background:#eaf1fb;border-color:#c3d6f0;color:#2b5fa8}
+.cs-chain .v.un{color:#b9b1ad;border-style:dashed;text-decoration:line-through}
 .cs-chain .sep{color:var(--text3,#9c938f);font-size:11px}
+.cs-hist .st{font-size:11px;font-weight:700;border-radius:5px;padding:1px 6px;margin-right:6px}
+.cs-hist .st.current{background:var(--accent,#c2185b);color:#fff}
+.cs-hist .st.undone{background:#f2efed;color:#b9b1ad;border:1px dashed #d8d0cc}
 .cs-chain-hint{padding-top:8px;font-size:11.5px;color:var(--text3,#9c938f)}
 
 .cs-note{padding:10px 12px;border-radius:11px;font-size:12px;line-height:1.6;
@@ -929,7 +933,10 @@
     var parts = [];
     versions.forEach(function (v, i) {
       if (i) parts.push('<span class="sep">·</span>');
-      var cls = 'v' + (Number(v.version) === Number(CS.state && CS.state.version) ? ' cur' : '');
+      // 指针模型：current 高亮；undone（被回滚掉、可恢复）虚线划掉；superseded 正常灰
+      var cls = 'v';
+      if (v.status === 'current') cls += ' cur';
+      else if (v.status === 'undone') cls += ' un';
       parts.push('<span class="' + cls + '" data-csv="' + v.version + '" onclick="csPickVersion(this)">v' + v.version + '</span>');
     });
     el.innerHTML = parts.join('');
@@ -937,8 +944,8 @@
 
   window.csPickVersion = function (el) {
     var v = Number(el.getAttribute('data-csv'));
-    if (CS.previewVersion === v) { // 再点一次 = 回滚
-      if (!confirm('回滚到 v' + v + '？v' + v + ' 之后的版本会被丢弃。')) return;
+    if (CS.previewVersion === v) { // 再点一次 = 切到那一版（已撤销版 = 恢复；都不调模型）
+      if (!confirm('切到 v' + v + '？状态正文与覆盖范围会变成那一版的样子（链上其他版本都保留，随时可再切）。')) return;
       doRollback(v);
       return;
     }
@@ -980,17 +987,20 @@
     var inner = $('cs-arch-inner');
     var st = CS.state;
     if (!st || !st.exists) { msg('还没有并入记录', 'err'); return; }
-    // 每行用那一版「自己的」覆盖区间（v.cover），不能用当前 cover——回滚后当前值是旧值
-    var h = ['<div class="cs-hist" style="border-top:0">每次并入吃掉了哪段原文。某次并错了，就回滚到它前一个版本，再从正确的地方重新并入：</div>'];
+    // 每行用那一版「自己的」覆盖区间（v.range，编号区间而非时间段——与输入框同一套语言）；
+    // 状态由服务端按指针派生：current / undone（可恢复）/ superseded
+    var h = ['<div class="cs-hist" style="border-top:0">点任意版本先预览正文，再点一次切到那一版（已撤销的切回去 = 恢复，不调模型）：</div>'];
     (st.versions || []).slice().reverse().forEach(function (v) {
-      var c = v.cover || {};
+      var statusTxt = v.status === 'current' ? '当前' : (v.status === 'undone' ? '已撤销·可恢复' : '');
+      var rng = v.range ? ('覆盖 第 ' + (v.range.start_index + 1) + '~' + (v.range.end_index + 1) + ' 条') : '覆盖区间未定';
       h.push('<div class="cs-hist"><span class="v">v' + v.version + '</span>' +
+        (statusTxt ? '<span class="st ' + v.status + '">' + statusTxt + '</span>' : '') +
         esc(v.at ? String(v.at).slice(0, 16).replace('T', ' ') : '') +
-        ' · 吃掉 <b>' + esc(c.label_start || '?') + ' ~ ' + esc(c.label_end || '?') + '</b>' +
-        '<span class="c"> · 状态 ' + v.chars + ' 字' + (v.source && v.source !== 'merge' ? ' · ' + esc(v.source) : '') + '</span></div>');
+        ' · ' + esc(rng) +
+        '<span class="c"> · 状态 ' + v.chars + ' 字</span></div>');
     });
     inner.innerHTML = h.join('');
-    $('cs-arch-summary').textContent = '并入记录（' + (st.versions || []).length + ' 次）';
+    $('cs-arch-summary').textContent = '并入记录（' + (st.versions || []).length + ' 版，保留最近 5 版）';
     wrap.open = true;
   };
 

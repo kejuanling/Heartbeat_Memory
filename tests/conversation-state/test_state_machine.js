@@ -191,27 +191,71 @@ eq("版本链被截到 5 版", st8.versions.length, 5);
 eq("版本链保留的是最近 5 版（v8..v4）", st8.versions.map(function (v) { return v.version; }).join(","), "8,7,6,5,4");
 eq("v4 已被挤出", st8.versions.some(function (v) { return v.version === 3; }), false);
 eq("覆盖终点推进到第 32 条（0-based 31）", st8.covered_range.end_index, 31);
+eq("当前版 status=current", st8.versions.find(function (v) { return v.version === 8; }).status, "current");
+eq("老版 status=superseded", st8.versions.find(function (v) { return v.version === 4; }).status, "superseded");
+check("每行带自己的编号区间", st8.versions.every(function (v) { return v.range && typeof v.range.end_index === "number"; }), JSON.stringify(st8.versions));
 
 // ================= 5. 版本正文可单独取回 =================
 const v6 = cs.getVersionText(TEST_STATE, 6);
 check("取 v6 正文成功", v6.ok === true, JSON.stringify(v6));
 eq("v6 正文正确", v6.text, "状态 v6");
 
-// ================= 6. 回滚：正文与覆盖退回那一版 =================
+// ================= 6. 回滚（指针模型）：只挪指针，不截链 =================
 r = cs.rollback({ session: TEST_STATE, version: 5 });
 check("回滚成功", r.ok === true, JSON.stringify(r));
 eq("回滚后正文 = v5", r.text, "状态 v5");
 eq("回滚后 cover.end 退回 v5 的终点（m24）", (r.cover || {}).end_id, "m24");
-eq("回滚时版本号跟着退回（内容即版本）", r.version, 5);
-eq("版本链截到 v5 为止（v3 早被 5 版上限挤掉）", (r.versions || []).map(function (v) { return v.version; }).join(","), "5,4");
+eq("指针移到 v5", r.version, 5);
+eq("回滚不截链：5 版全保留", (r.versions || []).map(function (v) { return v.version; }).join(","), "8,7,6,5,4");
+eq("被回滚掉的 v6..v8 标记 undone", r.versions.filter(function (v) { return v.status === "undone"; }).map(function (v) { return v.version; }).join(","), "8,7,6");
+eq("v4 仍是 superseded", r.versions.find(function (v) { return v.version === 4; }).status, "superseded");
 
-// ================= 7. 撤销最后一次并入 =================
+// ================= 7. 撤销 = 回滚到上一版（同样不截链）=================
 r = cs.undoLastMerge({ session: TEST_STATE });
 check("撤销成功", r.ok === true, JSON.stringify(r));
-// 上一步已回滚到 v5，所以撤销 = 再退一版到 v4
+// 当前指针在 v5，撤销 = 再退一版到 v4
 eq("撤销再退一版", cs.getState(TEST_STATE).text, "状态 v4");
-eq("撤销后版本号是 v4", cs.getState(TEST_STATE).version, 4);
-eq("撤销把版本链截到 v4", cs.getState(TEST_STATE).versions.map(function (v) { return v.version; }).join(","), "4");
+eq("撤销后指针在 v4", cs.getState(TEST_STATE).version, 4);
+eq("链仍完整", cs.getState(TEST_STATE).versions.map(function (v) { return v.version; }).join(","), "8,7,6,5,4");
+eq("v5 也成了 undone", cs.getState(TEST_STATE).versions.find(function (v) { return v.version === 5; }).status, "undone");
+
+// ================= 7b. 恢复：切回「已撤销」的版本（不调模型，纯指针）=================
+r = cs.rollback({ session: TEST_STATE, version: 7 });
+check("恢复 v7 成功", r.ok === true, JSON.stringify(r));
+eq("恢复后正文 = v7", r.text, "状态 v7");
+eq("恢复后指针在 v7", r.version, 7);
+eq("恢复后覆盖 = v7 的覆盖（终点 m28）", (r.cover || {}).end_id, "m28");
+eq("链不截", r.versions.map(function (v) { return v.version; }).join(","), "8,7,6,5,4");
+eq("此时 v8 是 undone、v5/v6 是 superseded",
+  r.versions.filter(function (v) { return v.status === "undone"; }).map(function (v) { return v.version; }).join(","), "8");
+
+// ================= 7c. 回滚后再并入：版本号单调递增（不撞链上已有号）=================
+// 指针在 v7（覆盖到 m28），下一次并入从 m29 开始 → 新版本必须是 v9（链上最大号 8 +1），不是 v8
+r = cs.commitMerge({
+  session: TEST_STATE,
+  state: "状态 v9",
+  ops: [],
+  start_msg: anchorable32[29],
+  end_msg: anchorable32[31],
+});
+check("回滚后并入成功", r.ok === true, JSON.stringify(r));
+eq("新版本号 = v9（单调，跳过已存在的 v8）", r.version, 9);
+eq("链上没有撞号的两个 v8", r.versions.filter(function (v) { return v.version === 8; }).length, 1);
+eq("v8 变成 superseded", r.versions.find(function (v) { return v.version === 8; }).status, "superseded");
+
+// ================= 7d. 5 版上限：从最老那头挤 =================
+// 指针先切回 v5（链上最老），再连续并入两次逼挤出。
+// 提交后指针总在最新版，所以 v5/v6 会被正常挤出（指针不受影响）——
+// 这也是对「回滚到老版后继续并入」完整路径的覆盖。
+cs.rollback({ session: TEST_STATE, version: 5 });
+r = cs.commitMerge({ session: TEST_STATE, state: "状态 v10", ops: [], start_msg: anchorable32[25], end_msg: anchorable32[28] });
+check("v10 并入成功", r.ok === true, JSON.stringify(r));
+r = cs.commitMerge({ session: TEST_STATE, state: "状态 v11", ops: [], start_msg: anchorable32[29], end_msg: anchorable32[31] });
+check("v11 并入成功", r.ok === true, JSON.stringify(r));
+const st11 = cs.getState(TEST_STATE);
+eq("指针在最新版 v11", st11.version, 11);
+eq("链仍为 5 版", st11.versions.length, 5);
+eq("最老的 v5/v6 已被挤出", st11.versions.map(function (v) { return v.version; }).join(","), "11,10,9,8,7");
 
 // ================= 8. 撤销到只剩一版时应整条移除 =================
 cs.commitMerge({ session: TEST_STATE2, state: "只有一版", ops: [], start_msg: anchorable[0], end_msg: anchorable[3] });
