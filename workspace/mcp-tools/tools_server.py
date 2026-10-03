@@ -624,7 +624,9 @@ def tool_context_search(args):
     all_sessions = "1" if scope == "all" else "0"
     params = {"limit": str(limit), "mode": mode, "all_sessions": all_sessions}
     if latest:
-        # 1003-13: 填数字 = 忽略 q/time_prefix，直接返回最近 N 条原文（按时间倒序，最新在前）
+        # 1003-14: latest 模式忽略 scope，恒跨全部会话（AI 用它总是为了查别的会话/历史，
+        # 不会拿它查当前会话）；填数字 = 忽略 q/time_prefix，直接返回全部会话最近 N 条原文（时间倒序）
+        params["all_sessions"] = "1"
         params["latest"] = str(latest)
     elif q:
         params["q"] = q
@@ -674,7 +676,7 @@ TOOLS["context_search"] = {
         "properties": {
             "q": {"type": "string", "description": "检索词或描述（可选）。与 time_prefix、latest 至少填一个（都不填时自动以她最新一条消息为检索内容）；提供则按 q 检索（语义模式下可以是描述性语句，如她上次说难过的时候、我们聊过蓝鲸的话题）；也可与 time_prefix 组合（时间范围内内容检索）"},
             "time_prefix": {"type": "string", "description": "消息自带的时间缀前缀（如 2026-08-28 或 2026-08-28T19:34），按消息时间定位原文；可单独使用（q 留空），返回命中消息及 msg_id"},
-            "latest": {"type": "integer", "description": "填数字 N（1-100）：忽略 q 与 time_prefix，直接返回最近（最后一次请求的）最多 N 条原文对话，按时间倒序（最新在前）；最常用于先拿最近对话上下文再按需翻更早的"},
+            "latest": {"type": "integer", "description": "填数字 N（1-100）：忽略 q、time_prefix 与 scope，恒跨全部会话，直接返回最近（最后一次请求的）最多 N 条原文对话，按时间倒序（最新在前）；最常用于先拿最近对话上下文再按需翻更早的"},
             "limit": {"type": "integer", "description": "返回条数，默认8，最大50"},
             "mode": {"type": "string", "description": "检索模式：semantic=语义检索（默认，推荐，意思相近也能搜到） | keyword=关键词精确匹配"},
             "scope": {"type": "string", "description": "搜索范围：all=跨所有会话（默认，最全） | current=仅当前会话"}
