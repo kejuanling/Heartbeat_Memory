@@ -37,12 +37,24 @@ body::before{
   .wrap{max-width:1100px}
 }
 
-.header{text-align:center;margin-bottom:1.8rem}
+.header{text-align:center;margin-bottom:1.8rem;position:relative}
 h1{
   font-weight:600;font-size:1.2rem;letter-spacing:10px;
   color:#b5837a;margin-bottom:0.2rem
 }
 .sub{font-size:0.65rem;color:#d4bcb0;letter-spacing:3px}
+/* 右上角导出按钮（1003-16） */
+.export-btn{
+  position:absolute;top:0;right:0;
+  padding:0.35rem 0.9rem;border:1px solid rgba(181,131,122,0.25);
+  border-radius:10px;background:rgba(255,255,255,0.55);
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  color:#b5837a;font-family:'Noto Serif SC','STKaiti','KaiTi',serif;
+  font-size:0.7rem;letter-spacing:2px;cursor:pointer;
+  transition:all 0.3s
+}
+.export-btn:hover{background:rgba(255,255,255,0.75);border-color:rgba(181,131,122,0.4);transform:translateY(-1px)}
+.export-btn:disabled{opacity:0.5;cursor:not-allowed;transform:none}
 
 /* 输入区 */
 .input-box{
@@ -214,6 +226,7 @@ h1{
   <div class="header">
     <h1>涵 的 日 记</h1>
     <p class="sub">碎碎念 · 谢可阅可评</p>
+    <button id="exportBtn" class="export-btn" title="导出全部日记为 JSON">导出</button>
   </div>
   <div class="input-box">
     <textarea id="newEntry" placeholder="写一段碎碎念..."></textarea>
@@ -489,6 +502,31 @@ document.getElementById('submitBtn').addEventListener('click', function(){
   if(!text)return;
   submitEntry(text);
 });
+
+/* 1003-16：导出全部日记为 diary.json（结构与后端 diary.json 同构） */
+function exportDiary(){
+  var btn = document.getElementById('exportBtn');
+  if(!btn) return;
+  btn.disabled = true; btn.textContent = '导出中…';
+  fetch(API + '/diary/api/entries')
+    .then(function(r){ if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function(list){
+      var data = { entries: list };
+      var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'diary.json';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 500);
+      btn.disabled = false; btn.textContent = '导出';
+    })
+    .catch(function(e){
+      alert('导出失败: ' + e.message);
+      btn.disabled = false; btn.textContent = '导出';
+    });
+}
+document.getElementById('exportBtn').addEventListener('click', exportDiary);
 
 load();
 </script>
