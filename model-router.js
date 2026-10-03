@@ -9,12 +9,15 @@ const { writeJsonAtomic } = require("./json_atomic"); // V10 收敛：本地重�
 const AI_PROVIDERS_CONFIG = path.join(__dirname, "ai-providers.json");
 
 const KNOWN_MODEL_ROLES = {
-  compaction:   "压缩摘要",
-  memory_admit: "记忆准入",
-  memory_pool:  "记忆提炼",
-  reparse:      "摘要解析",
-  digest:       "回看摘要",
-  rerank:       "记忆重排"
+  compaction:      "压缩摘要",
+  memory_admit:    "记忆准入",
+  memory_pool:     "记忆提炼",
+  memory_summary:  "记忆总结",
+  reparse:         "摘要解析",
+  backfill:        "老数据重跑",
+  distill:         "日记蒸馏",
+  digest:          "回看摘要",
+  rerank:          "记忆重排"
 };
 
 function loadProviders() {

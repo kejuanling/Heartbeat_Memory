@@ -5771,7 +5771,10 @@ function renderModelRoles(roles){
     compaction:"把旧对话压成摘要，推荐快且便宜的模型",
     memory_admit:"判断一条对话值不值得入记忆",
     memory_pool:"从对话里提炼记忆入库",
+    memory_summary:"每晚生成两块记忆总结缓存（Core Identity/长期理解），记忆池变化才重算",
     reparse:"压缩块原文提炼入记忆池",
+    backfill:"老数据重跑：逐批整理已有记忆（润色/合并/沉底建议）",
+    distill:"日记蒸馏：每日新增日记提炼入记忆池",
     digest:"整理已替换历史供回看",
     rerank:"检索记忆时给候选排序"
   };
