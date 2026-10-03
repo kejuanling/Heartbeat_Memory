@@ -1848,15 +1848,17 @@ function recentDiaryTextBefore(sessionId, count, createdIso) {
     }
   } catch (e) {}
   if (!cutoff) return "";
-  // 2026-10-03：日记改读 data/diary.json（diary-store）；hidden 用字段；本地日期严格早于 cutoff。
+  // 2026-10-03：日记改读 data/diary.json（diary-store）；hidden 用字段。
+  // 1003-12 用户拍板：注入「创建日当天及之前」（date <= cutoff），排除本会话自己写的（session 匹配）。
   // 输出口径不变：按天合并、「### 日期」头、时间正序。
+  const selfSession = (function () { const t = safeSessionToken(sessionId || "default"); return t === "default" ? null : t; })();
   const before = diaryStore.listEntries(__dirname)
-    .filter(e => !e.hidden)
+    .filter(e => !e.hidden && e.session !== selfSession)
     .map(e => {
       const p = getDatePartsInTimeZone(new Date(e.created_at), TIME_ZONE);
       return { id: e.id, date: `${p.year}-${p.month}-${p.day}`, content: e.content };
     })
-    .filter(f => f.date < cutoff);
+    .filter(f => f.date <= cutoff);
   if (!before.length) return "";
   const pickedDates = Array.from(new Set(before.map(f => f.date))).slice(-Math.max(1, Number(count) || 3));
   const out = [];
@@ -2030,7 +2032,7 @@ function buildCrossMemorySnapshot(sessionId) {
     }
   } catch (e) { console.warn("[cross-snapshot] 读取快照失败:", e.message); }
   if (!createdIso) createdIso = new Date().toISOString();
-  const text = computeCrossMemoryText(cfg, createdIso);
+  const text = computeCrossMemoryText(cfg, createdIso, sessionId);
   // 只有非空才落盘（有内容才固定；空则下次重试，避免把永远为空的会话锁死）
   if (text) {
     try {
@@ -2045,7 +2047,7 @@ function buildCrossMemorySnapshot(sessionId) {
 
 // 跨窗口注入正文实时计算（不读不写快照）：置顶记忆 + 截至会话创建日的近期日记。
 // 2026-09-13 增：菜单页「跨窗口注入」预览改用本函数每次实时重算，不再显示开窗口时固定的旧快照。
-function computeCrossMemoryText(cfg, createdIso) {
+function computeCrossMemoryText(cfg, createdIso, sessionId) {
   const parts = [];
   if (cfg.cross_inject_memory !== false) {
     // 相关记忆：只固定 V2 anchor 记忆（管理台手动置顶），不限制条数。
@@ -2055,9 +2057,9 @@ function computeCrossMemoryText(cfg, createdIso) {
       parts.push("## 相关记忆\n" + pinnedMems.map(function (m) { return "【" + m.kind + "】" + m.text; }).join("\n"));
     }
   }
-  // 日记：跨窗口注入（快照的一部分），只注入"本会话创建日期之前"的日记。
+  // 日记：跨窗口注入（快照的一部分），注入"创建日当天及之前"的日记，排除本会话自己写的（1003-12）。
   if (cfg.cross_inject_diary !== false) {
-    const dt = recentDiaryTextBefore(undefined, Number(cfg.cross_inject_diary_count) || 3, createdIso);
+    const dt = recentDiaryTextBefore(sessionId, Number(cfg.cross_inject_diary_count) || 3, createdIso);
     if (dt) parts.push("## 近期日记\n" + dt);
   }
   return parts.join("\n\n");
@@ -4086,7 +4088,7 @@ app.get("/admin/cross-window-inject", { preHandler: basicAuth }, async (req, rep
             if (fs.existsSync(snapFile)) createdIso = (fs.readJsonSync(snapFile) || {}).created_at;
           } catch (e) {}
         }
-        text = computeCrossMemoryText(cfg, createdIso);
+        text = computeCrossMemoryText(cfg, createdIso, sid);
       }
     } catch (cx) { console.warn("[cross-inject] 预览失败:", cx.message); }
     reply.send({ text: text, session_id: sid, mode: "legacy" });

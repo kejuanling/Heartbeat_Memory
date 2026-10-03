@@ -25,6 +25,7 @@
 const fs = require("fs");
 const path = require("path");
 const { getDatePartsInTimeZone, resolveTimeZone } = require("./time_utils");
+const { safeSessionToken } = require("./lib/session-token"); // 1003-12：排除本会话写的日记
 const diaryStore = require("./lib/diary-store");
 
 const TARGETS = ["assembly", "identity", "retire", "instructions"];
@@ -242,12 +243,14 @@ function assembleInput(opts) {
   let diaryCount = 3;
   try { diaryCount = Number(JSON.parse(fs.readFileSync(path.join(dataDir, 'cross_inject_config.json'), 'utf8')).cross_inject_diary_count) || 3; } catch (e) {}
   // map 挂在 v2Input 上供溯源（builder 只读已知字段，多余键无害）
-  // 日记过滤（2026-09-20 恢复旧注入边界，用户拍板）：只留「严格早于会话创建日期」且未被隐藏的篇，
-  // 创建之后写的日记由本会话时间线的日记特殊事件自然覆盖，不再跨窗口重复注入；边界缺失时不注入任何日记。
+  // 日记过滤（1003-12 用户拍板）：注入「创建日当天及之前」（date <= 会话创建日）且未被隐藏的篇；
+  // 本会话自己写的日记（session === 本会话）由时间线 [DIARY] 事件自然覆盖，跨窗口不重复注入。
+  // 当天日记里旧窗口写的注入、本会话写的不注入；之后的日记不注入。边界缺失时不注入任何日记。
   const cutoffDate = sessionDiaryCutoffDate(opts.sessionId, opts.loadTimeline);
+  const selfSession = (function () { const t = safeSessionToken(opts.sessionId || "default"); return t === "default" ? null : t; })();
   // 2026-10-03：hidden 用日记字段（不再读 diary_hidden.json）
   const diaryEntries = cutoffDate
-    ? readDiaryEntriesForShadow(opts.baseDir).filter(e => e.date < cutoffDate && !e.hidden)
+    ? readDiaryEntriesForShadow(opts.baseDir).filter(e => e.date <= cutoffDate && !e.hidden && e.session !== selfSession)
     : [];
   return { pinnedEntries, timeline, diaryEntries, memoriesV2, query, excludeIds, map: shadowMap, config: { diaryCount }, summaryBlocks: readSummaryBlocks(dataDir) };
 }
