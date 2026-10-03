@@ -1430,14 +1430,114 @@ function updateReplacement(id, text) {
 }
 
 // ========================
+// 状态区间记录 upsertSpanRecord（2026-10-03 新增，供 lib/conversation-state.js 用）
+//
+// 与 addReplacement / addManualRecord 的区别，以及为什么能这么做：
+//   1) matched 只存首尾两条锚点消息。注入侧取 aStart/aEnd 之后就只用它们的 id 定位
+//      （见下方 applyReplacements 的锚点段落），中间的正文一次都用不到。
+//      所以状态记录的大小与它覆盖多长无关——覆盖 1894 条和覆盖 20 条，存盘一样大。
+//      旧记录的 matched 存全量原文，是 scripts/regenerate-blocks.js 批量重算要用的；
+//      状态记录不需要它（要原文按 id 区间从时间线现取）。
+//   2) 写入前做区间重叠断言。applyReplacements 是按时间线位置单调推进定位的，
+//      两条同会话记录的区间一旦相交，定位会错位并吞掉相邻区间——这是硬伤不是偏好，
+//      所以宁可拒绝写入（阶段二迁移旧块时靠它挡住「状态前缀撞上还没退役的旧块」）。
+//
+// 本函数是纯新增，不改动任何既有函数的行为。
+// ========================
+function upsertSpanRecord(options) {
+  const opts = options || {};
+  const recId = String(opts.recordId || "").trim();
+  const session = String(opts.session || "").trim();
+  const text = String(opts.text || "").trim();
+  const startMsg = opts.startMsg;
+  const endMsg = opts.endMsg;
+  if (!recId || !session) return { ok: false, error: "缺少 recordId 或 session" };
+  if (!text) return { ok: false, error: "状态正文不能为空" };
+  if (text.length > MAX_MEMORY_CHARS) return { ok: false, error: "状态正文太长（" + text.length + " 字，上限 " + MAX_MEMORY_CHARS + "）" };
+  if (!startMsg || !startMsg.id || !endMsg || !endMsg.id) return { ok: false, error: "缺少首尾锚点消息 id" };
+
+  const tl = Array.isArray(loadTimeline()) ? loadTimeline() : [];
+  const idPos = new Map();
+  for (let i = 0; i < tl.length; i++) {
+    const id = tl[i] && tl[i].id ? String(tl[i].id) : null;
+    if (id && !idPos.has(id)) idPos.set(id, i);
+  }
+  const s = idPos.get(String(startMsg.id));
+  const e = idPos.get(String(endMsg.id));
+  if (s === undefined) return { ok: false, error: "区间起点消息不在当前会话时间线里" };
+  if (e === undefined) return { ok: false, error: "区间终点消息不在当前会话时间线里" };
+  if (e < s) return { ok: false, error: "区间首尾顺序颠倒" };
+
+  // 重叠检测：同会话、未停用、未隐藏、不是本记录，且区间与 [s,e] 有交集 → 拒绝
+  const items = loadItems();
+  const conflicts = [];
+  items.forEach(function (it) {
+    if (!it || it.removed || it.id === recId) return;
+    if (it.session && it.session !== session) return;
+    if (it.enabled === false || it.hidden === true) return;
+    const m = Array.isArray(it.matched) && it.matched.length ? it.matched : null;
+    if (!m) return;
+    let a = null, b = null;
+    for (let i = 0; i < m.length; i++) { if (!isSpecialEvent(m[i])) { a = m[i]; break; } }
+    for (let i = m.length - 1; i >= 0; i--) { if (!isSpecialEvent(m[i])) { b = m[i]; break; } }
+    if (!a || !b || !a.id || !b.id) return;
+    const os = idPos.get(String(a.id));
+    const oe = idPos.get(String(b.id));
+    if (os === undefined || oe === undefined) return;   // 定位不到就当不相交（与注入侧兜底一致）
+    if (os > e || oe < s) return;                       // 不相交
+    conflicts.push(it.id);
+  });
+  if (conflicts.length) {
+    return { ok: false, error: "区间与已有记录重叠，先把那些记录停用：" + conflicts.slice(0, 3).join("、") };
+  }
+
+  const now = nowIso();
+  let rec = items.find(function (x) { return x && x.id === recId; });
+  if (!rec) {
+    rec = {
+      id: recId,
+      created_at: now,
+      source: opts.source || "state",
+      session: session,
+      matched: [startMsg, endMsg],
+      range: { start_index: s, end_index: e },
+      range_label: String(opts.rangeLabel || "").trim(),
+      count: opts.count != null ? Number(opts.count) : (e - s + 1),
+      enabled: true,
+      removed: false,
+    };
+    items.push(rec);
+  } else {
+    if (Array.isArray(rec.matched) && rec.matched.length) archiveHistory(rec, text);
+    rec.matched = [startMsg, endMsg];
+    rec.range = { start_index: s, end_index: e };
+    if (String(opts.rangeLabel || "").trim()) rec.range_label = String(opts.rangeLabel).trim();
+    if (opts.count != null) rec.count = Number(opts.count);
+    rec.session = session;
+    rec.enabled = true;
+    rec.hidden = false;   // 状态记录不参与「隐藏」这套（那是老块堆太多时的权宜手段）
+  }
+  rec.text = text;
+  rec.memory = text;
+  rec.updated_at = now;
+  saveItems(items);
+  console.log("[context-replacements] 状态区间记录已写入：" + recId + "（第 " + s + "~" + e + " 条，" + text.length + " 字）");
+  return { ok: true, item: publicItem(rec) };
+}
+
+// ========================
 // 应用到发送给 AI 的上下文（统一生效逻辑）
 // ========================
 function buildMemoryMessage(item) {
   // 占位头 0919 起改英文块头（Context Assembly 0918 定稿命名），时间段紧跟一个空格；旧「（对话摘要」头仅存在于历史会话
   // 2026-09-28 用户拍板：压缩替换块在上下文中显示为 developer 段（与其他 V2 注入块同层）；
   // 出口经 role-mapper default 映射为 system 发给上游。
+  // 2026-10-03 状态机：source=state 的记录是「当前状态」而不是「历史摘要」，
+  // 头写错会让模型按「回顾过去」的方式去读它，所以单开一个头。非 state 记录行为不变。
+  const isState = item && item.source === "state";
+  const header = isState ? "## Conversation State" : "## Historical Summary";
   const label = item.range_label ? " " + item.range_label : "";
-  return { role: "developer", _ctxRep: true, content: "## Historical Summary" + label + "\n" + recordText(item) };
+  return { role: "developer", _ctxRep: true, content: header + label + "\n" + recordText(item) };
 }
 
 // ---------------- 重要内容标记（星星） ----------------
@@ -3080,6 +3180,8 @@ module.exports = {
   toggleReplacement,
   setReplacementHidden,
   updateReplacement,
+  // 2026-10-03 状态机写入通道（lib/conversation-state.js 用）
+  upsertSpanRecord,
   applyReplacements,
   getReplaceLog,
   searchContextEnhanced,

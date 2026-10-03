@@ -244,6 +244,67 @@
       <span class="cc-sync" id="cc-syncing">同步中…</span>
     </div>
     <div id="compaction-summary" style="margin-top:0"></div>
+
+    <!-- 2026-10-03 状态机：视图切换。阶段一起存量旧块仍在用，两套并存；
+         阶段三存量迁完后这个切换会退化成只留「状态机」。 -->
+    <div class="cs-mode" id="cs-mode">
+      <button type="button" class="cs-mode-btn on" id="cs-mode-state" onclick="csSetMode('state')">状态机</button>
+      <button type="button" class="cs-mode-btn" id="cs-mode-block" onclick="csSetMode('block')">旧块</button>
+      <span class="cs-mode-hint" id="cs-mode-hint"></span>
+    </div>
+
+    <!-- 状态机面板 -->
+    <div id="cs-panel" class="cs-panel">
+
+      <!-- 状态卡 -->
+      <div class="cs-card cs-state-card" id="cs-state-card">
+        <div class="cs-state-head">
+          <span class="cs-state-title">当前状态</span>
+          <span class="cs-ver" id="cs-ver">—</span>
+          <span class="cs-tag cs-tag-seed hide" id="cs-seed">块模式种子</span>
+          <span class="cs-state-meta" id="cs-state-meta"></span>
+        </div>
+        <div class="cs-cover" id="cs-cover"></div>
+        <div class="cs-state-body collapsed" id="cs-state-body">这个会话还没有状态。在下面的未覆盖区选一段原文，点「并入状态」。</div>
+        <div class="cs-acts">
+          <button type="button" class="cs-btn" id="cs-expand-btn" onclick="csToggleExpand()">展开全文</button>
+          <button type="button" class="cs-btn" id="cs-history-btn" onclick="csShowHistory()">并入历史</button>
+          <button type="button" class="cs-btn danger" onclick="csUndo()">撤销最后一次并入</button>
+        </div>
+        <div class="cs-chain" id="cs-chain"></div>
+        <div class="cs-chain-hint">点任一版可预览 · 再点一次回滚到那一版并从那里继续并入</div>
+      </div>
+
+      <!-- 迁移期提示（种子状态才显示） -->
+      <div class="cs-note hide" id="cs-note"></div>
+
+      <!-- diff 面板（预览后出现） -->
+      <div class="cs-diff hide" id="cs-diff">
+        <div class="cs-diff-head" id="cs-diff-head"></div>
+        <div class="cs-diff-list" id="cs-diff-list"></div>
+        <div class="cs-diff-foot">
+          <button type="button" class="cs-btn" onclick="csCancelPreview()">取消，原文留着</button>
+          <button type="button" class="cs-btn primary" id="cs-commit-btn" onclick="csCommit()">确认并入</button>
+        </div>
+      </div>
+
+      <!-- 未覆盖区 -->
+      <div class="cs-sec-title" id="cs-uncov-title">还没并入的原文</div>
+      <div class="cs-uncov-meta" id="cs-uncov-meta"></div>
+      <div class="cs-range-row">
+        <input type="text" id="cs-range-input" placeholder="如 5669-5674" inputmode="numeric">
+        <button type="button" class="cs-btn" onclick="csAutoChunk()">自动分块</button>
+        <button type="button" class="cs-btn primary" id="cs-preview-btn" onclick="csPreview()">▸ 并入状态</button>
+      </div>
+      <div class="cs-msg" id="cs-msg" aria-live="polite"></div>
+      <div class="cs-preview-msgs" id="cs-preview-msgs"></div>
+
+      <!-- 归档 -->
+      <details class="cs-arch" id="cs-arch-wrap">
+        <summary id="cs-arch-summary">历史归档</summary>
+        <div class="cs-arch-inner" id="cs-arch-inner"></div>
+      </details>
+    </div>
      <div class="cc-orig-search-wrap">
        <div class="search-bar" style="margin-bottom:6px">
          <input type="text" id="cc-original-search" placeholder="搜索原文…" oninput="scheduleCcOriginalSearch()">
@@ -626,6 +687,536 @@
  
  
  <script src="/admin/mobile.js"></script>
+ <!-- ══════════════════════════════════════════════════════════════════
+  会话状态机前端（2026-10-03 新增）
+  内联在 html 里而不是拆新文件：省掉两条静态路由，也不去动 admin-mobile.js
+  那个 25 万字符的巨文件。样式沿用本页既有的 --accent / --text3 / card 变量。
+  ══════════════════════════════════════════════════════════════════ -->
+<style id="cs-style">
+.cs-mode{display:flex;align-items:center;gap:6px;padding:0 0 12px}
+.cs-mode-btn{padding:7px 15px;border-radius:9px;border:1px solid var(--line,var(--line2,#e0d9d5));
+  background:var(--card,#fff);color:var(--text2,#6b625e);font:600 12.5px/1 inherit;cursor:pointer}
+.cs-mode-btn.on{background:var(--accent,#c2185b);border-color:var(--accent,#c2185b);color:#fff}
+.cs-mode-hint{margin-left:auto;font-size:11px;color:var(--text3,#9c938f);text-align:right;line-height:1.4}
+
+.cs-panel{display:none}
+.cs-panel.on{display:block}
+.cs-card{background:var(--card,#fff);border:1px solid var(--line,#ece7e4);border-radius:14px;padding:13px 14px;margin-bottom:12px}
+.cs-state-card{border-color:var(--accent-line,#f5c9dc);
+  box-shadow:inset 0 1px 0 var(--accent-soft,#fdeef4),0 6px 18px -14px rgba(194,24,91,.4)}
+.cs-state-head{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.cs-state-title{font-weight:700;font-size:15px}
+.cs-ver{font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;background:var(--accent,#c2185b);color:#fff}
+.cs-tag{font-size:11px;padding:2px 8px;border-radius:6px;font-weight:700}
+.cs-tag-seed{background:#eaf1fb;color:#2b5fa8;border:1px solid #c3d6f0}
+.cs-state-meta{margin-left:auto;font-size:11px;color:var(--text3,#9c938f)}
+.cs-cover{display:flex;gap:12px;flex-wrap:wrap;padding:9px 0 2px;font-size:11.5px;color:var(--text2,#6b625e)}
+.cs-cover b{color:var(--ink,var(--text,#2b2523))}
+.cs-state-body{margin:11px 0 0;padding:13px 14px;background:#fdfbfc;border:1px solid var(--line,#ece7e4);
+  border-radius:11px;font-size:14px;line-height:1.75;color:#3a3331;white-space:pre-wrap;word-break:break-word}
+.cs-state-body.collapsed{max-height:140px;overflow:hidden;
+  -webkit-mask-image:linear-gradient(180deg,#000 58%,transparent);mask-image:linear-gradient(180deg,#000 58%,transparent)}
+.cs-acts{display:flex;gap:7px;padding:12px 0 0;flex-wrap:wrap}
+.cs-btn{flex:1;min-width:84px;padding:10px 6px;border-radius:10px;font:600 12.5px/1 inherit;cursor:pointer;
+  border:1px solid var(--line2,#e0d9d5);background:var(--card,#fff);color:var(--text2,#6b625e)}
+.cs-btn.primary{background:var(--accent,#c2185b);border-color:var(--accent,#c2185b);color:#fff}
+.cs-btn.danger{border-color:#f5c9c9;color:#c62828}
+.cs-btn:disabled{opacity:.45;cursor:not-allowed}
+.cs-chain{display:flex;align-items:center;gap:5px;padding:12px 0 2px;flex-wrap:wrap}
+.cs-chain .v{font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:8px;border:1px solid var(--line2,#e0d9d5);
+  background:var(--card,#fff);color:var(--text2,#6b625e);cursor:pointer}
+.cs-chain .v.cur{background:var(--accent,#c2185b);border-color:var(--accent,#c2185b);color:#fff}
+.cs-chain .v.pv{background:#eaf1fb;border-color:#c3d6f0;color:#2b5fa8}
+.cs-chain .sep{color:var(--text3,#9c938f);font-size:11px}
+.cs-chain-hint{padding-top:8px;font-size:11.5px;color:var(--text3,#9c938f)}
+
+.cs-note{padding:10px 12px;border-radius:11px;font-size:12px;line-height:1.6;
+  background:#fdf3e3;border:1px solid #f0dab3;color:#7d4f0c;margin-bottom:12px}
+.cs-note.gap{background:#eaf1fb;border-color:#c3d6f0;color:#1e4a86}
+
+.cs-diff{border:1px solid var(--line,#ece7e4);border-radius:12px;overflow:hidden;margin-bottom:12px}
+.cs-diff-head{padding:9px 12px;background:#faf7f6;font-size:12px;font-weight:700;color:var(--text2,#6b625e);
+  border-bottom:1px solid var(--line,#ece7e4)}
+.cs-diff-list{max-height:340px;overflow:auto}
+.cs-op{padding:10px 12px;border-bottom:1px solid var(--line,#ece7e4);font-size:13px;display:flex;gap:9px;align-items:flex-start}
+.cs-op:last-child{border-bottom:0}
+.cs-op .ico{flex:none;width:17px;height:17px;border-radius:5px;display:grid;place-items:center;
+  font-size:11px;font-weight:700;color:#fff;margin-top:2px}
+.cs-op.add .ico{background:#2e7d5b}
+.cs-op.update .ico{background:#2b5fa8}
+.cs-op.remove .ico{background:#c62828}
+.cs-op.remove{background:#fdecec}
+.cs-op.blocked .txt{text-decoration:line-through;opacity:.5}
+.cs-op .txt{flex:1;min-width:0;line-height:1.55}
+.cs-op .why{display:block;color:var(--text3,#9c938f);font-size:11.5px;margin-top:2px}
+.cs-op .blk{flex:none;font-size:11px;padding:3px 9px;border-radius:7px;border:1px solid #f5c9c9;
+  background:#fff;color:#c62828;font-weight:700;cursor:pointer}
+.cs-op .blk.on{background:#c62828;color:#fff;border-color:#c62828}
+.cs-diff-foot{padding:9px 12px;background:#faf7f6;border-top:1px solid var(--line,#ece7e4);display:flex;gap:8px}
+
+.cs-sec-title{font-size:11.5px;font-weight:700;color:var(--text3,#9c938f);margin:16px 0 8px;
+  display:flex;align-items:center;gap:9px}
+.cs-sec-title::after{content:"";flex:1;height:1px;background:var(--line2,#e0d9d5)}
+.cs-uncov-meta{font-size:11.5px;color:var(--text2,#6b625e);margin-bottom:9px}
+.cs-range-row{display:flex;gap:7px;align-items:center}
+.cs-range-row input{flex:1;min-width:0;padding:10px;border-radius:10px;border:1px solid var(--line2,#e0d9d5);
+  background:var(--card,#fff);color:var(--text,#2b2523);font:13px/1 inherit}
+.cs-msg{margin-top:10px;font-size:12px;color:var(--accent,#c2185b);min-height:18px;text-align:center}
+.cs-msg.err{color:#c62828}
+.cs-msg.ok{color:#2e7d5b}
+.cs-preview-msgs{margin-top:10px;max-height:300px;overflow:auto;border:1px solid var(--line,#ece7e4);
+  border-radius:11px;background:var(--card,#fff)}
+.cs-pm{border-top:1px solid var(--line,#ece7e4);padding:9px 12px}
+.cs-pm:first-child{border-top:0}
+.cs-pm .who{font-size:11px;font-weight:700;margin-bottom:3px}
+.cs-pm.her .who{color:var(--accent,#c2185b)}
+.cs-pm.me .who{color:#2b5fa8}
+.cs-pm .who em{font-style:normal;color:var(--text3,#9c938f);font-weight:400;margin-left:5px}
+.cs-pm .bd{font-size:13.5px;line-height:1.6;word-break:break-word}
+
+.cs-arch{border:1px dashed var(--line2,#e0d9d5);border-radius:12px;background:#faf8f7;margin-top:12px}
+.cs-arch summary{padding:12px 14px;font-size:13px;font-weight:600;color:var(--text2,#6b625e);cursor:pointer;list-style:none}
+.cs-arch summary::-webkit-details-marker{display:none}
+.cs-arch summary::before{content:"▸ ";color:var(--text3,#9c938f)}
+.cs-arch[open] summary::before{content:"▾ "}
+.cs-arch-inner{padding:0 14px 12px}
+.cs-mini{display:flex;gap:7px;align-items:center;padding:7px 0;border-top:1px solid var(--line,#ece7e4);font-size:12px}
+.cs-mini .n{color:var(--text3,#9c938f);width:46px;flex:none;font-weight:700}
+.cs-mini .r{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text2,#6b625e)}
+.cs-mini .z{color:var(--text3,#9c938f);font-size:11px;flex:none}
+.cs-hist{padding:10px 12px;border-top:1px solid var(--line,#ece7e4);font-size:12.5px;line-height:1.6}
+.cs-hist .v{font-weight:700;color:var(--accent,#c2185b);margin-right:6px}
+.cs-hist .c{color:var(--text3,#9c938f);font-size:11px}
+.hide{display:none!important}
+</style>
+
+<script>
+/* ── 会话状态机前端 ────────────────────────────────────────────── */
+(function () {
+  "use strict";
+  var CS_API = location.pathname.indexOf('/heartbeat/admin/') === 0 ? '/heartbeat/admin/conversation-state' : '/admin/conversation-state';
+  var ccApi = function (p) {
+    return (location.pathname.indexOf('/heartbeat/admin/') === 0 ? '/heartbeat/admin' : '/admin') + p;
+  };
+  var CS = { mode: 'state', state: null, preview: null, busy: false, previewVersion: null };
+
+  function $(id) { return document.getElementById(id); }
+  function show(el, on) { if (el) el.classList.toggle('hide', !on); }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function currentSession() {
+    var sel = $('adm-session-sel');
+    return sel && sel.value ? sel.value : '';
+  }
+  function msg(txt, kind) {
+    var el = $('cs-msg');
+    if (!el) return;
+    el.textContent = txt || '';
+    el.className = 'cs-msg' + (kind ? ' ' + kind : '');
+  }
+
+  function csrfHeaders() {
+    var h = { 'Content-Type': 'application/json' };
+    try {
+      var m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
+      if (m) h['x-csrf-token'] = decodeURIComponent(m[1]);
+    } catch (e) { }
+    return h;
+  }
+  function req(path, opts) {
+    opts = opts || {};
+    return fetch(path, {
+      method: opts.method || 'GET',
+      headers: csrfHeaders(),
+      credentials: 'include',
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok || j.ok === false) throw new Error(j.error || j.message || ('HTTP ' + r.status));
+        return j;
+      });
+    });
+  }
+
+  /* ── 视图切换 ── */
+  window.csSetMode = function (mode) {
+    CS.mode = mode === 'block' ? 'block' : 'state';
+    $('cs-mode-state').classList.toggle('on', CS.mode === 'state');
+    $('cs-mode-block').classList.toggle('on', CS.mode === 'block');
+    $('cs-panel').classList.toggle('on', CS.mode === 'state');
+    // 旧块视图的三块内容在状态机模式下让位；注意搜索框是 class 不是 id
+    $('compaction-chunks').style.display = CS.mode === 'block' ? '' : 'none';
+    $('cc-multi-bar').style.display = CS.mode === 'block' ? '' : 'none';
+    var searchWrap = document.querySelector('.cc-orig-search-wrap');
+    if (searchWrap) searchWrap.style.display = CS.mode === 'block' ? '' : 'none';
+    $('cs-mode-hint').textContent = CS.mode === 'state'
+      ? '新压缩走状态机；下面的「旧块」是改造前的老视图'
+      : '老视图：每块各写一段摘要，互不知道对方写了什么';
+    if (CS.mode === 'state') loadCsState();
+  };
+
+  /* ── 读状态 ── */
+  function loadCsState() {
+    var sid = currentSession();
+    if (!sid) {
+      CS.state = null;
+      renderState(null);
+      msg('先在上面选一个会话');
+      return Promise.resolve();
+    }
+    return req(CS_API + '?session=' + encodeURIComponent(sid)).then(function (j) {
+      CS.state = j;
+      renderState(j);
+      renderRangeInfo();
+    }).catch(function (e) { msg(e.message, 'err'); });
+  }
+
+  function renderState(j) {
+    var body = $('cs-state-body');
+    var ver = $('cs-ver');
+    var cov = $('cs-cover');
+    var note = $('cs-note');
+    var expandBtn = $('cs-expand-btn');
+    var undoBtn = null;
+    var acts = $('cs-state-card').querySelectorAll('.cs-acts .cs-btn');
+    if (acts.length) undoBtn = acts[2];
+
+    if (!j || !j.exists) {
+      ver.textContent = '—';
+      cov.innerHTML = '';
+      body.textContent = '这个会话还没有状态。在下面选一段原文，点「并入状态」。';
+      body.classList.add('collapsed');
+      expandBtn.textContent = '展开全文';
+      expandBtn.disabled = true;
+      show($('cs-seed'), false);
+      show(note, false);
+      if (undoBtn) undoBtn.disabled = true;
+      renderChain([]);
+      return;
+    }
+    expandBtn.disabled = false;
+    body.textContent = j.text;
+    ver.textContent = 'v' + j.version;
+    var c = j.cover || {};
+    cov.innerHTML = '<span>覆盖 <b>' + esc(c.label_start || '') + ' ~ ' + esc(c.label_end || '') + '</b></span>' +
+      '<span>已并入 <b>' + j.version + '</b> 次</span>' +
+      '<span><b>' + j.text.length + '</b> 字</span>' +
+      '<span>更新于 <b>' + esc(String(j.updated_at || '').slice(0, 16).replace('T', ' ')) + '</b></span>';
+    show($('cs-seed'), !!j.seed_from_legacy);
+    if (undoBtn) undoBtn.disabled = !j.versions || j.versions.length < 1;
+    renderChain(j.versions || []);
+    renderNote(j);
+  }
+
+  function renderNote(j) {
+    var note = $('cs-note');
+    if (!note) return;
+    if (j.seed_from_legacy) {
+      note.className = 'cs-note gap';
+      note.innerHTML = '<b>迁移期：</b>这份状态是用旧块摘要回填的种子（<b>继承旧块「记忆列表」写法</b>）。' +
+        '下次并入新原文时会换成真·原文驱动的状态。';
+      show(note, true);
+    } else {
+      show(note, false);
+    }
+  }
+
+  function renderChain(versions) {
+    var el = $('cs-chain');
+    if (!el) return;
+    if (!versions || versions.length < 2) { el.innerHTML = ''; return; }
+    var parts = [];
+    versions.forEach(function (v, i) {
+      if (i) parts.push('<span class="sep">·</span>');
+      var cls = 'v' + (Number(v.version) === Number(CS.state && CS.state.version) ? ' cur' : '');
+      parts.push('<span class="' + cls + '" data-csv="' + v.version + '" onclick="csPickVersion(this)">v' + v.version + '</span>');
+    });
+    el.innerHTML = parts.join('');
+  }
+
+  window.csPickVersion = function (el) {
+    var v = Number(el.getAttribute('data-csv'));
+    if (CS.previewVersion === v) { // 再点一次 = 回滚
+      if (!confirm('回滚到 v' + v + '？v' + v + ' 之后的版本会被丢弃。')) return;
+      doRollback(v);
+      return;
+    }
+    CS.previewVersion = v;
+    var all = el.parentNode.querySelectorAll('.v');
+    for (var i = 0; i < all.length; i++) all[i].classList.remove('pv');
+    el.classList.add('pv');
+    req(CS_API + '/version?session=' + encodeURIComponent(currentSession()) + '&version=' + v)
+      .then(function (j) {
+        var body = $('cs-state-body');
+        body.textContent = j.text;
+        body.classList.remove('collapsed');
+        $('cs-expand-btn').textContent = '收起';
+        msg('正在预览 v' + v + '（再点一次该版本号即回滚）', 'ok');
+      }).catch(function (e) { msg(e.message, 'err'); });
+  };
+
+  function doRollback(v) {
+    msg('回滚中…');
+    req(CS_API + '/rollback?session=' + encodeURIComponent(currentSession()), { method: 'POST', body: { version: v } })
+      .then(function () {
+        CS.previewVersion = null;
+        msg('已回滚到 v' + v, 'ok');
+        return loadCsState();
+      }).catch(function (e) { msg(e.message, 'err'); });
+  }
+
+  window.csToggleExpand = function () {
+    var b = $('cs-state-body');
+    var btn = $('cs-expand-btn');
+    var c = b.classList.toggle('collapsed');
+    btn.textContent = c ? '展开全文' : '收起';
+  };
+
+  window.csShowHistory = function () {
+    var sid = currentSession();
+    if (!sid) return;
+    var wrap = $('cs-arch-wrap');
+    var inner = $('cs-arch-inner');
+    var st = CS.state;
+    if (!st || !st.exists) { msg('还没有并入历史', 'err'); return; }
+    var h = ['<div class="cs-hist" style="border-top:0">每次并入吃掉的原文区间：</div>'];
+    (st.versions || []).slice().reverse().forEach(function (v) {
+      h.push('<div class="cs-hist"><span class="v">v' + v.version + '</span>' +
+        esc(v.at ? String(v.at).slice(0, 16).replace('T', ' ') : '') +
+        ' · 覆盖到 ' + esc((st.cover && st.cover.label_end) || '') +
+        '<span class="c"> · ' + v.chars + ' 字</span></div>');
+    });
+    inner.innerHTML = h.join('');
+    $('cs-arch-summary').textContent = '并入历史（' + (st.versions || []).length + ' 次）';
+    wrap.open = true;
+  };
+
+  window.csUndo = function () {
+    var sid = currentSession();
+    if (!sid) return;
+    if (!confirm('撤销最后一次并入？被吃掉的那段原文会回到「还没并入」区。')) return;
+    msg('撤销中…');
+    req(CS_API + '/undo?session=' + encodeURIComponent(sid), { method: 'POST', body: {} })
+      .then(function (j) {
+        msg(j.removedAll ? '已整条撤销，原文全部回到未覆盖区' : ('已退回到 v' + j.rolled_to), 'ok');
+        CS.preview = null; show($('cs-diff'), false);
+        return loadCsState();
+      }).catch(function (e) { msg(e.message, 'err'); });
+  };
+
+  /* ── 区间 ── */
+  // 状态吃掉的是时间线上一段连续前缀，所以「还没并入的」就是它后面那一段。
+  // 没有 covered_range（比如状态是刚建的、记录还没写）就退回让用户手填。
+  var CS_TOTAL = 0;
+
+  function renderRangeInfo() {
+    var sid = currentSession();
+    if (!sid) return;
+    req(ccApi('/context-compaction/range-preview?session_id=' + encodeURIComponent(sid) + '&start=1&end=1'))
+      .then(function (j) {
+        CS_TOTAL = j.compactCount || 0;
+        var st = CS.state;
+        var cr = st && st.covered_range;
+        var el = $('cs-uncov-meta');
+        if (!el) return;
+        if (!cr || typeof cr.end_index !== 'number') {
+          el.innerHTML = '本会话可压缩 <b>' + CS_TOTAL + '</b> 条。填一个区间，或点「自动分块」。';
+          return;
+        }
+        var from = cr.end_index + 2;   // end_index 是 0-based 的「最后一条已覆盖」在可压缩列表里的下标
+        if (from > CS_TOTAL) {
+          el.innerHTML = '全部 <b>' + CS_TOTAL + '</b> 条都已并入状态。要再并入得先撤销，或换个会话。';
+          return;
+        }
+        el.innerHTML = '状态已吃掉第 1~' + (from - 1) + ' 条，<b>还没并入的是第 ' + from + '~' + CS_TOTAL + ' 条</b>。';
+      }).catch(function () { });
+  }
+
+  window.csAutoChunk = function () {
+    var sid = currentSession();
+    if (!sid) { msg('先选会话', 'err'); return; }
+    var cr = CS.state && CS.state.covered_range;
+    var from = (cr && typeof cr.end_index === 'number') ? cr.end_index + 2 : 1;
+    if (!CS_TOTAL) renderRangeInfo();
+    var total = CS_TOTAL;
+    if (!total) { msg('这个会话没有可压缩的内容', 'err'); return; }
+    if (from > total) { msg('全部都已并入了，先撤销一次', 'err'); return; }
+    var chunk = 100;
+    try {
+      var el = $('cc-cfg-chunk');
+      if (el && el.value) chunk = Math.max(20, parseInt(el.value, 10) || 100);
+    } catch (e) { }
+    // 从未覆盖区的末尾往前取一段——跟旧块「自动分块」的方向一致（先压更早的）
+    var s = Math.max(from, total - chunk + 1);
+    $('cs-range-input').value = s + '-' + total;
+    msg('已填入第 ' + s + '~' + total + ' 条（未覆盖区末尾 ' + chunk + ' 条）', 'ok');
+  };
+
+  function parseRange() {
+    var raw = String($('cs-range-input').value || '').trim();
+    var m = raw.match(/^(\d+)\s*[-~～]\s*(\d+)$/);
+    if (m) return { start: +m[1], end: +m[2] };
+    if (/^\d+$/.test(raw)) return { start: +raw, end: +raw };
+    return null;
+  }
+
+  /* ── 预览（调模型，不落盘）── */
+  window.csPreview = function () {
+    if (CS.busy) return;
+    var sid = currentSession();
+    if (!sid) { msg('先在上面选一个会话', 'err'); return; }
+    var r = parseRange();
+    if (!r) { msg('区间格式不对，填「起-止」，比如 5669-5674', 'err'); return; }
+    if (r.end < r.start) { msg('结束号要大于起始号', 'err'); return; }
+    // 挡住重复并入已覆盖的区间：状态吃掉的是连续前缀，重跑一遍只会得到「无变更」，
+    // 白花一次模型调用，还让人以为状态机坏了
+    var cr = CS.state && CS.state.covered_range;
+    if (cr && typeof cr.end_index === 'number' && r.start <= cr.end_index + 1) {
+      if (!confirm('第 ' + r.start + '~' + r.end + ' 条已经在状态覆盖范围里了（第 1~' + (cr.end_index + 1) +
+        ' 条）。\n\n真要重跑一遍吗？多数情况下结果会是「没有变更」，白花一次模型调用。建议先撤销，或把起点填到第 ' +
+        (cr.end_index + 2) + ' 条。')) return;
+    }
+    CS.busy = true;
+    var btn = $('cs-preview-btn');
+    btn.disabled = true; btn.textContent = '正在调模型…';
+    msg('正在算新状态（会调模型，可能几十秒到几分钟）');
+    show($('cs-diff'), false);
+
+    req(CS_API + '/preview?session=' + encodeURIComponent(sid), { method: 'POST', body: { start: r.start, end: r.end } })
+      .then(function (j) {
+        CS.preview = j;
+        renderDiff(j);
+        renderPreviewMsgs(r);
+        msg('算好了，确认无误再并入');
+      })
+      .catch(function (e) { msg(e.message, 'err'); })
+      .finally(function () {
+        CS.busy = false;
+        btn.disabled = false; btn.textContent = '▸ 并入状态';
+      });
+  };
+
+  function renderPreviewMsgs(r) {
+    var sid = currentSession();
+    req(ccApi('/context-compaction/range-preview?session_id=' + encodeURIComponent(sid) +
+      '&start=' + r.start + '&end=' + r.end + '&limit=200'))
+      .then(function (j) {
+        var h = [];
+        (j.items || []).forEach(function (it) {
+          var her = it.role === 'user';
+          h.push('<div class="cs-pm ' + (her ? 'her' : 'me') + '"><div class="who">' + (her ? '她' : '我') +
+            '<em>#' + it.num + ' · ' + esc(it.time || '') + '</em></div><div class="bd">' + esc(it.content) + '</div></div>');
+        });
+        var el = $('cs-preview-msgs');
+        el.innerHTML = h.join('');
+        el.scrollTop = 0;
+      }).catch(function () { });
+  }
+
+  function renderDiff(j) {
+    var head = $('cs-diff-head');
+    var list = $('cs-diff-list');
+    var r = j.range || {};
+    head.textContent = '并入第 ' + r.start_num + '~' + r.end_num + ' 条（' + r.count + ' 条）→ 状态会变成 v' + ((j.prev_version || 0) + 1) +
+      (j.search_rounds ? '　·　模型中途检索了 ' + j.search_rounds + ' 轮' : '');
+
+    var by = { add: 0, update: 0, remove: 0 };
+    (j.ops || []).forEach(function (o) { by[o.type] = (by[o.type] || 0) + 1; });
+    var sum = [];
+    if (by.add) sum.push('✚ 新增 ' + by.add);
+    if (by.update) sum.push('↻ 改写 ' + by.update);
+    if (by.remove) sum.push('✖ 删除 ' + by.remove);
+
+    var h = '';
+    if (sum.length) h += '<div class="cs-op" style="background:#faf7f6"><span class="ico" style="background:#6b625e">≡</span><span class="txt"><b>' +
+      sum.join('　') + '</b>' + (by.remove ? '<span class="why">删除项可拦截——不同意就点「阻止删除」，那一处会保留原样</span>' : '') + '</span></div>';
+    (j.ops || []).forEach(function (o, i) {
+      h += '<div class="cs-op ' + o.type + '" id="csop' + i + '"><span class="ico">' +
+        (o.type === 'add' ? '＋' : o.type === 'update' ? '↻' : '✖') + '</span>' +
+        '<span class="txt">' + esc(o.desc) + (o.reason ? '<span class="why">' + esc(o.reason) + '</span>' : '') + '</span>' +
+        (o.type === 'remove' ? '<button type="button" class="blk" onclick="csBlockOp(this,\'csop' + i + '\')">阻止删除</button>' : '') +
+        '</div>';
+    });
+    if (!(j.ops || []).length) h += '<div class="cs-op"><span class="txt" style="color:#9c938f">模型没有报告任何变更（这一段原文没带来状态变化）</span></div>';
+    list.innerHTML = h;
+
+    $('cs-commit-btn').textContent = '确认并入（' + String(j.state || '').length + ' 字）';
+    show($('cs-diff'), true);
+    setTimeout(function () { $('cs-diff').scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 60);
+  }
+
+  window.csBlockOp = function (btn, opId) {
+    var op = $(opId);
+    var blocked = btn.classList.toggle('on');
+    btn.textContent = blocked ? '已阻止' : '阻止删除';
+    if (op) op.classList.toggle('blocked', blocked);
+  };
+
+  window.csCancelPreview = function () {
+    CS.preview = null;
+    show($('cs-diff'), false);
+    $('cs-preview-msgs').innerHTML = '';
+    msg('已取消，原文保留在未覆盖区');
+  };
+
+  window.csCommit = function () {
+    var sid = currentSession();
+    var j = CS.preview;
+    if (!sid || !j) { msg('没有待并入的预览', 'err'); return; }
+    var blocked = [];
+    var nodes = $('cs-diff-list').querySelectorAll('.cs-op.remove.blocked .txt');
+    for (var i = 0; i < nodes.length; i++) blocked.push(nodes[i].childNodes[0].nodeValue.trim());
+
+    var btn = $('cs-commit-btn');
+    btn.disabled = true; btn.textContent = '并入中…';
+    msg('并入中…');
+    req(CS_API + '/commit?session=' + encodeURIComponent(sid), {
+      method: 'POST',
+      body: {
+        state: j.state, ops: j.ops, blocked: blocked,
+        start_msg: j.range.start_msg, end_msg: j.range.end_msg,
+        label_start: j.range.label_start, label_end: j.range.label_end,
+        count: j.range.count, range_label: j.range.range_label, source: 'merge',
+      },
+    }).then(function (r) {
+      CS.preview = null;
+      show($('cs-diff'), false);
+      $('cs-preview-msgs').innerHTML = '';
+      $('cs-range-input').value = '';
+      btn.disabled = false; btn.textContent = '确认并入';
+      msg('已并入，状态 → v' + r.version, 'ok');
+      return loadCsState();
+    }).catch(function (e) {
+      btn.disabled = false; btn.textContent = '确认并入';
+      msg(e.message, 'err');
+    });
+  };
+
+  /* ── 挂到现有的会话切换上 ── */
+  var origChange = window.onAdminSessionChange;
+  window.onAdminSessionChange = function () {
+    CS.preview = null; CS.previewVersion = null;
+    show($('cs-diff'), false);
+    if (typeof origChange === 'function') { try { origChange(); } catch (e) { } }
+    if (CS.mode === 'state') loadCsState();
+  };
+  var origLoad = window.loadCompactionPreview;
+  window.loadCompactionPreview = function () {
+    if (typeof origLoad === 'function') { try { origLoad(); } catch (e) { } }
+    if (CS.mode === 'state') loadCsState();
+  };
+
+  // 进压缩页时默认状态机视图；没有状态的会话自动回落到旧块（存量还在用）
+  document.addEventListener('DOMContentLoaded', function () {
+    setTimeout(function () {
+      window.csSetMode('state');
+      loadCsState();
+    }, 300);
+  });
+})();
+</script>
+
  <div class="cloud-drawer" id="cloudDrawer">
    <div class="cloud-drawer-head">
      <button class="cloud-drawer-btn" onclick="closeCloudDrawer()">← 返回词云</button>
