@@ -5896,10 +5896,17 @@ app.post("/admin/context-compaction/blocks", { preHandler: basicAuth }, async (r
         gapMinutes: gapMinutes,
         chunkSize: Number(body.chunkSize) || Number(ccCfg.compaction_chunk_size) || 100,
         chunkMin: Number(body.chunkMin) || Number(ccCfg.compaction_chunk_min) || 40,
-        chunkMax: Number(body.chunkMax) || Number(ccCfg.compaction_chunk_max) || 160
+        chunkMax: Number(body.chunkMax) || Number(ccCfg.compaction_chunk_max) || 160,
+        // 2026-10-03 状态机「自动分块」用：只算切点不建块（真建块会撞状态的重叠断言）
+        dryRun: body.dryRun === true
       });
       if (!r.ok) return reply.send({ ok: false, message: r.message });
-      return reply.send({ ok: true, action: "split_range", count: r.count, gapMinutes: gapMinutes });
+      return reply.send({
+        ok: true, action: "split_range", count: r.count, gapMinutes: gapMinutes,
+        // dryRun 时额外回切点边界（0-based 闭区间）；旧前端只读 count，不受影响
+        segments: r.segments || [],
+        dryRun: !!r.dryRun
+      });
     }
     // 旧式自动分块操作已下线（统一替换）
     if (action === "add" || action === "remove") {

@@ -15,6 +15,7 @@ const TEST_STATE = "test-state-sess-A";
 const TEST_STATE2 = "test-state-sess-B";
 const TEST_STATE3 = "test-state-sess-C";
 const TEST_STATE4 = "test-state-sess-D";
+const TEST_STATE5 = "test-state-sess-E";
 
 // ---- 记录真实存在过哪些测试文件，跑完原样恢复 ----
 // 注册在 exit 上：中途断言抛错也要还原，否则崩溃一次就留下一堆脏状态，
@@ -170,21 +171,31 @@ const spanAfter = spanWrites.filter(function (w) { return w.recordId === lbl.rec
 eq("注入记录的标签是完整区间", spanAfter.rangeLabel, "2026-01-01 00:00 ~ 2026-01-01 00:19");
 
 // ================= 4. 版本链只留 5 版 =================
+// 连续性断言（1003-21 加的）要求每次并入紧接上一次覆盖范围的末尾，
+// 所以这里改成一段段往后推：v2 已覆盖到 m14，v3..v8 依次吃 m15~m31。
+// （20 条不够 6 次连续并入，时间线加长到 32 条。）
+tl = mkMsgs(32, "m");
+const anchorable32 = tl.filter(function (m) { return m.id; });
+const chainEnds = [19, 22, 24, 26, 28, 31];   // v3..v8 各自的覆盖终点
+let chainPrev = 14;                            // v2 已覆盖到的终点下标
 for (let i = 3; i <= 8; i++) {
+  const end = chainEnds[i - 3];
   const rr = cs.commitMerge({
     session: TEST_STATE,
     state: "状态 v" + i,
     ops: [{ type: "add", desc: "x" + i }],
-    start_msg: anchorable[15],
-    end_msg: anchorable[19],
+    start_msg: anchorable32[chainPrev + 1],
+    end_msg: anchorable32[end],
   });
-  check("第 " + i + " 次并入成功", rr.ok === true, JSON.stringify(rr));
+  check("第 " + i + " 次并入成功（起点 " + (chainPrev + 1) + " 紧接上次覆盖）", rr.ok === true, JSON.stringify(rr));
+  chainPrev = end;
 }
 const st8 = cs.getState(TEST_STATE);
 eq("版本 8 后 version=8", st8.version, 8);
 eq("版本链被截到 5 版", st8.versions.length, 5);
 eq("版本链保留的是最近 5 版（v8..v4）", st8.versions.map(function (v) { return v.version; }).join(","), "8,7,6,5,4");
 eq("v4 已被挤出", st8.versions.some(function (v) { return v.version === 3; }), false);
+eq("覆盖终点推进到第 32 条（0-based 31）", st8.covered_range.end_index, 31);
 
 // ================= 5. 版本正文可单独取回 =================
 const v6 = cs.getVersionText(TEST_STATE, 6);
@@ -195,9 +206,9 @@ eq("v6 正文正确", v6.text, "状态 v6");
 r = cs.rollback({ session: TEST_STATE, version: 5 });
 check("回滚成功", r.ok === true, JSON.stringify(r));
 eq("回滚后正文 = v5", r.text, "状态 v5");
-eq("回滚后 cover.end 退回 v5 的终点", (r.cover || {}).end_id, "m19");
+eq("回滚后 cover.end 退回 v5 的终点（m24）", (r.cover || {}).end_id, "m24");
 eq("回滚时版本号跟着退回（内容即版本）", r.version, 5);
-eq("版本链截到 v5 为止（v3 早被 5 版上限挤掉）", r.versions.map(function (v) { return v.version; }).join(","), "5,4");
+eq("版本链截到 v5 为止（v3 早被 5 版上限挤掉）", (r.versions || []).map(function (v) { return v.version; }).join(","), "5,4");
 
 // ================= 7. 撤销最后一次并入 =================
 r = cs.undoLastMerge({ session: TEST_STATE });
@@ -243,6 +254,26 @@ r = cs.rollback({ session: TEST_STATE, version: 99 });
 check("回滚到不存在的版本被拒", r.ok === false);
 r = cs.undoLastMerge({ session: "never-existed" });
 check("撤销不存在的会话被拒", r.ok === false);
+
+// ================= 10b. 连续性断言：跳着并入必须被拒 =================
+// 1003-21 补的：状态覆盖的是连续前缀。用户若选了后面的一段（未覆盖区中间/末尾），
+// 中间那段原文会被状态静默吞掉、而模型从没读过——表现是「那段对话像从没发生过」，
+// 而且不报错、注入也正常，极难察觉。宁可拒绝写入。
+cs.commitMerge({ session: TEST_STATE5, state: "前一段", ops: [], start_msg: anchorable[0], end_msg: anchorable[5] });
+const cr5 = cs.getState(TEST_STATE5).covered_range;
+check("并入后能算出覆盖区间（从 cover 边界现算，不靠 span 快照）",
+  cr5 && cr5.start_index === 0 && cr5.end_index === 5, JSON.stringify(cr5));
+r = cs.commitMerge({ session: TEST_STATE5, state: "跳着来的", ops: [], start_msg: anchorable[10], end_msg: anchorable[15] });
+check("跳着并入被拒", r.ok === false, JSON.stringify(r));
+check("拒绝理由点明会被吞掉", /吞掉/.test(r.error || ""), r.error);
+check("拒绝理由给出正确起点（第 7 条）", /第 7 条/.test(r.error || ""), r.error);
+eq("被拒时状态没变", cs.getState(TEST_STATE5).text, "前一段");
+r = cs.commitMerge({ session: TEST_STATE5, state: "接着来的", ops: [], start_msg: anchorable[6], end_msg: anchorable[15] });
+check("紧接覆盖范围并入成功", r.ok === true, JSON.stringify(r));
+eq("连续时状态已更新", cs.getState(TEST_STATE5).text, "接着来的");
+const cr5b = cs.getState(TEST_STATE5).covered_range;
+eq("连续并入后覆盖终点推进到第 16 条（0-based 15）", cr5b.end_index, 15);
+eq("起点仍锚在第 1 条（连续前缀）", cr5b.start_index, 0);
 
 // ================= 恢复现场 =================
 restoreFiles();

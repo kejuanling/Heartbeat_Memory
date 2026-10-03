@@ -1050,11 +1050,9 @@
       var cx = $('cc-cfg-chunk-max'); if (cx && cx.value) cfg.chunkMax = +cx.value || 200;
     } catch (e) { }
 
-    // ★ 从未覆盖区「最早」开始切，不是从末尾。
-    // 状态覆盖的是一段连续前缀，从末尾取会留下一段空隙——那段原文会被状态吞掉却从没被模型读过。
-    // 切点交给「压缩页同一套规则」：POST /admin/context-compaction/blocks {action:"split_range"}，
-    // 服务端就是 splitRangeByGaps——按时间间隔找自然边界，和旧块「自动分块」完全同一套实现。
-    // 只借用它的切点计算，不真建块（那是旧块路径的事，这里建了会撞重叠断言）。
+    // 规则：建议起点 = 已并入到哪 + 1，纯函数。切了不并入，下次建议不变（不会跳过）。
+    // 切点用旧块「自动分块」同一套规则（splitRangeByGaps，按时间间隔找自然边界，
+    // 所以第一块可能是 156 条这种非整数），但 dryRun:true 只算不建——真建块会撞状态的重叠断言。
     req(ccApi('/context-compaction/blocks?session_id=' + encodeURIComponent(sid)), {
       method: 'POST',
       body: {
@@ -1062,18 +1060,18 @@
         start: from, end: total,
         gapMinutes: cfg.gapMinutes,
         chunkSize: cfg.chunkSize, chunkMin: cfg.chunkMin, chunkMax: cfg.chunkMax,
+        dryRun: true,
       },
     }).then(function (j) {
       if (!j.ok) { msg(j.message || j.error || '分块失败', 'err'); return; }
-      // 旧路由只回 count 不回边界，按同一套参数在本地复算一次切点（仅用于填输入框，不写任何数据）
-      var chunk = cfg.chunkSize || 100;
-      var minSize = Math.max(5, cfg.chunkMin || Math.floor(chunk / 2));
-      var maxSize = Math.max(minSize + 5, cfg.chunkMax || chunk * 2);
-      var take = Math.min(maxSize, Math.max(minSize, chunk));
-      var s = from, e = Math.min(total, s + take - 1);
+      var segs = j.segments || [];
+      if (!segs.length) { msg('这一段切不出块边界，手动填区间吧', 'err'); return; }
+      var first = segs[0];
+      var s = first.start + 1, e = first.end + 1;   // 服务端切点是 0-based
       $('cs-range-input').value = s + '-' + e;
-      msg('从第 ' + s + ' 条开始切，先取第 ' + (e - s + 1) + ' 条（目标 ' + chunk +
-        ' 条；整段按 ' + cfg.gapMinutes + ' 分钟间隔约切成 ' + (j.count || 1) + ' 块）。', 'ok');
+      msg('建议并入第 ' + s + '~' + e + ' 条（' + (e - s + 1) + ' 条）。' +
+        (segs.length > 1 ? '整段按 ' + cfg.gapMinutes + ' 分钟间隔还能再切 ' + (segs.length - 1) + ' 块。' : '') +
+        '不并入的话，下次建议还是这一段。', 'ok');
     }).catch(function (e) { msg(e.message, 'err'); });
   };
 

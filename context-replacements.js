@@ -1254,8 +1254,18 @@ function splitRangeByGaps(start, end, cfg) {
     itemsList = filtered;
     created.push(built.record);
   }
-  saveItems(itemsList);
-  return { ok: true, count: created.length, records: created.map(publicItem), removedCount: removedCount };
+  // 2026-10-03 状态机借用切点计算：dryRun=true 只算边界不落盘（不建块、不吞并旧块），
+  // 否则状态机「自动分块」会真的建出一批旧块，反过来撞 upsertSpanRecord 的重叠断言。
+  // 注意本函数的参数名是 cfg（不是 opts）——首版就写错过，curl 实测才炸出来。
+  if (!(cfg && cfg.dryRun === true)) saveItems(itemsList);
+  return {
+    ok: true,
+    count: created.length,
+    records: created.map(publicItem),
+    removedCount: removedCount,
+    segments: segments,                       // 0-based 闭区间，供前端直接填区间输入框
+    dryRun: !!(cfg && cfg.dryRun === true),
+  };
 }
 
 // ========================
