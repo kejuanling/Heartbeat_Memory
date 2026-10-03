@@ -6267,10 +6267,13 @@ app.get("/internal/paper/view", async (req, reply) => {
       const paperStore = require("./lib/paper-store");
       const e = paperStore.getEntry(__dirname, id);
       if (!e) return reply.code(404).send({ error: "纸不存在：id=" + id });
-      return reply.send({ id: e.id, title: e.title, content: String(e.content || "").trim() });
+      // 1003-20：补创建时间（与列表同口径）
+      const _tu = require("./time_utils");
+      const _dp = _tu.getDatePartsInTimeZone(new Date(e.created_at), _tu.resolveTimeZone());
+      return reply.send({ id: e.id, title: e.title, time: _dp.year + "-" + _dp.month + "-" + _dp.day + " " + _dp.hour + ":" + _dp.minute, content: String(e.content || "").trim() });
     }
     const list = papers.listPapers().slice(0, 10).map(e => ({
-      id: e.id, title: e.title, time: e.time, session: e.session,
+      id: e.id, title: e.title, time: e.time,
     }));
     reply.send({ papers: list, total: papers.listPapers().length,
       message: "带 id=编号 可看对应那张全文" });

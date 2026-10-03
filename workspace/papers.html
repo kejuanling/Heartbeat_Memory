@@ -100,7 +100,8 @@ function load(){
     if(!PAPERS.length){el.innerHTML='<div class="empty">还没有留过纸</div>';return}
     el.innerHTML=PAPERS.map(function(p,i){
       var t=p.title||'(无标题)';
-      var tag=p.session?'<em>窗口 '+esc(p.session.slice(0,10))+'</em>':'<em>共享</em>';
+      /* 1003-20：不显示会话编号，仅无 session 的纸标记「共享」 */
+      var tag=p.session?'':'<em>共享</em>';
       return '<div class="paper" onclick="openPaper('+i+')"><div class="t">#'+esc(p.id)+' · '+esc(t)+'</div><div class="m">'+esc(p.time||'')+' '+tag+'</div></div>';
     }).join('');
   }).catch(function(){
@@ -113,7 +114,8 @@ function openPaper(i){
     .then(function(r){return r.json()})
     .then(function(j){
       document.getElementById('sh-t').textContent=p.title||'留纸';
-      document.getElementById('sh-m').textContent=(p.time||'')+(p.session?(' · 窗口 '+p.session):' · 共享');
+      /* 1003-20：不显示会话编号 */
+      document.getElementById('sh-m').textContent=(p.time||'')+(p.session?'':' · 共享');
       document.getElementById('sh-c').textContent=(j.content||'').replace(/^#[^\n]*\n/,'').trim();
       document.getElementById('ov').classList.add('show');
     }).catch(function(){alert('读取失败')});
