@@ -1216,6 +1216,39 @@ function patchMessage(sessionId, id, patch) {
   return timeline[idx];
 }
 
+// 剥掉日记正文开头的「## 时间」头行（时间线 [DIARY] 消息从不带该头，见 lib/diary.js 落库格式）
+function diaryBodyOnly(content) {
+  return String(content || "").replace(/^##[^\n]*\n+/, "").trim();
+}
+
+// 日记 ↔ 时间线同步（2026-10-19，替代恒返回 0 的 syncDiarySpecialEvents）：按 diary_id 外键
+// 定点更新时间线里的 kind=diary 消息正文。页面编辑/恢复日记后调用，保证「聊天上下文」面
+// 与「谢的日记页面」面一致（跨窗口注入面直接读 diary.json，天然同步；隐藏按拍板不动时间线）。
+// 时间线消息不存在（存量未回填/旧消息无外键）时返回 missing:true，由调用方决定是否提示。
+function syncDiaryTimelineMessages(sessionId, diaryId, newWrappedContent) {
+  if (diaryId == null) return { patched: 0, missing: true };
+  try {
+    const sid = sessionId || "default";
+    const timeline = loadTimeline(sid);
+    let patched = 0;
+    const next = timeline.map(function (m) {
+      if (m && m.kind === "diary" && m.diary_id === diaryId) {
+        patched++;
+        return Object.assign({}, m, { content: newWrappedContent });
+      }
+      return m;
+    });
+    if (!patched) return { patched: 0, missing: true };
+    saveTimeline(next, sid);
+    sseNotify(sid);
+    console.log("[diary] 已按 diary_id=" + diaryId + " 同步时间线 " + patched + " 条消息");
+    return { patched: patched, missing: false };
+  } catch (e) {
+    console.warn("[diary] 时间线同步失败 (diary_id=" + diaryId + "):", e.message);
+    return { patched: 0, missing: true, error: e.message };
+  }
+}
+
 // 工具调用记录消息判定（服务器写入格式：assistant + 「【工具调用记录】」开头）
 function isToolNoteMessage(m) {
   return !!m && m.role === "assistant" && typeof m.content === "string" && m.content.startsWith("【工具调用记录】");
@@ -1785,10 +1818,12 @@ const wakeChatModule = require("./routes/wake-chat");
 // 隐藏消息，否则 AI 重建上下文时看不到自己写过什么（isRealDiary 让它永不压缩）。
 // 对话侧两条工具循环（streamToolLoop 主路径 + runWithTools 兜底）与唤醒侧工具循环共用这一个实现。
 // 注：diaryLib 在下方 .env 读取区之后才初始化（const 有 TDZ），本函数只在请求期被调用，运行期安全。
-function onDiaryToolWritten(sid, dContent) {
+function onDiaryToolWritten(sid, dContent, diaryId) {
   try {
-    appendMessages(sid, [{ role: "assistant", content: diaryLib.wrapDiaryTag(dContent), kind: "diary", time: new Date().toISOString() }], { silent: true });
-    console.log("[diary] diary_add 已落库时间线 (session=" + sid + ", chars=" + dContent.length + ")");
+    const msg = { role: "assistant", content: diaryLib.wrapDiaryTag(dContent), kind: "diary", time: new Date().toISOString() };
+    if (diaryId != null) msg.diary_id = diaryId;   // 2026-10-19：外键，页面编辑/恢复按它定点同步
+    appendMessages(sid, [msg], { silent: true });
+    console.log("[diary] diary_add 已落库时间线 (session=" + sid + ", chars=" + dContent.length + ", diary_id=" + diaryId + ")");
   } catch (e) { console.warn("[diary] diary_add 落库时间线失败:", e.message); }
 }
 
@@ -2091,8 +2126,8 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
       const visibleStored = _diaryResult.diaryContent ? _diaryResult.remainingText : storedText;
       if (!tailHasReply(sessionId, visibleStored)) {
         if (_diaryResult.diaryContent) {
-          diaryLib.appendDiaryEntry(_diaryResult.diaryContent, sessionId);
-          toAppend.push({ role: "assistant", content: diaryLib.wrapDiaryTag(_diaryResult.diaryContent), kind: "diary" });
+          const _diarySaved = diaryLib.appendDiaryEntry(_diaryResult.diaryContent, sessionId);
+          toAppend.push({ role: "assistant", content: diaryLib.wrapDiaryTag(_diaryResult.diaryContent), kind: "diary", diary_id: (_diarySaved && _diarySaved.id) || undefined });
         }
         toAppend.push({
           id: replyMsgId || undefined,
@@ -2310,7 +2345,7 @@ function normalizeDiaryForStore(raw) {
 // wake-event v2 落库实现（2026-09-15 批3收尾抽出）：网关内唤醒调度器（lib/wake-scheduler.js）进程内直调，无 HTTP 入口。
 function applyWakeEventV2(body) {
   try {
-    const { session_id, speak, diary, push, event, tools, wake_block_id, reasoning } = body || {};
+    const { session_id, speak, diary, diary_id: diaryId, push, event, tools, wake_block_id, reasoning } = body || {};
     const evSession = typeof session_id === "string" && session_id.trim() ? String(session_id).trim() : null;
     const speakRaw = String(speak || "").trim();
     const diaryRaw = normalizeDiaryForStore(diary);
@@ -2318,7 +2353,7 @@ function applyWakeEventV2(body) {
     const pushMeta = (push && typeof push === "object") ? push : null;
     const wakeTools = Array.isArray(tools) ? tools.filter(t => t && t.name) : [];
     const appended = [];
-    if (diaryRaw) appended.push({ role: "assistant", content: diaryRaw, kind: "diary" });
+    if (diaryRaw) appended.push({ role: "assistant", content: diaryRaw, kind: "diary", diary_id: (diaryId != null) ? diaryId : undefined });
     // 2026-09-24（用户拍板 B 案）：时间线是流水账记录层，AI 所有输出原样入库不可改写（0920 拍板核心）。
     // [NO_ACTION] 开头的静默输出同样原样落 assistant 行、打 kind=noaction——
     // /v1/history 与 sidx 下发层按 kind 过滤（与 kind=diary 同款机制），前端不显示；
@@ -2421,40 +2456,6 @@ function readDiaryEntries(limit) {
 // 编辑日记文件后，把时间线里同日的「醒来写了日记」特殊事件一并更新（旧事件「自动写了日记」同样匹配），
 // 保证注入 LLM 上下文的内容与日记文件一致。
 // ========================
-// sessionId：日记所属会话目录名（2026-09-12 起日记分会话保存，编辑会话日记只同步该会话的时间线）；
-// 传 null/undefined = 共享层日记，沿用旧行为同步默认会话时间线。
-function syncDiarySpecialEvents(fileName, newContent, sessionId) {
-  // 2026-09-20 拆篇迁移：文件名放开认批6「日期_时分秒.md」（原只认 日期.md，编辑新格式文件时事件静默不同步）
-  const dateMatch = String(fileName || "").match(/^(\d{4}-\d{2}-\d{2})(?:_\d{4,6}(?:-\d+)?)?\.md$/i);
-  if (!dateMatch) return 0;
-  const dateKey = dateMatch[1];
-  const timeline = loadTimeline(sessionId || undefined);
-  let updated = 0;
-  const next = timeline.map(msg => {
-    if (!msg || msg.role !== "assistant" || typeof msg.content !== "string") return msg;
-    const text = msg.content;
-    if (!/醒来写了日记|自动写了日记/.test(text)) return msg;
-    const head = text.match(/^（\s*(\d{4}-\d{2}-\d{2})(?:\s+(\d{1,2}:\d{2}))?\s*(?:醒来写了日记|自动写了日记)[:：]?\s*/);
-    if (!head || head[1] !== dateKey) return msg;
-    // 优先按「## 日期 时间」标题把对应条目摘出来；匹配不到就用整篇新内容
-    let diaryText = String(newContent || "").trim();
-    if (head[2]) {
-      const timeEsc = head[2].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const entryRe = new RegExp("##\\s*" + dateKey + "\\s+" + timeEsc + "\\s*\\n([\\s\\S]*?)(?=\\n\\s*##\\s|$)", "i");
-      const entryMatch = String(newContent || "").match(entryRe);
-      if (entryMatch && entryMatch[1].trim()) diaryText = entryMatch[1].trim();
-    }
-    updated++;
-    const timeLabel = head[2] ? `${head[1]} ${head[2]}` : head[1];
-    return { ...msg, content: `（${timeLabel} 醒来写了日记：${diaryText}）` };
-  });
-  if (updated > 0) {
-    saveTimeline(next, sessionId);
-    console.log(`[diary] 已同步 ${updated} 条日记特殊事件（${fileName}）`);
-  }
-  return updated;
-}
-
 // ========================
 // HTTP Basic Auth
 // ========================
@@ -6314,21 +6315,15 @@ function xieDiaryAuth(req, reply, done) {
   } catch (e) {}
   reply.code(401).send({ error: "需要访问口令" });
 }
-
-// 日记特殊事件同步（按 id）：从 entry.created_at 生成匹配用文件名，复用 syncDiarySpecialEvents 原逻辑
-function syncDiarySpecialEventsById(entry, newContent) {
-  const p = getDatePartsInTimeZone(new Date(entry.created_at), TIME_ZONE);
-  const fileName = `${p.year}-${p.month}-${p.day}_${p.hour}${p.minute}${p.second}.md`;
-  return syncDiarySpecialEvents(fileName, newContent, entry.session || undefined);
-}
-
 // ===== MCP 工具（tools_server.py）经内部接口读写日记（2026-10-03）=====
 // 写操作集中在网关单进程，避免多进程并发写 diary.json；鉴权由全局 /internal 钩子处理。
 app.post("/internal/diary", async (req, reply) => {
   try {
     const body = req.body || {};
-    const ok = diaryLib.appendDiaryEntry(body.content, body.session_id);
-    reply.send({ success: ok });
+    const saved = diaryLib.appendDiaryEntry(body.content, body.session_id);
+    // 2026-10-19：多返回新条目 id——tools_server.py 把它塞进工具回执，网关工具循环据此给
+    // 时间线消息打 diary_id 外键（success 仍为布尔，旧判断不受影响）
+    reply.send({ success: !!saved, id: (saved && saved.id) || undefined });
   } catch (err) {
     console.error("[internal/diary] 写日记失败:", err);
     reply.code(500).send({ error: err.message });
@@ -6455,8 +6450,9 @@ app.post("/xie-diary/api/update", { preHandler: xieDiaryAuth }, async (req, repl
     const p = getDatePartsInTimeZone(new Date(e.created_at), TIME_ZONE);
     const newContent = `## ${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}\n\n${newText}\n`;
     diaryStore.updateEntry(__dirname, e.id, { content: newContent });
-    const syncedEvents = syncDiarySpecialEventsById(e, newContent);
-    reply.send({ success: true, id: e.id, syncedEvents, chars: newContent.length });
+    // 2026-10-19：按 diary_id 外键同步时间线（syncedEvents 字段保留 = 同步条数，旧前端字段兼容）
+    const sync = syncDiaryTimelineMessages(e.session, e.id, diaryLib.wrapDiaryTag(newText));
+    reply.send({ success: true, id: e.id, syncedEvents: sync.patched, timelineMissing: sync.missing, chars: newContent.length });
   } catch (err) {
     console.error("[xie-diary] 编辑日记失败:", err);
     reply.code(500).send({ error: err.message });
@@ -6499,8 +6495,9 @@ app.post("/xie-diary/api/restore", { preHandler: xieDiaryAuth }, async (req, rep
     saveDiaryVersion(e.id, e.content);
     const old = fs.readFileSync(v.full, "utf-8");
     diaryStore.updateEntry(__dirname, e.id, { content: old });
-    const syncedEvents = syncDiarySpecialEventsById(e, old);
-    reply.send({ success: true, id: e.id, chars: old.length, syncedEvents });
+    // 2026-10-19：按 diary_id 外键同步时间线（恢复的正文剥掉「## 时间」头行后重包裹）
+    const sync = syncDiaryTimelineMessages(e.session, e.id, diaryLib.wrapDiaryTag(diaryBodyOnly(old)));
+    reply.send({ success: true, id: e.id, chars: old.length, syncedEvents: sync.patched, timelineMissing: sync.missing });
   } catch (err) {
     console.error("[xie-diary] 恢复历史版本失败:", err);
     reply.code(500).send({ error: err.message });

@@ -106,7 +106,8 @@ def tool_diary_add(args):
         return {"error": "写入陪伴日记失败: %s" % data["_error"]}
     if not data.get("success"):
         return {"error": "写入陪伴日记失败: %s" % data}
-    return {"success": True, "message": "已写入陪伴日记"}
+    # 2026-10-19：带回新条目 id——网关工具循环从回执解析出 diary_id，给时间线消息打外键
+    return {"success": True, "message": "已写入陪伴日记", "diary_id": data.get("id")}
 
 def tool_diary_list(args):
     count = args.get("count", 5)

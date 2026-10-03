@@ -1144,8 +1144,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
             if (!tailHasReply(sessionId, visibleContent)) {
               const toAppend = [];
               if (diaryResult.diaryContent) {
-                diaryLib.appendDiaryEntry(diaryResult.diaryContent, sessionId);
-                toAppend.push({ role: "assistant", content: diaryLib.wrapDiaryTag(diaryResult.diaryContent), kind: "diary" });
+                const diarySaved = diaryLib.appendDiaryEntry(diaryResult.diaryContent, sessionId);
+                toAppend.push({ role: "assistant", content: diaryLib.wrapDiaryTag(diaryResult.diaryContent), kind: "diary", diary_id: (diarySaved && diarySaved.id) || undefined });
               }
               if (visibleContent) {
                 // 与流式路径同口径落富字段（2026-09-15：此前非流式丢思考链/token，刷新后不一致）
@@ -1360,8 +1360,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
           if (!tailHasReply(sessionId, visibleContent)) {
             const toAppend = [];
             if (diaryResult.diaryContent) {
-              diaryLib.appendDiaryEntry(diaryResult.diaryContent, sessionId);
-              toAppend.push({ role: "assistant", content: diaryLib.wrapDiaryTag(diaryResult.diaryContent), kind: "diary" });
+              const diarySaved = diaryLib.appendDiaryEntry(diaryResult.diaryContent, sessionId);
+              toAppend.push({ role: "assistant", content: diaryLib.wrapDiaryTag(diaryResult.diaryContent), kind: "diary", diary_id: (diarySaved && diarySaved.id) || undefined });
             }
             if (visibleContent) {
               // 方案二增量：回复只追加一条（富字段 reasoning/tokens 一并落，跨设备刷新不丢）

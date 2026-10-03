@@ -50,11 +50,18 @@ function _injectSessionArg(name, args, sessionId) {
 // 2026-10-03：原先这段只写在 executeToolCalls（非流式兜底路径）里，streamToolLoop —— 也就是生产
 // 主路径 —— 完全没有，导致流式对话里用 diary_add 工具写的日记从不落时间线。现由两条循环共用本函数，
 // 判定口径只有这一处，不会再漂移。
-function _notifyDiaryWritten(name, args, error, onDiaryWritten, sessionId) {
+function _notifyDiaryWritten(name, args, error, result, onDiaryWritten, sessionId) {
   if (name !== "diary_add" || error || typeof onDiaryWritten !== "function") return;
   const dText = (args && typeof args.content === "string" && args.content.trim()) ? args.content.trim() : "";
   if (!dText) return;
-  try { onDiaryWritten(sessionId, dText); } catch (e) { mcpLogWarn("[diary] 时间线落库回调失败: " + e.message); }
+  // 2026-10-19：从工具回执解析新条目 id（tools_server.py 的 diary_add 返回 JSON 带 diary_id），
+  // 时间线消息据此打外键。解析失败（旧版工具/非 JSON 回执）不阻断落库，只是这条没有外键。
+  let diaryId = null;
+  try {
+    const parsed = JSON.parse(String((result && result.markdown) || ""));
+    if (parsed && parsed.diary_id != null) diaryId = parsed.diary_id;
+  } catch (e) {}
+  try { onDiaryWritten(sessionId, dText, diaryId); } catch (e) { mcpLogWarn("[diary] 时间线落库回调失败: " + e.message); }
 }
 
 
@@ -361,7 +368,7 @@ async function executeToolCalls(toolCalls, working, toolHistory, ctx, onEvent, n
       error,
       afterSeg: (typeof afterSeg === "number") ? afterSeg : -1   // 方案2刷新：该工具位于第 afterSeg 段正文之后（-1=最前）
     });
-    _notifyDiaryWritten(name, args, error, ctx.onDiaryWritten, ctx.sessionId);
+    _notifyDiaryWritten(name, args, error, result, ctx.onDiaryWritten, ctx.sessionId);
     if (typeof onEvent === "function") onEvent({ type: "tool_end", index, id, name, args, result: resTrunc, error, ok: !error, afterSeg: (typeof afterSeg === "number") ? afterSeg : -1 });
   }
 }
@@ -645,7 +652,7 @@ async function streamToolLoop({
       working.push({ role: "tool", tool_call_id: id, content: buildToolResultContent({ name, time: toolTime, error, markdown: _truncateResult(result.markdown || "", MAX_TOOL_RESULT_CHARS) }) });
       toolHistory.push({ name, args, time: toolTime, result: resTrunc, error });
       // 2026-10-03：与 executeToolCalls 同口径补齐——流式主路径此前漏写，diary_add 日记不落时间线
-      _notifyDiaryWritten(name, args, error, onDiaryWritten, sessionId);
+      _notifyDiaryWritten(name, args, error, result, onDiaryWritten, sessionId);
       const timelineTool = streamTimeline.find(function (n) { return n && n.type === "tool" && n.tool && n.tool.index === index; });
       if (timelineTool && timelineTool.tool) {
         // 工具名/ID 可能在流的早期尚未到齐；终态必须把完整身份回填到 canonical timeline。
