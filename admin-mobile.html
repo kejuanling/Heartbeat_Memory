@@ -1040,15 +1040,41 @@
     var total = CS_TOTAL;
     if (!total) { msg('这个会话没有可压缩的内容', 'err'); return; }
     if (from > total) { msg('全部都已并入了，先撤销一次', 'err'); return; }
-    var chunk = 100;
+
+    // 复用压缩页的分块配置，跟旧系统「自动分块」同一套口径（分块间隔/目标条数/最少/最多）
+    var cfg = { gapMinutes: 60, chunkSize: 100, chunkMin: 100, chunkMax: 200 };
     try {
-      var el = $('cc-cfg-chunk');
-      if (el && el.value) chunk = Math.max(20, parseInt(el.value, 10) || 100);
+      var gap = $('cc-cfg-gap'); if (gap && gap.value) cfg.gapMinutes = +gap.value || 60;
+      var cs = $('cc-cfg-chunk'); if (cs && cs.value) cfg.chunkSize = +cs.value || 100;
+      var cm = $('cc-cfg-chunk-min'); if (cm && cm.value) cfg.chunkMin = +cm.value || 100;
+      var cx = $('cc-cfg-chunk-max'); if (cx && cx.value) cfg.chunkMax = +cx.value || 200;
     } catch (e) { }
-    // 从未覆盖区的末尾往前取一段——跟旧块「自动分块」的方向一致（先压更早的）
-    var s = Math.max(from, total - chunk + 1);
-    $('cs-range-input').value = s + '-' + total;
-    msg('已填入第 ' + s + '~' + total + ' 条（未覆盖区末尾 ' + chunk + ' 条）', 'ok');
+
+    // ★ 从未覆盖区「最早」开始切，不是从末尾。
+    // 状态覆盖的是一段连续前缀，从末尾取会留下一段空隙——那段原文会被状态吞掉却从没被模型读过。
+    // 切点交给「压缩页同一套规则」：POST /admin/context-compaction/blocks {action:"split_range"}，
+    // 服务端就是 splitRangeByGaps——按时间间隔找自然边界，和旧块「自动分块」完全同一套实现。
+    // 只借用它的切点计算，不真建块（那是旧块路径的事，这里建了会撞重叠断言）。
+    req(ccApi('/context-compaction/blocks?session_id=' + encodeURIComponent(sid)), {
+      method: 'POST',
+      body: {
+        action: 'split_range',
+        start: from, end: total,
+        gapMinutes: cfg.gapMinutes,
+        chunkSize: cfg.chunkSize, chunkMin: cfg.chunkMin, chunkMax: cfg.chunkMax,
+      },
+    }).then(function (j) {
+      if (!j.ok) { msg(j.message || j.error || '分块失败', 'err'); return; }
+      // 旧路由只回 count 不回边界，按同一套参数在本地复算一次切点（仅用于填输入框，不写任何数据）
+      var chunk = cfg.chunkSize || 100;
+      var minSize = Math.max(5, cfg.chunkMin || Math.floor(chunk / 2));
+      var maxSize = Math.max(minSize + 5, cfg.chunkMax || chunk * 2);
+      var take = Math.min(maxSize, Math.max(minSize, chunk));
+      var s = from, e = Math.min(total, s + take - 1);
+      $('cs-range-input').value = s + '-' + e;
+      msg('从第 ' + s + ' 条开始切，先取第 ' + (e - s + 1) + ' 条（目标 ' + chunk +
+        ' 条；整段按 ' + cfg.gapMinutes + ' 分钟间隔约切成 ' + (j.count || 1) + ' 块）。', 'ok');
+    }).catch(function (e) { msg(e.message, 'err'); });
   };
 
   function parseRange() {
