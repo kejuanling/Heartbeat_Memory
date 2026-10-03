@@ -257,13 +257,25 @@ eq("指针在最新版 v11", st11.version, 11);
 eq("链仍为 5 版", st11.versions.length, 5);
 eq("最老的 v5/v6 已被挤出", st11.versions.map(function (v) { return v.version; }).join(","), "11,10,9,8,7");
 
-// ================= 8. 撤销到只剩一版时应整条移除 =================
+// ================= 8. 撤销到只剩一版：指针清空，但链保留（可恢复）=================
 cs.commitMerge({ session: TEST_STATE2, state: "只有一版", ops: [], start_msg: anchorable[0], end_msg: anchorable[3] });
 r = cs.undoLastMerge({ session: TEST_STATE2 });
 check("单版撤销成功", r.ok === true, JSON.stringify(r));
-eq("单版撤销整条移除", r.removedAll, true);
+eq("单版撤销指针清空", r.removedAll, true);
 eq("移除后 getState 不存在", cs.getState(TEST_STATE2).exists, false);
 eq("移除后注入记录也没了", spanWrites.filter(function (w) { return w.recordId.indexOf(TEST_STATE2) !== -1; }).length, 0);
+// 指针模型（1003-32）：链保留，全部标 undone——并入记录里可原样恢复
+const g2 = cs.getState(TEST_STATE2);
+eq("链保留 1 版", g2.versions.length, 1);
+eq("保留的版本标 undone", g2.versions[0].status, "undone");
+eq("保留版正文还在", g2.versions[0].chars, "只有一版".length);
+// 从「无状态」恢复：rollback 直接重建状态（不调模型）
+r = cs.rollback({ session: TEST_STATE2, version: 1 });
+check("从空状态恢复成功", r.ok === true, JSON.stringify(r));
+eq("恢复后 exists=true", cs.getState(TEST_STATE2).exists, true);
+eq("恢复后正文原样", cs.getState(TEST_STATE2).text, "只有一版");
+check("恢复后 covered_range 正确", cs.getState(TEST_STATE2).covered_range.end_index === 3, JSON.stringify(cs.getState(TEST_STATE2).covered_range));
+eq("注入记录重建", spanWrites.filter(function (w) { return w.recordId.indexOf(TEST_STATE2) !== -1; }).length, 1);
 
 // ================= 9. 区间重叠必须被拒 =================
 // 场景要写对：同一会话连续两次并入不算「重叠」——commitMerge 把覆盖区间固定成连续前缀

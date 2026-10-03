@@ -268,11 +268,20 @@
         <div class="cs-state-body collapsed" id="cs-state-body">这个会话还没有状态。在下面的未覆盖区选一段原文，点「并入状态」。</div>
         <div class="cs-acts">
           <button type="button" class="cs-btn" id="cs-expand-btn" onclick="csToggleExpand()">展开全文</button>
-          <button type="button" class="cs-btn" id="cs-history-btn" onclick="csShowHistory()">并入记录</button>
           <button type="button" class="cs-btn danger" onclick="csUndo()">撤销最后一次并入</button>
         </div>
         <div class="cs-chain" id="cs-chain"></div>
         <div class="cs-chain-hint">点任一版可预览 · 再点一次切到那一版（已撤销的划线版 = 恢复，不调模型；所有版本都保留）</div>
+      </div>
+
+      <!-- 并入记录：固定显示区（不再藏折叠区，撤销后也能看到并恢复） -->
+      <div class="cs-card" id="cs-hist-card">
+        <div class="cs-state-head">
+          <span class="cs-state-title">并入记录</span>
+          <span class="cs-state-meta" id="cs-hist-count"></span>
+        </div>
+        <div class="cs-chain-hint" style="padding-top:6px">点任意版本先预览它的正文，再点一次切到那一版（已撤销的切回去 = 恢复，不调模型）：</div>
+        <div id="cs-hist-list"></div>
       </div>
 
       <!-- 迁移期提示（种子状态才显示） -->
@@ -300,9 +309,9 @@
       <div class="cs-sec-title hide" id="cs-preview-title"></div>
       <div class="cs-preview-msgs" id="cs-preview-msgs"></div>
 
-      <!-- 归档 -->
-      <details class="cs-arch" id="cs-arch-wrap">
-        <summary id="cs-arch-summary">历史归档</summary>
+      <!-- 归档：旧块（阶段二迁移前的存量） -->
+      <details class="cs-arch">
+        <summary>历史归档 · 旧块（改造前的并列摘要，阶段二迁移后此区消失）</summary>
         <div class="cs-arch-inner" id="cs-arch-inner"></div>
       </details>
     </div>
@@ -882,21 +891,25 @@
     var cov = $('cs-cover');
     var note = $('cs-note');
     var expandBtn = $('cs-expand-btn');
-    var undoBtn = null;
     var acts = $('cs-state-card').querySelectorAll('.cs-acts .cs-btn');
-    if (acts.length) undoBtn = acts[2];
+    var undoBtn = acts.length ? acts[acts.length - 1] : null;
+    var hasVersions = !!(j && j.versions && j.versions.length);
 
     if (!j || !j.exists) {
       ver.textContent = '—';
       cov.innerHTML = '';
-      body.textContent = '这个会话还没有状态。在下面选一段原文，点「并入状态」。';
+      // 指针模型：整条撤销后链保留，并入记录里所有版本标「已撤销·可恢复」
+      body.textContent = hasVersions
+        ? '状态已整条撤销。在下方「并入记录」里点任意版本可原样恢复（不调模型），或重新并入。'
+        : '这个会话还没有状态。在下面的未覆盖区选一段原文，点「并入状态」。';
       body.classList.add('collapsed');
       expandBtn.textContent = '展开全文';
       expandBtn.disabled = true;
       show($('cs-seed'), false);
       show(note, false);
-      if (undoBtn) undoBtn.disabled = true;
+      if (undoBtn) undoBtn.disabled = !hasVersions;
       renderChain([]);
+      renderMergeHistory(j || { versions: [] });
       return;
     }
     expandBtn.disabled = false;
@@ -911,6 +924,7 @@
     if (undoBtn) undoBtn.disabled = !j.versions || j.versions.length < 1;
     renderChain(j.versions || []);
     renderNote(j);
+    renderMergeHistory(j);
   }
 
   function renderNote(j) {
@@ -980,18 +994,19 @@
     btn.textContent = c ? '展开全文' : '收起';
   };
 
-  window.csShowHistory = function () {
-    var sid = currentSession();
-    if (!sid) return;
-    var wrap = $('cs-arch-wrap');
-    var inner = $('cs-arch-inner');
-    var st = CS.state;
-    if (!st || !st.exists) { msg('还没有并入记录', 'err'); return; }
-    // 每行用那一版「自己的」覆盖区间（v.range，编号区间而非时间段——与输入框同一套语言）；
-    // 状态由服务端按指针派生：current / undone（可恢复）/ superseded
-    var h = ['<div class="cs-hist" style="border-top:0">点任意版本先预览正文，再点一次切到那一版（已撤销的切回去 = 恢复，不调模型）：</div>'];
-    (st.versions || []).slice().reverse().forEach(function (v) {
-      var statusTxt = v.status === 'current' ? '当前' : (v.status === 'undone' ? '已撤销·可恢复' : '');
+  // 并入记录：固定显示区（renderState 每次刷新都会重画），不再需要按钮触发
+  function renderMergeHistory(st) {
+    var list = $('cs-hist-list');
+    if (!list) return;
+    var versions = (st && st.versions) || [];
+    $('cs-hist-count').textContent = versions.length ? (versions.length + ' 版 · 保留最近 5 版') : '还没有并入';
+    if (!versions.length) {
+      list.innerHTML = '<div class="cs-hist" style="border-top:0;color:var(--text3,#9c938f)">还没有并入过。在下面的未覆盖区选一段原文开始。</div>';
+      return;
+    }
+    var h = [];
+    versions.forEach(function (v) {
+      var statusTxt = v.status === 'current' ? '当前' : (v.status === 'undone' ? '已撤销·点2下恢复' : '');
       var rng = v.range ? ('覆盖 第 ' + (v.range.start_index + 1) + '~' + (v.range.end_index + 1) + ' 条') : '覆盖区间未定';
       h.push('<div class="cs-hist"><span class="v">v' + v.version + '</span>' +
         (statusTxt ? '<span class="st ' + v.status + '">' + statusTxt + '</span>' : '') +
@@ -999,15 +1014,13 @@
         ' · ' + esc(rng) +
         '<span class="c"> · 状态 ' + v.chars + ' 字</span></div>');
     });
-    inner.innerHTML = h.join('');
-    $('cs-arch-summary').textContent = '并入记录（' + (st.versions || []).length + ' 版，保留最近 5 版）';
-    wrap.open = true;
-  };
+    list.innerHTML = h.join('');
+  }
 
   window.csUndo = function () {
     var sid = currentSession();
     if (!sid) return;
-    if (!confirm('撤销最后一次并入？被吃掉的那段原文会回到「还没并入」区。')) return;
+    if (!confirm('撤销最后一次并入？\n\n被吃掉的那段原文会回到「还没并入」区；这一版会标「已撤销」留在并入记录里，随时可原样恢复（不调模型）。')) return;
     msg('撤销中…');
     req(CS_API + '/undo?session=' + encodeURIComponent(sid), { method: 'POST', body: {} })
       .then(function (j) {
