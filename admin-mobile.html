@@ -268,7 +268,7 @@
         <div class="cs-state-body collapsed" id="cs-state-body">这个会话还没有状态。在下面的未覆盖区选一段原文，点「并入状态」。</div>
         <div class="cs-acts">
           <button type="button" class="cs-btn" id="cs-expand-btn" onclick="csToggleExpand()">展开全文</button>
-          <button type="button" class="cs-btn" id="cs-history-btn" onclick="csShowHistory()">并入历史</button>
+          <button type="button" class="cs-btn" id="cs-history-btn" onclick="csShowHistory()">并入记录</button>
           <button type="button" class="cs-btn danger" onclick="csUndo()">撤销最后一次并入</button>
         </div>
         <div class="cs-chain" id="cs-chain"></div>
@@ -843,11 +843,12 @@
     $('cs-mode-state').classList.toggle('on', CS.mode === 'state');
     $('cs-mode-block').classList.toggle('on', CS.mode === 'block');
     $('cs-panel').classList.toggle('on', CS.mode === 'state');
-    // 旧块视图的三块内容在状态机模式下让位；注意搜索框是 class 不是 id
+    // 旧块视图的块列表和多选栏在状态机模式下让位；
+    // 「搜索原文」两种模式都保留——状态机模式下它就是看原文的入口（搜原文、按时间段搜都行）
     $('compaction-chunks').style.display = CS.mode === 'block' ? '' : 'none';
     $('cc-multi-bar').style.display = CS.mode === 'block' ? '' : 'none';
     var searchWrap = document.querySelector('.cc-orig-search-wrap');
-    if (searchWrap) searchWrap.style.display = CS.mode === 'block' ? '' : 'none';
+    if (searchWrap) searchWrap.style.display = '';
     $('cs-mode-hint').textContent = CS.mode === 'state'
       ? '新压缩走状态机；下面的「旧块」是改造前的老视图'
       : '老视图：每块各写一段摘要，互不知道对方写了什么';
@@ -977,16 +978,18 @@
     var wrap = $('cs-arch-wrap');
     var inner = $('cs-arch-inner');
     var st = CS.state;
-    if (!st || !st.exists) { msg('还没有并入历史', 'err'); return; }
-    var h = ['<div class="cs-hist" style="border-top:0">每次并入吃掉的原文区间：</div>'];
+    if (!st || !st.exists) { msg('还没有并入记录', 'err'); return; }
+    // 每行用那一版「自己的」覆盖区间（v.cover），不能用当前 cover——回滚后当前值是旧值
+    var h = ['<div class="cs-hist" style="border-top:0">每次并入吃掉了哪段原文。某次并错了，就回滚到它前一个版本，再从正确的地方重新并入：</div>'];
     (st.versions || []).slice().reverse().forEach(function (v) {
+      var c = v.cover || {};
       h.push('<div class="cs-hist"><span class="v">v' + v.version + '</span>' +
         esc(v.at ? String(v.at).slice(0, 16).replace('T', ' ') : '') +
-        ' · 覆盖到 ' + esc((st.cover && st.cover.label_end) || '') +
-        '<span class="c"> · ' + v.chars + ' 字</span></div>');
+        ' · 吃掉 <b>' + esc(c.label_start || '?') + ' ~ ' + esc(c.label_end || '?') + '</b>' +
+        '<span class="c"> · 状态 ' + v.chars + ' 字' + (v.source && v.source !== 'merge' ? ' · ' + esc(v.source) : '') + '</span></div>');
     });
     inner.innerHTML = h.join('');
-    $('cs-arch-summary').textContent = '并入历史（' + (st.versions || []).length + ' 次）';
+    $('cs-arch-summary').textContent = '并入记录（' + (st.versions || []).length + ' 次）';
     wrap.open = true;
   };
 
@@ -1228,6 +1231,19 @@
     if (typeof origLoad === 'function') { try { origLoad(); } catch (e) { } }
     if (CS.mode === 'state') loadCsState();
   };
+
+  // ── 填区间后自动看原文（不调模型）──
+  // 点「并入状态」才会调模型；这里只是把选中范围的原文拉出来看，
+  // 免得「想看看这段是什么」也得烧一次调用。
+  var csRangeTimer = null;
+  $('cs-range-input').addEventListener('input', function () {
+    clearTimeout(csRangeTimer);
+    csRangeTimer = setTimeout(function () {
+      var r = parseRange();
+      if (!r) return;
+      renderPreviewMsgs(r);
+    }, 600);
+  });
 
   // 进压缩页时默认状态机视图；没有状态的会话自动回落到旧块（存量还在用）
   document.addEventListener('DOMContentLoaded', function () {
