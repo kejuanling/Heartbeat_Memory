@@ -1033,21 +1033,16 @@
           }
         }
         // 进页面就把未并入区的原文亮出来（默认最新 50 条），不用填区间也不用点按钮
-        csAutoShowUncovered();
+        csSuggestAndPreview(true);
       }).catch(function () { });
   }
 
-  window.csAutoChunk = function () {
-    var sid = currentSession();
-    if (!sid) { msg('先选会话', 'err'); return; }
-    var cr = CS.state && CS.state.covered_range;
-    var from = (cr && typeof cr.end_index === 'number') ? cr.end_index + 2 : 1;
-    if (!CS_TOTAL) renderRangeInfo();
-    var total = CS_TOTAL;
-    if (!total) { msg('这个会话没有可压缩的内容', 'err'); return; }
-    if (from > total) { msg('全部都已并入了，先撤销一次', 'err'); return; }
-
-    // 复用压缩页的分块配置，跟旧系统「自动分块」同一套口径（分块间隔/目标条数/最少/最多）
+  // ── 分块建议 + 原文预览（同一个来源）──
+  // 规则：建议起点 = 已并入到哪 + 1，纯函数。切了不并入，下次建议不变（不会跳过）。
+  // 切点用旧块「自动分块」同一套规则（splitRangeByGaps，按时间间隔找自然边界，
+  // 所以第一块可能是 156 条这种非整数），但 dryRun:true 只算不建——真建块会撞状态的重叠断言。
+  // preview 区间 = 建议区间：建议切哪段，原文就显示哪段的全部，没有条数上限。
+  function csChunkCfg() {
     var cfg = { gapMinutes: 60, chunkSize: 100, chunkMin: 100, chunkMax: 200 };
     try {
       var gap = $('cc-cfg-gap'); if (gap && gap.value) cfg.gapMinutes = +gap.value || 60;
@@ -1055,10 +1050,25 @@
       var cm = $('cc-cfg-chunk-min'); if (cm && cm.value) cfg.chunkMin = +cm.value || 100;
       var cx = $('cc-cfg-chunk-max'); if (cx && cx.value) cfg.chunkMax = +cx.value || 200;
     } catch (e) { }
+    return cfg;
+  }
 
-    // 规则：建议起点 = 已并入到哪 + 1，纯函数。切了不并入，下次建议不变（不会跳过）。
-    // 切点用旧块「自动分块」同一套规则（splitRangeByGaps，按时间间隔找自然边界，
-    // 所以第一块可能是 156 条这种非整数），但 dryRun:true 只算不建——真建块会撞状态的重叠断言。
+  // quiet=true（进页面自动跑）：填建议区间 + 显示该段原文，不弹提示；
+  // quiet=false（点「自动分块」）：同上 + 弹提示说明。
+  function csSuggestAndPreview(quiet) {
+    var sid = currentSession();
+    if (!sid) { if (!quiet) msg('先选会话', 'err'); return; }
+    var cr = CS.state && CS.state.covered_range;
+    var from = (cr && typeof cr.end_index === 'number') ? cr.end_index + 2 : 1;
+    var total = CS_TOTAL;
+    if (!total) { if (!quiet) msg('这个会话没有可压缩的内容', 'err'); return; }
+    if (from > total) {
+      if (!quiet) msg('全部都已并入了，先撤销一次', 'err');
+      show($('cs-preview-title'), false);
+      $('cs-preview-msgs').innerHTML = '';
+      return;
+    }
+    var cfg = csChunkCfg();
     req(ccApi('/context-compaction/blocks?session_id=' + encodeURIComponent(sid)), {
       method: 'POST',
       body: {
@@ -1069,17 +1079,21 @@
         dryRun: true,
       },
     }).then(function (j) {
-      if (!j.ok) { msg(j.message || j.error || '分块失败', 'err'); return; }
+      if (!j.ok) { if (!quiet) msg(j.message || j.error || '分块失败', 'err'); return; }
       var segs = j.segments || [];
-      if (!segs.length) { msg('这一段切不出块边界，手动填区间吧', 'err'); return; }
-      var first = segs[0];
-      var s = first.start + 1, e = first.end + 1;   // 服务端切点是 0-based
+      if (!segs.length) { if (!quiet) msg('这一段切不出块边界，手动填区间吧', 'err'); return; }
+      var s = segs[0].start + 1, e = segs[0].end + 1;   // 服务端切点是 0-based
       $('cs-range-input').value = s + '-' + e;
-      msg('建议并入第 ' + s + '~' + e + ' 条（' + (e - s + 1) + ' 条）。' +
-        (segs.length > 1 ? '整段按 ' + cfg.gapMinutes + ' 分钟间隔还能再切 ' + (segs.length - 1) + ' 块。' : '') +
-        '不并入的话，下次建议还是这一段。', 'ok');
-    }).catch(function (e) { msg(e.message, 'err'); });
-  };
+      renderPreviewMsgs({ start: s, end: e });
+      if (!quiet) {
+        msg('建议并入第 ' + s + '~' + e + ' 条（' + (e - s + 1) + ' 条）。' +
+          (segs.length > 1 ? '整段按 ' + cfg.gapMinutes + ' 分钟间隔还能再切 ' + (segs.length - 1) + ' 块。' : '') +
+          '不并入的话，下次建议还是这一段。', 'ok');
+      }
+    }).catch(function (e) { if (!quiet) msg(e.message, 'err'); });
+  }
+
+  window.csAutoChunk = function () { csSuggestAndPreview(false); };
 
   function parseRange() {
     var raw = String($('cs-range-input').value || '').trim();
@@ -1097,6 +1111,7 @@
     var r = parseRange();
     if (!r) { msg('区间格式不对，填「起-止」，比如 5669-5674', 'err'); return; }
     if (r.end < r.start) { msg('结束号要大于起始号', 'err'); return; }
+    if (r.end - r.start + 1 > 1000) { msg('区间太大（' + (r.end - r.start + 1) + ' 条）。分几次并入，先填 1000 条以内的一段。', 'err'); return; }
     // 挡住重复并入已覆盖的区间：状态吃掉的是连续前缀，重跑一遍只会得到「无变更」，
     // 白花一次模型调用，还让人以为状态机坏了
     var cr = CS.state && CS.state.covered_range;
@@ -1127,8 +1142,10 @@
 
   function renderPreviewMsgs(r) {
     var sid = currentSession();
+    // 不限条数：预览区间 = 分块建议区间（≤ chunkMax，默认 200），有多少显示多少。
+    // 手填超大区间时由上面的 guard 拦，这里不设 50/200 之类的暗上限。
     req(ccApi('/context-compaction/range-preview?session_id=' + encodeURIComponent(sid) +
-      '&start=' + r.start + '&end=' + r.end + '&limit=200'))
+      '&start=' + r.start + '&end=' + r.end))
       .then(function (j) {
         var h = [];
         (j.items || []).forEach(function (it) {
@@ -1139,23 +1156,13 @@
         var el = $('cs-preview-msgs');
         el.innerHTML = h.join('');
         el.scrollTop = 0;
-        // 标题随内容走：默认是未并入区的原文，填了区间就显示所选区间
+        // 标题随内容走：默认是建议区间的原文，填了区间就显示所选区间
         var tt = $('cs-preview-title');
         if (tt) {
-          tt.textContent = '原文预览 · 第 ' + r.start + '~' + r.end + ' 条' + (j.items && j.items.length ? '（显示 ' + j.items.length + ' 条）' : '');
+          tt.textContent = '原文预览 · 第 ' + r.start + '~' + r.end + ' 条（' + (j.items || []).length + ' 条）';
           tt.classList.remove('hide');
         }
       }).catch(function () { });
-  }
-
-  // 进页面就亮出原文：默认显示未并入区最新一段（最多 50 条），不用填任何东西
-  function csAutoShowUncovered() {
-    var cr = CS.state && CS.state.covered_range;
-    var from = (cr && typeof cr.end_index === 'number') ? cr.end_index + 2 : 1;
-    var total = CS_TOTAL;
-    if (!total || from > total) { show($('cs-preview-title'), false); return; }
-    var end = Math.min(total, from + 49);
-    renderPreviewMsgs({ start: from, end: end });
   }
 
   function renderDiff(j) {
