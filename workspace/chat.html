@@ -1537,6 +1537,8 @@ body[data-theme="crt"] #chat[data-layout="claude"] .msg.ai .bubble::before{
   content:"谢@机房:~$ ";display:inline;color:#8A7D68;
   text-shadow:none;letter-spacing:0;
 }
+body[data-theme="crt"] #chat[data-layout="claude"] .msg.ai .bubble p{display:inline;margin:0!important}
+body[data-theme="crt"] #chat[data-layout="claude"] .msg.ai .bubble p+p::before{content:"\A";white-space:pre}
 /* 008 输入条迁入纸流末尾：无箱体，纯提示行；流式输出期间自动隐身 */
 body[data-theme="crt"] #chat[data-layout="claude"] > .inputbar.crt-inline{
   position:relative!important;
