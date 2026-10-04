@@ -3981,8 +3981,12 @@ function renderAll(keepPos){
   // 先摘下切会话转圈遮罩再清空，否则第一次 renderAll 就把它删掉，遮罩此后永久失效
   const csKeep=document.getElementById("chatSwitching");
   if(csKeep&&csKeep.parentNode===chatEl)chatEl.removeChild(csKeep);
+  // 1004-05 CRT：输入条已迁入 #chat 末尾，清空前摘出，清完放回，否则 renderAll 一次后输入条永久消失
+  const ibKeep=chatEl.querySelector(".inputbar.crt-inline");
+  if(ibKeep)chatEl.removeChild(ibKeep);
   chatEl.innerHTML="";
   if(csKeep)chatEl.appendChild(csKeep);
+  if(ibKeep)chatEl.appendChild(ibKeep);
   removeEmpty();
   if(!msgs.length){chatEl.appendChild(emptyEl);if(keepPos!==true)scrollBottom();return;}
   if(!_lockFrom){ _from=Math.max(0,msgs.length-_WIN); _to=null; }
