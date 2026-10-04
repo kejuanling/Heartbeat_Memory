@@ -1002,7 +1002,7 @@
 .mp-wb.off:hover,.mp-vb.off:hover{filter:none}
 
 /* 1005-16b：评估理由顶部横幅（页面上方长条，右上角叉，12s 自动消失兜底） */
-.mp-reason-banner{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:300;width:min(94vw,640px);background:var(--card);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,0.12);padding:12px 40px 12px 16px;display:flex;flex-direction:column;gap:4px;animation:mp-banner-in .25s ease}
+.mp-reason-banner{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:300;width:min(94vw,640px);background:var(--card);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--accent);border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,0.12);padding:12px 40px 12px 16px;display:flex;flex-direction:column;gap:4px;animation:mp-banner-in .25s ease}
 @keyframes mp-banner-in{from{opacity:0;transform:translate(-50%,-8px)}to{opacity:1;transform:translate(-50%,0)}}
 .mp-reason-banner-title{font-size:13px;font-weight:600;color:var(--tab-active)}
 .mp-reason-banner-text{font-size:13px;color:var(--text2);line-height:1.7;word-break:break-word}
