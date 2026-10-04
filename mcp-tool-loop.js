@@ -28,7 +28,7 @@ function mcpNowLocal() {
 }
 function mcpLogWarn(msg) { console.warn("[" + mcpNowLocal() + "] " + msg); }
 
-const DEFAULT_MAX_TOOL_ROUNDS = 6;
+const DEFAULT_MAX_TOOL_ROUNDS = 10; // 1004-03：聊天/唤醒工具循环上限 6→10
 const MAX_REASONING_CHARS = 4000; // 思考链最多保留字符数，避免过长
 // 轮内上游超时：与 server.js 全局口径一致（此前硬编码 120s，比全局 180s 短，长回复会先于全局超时被误杀）
 const UPSTREAM_TIMEOUT_MS = Number(process.env.UPSTREAM_TIMEOUT_MS) || 180000;
