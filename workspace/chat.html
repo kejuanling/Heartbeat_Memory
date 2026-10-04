@@ -9703,16 +9703,11 @@ body[data-theme="claude"] footer .inputbar #send{box-shadow:0 2px 7px rgba(0,0,0
 /* 2026-10-05 底栏输入框终稿 v2：crt 独立输入条——不继承 claude 输入条样式，选择器带 :has(#chat[data-layout="claude"]) 提高优先级反覆盖 claude 块 */
 body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer{
   background:#0A0908!important;
-  border-top:1px solid rgba(224,179,106,.14)!important;
+  border-top:1px solid rgba(224,179,106,.10)!important;
   box-shadow:none!important;
+  transition:border-color .3s ease;
 }
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer::before{
-  content:"";position:absolute;top:-1px;left:0;right:0;height:1px;z-index:2;pointer-events:none;
-  background:linear-gradient(90deg,transparent,#E0B36A,transparent);
-  transform:scaleX(0);transform-origin:center;
-  transition:transform .45s cubic-bezier(.22,.8,.3,1);
-}
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer:focus-within::before{transform:scaleX(1)}
+body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer:focus-within{border-top-color:#E0B36A!important}
 body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .inputbar{
   background:none!important;border:none!important;border-radius:0!important;
   box-shadow:none!important;padding:10px 0!important;gap:9px;
