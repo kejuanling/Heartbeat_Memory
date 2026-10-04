@@ -5485,7 +5485,7 @@ try{var _ib=document.querySelector(".inputbar"),_ch=document.getElementById("cha
 if(_ib&&_ch){
   if(name==="crt"){
     if(_ib.parentNode!==_ch){_ib.classList.add("crt-inline");_ch.appendChild(_ib);}
-    if(!window._crtIO){window._crtIO=new MutationObserver(function(){var _c2=document.getElementById("chat");if(!_c2)return;var _i2=_c2.querySelector(".inputbar.crt-inline");if(_i2&&_c2.lastElementChild!==_i2)_c2.appendChild(_i2);});window._crtIO.observe(_ch,{childList:true});}
+    if(!window._crtIO){window._crtIO=new MutationObserver(function(){var _c2=document.getElementById("chat");if(!_c2)return;if(document.body.getAttribute("data-theme")!=="crt")return;var _i2=_c2.querySelector(".inputbar.crt-inline");if(!_i2){_i2=document.querySelector(".inputbar.crt-inline");if(_i2){_c2.appendChild(_i2);}return;}if(_c2.lastElementChild!==_i2)_c2.appendChild(_i2);});window._crtIO.observe(_ch,{childList:true});}
   }else{
     if(_ib.classList.contains("crt-inline")){_ib.classList.remove("crt-inline");var _f=document.querySelector("footer");if(_f)_f.appendChild(_ib);}
     if(window._crtIO){window._crtIO.disconnect();window._crtIO=null;}
