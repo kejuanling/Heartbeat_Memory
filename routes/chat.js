@@ -356,11 +356,7 @@ module.exports = function registerChatRoutes(app, deps) {
         .map(m => {
           const clean = { role: m.role };
           if (m.id !== undefined) clean.id = m.id;
-          if (m.content !== undefined) {
-            // 1005：落盘保留原始含[DIARY]文本，下发前端时剥掉日记块（kind:diary 消息已在上面过滤掉）
-            const _dr = diaryLib.extractDiaryFromResponse(m.content);
-            clean.content = _dr.diaryContent ? _dr.remainingText : m.content;
-          }
+          if (m.content !== undefined) clean.content = m.content;
           if (m.time) clean.time = m.time;
           if (m.reasoning !== undefined) clean.reasoning = m.reasoning;
           if (m.tools !== undefined) clean.tools = m.tools;
