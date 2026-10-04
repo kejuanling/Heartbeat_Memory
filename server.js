@@ -2117,12 +2117,9 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
   // → 表现为"字段永远不下发、前端静默退回旧行为"，测试还可能假通过。
   // 1004-11：与落盘同口径——落盘 visibleStored 剥日记块，终止帧此前不剥 → 前端本地缓存
   // 含 [DIARY] 与时间线字节不一致（补拉每次校准）。这里统一剥掉。
-  const finalStoredText = (function () {
-    const _base = stripToolEchoBlocks((r && r.text) ? r.text : (aiClean || ""));
-    if (!_base) return "";
-    const _dr = diaryLib.extractDiaryFromResponse(_base);
-    return _dr.diaryContent ? _dr.remainingText : _base;
-  })();
+  const _storedBase = stripToolEchoBlocks((r && r.text) ? r.text : (aiClean || ""));
+  const _storedDiary = _storedBase ? diaryLib.extractDiaryFromResponse(_storedBase) : { diaryContent: "", remainingText: "" };
+  const finalStoredText = _storedDiary.diaryContent ? _storedDiary.remainingText : _storedBase;
   const finalTimelinePayload = (r && Array.isArray(r.streamTimeline))
     ? r.streamTimeline.map(function (n) {
         if (!n || !n.type) return null;
@@ -2169,12 +2166,10 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
       // 存储用原始文本但去工具回声：保留 <wake>/<memory> 等标签作为上下文一部分；下发/回放仍用 aiClean。
       // 2026-09-24 B3：storedText/timeline 映射提级为函数级 finalStoredText/finalTimelinePayload（与终止帧共用）
       const storedText = finalStoredText;
-      // 2026-09-26 [DIARY]（MCP 分支补齐，与 routes/chat.js:1039 同口径）：回复中的日记块 →
-      // 日记文件 + 独立 kind=diary 隐藏消息（context-replacements isDiaryEvent 对其永不压缩，
-      // AI 上下文重建仍可见），可见正文剥掉日记块，避免时间线孪生。此前此分支漏提取，
-      // 日记既不进 diary/ 文件、又粘在可被压缩的普通消息里。
-      const _diaryResult = diaryLib.extractDiaryFromResponse(storedText);
-      const visibleStored = _diaryResult.diaryContent ? _diaryResult.remainingText : storedText;
+      // 1005 修复：此前 finalStoredText 已剥过一次 DIARY，这里又对剥过的文本再提取一次 → 永远为空。
+      // 改为直接复用首次提取的 _storedDiary。
+      const _diaryResult = _storedDiary;
+      const visibleStored = storedText;
       if (!tailHasReply(sessionId, visibleStored)) {
         if (_diaryResult.diaryContent) {
           const _diarySaved = diaryLib.appendDiaryEntry(_diaryResult.diaryContent, sessionId);
