@@ -2139,6 +2139,15 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
       // 1004-05：标记快照完成，前端补拉拿到最终内容
       const _agDone = activeGenMap.get(sessionId);
       if (_agDone) { _agDone.text = r.text; _agDone.reasoning = r.reasoning || _agDone.reasoning; _agDone.done = true; _agDone.ts = Date.now(); }
+      // 1004-06：服务端主动推送——iOS 后台会冻结前端 JS，前端 notify fetch 发不出去。
+      // 落盘时检查该会话有无在线 SSE 订阅：无订阅=用户不在看这个会话（切后台/关页面）→ 直接发推送。
+      try {
+        const _subs = sseSubscribers.get(sessionId);
+        if (!_subs || _subs.size === 0) {
+          const _pushBody = String(r.text || "").replace(/<[^>]+>/g, "").replace(/[#*`>\n]/g, " ").trim().slice(0, 200);
+          if (_pushBody) sendPushNotification({ title: "", body: _pushBody, sessionId }).catch(function () {});
+        }
+      } catch (e) {}
       // 方案二增量：以盘上为基同步请求差量（人设同步/去重补齐/重生成尾部对齐），
       // 不再拿请求消息数组全量重建覆盖——前端只带局部历史（分页/懒加载）也不会丢服务器完整历史。
       const reqMsgs = Array.isArray(kelivoMessages) && kelivoMessages.length
