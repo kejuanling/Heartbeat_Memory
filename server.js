@@ -96,6 +96,10 @@ const RECENT_REPLIES_MAX = 200; // 上限，防止长期运行膨胀（配合 TT
 // 2026-09-23 审查 F8：pending 占位的等待上限。首个请求失败/崩溃时要靠它兜底降级，
 // 否则重入请求会一直挂到连接超时。取 90s，与客户端「静默超时」同量级。
 const IDEMPOTENCY_PENDING_WAIT_MS = 90 * 1000;
+// 1003-27：同 client_msg_id 重入请求等待首轮的总上限（5 分钟）。
+// 首轮仍在生成时（前端断连自动重发 + 长生成/工具循环）不得降级重调上游，
+// 否则会产生双份上游调用、两个一模一样的回复；到总上限仍无结果才允许降级。
+const IDEMPOTENCY_PENDING_TOTAL_MS = 5 * 60 * 1000;
 function isRecentReplyCacheable(r) {
   return r && typeof r.text === "string" && r.text.length > 0;
 }
@@ -149,9 +153,10 @@ function waitPendingReply(id, timeoutMs) {
     let done = false;
     const timer = setTimeout(function () {
       if (done) return; done = true;
-      // 超时：清掉占位，避免后续请求继续等一个已死的占位
-      const now = recentReplies.get(id);
-      if (now && now.pending) recentReplies.delete(id);
+      // 1003-27：超时不再删除占位——占位是否仍 pending 由调用方判断（首轮还活着 → 继续等，
+      // 不降级重调上游）；删除占位的责任归 clearPendingReply（失败）/setRecentReply（成功覆盖）/
+      // 调用方总上限兜底。原实现超时即删占位，会令「首轮 >90s 仍在生成」的重入请求误判首轮已死
+      // 而再次调用上游，产生双份相同回复。
       resolve(null);
     }, Math.max(1000, Number(timeoutMs) || IDEMPOTENCY_PENDING_WAIT_MS));
     cur.waiters.push(function (entry) {
@@ -1778,6 +1783,7 @@ require("./routes/chat")(app, {
   isRecentReplyCacheable,
   IDEMPOTENCY_TTL_MS,
   IDEMPOTENCY_PENDING_WAIT_MS,
+  IDEMPOTENCY_PENDING_TOTAL_MS,
   setRecentReply,
   beginPendingReply,
   waitPendingReply,

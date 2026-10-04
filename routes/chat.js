@@ -145,6 +145,7 @@ module.exports = function registerChatRoutes(app, deps) {
     isRecentReplyCacheable,
     IDEMPOTENCY_TTL_MS,
     IDEMPOTENCY_PENDING_WAIT_MS,
+    IDEMPOTENCY_PENDING_TOTAL_MS,
     setRecentReply,
     beginPendingReply,
     waitPendingReply,
@@ -864,11 +865,34 @@ app.post("/v1/chat/completions", async (req, reply) => {
       //    改为等待首轮产出后回放，用户无感且不重复烧 token；等待上限见 IDEMPOTENCY_PENDING_WAIT_MS。
       if (cached && cached.pending) {
         console.log("[idempotency] 同 client_msg_id 请求仍在处理中，挂起等待首轮结果（不重复调上游）");
-        const waited = await waitPendingReply(clientMsgId, IDEMPOTENCY_PENDING_WAIT_MS);
+        // 1003-27：等待超时后若首轮占位仍在（首轮还活着）→ 继续等待，不降级重调上游。
+        // 修复背景：前端网络失败 600ms 自动重发（同 client_msg_id）+ 首轮长生成（工具循环/上游慢
+        // 超过 90s）+ 原实现在等待超时即降级重调 → 首轮连接已断但服务端继续生成并落盘，
+        // 双份上游调用产生两个一模一样的回复。只有占位消失（首轮失败/崩溃）或总上限到才降级。
+        let waited = await waitPendingReply(clientMsgId, IDEMPOTENCY_PENDING_WAIT_MS);
         if (waited && isRecentReplyCacheable(waited)) {
           if (await _replayCachedReply(waited)) return;
         }
-        console.warn("[idempotency] 等待超时或首轮未产出结果，本轮降级按新请求处理");
+        const waitTotalMs = (typeof IDEMPOTENCY_PENDING_TOTAL_MS === "number" && IDEMPOTENCY_PENDING_TOTAL_MS > 0)
+          ? IDEMPOTENCY_PENDING_TOTAL_MS : (IDEMPOTENCY_PENDING_WAIT_MS * 2);
+        const deadline = Date.now() + waitTotalMs;
+        while (Date.now() < deadline) {
+          const cur = recentReplies.get(clientMsgId);
+          if (!cur || !cur.pending) break; // 首轮已结束（成功被缓存 / 失败被清占位）
+          console.warn("[idempotency] 首轮仍在生成（已等待 " + Math.round((Date.now() - cached.ts) / 1000) +
+            "s），继续等待，不降级重调上游");
+          waited = await waitPendingReply(clientMsgId, IDEMPOTENCY_PENDING_WAIT_MS);
+          if (waited && isRecentReplyCacheable(waited)) {
+            if (await _replayCachedReply(waited)) return;
+          }
+        }
+        const finalEntry = recentReplies.get(clientMsgId);
+        if (finalEntry && finalEntry.pending) {
+          // 总上限到首轮仍在生成：释放占位允许降级（此时前端大概率已放弃或连接早已断开）
+          recentReplies.delete(clientMsgId);
+          console.warn("[idempotency] 首轮超过 " + Math.round(waitTotalMs / 1000) + "s 仍未完成，释放占位降级按新请求处理");
+        }
+        console.warn("[idempotency] 首轮未产出可回放结果，本轮降级按新请求处理");
       }
       // ③ 登记 pending 占位，声明本请求负责生成（供后续重入请求等待）
       beginPendingReply(clientMsgId);
