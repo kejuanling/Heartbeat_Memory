@@ -890,14 +890,6 @@ function escapeHtml(s){
 
  // 2026-09-12 日记按会话分开保存：分组渲染需要会话名（token→名称），异步加载后补渲染一次
  const ADM_SESSION_NAMES = {};
- async function loadDiarySessionNames(){
-   try{
-     const r=await fetch('/v1/sessions',{credentials:'include'});
-     const j=await r.json();
-     for(const s of ((j&&j.sessions)||[])){ if(s&&s.id) ADM_SESSION_NAMES[s.id]=s.name||''; }
-   }catch(e){}
- }
-
  
  
  
@@ -1295,19 +1287,6 @@ function reconcileCcList(el, html){
 }
 
  // ===== 多选模式 =====
- function toggleCcMultiSelect(){
-   AppState.ccMultiSelectMode = !AppState.ccMultiSelectMode;
-   AppState.ccSelectedChunks.clear();
-   if(AppState.ccMultiSelectMode){ loadCcReparseMaxChars(); }
-   const btn = document.getElementById('cc-multiselect-btn');
-   const bar = document.getElementById('cc-multi-bar');
-   if(btn) btn.classList.toggle('primary', AppState.ccMultiSelectMode);
-   if(btn) btn.textContent = AppState.ccMultiSelectMode ? '取消多选' : '多选';
-   if(bar) bar.classList.toggle('show', AppState.ccMultiSelectMode);
-   renderCompaction();
-   updateMultiSelectBar();
- }
-
  function toggleCcChunkSelect(type, key){
    const selKey = type === 'gap' ? 'gap-' + key : key;
    if(AppState.ccSelectedChunks.has(selKey)){
@@ -1343,28 +1322,6 @@ function reconcileCcList(el, html){
       AppState.ccReparseMergeMaxChars = (c && c.reparse_merge_max_chars!=null) ? Number(c.reparse_merge_max_chars) : 8000;
     }catch(e){ /* 读取失败用默认值 */ }
   }
-
- function toggleSelectAllCc(){
-   const d = AppState.compactionPlan;
-   if(!d) return;
-   // 全选范围 = 当前状态筛选下的可见项（未筛选时 = 全部）
-   const visible = ccBuildMergedItems(d);
-   const keys = visible.map(function(it){
-     return it.type === 'gap'
-       ? 'gap-' + (it.gap.startIdx||0) + '-' + (it.gap.endIdx||0)
-       : it.chunk.index;
-   });
-   const visibleSelected = keys.filter(function(k){ return AppState.ccSelectedChunks.has(k); }).length;
-   if(keys.length > 0 && visibleSelected >= keys.length){
-     // 当前筛选下已全选 → 只取消可见项
-     keys.forEach(function(k){ AppState.ccSelectedChunks.delete(k); });
-   }else{
-     AppState.ccSelectedChunks.clear();
-     keys.forEach(function(k){ AppState.ccSelectedChunks.add(k); });
-   }
-   renderCompaction();
-   updateMultiSelectBar();
- }
 
  function updateMultiSelectBar(){
    const bar = document.getElementById('cc-multi-bar');
@@ -1416,15 +1373,6 @@ function reconcileCcList(el, html){
  }
 
  // ===== 状态筛选 =====
- function toggleCcFilter(type){
-   if(AppState.ccFilter === type){
-     AppState.ccFilter = null; // 再点一次取消筛选
-   }else{
-     AppState.ccFilter = type;
-   }
-   renderCompaction();
- }
-
  // 应用筛选到 merged 列表
  function applyCcFilter(list, d){
    if(!AppState.ccFilter) return list;
@@ -1533,7 +1481,6 @@ function reconcileCcList(el, html){
  // 正文接其后可多行，段间空行分隔；匹配到块后按记录 id 批量写入（后端归档历史+置 enabled=false=待替换）
  let ccImportMatched = [];  // [{entry, chunk}]
  let ccImportFailed = [];   // [{entry}]
- function resetCcImportState(){ ccImportMatched = []; ccImportFailed = []; }
  function parseCcImportText(text){
    const lines = String(text||'').split(/\r?\n/);
    const entries = [];
@@ -1589,29 +1536,6 @@ function reconcileCcList(el, html){
    });
    pv.innerHTML = html;
  }
- function previewCcImport(){
-   const ta = document.getElementById('cc-import-ta');
-   if(!ta) return;
-   const entries = parseCcImportText(ta.value);
-   const pv = document.getElementById('cc-import-preview');
-   if(!entries.length){
-     if(pv) pv.innerHTML = '<div class="cc-import-item fail">未解析到任何条目：每段请以「边界: 首id..尾id」「[首id..尾id]」「块 #N」或「[a:b]」开头，正文接其后</div>';
-     const btn = document.getElementById('cc-import-do-btn');
-     if(btn) btn.disabled = true;
-     return;
-   }
-   ccImportMatched = [];
-   ccImportFailed = [];
-   entries.forEach(function(entry){
-     const c = matchCcImportEntry(entry);
-     if(c) ccImportMatched.push({ entry: entry, chunk: c });
-     else ccImportFailed.push({ entry: entry });
-   });
-   const btn = document.getElementById('cc-import-do-btn');
-   if(btn) btn.disabled = ccImportMatched.length === 0;
-   renderCcImportPreview();
- }
-
     
 
 
@@ -1666,42 +1590,12 @@ function removeSingleBlock(idx, blockIndex, isAi, recId){
  }
  
   // 文本 → 话题 token 集：去停用词的中文字/相邻字 bigram + 英数词，供相邻消息相似度比较
- function ccGapTopicTokens(text){
-  const STOP=new Set("的了我是你他它她这在在有也就说都还被把让跟和与或但而而且还再不没这那们个种些去来到上下前后时次天点会能要想觉得自己什么怎么这样那样现在然后因为所以但是如果感觉时候东西应该可以已经知道看到听到想到".split(""));
-  const raw=String(text||'').replace(/<[^>]+>/g,'').toLowerCase();
-  const out=new Set();
-  const runs=raw.match(/[a-z0-9]+|[\u4e00-\u9fff]+/g)||[];
-  const regEn=/^[a-z0-9]+$/;
-  runs.forEach(function(run){
-    if(regEn.test(run)){ if(run.length>=2) out.add(run); return; }
-    for(let i=0;i<run.length;i++){
-      if(STOP.has(run[i])) continue;
-      out.add(run[i]);
-      if(i+1<run.length && !STOP.has(run[i+1])) out.add(run[i]+run[i+1]);
-    }
-  });
-  return out;
-}
 // ccGapCutAtInput / ccDoCutSegments / ccGapToggleCuts（切点输入框/批量切分/切点开关）
 // 已于 2026-09-28 删除：零引用（UI 不再生成切点输入与开关入口）
 function ccFindGap(gs, ge){
   const d=AppState.compactionPlan; if(!d||!d.uncovered||!d.uncovered.gaps) return null;
   for(let i=0;i<d.uncovered.gaps.length;i++){ const g=d.uncovered.gaps[i]; if((g.startIdx||0)===gs && (g.endIdx||0)===ge) return g; }
   return null;
-}
-function ccGapItemHtml(key, m, idx){
-  return '<div class="cc-gap-item'+(m.marked?' marked':'')+'" id="cc-gap-item-'+key+'-'+idx+'" title="点击展开/收起">'
-    +'<div class="cc-gap-item-head">'
-    +'<span class="cc-gap-left">'
-    +'<span class="cc-role '+(m.role==='user'?'cc-role-she':'cc-role-me')+'">'+(m.role==='user'?'她':'我')+'</span>'
-    +'<span class="cc-gap-num">#'+m.num+'</span>'
-    +'</span>'
-    +'<span class="cc-gap-right">'
-    +(m.time?'<span class="cc-gap-time">'+escHtml(m.time)+'</span>':'')
-    +'</span>'
-    +'</div>'
-    +'<div class="cc-gap-body" onclick="toggleCcGapExpand(\''+key+'\','+idx+')">'+escHtml(m.content)+'</div>'
-    +'</div>'
 }
 function ccGapMoreWrapHtml(key, gs, ge){
   if(!AppState.ccGapHasMore[key]) return '';
@@ -1808,28 +1702,6 @@ function ccArmAllGapAutoLoad(){
  }
  
   // 导出块原文 txt：优先用块内已加载的 msgs，空则提示先展开
-  function exportBlockTxt(idx){
-    const c=(AppState.compactionPlan&&AppState.compactionPlan.chunks||[]).find(function(x){return x.index===idx;});
-    if(!c){ toast('块不存在'); return; }
-    const msgs=c.msgs||AppState.ccMsgBySig[c.signature]||[];
-    if(!msgs.length){ toast('该块原文尚未加载，请先展开一次再导出'); return; }
-    const baseNum=(typeof c.blockStart==='number'&&c.blockStart>=0)?c.blockStart:((typeof c.firstIdx==='number'&&c.firstIdx>=0)?c.firstIdx:null);
-    let txt='块 #'+c.index+(c.range_label?(' '+c.range_label):'')+'\n';
-    txt+='========================================\n\n';
-    msgs.forEach(function(m,i){
-      const role=m.role==='user'?'她':'我';
-      const num=(m&&('num' in m))?((typeof m.num==='number'&&m.num>=0)?('# '+(m.num+1)+' '):''):(baseNum===null?'':('# '+(baseNum+i+1)+' '));
-      const t=m.time?(' ['+m.time+']'):'';
-      txt+=num+role+t+'：'+(m.content||'')+'\n\n';
-    });
-    const blob=new Blob([txt],{type:'text/plain;charset=utf-8'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url; a.download='block_'+idx+'.txt';
-    document.body.appendChild(a); a.click();
-    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },60);
-  }
-
 // AI 块：查看摘要
  function toggleCcAiSummary(idx){
    const wasOpen=AppState.ccAiSummaryOpen.has(idx);
@@ -2074,18 +1946,6 @@ function ccArmAllGapAutoLoad(){
  }
  
  
- function renderCcMessagesLazy(c){
-   const sig=c.signature;
-   if(c.msgs) AppState.ccMsgBySig[sig]=c.msgs;
-   if(AppState.ccMsgsHtmlCache[sig]) return AppState.ccMsgsHtmlCache[sig];
-   const msgs=AppState.ccMsgBySig[sig];
-   if(!msgs){
-     ensureCcMessages();
-     return '<div style="margin-top:8px;font-size:12px;color:var(--text3)">消息加载中...</div>';
-   }
-   AppState.ccMsgsHtmlCache[sig]=buildCcMessagesHtml(c, msgs, false); // AI 块/手工块都显示标星
-   return AppState.ccMsgsHtmlCache[sig];
- }
  
  function ensureCcMessages(){
    if(AppState.ccMsgFetchDone || AppState.ccMsgFetching) return;
@@ -2269,37 +2129,6 @@ function ccArmAllGapAutoLoad(){
   }
   }
  
-   function renderPushLog(d){
-    const items=d.items||[];
-    window.__pushItems=items;
-    const st=document.getElementById('push-log-info');
-    if(st) st.textContent='共 '+items.length+' 条（最新在前）';
-    const el=document.getElementById('push-log-list');
-    if(!el)return;
-    if(!items.length){ el.innerHTML='<div class="empty">暂无推送记录（AI 推送后会记录到时间线）</div>'; return; }
-    let html='';
-    items.forEach(function(it){
-      let t='';
-      try{ if(it.at) t=new Date(String(it.at).replace(' ','T')+':00+08:00').toLocaleString('zh-CN',{hour12:false}); }catch(e){}
-      const isWake=it.sent===false;
-      const dotBg=isWake?'#e67e22':'#34495e';
-      const sessLabel = escapeHtml(it.session_id || 'default');
-      html+='<div class="push-item" data-push-pos="'+it.position+'" data-push-session="'+escapeHtml(it.session_id||'default')+'">'
-        +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-        +'<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text2);font-weight:600"><i style="width:8px;height:8px;border-radius:50%;background:'+dotBg+';display:inline-block;flex-shrink:0"></i>'+escapeHtml(it.channel||'bark')+'</span>'
-        +'<span style="display:inline-block;padding:1px 6px;font-size:10px;background:var(--bg2);color:var(--text3);border-radius:4px;flex-shrink:0">'+sessLabel+'</span>'
-        +'<span style="font-size:11px;color:var(--text3);flex:1;min-width:0">'+escapeHtml(t)+'</span>'
-        +'<span style="display:flex;gap:6px;flex-wrap:nowrap;flex-shrink:0">'
-        +(isWake?'':'<button class="btn btn-outline" style="width:auto;flex:0 0 auto;padding:2px 8px;font-size:11px;min-height:0" onclick="openPushEdit(\''+it.position+'\')">编辑</button>')
-        +'<button class="btn btn-outline push-del-btn" type="button" style="width:auto;flex:0 0 auto;padding:2px 8px;font-size:11px;min-height:0;color:#c0392b;border-color:#c0392b" onclick="deletePushEvent(\''+it.position+'\')">删除</button>'
-        +'</span>'
-        +'</div>'
-        +'<div class="push-item-title" style="margin:8px 0 0;font-size:13px;color:var(--text2)"><b>'+escapeHtml(it.title||'')+'</b></div>'
-        +'<div class="push-item-body" style="margin:0 0 4px;font-size:12px;color:var(--text2);white-space:pre-wrap;word-break:break-all">'+escapeHtml(it.body||'')+'</div>'
-        +'</div>';
-    });
-    el.innerHTML=html;
-  }
   function findPushItem(pos){ return (window.__pushItems||[]).find(function(x){ return String(x.position)===String(pos); }); }
   function deletePushEvent(pos){
     const it=findPushItem(pos);
@@ -2780,33 +2609,12 @@ function ccArmAllGapAutoLoad(){
  let ctxLongTexts={}; // 超长消息全文暂存，点击「展开全文」时换入
 
  // 点击「展开全文」把超长消息全文换入（全文已转义，直接当 HTML 写入）
- function expandCtxText(key,link){
-   const full=ctxLongTexts[key];
-   const div=link&&link.parentNode;
-   if(div&&full){ div.innerHTML=full; delete ctxLongTexts[key]; }
- }
  
  
  
  
  // ============ 记忆词云卡片 ============
  let cloudWord='';
- function switchMemView(v){
-  AppState.memView=v;
-  closeCloudDrawer();
-  const cloud=document.getElementById('mem-cloud-wrap');
-  const mempool=document.getElementById('mem-mempool-wrap');
-  if(cloud)cloud.style.display=v==='cloud'?'':'none';
-  if(mempool)mempool.style.display=v==='mempool'?'':'none';
-  const styleBtn=function(id,active){
-    const b=document.getElementById(id);
-    if(b)b.classList.toggle('active',active);
-  };
-  styleBtn('mem-view-cloud',v==='cloud');
-  styleBtn('mem-view-mempool',v==='mempool');
-  if(v==='cloud')loadMemCloud();
-  else if(v==='mempool')initMemPoolView();
- }
    // ============ 记忆蒸馏配置（1002 记忆改造 §8 3.1：定时开关 / 时间 / 批次 / 立即跑一次） ============
   async function loadDistillConfig(){
     const msg=document.getElementById('distill-config-msg');
@@ -3283,18 +3091,6 @@ function ccArmAllGapAutoLoad(){
     el.innerHTML=html;
   }
   // 点「导出」先选类别（全部 / 新五类 / 旧四类），再按所选导出活跃条目
-  function openMemPoolExport(){
-    const sel=document.getElementById('mempool-export-cat');
-    if(sel){
-      const cats=['关于她','认账','拓本','压缩摘要','对话碎片'];
-      const legacy=['关于我们','锚点','信号','对话摘要'];
-      const exists=function(c){ return !window.__memPoolData || !window.__memPoolData.stats || (window.__memPoolData.stats.byCategory[c]||0)>0; };
-      sel.innerHTML='<option value="">全部活跃记忆</option>'
-        +cats.concat(legacy).map(function(c){ return '<option value="'+c+'">'+c+(legacy.indexOf(c)>=0?'（旧）':'')+(exists(c)?'':' · 空')+'</option>'; }).join('');
-      sel.value='';
-    }
-    openModal('mempoolExportModal');
-  }
   async function exportMemPool(){
     const cat=document.getElementById('mempool-export-cat')?document.getElementById('mempool-export-cat').value:'';
     const msg=document.getElementById('mempool-clean-msg');
@@ -3896,158 +3692,10 @@ function ccArmAllGapAutoLoad(){
       toast('已彻底删除'); loadMemPool();
     }catch(e){ toast('操作失败: '+e.message); }
   }
- // 词云加载与画布渲染（loadMemCloud / renderWordCloud / selectCloudWord）
- async function loadMemCloud(){
-   const el=document.getElementById('mem-cloud');
-   if(!el)return;
-   el.innerHTML=skeletonHtml(6);
-   try{
-     const r=await fetch(ADMIN_API + '/context-compaction/keywords?limit=80');
-     const j=await r.json();
-     renderWordCloud(el,j.keywords||[]);
-   }catch(e){el.innerHTML='<div class="empty">加载失败: '+e.message+'</div>'}
- }
- function renderWordCloud(el,words){
-   el.innerHTML='';
-   if(!words.length){el.innerHTML='<div class="empty">暂无上下文可统计</div>';return}
-   const max=words[0].weight||1;
-   const pad=18;
-   const W=Math.max(300,(el.clientWidth||320)-pad*2), H=Math.max(360,Math.min(540,Math.round(W*0.55)));
-   const pickColor=function(ratio){
-     if(ratio>=0.72)return '#6a4848';
-     if(ratio>=0.45)return '#a5827f';
-     if(ratio>=0.22)return '#c3a8a4';
-     return '#cdbeb9';
-   };
-   // 自动缩放字号：按预估占用面积，超出画布 80% 就整体缩小，保证都能放下
-   const est=words.reduce(function(s,k){
-     const ratio=k.weight/max, size=13+26*ratio;
-     return s+(k.word.length*size*0.92+12)*(size+10);
-   },0);
-   const avail=(W-10)*(H-10)*0.8;
-   const scaleF=Math.min(1,Math.sqrt(avail/Math.max(1,est)));
-   const canvas=document.createElement('canvas');
-   canvas.width=W*2; canvas.height=H*2;
-   canvas.style.width=W+'px'; canvas.style.height=H+'px';
-   canvas.style.display='block'; canvas.style.margin='0 auto';
-   canvas.title='点击词查看相关对话';
-   el.appendChild(canvas);
-   const ctx=canvas.getContext('2d');
-   ctx.scale(2,2);
-   // 网格占用：已放置的词占住格子，新词检测候选位置是否冲突
-   const CELL=4, cols=Math.ceil(W/CELL), rows=Math.ceil(H/CELL);
-   const grid=new Uint8Array(cols*rows);
-   function cellFree(x,y,bw,bh){
-     const x0=Math.max(0,Math.floor((x-bw/2)/CELL)), x1=Math.min(cols-1,Math.floor((x+bw/2)/CELL));
-     const y0=Math.max(0,Math.floor((y-bh/2)/CELL)), y1=Math.min(rows-1,Math.floor((y+bh/2)/CELL));
-     for(let cy=y0;cy<=y1;cy++)for(let cx=x0;cx<=x1;cx++){if(grid[cy*cols+cx])return false}
-     return true;
-   }
-   function markCells(x,y,bw,bh){
-     const x0=Math.max(0,Math.floor((x-bw/2)/CELL)), x1=Math.min(cols-1,Math.floor((x+bw/2)/CELL));
-     const y0=Math.max(0,Math.floor((y-bh/2)/CELL)), y1=Math.min(rows-1,Math.floor((y+bh/2)/CELL));
-     for(let cy=y0;cy<=y1;cy++)for(let cx=x0;cx<=x1;cx++)grid[cy*cols+cx]=1;
-   }
-   const placed=[];
-   const R=Math.hypot(W,H)/2;
-   const fontFamily='"YouYuan","幼圆","Yuanti SC","STYuanti","圆体-简",sans-serif';
-   words.forEach(function(k,i){
-     const ratio=k.weight/max;
-     let done=false;
-     // 由内向外逐环扫描；放不下就缩小字号再试
-     for(const scl of [1,0.85,0.7]){
-       const size=Math.max(11,Math.round((13+26*ratio)*scaleF*scl));
-       const w=k.word.length*size*0.92;
-       const bw=w+12, bh=size+10;
-       let found=false,px=0,py=0;
-       for(let rad=8;rad<R&&!found;rad+=2){
-         const arc=Math.max(1,Math.round(rad*2*Math.PI/5));
-         for(let a=0;a<arc&&!found;a++){
-           const theta=(a/arc)*Math.PI*2+(rad%7)*0.17;
-           const x=W/2+rad*Math.cos(theta);
-           const y=H/2+rad*Math.sin(theta);
-           if(x-bw/2>=8&&x+bw/2<=W-8&&y-bh/2>=8&&y+bh/2<=H-8){
-             if(cellFree(x,y,bw,bh)){found=true;px=x;py=y}
-           }
-         }
-       }
-       if(found){
-         placed.push({word:k.word,x:px,y:py,bw:bw,bh:bh,size:size,color:pickColor(ratio),alpha:0.62+0.38*ratio,hoverColor:(ratio>=0.72?'#5a3a3a':'#6a4848')});
-         markCells(px,py,bw,bh);
-         done=true;
-         break;
-       }
-     }
-     if(!done)return;
-   });
-   let hoverIdx=-1;
-   const draw=function(hover){
-     ctx.clearRect(0,0,W,H);
-     placed.forEach(function(p,idx){
-       const s=hover===idx?Math.round(p.size*1.14):p.size;
-       ctx.font=s+'px '+fontFamily;
-       ctx.textAlign='center'; ctx.textBaseline='middle';
-       ctx.globalAlpha=p.alpha;
-       ctx.fillStyle=(hover===idx?p.hoverColor:p.color);
-       ctx.fillText(p.word,p.x,p.y);
-       ctx.globalAlpha=1;
-     });
-   };
-   draw(-1);
-   canvas.addEventListener('mousemove',function(e){
-     const rect=canvas.getBoundingClientRect();
-     const x=e.clientX-rect.left, y=e.clientY-rect.top;
-     let hit=-1;
-     for(let k2=0;k2<placed.length;k2++){
-       const p=placed[k2];
-       if(x>=p.x-p.bw/2&&x<=p.x+p.bw/2&&y>=p.y-p.bh/2&&y<=p.y+p.bh/2){hit=k2;break;}
-     }
-     if(hit!==hoverIdx){hoverIdx=hit;draw(hit);}
-     canvas.style.cursor=hit>=0?'pointer':'default';
-   });
-   canvas.addEventListener('mouseleave',function(){
-     if(hoverIdx!==-1){hoverIdx=-1;draw(-1);}
-     canvas.style.cursor='default';
-   });
-   canvas.addEventListener('click',function(e){
-     const rect=canvas.getBoundingClientRect();
-     const x=e.clientX-rect.left, y=e.clientY-rect.top;
-     for(const p of placed){
-       if(x>=p.x-p.bw/2&&x<=p.x+p.bw/2&&y>=p.y-p.bh/2&&y<=p.y+p.bh/2){
-         selectCloudWord(p.word);
-         return;
-       }
-     }
-   });
- }
  
  function fmtCcClock(iso){
    if(!iso)return '';
    try{return new Date(iso).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}catch(e){return iso;}
- }
- async function selectCloudWord(word){
-   const drawer=document.getElementById('cloudDrawer');
-   const title=document.getElementById('cloudDrawerTitle');
-   const el=document.getElementById('cloud-results');
-   if(!el)return;
-   if(drawer)drawer.classList.add('open');
-   if(title)title.textContent='关键词「'+word+'」相关对话';
-   el.innerHTML='<div class="loading">检索「'+word+'」...</div>';
-   try{
-     const r=await fetch(ADMIN_API+'/context/keywords/related?word='+encodeURIComponent(word));
-     const j=await r.json();
-     const segs=j.segments||[];
-     if(!segs.length){el.innerHTML='<div class="similar-empty">没有找到相关对话</div>';return}
-     el.innerHTML='<div class="cloud-results-title">命中 '+j.total+' 条消息 · '+segs.length+' 段对话</div>'+
-       segs.map(function(s){
-         const range=(s.startTime||s.endTime)?fmtCcClock(s.startTime)+' ~ '+fmtCcClock(s.endTime):'';
-         return '<div class="cloud-res-item">'+
-           '<div class="cloud-res-meta"><div class="cloud-res-left"><span class="cloud-res-time">'+escapeHtml(range)+'</span></div>'+
-           '<span class="cloud-res-imp">命中 '+s.count+' 条</span></div>'+
-           '<div class="cloud-res-content">'+escapeHtml(s.preview||'')+'</div>'+
-           '</div>';
-       }).join('');
-   }catch(err){el.innerHTML='<div class="similar-empty">加载失败: '+escapeHtml(err.message)+'</div>'}
  }
  function closeCloudDrawer(){
    const d=document.getElementById('cloudDrawer');
