@@ -774,7 +774,7 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .rw .rw-h{font-size:11px;color:var(--cap-think-text);letter-spacing:1px;display:flex;align-items:center;gap:6px}
 .rw .rw-c{display:none;margin-top:6px;white-space:pre-wrap;font-size:12px}
 /* 展开后限高滚动窗口：长思考不再无限撑高气泡（2026-09-12，用户定值 280px） */
-.rw.open .rw-c{display:block;max-height:280px;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-right:4px}
+.rw.open .rw-c{display:block;max-height:280px;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;padding-right:4px;word-break:break-word}
 .rw .rw-a{font-size:10px;color:var(--ink3);margin-left:auto;transition:transform .2s}
 .rw.open .rw-a{transform:rotate(180deg)}
 /* 思考过程 / 工具痕迹：气泡外的独立容器（单独成行，不塞进气泡） */
@@ -6457,7 +6457,13 @@ function closeDrawer(){document.getElementById("sessionDrawer").classList.remove
     var d=document.getElementById("sessionDrawer");
     if(d&&d.classList.contains("open"))return;
     var tg=e.target;
-    if(tg&&typeof tg.closest==="function"&&tg.closest(".drawer,textarea,input,select"))return;
+    // 1004-01：命中输入区/弹层时必须重置 _swipe/_sx 再 return——原实现直接 return 不重置，
+    // 导致在输入框里滑动时 _tx=clientX-旧起点(0) 被误判成「从左边缘右滑」而误触抽屉。
+    if(tg&&typeof tg.closest==="function"&&tg.closest(".drawer,textarea,input,select,[contenteditable=true]")){_swipe=false;_sx=0;return;}
+    if(document.activeElement&&/^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)){_swipe=false;_sx=0;return;}
+    var _em=document.getElementById("editMask");
+    if(_em&&!_em.classList.contains("hidden")){_swipe=false;_sx=0;return;}   // 编辑/动作菜单等底部弹层打开中
+    if(document.querySelector(".call-overlay.open")){_swipe=false;_sx=0;return;}
     _sx=t.clientX;_sy=t.clientY;_tx=0;_ty=0;_swipe=false;
     if(_sx>34)return;   // 仅左边缘窄带触发
   },{passive:true});
@@ -10126,6 +10132,14 @@ body[data-theme="terra"] #chat .tool-trace .tt-h{
 body[data-theme="terra"] #chat .tool-trace .tt-name{font-family:'Geist Mono',ui-monospace,monospace!important;color:#3d3929!important;}
 body[data-theme="terra"] #chat .tool-trace .tt-icon{color:#788c5d!important;}
 body[data-theme="terra"] #chat .tool-trace .tt-done,body[data-theme="terra"] #chat .tool-trace .tt-ok{color:#788c5d!important;}
+/* 1004-01：展开时恢复纵向卡片布局。inline-flex 收起时是横向胶囊，展开后 tt-h 与
+   tt-body 会横向并排，工具名被挤到左边与结果块重叠；展开时切回 flex 纵向堆叠。 */
+body[data-theme="terra"] #chat .tool-trace.open{
+  display:flex!important;flex-direction:column!important;align-items:stretch!important;
+  width:100%!important;max-width:min(84%,640px)!important;
+  border-radius:16px!important;padding:8px 12px!important;
+}
+body[data-theme="terra"] #chat .tool-trace.open .tt-h{flex-shrink:0;align-self:flex-start;}
 
 /* ===== 输入区：设计稿样式（无底栏，独立元素） ===== */
 /* footer 容器：完全透明，无边框 */
