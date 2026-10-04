@@ -4,6 +4,8 @@
 // Memory V2 存储层（C1）
 // 六轴单集合记忆：kind(fact/rule) × subject(user/self/relationship/external)（1002-14 删除 quote/milestone 两类）
 // × status(active/superseded/archived) × confidence × origin × provenance。（priority/重要级已删，0920 用户拍板）
+// Schema v2.0（1005-16）：删 10 字段（priority/speaker/updated_at/action_hint/related_subjects/source/scope/valid_from/valid_to/related_memories——全部死字段或预留无消费），
+// 加 4 字段（worth/worth_reason/volatility/volatility_reason——评估标签，judge 判定与离线探针产出，1005-16 用户拍板入库）。
 // 设计契约：gpt串口/13.txt（Schema v1.0 冻结稿）、17.txt（MVP Plan C1）。
 // 铁律：
 //   1. 不 require 旧记忆模块（memory-pool/memory-engine），不写旧池任何文件；
@@ -20,31 +22,29 @@ const { nowIso } = require("./time_utils");
 // 只读守卫（与 memory-engine 同款思路）：只读进程禁止一切落盘与内存改写
 const READONLY = process.env.MEMORY_V2_READONLY === "1";
 
-// ---- Schema v1.0 常量（冻结：改动任何枚举/语义必须升 schema_ver 并走迁移说明） ----
-const SCHEMA_VER = 1;
+// ---- Schema v2.0 常量（冻结：改动任何枚举/语义必须升 schema_ver 并走迁移说明） ----
+const SCHEMA_VER = 2;
 const KINDS = ["fact", "rule"];
 const SUBJECTS = ["user", "self", "relationship", "external"];
 const STATUSES = ["active", "superseded", "archived"]; // pending_review 在队列文件，不在集合
 const ORIGINS = ["memory_tag", "tool", "manual", "promotion", "import"];
 const DIRECTIONS = ["toward_user", "about_user", "self_discipline"]; // 仅 rule 可选
-const SPEAKERS = ["user", "self", "ai"]; // 历史字段：原 kind=quote 专用，1002-14 分类删除后不再有 kind 联动（界面映射：涵=user / 谢=ai）
 const PROVENANCE_METHODS = ["tag_inline", "mcp_tool", "admin_form", "summary_promotion", "diary_promotion", "migration_batch", "review_admit"];
 const SUPERSEDED_REASONS = ["updated", "merged", "contradiction_resolved", "retracted", "archived", "unknown"];
-const RELATED_RELS = ["derived_from", "pairs_with"];
 const TEXT_MAX = 2000;
 const PROVENANCE_QUOTE_MAX = 200;
 const NOTE_MAX = 200;
 
+// ---- 1005-16：评估标签（worth/volatility）——judge 判定与离线探针产出，1005-16 用户拍板入库 ----
+// worth：这条记忆值不值得长期保留（0-1）；volatility：会不会过时（stable/volatile/situational）
+const VOLATILITIES = ["stable", "volatile", "situational"];
+const WORTH_REASON_MAX = 200;
+const VOLATILITY_REASON_MAX = 200;
+
 // ---- 1002 记忆改造 §8 第 4 项：schema 演进新增字段（全部可选，缺按默认值补，向后兼容） ----
-// source：这条记忆从哪来；scope：适用范围；valid_from/to：生效/失效时间
-// sensitive：高敏（注入前脱敏）；triggers：命中即优先浮现的触发词；action_hint：命中时该怎么做
-// last_hit_at：最后被检索命中时间（系统字段，评估用，写入方不可指定）
-const SOURCE_TYPES = ["diary", "paper", "chat", "distill", "backfill"];
-const SOURCE_REF_MAX = 200;
-const SCOPE_MAX = 200;
+// sensitive：高敏（注入前脱敏）；triggers：命中即优先浮现的触发词；last_hit_at：最后被检索命中时间（系统字段，评估用，写入方不可指定）
 const TRIGGER_MAX = 40;
 const TRIGGERS_MAX = 12;
-const ACTION_HINT_MAX = 300;
 
 // 状态机（13.txt 第四节）：非法迁移一律拒绝。
 //   active → superseded（原因必填：updated/merged/contradiction_resolved）
@@ -162,12 +162,7 @@ function _buildEntry(input, cfg) {
   if (!ORIGINS.includes(origin)) throw new Error(`origin 非法: ${origin}（允许 ${ORIGINS.join("/")}）`);
 
   // 1002-14：kind=quote/milestone 已删除（用户拍板），两条联动铁律随之取消。
-  // speaker 保留为历史字段（存量数据仍有值），新写入可显式指定，只校验枚举。
-  let speaker = null;
-  if (input.speaker != null) {
-    if (!SPEAKERS.includes(input.speaker)) throw new Error(`speaker 非法: ${input.speaker}（允许 ${SPEAKERS.join("/")}）`);
-    speaker = input.speaker;
-  }
+  // 1005-16：speaker 字段删除（历史残留，无注入消费）——传入值忽略（宽容，不报错）。
 
   let direction = null;
   if (input.direction != null) {
@@ -199,27 +194,6 @@ function _buildEntry(input, cfg) {
     method: prov.method,
   };
 
-  let related_subjects = [];
-  if (input.related_subjects != null) {
-    if (!Array.isArray(input.related_subjects)) throw new Error("related_subjects 必须是数组");
-    for (const s of input.related_subjects) {
-      if (!SUBJECTS.includes(s)) throw new Error(`related_subjects 非法: ${s}`);
-      if (s === subject) throw new Error("related_subjects 不得包含主 subject");
-    }
-    related_subjects = [...new Set(input.related_subjects)];
-  }
-
-  let related_memories = [];
-  if (input.related_memories != null) {
-    if (!Array.isArray(input.related_memories)) throw new Error("related_memories 必须是数组");
-    for (const r of input.related_memories) {
-      if (!r || typeof r !== "object" || !strOrNull(r.id) || !RELATED_RELS.includes(r.rel)) {
-        throw new Error(`related_memories 项非法（需 {id, rel ∈ ${RELATED_RELS.join("/")}}）`);
-      }
-    }
-    related_memories = input.related_memories.map((r) => ({ id: String(r.id).trim(), rel: r.rel }));
-  }
-
   const supersedes = idArrayOrNull(input.supersedes, "supersedes");
 
   let note = null;
@@ -228,22 +202,7 @@ function _buildEntry(input, cfg) {
     if (note && note.length > NOTE_MAX) throw new Error(`note 超长（>${NOTE_MAX}）`);
   }
 
-  // 1002 第 4 项：新增字段（全部可选；传了必须合法，非法报错而非静默丢弃）
-  let source = null;
-  if (input.source != null) {
-    const so = input.source;
-    if (!so || typeof so !== "object") throw new Error("source 必须是对象 {type, ref}");
-    if (!SOURCE_TYPES.includes(so.type)) throw new Error(`source.type 非法: ${so.type}（允许 ${SOURCE_TYPES.join("/")}）`);
-    const ref = strOrNull(so.ref);
-    if (ref && ref.length > SOURCE_REF_MAX) throw new Error(`source.ref 超长（>${SOURCE_REF_MAX}）`);
-    source = { type: so.type, ref };
-  }
-
-  const scope = strOrNull(input.scope);
-  if (scope && scope.length > SCOPE_MAX) throw new Error(`scope 超长（>${SCOPE_MAX}）`);
-
-  const valid_from = strOrNull(input.valid_from);
-  const valid_to = strOrNull(input.valid_to);
+  // 1005-16：以下原 schema 演进字段已删（预留无消费），传入值一律忽略（宽容）：related_subjects/source/scope/valid_from/valid_to/action_hint/related_memories
   const sensitive = !!input.sensitive;
 
   let triggers = [];
@@ -254,8 +213,29 @@ function _buildEntry(input, cfg) {
     triggers = [...new Set(arr)].slice(0, TRIGGERS_MAX);
   }
 
-  const action_hint = strOrNull(input.action_hint);
-  if (action_hint && action_hint.length > ACTION_HINT_MAX) throw new Error(`action_hint 超长（>${ACTION_HINT_MAX}）`);
+  // 1005-16：评估标签（可选；传了必须合法，非法报错而非静默丢弃；judge/探针已做降级，这里兜底校验）
+  let worth = null;
+  if (input.worth != null) {
+    const n = Number(input.worth);
+    if (!Number.isFinite(n) || n < 0 || n > 1) throw new Error(`worth 必须是 0-1 的数字，got: ${input.worth}`);
+    worth = Math.round(n * 100) / 100;
+  }
+  let worth_reason = null;
+  if (input.worth_reason != null) {
+    worth_reason = strOrNull(input.worth_reason);
+    if (worth_reason && worth_reason.length > WORTH_REASON_MAX) throw new Error(`worth_reason 超长（>${WORTH_REASON_MAX}）`);
+  }
+  let volatility = null;
+  if (input.volatility != null) {
+    const v = String(input.volatility).trim();
+    if (!VOLATILITIES.includes(v)) throw new Error(`volatility 非法: ${v}（允许 ${VOLATILITIES.join("/")}）`);
+    volatility = v;
+  }
+  let volatility_reason = null;
+  if (input.volatility_reason != null) {
+    volatility_reason = strOrNull(input.volatility_reason);
+    if (volatility_reason && volatility_reason.length > VOLATILITY_REASON_MAX) throw new Error(`volatility_reason 超长（>${VOLATILITY_REASON_MAX}）`);
+  }
 
   const now = nowIso();
   return {
@@ -264,9 +244,7 @@ function _buildEntry(input, cfg) {
     text,
     kind,
     subject,
-    related_subjects,
     direction,
-    speaker,
     status: "active", // 创建恒为 active；superseded/archived 只能经 updateStatus 状态机到达
     confidence,
     origin,
@@ -278,15 +256,13 @@ function _buildEntry(input, cfg) {
     superseded_by: null,
     superseded_reason: null,
     superseded_at: null,
-    related_memories,
     note,
-    source,
-    scope,
-    valid_from,
-    valid_to,
     sensitive,
     triggers,
-    action_hint,
+    worth,
+    worth_reason,
+    volatility,
+    volatility_reason,
     last_hit_at: null, // 系统字段：检索命中时由 markHit 更新，写入方不可指定
   };
 }
@@ -371,13 +347,13 @@ function createStore(opts = {}) {
     let missing = 0;
     for (const e of arr) {
       if (!e || typeof e !== "object") continue;
-      if (e.source === undefined) { e.source = null; missing++; }
-      if (e.scope === undefined) { e.scope = null; missing++; }
-      if (e.valid_from === undefined) { e.valid_from = null; missing++; }
-      if (e.valid_to === undefined) { e.valid_to = null; missing++; }
       if (e.sensitive === undefined) { e.sensitive = false; missing++; }
       if (!Array.isArray(e.triggers)) { e.triggers = []; missing++; }
-      if (e.action_hint === undefined) { e.action_hint = null; missing++; }
+      // 1005-16：评估标签缺省补 null（存量由迁移脚本从探针回填，这里是兜底）
+      if (e.worth === undefined) { e.worth = null; missing++; }
+      if (e.worth_reason === undefined) { e.worth_reason = null; missing++; }
+      if (e.volatility === undefined) { e.volatility = null; missing++; }
+      if (e.volatility_reason === undefined) { e.volatility_reason = null; missing++; }
       if (e.last_hit_at === undefined) { e.last_hit_at = null; missing++; }
     }
     return missing;
@@ -456,9 +432,10 @@ function createStore(opts = {}) {
   }
 
   // 管理台人工编辑（0919）：白名单字段直改；text 变化刷 content_updated_at；枚举与 kind 联动铁律同 create
-  // 1002 第 4 项：新增字段纳入人工可编辑；last_hit_at 为系统字段，不开放编辑
-  const UPDATABLE_FIELDS = ["text", "note", "kind", "subject", "direction", "speaker", "established_at", "related_subjects", "anchor",
-    "source", "scope", "valid_from", "valid_to", "sensitive", "triggers", "action_hint"];
+  // 1005-16：白名单随 schema v2 精简（删 speaker/related_subjects/source/scope/valid_from/valid_to/action_hint），加评估标签 4 字段
+  // last_hit_at 为系统字段，不开放编辑
+  const UPDATABLE_FIELDS = ["text", "note", "kind", "subject", "direction", "established_at", "anchor",
+    "sensitive", "triggers", "worth", "worth_reason", "volatility", "volatility_reason"];
   function updateFields(id, patch) {
     if (readonly) return fail("readonly 模式拒绝写入");
     const e = get(id);
@@ -479,7 +456,7 @@ function createStore(opts = {}) {
         e.note = n;
       } else if (k === "kind") {
         if (!KINDS.includes(v)) return fail("kind 非法: " + v);
-        // 1002-14：quote/milestone 分类已删，kind 仅 fact/rule；speaker 保留为历史字段
+        // 1002-14：quote/milestone 分类已删，kind 仅 fact/rule（speaker 字段 1005-16 已删）
         e.kind = v;
       } else if (k === "subject") {
         if (!SUBJECTS.includes(v)) return fail("subject 非法: " + v);
@@ -488,35 +465,10 @@ function createStore(opts = {}) {
         if (e.kind !== "rule") return fail("direction 仅 rule 可用");
         if (v != null && !DIRECTIONS.includes(v)) return fail("direction 非法: " + v);
         e.direction = v == null ? null : v;
-      } else if (k === "speaker") {
-        if (v != null && !SPEAKERS.includes(v)) return fail("speaker 非法: " + v);
-        e.speaker = v;
       } else if (k === "established_at") {
         e.established_at = strOrNull(v);
-      } else if (k === "related_subjects") {
-        if (!Array.isArray(v)) return fail("related_subjects 必须是数组");
-        for (const x of v) if (!SUBJECTS.includes(x)) return fail("related_subjects 项非法: " + x);
-        if (v.includes(e.subject)) return fail("related_subjects 不得包含主 subject");
-        e.related_subjects = [...new Set(v)];
       } else if (k === "anchor") {
         e.anchor = !!v; // 注入层扩展字段（anchor 表待办）：true=常驻 Meaningful Moments/Identity 分层
-      } else if (k === "source") {
-        if (v == null) { e.source = null; }
-        else {
-          if (!v || typeof v !== "object") return fail("source 必须是对象 {type, ref}");
-          if (!SOURCE_TYPES.includes(v.type)) return fail("source.type 非法: " + v.type);
-          const ref = strOrNull(v.ref);
-          if (ref && ref.length > SOURCE_REF_MAX) return fail("source.ref 超长");
-          e.source = { type: v.type, ref };
-        }
-      } else if (k === "scope") {
-        const sv = strOrNull(v);
-        if (sv && sv.length > SCOPE_MAX) return fail("scope 超长");
-        e.scope = sv;
-      } else if (k === "valid_from") {
-        e.valid_from = strOrNull(v);
-      } else if (k === "valid_to") {
-        e.valid_to = strOrNull(v);
       } else if (k === "sensitive") {
         e.sensitive = !!v;
       } else if (k === "triggers") {
@@ -527,10 +479,28 @@ function createStore(opts = {}) {
           for (const x of arr) if (x.length > TRIGGER_MAX) return fail("triggers 项超长");
           e.triggers = [...new Set(arr)].slice(0, TRIGGERS_MAX);
         }
-      } else if (k === "action_hint") {
-        const hv = strOrNull(v);
-        if (hv && hv.length > ACTION_HINT_MAX) return fail("action_hint 超长");
-        e.action_hint = hv;
+      } else if (k === "worth") {
+        if (v == null) { e.worth = null; }
+        else {
+          const n = Number(v);
+          if (!Number.isFinite(n) || n < 0 || n > 1) return fail("worth 必须是 0-1 的数字");
+          e.worth = Math.round(n * 100) / 100;
+        }
+      } else if (k === "worth_reason") {
+        const w = strOrNull(v);
+        if (w && w.length > WORTH_REASON_MAX) return fail("worth_reason 超长");
+        e.worth_reason = w;
+      } else if (k === "volatility") {
+        if (v == null) { e.volatility = null; }
+        else {
+          const sv = String(v).trim();
+          if (!VOLATILITIES.includes(sv)) return fail("volatility 非法: " + sv);
+          e.volatility = sv;
+        }
+      } else if (k === "volatility_reason") {
+        const vr = strOrNull(v);
+        if (vr && vr.length > VOLATILITY_REASON_MAX) return fail("volatility_reason 超长");
+        e.volatility_reason = vr;
       }
     }
     flush();
@@ -597,9 +567,9 @@ module.exports = {
   validateEntry,
   DEFAULT_CONFIG,
   CONSTANTS: {
-    SCHEMA_VER, KINDS, SUBJECTS, STATUSES, ORIGINS, DIRECTIONS, SPEAKERS,
-    PROVENANCE_METHODS, SUPERSEDED_REASONS, RELATED_RELS,
+    SCHEMA_VER, KINDS, SUBJECTS, STATUSES, ORIGINS, DIRECTIONS,
+    PROVENANCE_METHODS, SUPERSEDED_REASONS,
     TRANSITIONS, TRANSITION_REASONS, TEXT_MAX, PROVENANCE_QUOTE_MAX, NOTE_MAX,
-    SOURCE_TYPES, SOURCE_REF_MAX, SCOPE_MAX, TRIGGER_MAX, TRIGGERS_MAX, ACTION_HINT_MAX,
+    VOLATILITIES, WORTH_REASON_MAX, VOLATILITY_REASON_MAX, TRIGGER_MAX, TRIGGERS_MAX,
   },
 };
