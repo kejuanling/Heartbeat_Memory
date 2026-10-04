@@ -1419,6 +1419,8 @@ body[data-theme="crt"]:has(#chat[data-layout="claude"]) header{
   border-bottom:1px solid rgba(224,179,106,.16)!important;
   backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
 }
+/* CRT 终端风：隐藏地球/语音通话按钮，只留菜单，避免右上角按钮重叠 */
+body[data-theme="crt"] #worldBtn,body[data-theme="crt"] #voiceBtn{display:none!important}
 body[data-theme="crt"] .hd-typing{color:#C9994E}
 body[data-theme="crt"] .hd-typing-dots{display:none}
 body[data-theme="crt"] .hd-typing-text::after{
