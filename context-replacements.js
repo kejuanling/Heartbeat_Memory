@@ -3113,7 +3113,8 @@ function buildIncrementalContext(sessionId, timeline) {
       out.head.push(m);
     }
     if (!hiddenIds.has(loc.it.id) && !truncatedIds.has(loc.it.id)) {
-      // 正常块：标星前置 + 摘要 + 区间保留（记忆浮现/工具剔除、标星跳过、不可压缩保留）
+      // 正常块：标星前置 + 区间保留（记忆浮现/工具剔除、标星跳过、不可压缩保留）+ 摘要
+      // 1004-09：保留原文（真日记等）挪到摘要之前——固定内容在前、易变的状态摘要在后，头部稳定利于缓存
       const starred = [];
       for (let i = loc.s; i <= loc.e; i++) {
         const m = tl[i];
@@ -3122,7 +3123,6 @@ function buildIncrementalContext(sessionId, timeline) {
         if (marks[contentKey(m)]) starred.push(m);
       }
       starred.forEach(function (sm) { out.head.push(sm); });
-      out.head.push(buildMemoryMessage(loc.it));
       for (let i = loc.s; i <= loc.e; i++) {
         const m = tl[i];
         if (!m || m.role === "system" || m.deleted) continue;
@@ -3132,6 +3132,7 @@ function buildIncrementalContext(sessionId, timeline) {
         if (marks[contentKey(m)]) continue;
         if (!isCompressible(m, true)) out.head.push(m);
       }
+      out.head.push(buildMemoryMessage(loc.it));
     }
     // 隐藏/截断块：区间原文剔除（不输出）
     cur = loc.e + 1;
