@@ -3105,17 +3105,34 @@ function ccArmAllGapAutoLoad(){
     });
     el.innerHTML=html;
   }
-  // 1005-16：评估标签点击看一句话理由（数据来自 pool-view 透传的 worth/volatility）
+  // 1005-16b：评估理由展示——顶部横幅（toast 2.2s 太短，改为可停留长条，右上角叉关闭，12s 自动消失兜底）
+  let mpReasonBannerTimer=null;
+  function mpShowReason(title, reason){
+    const b=document.getElementById('mpReasonBanner');
+    if(!b) return;
+    const t=document.getElementById('mp-reason-title');
+    const tx=document.getElementById('mp-reason-text');
+    if(t) t.textContent=title;
+    if(tx) tx.textContent=reason||'（无理由说明）';
+    b.style.display='block';
+    clearTimeout(mpReasonBannerTimer);
+    mpReasonBannerTimer=setTimeout(closeMpReasonBanner,12000);
+  }
+  function closeMpReasonBanner(){
+    const b=document.getElementById('mpReasonBanner');
+    if(b) b.style.display='none';
+    clearTimeout(mpReasonBannerTimer);
+  }
   function mpWorthTip(id){
     const it=((window.__memPoolItems||[]).find(function(x){return x.id===id;}));
     if(!it || it.worth==null){ toast('这条记忆还没有 worth 评估，等探针重跑后补齐'); return; }
-    toast('值得记 '+Math.round(it.worth*100)+'%：'+(it.worth_reason||'（无理由说明）'));
+    mpShowReason('值得记 '+Math.round(it.worth*100)+'%', it.worth_reason);
   }
   function mpVolTip(id){
     const it=((window.__memPoolItems||[]).find(function(x){return x.id===id;}));
     if(!it || !it.volatility){ toast('这条记忆还没有 volatility 评估，等探针重跑后补齐'); return; }
     const V={stable:'基本不会过时',volatile:'可能会过时',situational:'一次性事件'};
-    toast('会不会过时：'+(V[it.volatility]||it.volatility)+'。'+(it.volatility_reason||'（无理由说明）'));
+    mpShowReason('会不会过时：'+(V[it.volatility]||it.volatility), it.volatility_reason);
   }
   // 点「导出」先选类别（全部 / 新五类 / 旧四类），再按所选导出活跃条目
   async function exportMemPool(){
