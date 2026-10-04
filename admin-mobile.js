@@ -3063,10 +3063,25 @@ function ccArmAllGapAutoLoad(){
     items.forEach(function(it){
       const sunk=it.active===false, pinned=it.pinned;
       const cc=mpCatColor(it.category);
+      // 1005-16：评估标签按钮（worth 百分比 + volatility 短标签；未评估灰色占位，点击看一句话理由）
+      const w=(typeof it.worth==='number')?it.worth:null;
+      const wPct=w!=null?Math.round(w*100):null;
+      const wCls=wPct==null?'':(wPct>=70?'high':(wPct>=40?'mid':'low'));
+      const vol=it.volatility||null;
+      const VOL_LBL={stable:'稳定',volatile:'易变',situational:'一次'};
+      const VOL_CLS={stable:'stable',volatile:'volatile',situational:'situational'};
+      const volLbl=vol?(VOL_LBL[vol]||escapeHtml(vol)):'';
+      const volCls=vol?(VOL_CLS[vol]||''):'';
       html+='<div class="mp-card'+(sunk?' sunk':'')+(pinned?' pin':'')+'" style="--mp-cat:'+cc+'">'
         +'<div class="mp-card-head">'
           +'<span class="mp-cat"><span class="mp-dot"></span>'+escapeHtml(it.category)+'</span>'
           +'<span class="mp-badges">'
+            +(wPct!=null
+              ?'<button type="button" class="mp-wb '+wCls+'" onclick="mpWorthTip(\''+it.id+'\')" title="值得记：'+(it.worth_reason||'无理由说明')+'">'+wPct+'%</button>'
+              :'<button type="button" class="mp-wb off" onclick="mpWorthTip(\''+it.id+'\')">–</button>')
+            +(vol
+              ?'<button type="button" class="mp-vb '+volCls+'" onclick="mpVolTip(\''+it.id+'\')" title="会不会过时：'+(it.volatility_reason||'无理由说明')+'">'+volLbl+'</button>'
+              :'<button type="button" class="mp-vb off" onclick="mpVolTip(\''+it.id+'\')">–</button>')
             +(pinned?'<span class="mp-badge pin">PIN</span>':'')
             +(sunk?'<span class="mp-badge sunk">已沉底</span>':'')
           +'</span>'
@@ -3089,6 +3104,18 @@ function ccArmAllGapAutoLoad(){
         +'</div>';
     });
     el.innerHTML=html;
+  }
+  // 1005-16：评估标签点击看一句话理由（数据来自 pool-view 透传的 worth/volatility）
+  function mpWorthTip(id){
+    const it=((window.__memPoolItems||[]).find(function(x){return x.id===id;}));
+    if(!it || it.worth==null){ toast('这条记忆还没有 worth 评估，等探针重跑后补齐'); return; }
+    toast('值得记 '+Math.round(it.worth*100)+'%：'+(it.worth_reason||'（无理由说明）'));
+  }
+  function mpVolTip(id){
+    const it=((window.__memPoolItems||[]).find(function(x){return x.id===id;}));
+    if(!it || !it.volatility){ toast('这条记忆还没有 volatility 评估，等探针重跑后补齐'); return; }
+    const V={stable:'基本不会过时',volatile:'可能会过时',situational:'一次性事件'};
+    toast('会不会过时：'+(V[it.volatility]||it.volatility)+'。'+(it.volatility_reason||'（无理由说明）'));
   }
   // 点「导出」先选类别（全部 / 新五类 / 旧四类），再按所选导出活跃条目
   async function exportMemPool(){

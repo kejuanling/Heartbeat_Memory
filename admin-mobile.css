@@ -991,3 +991,12 @@
 .log-group summary::before{content:"▸ ";display:inline-block;transition:transform .18s}
 .log-group[open] summary::before{transform:rotate(90deg)}
 .log-group .log-item{margin:6px 8px}
+
+/* 1005-16：记忆池卡片评估标签按钮（worth 百分比 + volatility 短标签；扁平、半透明底、点击看理由） */
+.mp-wb,.mp-vb{display:inline-flex;align-items:center;font-size:10px;font-weight:600;padding:2px 8px;border-radius:6px;border:1px solid transparent;cursor:pointer;font-family:inherit;line-height:1.4;transition:filter .15s}
+.mp-wb:hover,.mp-vb:hover{filter:brightness(1.15)}
+.mp-wb.high,.mp-vb.stable{background:rgba(39,174,96,.12);color:#27ae60;border-color:rgba(39,174,96,.35)}
+.mp-wb.mid,.mp-vb.volatile{background:rgba(243,156,18,.12);color:#b9770e;border-color:rgba(243,156,18,.35)}
+.mp-wb.low,.mp-vb.situational{background:rgba(231,76,60,.10);color:#c0392b;border-color:rgba(231,76,60,.30)}
+.mp-wb.off,.mp-vb.off{background:transparent;color:#95a5a6;border-color:rgba(149,165,166,.30);cursor:default}
+.mp-wb.off:hover,.mp-vb.off:hover{filter:none}

@@ -53,6 +53,11 @@ module.exports = function registerMemoryV2Admin(app, deps) {
         source: e.origin,
         status: e.status,
         subject: e.subject,
+        // 1005-16：评估标签透传（judge/探针产出；未评估为 null，前端显示占位）
+        worth: (typeof e.worth === "number") ? e.worth : null,
+        worth_reason: e.worth_reason || null,
+        volatility: e.volatility || null,
+        volatility_reason: e.volatility_reason || null,
       }));
       if (q) mapped = mapped.filter(x => x.content.includes(q));
       if (category) mapped = mapped.filter(x => x.category === category);
