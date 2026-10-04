@@ -343,6 +343,29 @@
        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px;">保存后写入 data/ctx_limit_prompt.json，下次触发容量提醒即生效。</div>
      </div>
    </div>
+
+     <!-- 状态机提示词（2026-10-04 新增，用户要求把状态机提示词搬到管理台提示词页） -->
+     <div class="card" data-collapse-id="cs-prompt-config" data-default="collapsed">
+       <div class="card-title collapsible" onclick="toggleCard(this)"><span>会话状态机提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+       <div class="card-body">
+         <div style="font-size:11px;color:var(--text3);margin-bottom:6px;line-height:1.6">
+           状态机每次算新状态时用的提示词。<b>System</b> 决定「状态怎么写」，<b>User 模板</b> 决定「每次喂它什么」。
+           User 模板里的占位符 <code>${PREV_STATE}</code> / <code>${CHUNK_INFO}</code> / <code>${CONVERSATION_TEXT}</code> 会被替换，删掉会导致内容缺失。
+         </div>
+         <div style="font-size:11px;color:var(--text3);margin:8px 0 3px;">System</div>
+         <textarea id="cs-prompt-system" rows="20" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;line-height:1.6;font-family:monospace;resize:vertical;"></textarea>
+         <div style="font-size:11px;color:var(--text3);margin:10px 0 3px;">User 模板</div>
+         <textarea id="cs-prompt-user" rows="8" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;line-height:1.6;font-family:monospace;resize:vertical;"></textarea>
+         <div class="env-row" style="margin-top:8px;gap:8px;">
+           <button type="button" class="btn btn-primary" onclick="saveCsPrompt()" style="flex:1;background:var(--accent)">保存</button>
+           <button type="button" class="btn btn-outline" onclick="loadCsPrompt()" style="flex:1">重新载入</button>
+           <button type="button" class="btn btn-outline" onclick="resetCsPrompt()" style="flex:1">恢复默认</button>
+         </div>
+         <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px;" id="cs-prompt-status">
+           保存后写入 data/conversation_state_prompt.json，<b>下次算新状态</b>时生效（已在算的那次不受影响）。留空则用代码内置默认。
+         </div>
+       </div>
+     </div>
        <div class="card" data-collapse-id="reparse-prompt-config" data-default="collapsed">
       <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆池·解析提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
       <div class="card-body">

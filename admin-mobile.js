@@ -2238,7 +2238,7 @@ function ccArmAllGapAutoLoad(){
   if(name==='memory'){ if(!window.__memPoolInited){ initMemPoolView(); window.__memPoolInited=true; } loadReviewQueue(); }
   if(name!=='config' && typeof stopBackfillWatch==='function'){ stopBackfillWatch(); }
   if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
-  if(name==='prompts'){loadWakePrompt();loadContextDigestPrompt();loadCtxLimitPrompt();loadReparsePrompt();loadJudgePrompt();loadDistillPrompt();loadSummaryPrompt();loadBackfillPrompt();}
+  if(name==='prompts'){loadWakePrompt();loadContextDigestPrompt();loadCtxLimitPrompt();loadCsPrompt();loadReparsePrompt();loadJudgePrompt();loadDistillPrompt();loadSummaryPrompt();loadBackfillPrompt();}
   if(name==='config'){loadToolsConfig(); loadCrossInjectConfig();
     // 1003：记忆蒸馏 / 两块总结 / 老数据重跑三张设置卡已搬到本页（跨窗口注入卡片下方）。
     // 三个 load 原本挂在 initMemPoolView（只跑一次且必须先进记忆页才触发），搬走后若从配置页直接进来会加载不到 → 输入框全空。
@@ -2420,6 +2420,67 @@ function ccArmAllGapAutoLoad(){
      const r=await fetch(ADMIN_API + '/context-compaction/ctx-limit-prompt',{method:'DELETE'});
      const j=await r.json();
      if(j.ok){toast('已恢复默认');loadCtxLimitPrompt()}
+     else toast('失败: '+(j.error||''));
+   }catch(e){toast('网络错误')}
+ }
+
+ // ── 会话状态机提示词（2026-10-04，用户要求搬到管理台提示词页）──
+ // 路由早就有（/admin/conversation-state/prompt，读/存/恢复默认），这里补上前端。
+ // 两段式：system 决定「状态怎么写」，user_template 决定「每次喂它什么」。
+ const CS_PROMPT_API = ADMIN_API + '/conversation-state/prompt';
+
+ async function loadCsPrompt(){
+   const se=document.getElementById('cs-prompt-system');
+   const pe=document.getElementById('cs-prompt-user');
+   if(!se||!pe)return;
+   try{
+     const r=await fetch(CS_PROMPT_API);
+     const j=await r.json();
+     se.value=j.system||'';
+     pe.value=j.user_template||'';
+     markCsPromptCustom(!!j.custom_set);
+   }catch(e){se.value='加载失败';pe.value=''}
+ }
+
+ function markCsPromptCustom(isCustom){
+   const el=document.getElementById('cs-prompt-status');
+   if(!el)return;
+   el.innerHTML = isCustom
+     ? '当前用的是<b>你自定义</b>的版本（写在 data/conversation_state_prompt.json）。保存后<b>下次算新状态</b>时生效；已在算的那次不受影响。'
+     : '当前用的是<b>代码内置默认</b>（没写过自定义文件）。保存后写入 data/conversation_state_prompt.json，<b>下次算新状态</b>时生效。留空则回落默认。';
+ }
+
+ async function saveCsPrompt(){
+   const se=document.getElementById('cs-prompt-system');
+   const pe=document.getElementById('cs-prompt-user');
+   if(!se||!pe)return;
+   const sys=se.value.trim(), usr=pe.value.trim();
+   if(!sys){toast('System 不能为空');return}
+   if(!usr){toast('User 模板不能为空');return}
+   // 占位符被删会让喂给模型的内容缺块——保存前点出来，比算完才发现不对再回来改强
+   const missing=[];
+   if(usr.indexOf('${PREV_STATE}')<0) missing.push('${PREV_STATE}（上一版状态）');
+   if(usr.indexOf('${CONVERSATION_TEXT}')<0) missing.push('${CONVERSATION_TEXT}（本次对话原文）');
+   if(missing.length && !confirm('User 模板里少了这些占位符：\n\n  '+missing.join('\n  ')+'\n\n缺了它们，模型每次看到的输入会不完整。确定要保存吗？')) return;
+   try{
+     const r=await fetch(CS_PROMPT_API,{method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({system:sys,user_template:usr})});
+     const j=await r.json();
+     if(j.custom_set!==undefined){
+       se.value=j.system||sys; pe.value=j.user_template||usr;
+       markCsPromptCustom(!!j.custom_set);
+       toast('已保存，下次算新状态时生效');
+     }else toast('保存失败: '+(j.error||''));
+   }catch(e){toast('网络错误')}
+ }
+
+ async function resetCsPrompt(){
+   if(!confirm('恢复默认状态机提示词？\n\n会删掉 data/conversation_state_prompt.json，回到代码内置的默认版本。'))return;
+   try{
+     const r=await fetch(CS_PROMPT_API,{method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({action:'reset'})});
+     const j=await r.json();
+     if(j.custom_set!==undefined){toast('已恢复默认');loadCsPrompt()}
      else toast('失败: '+(j.error||''));
    }catch(e){toast('网络错误')}
  }
