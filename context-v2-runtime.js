@@ -27,7 +27,14 @@ const { createSessionCfg } = require('./lib/session-cfg');   // 2026-10-03：会
 // 末尾连续 user 消息之前（当轮待回复前，位于历史之后）。
 function apply(messages, blocks) {
   const old = [];
-  (messages || []).forEach((m, i) => { if (m && m.role === 'developer' && typeof m.content === 'string' && (m.content.startsWith('[永久上下文]') || m.content.startsWith('[跨窗口]'))) old.push(i); });
+  // 1004-11：V2 块头是 "## System Instructions" 等（HEADERS），旧前缀 [永久上下文]/[跨窗口] 是
+  // V1 时代遗留——只匹配旧前缀时防御失效（新块清不掉）。精确匹配 V2 五个块头 + 保留旧前缀兼容历史；
+  // 不匹配 "## Conversation State"（状态块，不能清）。
+  const _v2Heads = ['## System Instructions', '## Core Identity', '## Long-term Understanding', '## Earlier Days', '## Possibly Relevant Memories'];
+  (messages || []).forEach((m, i) => {
+    if (m && m.role === 'developer' && typeof m.content === 'string' &&
+      (m.content.startsWith('[永久上下文]') || m.content.startsWith('[跨窗口]') || _v2Heads.some(function (h) { return m.content.startsWith(h); }))) old.push(i);
+  });
   const fixed = (blocks || []).filter(b => b.key !== 'relevant_memories' && !b.empty).map(b => ({ role: 'developer', content: b.content }));
   const relevant = (blocks || []).find(b => b.key === 'relevant_memories' && !b.empty);
   const out = (messages || []).filter((m, i) => old.indexOf(i) < 0);

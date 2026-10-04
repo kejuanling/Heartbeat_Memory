@@ -1080,6 +1080,12 @@ app.post("/v1/chat/completions", async (req, reply) => {
         if (await handleMcpRequest(body, reply, req, outboundMessages, sessionId, kelivoMessages)) return;
       } catch (mcpErr) {
         console.warn("[mcp] 工具循环失败，回退原逻辑:", mcpErr.message, "| session:", sessionId, "| msgs:", Array.isArray(sanitizedMessages) ? sanitizedMessages.length : -1, "| model:", (body && body.model) || "");
+        // 1004-11：工具循环中途上游失败时若 SSE 头已发出（streamStarted），直连分支二次 writeHead 会崩溃，
+        // 客户端收半截 SSE、已生成部分不落盘。头已发 → 直接结束响应返回，不再走直连。
+        if (reply.raw.headersSent) {
+          try { reply.raw.end(); } catch (e) {}
+          return;
+        }
       }
     }
     // === MCP_TOOL_LOOP_END ===
@@ -1153,7 +1159,10 @@ app.post("/v1/chat/completions", async (req, reply) => {
           // 解析 <wake> 闹钟标签并写入调度（标签随后被剥离，不显示给用户）
           parseWakeTagAndSchedule(aiContent, sessionId);
           // 提取并存储记忆，同时拿到清洗后的文本
-          const cleanText = await tagParser.extractAndStore(aiContent, { sessionId });
+          const cleanText = await tagParser.extractAndStore(aiContent, { sessionId }).catch(err => {
+            console.warn("[memory] 非流式标签解析失败:", err.message);
+            return aiContent;
+          });
           // 用清洗后的文本替换 JSON 中的 content
           if (cleanText !== aiContent) {
             parsed.choices[0].message.content = cleanText;

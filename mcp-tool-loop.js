@@ -647,6 +647,8 @@ async function streamToolLoop({
       let result, error = null;
       try { result = await callToolByExposedName(serverClients, routes, name, args); }
       catch (e) { error = e.message || String(e); result = { markdown: JSON.stringify({ type: "tool_error", error: "mcp_service_error", message: error }) }; }
+      // 1004-11：落盘/前端 20KB 截断（防 assistant.tools 膨胀）；发给模型的走 MAX_TOOL_RESULT_CHARS(30KB)，
+      // 模型可见更全、落盘瘦身——两条口径有意不同，勿合并。
       const resTrunc = _truncateResult(result.markdown || "", error ? 0 : 20000);
       // 来源标记：与 executeToolCalls 同一格式（工具名+调用时间+状态+结果，空/失败显式）
       working.push({ role: "tool", tool_call_id: id, content: buildToolResultContent({ name, time: toolTime, error, markdown: _truncateResult(result.markdown || "", MAX_TOOL_RESULT_CHARS) }) });

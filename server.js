@@ -2091,7 +2091,14 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
   // 与 SSE 终止帧（块外，try-catch 包裹）必须共用同一份。此前 storedText/timeline 映射都在
   // if 块内，终止帧直接引用会 ReferenceError 且被终止帧的 try-catch 静默吞掉
   // → 表现为"字段永远不下发、前端静默退回旧行为"，测试还可能假通过。
-  const finalStoredText = (r && r.text) ? stripToolEchoBlocks(r.text || aiClean) : "";
+  // 1004-11：与落盘同口径——落盘 visibleStored 剥日记块，终止帧此前不剥 → 前端本地缓存
+  // 含 [DIARY] 与时间线字节不一致（补拉每次校准）。这里统一剥掉。
+  const finalStoredText = (function () {
+    const _base = stripToolEchoBlocks((r && r.text) ? r.text : (aiClean || ""));
+    if (!_base) return "";
+    const _dr = diaryLib.extractDiaryFromResponse(_base);
+    return _dr.diaryContent ? _dr.remainingText : _base;
+  })();
   const finalTimelinePayload = (r && Array.isArray(r.streamTimeline))
     ? r.streamTimeline.map(function (n) {
         if (!n || !n.type) return null;

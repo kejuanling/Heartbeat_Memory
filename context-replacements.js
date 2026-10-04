@@ -1805,6 +1805,13 @@ function applyReplacements(messages, source) {
   items = items.concat(manualHiddenItems);
   if (items.length === 0) return messages;
 
+  // 1004-11：增量路径（buildIncrementalContext）已把块摘要注入 messages 时，兜底对已摘要化的
+  // 记录再找原文锚点必然失败并 warn 刷屏（状态块误报"找不到尾锚点"，59MB 日志帮凶）。
+  // 预收集请求里已有的摘要块 content（_ctxRep 标记，含状态块），命中则跳过不重复处理、不 warn。
+  const presentRepContent = new Set();
+  out.forEach(function (m) {
+    if (m && m._ctxRep === true && typeof m.content === "string") presentRepContent.add(m.content);
+  });
   const replacements = [];
   let searchStart = 0;
   items.forEach(function (item) {
@@ -1814,6 +1821,8 @@ function applyReplacements(messages, source) {
       console.warn("[context-replacements] 块跳过 id=" + item.id + " 原因=matched为空");
       return;
     }
+    // 1004-11：增量已注入过同内容摘要（_ctxRep 精确命中）→ 跳过，不重复找锚点、不 warn
+    if (presentRepContent.has(buildMemoryMessage(item).content)) return;
     // 窗口隔离：块首条锚点消息在当前时间线里的实际时间早于窗口起点 → 旧窗口块，跳过
     const firstTlPos = tlPos.get(item.id);
     if (firstTlPos >= 0 && windowStartMs !== null) {
