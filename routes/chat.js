@@ -142,6 +142,8 @@ module.exports = function registerChatRoutes(app, deps) {
     sseNotify,
     SSE_HEARTBEAT_MS,
     recentReplies,
+    activeGenMap,
+    ACTIVE_GEN_TTL_MS,
     isRecentReplyCacheable,
     IDEMPOTENCY_TTL_MS,
     IDEMPOTENCY_PENDING_WAIT_MS,
@@ -326,6 +328,19 @@ module.exports = function registerChatRoutes(app, deps) {
   //                                                      出现时联动变化）+ has_more（起点前还有更早原文）
   //   GET /v1/history?session_id=X&before=<id>&limit=N → 更早窗口：before 为当前窗口最早消息 id，
   //                                                      返回其前 N 条原文（含压缩区间原文）
+  // 1004-05：进行中生成快照查询——前端断流/切回前台后轮询这里续显，不用刷新
+  app.get('/v1/chat/status', async (req, reply) => {
+    try {
+      if ((req.headers['x-client'] || '').trim() !== 'dylan-chat') return reply.code(403).send({ error: 'forbidden' });
+      const sessionId = String(req.query.session_id || '').trim();
+      if (!sessionId) return reply.send({ active: false, done: true });
+      const ag = activeGenMap.get(sessionId);
+      if (!ag) return reply.send({ active: false, done: true });
+      if (ag.done && Date.now() - ag.ts > ACTIVE_GEN_TTL_MS) { activeGenMap.delete(sessionId); return reply.send({ active: false, done: true }); }
+      return reply.send({ active: !ag.done, done: ag.done, text: ag.text || "", reasoning: ag.reasoning || "", tools: ag.tools || [], ts: ag.ts });
+    } catch (e) { return reply.send({ active: false, done: true }); }
+  });
+
   app.get('/v1/history', async (req, reply) => {
     try {
       const sessionId = String(req.query.session_id || req.headers['x-session-id'] || '').trim();

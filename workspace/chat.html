@@ -3805,6 +3805,26 @@ function showHeaderTyping(show){
 function removeTyping(){
   showHeaderTyping(false);
 }
+// 1004-05：流中断后续显——问服务端这轮是不是还在跑（切后台/断网常见），在跑就轮询补拉，done 后从服务端拉历史重建
+async function _resumeFromServer(sid){
+  try{
+    for(var i=0;i<60;i++){
+      var r=await fetch("/v1/chat/status?session_id="+encodeURIComponent(sid),{headers:{"X-Client":"dylan-chat","Authorization":"Bearer "+api_key}});
+      var st=await r.json();
+      if(st&&st.text) _setResumeText(st.text);
+      if(st&&(st.done||!st.active)){ setTimeout(function(){ liveReloadNow(); },400); return true; }
+      await new Promise(function(res){setTimeout(res,1500);});
+    }
+    return true;
+  }catch(e){ return false; }
+}
+function _setResumeText(text){
+  if(!chatEl||!text) return;
+  var bubbles=chatEl.querySelectorAll(".msg.ai .bubble, .msg.ai .mcol > .bubble");
+  if(!bubbles.length) return;
+  var last=bubbles[bubbles.length-1];
+  last.innerHTML=cfg.ai_md?renderMd(stripTtsCtl(text)):escapeHtml(stripTtsCtl(text));
+}
 function showError(msg){
   removeTyping();
   const d=document.createElement("div");d.className="msg ev-silent";
@@ -4117,7 +4137,10 @@ async function request(finalMsgs, fromSend, regenAnchorId){
     }
     if(_streamStoppedByUser){ /* 用户主动中断输出：不显示错误条 */ }
     else if(_streamTimedOut) showError("响应超时（180 秒未收到数据），已中断。请检查网络后重试");
-    else showError(err.message);
+    else {
+      // 1004-05：流中断先试服务端续显（切后台/断网时这轮可能还在跑）；真失败才报错
+      _resumeFromServer(sidAtStart).then(function(ok){ if(!ok) showError(err.message); });
+    }
   }finally{
     if(_silenceTimer){clearTimeout(_silenceTimer);_silenceTimer=null;}   // M17：清理静默超时计时器
     _silenceResetFn=null;_silenceClearFn=null;   // 清句柄，避免串到下一轮请求

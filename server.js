@@ -91,6 +91,11 @@ setInterval(sweepSseSubscribers, SSE_ZOMBIE_SCAN_MS).unref();
 // client_msg_id -> {text, reasoning, tools, usage, ts}
 //                或 {pending:true, ts, waiters:[fn]}（生成中的占位，2026-09-23 F8）
 const recentReplies = new Map();
+// 1004-05：进行中生成的实时快照（sessionId -> {text, reasoning, tools, ts, done}）。
+// 前端断流/切后台回来后轮询 /v1/chat/status 拉这里续显，不再要求用户手动刷新。
+// done=true 表示本轮已落盘，保留 10 分钟供最后一次补拉后清理。
+const activeGenMap = new Map();
+const ACTIVE_GEN_TTL_MS = 10 * 60 * 1000;
 const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000; // 10 分钟内重复请求视为同一条
 const RECENT_REPLIES_MAX = 200; // 上限，防止长期运行膨胀（配合 TTL 过期仍会残留，故再加硬上限）
 // 2026-09-23 审查 F8：pending 占位的等待上限。首个请求失败/崩溃时要靠它兜底降级，
@@ -302,7 +307,11 @@ const contextReplacements = require("./context-replacements");
 const contextDigest = require("./context-digest");
 const conversationState = require("./lib/conversation-state");
 // 状态机日志接进压缩页悬浮球（addCompactionLog 是函数声明，提升可用；闭包隔开 compactionLogs 的 TDZ）
-conversationState.setLogFn(function (entry) { return addCompactionLog(entry); });
+conversationState.setLogFn(function (entry) {
+  // 1004-12：状态机日志统一打 action=state 标签，前端压缩页日志按"状态机压缩"分组
+  if (entry && typeof entry === "object" && !entry.action) entry = Object.assign({}, entry, { action: "state" });
+  return addCompactionLog(entry);
+});
 
 const DEFAULT_BODY_LIMIT_MB = 50;
 
@@ -1780,6 +1789,8 @@ require("./routes/chat")(app, {
   sseNotify,
   SSE_HEARTBEAT_MS,
   recentReplies,
+  activeGenMap,
+  ACTIVE_GEN_TTL_MS,
   isRecentReplyCacheable,
   IDEMPOTENCY_TTL_MS,
   IDEMPOTENCY_PENDING_WAIT_MS,
@@ -1988,22 +1999,30 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
   };
   const onEvent = (evt) => {
     if (!evt) return;
+    // 1004-05：实时累积快照（断流续显用）——lazy init，按 sessionId 一份
+    let _ag = activeGenMap.get(sessionId);
+    if (!_ag || _ag.done) { _ag = { text: "", reasoning: "", tools: [], ts: Date.now(), done: false }; activeGenMap.set(sessionId, _ag); }
     try {
       if (evt.type === "text") {
         // 逐段正文先剥标签/工具回声再下发，保证用户看不到 <memory> 等标签与模型自抄的工具结果；
         // 存记忆副作用仍由收尾对完整文本做一次（extractAndStore）。
         const clean = stripToolEchoBlocks(tagParser.stripTags(evt.text));
+        _ag.text += clean;
         for (let i = 0; i < clean.length; i += 24) streamDelta({ content: clean.slice(i, i + 24) });
       } else if (evt.type === "reasoning") {
         const clean = tagParser.stripTags(evt.text);
+        _ag.reasoning += clean;
         for (let i = 0; i < clean.length; i += 60) streamDelta({ reasoning_content: clean.slice(i, i + 60) });
       } else if (evt.type === "tool_start") {
         const p = { index: evt.index, id: evt.id, name: evt.name, args: evt.args };
+        _ag.tools.push({ id: evt.id, name: evt.name, args: evt.args, status: "running" });
         streamDelta({ tool_start: p });
       } else if (evt.type === "tool_args_delta") {
         streamDelta({ tool_args_delta: { index: evt.index, id: evt.id, delta: evt.delta || "" } });
       } else if (evt.type === "tool_end") {
         const p = { index: evt.index, id: evt.id, name: evt.name, args: evt.args, result: evt.result, error: evt.error, ok: evt.ok };
+        const _ti = _ag.tools.findIndex(function (t) { return t.id === evt.id; });
+        if (_ti >= 0) { _ag.tools[_ti].status = evt.error ? "error" : "ok"; _ag.tools[_ti].result = evt.result; }
         streamDelta({ tool_end: p });
       }
     } catch (e) {
@@ -2047,6 +2066,10 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
       });
     }
 
+  // 1004-05 兜底：不管本轮有没有正文，生成结束就把快照标 done（空回复/异常也别让前端一直轮询）。
+  // 有正文时上面落盘块会用最终 r.text 覆盖；这里先按已累积的 text 收尾。
+  const _agFinal = activeGenMap.get(sessionId);
+  if (_agFinal && !_agFinal.done) { _agFinal.done = true; _agFinal.ts = Date.now(); }
   // 工具循环跑完后，把「完整消息序列」捕获进 lastLLMMessages，
   // 让「当前请求上下文」如实展示带 tool_calls / tool 结果的真实链路（而非基础上下文）。
   try {
@@ -2113,6 +2136,9 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
   // 这里把最终回复也写回当前会话的时间线。
   if (r && r.text) {
     try {
+      // 1004-05：标记快照完成，前端补拉拿到最终内容
+      const _agDone = activeGenMap.get(sessionId);
+      if (_agDone) { _agDone.text = r.text; _agDone.reasoning = r.reasoning || _agDone.reasoning; _agDone.done = true; _agDone.ts = Date.now(); }
       // 方案二增量：以盘上为基同步请求差量（人设同步/去重补齐/重生成尾部对齐），
       // 不再拿请求消息数组全量重建覆盖——前端只带局部历史（分页/懒加载）也不会丢服务器完整历史。
       const reqMsgs = Array.isArray(kelivoMessages) && kelivoMessages.length
@@ -5919,6 +5945,19 @@ function addCompactionLog(entry) {
       compactionLogs.unshift(merged);
       persistCompactionLogs();
       return merged;
+    }
+  }
+  // 1004-12：调度启动日志去重——gateway 每次重启各模块都写一条，同一天同模块只保留一条（刷新时间不新增）
+  if (entry.action === "system" && String(entry.message || "").indexOf("调度已启动") >= 0) {
+    const prefix = String(entry.message || "").split("：")[0];
+    const dup = compactionLogs.find(function (l) {
+      return l && l.action === "system" && String(l.message || "").indexOf("调度已启动") >= 0 &&
+        String(l.message || "").split("：")[0] === prefix;
+    });
+    if (dup) {
+      dup.time = now;
+      persistCompactionLogs();
+      return dup;
     }
   }
   const log = Object.assign({ id: Date.now() + '-' + Math.random().toString(36).slice(2, 8), time: now }, entry);
