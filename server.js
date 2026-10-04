@@ -5609,7 +5609,21 @@ app.get("/admin/conversation-state", { preHandler: basicAuth }, async (req, repl
   const sid = _csSessionOf(req);
   if (!sid) return reply.code(400).send({ error: "缺少 session 参数" });
   try {
-    reply.send(conversationState.getState(sid));
+    // 顺带回带候选状态：省得管理台再发一次请求就能同时拿到「当前状态 + 待确认候选」
+    const st = conversationState.getState(sid);
+    st.candidate = conversationState.getCandidate(sid);
+    reply.send(st);
+  } catch (err) {
+    reply.code(400).send({ error: err.message });
+  }
+});
+
+// 丢弃某会话的待确认候选（用户不想要这份了；不调模型、不可恢复——要留着就点确认并入）
+app.post("/admin/conversation-state/candidate/discard", { preHandler: basicAuth }, async (req, reply) => {
+  const sid = _csSessionOf(req);
+  if (!sid) return reply.code(400).send({ error: "缺少 session 参数" });
+  try {
+    reply.send(conversationState.clearCandidate(sid));
   } catch (err) {
     reply.code(400).send({ error: err.message });
   }

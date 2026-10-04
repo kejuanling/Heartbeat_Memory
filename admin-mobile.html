@@ -279,7 +279,7 @@
         <div class="cs-diff-head" id="cs-diff-head"></div>
         <div class="cs-diff-list" id="cs-diff-list"></div>
         <div class="cs-diff-foot">
-          <button type="button" class="cs-btn" onclick="csCancelPreview()">取消，原文留着</button>
+          <button type="button" class="cs-btn" onclick="csCancelPreview()">丢弃这份候选</button>
           <button type="button" class="cs-btn primary" id="cs-commit-btn" onclick="csCommit()">确认并入</button>
         </div>
       </div>
@@ -792,6 +792,21 @@
     }
     return req(CS_API + '?session=' + encodeURIComponent(sid)).then(function (j) {
       CS.state = j;
+      // 2026-10-04：盘上有待确认的候选就直接把 diff 面板显示出来。
+      // 之前候选只存在浏览器内存里，刷新或切会话就没了——用户反馈
+      // 「我刚生成了一个，成功了，但没显示，不知道到哪去了」。现在 preview 会落盘，这里读回来复原。
+      var cand = j && j.candidate;
+      if (cand && cand.exists && cand.candidate && cand.candidate.state) {
+        CS.preview = cand.candidate;
+        renderDiff(cand.candidate);
+        msg('这个会话有一份算好但还没并入的候选状态（' + String(cand.candidate.state).length + ' 字 · ' +
+          String(cand.candidate.created_at || '').slice(0, 16).replace('T', ' ') + ' 算的）——确认无误就点「确认并入」');
+      } else {
+        CS.preview = null;
+        show($('cs-diff'), false);
+        $('cs-preview-msgs').innerHTML = '';
+        show($('cs-preview-title'), false);
+      }
       renderState(j);
       renderRangeInfo();
     }).catch(function (e) { msg(e.message, 'err'); });
@@ -818,7 +833,9 @@
       expandBtn.textContent = '展开全文';
       expandBtn.disabled = true;
       show($('cs-seed'), false);
-      show(note, false);
+      // 注意：没有正式状态时**仍可能有待确认的候选**（用户算完还没点并入就是这状态），
+      // 所以这里不直接隐藏 note，交给 renderNote 按「有没有候选」决定显示什么。
+      renderNote(j || {});
       if (undoBtn) undoBtn.disabled = !hasVersions;
       renderChain([]);
       renderMergeHistory(j || { versions: [] });
@@ -842,6 +859,21 @@
   function renderNote(j) {
     var note = $('cs-note');
     if (!note) return;
+    // 2026-10-04：待确认的候选提示。候选已落盘（刷新/切会话都不丢），
+    // 所以提示放在状态卡上——不点开 diff 面板也能知道「有一份算好的在那儿」。
+    var cand = j && j.candidate && j.candidate.exists ? j.candidate.candidate : null;
+    if (cand && cand.state) {
+      var when = String(cand.created_at || '').slice(0, 16).replace('T', ' ');
+      var r = cand.range || {};
+      note.className = 'cs-note gap';
+      note.innerHTML = '<b>有一份算好但还没并入的候选状态（v' + ((cand.prev_version || 0) + 1) + '）：</b>' +
+        cand.state.length + ' 字 · ' + (r.range_label || (r.start_num + '~' + r.end_num + ' 条')) +
+        ' · ' + when + ' 算的。' +
+        '<br>它存在服务器上，刷新或切到别的会话再回来都还在。' +
+        '看完下面的候选内容，确认无误点「确认并入」才真正生效；不想要就点「丢弃这份候选」。';
+      show(note, true);
+      return;
+    }
     if (j.seed_from_legacy) {
       note.className = 'cs-note gap';
       note.innerHTML = '<b>迁移期：</b>这份状态是用旧块摘要回填的种子（<b>继承旧块「记忆列表」写法</b>）。' +
@@ -1071,7 +1103,9 @@
         CS.preview = j;
         renderDiff(j);
         renderPreviewMsgs(r);
-        msg('算好了，确认无误再并入');
+        // 后端已把这版候选落盘，这里同步状态卡上的提示（刷新后仍在）
+        if (CS.state) renderNote({ candidate: { exists: true, candidate: j }, seed_from_legacy: false });
+        msg('算好了（已存在服务器上，刷新不会丢），确认无误再并入');
       })
       .catch(function (e) { msg(e.message, 'err'); })
       .finally(function () {
@@ -1144,12 +1178,27 @@
     if (op) op.classList.toggle('blocked', blocked);
   };
 
+  // 2026-10-04：候选状态已落盘，所以「取消」必须是**真的丢弃盘上那份**，
+  // 否则下次进页面 loadCsState 又把它读回来，用户点了取消却还在。
   window.csCancelPreview = function () {
-    CS.preview = null;
-    show($('cs-diff'), false);
-    $('cs-preview-msgs').innerHTML = '';
-    show($('cs-preview-title'), false);
-    msg('已取消，原文保留在未覆盖区');
+    var sid = currentSession();
+    if (!sid) return;
+    if (!confirm('丢弃这份候选状态？\n\n它已经算好并存在服务器上了（约 1~5 分钟的模型调用）。丢弃后不能恢复，想再看只能重新算一次。\n\n原文保留在「还没并入」区，不受影响。')) return;
+    var btn = $('cs-commit-btn');
+    if (btn) { btn.disabled = true; btn.textContent = '丢弃中…'; }
+    req(CS_API + '/candidate/discard?session=' + encodeURIComponent(sid), { method: 'POST' })
+      .then(function () {
+        CS.preview = null;
+        show($('cs-diff'), false);
+        $('cs-preview-msgs').innerHTML = '';
+        show($('cs-preview-title'), false);
+        msg('已丢弃这份候选，原文保留在未覆盖区', 'ok');
+        return loadCsState();
+      })
+      .catch(function (e) {
+        if (btn) { btn.disabled = false; btn.textContent = '确认并入'; }
+        msg('丢弃失败：' + e.message, 'err');
+      });
   };
 
   window.csCommit = function () {
