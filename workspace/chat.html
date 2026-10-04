@@ -403,6 +403,7 @@ footer{
   border-top:1px solid transparent;
 }
 .crt-prefix{display:none}
+.crt-paperclip{display:none}
 .inputbar{
   display:flex;align-items:center;gap:8px;
   background:var(--inputbar-bg);
@@ -1522,21 +1523,18 @@ body[data-theme="crt"] #input{
   color:#E0B36A!important;caret-color:#E0B36A!important;
   font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Courier New",monospace!important;
   background:transparent!important;border:none!important;box-shadow:none!important;
+  -webkit-appearance:none;appearance:none;
 }
 body[data-theme="crt"] #input::placeholder{color:transparent!important}
-/* 回形针：隐藏原加号，mask 换图标，颜色随 currentColor（平时暗金/聚焦亮金） */
-body[data-theme="crt"] #imgBtn .ico{display:none!important}
+/* 回形针：真实 svg 双图标切换（跨浏览器兼容，替代 mask），颜色随 currentColor（平时暗金/聚焦亮金） */
+body[data-theme="crt"] .crt-paperclip{display:block!important}
+body[data-theme="crt"] #imgBtn .ico:not(.crt-paperclip){display:none!important}
 body[data-theme="crt"] #imgBtn{
   background:none!important;border:none!important;box-shadow:none!important;
   color:#8A7D68!important;padding:2px!important;margin:0!important;
   width:auto!important;height:auto!important;transition:color .2s;
 }
 body[data-theme="crt"] footer:focus-within #imgBtn{color:#E0B36A!important}
-body[data-theme="crt"] #imgBtn::before{
-  content:"";display:block;width:18px;height:18px;background:currentColor;
-  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 6.59l-8.57 8.57a2 2 0 0 1-2.83-2.83l7.07-7.07'/%3E%3C/svg%3E") no-repeat center/contain;
-  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 6.59l-8.57 8.57a2 2 0 0 1-2.83-2.83l7.07-7.07'/%3E%3C/svg%3E") no-repeat center/contain;
-}
 body[data-theme="crt"] #micBtn,body[data-theme="crt"] #send{display:none!important}
 /* 2026-10-05 修正：flex order 重排为 前缀(0)/输入框(1)/回形针(2)；隐藏右下角跳底悬浮球 */
 body[data-theme="crt"] .inputbar .crt-prefix{order:0}
@@ -1669,7 +1667,7 @@ body[data-theme="crt"] .claude-fab-right .fab-btn{opacity:.5}
   <div class="previews" id="previews"></div>
   <div class="inputbar">
     <span class="crt-prefix">涵@港口:~$</span>
-    <button class="icon-btn" id="imgBtn" title="发图片" aria-label="发图片"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+    <button class="icon-btn" id="imgBtn" title="发图片" aria-label="发图片"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><svg class="ico crt-paperclip" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 6.59l-8.57 8.57a2 2 0 0 1-2.83-2.83l7.07-7.07"/></svg></button>
     <textarea id="input" rows="1" placeholder="说点什么…"></textarea>
     <button class="icon-btn" id="micBtn" title="按住说话（向上滑取消）" aria-label="按住说话"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10.5V11a7 7 0 0 1-14 0v-.5"/><line x1="12" y1="18.5" x2="12" y2="21.5"/><line x1="8.5" y1="21.5" x2="15.5" y2="21.5"/></svg></button>
     <button class="icon-btn" id="send" title="发送" aria-label="发送"><svg class="ico fill" viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" stroke="none"><path d="M3 20 L21 11 L3 2 L3 9 L14 11 L3 13 Z"/></svg></button>
