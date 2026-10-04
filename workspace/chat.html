@@ -1501,55 +1501,7 @@ body[data-theme="crt"] #chat[data-layout="claude"] .msg.ai .bubble::before{
 body[data-theme="crt"] #chat[data-layout="claude"] .msg.ai .bubble p{display:inline;margin:0!important}
 body[data-theme="crt"] #chat[data-layout="claude"] .msg.ai .bubble p+p::before{content:"\A";white-space:pre}
 /* 2026-10-05 008（输入条迁入消息流/sticky/隐身）已删：输入条固定回 footer */
-/* 2026-10-05 底栏输入框终稿 v2：crt 独立输入条——不继承 claude 输入条样式，选择器带 :has(#chat[data-layout="claude"]) 提高优先级反覆盖 claude 块 */
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer{
-  background:#0A0908!important;
-  border-top:1px solid rgba(224,179,106,.14)!important;
-  box-shadow:none!important;
-  transition:border-color .2s;
-}
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer:focus-within{border-top-color:#E0B36A!important}
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .inputbar{
-  background:none!important;border:none!important;border-radius:0!important;
-  box-shadow:none!important;padding:10px 0!important;gap:9px;
-  min-height:auto!important;
-  backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
-}
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .crt-prefix{
-  display:inline;
-  font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Courier New",monospace;
-  font-size:13px;color:#8A7D68;white-space:nowrap;flex-shrink:0;
-  transition:color .2s;
-}
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer:focus-within .crt-prefix{color:#E0B36A}
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .inputbar #input{
-  color:#E0B36A!important;caret-color:#E0B36A!important;
-  font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Courier New",monospace!important;
-  font-size:15px!important;
-  background:transparent!important;border:none!important;outline:none!important;box-shadow:none!important;
-  -webkit-appearance:none;appearance:none;
-}
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .inputbar #input::placeholder{color:transparent!important}
-/* 回形针：真实 svg 双图标切换，加号隐藏；颜色随 currentColor（平时暗金/聚焦亮金） */
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn .crt-paperclip{display:block!important;width:18px!important;height:18px!important;stroke-width:1.8}
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer #imgBtn .ico:not(.crt-paperclip){display:none!important}
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn{
-  background:none!important;border:none!important;box-shadow:none!important;
-  color:#8A7D68!important;padding:2px!important;margin:0!important;
-  width:auto!important;height:auto!important;transition:color .2s;
-  display:flex!important;align-items:center;justify-content:center;box-sizing:content-box;
-}
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer:focus-within #imgBtn{color:#E0B36A!important}
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer #micBtn,body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer #send{display:none!important}
-/* flex order 重排：前缀(0)/输入框(1)/回形针(2) */
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .crt-prefix{order:0}
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .inputbar #input{order:1}
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn{order:2}
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) .jump-fab{display:none!important}
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) #chat[data-layout="claude"]{padding-bottom:calc(env(safe-area-inset-bottom) + 40vh)!important}
-/* 附加：悬浮球减淡，弱化按钮感 */
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) .claude-fab-left,
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) .claude-fab-right .fab-btn{opacity:.5}
+
 </style>
 </head>
 
@@ -9746,6 +9698,55 @@ body[data-theme="claude"] footer .inputbar #input{line-height:1.45!important}
 
 
 body[data-theme="claude"] footer .inputbar #send{box-shadow:0 2px 7px rgba(0,0,0,.08)!important;transition:transform .12s ease!important}
+/* 2026-10-05 底栏输入框终稿 v2：crt 独立输入条——不继承 claude 输入条样式，选择器带 :has(#chat[data-layout="claude"]) 提高优先级反覆盖 claude 块 */
+body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer{
+  background:#0A0908!important;
+  border-top:1px solid rgba(224,179,106,.14)!important;
+  box-shadow:none!important;
+  transition:border-color .2s;
+}
+body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer:focus-within{border-top-color:#E0B36A!important}
+body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .inputbar{
+  background:none!important;border:none!important;border-radius:0!important;
+  box-shadow:none!important;padding:10px 0!important;gap:9px;
+  min-height:auto!important;
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+}
+body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .crt-prefix{
+  display:inline;
+  font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Courier New",monospace;
+  font-size:13px;color:#8A7D68;white-space:nowrap;flex-shrink:0;
+  transition:color .2s;
+}
+body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer:focus-within .crt-prefix{color:#E0B36A}
+body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .inputbar #input{
+  color:#E0B36A!important;caret-color:#E0B36A!important;
+  font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Courier New",monospace!important;
+  font-size:15px!important;
+  background:transparent!important;border:none!important;outline:none!important;box-shadow:none!important;
+  -webkit-appearance:none;appearance:none;
+}
+body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .inputbar #input::placeholder{color:transparent!important}
+/* 回形针：真实 svg 双图标切换，加号隐藏；颜色随 currentColor（平时暗金/聚焦亮金） */
+body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn .crt-paperclip{display:block!important;width:18px!important;height:18px!important;stroke-width:1.8}
+body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer #imgBtn .ico:not(.crt-paperclip){display:none!important}
+body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn{
+  background:none!important;border:none!important;box-shadow:none!important;
+  color:#8A7D68!important;padding:2px!important;margin:0!important;
+  width:auto!important;height:auto!important;transition:color .2s;
+  display:flex!important;align-items:center;justify-content:center;box-sizing:content-box;
+}
+body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer:focus-within #imgBtn{color:#E0B36A!important}
+body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .inputbar #micBtn,body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .inputbar #send{display:none!important}
+/* flex order 重排：前缀(0)/输入框(1)/回形针(2) */
+body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .crt-prefix{order:0}
+body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .inputbar #input{order:1}
+body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn{order:2}
+body[data-theme="crt"]:has(#chat[data-layout="claude"]) .jump-fab{display:none!important}
+body[data-theme="crt"]:has(#chat[data-layout="claude"]) #chat[data-layout="claude"]{padding-bottom:calc(env(safe-area-inset-bottom) + 40vh)!important}
+/* 附加：悬浮球减淡，弱化按钮感 */
+body[data-theme="crt"]:has(#chat[data-layout="claude"]) .claude-fab-left,
+body[data-theme="crt"]:has(#chat[data-layout="claude"]) .claude-fab-right .fab-btn{opacity:.5}
 
 
 
