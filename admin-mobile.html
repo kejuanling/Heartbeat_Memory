@@ -249,6 +249,7 @@
         <div class="cs-state-body collapsed" id="cs-state-body">这个会话还没有状态。在下面的未覆盖区选一段原文，点「并入状态」。</div>
         <div class="cs-acts">
           <button type="button" class="cs-btn" id="cs-expand-btn" onclick="csToggleExpand()">展开全文</button>
+          <button type="button" class="cs-btn" id="cs-edit-btn" onclick="csOpenEdit()">编辑</button>
           <button type="button" class="cs-btn danger" onclick="csUndo()">撤销最后一次并入</button>
         </div>
         <div class="cs-chain" id="cs-chain"></div>
@@ -508,6 +509,27 @@
  </div>
  
  
+ <!-- 手动改写当前状态正文（2026-10-04）。语义：直接覆盖当前版、保存即生效、不产生新版本。
+      所以这个弹框的提示要说清「覆盖、不可回退」——同版本内手改没有存档。 -->
+ <div class="modal-overlay" id="csEditModal">
+   <div class="modal modal-edit-mem" style="max-width:min(94vw,720px)">
+     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-shrink:0">
+       <h3 style="margin:0;font-size:16px">编辑当前状态</h3>
+       <button type="button" onclick="closeModal('csEditModal')" style="background:rgba(0,0,0,0.04);border:none;font-size:16px;color:var(--text2);cursor:pointer;padding:6px 10px;border-radius:8px;line-height:1">&times;</button>
+     </div>
+     <div id="cs-edit-meta" style="font-size:11px;color:var(--text3);margin-bottom:8px"></div>
+     <textarea id="cs-edit-content" rows="18" style="width:100%;box-sizing:border-box;padding:12px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,0.85);font-size:13px;line-height:1.65;color:var(--text2);resize:vertical;font-family:inherit"></textarea>
+     <div style="font-size:11px;color:var(--text3);margin-top:8px;line-height:1.6">
+       保存后<strong>直接覆盖当前这一版</strong>的正文并立即对上下文生效（覆盖区间不变）。不会产生新版本；
+       同一版内改了什么没有存档，改错了只能重写一遍。要回到模型写的原版，去「并入记录」里翻更早的版本。
+     </div>
+     <div style="display:flex;gap:10px;margin-top:12px">
+       <button type="button" class="btn btn-primary" onclick="csSaveEdit()" style="flex:1;background:var(--accent)">保存并生效</button>
+       <button type="button" class="btn btn-outline" onclick="closeModal('csEditModal')" style="flex:1">取消</button>
+     </div>
+   </div>
+ </div>
+
  <div class="modal-overlay" id="ccAiEditModal">
    <div class="modal modal-edit-mem" style="max-width:min(94vw,660px)">
      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-shrink:0">
@@ -819,6 +841,9 @@
       body.classList.add('collapsed');
       expandBtn.textContent = '展开全文';
       expandBtn.disabled = true;
+      // 没状态就没得改（同理没得撤销）
+      var editBtn = $('cs-edit-btn');
+      if (editBtn) editBtn.disabled = true;
       show($('cs-seed'), false);
       // 注意：没有正式状态时**仍可能有待确认的候选**（用户算完还没点并入就是这状态），
       // 所以这里不直接隐藏 note，交给 renderNote 按「有没有候选」决定显示什么。
@@ -829,6 +854,8 @@
       return;
     }
     expandBtn.disabled = false;
+    var editBtnOn = $('cs-edit-btn');
+    if (editBtnOn) editBtnOn.disabled = false;
     body.textContent = j.text;
     ver.textContent = 'v' + j.version;
     var c = j.cover || {};
@@ -923,6 +950,46 @@
     var btn = $('cs-expand-btn');
     var c = b.classList.toggle('collapsed');
     btn.textContent = c ? '展开全文' : '收起';
+  };
+
+  // 手动改写当前状态正文（2026-10-04，用户要求「当前状态的内容加个编辑」）
+  // 语义：直接覆盖当前版、保存即生效、不产生新版本（用户拍板）。
+  window.csOpenEdit = function () {
+    var st = CS.state;
+    if (!st || !st.exists) { msg('这个会话还没有状态，没什么可改', 'err'); return; }
+    var ta = $('cs-edit-content');
+    if (!ta) return;
+    ta.value = st.text || '';
+    var c = st.cover || {};
+    var meta = $('cs-edit-meta');
+    if (meta) {
+      meta.textContent = '当前 v' + st.version + ' · ' + String(st.text || '').length + ' 字 · 覆盖 ' +
+        (c.label_start || '?') + ' ~ ' + (c.label_end || '?') +
+        (st.manual_edit ? '（上次手改于 ' + String(st.manual_edit.at).slice(0, 16).replace('T', ' ') + '）' : '');
+    }
+    openModal('csEditModal');
+  };
+
+  window.csSaveEdit = function () {
+    var sid = currentSession();
+    var ta = $('cs-edit-content');
+    if (!sid || !ta) return;
+    var text = String(ta.value || '').trim();
+    if (!text) { msg('状态正文不能为空', 'err'); return; }
+    if (text === String((CS.state && CS.state.text) || '')) {
+      msg('内容没变，不用保存', 'ok');
+      closeModal('csEditModal');
+      return;
+    }
+    if (!confirm('覆盖当前状态正文？\n\n保存后立即对上下文生效，覆盖区间不变。\n同一版内改的内容没有存档，改错了只能重写一遍。')) return;
+    req(CS_API + '/edit?session=' + encodeURIComponent(sid), {
+      method: 'POST',
+      body: { confirm: true, text: text },
+    }).then(function (r) {
+      closeModal('csEditModal');
+      msg('已保存并生效（状态 → v' + r.version + '，' + String(r.text || '').length + ' 字）', 'ok');
+      return loadCsState();
+    }).catch(function (e) { msg(e.message, 'err'); });
   };
 
   // 并入记录：折叠区（renderState 每次刷新都会重画）

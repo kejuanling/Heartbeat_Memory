@@ -5682,6 +5682,23 @@ app.post("/admin/conversation-state/commit", { preHandler: basicAuth }, async (r
   }
 });
 
+// 手动改当前状态正文（2026-10-04）：直接覆盖当前版、保存即生效、不产生新版本。
+// 与 undo 一样是破坏性写操作，但改的是正文不是状态记录——加同样的 confirm 闸，
+// 避免「探测接口存在性」这类空 body 请求真的把状态正文清空。
+app.post("/admin/conversation-state/edit", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  const sid = _csSessionOf(req);
+  if (!sid) return reply.code(400).send({ error: "缺少 session 参数" });
+  if (body.confirm !== true) {
+    return reply.code(400).send({ error: "改写状态正文需要显式确认：请带 confirm:true（会直接覆盖当前版本的正文）" });
+  }
+  try {
+    reply.send(conversationState.editStateText({ session: sid, text: body.text }));
+  } catch (err) {
+    reply.code(400).send({ error: (err && err.message) || String(err) });
+  }
+});
+
 app.post("/admin/conversation-state/rollback", { preHandler: basicAuth }, async (req, reply) => {
   const body = req.body || {};
   const sid = _csSessionOf(req);
