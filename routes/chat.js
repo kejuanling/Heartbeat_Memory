@@ -1195,9 +1195,10 @@ app.post("/v1/chat/completions", async (req, reply) => {
                 const diarySaved = diaryLib.appendDiaryEntry(diaryResult.diaryContent, sessionId);
                 toAppend.push({ role: "assistant", content: diaryLib.wrapDiaryTag(diaryResult.diaryContent), kind: "diary", diary_id: (diarySaved && diarySaved.id) || undefined });
               }
-              if (visibleContent) {
-                // 与流式路径同口径落富字段（2026-09-15：此前非流式丢思考链/token，刷新后不一致）
-                toAppend.push({ id: replyMsgId || undefined, role: "assistant", content: visibleContent, reasoning: aiThinking || "", tokens: (parsed && parsed.usage) || null });
+              if (aiContent) {
+                // 1005 改：后端时间线是流水账，落原始完整文本（含[DIARY]标签），不剥；
+                // 日记内容另外存 diary.json + kind:diary 消息；前端可见内容由历史 API 下发时剥。
+                toAppend.push({ id: replyMsgId || undefined, role: "assistant", content: aiContent, reasoning: aiThinking || "", tokens: (parsed && parsed.usage) || null });
               }
               if (toAppend.length) appendMessages(sessionId, toAppend);
             }
@@ -1411,9 +1412,9 @@ app.post("/v1/chat/completions", async (req, reply) => {
               const diarySaved = diaryLib.appendDiaryEntry(diaryResult.diaryContent, sessionId);
               toAppend.push({ role: "assistant", content: diaryLib.wrapDiaryTag(diaryResult.diaryContent), kind: "diary", diary_id: (diarySaved && diarySaved.id) || undefined });
             }
-            if (visibleContent) {
-              // 方案二增量：回复只追加一条（富字段 reasoning/tokens 一并落，跨设备刷新不丢）
-              toAppend.push({ id: replyMsgId || undefined, role: "assistant", content: visibleContent, reasoning: aiThinking || "", tokens: aiUsage || null });
+            if (aiFullContent) {
+              // 1005 改：后端流水账落原始完整文本（含[DIARY]标签），不剥；下发前端时剥。
+              toAppend.push({ id: replyMsgId || undefined, role: "assistant", content: aiFullContent, reasoning: aiThinking || "", tokens: aiUsage || null });
             }
             if (toAppend.length) appendMessages(sessionId, toAppend);
           }

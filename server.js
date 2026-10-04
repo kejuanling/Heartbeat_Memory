@@ -2177,7 +2177,8 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         }
         toAppend.push({
           id: replyMsgId || undefined,
-          role: "assistant", content: visibleStored, reasoning: r.reasoning || "", tools: r.toolHistory || [], tokens: r.usage || null,
+          // 1005 改：后端流水账落原始完整文本（r.text 含[DIARY]标签），不剥；下发前端时剥。
+          role: "assistant", content: (r && r.text) ? r.text : aiClean, reasoning: r.reasoning || "", tools: r.toolHistory || [], tokens: r.usage || null,
           segments: (r.toolHistory && r.toolHistory.length) ? (r.segments || []).map(function(s){ return stripToolEchoBlocks(tagParser.stripTags(s)); }) : undefined,
           stream_timeline: finalTimelinePayload   // 真实事件时间线：刷新时按 text/tool 原顺序重建（与终止帧下发同一份）
         });
