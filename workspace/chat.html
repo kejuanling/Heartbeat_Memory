@@ -6452,6 +6452,7 @@ function closeDrawer(){document.getElementById("sessionDrawer").classList.remove
 /* ===== 0929-25 手势：屏幕左边缘向右滑 → 呼出会话列表（与聊天区垂直滚动不冲突） ===== */
 (function(){
   var _sx=0,_sy=0,_tx=0,_ty=0,_swipe=false;
+  var _lastSwipeT=0;   // 1004-02：连续两次右滑才呼出抽屉（防误触）
   document.addEventListener("touchstart",function(e){
     var t=e.touches&&e.touches[0]; if(!t)return;
     var d=document.getElementById("sessionDrawer");
@@ -6474,8 +6475,18 @@ function closeDrawer(){document.getElementById("sessionDrawer").classList.remove
   },{passive:true});
   document.addEventListener("touchend",function(){
     if(_swipe&&_tx>50&&_tx>Math.abs(_ty)*1.2){
+      var now=Date.now();
       var d=document.getElementById("sessionDrawer");
-      if(d&&!d.classList.contains("open")&&typeof openDrawer==="function")openDrawer();
+      if(d&&!d.classList.contains("open")){
+        // 1004-02：连续两次右滑（900ms 内）才真正呼出，第一次只提示，防打字/滑动误触
+        if(now-_lastSwipeT<900){
+          _lastSwipeT=0;
+          if(typeof openDrawer==="function")openDrawer();
+        }else{
+          _lastSwipeT=now;
+          if(typeof showToast==="function")showToast("再右滑一次呼出会话列表");
+        }
+      }
     }
     _sx=_sy=_tx=_ty=0;_swipe=false;
   },{passive:true});
