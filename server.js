@@ -3436,135 +3436,11 @@ app.post("/admin/memory-pool/reparse", { preHandler: basicAuth }, async (req, re
 
 // ========================
 // 0928-48：reparse 分批限流调度器（按会话串行 + 块间定时间隔，防 LLM 429）
-// 用法：POST /admin/memory-pool/reparse/schedule {sessions:[...], gapMs:300000, skipParsed:true}
 // 单飞：已有任务在跑返回 409；状态 GET /schedule/status；取消 POST /schedule/cancel
 // ========================
 let reparseScheduler = null;
 const REPARSE_DEFAULT_GAP_MS = 300000; // 块间默认 5 分钟
 
-app.post("/admin/memory-pool/reparse/schedule", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    if (reparseScheduler && reparseScheduler.running) {
-      return reply.code(409).send({ error: "已有分批解析在跑，请先取消或等它完成", status: reparseScheduler.status() });
-    }
-    const b = req.body || {};
-    const fsx = require("fs-extra");
-    const cf = require("path").join(__dirname, "data", "context_replacements.json");
-    let records = [];
-    try { records = await fsx.readJson(cf); } catch (e) { records = []; }
-    const active = Array.isArray(records) ? records.filter(function (it) { return it && !it.removed && it.enabled !== false; }) : [];
-    const bySession = new Map();
-    active.forEach(function (it) {
-      const s = it.session || "default";
-      if (!bySession.has(s)) bySession.set(s, []);
-      bySession.get(s).push(it);
-    });
-    const sessions = (Array.isArray(b.sessions) && b.sessions.length) ? b.sessions : Array.from(bySession.keys());
-    const gapMs = (Number(b.gapMs) >= 10000) ? Number(b.gapMs) : REPARSE_DEFAULT_GAP_MS;
-    const skipParsed = b.skipParsed !== false;
-    const queue = [];
-    const skipped = [];
-    sessions.forEach(function (s) {
-      (bySession.get(s) || []).forEach(function (it) {
-        const sum = String(it.text || it.memory || "").trim();
-        if (!sum) return;
-        if (skipParsed && it.reparsed_at) { skipped.push(String(it.id || "")); return; }
-        queue.push({ session: s, it: it });
-      });
-    });
-    if (!queue.length) return reply.send({ success: true, scheduled: 0, skipped: skipped.length, note: "无可解析块（全部已解析或无可解析摘要）" });
-
-    // 旧的 pending reparse 日志标「被新任务取代」
-    compactionLogs.forEach(function (l) {
-      if (l && l.status === "pending" && l.action === "reparse") l.status = "skipped";
-    });
-
-    const st = {
-      running: true, queue: queue, cursor: 0, sessions: sessions,
-      gapMs: gapMs, skipParsed: skipParsed, done: 0, failed: 0, candidates: 0,
-      logId: null, timer: null, nextAt: null, startAt: Date.now(),
-      status: function () {
-        return {
-          running: this.running,
-          session: this.queue[this.cursor] ? this.queue[this.cursor].session : null,
-          current: this.cursor, total: this.queue.length,
-          done: this.done, failed: this.failed, candidates: this.candidates,
-          nextAt: this.nextAt, gapMs: this.gapMs
-        };
-      }
-    };
-    reparseScheduler = st;
-    const label = "分批再解析（" + queue.length + " 块 · 间隔 " + Math.round(gapMs / 60000) + " 分钟）";
-    const log = addCompactionLog({ action: "reparse", label: label, status: "pending", message: "队列：会话 " + sessions.join(" → ") + "，跳过已解析 " + skipped.length + " 块" });
-    st.logId = log.id;
-    const update = function (msg) {
-      const li = compactionLogs.findIndex(function (x) { return x.id === st.logId; });
-      if (li >= 0) { compactionLogs[li].message = msg; try { persistCompactionLogs(); } catch (e) {} }
-    };
-
-    const processOne = async function () {
-      if (!st.running) return;
-      if (st.cursor >= st.queue.length) {
-        st.running = false;
-        try { await fsx.writeJson(cf, records); } catch (e) {}
-        update("全部完成：成功 " + st.done + " / 失败 " + st.failed + "，候选 " + st.candidates + " 条进待审");
-        addCompactionLog({ id: st.logId, action: "reparse", label: label, status: "success", message: "全部完成：成功 " + st.done + " / 失败 " + st.failed + "，候选 " + st.candidates + " 条进待审（跳过已解析 " + skipped.length + "）" });
-        return;
-      }
-      const cur = st.queue[st.cursor];
-      const it = cur.it;
-      const idx = st.cursor + 1;
-      st.nextAt = null;
-      const bl = String((it.text || it.memory || "") || "").replace(/\s+/g, " ").trim().slice(0, 16) || String(it.id || "?").slice(0, 12);
-      update("正在解析 第 " + idx + "/" + st.queue.length + " 块（会话 " + cur.session + " · " + bl + "）...");
-      try {
-        const original = (it && it.range) ? sliceTimelineOriginal(it.session, it.range) : null;
-        const sourceText = (original && original.trim()) ? original : String(it.text || it.memory || "").trim();
-        const candidates = await extractMemoryCandidates(sourceText);
-        it.reparsed_at = new Date().toISOString();
-        let candOk = 0;
-        for (const c of candidates) {
-          try {
-            const r = await (memoryV2Admission
-              ? memoryV2Admission.submitPromotion({ content: c.text, kind: c.kind, block_id: String(it.id || "") }, { sessionId: it.session })
-              : Promise.resolve({ action: "error" }));
-            if (r && r.action !== "reject") candOk++;
-          } catch (e) {}
-        }
-        st.candidates += candOk;
-        st.done++;
-        update("第 " + idx + "/" + st.queue.length + " 块已解析（" + bl + "）：候选 " + candOk + " 条进待审，等待 " + Math.round(st.gapMs / 60000) + " 分钟后下一块");
-      } catch (e) {
-        st.failed++;
-        update("第 " + idx + "/" + st.queue.length + " 块失败（" + bl + "）：" + String(e && e.message || e).slice(0, 80) + "，等待 " + Math.round(st.gapMs / 60000) + " 分钟后下一块");
-      }
-      st.cursor++;
-      if (st.cursor >= st.queue.length) { st.nextAt = Date.now() + st.gapMs; st.timer = setTimeout(processOne, st.gapMs); }
-      else { st.nextAt = Date.now() + st.gapMs; st.timer = setTimeout(processOne, st.gapMs); }
-    };
-
-    // 启动（首块立即跑，后续块间隔 gapMs）
-    st.timer = setTimeout(processOne, 0);
-    reply.send({ success: true, scheduled: queue.length, skipped: skipped.length, sessions: sessions, gapMs: gapMs, status: st.status() });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-app.get("/admin/memory-pool/reparse/schedule/status", { preHandler: basicAuth }, (req, reply) => {
-  reply.send({ scheduler: reparseScheduler ? reparseScheduler.status() : null });
-});
-
-app.post("/admin/memory-pool/reparse/schedule/cancel", { preHandler: basicAuth }, (req, reply) => {
-  if (!reparseScheduler || !reparseScheduler.running) return reply.send({ success: true, note: "当前无运行中的任务" });
-  reparseScheduler.running = false;
-  if (reparseScheduler.timer) { clearTimeout(reparseScheduler.timer); reparseScheduler.timer = null; }
-  const li = compactionLogs.findIndex(function (x) { return x.id === reparseScheduler.logId; });
-  if (li >= 0) { compactionLogs[li].status = "skipped"; compactionLogs[li].message = "已取消（剩余 " + (reparseScheduler.queue.length - reparseScheduler.cursor) + " 块未解析）"; try { persistCompactionLogs(); } catch (e) {} }
-  const st = reparseScheduler.status();
-  reparseScheduler = null;
-  reply.send({ success: true, note: "已取消", status: st });
-});
 
 // —— promotion 改造 helper（0918）：压缩块区间的时间线原文切片 + LLM 候选提取 ——
 
@@ -3893,17 +3769,6 @@ app.get("/admin/memory-backfill/status", { preHandler: basicAuth }, async (req, 
 });
 
 // 建议沉底列表（sink 是删除级，不混进新增候选；这里只列，不自动执行）
-app.get("/admin/memory-backfill/sink-suggestions", { preHandler: basicAuth }, async (req, reply) => {
-  if (!requireBackfill(reply)) return;
-  try { reply.send(memoryBackfill.readSinkSuggestions()); }
-  catch (err) { reply.code(500).send({ error: err.message }); }
-});
-
-app.delete("/admin/memory-backfill/sink-suggestions/:id", { preHandler: basicAuth }, async (req, reply) => {
-  if (!requireBackfill(reply)) return;
-  try { reply.send(memoryBackfill.clearSinkSuggestion(req.params.id)); }
-  catch (err) { reply.code(500).send({ error: err.message }); }
-});
 
 // 重跑提示词：留空 = 回落内置默认；DELETE = 清空自定义
 app.get("/admin/memory-backfill/prompt", { preHandler: basicAuth }, async (req, reply) => {
@@ -3942,31 +3807,6 @@ function isPushEchoContent(s) {
 }
 // 解析推送回显内容
 // 2026-09-22 审查 R19：注入 loadTimeline/saveTimeline，让推送编辑/删除走时间线四道守卫 + 快照指纹
-require("./routes/push-events")(app, { basicAuth, baseDir: __dirname, loadTimeline, saveTimeline });
-app.get("/admin/cross-window-inject", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    // 2026-10-19：V1 预览分支（mode:"legacy"）随 V1 死代码一并删除。生产恒为
-    // ctx_v2_enabled=true，预览与主聊天同源：同一 assembleInput + buildContextBlocks 实时拼注入内容
-    //（Relevant 块依赖当轮用户消息，预览不含）。前端 workspace/chat.html 只把 mode 用于一行 tip 文案，
-    // 恒为 "v2" 不影响任何渲染逻辑。
-    const sid = String(req.query && req.query.session_id ? req.query.session_id : "").trim() || "default";
-    let v2Text = "";
-    try {
-      const v2Input = ctxV2Shadow.assembleInput({
-        baseDir: __dirname,
-        sessionId: sid,
-        llmMessages: [],
-        loadTimeline: loadTimeline,
-        normalizeContentToText: normalizeContentToText,
-      });
-      const built = buildContextBlocks(v2Input);
-      v2Text = (built.blocks || [])
-        .filter(function (b) { return b && !b.empty && b.key !== "relevant_memories"; })
-        .map(function (b) { return b.content; }).join("\n\n");
-    } catch (cx) { console.warn("[cross-inject] V2 预览失败:", cx.message); }
-    reply.send({ text: v2Text, session_id: sid, mode: "v2" });
-  } catch (err) { reply.code(500).send({ error: err.message }); }
-});
 
 // 跨窗口注入参数（日记条数，V2 Earlier Days 篇数同源）
 app.get("/admin/cross-inject/config", { preHandler: basicAuth }, async (req, reply) => {
@@ -4266,98 +4106,6 @@ function estimateAlertTokens(timeline) {
 }
 
 // 批次4 C5：后台活动「提醒」板块数据源：网易云 Cookie 失效 / 会话上下文达容量上限 / 服务异常
-app.get("/admin/alerts", { preHandler: basicAuth }, async (req, reply) => {
-  const alerts = [];
-  // 1) 网易云 Cookie 失效：配置了 MUSIC_U 但网易云账号接口取不到资料
-  try {
-    const session = readNeteaseSession();
-    if (session && session.musicU) {
-      const cookieHeader = "MUSIC_U=" + session.musicU + (session.csrf ? "; __csrf=" + session.csrf : "");
-      const account = await fetchNeteaseAccount(cookieHeader);
-      if (!account || !account.nickname) {
-        alerts.push({ type: "netease", level: "warn", title: "网易云 Cookie 失效", desc: "登录会话已失效，需重新设置 MUSIC_U" });
-      }
-    }
-  } catch (e) { console.warn("[alerts] netease:", e.message); }
-  // 2) 会话 token 达提醒上限：最近活跃会话时间线按容量守卫同口径估算用量，达到「提醒上限」（ctx_limit_alert_tokens，独立配置，与容量提醒/压缩无关）即报，带会话 id/名称/用量
-  const sessNames = {};
-  try { Object.assign(sessNames, readJsonFileSafe(SESSION_NAMES_FILE, {})); } catch (e) {}
-  try {
-    const limit = Number(contextCompactor.loadConfig().ctx_limit_alert_tokens) || 0;
-    if (limit) {
-      const files = [];
-      try { files.push({ f: TIMELINE_FILE, m: fs.statSync(TIMELINE_FILE).mtimeMs }); } catch (e) {}
-      for (const f of fs.readdirSync(__dirname)) {
-        if (/^enhanced_messages_s_.*\.json$/.test(f)) {
-          try { files.push({ f: f, m: fs.statSync(path.join(__dirname, f)).mtimeMs }); } catch (e) {}
-        }
-      }
-      files.sort(function (a, b) { return b.m - a.m; });
-      const recent = files.slice(0, 9);
-      for (const { f } of recent) {
-        try {
-          const tl = JSON.parse(fs.readFileSync(path.join(__dirname, f), "utf-8"));
-          if (!Array.isArray(tl)) continue;
-          const actual = latestActualPromptTokens(tl);
-          const used = actual != null ? actual : estimateAlertTokens(tl);
-          if (used < limit) continue; // 用量达到上限才提醒（不依赖是否已塞容量提醒；降回上限以下自动消失）
-          const sid = f === TIMELINE_FILE ? "default" : f.replace(/^enhanced_messages_/, "").replace(/\.json$/, "");
-          alerts.push({ type: "capacity", level: "warn", title: "会话 token 达提醒上限", session_id: sid, session_name: sessNames[sid] || null, token_used: used, token_limit: limit, token_source: actual != null ? "actual" : "estimate", desc: actual != null ? "最近一轮上游实际 prompt_tokens" : "估算（无最近 usage 记录）" });
-        } catch (e) {}
-      }
-    }
-  } catch (e) { console.warn("[alerts] capacity:", e.message); }
-  // 4) 日志哨兵事件（ops/log_sentinel.py 落盘 data/sentinel_events.json）：24h 内的新IP登录/SSH爆破/MCP入口异常/服务掉线
-  try {
-    const sentEv = readJsonFileSafe(path.join(__dirname, "data", "sentinel_events.json"), null);
-    const evList = sentEv && Array.isArray(sentEv.events) ? sentEv.events : [];
-    const cutoff = Date.now() - 24 * 3600 * 1000;
-    const fresh = evList.filter(function (ev) { return ev && typeof ev.ts === "number" && ev.ts >= cutoff; });
-    fresh.slice(-10).forEach(function (ev) {
-      const d = new Date(ev.ts);
-      const when = (d.getMonth() + 1) + "月" + d.getDate() + "日 " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
-      alerts.push({ type: "sentinel", level: "warn", title: ev.title || "哨兵事件", desc: when + " · " + (ev.body || "") });
-    });
-  } catch (e) { console.warn("[alerts] sentinel:", e.message); }
-  // 5) 上游余额不足：最近 402 记录（24h 窗口），数据来自 lib/upstream-alert（各上游调用点 note402）
-  try {
-    const ua = upstreamAlert.snapshot();
-    if (ua.last402At && (Date.now() - ua.last402At) < 24 * 3600 * 1000) {
-      const d = new Date(ua.last402At);
-      const when = (d.getMonth() + 1) + "月" + d.getDate() + "日 " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
-      alerts.push({ type: "balance", level: "warn", title: "上游模型余额不足", desc: when + " · " + (ua.lastModel || "模型未知") + "（24h 内累计 " + (ua.count || 0) + " 次 402）" });
-    }
-  } catch (e) { console.warn("[alerts] balance:", e.message); }
-  // 3) 服务状态：列出全部实际部署的服务（pm2 存在 / systemd unit 存在 / 端口型全部），异常高亮
-  const services = [];
-  try {
-    const pm2Out = runShellCommand("pm2 jlist").output || "[]";
-    const pm2ByName = {};
-    try { JSON.parse(pm2Out).forEach(function (a) { pm2ByName[a.name] = a.pm2_env && a.pm2_env.status; }); } catch (e) {}
-    const ssOut = String(runShellCommand("ss -ltn 2>/dev/null").output || "");
-    const ports = new Set();
-    const mm = ssOut.match(/:(\d{2,5})\s/g) || [];
-    mm.forEach(function (s) { ports.add(s.replace(/[:\s]/g, "")); });
-    for (const svc of MANAGED_SERVICES) {
-      let ok = true, status = "unknown";
-      if (svc.type === "pm2") {
-        if (!(svc.name in pm2ByName)) continue; // 未部署，跳过
-        status = pm2ByName[svc.name] || "unknown";
-        ok = status === "online";
-      } else if (svc.type === "port") {
-        status = ports.has(String(svc.port)) ? "running" : "stopped";
-        ok = status === "running";
-      } else if (svc.type === "systemd") {
-        const en = runShellCommand("systemctl is-enabled " + svc.name + " 2>/dev/null").output || "";
-        if (en !== "enabled" && en !== "disabled") continue; // unit 不存在，跳过
-        status = runShellCommand("systemctl is-active " + svc.name).output || "unknown";
-        ok = status === "active";
-      }
-      services.push({ name: svc.name, label: svc.label || svc.name, status: status, ok: ok });
-    }
-  } catch (e) { console.warn("[alerts] services:", e.message); }
-  reply.send({ ok: true, alerts: alerts, services: services, ts: Date.now() });
-});
 
 
 
@@ -5437,41 +5185,6 @@ app.get("/admin/context-compaction/search", { preHandler: basicAuth }, async (re
 });
 
 // 已标星消息列表：统一管理所有被标星的原正文
-app.get("/admin/context-compaction/marked-list", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const res = contextReplacements.listMarked();
-    // in_context：该标星正文当前是否实际在最后一次发给 LLM 的上下文里
-    // （记忆碎片原句 / 所在块摘要保留 / 原文仍在窗口，统一按归一化正文前缀匹配捕获文本）
-    try {
-      const norm = function (s) { return String(s || "").toLowerCase().replace(/\s+/g, ""); };
-      let captureText = "";
-      if (Array.isArray(lastLLMMessages)) {
-        captureText = lastLLMMessages.map(function (m) {
-          const c = m && m.content;
-          if (typeof c === "string") return c;
-          if (Array.isArray(c)) return c.map(function (p) { return (p && typeof p.text === "string") ? p.text : ""; }).join("");
-          return "";
-        }).join("\n");
-        captureText = norm(captureText);
-      }
-      if (captureText) {
-        (res.results || []).forEach(function (r) {
-          const full = norm(r.content);
-          if (!full) { r.in_context = false; return; }
-          const probe = full.length > 100 ? full.slice(0, 100) : full;
-          r.in_context = captureText.indexOf(probe) >= 0;
-        });
-      } else {
-        (res.results || []).forEach(function (r) { r.in_context = false; });
-      }
-    } catch (e) {
-      (res.results || []).forEach(function (r) { if (r.in_context === undefined) r.in_context = false; });
-    }
-    reply.send(res);
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
 
 // 词云点词：检索池里包含该词的相关对话片段
 app.get("/admin/context/keywords/related", { preHandler: basicAuth }, async (req, reply) => {
@@ -5561,20 +5274,6 @@ app.post("/admin/context-compaction/mark", { preHandler: basicAuth }, async (req
 });
 
 // 更新已标星消息正文（管理台"已标星消息"编辑）：只更新 content，保留角色与标星时间
-app.post("/admin/context-compaction/marked/update", { preHandler: basicAuth }, async (req, reply) => {
-  const body = req.body || {};
-  const key = String(body.key || "").trim();
-  const content = String(body.content || "").trim();
-  if (!key) return reply.code(400).send({ error: "key 无效" });
-  if (!content) return reply.code(400).send({ error: "正文内容不能为空" });
-  try {
-    const r = contextReplacements.updateMark(key, { content: content });
-    if (!r.ok) return reply.code(400).send({ error: r.error || "更新失败" });
-    reply.send({ ok: true, content: r.content });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
 
 // 容量提醒提示词（会话超上限时塞给 AI 的整条提醒；独立配置，与压缩提示词互不关联）
 app.get("/admin/context-compaction/ctx-limit-prompt", { preHandler: basicAuth }, async (req, reply) => {
@@ -6835,121 +6534,6 @@ function resolvePageVideos(pageUrl, html) {
 
 // 唤醒原始日志（wake-up 独立进程的 pm2 日志尾读）：2026-09-15 进程退役后日志不再增长，
 // 仅剩历史排查价值；路径可经 WAKE_UP_LOG_PATH 覆盖
-app.get("/admin/logs/wake-up", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const lines = parseInt(req.query.lines) || 200;
-    // 2026-09-20：唤醒调度已并入 gateway（wake-up 独立进程退役），日志源改读 gateway-out.log；
-    // gateway 日志含全部请求噪音且持续膨胀，只读尾部 3MB 再取行
-    const logPath = process.env.WAKE_UP_LOG_PATH || "/root/.pm2/logs/gateway-out.log";
-    try {
-      let raw = "";
-      try {
-        const st = fs.statSync(logPath);
-        const readBytes = Math.min(st.size, 3 * 1024 * 1024);
-        const buf = Buffer.alloc(readBytes);
-        const fd = fs.openSync(logPath, "r");
-        try { fs.readSync(fd, buf, 0, readBytes, st.size - readBytes); } finally { fs.closeSync(fd); }
-        raw = buf.toString("utf-8");
-        if (readBytes < st.size) raw = raw.slice(raw.indexOf("\n") + 1); // 掐掉首行残段
-      } catch (e) {
-        raw = fs.readFileSync(logPath, "utf-8");
-      }
-      // 2026-09-23:前端唤醒日志去噪--白名单保留唤醒相关行,再剔除重复/内部确认行
-      const allLines = raw.split("\n").filter(l => l.trim());
-      const KEEP = ["开始自动唤醒", "====", "[wake-scheduler]", "[wake-chat]", "[diary]"];
-      const DROP = ["块已落盘", "直连完成", "已设定定时唤醒", "唤醒周期已重置",
-        "唤醒调度器已在 gateway 内启动", "wake_completion_forward", "Wake Result",
-        "[tag-parser]", "[wake-event]"];
-      const filtered = allLines.filter(l => KEEP.some(k => l.includes(k)) && !DROP.some(k => l.includes(k)));
-      const tailLines = filtered.slice(-lines);
-      reply.send({ lines: tailLines, total: filtered.length });
-    } catch {
-      reply.send({ lines: [], total: 0, error: "日志文件不存在" });
-    }
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-
-
-// 获取/新增/删除 永久注入上下文 (pinned memories)
-app.get("/admin/logs/pinned", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const list = engine.getPinnedMemories ? engine.getPinnedMemories() : [];
-    reply.send({ list });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-app.post("/admin/logs/pinned", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const { title, content, order } = req.body || {};
-    const mem = await engine.addPinnedMemory({ title, content, order }, { allowDeleted: true });
-    reply.send({ success: true, memory: mem });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-
-
-app.put("/admin/logs/pinned/:id", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const { title, content, order } = req.body || {};
-    const updates = {};
-    if (title !== undefined) updates.title = title;
-    if (content !== undefined) updates.content = content;
-    if (order !== undefined) updates.order = order;
-    const mem = await engine.updatePinnedMemory(req.params.id, updates);
-    if (!mem) return reply.code(404).send({ error: "not found" });
-    reply.send({ success: true, memory: mem });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-app.post("/admin/logs/pinned/reorder", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const ids = (req.body || {}).ids;
-    const list = await engine.reorderPinnedMemory(ids);
-    if (!list) return reply.code(400).send({ error: "无效的排序数据" });
-    reply.send({ success: true, list: list });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
-app.delete("/admin/logs/pinned/:id", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const engine = require("./memory-engine");
-    const ok = await engine.deletePinnedMemory(req.params.id);
-    reply.send({ success: ok });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
-
-// 获取最后一次发给LLM的完整上下文
-app.get("/admin/logs/context", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    if (!lastLLMMessages) {
-      reply.send({ messages: [], total: 0, captureTime: null });
-      return;
-    }
-    const messages = lastLLMMessages.map(m => {
-      if (m.role === "_divider") return { role: "_divider", content: m.content };
-      return { role: m.role, content: m.content, images: m.images, attachments: m.attachments, tool_calls: m.tool_calls, tool_call_id: m.tool_call_id };
-    });
-    reply.send({ messages, total: messages.length, captureTime: lastLLMCaptureTime });
-  } catch (err) {
-    reply.code(500).send({ error: err.message });
-  }
-});
 
 // ========================
 // 启动服务
