@@ -2350,15 +2350,10 @@ function ccArmAllGapAutoLoad(){
    const card=el.closest('.card'); if(!card)return;
    const parts=Array.prototype.slice.call(card.querySelectorAll('.hint-body')).map(function(n){return n.innerHTML;});
    const titleEl=card.querySelector('.card-title span');
-   document.getElementById('hintModalTitle').textContent=(titleEl?titleEl.textContent:'说明')+' · 说明';
-   const body=document.getElementById('hintModalBody');
-   body.innerHTML=parts.length?parts.join('<div style="border-top:1px solid var(--border);margin:8px 0"></div>'):'（无说明）';
-   openModal('hintModal');
+   mpShowReason((titleEl?titleEl.textContent:'说明')+' · 说明', parts.length?parts.join('<div style="border-top:1px solid var(--border);margin:8px 0"></div>'):'（无说明）', true);
  }
  function showHintText(el,title,text){
-   document.getElementById('hintModalTitle').textContent=title||'说明';
-   document.getElementById('hintModalBody').textContent=text||'';
-   openModal('hintModal');
+   mpShowReason(title||'说明', text||'');
  }
  
  function initCollapsibleCards(){
@@ -3107,13 +3102,13 @@ function ccArmAllGapAutoLoad(){
   }
   // 1005-16b：评估理由展示——顶部横幅（toast 2.2s 太短，改为可停留长条，右上角叉关闭，12s 自动消失兜底）
   let mpReasonBannerTimer=null;
-  function mpShowReason(title, reason){
+  function mpShowReason(title, reason, isHtml){
     const b=document.getElementById('mpReasonBanner');
     if(!b) return;
     const t=document.getElementById('mp-reason-title');
     const tx=document.getElementById('mp-reason-text');
     if(t) t.textContent=title;
-    if(tx) tx.textContent=reason||'（无理由说明）';
+    if(tx){ if(isHtml){ tx.innerHTML=reason||'（无说明）'; } else { tx.textContent=reason||'（无理由说明）'; } }
     b.style.display='block';
     clearTimeout(mpReasonBannerTimer);
     mpReasonBannerTimer=setTimeout(closeMpReasonBanner,12000);

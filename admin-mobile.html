@@ -50,7 +50,7 @@
    </div>
 
    <div class="card" data-collapse-id="cross-inject-config" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>跨窗口注入 · 日记条数</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>跨窗口注入 · 日记条数</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">?</span><span class="collapse-arrow">▾</span></div>
      <div class="hint-card">
        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px;">控制 V2 上下文「Earlier Days」块注入的近期日记篇数（默认 3）。保存后写入 data/cross_inject_config.json，下次请求即生效。</div>
      </div>
@@ -68,7 +68,7 @@
      </div>
    </div>
    <div class="card" data-collapse-id="distill-config" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆蒸馏 · 定时设置</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆蒸馏 · 定时设置</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">?</span><span class="collapse-arrow">▾</span></div>
      <div class="hint-card">
        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px;">每天在设定时间把「涵的日记」分批喂给模型抽取记忆候选，产出全部进待审队列等你裁决，不会直接入库。开关关掉就不自动跑；「立即跑一次」不受开关约束，随时可以手动跑。保存后写入 data/memory_distill_config.json，立即生效。</div>
      </div>
@@ -94,7 +94,7 @@
    </div>
 
    <div class="card" data-collapse-id="summary-config" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>两块总结 · 定时设置</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>两块总结 · 定时设置</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">?</span><span class="collapse-arrow">▾</span></div>
      <div class="hint-card">
        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px;">每次对话开头那两块：Core Identity（写「规矩」，取材记忆池全部活跃 rule 条目）与 Long-term Understanding（写「理解」，取材全部活跃 fact 条目）——不是置顶那几条。每晚到点检查一次：记忆池没变化就完全不动（比对指纹，不调模型），变了才重新生成并写缓存。模型挂了沿用上一版，连上一版都没有才回退直注原始条目。开「增量生成」时，变化不多就只把「上一版 + 新增/改动/移除」喂给模型；关掉则每次全量重生成。</div>
      </div>
@@ -122,7 +122,7 @@
    </div>
 
    <div class="card" data-collapse-id="backfill-config" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>老数据重跑 · 逐批整理</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>老数据重跑 · 逐批整理</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">?</span><span class="collapse-arrow">▾</span></div>
      <div class="hint-card">
        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px;">把记忆池里已有的活跃记忆一批一批过一遍，让模型判断该怎么整理：润色改写 / 补充信息 / 合并碎片 / 补抽漏掉的 / 建议沉底。**产出一律进待审**，不会自己动池子。每条都会先回原文取证，原文对不上的一律不动。「建议沉底」是删除级动作，不进待审，单独列出来等你定夺。</div>
      </div>
@@ -146,7 +146,7 @@
      </div>
    </div>
    <div class="card" data-collapse-id="cc-config" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>压缩参数配置</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>压缩参数配置</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">?</span><span class="collapse-arrow">▾</span></div>
      <div class="card-body">
        <div class="cc-cfg-grid">
          <label class="cc-cfg-field">自动分块间隔（分钟）
@@ -157,9 +157,9 @@
            <input type="number" id="cc-cfg-chunk-min" min="1" step="1"></label>
          <label class="cc-cfg-field">块最多条数
            <input type="number" id="cc-cfg-chunk-max" min="1" step="1"></label>
-         <label class="cc-cfg-field">上下文容量上限<span class="hint-i" onclick="event.preventDefault();event.stopPropagation();showHintText(this,'上下文容量上限','按 token 估算，0=不限。超过时网关塞一条隐藏提醒，让 AI 自己压缩上下文。')">i</span>
+         <label class="cc-cfg-field">上下文容量上限<span class="hint-i" onclick="event.preventDefault();event.stopPropagation();showHintText(this,'上下文容量上限','按 token 估算，0=不限。超过时网关塞一条隐藏提醒，让 AI 自己压缩上下文。')">?</span>
            <input type="number" id="cc-cfg-ctx-limit" min="0" step="1000"></label>
-         <label class="cc-cfg-field">提醒上限<span class="hint-i" onclick="event.preventDefault();event.stopPropagation();showHintText(this,'提醒上限','后台提醒卡的超限门槛（token 估算），0=不提醒。只管提醒显示，与容量提醒/自动压缩无关。')">i</span>
+         <label class="cc-cfg-field">提醒上限<span class="hint-i" onclick="event.preventDefault();event.stopPropagation();showHintText(this,'提醒上限','后台提醒卡的超限门槛（token 估算），0=不提醒。只管提醒显示，与容量提醒/自动压缩无关。')">?</span>
            <input type="number" id="cc-cfg-alert-limit" min="0" step="1000"></label>
          <label class="cc-cfg-field">容量提醒开关
            <span class="switch"><input type="checkbox" id="cc-cfg-ctx-remind"><span class="slider"></span></span></label>
@@ -308,7 +308,7 @@
 
 <div class="tab-content" id="tab-prompts">
    <div class="card" data-collapse-id="wake-prompt" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>唤醒提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>唤醒提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">?</span><span class="collapse-arrow">▾</span></div>
      <div class="card-body">
          <textarea id="wake-prompt-edit" rows="8" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;font-family:monospace;line-height:1.6;resize:vertical;"></textarea>
          <div class="env-row" style="margin-top:8px;gap:8px;">
@@ -319,7 +319,7 @@
      </div>
    </div>
    <div class="card" data-collapse-id="context-digest-prompt" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>摘要整理提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>摘要整理提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">?</span><span class="collapse-arrow">▾</span></div>
      <div class="card-body">
          <textarea id="context-digest-prompt-edit" rows="12" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;font-family:monospace;line-height:1.6;resize:vertical;"></textarea>
          <div class="env-row" style="margin-top:8px;gap:8px;">
@@ -331,7 +331,7 @@
      </div>
    </div>
    <div class="card" data-collapse-id="ctx-limit-prompt" data-default="collapsed">
-     <div class="card-title collapsible" onclick="toggleCard(this)"><span>容量提醒提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>容量提醒提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">?</span><span class="collapse-arrow">▾</span></div>
      <div class="card-body">
        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:4px;"></div>
        <textarea id="ctx-limit-prompt-edit" rows="14" style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.7);font-size:12px;line-height:1.6;font-family:monospace;resize:vertical;"></textarea>
@@ -346,7 +346,7 @@
 
      <!-- 状态机提示词（2026-10-04 新增，用户要求把状态机提示词搬到管理台提示词页） -->
      <div class="card" data-collapse-id="cs-prompt-config" data-default="collapsed">
-       <div class="card-title collapsible" onclick="toggleCard(this)"><span>会话状态机提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+       <div class="card-title collapsible" onclick="toggleCard(this)"><span>会话状态机提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">?</span><span class="collapse-arrow">▾</span></div>
        <div class="card-body">
          <div style="font-size:11px;color:var(--text3);margin-bottom:6px;line-height:1.6">
            状态机每次算新状态时用的提示词。<b>System</b> 决定「状态怎么写」，<b>User 模板</b> 决定「每次喂它什么」。
@@ -367,7 +367,7 @@
        </div>
      </div>
        <div class="card" data-collapse-id="reparse-prompt-config" data-default="collapsed">
-      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆池·解析提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆池·解析提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">?</span><span class="collapse-arrow">▾</span></div>
       <div class="card-body">
         <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:6px;">下面展示「解析」用的提示词（系统 + 用户）——解析对象是压缩块覆盖区间的对话原文，产出候选全部进记忆 review 队列人工把关。可直接修改、保存后覆盖内置；点「恢复内置默认」会清空自定义、回到内置版。</div>
         <div class="cc-cfg-msg" id="reparse-prompt-msg" style="margin-bottom:8px"></div>
@@ -383,7 +383,7 @@
     </div>
 
     <div class="card" data-collapse-id="judge-prompt-config" data-default="collapsed">
-      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆流水线·判定提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆流水线·判定提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">?</span><span class="collapse-arrow">▾</span></div>
       <div class="card-body">
         <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:6px;">新记忆入库前，流水线用它调用 LLM 判定「候选 × 已有记忆」的关系（duplicate=重复 / update=更新 / coexist=共存 / need_review=待审）并决定去向：重复拒收、更新与待审进人工队列、共存直接入库。占位符 ${existing_kind} ${existing_text} ${candidate_kind} ${candidate_text} 运行时自动填充。可直接修改保存覆盖内置；「恢复内置默认」清空自定义。</div>
         <div class="cc-cfg-msg" id="judge-prompt-msg" style="margin-bottom:8px"></div>
@@ -396,7 +396,7 @@
     </div>
 
     <div class="card" data-collapse-id="distill-prompt-config" data-default="collapsed">
-      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆蒸馏·抽取提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆蒸馏·抽取提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">?</span><span class="collapse-arrow">▾</span></div>
       <div class="card-body">
         <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:6px;">后台蒸馏每批把「若干篇日记 + 按日期检索到的当天对话原文」打包喂给模型，用它抽取值得长期记住的候选——产出全部进记忆待审队列，不直接入池。占位符 ${DIARY_COUNT} 运行时替换为本次日记篇数；「上一批已提取的记忆」与「=== 材料 ===」由运行时自动拼在 User 提示词之后，不需要自己写。两边都留空即用内置默认；点「恢复内置默认」清空自定义。</div>
         <div class="cc-cfg-msg" id="distill-prompt-msg" style="margin-bottom:8px"></div>
@@ -413,7 +413,7 @@
     </div>
 
     <div class="card" data-collapse-id="summary-prompt-config" data-default="collapsed">
-      <div class="card-title collapsible" onclick="toggleCard(this)"><span>两块总结·合并提示词（1003-15）</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+      <div class="card-title collapsible" onclick="toggleCard(this)"><span>两块总结·合并提示词（1003-15）</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">?</span><span class="collapse-arrow">▾</span></div>
       <div class="card-body">
         <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:6px;">一次 LLM 调用同时生成两块（Core Identity + Long-term Understanding），模型根据全部材料自己分配，两块不重复。占位符（运行时自动填充）：${RULE_COUNT} 规则类条数、${RULE_PREVIOUS_BLOCK} 上一版、${RULE_DELTA_BLOCK} 增量、${RULE_MEMORY_LIST} 规则类清单，${FACT_*} 同义为事实类。全量模式两块材料都喂；增量模式只喂「上一版 + 增量记忆」，模型可调用关键词检索工具补充材料（最多 4 轮）。两边都留空即用内置默认；点「恢复内置默认」清空自定义。</div>
         <div class="cc-cfg-msg" id="summary-prompt-msg" style="margin-bottom:8px"></div>
@@ -430,7 +430,7 @@
     </div>
 
     <div class="card" data-collapse-id="bf-prompt-config" data-default="collapsed">
-      <div class="card-title collapsible" onclick="toggleCard(this)"><span>老数据重跑·整理提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">i</span><span class="collapse-arrow">▾</span></div>
+      <div class="card-title collapsible" onclick="toggleCard(this)"><span>老数据重跑·整理提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">?</span><span class="collapse-arrow">▾</span></div>
       <div class="card-body">
         <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:6px;">决定模型怎么对待那些老记忆：什么该润色、什么该合并、什么该沉底。可用占位符：${MEM_COUNT} 本批条数、${MATERIALS} 记忆与原文清单。★ 内置默认里的铁律「不确定就 keep」「原文对不上就 keep」别删——删了它会开始乱改。</div>
         <div class="cc-cfg-msg" id="bf-prompt-msg" style="margin-bottom:8px"></div>
