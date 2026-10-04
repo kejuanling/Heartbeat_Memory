@@ -1412,7 +1412,7 @@ body[data-theme="crt"]:has(#chat[data-layout="claude"])::after{
   content:"";position:fixed;inset:0;z-index:20;pointer-events:none;
   background:
     repeating-linear-gradient(0deg,rgba(0,0,0,.15) 0 1px,transparent 1px 3px),
-    radial-gradient(ellipse at 50% 45%,transparent 55%,rgba(0,0,0,.30) 100%);
+    linear-gradient(180deg,rgba(0,0,0,.50) 0%,rgba(0,0,0,.18) 5%,transparent 10%);
 }
 
 /* 头部 */
@@ -9743,7 +9743,7 @@ body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .crt-prefix{order
 body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .inputbar #input{order:1}
 body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn{order:2}
 body[data-theme="crt"]:has(#chat[data-layout="claude"]) .jump-fab{display:none!important}
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) #chat[data-layout="claude"]{padding-bottom:calc(env(safe-area-inset-bottom) + 40vh)!important}
+body[data-theme="crt"]:has(#chat[data-layout="claude"]) #chat[data-layout="claude"]{padding-bottom:calc(env(safe-area-inset-bottom) + 20%)!important}
 /* 2026-10-05 修正：删除 crt 对右上角 fab 的 opacity 减淡——opacity:.5 覆盖了收起态 expandable 的 opacity:0，导致隐藏按钮半透明叠在主按钮上 */
 
 
