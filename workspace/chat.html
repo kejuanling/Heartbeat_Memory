@@ -1534,12 +1534,12 @@ body[data-theme="crt"] #chat[data-layout="claude"] .msg.user .bubble p{display:i
 body[data-theme="crt"] #chat[data-layout="claude"] .msg.user .bubble p+p::before{content:"\A";white-space:pre}
 /* 007 AI 前缀：谢@机房（正文较长，前缀作文件头行，不内联拍扁） */
 body[data-theme="crt"] #chat[data-layout="claude"] .msg.ai .bubble::before{
-  content:"谢@机房:~$";display:block;color:#9C855C;font-size:12px;
-  margin:0 0 3px;text-shadow:none;letter-spacing:.5px;
+  content:"谢@机房:~$ ";display:inline;color:#8A7D68;
+  text-shadow:none;letter-spacing:0;
 }
 /* 008 输入条迁入纸流末尾：无箱体，纯提示行；流式输出期间自动隐身 */
 body[data-theme="crt"] #chat[data-layout="claude"] > .inputbar.crt-inline{
-  position:static!important;
+  position:relative!important;
   margin:6px 14px calc(12px + env(safe-area-inset-bottom))!important;
   background:transparent!important;border:none!important;border-radius:0!important;
   box-shadow:none!important;
