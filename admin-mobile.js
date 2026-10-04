@@ -384,17 +384,37 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
      body.innerHTML = '<div class="log-panel-empty">暂无生成记录</div>';
      return;
    }
-   body.innerHTML = logs.map(function(l){
+   // 1004-12：按类型分组——生成任务 / 状态机压缩 / 后台任务（默认折叠）。
+   // 后台任务条目直接用 message 作主文本（自带 [模块] 前缀=在干什么），不再显示无意义的"后台任务"label。
+   const groups = { gen: [], state: [], sys: [] };
+   logs.forEach(function(l){
+     if (GEN_ACTIONS[l && l.action]) groups.gen.push(l);
+     else if (l && l.action === 'state') groups.state.push(l);
+     else groups.sys.push(l);
+   });
+   const esc = function(s){ return String(s == null ? '' : s).replace(/</g,'&lt;'); };
+   const itemHtml = function(l, msgAsLabel){
      const statusText = l.status === 'success' ? '成功' : (l.status === 'error' ? '失败' : (l.status === 'skipped' ? '跳过' : '进行中'));
+     const labelText = msgAsLabel ? esc(l.message || l.label || '后台任务').replace(/\n/g,'<br>') : esc(l.label || '未知操作');
+     const msgText = msgAsLabel ? '' : esc(l.message || '').replace(/\n/g,'<br>');
      return '<div class="log-item ' + (l.status || 'pending') + '">' +
        '<div class="log-item-head">' +
-         '<span class="log-item-label">' + (l.label || '未知操作') + '</span>' +
+         '<span class="log-item-label">' + labelText + '</span>' +
          '<span class="log-item-status">' + statusText + '</span>' +
        '</div>' +
-       '<div class="log-item-msg">' + String(l.message || '').replace(/</g,'&lt;').replace(/\n/g,'<br>') + '</div>' +
+       (msgText ? '<div class="log-item-msg">' + msgText + '</div>' : '') +
        '<div class="log-item-time">' + formatLogTime(l.time) + '</div>' +
      '</div>';
-   }).join('');
+   };
+   const groupHtml = function(title, list, collapsed){
+     return '<details class="log-group"' + (collapsed ? '' : ' open') + '><summary>' + title + '（' + list.length + '）</summary>' +
+       list.map(function(l){ return itemHtml(l, title === '后台任务'); }).join('') + '</details>';
+   };
+   let html = '';
+   if (groups.gen.length) html += groupHtml('生成任务', groups.gen, false);
+   if (groups.state.length) html += groupHtml('状态机压缩', groups.state, false);
+   if (groups.sys.length) html += groupHtml('后台任务', groups.sys, true);
+   body.innerHTML = html;
  }
 
  // —— 生成中状态恢复（0926）：解析/生成摘要是服务端同步任务，页面被杀或重进后前端 fetch 已丢，
@@ -3550,6 +3570,85 @@ function ccArmAllGapAutoLoad(){
       toast('review 队列加载失败: '+e.message);
     }
   }
+  // 1004-04：待审卡片的 judge 信息区——两个分数卡 + 相似记忆清单（每条带沉底按钮）。
+  // judge 只提供信息，不参与决策：分数只显示，相似条目只列，留/沉全部由人点。
+  // 数据来自队列记录的 it.judge = {worth, worth_reason, volatility, volatility_reason, similar[]}。
+  const JUDGE_REL={duplicate:'重复',update:'更新',contradiction:'矛盾',coexist:'可共存',need_review:'待定'};
+  const JUDGE_REL_CLS={duplicate:'dup',update:'upd',contradiction:'con',coexist:'coex',need_review:'nrv'};
+  const JUDGE_VOL={stable:'基本不会',volatile:'可能会',situational:'一次性'};
+  const JUDGE_VOL_CLS={stable:'stable',volatile:'volatile',situational:'situational'};
+  function renderJudgeBlock(it){
+    const j=it&&it.judge;
+    if(!j)return '';
+    let h='';
+    // --- 两个分数卡 ---
+    const w=(typeof j.worth==='number')?j.worth:null;
+    const wPct=w!=null?Math.round(w*100):null;
+    const wCls=wPct==null?'':(wPct>=70?'high':(wPct>=40?'mid':'low'));
+    const vol=j.volatility||null;
+    if(wPct!=null||vol){
+      h+='<div class="mp-judge-scores">';
+      if(wPct!=null){
+        h+='<div class="mp-js"><div class="mp-js-top"><span class="mp-js-lbl">值得记吗</span><span class="mp-js-val '+wCls+'">'+wPct+'%</span></div>'
+          +'<div class="mp-js-bar"><i class="'+wCls+'" style="width:'+wPct+'%"></i></div>'
+          +(j.worth_reason?'<div class="mp-js-why">'+escapeHtml(j.worth_reason)+'</div>':'')
+          +'</div>';
+      }
+      if(vol){
+        h+='<div class="mp-js"><div class="mp-js-top"><span class="mp-js-lbl">会不会过时</span><span class="mp-js-vol '+(JUDGE_VOL_CLS[vol]||'')+'">'+(JUDGE_VOL[vol]||escapeHtml(vol))+'</span></div>'
+          +(j.volatility_reason?'<div class="mp-js-why">'+escapeHtml(j.volatility_reason)+'</div>':'')
+          +'</div>';
+      }
+      h+='</div>';
+    }
+    // --- 相似记忆清单 ---
+    const sim=Array.isArray(j.similar)?j.similar:[];
+    if(sim.length){
+      const show=sim.slice(0,5), rest=sim.slice(5);
+      h+='<div class="mp-sim">'
+        +'<div class="mp-sim-h"><span>相似记忆 '+sim.length+' 条（只读参考，可逐条沉底）</span><span>门槛 0.18</span></div>';
+      const simItem=function(s,hidden){
+        return '<div class="mp-sim-i"'+(hidden?' style="display:none"':'')+'>'
+          +'<div class="mp-sim-main">'
+            +'<div class="mp-sim-t">'+escapeHtml(s.text||'')+'</div>'
+            +'<div class="mp-sim-b">'
+              +(s.relation?'<span class="mp-rel '+(JUDGE_REL_CLS[s.relation]||'nrv')+'">'+(JUDGE_REL[s.relation]||escapeHtml(s.relation))+'</span>':'')
+              +(typeof s.score==='number'?'<span class="mp-sim-score">匹配 '+s.score.toFixed(2)+'</span>':'')
+            +'</div>'
+            +(s.relation_reason?'<div class="mp-sim-why">'+escapeHtml(s.relation_reason)+'</div>':'')
+            +(s.judge_error?'<div class="mp-sim-why" style="color:#c0392b">判定失败：'+escapeHtml(s.judge_error)+'</div>':'')
+          +'</div>'
+          +'<button type="button" class="mp-sink-btn" id="sink-'+escapeHtml(it.id)+'-'+escapeHtml(s.id)+'" onclick="sinkSimilarFromReview(\''+escapeHtml(it.id)+'\',\''+escapeHtml(s.id)+'\')">沉底</button>'
+        +'</div>';
+      };
+      show.forEach(function(s){ h+=simItem(s,false); });
+      rest.forEach(function(s){ h+=simItem(s,true); });
+      if(rest.length) h+='<div class="mp-sim-more" onclick="mpSimExpand(this)">还有 '+rest.length+' 条更低分的 · 展开</div>';
+      h+='</div>';
+    } else if(j.similar && j.similar.length===0 && (j.worth!=null||j.volatility)){
+      h+='<div class="mp-nosim">库里没有跟它相似的记忆。judge 仍然给了上面两个判断供参考。</div>';
+    }
+    return h;
+  }
+  // 相似清单「展开」：把同容器内隐藏的低分条目显示出来，按钮自身消失
+  function mpSimExpand(btn){
+    const box=btn.parentNode;
+    if(box) box.querySelectorAll('.mp-sim-i').forEach(function(e){ e.style.display=''; });
+    btn.style.display='none';
+  }
+  // 相似记忆「沉底」：直接复用既有归档接口（status action=archive），成功后就地变灰
+  async function sinkSimilarFromReview(queueId, memId){
+    if(!confirm('沉底这条记忆？沉底后不再参与检索浮现。'))return;
+    const btn=document.getElementById('sink-'+queueId+'-'+memId);
+    if(btn){ btn.disabled=true; btn.textContent='沉底中…'; }
+    try{
+      const r=await fetch(ADMIN_API+'/memory-v2/entries/'+encodeURIComponent(memId)+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'archive'})});
+      const d=await r.json().catch(function(){return {};});
+      if(d.error){ toast('沉底失败: '+d.error); if(btn){ btn.disabled=false; btn.textContent='沉底'; } return; }
+      if(btn){ btn.textContent='已沉底'; btn.classList.add('sunk'); }
+      toast('已沉底');
+    }catch(e){ toast('沉底失败: '+e.message); if(btn){ btn.disabled=false; btn.textContent='沉底'; } }
+  }
   function renderReviewItems(el){
     const q=window.__reviewQueue;
     if(!q){ el.innerHTML='<div class="loading">加载 review 队列...</div>'; return; }
@@ -3572,6 +3671,9 @@ function ccArmAllGapAutoLoad(){
           +'<span class="mp-badges"><span class="mp-badge">待审</span></span>'
         +'</div>'
         +'<div class="mp-body">'+escapeHtml(c.text||'')+'</div>'
+        // 1004-04：judge 纯信息输出——两个分数 + 相似清单（含逐条沉底按钮）。
+        // judge 不参与任何决策，这里只展示；留/沉由人点。
+        +renderJudgeBlock(it)
         // 1002 第 5 项：老数据重跑的候选，改前改后同卡上下对照（②-A），并把动作与理由摆在最显眼处
         +(c.backfill?'<div class="mp-merge" style="margin:8px 0 0;padding:8px;border:1px dashed var(--text3);border-radius:8px;font-size:12px;color:var(--text3);line-height:1.7">'
           +'<div style="margin-bottom:6px"><span class="mp-badge" style="background:var(--accent);color:#fff">老数据重跑 · '+(BF_ACTION[c.backfill.action]||escapeHtml(String(c.backfill.action||'')))+'</span></div>'

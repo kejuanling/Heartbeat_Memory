@@ -816,6 +816,40 @@
  .mp-review-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:2px 0 10px}
  .mp-review-total{font-size:12px;color:var(--text2);font-weight:600}
  .cc-multi-bar-actions.cols2{grid-template-columns:repeat(2,1fr)}
+ /* ===== 1004-04 judge 信息区：两个分数卡（纯信息，不参与决策） ===== */
+ .mp-judge-scores{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+ .mp-js{background:#faf6f7;border:1px solid var(--border);border-radius:10px;padding:8px 10px;min-width:0}
+ .mp-js-top{display:flex;align-items:baseline;gap:5px;margin-bottom:4px;flex-wrap:wrap}
+ .mp-js-lbl{font-size:11px;color:var(--text3);flex-shrink:0}
+ .mp-js-val{font-size:18px;font-weight:700;letter-spacing:-.5px;line-height:1}
+ .mp-js-val.high{color:#27845a}.mp-js-val.mid{color:#b8860b}.mp-js-val.low{color:#c0392b}
+ .mp-js-bar{height:3px;background:#e8e0e1;border-radius:2px;overflow:hidden;margin-bottom:5px}
+ .mp-js-bar>i{display:block;height:100%;border-radius:2px}
+ .mp-js-bar>i.high{background:#5bbd85}.mp-js-bar>i.mid{background:#d9a441}.mp-js-bar>i.low{background:#e07a6a}
+ .mp-js-why{font-size:11px;color:var(--text3);line-height:1.55;word-break:break-word}
+ .mp-js-vol{font-size:14px;font-weight:700}
+ .mp-js-vol.stable{color:#27845a}.mp-js-vol.volatile{color:#b8860b}.mp-js-vol.situational{color:#c0392b}
+ /* ===== 相似记忆清单（每条带关系标签 + 匹配分 + 理由 + 沉底按钮） ===== */
+ .mp-sim{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff}
+ .mp-sim-h{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 10px;background:#f5f0f1;font-size:11px;color:var(--text2);font-weight:600;flex-wrap:wrap}
+ .mp-sim-i{display:flex;align-items:flex-start;gap:10px;padding:9px 10px;border-top:1px solid var(--border);background:#fafafa}
+ .mp-sim-main{flex:1;min-width:0}
+ .mp-sim-t{font-size:13px;line-height:1.6;color:var(--text);margin-bottom:4px;word-break:break-word}
+ .mp-sim-b{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+ .mp-rel{font-size:10px;padding:2px 6px;border-radius:4px;font-weight:600;white-space:nowrap}
+ .mp-rel.dup{background:#fdecea;color:#c0392b}
+ .mp-rel.upd{background:#fff4e0;color:#b8860b}
+ .mp-rel.con{background:#f3e8fd;color:#7d3c98}
+ .mp-rel.coex{background:#eaf5ec;color:#27845a}
+ .mp-rel.nrv{background:#eef0f2;color:#5d6d7e}
+ .mp-sim-score{font-size:10px;color:var(--text3);font-family:ui-monospace,Menlo,monospace;white-space:nowrap}
+ .mp-sim-why{font-size:11px;color:var(--text3);line-height:1.55;margin-top:3px;word-break:break-word}
+ .mp-sim-more{padding:7px;text-align:center;font-size:11px;color:var(--text3);background:#faf8f8;border-top:1px solid var(--border)}
+ .mp-sink-btn{flex-shrink:0;align-self:flex-start;padding:4px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1px solid #f0cfcb;background:#fef5f5;color:#c0392b;cursor:pointer;white-space:nowrap;font-family:inherit;margin-top:1px}
+ .mp-sink-btn:hover{background:#fdecea}
+ .mp-sink-btn.sunk{background:#f5f5f5;color:var(--text3);border-color:var(--border);cursor:default}
+ .mp-sink-btn.sunk:hover{background:#f5f5f5}
+ .mp-nosim{padding:8px 10px;border-radius:9px;background:#f7fafb;border:1px dashed #cfe0e8;font-size:11px;color:#5d7b8a;line-height:1.6}
  /* 相似分组（0919 第六个统计按钮）：组容器虚线框通栏，组内卡片纵向排列便于逐条比对 */
  .mp-similar-head{grid-column:1/-1;font-size:12px;color:var(--text2);padding:2px 0 0}
  .mp-similar-head b{color:var(--accent)}
@@ -951,3 +985,9 @@
 .push-item{margin-bottom:8px!important;padding:10px 12px!important;border-radius:10px;background:var(--card,#fff);border:1px solid var(--border)}
 .push-item-title{margin:6px 0 0!important}
 .push-item-body{margin:0!important}
+.log-group{margin-bottom:6px;border:1px solid rgba(255,210,225,0.35);border-radius:10px;overflow:hidden;background:rgba(255,255,255,0.35)}
+.log-group summary{padding:6px 10px;font-size:12px;font-weight:600;color:#b83276;cursor:pointer;list-style:none;background:rgba(255,220,235,0.25);user-select:none}
+.log-group summary::-webkit-details-marker{display:none}
+.log-group summary::before{content:"▸ ";display:inline-block;transition:transform .18s}
+.log-group[open] summary::before{transform:rotate(90deg)}
+.log-group .log-item{margin:6px 8px}
