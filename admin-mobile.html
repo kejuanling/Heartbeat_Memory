@@ -233,11 +233,10 @@
     </div>
     <div id="compaction-summary" style="margin-top:0"></div>
 
-    <!-- 2026-10-03 状态机：视图切换。阶段一起存量旧块仍在用，两套并存；
-         阶段三存量迁完后这个切换会退化成只留「状态机」。 -->
+    <!-- 2026-10-04：旧压缩系统下线，压缩页只保留状态机视图。
+         旧块数据仍在（存量继续注入上下文），但不再有独立的「旧块」视图——
+         要查看/启停某个旧块，聊天页会话菜单的压缩弹窗仍按会话显示它。 -->
     <div class="cs-mode" id="cs-mode">
-      <button type="button" class="cs-mode-btn on" id="cs-mode-state" onclick="csSetMode('state')">状态机</button>
-      <button type="button" class="cs-mode-btn" id="cs-mode-block" onclick="csSetMode('block')">旧块</button>
       <span class="cs-mode-hint" id="cs-mode-hint"></span>
     </div>
 
@@ -619,14 +618,12 @@
   那个 25 万字符的巨文件。样式沿用本页既有的 --accent / --text3 / card 变量。
   ══════════════════════════════════════════════════════════════════ -->
 <style id="cs-style">
+/* 2026-10-04：视图切换按钮已撤（压缩页只剩状态机），cs-mode-btn 样式随之删除；
+   cs-panel 由「.on 切换显示」改为默认可见。 */
 .cs-mode{display:flex;align-items:center;gap:6px;padding:0 0 12px}
-.cs-mode-btn{padding:7px 15px;border-radius:9px;border:1px solid var(--line,var(--line2,#e0d9d5));
-  background:var(--card,#fff);color:var(--text2,#6b625e);font:600 12.5px/1 inherit;cursor:pointer}
-.cs-mode-btn.on{background:var(--accent,#c2185b);border-color:var(--accent,#c2185b);color:#fff}
 .cs-mode-hint{margin-left:auto;font-size:11px;color:var(--text3,#9c938f);text-align:right;line-height:1.4}
 
-.cs-panel{display:none}
-.cs-panel.on{display:block}
+.cs-panel{display:block}
 .cs-card{background:var(--card,#fff);border:1px solid var(--line,#ece7e4);border-radius:14px;padding:13px 14px;margin-bottom:12px}
 .cs-state-card{border-color:var(--accent-line,#f5c9dc);
   box-shadow:inset 0 1px 0 var(--accent-soft,#fdeef4),0 6px 18px -14px rgba(194,24,91,.4)}
@@ -768,22 +765,20 @@
       });
     });
   }
-
-  /* ── 视图切换 ── */
-  window.csSetMode = function (mode) {
-    CS.mode = mode === 'block' ? 'block' : 'state';
-    $('cs-mode-state').classList.toggle('on', CS.mode === 'state');
-    $('cs-mode-block').classList.toggle('on', CS.mode === 'block');
-    $('cs-panel').classList.toggle('on', CS.mode === 'state');
-    // 旧块视图的块列表和多选栏在状态机模式下让位；
-    // 「搜索原文」两种模式都保留——状态机模式下它就是看原文的入口（搜原文、按时间段搜都行）
-    $('compaction-chunks').style.display = CS.mode === 'block' ? '' : 'none';
+  /* ── 视图：2026-10-04 起只保留状态机 ──
+     原先两套并存（状态机 / 旧块）供切换；旧压缩系统下线后旧块视图整体撤掉。
+     保留 csSetMode 作空壳：聊天页与其它入口可能还调它，让它恒定落在状态机。 */
+  window.csSetMode = function () {
+    CS.mode = 'state';
+    $('cs-panel').classList.add('on');
+    // 旧块列表容器藏起来（数据仍由 preview 提供，聊天页压缩弹窗要用）。
+    var chunks = $('compaction-chunks');
+    if (chunks) chunks.style.display = 'none';
     var searchWrap = document.querySelector('.cc-orig-search-wrap');
     if (searchWrap) searchWrap.style.display = '';
-    $('cs-mode-hint').textContent = CS.mode === 'state'
-      ? '新压缩走状态机；下面的「旧块」是改造前的老视图'
-      : '老视图：每块各写一段摘要，互不知道对方写了什么';
-    if (CS.mode === 'state') loadCsState();
+    var hint = $('cs-mode-hint');
+    if (hint) hint.textContent = '压缩只走状态机：每会话一份持续演化的状态，不再有并列摘要块';
+    loadCsState();
   };
 
   /* ── 读状态 ── */
@@ -1197,12 +1192,12 @@
     CS.preview = null; CS.previewVersion = null;
     show($('cs-diff'), false);
     if (typeof origChange === 'function') { try { origChange(); } catch (e) { } }
-    if (CS.mode === 'state') loadCsState();
+    loadCsState();
   };
   var origLoad = window.loadCompactionPreview;
   window.loadCompactionPreview = function () {
     if (typeof origLoad === 'function') { try { origLoad(); } catch (e) { } }
-    if (CS.mode === 'state') loadCsState();
+    loadCsState();
   };
 
   // ── 填区间后自动看原文（不调模型）──
@@ -1218,11 +1213,11 @@
     }, 600);
   });
 
-  // 进压缩页时默认状态机视图；没有状态的会话自动回落到旧块（存量还在用）
+  // 进压缩页直接进状态机视图（2026-10-04 起唯一的视图）。
+  // 旧块视图已撤：存量旧块在聊天页会话菜单的压缩弹窗里看。
   document.addEventListener('DOMContentLoaded', function () {
     setTimeout(function () {
-      window.csSetMode('state');
-      loadCsState();
+      window.csSetMode();   // 内部已会 loadCsState
     }, 300);
   });
 })();
