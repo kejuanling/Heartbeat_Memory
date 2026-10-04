@@ -224,13 +224,8 @@
            <select id="adm-session-sel" onchange="onAdminSessionChange()" aria-label="选择会话"></select>
          </label>
          <button type="button" class="cc-btn secondary" onclick="loadCompactionPreview()">刷新</button>
-         <button type="button" class="cc-btn secondary" id="cc-expandall-btn" onclick="toggleCcExpandAll()">全部展开</button>
        </div>
      </div>
-         <div class="cc-statusbar" id="cc-statusbar">
-      <div class="cc-status-chips" id="cc-status-chips"></div>
-      <span class="cc-sync" id="cc-syncing">同步中…</span>
-    </div>
     <div id="compaction-summary" style="margin-top:0"></div>
 
     <!-- 2026-10-04：旧压缩系统下线，压缩页只保留状态机视图。
@@ -260,16 +255,6 @@
         <div class="cs-chain-hint">点任一版可预览 · 再点一次切到那一版（已撤销的划线版 = 恢复，不调模型；所有版本都保留）</div>
       </div>
 
-      <!-- 并入记录：固定显示区（不再藏折叠区，撤销后也能看到并恢复） -->
-      <div class="cs-card" id="cs-hist-card">
-        <div class="cs-state-head">
-          <span class="cs-state-title">并入记录</span>
-          <span class="cs-state-meta" id="cs-hist-count"></span>
-        </div>
-        <div class="cs-chain-hint" style="padding-top:6px">点任意版本先预览它的正文，再点一次切到那一版（已撤销的切回去 = 恢复，不调模型）：</div>
-        <div id="cs-hist-list"></div>
-      </div>
-
       <!-- 迁移期提示（种子状态才显示） -->
       <div class="cs-note hide" id="cs-note"></div>
 
@@ -295,10 +280,14 @@
       <div class="cs-sec-title hide" id="cs-preview-title"></div>
       <div class="cs-preview-msgs" id="cs-preview-msgs"></div>
 
-      <!-- 归档：旧块（阶段二迁移前的存量） -->
-      <details class="cs-arch">
-        <summary>历史归档 · 旧块（改造前的并列摘要，阶段二迁移后此区消失）</summary>
-        <div class="cs-arch-inner" id="cs-arch-inner"></div>
+      <!-- 并入记录（2026-10-04 按用户要求：挪到原「历史归档」的位置，
+           并改用历史归档那种折叠样式 details/summary） -->
+      <details class="cs-arch" id="cs-hist-arch">
+        <summary>并入记录 · 这个会话的状态演进</summary>
+        <div class="cs-arch-inner">
+          <div class="cs-chain-hint" style="padding-top:2px">点任意版本先预览它的正文，再点一次切到那一版（已撤销的切回去 = 恢复，不调模型）：</div>
+          <div id="cs-hist-list"></div>
+        </div>
       </details>
     </div>
      <div class="cc-orig-search-wrap">
@@ -936,12 +925,18 @@
     btn.textContent = c ? '展开全文' : '收起';
   };
 
-  // 并入记录：固定显示区（renderState 每次刷新都会重画），不再需要按钮触发
+  // 并入记录：折叠区（renderState 每次刷新都会重画）
   function renderMergeHistory(st) {
     var list = $('cs-hist-list');
     if (!list) return;
     var versions = (st && st.versions) || [];
-    $('cs-hist-count').textContent = versions.length ? (versions.length + ' 版 · 保留最近 5 版') : '还没有并入';
+    // 版本数写进折叠标题上：折叠着的时候也能看见有几个版本（原先那个计数 span 已随卡片一起删）
+    var arch = $('cs-hist-arch');
+    var sum = arch && arch.querySelector('summary');
+    if (sum) {
+      sum.textContent = '并入记录 · 这个会话的状态演进' +
+        (versions.length ? '（' + versions.length + ' 版 · 保留最近 5 版）' : '（还没有并入）');
+    }
     if (!versions.length) {
       list.innerHTML = '<div class="cs-hist" style="border-top:0;color:var(--text3,#9c938f)">还没有并入过。在下面的未覆盖区选一段原文开始。</div>';
       return;

@@ -980,10 +980,6 @@ function escapeHtml(s){
  let ccPreviewInflight=false;
 let ccPreviewDirty=false;
 let ccPreviewSeq=0;
-function setCcSyncing(on){
-  const s=document.getElementById('cc-syncing');
-  if(s) s.style.display=on?'inline-flex':'none';
-}
 /**
  * 拉取压缩预览数据并渲染；带 15 秒 TTL 去重（AppState.ccPreviewLoadedAt）。
  * 数据就绪后写入 AppState.compactionPlan 并调用 renderCompaction。
@@ -1002,7 +998,6 @@ function loadCompactionPreview(){
     const box=document.getElementById('cc-msg-scroll-'+c.index);
     if(box) savedInner[c.index]=box.scrollTop;
   });
-  setCcSyncing(true);
   if(el && !el.innerHTML.trim()) el.innerHTML='<div class="cc-loading"><span class="cc-spin"></span> 计算中…</div>';
   if(sum) sum.textContent='';
   if(msg) msg.textContent='正在刷新压缩预览…';
@@ -1019,7 +1014,6 @@ function loadCompactionPreview(){
     if(!AppState.ccGapCollapsedInit){AppState.ccGapCollapsedInit=true;Array.prototype.forEach.call((d.uncovered&&d.uncovered.gaps)||[],function(g){AppState.ccGapCollapsed.add((g.startIdx||0)+'-'+(g.endIdx||0));});}
     renderCompaction(savedY, savedInner);
     renderCompactionConfig();
-    updateCcStatusBar(d);
     if(msg) msg.textContent='';
   }).catch(function(e){
     if(seq!==ccPreviewSeq) return;
@@ -1027,7 +1021,6 @@ function loadCompactionPreview(){
     if(msg) msg.textContent='加载失败: '+e.message;
   }).finally(function(){
     if(seq===ccPreviewSeq){ ccPreviewInflight=false; }
-    setCcSyncing(false);
     if(AppState.ccMultiSelectMode){ updateMultiSelectBar(); }
     if(!ccPreviewInflight && ccPreviewDirty){ ccPreviewDirty=false; loadCompactionPreview(); }
   });
@@ -1220,11 +1213,6 @@ function ccBuildSummaryStatsHtml(d, t){
        AppState.ccAnimateOpen.clear();
      });
    }
-   const expandAllBtn=document.getElementById('cc-expandall-btn');
-   if(expandAllBtn && d.chunks && d.chunks.length){
-     const allOpen=d.chunks.every(function(c){return AppState.ccExpanded.has(c.index);});
-     expandAllBtn.textContent=allOpen?'全部收起':'全部展开';
-   }
    const rstBtn=document.getElementById('cc-reset-btn');
    if(rstBtn) rstBtn.disabled=d.compactCount<=0||!d.cutPointsActive;
    const cfgTip=document.getElementById('compaction-cfg-tip');
@@ -1284,26 +1272,6 @@ function reconcileCcList(el, html){
     const k=ccNodeKey(n);
     if(!k || !newKeys[k]) n.remove();
   });
-}
-function updateCcStatusBar(d){
-  d=d||AppState.compactionPlan;
-  const el=document.getElementById('cc-status-chips');
-  if(!el||!d) return;
-  const chunks=(d.chunks||[]);
-  const gaps=(d.uncovered&&d.uncovered.gaps)||[];
-  let pending=0,toReplace=0,replaced=0;
-  chunks.forEach(function(c){
-    const isAi=!!c.aiRep;
-    const enabled=c.enabled!==false;
-    if(isAi){ if(enabled) replaced++; }
-    else if(c.cached){ if(enabled) replaced++; else toReplace++; }
-    else { pending++; }
-  });
-  el.innerHTML=
-    '<span class="cc-chip '+(gaps.length?'active':'muted')+'" onclick="toggleCcFilter(\'gap\')"'+(AppState.ccFilter==='gap'?' data-filter="gap"':'')+'><i class="cc-dot"></i>未覆盖 <b>'+gaps.length+'</b> 区</span>'
-    +'<span class="cc-chip '+(pending?'done':'muted')+'" onclick="toggleCcFilter(\'pending\')"'+(AppState.ccFilter==='pending'?' data-filter="pending"':'')+'><i class="cc-dot"></i>待生成 <b>'+pending+'</b></span>'
-    +'<span class="cc-chip '+(toReplace?'warn':'muted')+'" onclick="toggleCcFilter(\'replace\')"'+(AppState.ccFilter==='replace'?' data-filter="replace"':'')+'><i class="cc-dot"></i>待替换 <b>'+toReplace+'</b></span>'
-    +'<span class="cc-chip '+(replaced?'done':'muted')+'" onclick="toggleCcFilter(\'replaced\')"'+(AppState.ccFilter==='replaced'?' data-filter="replaced"':'')+'><i class="cc-dot"></i>已替换 <b>'+replaced+'</b></span>';
 }
 
  // ===== 多选模式 =====
@@ -1435,7 +1403,6 @@ function updateCcStatusBar(d){
      AppState.ccFilter = type;
    }
    renderCompaction();
-   updateCcStatusBar();
  }
 
  // 应用筛选到 merged 列表
@@ -2086,14 +2053,6 @@ function ccArmAllGapAutoLoad(){
    renderCompaction();
  }
  
- function toggleCcExpandAll(){
-   const d=AppState.compactionPlan;
-   if(!d || !d.chunks || !d.chunks.length) return;
-   const allOpen=d.chunks.every(function(c){return AppState.ccExpanded.has(c.index);});
-   d.chunks.forEach(function(c){ if(allOpen) AppState.ccExpanded.delete(c.index); else AppState.ccExpanded.add(c.index); });
-   if(!allOpen) ensureCcMessages();
-   renderCompaction();
- }
  
  function renderCcMessagesLazy(c){
    const sig=c.signature;
