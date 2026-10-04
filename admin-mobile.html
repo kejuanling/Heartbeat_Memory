@@ -235,10 +235,9 @@
 
     <!-- 2026-10-04：旧压缩系统下线，压缩页只保留状态机视图。
          旧块数据仍在（存量继续注入上下文），但不再有独立的「旧块」视图——
-         要查看/启停某个旧块，聊天页会话菜单的压缩弹窗仍按会话显示它。 -->
-    <div class="cs-mode" id="cs-mode">
-      <span class="cs-mode-hint" id="cs-mode-hint"></span>
-    </div>
+         要查看/启停某个旧块，聊天页会话菜单的压缩弹窗仍按会话显示它。
+         原先这里有一行「压缩只走状态机…」的说明（cs-mode），用户要求去掉：
+         页面上只有一个视图时，这句话是废话。 -->
 
     <!-- 状态机面板 -->
     <div id="cs-panel" class="cs-panel">
@@ -619,9 +618,9 @@
   ══════════════════════════════════════════════════════════════════ -->
 <style id="cs-style">
 /* 2026-10-04：视图切换按钮已撤（压缩页只剩状态机），cs-mode-btn 样式随之删除；
-   cs-panel 由「.on 切换显示」改为默认可见。 */
-.cs-mode{display:flex;align-items:center;gap:6px;padding:0 0 12px}
-.cs-mode-hint{margin-left:auto;font-size:11px;color:var(--text3,#9c938f);text-align:right;line-height:1.4}
+   cs-panel 由「.on 切换显示」改为默认可见。
+   再后来用户要求把「压缩只走状态机…」那行说明也去掉（页面上只有一个视图时是废话），
+   cs-mode / cs-mode-hint 两个容器与样式一并删除。 */
 
 .cs-panel{display:block}
 .cs-card{background:var(--card,#fff);border:1px solid var(--line,#ece7e4);border-radius:14px;padding:13px 14px;margin-bottom:12px}
@@ -767,7 +766,8 @@
   }
   /* ── 视图：2026-10-04 起只保留状态机 ──
      原先两套并存（状态机 / 旧块）供切换；旧压缩系统下线后旧块视图整体撤掉。
-     保留 csSetMode 作空壳：聊天页与其它入口可能还调它，让它恒定落在状态机。 */
+     保留 csSetMode 作空壳：聊天页与其它入口可能还调它，让它恒定落在状态机。
+     「压缩只走状态机…」那行说明随后按用户要求删除（页面上只有一个视图时是废话）。 */
   window.csSetMode = function () {
     CS.mode = 'state';
     $('cs-panel').classList.add('on');
@@ -776,8 +776,6 @@
     if (chunks) chunks.style.display = 'none';
     var searchWrap = document.querySelector('.cc-orig-search-wrap');
     if (searchWrap) searchWrap.style.display = '';
-    var hint = $('cs-mode-hint');
-    if (hint) hint.textContent = '压缩只走状态机：每会话一份持续演化的状态，不再有并列摘要块';
     loadCsState();
   };
 
