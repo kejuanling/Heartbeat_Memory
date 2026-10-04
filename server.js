@@ -1972,18 +1972,19 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
       try { reply.raw.flushHeaders(); } catch (e) {}
       streamStarted = true;
     }
-    // 2026-09-21 审查 R7：写失败必须上抛（由 mcp-tool-loop 的 emit 捕获置 clientGone 中断工具循环），
-    // 否则客户端断开后工具循环与多轮上游调用照常跑完，白烧 token
+    // 1004-04（覆盖原 R7）：客户端断开后不再中断生成循环——改为静默丢弃 SSE 事件，让模型跑完并
+    // 照常落盘。原实现抛 client gone → 工具循环中止 → assistant 回复半途丢弃不落盘，用户切后台/关页面
+    // 回来刷新就看不到回复。代价是真关页面也会跑完这一轮（用户已确认接受 A 方案）。
     if (reply.raw.destroyed || reply.raw.writableEnded || reply.raw.writableFinished) {
-      throw new Error("client gone");
+      return;
     }
-    reply.raw.write("data: " + JSON.stringify({
+    try { reply.raw.write("data: " + JSON.stringify({
       id: "chatcmpl-mcp",
       object: "chat.completion.chunk",
       created: Math.floor(Date.now() / 1000),
       model,
       choices: [{ index: 0, delta: deltaObj, finish_reason: null }]
-    }) + "\n\n");
+    }) + "\n\n"); } catch (e) { /* socket 半死写失败：静默丢弃，不中断生成 */ }
   };
   const onEvent = (evt) => {
     if (!evt) return;
