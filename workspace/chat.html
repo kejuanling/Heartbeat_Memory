@@ -1541,9 +1541,11 @@ body[data-theme="crt"] #chat[data-layout="claude"] .msg.ai .bubble p{display:inl
 body[data-theme="crt"] #chat[data-layout="claude"] .msg.ai .bubble p+p::before{content:"\A";white-space:pre}
 /* 008 输入条迁入纸流末尾：无箱体，纯提示行；流式输出期间自动隐身 */
 body[data-theme="crt"] #chat[data-layout="claude"] > .inputbar.crt-inline{
-  position:relative!important;
-  margin:6px 14px calc(12px + env(safe-area-inset-bottom))!important;
-  background:transparent!important;border:none!important;border-radius:0!important;
+  position:sticky!important;bottom:0;z-index:8;
+  margin:auto 14px calc(12px + env(safe-area-inset-bottom))!important;
+  background:rgba(13,11,8,.92)!important;
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  border:none!important;border-radius:0!important;
   box-shadow:none!important;
   padding:2px 0 2px 108px!important;
   display:flex!important;align-items:flex-start!important;gap:0!important;
@@ -4375,7 +4377,7 @@ async function request(finalMsgs, fromSend, regenAnchorId){
     _silenceResetFn=null;_silenceClearFn=null;   // 清句柄，避免串到下一轮请求
     _streamStoppedByUser=false;
     sending=false;setSendState(false);aborter=null;
-    _streamActive=false; _streamToolMode="live"; _streamRenderModel=[]; _streamRenderCursor=0; _streamModelDraining=false; if(_streamDrainTimer){clearTimeout(_streamDrainTimer);_streamDrainTimer=null;} if(_streamTextRerenderTimer){clearTimeout(_streamTextRerenderTimer);_streamTextRerenderTimer=null;} _streamRoot=null; _streamThinkEl=null; _streamThinkCAt=0; _twStop();   // 结束统一响应模型（节流 timer 清、容器/思考链引用释放——DOM 由 renderAll 重建接管；打字机 timer 显式停）
+    _streamActive=false; _streamToolMode="live"; _streamRenderModel=[]; _streamRenderCursor=0; _streamModelDraining=false; if(_streamDrainTimer){clearTimeout(_streamDrainTimer);_streamDrainTimer=null;} if(_streamTextRerenderTimer){clearTimeout(_streamTextRerenderTimer);_streamTextRerenderTimer=null;} try{if(_streamRoot&&_streamRoot.parentNode){_streamRoot.classList.remove("stream-in");}}catch(_se){} _streamRoot=null; _streamThinkEl=null; _streamThinkCAt=0; _twStop();   // 结束统一响应模型（节流 timer 清、容器/思考链引用释放——DOM 由 renderAll 重建接管；打字机 timer 显式停）
     showHeaderTyping(false);
     try{ if(reader && reader.cancel) reader.cancel(); }catch(e){}
     // 2026-09-23 修复（B2）：补拉本轮「发送/连播期间」被 _doHistoryPull 丢弃的 history_update。
