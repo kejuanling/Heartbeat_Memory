@@ -9744,9 +9744,7 @@ body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .inputbar #input{
 body[data-theme="crt"]:has(#chat[data-layout="claude"]) footer .inputbar #imgBtn{order:2}
 body[data-theme="crt"]:has(#chat[data-layout="claude"]) .jump-fab{display:none!important}
 body[data-theme="crt"]:has(#chat[data-layout="claude"]) #chat[data-layout="claude"]{padding-bottom:calc(env(safe-area-inset-bottom) + 40vh)!important}
-/* 附加：悬浮球减淡，弱化按钮感 */
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) .claude-fab-left,
-body[data-theme="crt"]:has(#chat[data-layout="claude"]) .claude-fab-right .fab-btn{opacity:.5}
+/* 2026-10-05 修正：删除 crt 对右上角 fab 的 opacity 减淡——opacity:.5 覆盖了收起态 expandable 的 opacity:0，导致隐藏按钮半透明叠在主按钮上 */
 
 
 
