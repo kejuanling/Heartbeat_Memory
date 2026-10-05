@@ -3297,7 +3297,11 @@ function renderAiContent(msgEl, bubble, content, reasoning){   // 2026-09-24 P2-
       pre.querySelectorAll(".rw").forEach(rw=>rw.addEventListener("click",function(e){
         if(chatEl && chatEl.dataset.layout==="claude"){
           // claude 主题：打开底部抽屉（CRT 例外：就地收起/展开）
-          if(document.body.dataset.theme==="crt"){ rw.classList.toggle("open"); e.stopPropagation(); return; }
+          if(document.body.dataset.theme==="crt"){
+            if(e.target.closest(".rw-h")) rw.classList.toggle("open");
+            e.stopPropagation();
+            return;
+          }
           var body=rw.querySelector(".rw-c");
           if(body) openThinkSheet(body.innerHTML);
         } else {
@@ -3310,7 +3314,11 @@ function renderAiContent(msgEl, bubble, content, reasoning){   // 2026-09-24 P2-
   // 来自正文的工具胶囊（模型抄进 content 的【工具 · name】块）也需要绑定点击折叠
   if(toolEcho) bubble.querySelectorAll(".tool-trace").forEach(tt=>tt.addEventListener("click",function(e){
   if(chatEl && chatEl.dataset.layout==="claude"){
-    if(document.body.dataset.theme==="crt"){ tt.classList.toggle("open"); e.stopPropagation(); return; }
+    if(document.body.dataset.theme==="crt"){
+      if(e.target.closest(".tt-h")) tt.classList.toggle("open");
+      e.stopPropagation();
+      return;
+    }
     var name=tt.querySelector(".tt-name");
     var body=tt.querySelector(".tt-body");
     var nameText=name?name.textContent.trim():"Tool";
@@ -3325,11 +3333,11 @@ function renderAiContent(msgEl, bubble, content, reasoning){   // 2026-09-24 P2-
 document.addEventListener("click",function(e){
   if(!(chatEl && chatEl.dataset.layout==="claude")) return;
   if(document.body.dataset.theme==="crt"){
-    // CRT：思考链/工具链就地收起/展开，不弹抽屉
-    var crtTt=e.target.closest(".tool-trace");
-    if(crtTt){ crtTt.classList.toggle("open"); return; }
-    var crtRw=e.target.closest(".rw-wrap .rw");
-    if(crtRw){ crtRw.classList.toggle("open"); return; }
+    // CRT：仅点击标题（Thought / 工具名）就地收起/展开，不弹抽屉；点内容不触发
+    var crtTt=e.target.closest(".tool-trace .tt-h");
+    if(crtTt){ crtTt.closest(".tool-trace").classList.toggle("open"); return; }
+    var crtRw=e.target.closest(".rw-wrap .rw .rw-h");
+    if(crtRw){ crtRw.closest(".rw").classList.toggle("open"); return; }
   }
   var tt=e.target.closest(".tool-trace");
   if(tt){
@@ -3610,7 +3618,14 @@ function makeMsgEl(m,idx){
         }else{
           const _tmp=document.createElement("div");_tmp.innerHTML=renderToolCapsule(_u.tool);
           const _card=_tmp.firstChild;
-          if(_card){_card.addEventListener("click",function(){_card.classList.toggle("open");});d.appendChild(_card);}
+          if(_card){_card.addEventListener("click",function(e){
+            if(document.body.dataset.theme==="crt"){
+              if(e.target.closest(".tt-h")) _card.classList.toggle("open");
+              e.stopPropagation();
+              return;
+            }
+            _card.classList.toggle("open");
+          });d.appendChild(_card);}
         }
       });
     }else{
