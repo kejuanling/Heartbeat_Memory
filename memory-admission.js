@@ -320,9 +320,11 @@ function createAdmission(opts = {}) {
     // 1002 第 4 项：schema 新字段透传（可选）。上游（蒸馏 / 老数据重跑 / 管理台）可带 triggers 等，
     // 校验交给 memory-v2._buildEntry，非法值明确报错而非静默丢弃。
     // 1005-16：schema v2 已删 source/scope/valid_from/valid_to/action_hint——不再透传（_buildEntry 对已删字段宽容忽略，传了也无害）。
-    for (const k of ["sensitive", "triggers"]) {
+    for (const k of ["sensitive", "triggers", "vibe"]) {
       if (b[k] !== undefined) draft[k] = b[k];
     }
+    // 1005-17：来源会话（蒸馏取证后 c.session 反查；独立字段供相关注入"本会话不重复注入"排除）
+    if (strSafe(ctx.sessionId)) draft.source_session = strSafe(ctx.sessionId);
     // 1002 第 5 项：老数据重跑的动作元信息（{action,target_id,merge_ids,old_text,reason,evidence}）。
     // 只供待审队列展示「改前改后对照 / 由哪几条合并 / 为什么」——入库时 _buildEntry 忽略未知字段，不进 schema。
     if (b.backfill !== undefined) draft.backfill = b.backfill;
