@@ -1468,7 +1468,7 @@ body[data-theme="crt"] #chat[data-layout="claude"] #chatSwitching{
 body[data-theme="crt"] #chatSwitching .cs-text{color:#E0B36A!important}
 /* ===== CRT 工单 001-005（2026-10-05）===== */
 /* CRT 思考链默认展开（.rw-c 默认 display:none，CRT 下强制显示） */
-body[data-theme="crt"] #chat[data-layout="claude"] .rw .rw-c{display:block!important;max-height:none!important;overflow:visible!important}
+body[data-theme="crt"] #chat[data-layout="claude"] .rw .rw-c{display:block!important;max-height:50vh!important;overflow-y:auto!important;overflow-x:hidden!important;-webkit-overflow-scrolling:touch!important;word-break:break-word!important}
 /* 1005-19 CRT：工具链默认展开；思考链/工具链点击就地收起（.open=收起），不弹抽屉 */
 body[data-theme="crt"] #chat[data-layout="claude"] .tool-trace .tt-body{display:block!important;max-height:none!important;overflow:visible!important}
 body[data-theme="crt"] #chat[data-layout="claude"] .rw.open .rw-c,
