@@ -6150,6 +6150,82 @@ app.get("/admin/logs/context", { preHandler: basicAuth }, async (req, reply) => 
     reply.send({ messages, total: messages.length, captureTime: lastLLMCaptureTime });
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
+// 1005 补回：标星列表（含 in_context 标记）
+app.get("/admin/context-compaction/marked-list", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const res = contextReplacements.listMarked();
+    try {
+      const norm = function (s) { return String(s || "").toLowerCase().replace(/\s+/g, ""); };
+      let captureText = "";
+      if (Array.isArray(lastLLMMessages)) {
+        captureText = lastLLMMessages.map(function (m) {
+          const c = m && m.content;
+          if (typeof c === "string") return c;
+          if (Array.isArray(c)) return c.map(function (p) { return (p && typeof p.text === "string") ? p.text : ""; }).join("");
+          return "";
+        }).join("\n");
+        captureText = norm(captureText);
+      }
+      if (captureText) {
+        (res.results || []).forEach(function (r) {
+          const full = norm(r.content);
+          if (!full) { r.in_context = false; return; }
+          const probe = full.length > 100 ? full.slice(0, 100) : full;
+          r.in_context = captureText.indexOf(probe) >= 0;
+        });
+      } else {
+        (res.results || []).forEach(function (r) { r.in_context = false; });
+      }
+    } catch (e) {
+      (res.results || []).forEach(function (r) { if (r.in_context === undefined) r.in_context = false; });
+    }
+    reply.send(res);
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+app.post("/admin/context-compaction/marked/update", { preHandler: basicAuth }, async (req, reply) => {
+  const body = req.body || {};
+  const key = String(body.key || "").trim();
+  const content = String(body.content || "").trim();
+  if (!key) return reply.code(400).send({ error: "key 无效" });
+  if (!content) return reply.code(400).send({ error: "正文内容不能为空" });
+  try {
+    const r = contextReplacements.updateMark(key, { content: content });
+    if (!r.ok) return reply.code(400).send({ error: r.error || "更新失败" });
+    reply.send({ ok: true, content: r.content });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+// 1005 补回：唤醒日志
+app.get("/admin/logs/wake-up", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const lines = parseInt(req.query.lines) || 200;
+    const logPath = process.env.WAKE_UP_LOG_PATH || "/root/.pm2/logs/gateway-out.log";
+    try {
+      let raw = "";
+      try {
+        const st = fs.statSync(logPath);
+        const readBytes = Math.min(st.size, 3 * 1024 * 1024);
+        const buf = Buffer.alloc(readBytes);
+        const fd = fs.openSync(logPath, "r");
+        try { fs.readSync(fd, buf, 0, readBytes, st.size - readBytes); } finally { fs.closeSync(fd); }
+        raw = buf.toString("utf-8");
+        if (readBytes < st.size) raw = raw.slice(raw.indexOf("\n") + 1);
+      } catch (e) {
+        raw = fs.readFileSync(logPath, "utf-8");
+      }
+      const allLines = raw.split("\n").filter(l => l.trim());
+      const KEEP = ["开始自动唤醒", "====", "[wake-scheduler]", "[wake-chat]", "[diary]"];
+      const DROP = ["块已落盘", "直连完成", "已设定定时唤醒", "唤醒周期已重置",
+        "唤醒调度器已在 gateway 内启动", "wake_completion_forward", "Wake Result",
+        "[tag-parser]", "[wake-event]"];
+      const filtered = allLines.filter(l => KEEP.some(k => l.includes(k)) && !DROP.some(k => l.includes(k)));
+      const tailLines = filtered.slice(-lines);
+      reply.send({ lines: tailLines, total: filtered.length });
+    } catch {
+      reply.send({ lines: [], total: 0, error: "日志文件不存在" });
+    }
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
 
 // 多模态 content 拆分：文字保留原文，图片/音频/文件只留标记，
 // 避免 base64 大字符串进入管理台上下文面板导致手机渲染卡死
