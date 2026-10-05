@@ -212,6 +212,23 @@ function readPinnedEntries(dataDir) {
   return { pinnedEntries, map: shadowMap };
 }
 
+// 1005-17：相关注入参数从 memory_v2_config.json 的 relevant 段读（管理台可调），塞进 input.config 供 builder 浅覆盖
+function readRelevantCfg(dataDir) {
+  try {
+    const c = JSON.parse(fs.readFileSync(path.join(dataDir, 'memory_v2_config.json'), 'utf8'));
+    if (c && c.relevant && typeof c.relevant === 'object') {
+      const r = c.relevant;
+      return {
+        relevantWordWeight: r.wordWeight,
+        relevantSemWeight: r.semWeight,
+        relevantMinHybridScore: r.minHybridScore,
+        relevantHybridTopK: r.topK,
+      };
+    }
+  } catch (_) {}
+  return {};
+}
+
 function assembleInput(opts) {
   const dataDir = path.join(opts.baseDir, 'data');
   const pinnedData = readPinnedEntries(dataDir);
@@ -253,7 +270,7 @@ function assembleInput(opts) {
   const diaryEntries = cutoffDate
     ? readDiaryEntriesForShadow(opts.baseDir).filter(e => e.date <= cutoffDate && !e.hidden && e.session !== selfSession)
     : [];
-  return { pinnedEntries, timeline, diaryEntries, memoriesV2, query, excludeIds, map: shadowMap, config: { diaryCount }, summaryBlocks: readSummaryBlocks(dataDir), sessionId: opts.sessionId || null };
+  return { pinnedEntries, timeline, diaryEntries, memoriesV2, query, excludeIds, map: shadowMap, config: Object.assign({ diaryCount }, readRelevantCfg(dataDir)), summaryBlocks: readSummaryBlocks(dataDir), sessionId: opts.sessionId || null };
 }
 
 module.exports = {

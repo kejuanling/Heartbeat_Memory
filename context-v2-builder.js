@@ -318,7 +318,8 @@ function buildRelevant(input, cfg, fixedIdSet) {
     hits.push({ id: String(s.m.id), text: s.m.text, kind: s.m.kind, established_at: s.m.established_at || null, created_at: s.m.created_at || null, score: s.score });
     used += cost;
   }
-  return { lines, fixedIds: [], hits };
+  // 1005-17 预览模式（previewOnly）：照常算 hits（观察"本应注入哪条"），但 lines 置空 = 不注入
+  return { lines: (input.previewOnly === true) ? [] : lines, fixedIds: [], hits };
 }
 
 // ============================================================

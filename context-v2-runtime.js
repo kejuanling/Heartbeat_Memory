@@ -22,6 +22,44 @@ const shadow = require('./context-v2-shadow');
 const snapStore = require('./context-snapshot');
 const { createSessionCfg } = require('./lib/session-cfg');   // 2026-10-03：会话级跨窗口开关
 
+// 1005-17：相关注入参数（memory_v2_config.json relevant 段，管理台可调）
+function readRelevantCfg(baseDir) {
+  try {
+    const c = fsp.readJsonSync(path.join(baseDir, 'data', 'memory_v2_config.json'));
+    if (c && c.relevant && typeof c.relevant === 'object') {
+      const r = c.relevant;
+      return {
+        relevantWordWeight: r.wordWeight,
+        relevantSemWeight: r.semWeight,
+        relevantMinHybridScore: r.minHybridScore,
+        relevantHybridTopK: r.topK,
+      };
+    }
+  } catch (_) {}
+  return {};
+}
+
+// 1005-17：注入预览——记录最近 20 轮"本应注入哪条 + 混合分"（观察用，不进 prompt）
+function appendPreview(baseDir, sessionId, query, hits) {
+  try {
+    const p = path.join(baseDir, 'data', 'relevant_preview.json');
+    let arr = [];
+    try { arr = JSON.parse(fs.readFileSync(p, 'utf8')); } catch (_) {}
+    if (!Array.isArray(arr)) arr = [];
+    arr.unshift({
+      time: new Date().toISOString(),
+      session: String(sessionId || '').slice(0, 40),
+      query: String(query || '').slice(0, 60),
+      hits: (hits || []).map(function (h) {
+        return { id: h && h.id, kind: h && h.kind, score: h && h.score, text: (h && h.text || '').slice(0, 80) };
+      }),
+    });
+    arr = arr.slice(0, 20);
+    fs.writeFileSync(p, JSON.stringify(arr, null, 2));
+  } catch (_) {}
+}
+
+
 // 把 builder 输出套进消息：剔除旧 [永久上下文]/[跨窗口] developer 块 →
 // 固定块插到开头连续 system 之后；relevant_memories 单独追加到
 // 末尾连续 user 消息之前（当轮待回复前，位于历史之后）。
@@ -74,7 +112,7 @@ function minimalAssembleInput(opts) {
   // 1002 §8 第 6 项：快照模式也要能重建两块总结（不能被快照冻住），故 pinned 与总结缓存都要读。
   // pinned 进 Core Identity 块（手工固定的人设常驻内容保留），总结替代条目原文直注。
   const pinnedData = shadow.readPinnedEntries(dataDir);
-  return { pinnedEntries: pinnedData.pinnedEntries, timeline: [], diaryEntries: [], memoriesV2: memoriesV2, query: query, excludeIds: excludeIds, config: { diaryCount: 0 }, map: null, summaryBlocks: shadow.readSummaryBlocks(dataDir), sessionId: opts.sessionId || null };
+  return { pinnedEntries: pinnedData.pinnedEntries, timeline: [], diaryEntries: [], memoriesV2: memoriesV2, query: query, excludeIds: excludeIds, config: Object.assign({ diaryCount: 0 }, readRelevantCfg(dataDir)), map: null, summaryBlocks: shadow.readSummaryBlocks(dataDir), sessionId: opts.sessionId || null };
 }
 
 // 语义算分（0919 注入语义升级：Relevant 打分用 bge 余弦；失败回落字面，注入不致全灭）
@@ -94,6 +132,13 @@ async function attachVecScores(input) {
 async function assembleAndApply(opts) {
   // 相关记忆开关（1002 拍板）：关=不检索、不注入、不写时间线、不调 embed。
   const relOn = relevantEnabled(opts.baseDir);
+  // 1005-17 预览模式：注入关闭但 relevant.preview=true 时，照常检索算分观察"本应注入哪条"，
+  // 但不进 prompt、不浮现时间线、不打点（真实命中打点只在真注入时发生）。
+  let relPreview = false;
+  if (!relOn) {
+    try { relPreview = fsp.readJsonSync(path.join(opts.baseDir, 'data', 'memory_v2_config.json')).relevant.preview === true; }
+    catch (_) { relPreview = false; }
+  }
   const existing = snapStore.loadSnapshot(opts.baseDir, opts.sessionId);
   let blocks;
   let relevantHits = [];
@@ -101,7 +146,7 @@ async function assembleAndApply(opts) {
     // ---- 快照模式（1002-11）：人设与固定块永不重算，仅相关记忆动态 ----
     const input = minimalAssembleInput(opts);
     // 关闭时 query 置空：buildRelevant 首行即返回空 → 无块、无 hits（顺带跳过 embed 请求）
-    if (relOn) await attachVecScores(input); else input.query = '';
+    if (relOn || relPreview) { if (!relOn) input.previewOnly = true; await attachVecScores(input); } else input.query = '';
     const built = buildContextBlocks(input);
     blocks = existing.fixed_blocks
       .filter(function (b) { return b && b.content; })
@@ -121,6 +166,11 @@ async function assembleAndApply(opts) {
     const rel = built.blocks.find(function (b) { return b.key === 'relevant_memories' && !b.empty; });
     if (rel) blocks.push(rel);
     relevantHits = built.relevantHits || [];
+    // 1005-17 预览：记录本应注入条目后清空（不浮现、不打点）；真注入时此段不触发
+    if (relPreview && relevantHits.length) {
+      try { appendPreview(opts.baseDir, opts.sessionId, input.query, relevantHits); } catch (_) {}
+      relevantHits = [];
+    }
   } else {
     // ---- 首次（新会话 / 存量会话无快照）：全量组装并固化快照 ----
     const input = shadow.assembleInput({
@@ -130,7 +180,7 @@ async function assembleAndApply(opts) {
       loadTimeline: opts.loadTimeline,
       normalizeContentToText: opts.normalizeContentToText,
     });
-    if (relOn) await attachVecScores(input); else input.query = '';
+    if (relOn || relPreview) { if (!relOn) input.previewOnly = true; await attachVecScores(input); } else input.query = '';
     const built = buildContextBlocks(input);
     const sysMsg = (opts.messages || []).find(function (m) { return m && m.role === 'system'; });
     try {
@@ -147,6 +197,11 @@ async function assembleAndApply(opts) {
     }
     blocks = built.blocks;
     relevantHits = built.relevantHits || [];
+    // 1005-17 预览：记录本应注入条目后清空（不浮现、不打点）；真注入时此段不触发
+    if (relPreview && relevantHits.length) {
+      try { appendPreview(opts.baseDir, opts.sessionId, input.query, relevantHits); } catch (_) {}
+      relevantHits = [];
+    }
   }
   // 1002 第 4 项：相关记忆命中打点 → entry.last_hit_at（评估用）。
   // builder 是纯函数，副作用只在运行时做；打点失败静默，绝不影响上下文组装。

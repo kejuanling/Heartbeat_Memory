@@ -3562,6 +3562,44 @@ function requireDistill(reply) {
   return false;
 }
 
+// ===== 1005-17 相关记忆注入：参数配置 + 注入预览 =====
+app.get("/admin/memory-v2/relevant-config", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const p = path.join(__dirname, 'data', 'memory_v2_config.json');
+    const c = await fs.readJson(p).catch(() => ({}));
+    reply.send({ ctx_v2_relevant_enabled: c.ctx_v2_relevant_enabled === true, relevant: c.relevant || {} });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+app.post("/admin/memory-v2/relevant-config", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const p = path.join(__dirname, 'data', 'memory_v2_config.json');
+    const c = await fs.readJson(p).catch(() => ({}));
+    const b = req.body || {};
+    const oldRel = c.relevant || {};
+    const rel = {
+      preview: b.preview !== undefined ? !!b.preview : oldRel.preview,
+      wordWeight: b.wordWeight !== undefined ? Number(b.wordWeight) : oldRel.wordWeight,
+      semWeight: b.semWeight !== undefined ? Number(b.semWeight) : oldRel.semWeight,
+      minHybridScore: b.minHybridScore !== undefined ? Number(b.minHybridScore) : oldRel.minHybridScore,
+      topK: b.topK !== undefined ? Number(b.topK) : oldRel.topK,
+    };
+    const next = Object.assign({}, c, {
+      ctx_v2_relevant_enabled: b.enabled !== undefined ? !!b.enabled : (c.ctx_v2_relevant_enabled === true),
+      relevant: rel,
+    });
+    await fs.writeJson(p, next, { spaces: 2 });
+    reply.send({ ok: true, ctx_v2_relevant_enabled: next.ctx_v2_relevant_enabled, relevant: rel });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+app.get("/admin/memory-v2/relevant-preview", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const p = path.join(__dirname, 'data', 'relevant_preview.json');
+    const arr = await fs.readJson(p).catch(() => []);
+    reply.send({ items: Array.isArray(arr) ? arr : [] });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
 app.get("/admin/memory-distill/config", { preHandler: basicAuth }, async (req, reply) => {
   if (!requireDistill(reply)) return;
   try { reply.send(memoryDistill.readConfig()); }
