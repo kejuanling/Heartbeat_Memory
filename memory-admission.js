@@ -320,7 +320,7 @@ function createAdmission(opts = {}) {
     // 1002 第 4 项：schema 新字段透传（可选）。上游（蒸馏 / 老数据重跑 / 管理台）可带 triggers 等，
     // 校验交给 memory-v2._buildEntry，非法值明确报错而非静默丢弃。
     // 1005-16：schema v2 已删 source/scope/valid_from/valid_to/action_hint——不再透传（_buildEntry 对已删字段宽容忽略，传了也无害）。
-    for (const k of ["sensitive", "triggers", "vibe"]) {
+    for (const k of ["sensitive", "triggers", "vibe", "worth"]) {
       if (b[k] !== undefined) draft[k] = b[k];
     }
     // 1005-17：来源会话（蒸馏取证后 c.session 反查；独立字段供相关注入"本会话不重复注入"排除）
