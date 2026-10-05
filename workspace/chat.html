@@ -8545,7 +8545,7 @@ document.addEventListener('DOMContentLoaded', init);
   function closeNav(){ if(navDrawer) navDrawer.classList.remove('open'); }
   if(navBtn) navBtn.addEventListener('click', openNav);
   var worldBtn=document.getElementById('worldBtn');
-  if(worldBtn) worldBtn.addEventListener('click', function(){ window.open('/chat/v2','_blank'); });
+  if(worldBtn) worldBtn.addEventListener('click', function(){ window.open('/chat/v2?v='+Date.now(),'_blank'); });
   if(navClose) navClose.addEventListener('click', closeNav);
   if(navBackdrop) navBackdrop.addEventListener('click', closeNav);
 
