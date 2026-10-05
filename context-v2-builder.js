@@ -276,8 +276,8 @@ function buildRelevant(input, cfg, fixedIdSet) {
   const maxK = Math.max(1, Math.floor(Number(cfg.relevantHybridTopK) || 1));
   const vecScores = (input.vecScores && typeof input.vecScores === "object") ? input.vecScores : null;
 
-  const qt = tokenize(q);
-  const qset = new Set(qt.filter(function (x) { return x.length >= 2; }));
+  // tokenize 返回 Set：先展开再过滤双字及以上词元
+  const qset = new Set([...tokenize(q)].filter(function (x) { return x.length >= 2; }));
   const scored = [];
   for (const m of pool) {
     // triggers 命中：query 含 trigger 子串 → 1.0；否则双字词元交叠按比例
@@ -288,7 +288,7 @@ function buildRelevant(input, cfg, fixedIdSet) {
         const s = String(t || "").trim();
         if (!s) continue;
         if (q.indexOf(s) >= 0) { lit = 1; break; }
-        const tt = tokenize(s).filter(function (x) { return x.length >= 2; });
+        const tt = [...tokenize(s)].filter(function (x) { return x.length >= 2; });
         if (tt.length && qset.size) {
           let h = 0;
           for (const x of tt) if (qset.has(x)) h++;
