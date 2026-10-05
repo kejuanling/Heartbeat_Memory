@@ -201,27 +201,66 @@ function toItem(r) {
 // 1003-08 用户拍板：memory_search 完全按关键词命中（去语义余弦）：
 // q 分词后逐条统计命中词元数（hits），0 命中不返回；排序 = 命中数降序，同级按最新在前。
 // 返回只保留 {id, content}（id 供 memory_pin/update；其余字段工具不再透传）。
+// 1005-19：检索工具独立配置（memory_search 段，默认词面0.5/语义0.3/无门槛/最多5条）
+function readMemorySearchCfg() {
+  try {
+    const c = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "memory_v2_config.json"), "utf-8"));
+    return (c && c.memory_search && typeof c.memory_search === "object") ? c.memory_search : {};
+  } catch (e) { return {}; }
+}
+
 async function retrieveHybrid(rows, query, opts = {}) {
   const q = String(query || "").trim();
   if (!q) return [];
-  const topK = Math.max(1, Number(opts.topK) || 5);
+  // 1005-19 检索工具混合分升级（memory_search 主路径）：原实现是纯字面词元命中计数，名不副实。
+  // 现与相关注入同款混合分：词面分 = max(triggers 命中分, 全文双字词元交叠比例)（无标签存量记忆也能搜到），
+  // 语义分 = bge 余弦（复用 relevantScores，embed 不可用则纯词面），混合 = wordWeight×词面 + semWeight×语义。
+  const cfg = readMemorySearchCfg();
+  const wl = (cfg.wordWeight >= 0) ? cfg.wordWeight : 0.5;
+  const ws = (cfg.semWeight >= 0) ? cfg.semWeight : 0.3;
+  const gate = (cfg.minScore >= 0) ? cfg.minScore : 0;
+  const topK = Math.min(Math.max(1, Number(opts.topK) || 5), 5); // 用户 1005 拍板：最多 5 条
   const pool = rows.filter(r => (!opts.pinnedOnly || r.anchor === true) && (!opts.kind || r.kind === opts.kind));
   if (!pool.length) return [];
-  // 1003-08 补充：只按双字及以上词元命中（tokenize 含中文单字，单字如"不/在/面"到处命中，纯噪音）
-  const qt = new Set([...tokenize(q)].filter(function (x) { return x.length >= 2; }));
-  if (!qt.size) return [];
-  const scored = pool.map(r => {
-    const tw = new Set([...tokenize(r.text + " " + (r.kind || ""))].filter(function (x) { return x.length >= 2; }));
-    let hits = 0;
-    for (const x of qt) if (tw.has(x)) hits++;
-    return { r, hits };
-  });
-  scored.sort((a, b) => {
-    if (b.hits !== a.hits) return b.hits - a.hits;
-    const ua = String(a.r.content_updated_at || a.r.created_at || ""), ub = String(b.r.content_updated_at || b.r.created_at || "");
-    return ua < ub ? 1 : (ua > ub ? -1 : 0);
-  });
-  return scored.filter(s => s.hits > 0).slice(0, topK).map(s => ({ id: s.r.id, content: s.r.text }));
+  let semScores = null;
+  try {
+    const sr = await relevantScores(pool, q);
+    if (sr && sr.ok) semScores = sr.scores;
+  } catch (e) { semScores = null; }
+  const qset = new Set([...tokenize(q)].filter(function (x) { return x.length >= 2; }));
+  const scored = [];
+  for (const r of pool) {
+    let lit = 0;
+    const tr = Array.isArray(r.triggers) ? r.triggers : [];
+    if (tr.length) {
+      for (const t of tr) {
+        const s = String(t || "").trim();
+        if (!s) continue;
+        if (q.indexOf(s) >= 0) { lit = 1; break; }
+        const tt = [...tokenize(s)].filter(function (x) { return x.length >= 2; });
+        if (tt.length && qset.size) {
+          let h = 0;
+          for (const x of tt) if (qset.has(x)) h++;
+          if (h > 0) lit = Math.max(lit, h / tt.length);
+        }
+      }
+    }
+    if (!(lit > 0) && qset.size) {
+      const tw = new Set([...tokenize(r.text)].filter(function (x) { return x.length >= 2; }));
+      if (tw.size) {
+        let h = 0;
+        for (const x of qset) if (tw.has(x)) h++;
+        lit = Math.max(lit, h / qset.size);
+      }
+    }
+    if (!(lit > 0) && !semScores) continue; // 词面语义都拿不到分的不返回
+    const sem = semScores ? (semScores[r.id] != null ? semScores[r.id] : 0) : 0;
+    const score = Math.round((wl * lit + ws * sem) * 1000) / 1000;
+    if (score < gate) continue;
+    scored.push({ r, score });
+  }
+  scored.sort(function (a, b) { return b.score - a.score; });
+  return scored.slice(0, topK).map(s => ({ id: s.r.id, content: s.r.text }));
 }
 
 // 最近列表：按正文更新时间倒序（V2 无检索计数污染，content_updated_at 只在正文变化时刷）
