@@ -14,7 +14,10 @@
 //                本模块不发真实网络请求）；非法输出重试 1 次 → need_review 兜底
 // ========================
 
+// 1004-04：contradiction 从禁用改为可用（0928 起一直被提示词挡住）。
+// 用户判断"矛盾"是需要人工看的关键信号（例：「她喜欢红心木瓜」vs「她不爱吃木瓜」不是 update，是矛盾）。
 const RELATIONS = ["duplicate", "update", "contradiction", "coexist", "need_review"];
+const VOLATILITIES = ["stable", "volatile", "situational"];
 
 function normalizeText(s) {
   return String(s || "")
@@ -27,14 +30,15 @@ function normalizeText(s) {
 function judgeMock(candidateText, existingText) {
   const c = normalizeText(candidateText);
   const e = normalizeText(existingText);
-  if (!c || !e) return { relation: "need_review", confidence: 0.5, reason: "mock：空输入无法判定" };
-  if (c === e) return { relation: "duplicate", confidence: 1, reason: "mock：规范化后完全一致", merged_text: candidateText };
+  const M = (relation, conf, reason) => ({ relation, confidence: conf, relation_reason: reason,
+    worth: null, worth_reason: null, volatility: null, volatility_reason: null, merged_text: null });
+  if (!c || !e) return M("need_review", 0.5, "mock：空输入无法判定");
+  if (c === e) return M("duplicate", 1, "mock：规范化后完全一致");
   if (e.includes(c) || c.includes(e)) {
     const fuller = c.length >= e.length ? "候选" : "既有";
-    const merged = c.length >= e.length ? candidateText : existingText;
-    return { relation: "duplicate", confidence: 0.9, reason: `mock：子集/全量包含（${fuller}侧更全，落地保留更全一份）`, merged_text: merged };
+    return M("duplicate", 0.9, `mock：子集/全量包含（${fuller}侧更全）`);
   }
-  return { relation: "need_review", confidence: 0.5, reason: "mock：无语义判定能力，转人工/llm", merged_text: null };
+  return M("need_review", 0.5, "mock：无语义判定能力，转人工/llm");
 }
 
 // ---- B prompt（16.txt §四原则：无角色扮演、固定判断顺序、封闭词表、一句 reason、单行 JSON）----
@@ -44,21 +48,30 @@ const fs = require("fs");
 const path = require("path");
 const JUDGE_PROMPT_FILE = path.join(__dirname, "data", "judge_prompt.json");
 
+// ---- B prompt（1004 改造：judge 退化为「只提供信息的人」）----
+// 1004-04 用户拍板：
+//  ① 五个关系全部开放（含 contradiction，0928 起一直被禁用），每个都要给理由
+//  ② 额外输出两个纯信息字段：worth（值不值得长期记）+ volatility（会不会过时）
+//  ③ 不再生成 merged_text——命中相似一律进待审，合并交人工在待审页对照决定
+//  ④ 保留 1002 起在管理台累积的细化规则（更大清单/子项不判 duplicate、update 必须有可定位新旧信号）
 const JUDGE_TEMPLATE_DEFAULT =
-  "你是记忆关系判定器。判断【候选】与【既有】两条记忆的关系，只输出规定结论。\n" +
-  "判断顺序：1) 主体是否一致；2) 表述形态是否同类——原话（带引号/说话人/口语语气）与转述（第三人称概括/事实陈述/带解读）是两种形态，一边原话一边转述=不同分层，直接判 coexist；3) 同形态下是否同一条：逐字相同，或候选完整复述了既有那条并把它并入更大的事实集合；4) 候选是否有时间/否定/变更信号。\n" +
+  "你是记忆评估器。给定一条【候选】记忆和一条【既有】记忆，输出三组判断：关系、长期价值、时效性。只输出规定结论。\n" +
+  "判断顺序：1) 主体是否一致；2) 表述形态是否同类——原话（带引号/说话人/口语语气）与转述（第三人称概括/事实陈述/带解读）是两种形态，一边原话一边转述=不同分层，直接判 coexist；3) 同形态下是否同一条：逐字相同，或候选完整复述了既有那条并把它并入更大的事实集合；4) 候选是否有时间/否定/变更信号；5) 两边对同一件事的说法是否冲突。\n" +
   "关系定义：\n" +
-  "- duplicate=同主体同谓语同值，且表述形态同类（同为原话或同为转述）；或候选是既有的全量扩展版（完整复述既有那条一遍，再并列更多同层事实）。\n" +
-  "- update=同主体同谓语且值随时间变化（候选文本必须含时间/否定/变更词）。\n" +
-  "- coexist=以下任一：①多条独立原话的拼合 vs 其中单条（拼合只是容器，每一句都是独立记忆，子项各自保留）；②一边是原话、另一边是转述/概括/带解读（同一内容的不同分层）；③相似但不同事。\n" +
-  "- need_review=无法确定（疑似矛盾、跨主体、证据不足时必须选它，这不算失败）。\n" +
+  "- duplicate=同主体同谓语同值，且表述形态同类（同为原话或同为转述）；或候选是既有的全量扩展版（完整复述既有那条一遍，再并列更多同层事实）。候选若是更大清单/集合，而既有只是其中一个子项，不判duplicate。只有同主体、同谓语、同值、同形态的一条对一条，才可 duplicate。\n" +
+  "- update=同主体同谓语且值随时间变化（候选文本必须含时间/否定/变更词）。仅当候选包含可定位的新旧信号，且明确指向\"现在/之后/最近一次\"时，才判 update。无法确定新旧先后，必须 need_review。\n" +
+  "- contradiction=两条对同一件事给出明确冲突的说法（如喜欢 vs 不喜欢、去过 vs 没去过），两条都可能成立、需要人工决定以哪个为准。有冲突就该选它，不要因为分不清新旧而退回 need_review。\n" +
+  "- coexist=以下任一：①多条独立原话的拼合 vs 其中单条（拼合只是容器，每一句都是独立记忆，子项各自保留）；②一边是原话、另一边是转述/概括/带解读（同一内容的不同分层）；③主体相同但讲的是不同事。\n" +
+  "- need_review=无法归入以上任一关系（跨主体、证据不足、形态混合、表述含糊到判不出讲的是不是一回事）。\n" +
   "对照示例：\n" +
   "- 既有「他每天早起跑步，坚持了三年」/ 候选「他作息规律：每天早起跑步坚持三年；晚上十一点前睡；周末爬山」→ duplicate（同为转述；候选完整复述了既有那条并扩展成清单）\n" +
   "- 既有「小林：'这首歌我单曲循环了一整天。'」/ 候选「小林：'这首歌我单曲循环了一整天。' 小林：'演唱会门票抢到了。' 小林：'下次带朋友一起来。'」→ coexist（多条独立原话的拼合，既有那条是其中的独立子项，各自保留）\n" +
   "- 既有「他说'我不吃香菜'——饮食上很固执，点菜时要注意」/ 候选「他：'我不吃香菜。'」→ coexist（带解读的完整记忆 vs 其中的裸引原话，不同分层）\n" +
-  "当关系为 duplicate 或 update 时，必须输出 merged_text（把两条合并成唯一一条记忆文本）：保留两条中仍有效的信息，以候选的更新为准，删去冗余重复措辞，合并后字数不超过较长原条的 1.5 倍；禁止添加原文不存在的事实或推测。关系为 coexist 或 need_review 时，merged_text 输出 null。\n" +
-  "约束：只依据给定文本判定；字面包含关系本身不构成 duplicate 的充分理由（先检查形态与分层）；禁止输出规定词之外的词；禁止输出 contradiction（疑似矛盾分不清新旧时输出 need_review）；reason 只写一句话。\n" +
-  '输出单行 JSON：{"relation":"duplicate|update|coexist|need_review","confidence":0到1的小数,"reason":"一句话","merged_text":"合并后的文本或null"}\n' +
+  "价值判断（只针对【候选】这条记忆本身，与【既有】无关，即使没有相似也要判断）：\n" +
+  "- worth=这条候选值得长期保留吗（0 到 1 的小数）：0.9-1.0 长期稳定且会反复影响互动（性格、长期偏好、约定、边界、底线）；0.6-0.9 有用但不一定常触发（作息习惯、饮食偏好、说话风格；以及值得记住的具体事 event——做过的东西、重要经历、之后聊天还可能引用的一次性事件）；0.3-0.6 偏事实记录，保留价值有限（普通单次细节、一般事实记录）；0-0.3 不该进长期记忆（当日状态、临时情绪、吃喝琐事、无信息量的聊天碎片）。\n" +
+  "- volatility 三选一：stable=不会随时间改变（性格、喜好、长期模式）；volatile=会随时间改变但当前描述仍成立（住址、在读状态、当前作息、当前关系阶段）；situational=一次性事件或具体情境——先分清两类：值得记住的具体事（event：做过的东西、重要时刻、之后还可能被聊到、能引用的信息）仍应入库，worth 按上面的 event 档给；纯粹一次性琐事（吃喝、寒暄、某天偶然发生的小事、某次对话的细碎细节）才判本不该进长期记忆库。\n" +
+  "约束：只依据给定文本判定，不臆测文本之外的信息；字面包含关系本身不构成 duplicate 的充分理由（先检查形态与分层）；禁止输出规定词之外的词；merged_text 恒输出 null（合并由人工决定，机器不做合并）；三个 reason 各只写一句话。\n" +
+  '输出单行 JSON：{"relation":"duplicate|update|contradiction|coexist|need_review","confidence":0到1的小数,"relation_reason":"一句话","worth":0到1的小数,"worth_reason":"一句话","volatility":"stable|volatile|situational","volatility_reason":"一句话","merged_text":null}\n' +
   "【既有】（${existing_kind}）：${existing_text}\n" +
   "【候选】（${candidate_kind}）：${candidate_text}";
 
@@ -122,20 +135,32 @@ function parseJudgeOutput(raw) {
   if (!RELATIONS.includes(obj.relation)) return { ok: false, error: "relation 非法: " + obj.relation };
   const conf = Number(obj.confidence);
   if (!Number.isFinite(conf) || conf < 0 || conf > 1) return { ok: false, error: "confidence 缺失或非法: " + obj.confidence };
-  // merged_text：仅 duplicate/update 时有效（coexist/need_review 时 LLM 应给 null，给了也忽略）；
-  // 空/缺失 → null（调用方按原行为回退，不阻断判定）
-  let merged = null;
-  if (obj.merged_text != null && typeof obj.merged_text === "string" && String(obj.merged_text).trim()) {
-    merged = String(obj.merged_text).trim().slice(0, 3000);
-  }
-  return { ok: true, relation: obj.relation, confidence: conf, reason: String(obj.reason || "").slice(0, 200), merged_text: merged };
+  // 1004-04：worth / volatility 降级处理——LLM 没给或给了非法值时不阻断判定，
+  // 只置 null（待审页面对应位置不显示），其余字段照常可用。
+  const worth = (obj.worth == null || obj.worth === "") ? null : Number(obj.worth);
+  const worthOk = (worth != null && Number.isFinite(worth) && worth >= 0 && worth <= 1);
+  const vol = String(obj.volatility == null ? "" : obj.volatility).trim();
+  const volOk = VOLATILITIES.indexOf(vol) >= 0;
+  // merged_text：1004 起判重不再自动合并，恒为 null（保留字段仅供契约兼容）
+  return {
+    ok: true,
+    relation: obj.relation,
+    confidence: conf,
+    // 1004：reason 拆成两个——relation_reason 与 worth/volatility 各自的 why
+    relation_reason: String(obj.relation_reason || obj.reason || "").slice(0, 200),
+    worth: worthOk ? Math.round(worth * 100) / 100 : null,
+    worth_reason: worthOk ? String(obj.worth_reason || "").slice(0, 200) : null,
+    volatility: volOk ? vol : null,
+    volatility_reason: volOk ? String(obj.volatility_reason || "").slice(0, 200) : null,
+    merged_text: null,
+  };
 }
 
 // ---- llm 实现（callLLM 注入：async (prompt, attempt) => raw 字符串）----
 async function judgeLLM(candidateText, existingText, opts = {}) {
   const call = opts.callLLM;
   if (typeof call !== "function") {
-    return { relation: "need_review", confidence: 0.5, reason: "llm 通道未配置（callLLM 缺失），转人工" };
+    return { relation: "need_review", confidence: 0.5, relation_reason: "llm 通道未配置（callLLM 缺失），转人工", worth: null, worth_reason: null, volatility: null, volatility_reason: null, merged_text: null };
   }
   const prompt = buildPrompt(candidateText, existingText, opts.meta || {});
   let lastErr = "unknown";
@@ -149,11 +174,14 @@ async function judgeLLM(candidateText, existingText, opts = {}) {
     }
     const parsed = parseJudgeOutput(raw);
     if (parsed.ok) {
-      return { relation: parsed.relation, confidence: parsed.confidence, reason: parsed.reason, merged_text: parsed.merged_text };
+      return { relation: parsed.relation, confidence: parsed.confidence, relation_reason: parsed.relation_reason,
+               worth: parsed.worth, worth_reason: parsed.worth_reason,
+               volatility: parsed.volatility, volatility_reason: parsed.volatility_reason, merged_text: null };
     }
     lastErr = parsed.error;
   }
-  return { relation: "need_review", confidence: 0.5, reason: `judge 输出两次非法已转人工（${lastErr}）`, merged_text: null };
+  return { relation: "need_review", confidence: 0.5, relation_reason: "judge 输出两次非法已转人工（" + lastErr + "）",
+           worth: null, worth_reason: null, volatility: null, volatility_reason: null, merged_text: null };
 }
 
 // ---- 统一入口（恒 async；mock 立即兑现）----
