@@ -2122,7 +2122,7 @@ function ccArmAllGapAutoLoad(){
   if(name==='config'){loadToolsConfig(); loadCrossInjectConfig();
     // 1003：记忆蒸馏 / 两块总结 / 老数据重跑三张设置卡已搬到本页（跨窗口注入卡片下方）。
     // 三个 load 原本挂在 initMemPoolView（只跑一次且必须先进记忆页才触发），搬走后若从配置页直接进来会加载不到 → 输入框全空。
-    loadDistillConfig(); loadSummaryConfig(); loadBackfillConfig();
+    loadDistillConfig(); loadSummaryConfig(); loadBackfillConfig(); loadRelevantConfig(); loadRelevantPreview();
     // 2026-10-01 修复：压缩参数配置卡在配置 tab，但值依赖压缩预览先加载——原加载链只在压缩 tab/换会话/压缩操作后触发，
     // 直接进配置 tab（含刷新后恢复停留在配置 tab）时 preview 从未拉取，十二个输入框静默全空
     if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompactionConfig(); }
@@ -2669,6 +2669,74 @@ function ccArmAllGapAutoLoad(){
       loadDistillConfig();
     }catch(e){ if(msg) msg.textContent='跑失败: '+e.message; toast('跑失败: '+e.message); }
     finally{ if(btn){ btn.disabled=false; btn.textContent='立即跑一次'; } }
+
+  // ============ 相关记忆注入配置 + 注入预览（1005-17） ============
+  async function loadRelevantConfig(){
+    const msg=document.getElementById('relevant-config-msg');
+    try{
+      const r=await fetch(ADMIN_API+'/memory-v2/relevant-config');
+      const c=await r.json();
+      if(c.error){ if(msg) msg.textContent='读取失败: '+c.error; return; }
+      const en=document.getElementById('relevant-enabled'); if(en) en.checked=!!c.ctx_v2_relevant_enabled;
+      const pv=document.getElementById('relevant-preview-sw'); if(pv) pv.checked=!!(c.relevant&&c.relevant.preview);
+      const ww=document.getElementById('relevant-ww'); if(ww) ww.value=(c.relevant&&c.relevant.wordWeight!=null)?c.relevant.wordWeight:0.5;
+      const sw=document.getElementById('relevant-sw'); if(sw) sw.value=(c.relevant&&c.relevant.semWeight!=null)?c.relevant.semWeight:0.15;
+      const ms=document.getElementById('relevant-ms'); if(ms) ms.value=(c.relevant&&c.relevant.minHybridScore!=null)?c.relevant.minHybridScore:0.3;
+      const tk=document.getElementById('relevant-tk'); if(tk) tk.value=(c.relevant&&c.relevant.topK!=null)?c.relevant.topK:1;
+      if(msg){
+        if(c.ctx_v2_relevant_enabled) msg.textContent='真注入已开启：每轮最多 '+(c.relevant&&c.relevant.topK||1)+' 条（event 类，triggers 命中才入围）';
+        else if(c.relevant&&c.relevant.preview) msg.textContent='观察模式：只记录本应注入的条目，不进 prompt、不浮现';
+        else msg.textContent='相关注入已关闭（预览也未开）。';
+      }
+    }catch(e){ if(msg) msg.textContent='读取失败: '+e.message; }
+  }
+  async function saveRelevantConfig(){
+    const msg=document.getElementById('relevant-config-msg');
+    if(msg) msg.textContent='保存中...';
+    const en=document.getElementById('relevant-enabled');
+    const pv=document.getElementById('relevant-preview-sw');
+    const ww=document.getElementById('relevant-ww');
+    const sw=document.getElementById('relevant-sw');
+    const ms=document.getElementById('relevant-ms');
+    const tk=document.getElementById('relevant-tk');
+    const payload={
+      enabled: en?!!en.checked:false,
+      preview: pv?!!pv.checked:true,
+      wordWeight: Math.max(0, Number(ww&&ww.value)||0),
+      semWeight: Math.max(0, Number(sw&&sw.value)||0),
+      minHybridScore: Math.max(0, Math.min(1, Number(ms&&ms.value)||0)),
+      topK: Math.max(1, Math.floor(Number(tk&&tk.value)||1))
+    };
+    try{
+      const r=await fetch(ADMIN_API+'/memory-v2/relevant-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const d=await r.json();
+      if(d.error){ if(msg) msg.textContent='保存失败: '+d.error; toast('保存失败: '+d.error); return; }
+      if(msg) msg.textContent='已保存：'+(d.ctx_v2_relevant_enabled?('真注入开启（topK='+d.relevant.topK+'，门槛 '+d.relevant.minHybridScore+'）'):(d.relevant.preview?'观察模式（预览本应注入）':'全部关闭'))+'。';
+      toast('相关注入设置已保存');
+      loadRelevantConfig();
+    }catch(e){ if(msg) msg.textContent='保存失败: '+e.message; toast('保存失败: '+e.message); }
+  }
+  async function loadRelevantPreview(){
+    const el=document.getElementById('relevant-preview-list');
+    if(!el) return;
+    try{
+      const r=await fetch(ADMIN_API+'/memory-v2/relevant-preview');
+      const d=await r.json();
+      const arr=d.items||[];
+      if(!arr.length){ el.innerHTML='<div style="font-size:11px;color:var(--text3);padding:4px 2px;">还没有预览记录——聊几轮后这里会显示每轮「本应注入哪条 + 混合分」。注意：存量记忆没重跑补标签前 event 池为空，预览也是空的。</div>'; return; }
+      let h='';
+      arr.forEach(function(it){
+        const hs=(it.hits||[]).map(function(x){
+          return '<div class="rel-hit"><span class="rel-hit-score">'+x.score+'</span> <b>'+escapeHtml(x.kind||'')+'</b> '+escapeHtml((x.text||'').slice(0,60))+(x.id?' <span class="rel-hit-id">#'+escapeHtml(x.id)+'</span>':'')+'</div>';
+        }).join('');
+        h+='<div class="rel-row"><div class="rel-row-head">'+escapeHtml(String(it.time||'').slice(5,16).replace('T',' '))+' · '+escapeHtml(String(it.session||'').slice(0,14))+'</div>'
+          +'<div class="rel-query">问：'+escapeHtml(it.query||'')+'</div>'
+          +(hs||'<div style="color:var(--text3);font-size:11px;">本轮无命中</div>')
+          +'</div>';
+      });
+      el.innerHTML=h;
+    }catch(e){ el.innerHTML='<div style="font-size:11px;color:#c0392b;padding:4px 2px;">读取失败: '+escapeHtml(e.message)+'</div>'; }
+  }
   }
 
   // ============ 两块总结配置（1002 记忆改造 §8 6.5：Core Identity / Long-term Understanding 缓存 + 每晚定时检查） ============
@@ -2955,8 +3023,19 @@ function ccArmAllGapAutoLoad(){
   // ============ 记忆池（现走 Memory V2，编辑/筛选只认 fact/rule 两类；1002-14 删 quote/milestone） ============
   // 存量兼容：0912 五类（关于她/认账/拓本/压缩摘要/对话碎片）与更早旧四类仍会出现在列表里，
   // 统一暗灰显示、由后台清洗迁移逐步消化；颜色表保留两套键。
-  const MP_CAT_COLORS={fact:'#2980b9',rule:'#c0392b',quote:'#8e44ad',milestone:'#f39c12',关于她:'#2980b9',认账:'#c0392b',拓本:'#8e44ad',压缩摘要:'#7f8c8d',对话碎片:'#f39c12',关于我们:'#95a5a6',锚点:'#95a5a6',信号:'#95a5a6',对话摘要:'#95a5a6'};
+  const MP_CAT_COLORS={fact:'#2980b9',rule:'#c0392b',event:'#16a085',quote:'#8e44ad',milestone:'#f39c12',关于她:'#2980b9',认账:'#c0392b',拓本:'#8e44ad',压缩摘要:'#7f8c8d',对话碎片:'#f39c12',关于我们:'#95a5a6',锚点:'#95a5a6',信号:'#95a5a6',对话摘要:'#95a5a6'};
   function mpCatColor(c){ return MP_CAT_COLORS[c]||'#7f8c8d'; }
+
+  // 1005-17：triggers 关键词 + vibe 氛围 展示（有才渲染）
+  function mpTagsHtml(it){
+    const tr=Array.isArray(it.triggers)?it.triggers.filter(Boolean):[];
+    const vb=(it.vibe&&String(it.vibe).trim())||'';
+    if(!tr.length&&!vb) return '';
+    let h='<div class="mp-tags">';
+    tr.forEach(function(t){ h+='<span class="mp-tag">'+escapeHtml(t)+'</span>'; });
+    if(vb) h+='<span class="mp-vibe">'+escapeHtml(vb)+'</span>';
+    return h+'</div>';
+  }
 
   function initMemPoolView(){
     window.__memShowSunk=false;
@@ -3081,7 +3160,7 @@ function ccArmAllGapAutoLoad(){
             +(sunk?'<span class="mp-badge sunk">已沉底</span>':'')
           +'</span>'
         +'</div>'
-        +'<div class="mp-body">'+escapeHtml(it.content)+'</div>'
+        +'<div class="mp-body">'+escapeHtml(it.content)+'</div>'+mpTagsHtml(it)
         +'<div class="mp-meta">'
           +'<span>检索 '+(it.retrieval_count||0)+' 次</span>'
           +(typeof it._score==='number'?'<span class="mp-score">值 '+it._score+'</span>':'')
@@ -3321,7 +3400,7 @@ function ccArmAllGapAutoLoad(){
             +'<span class="mp-cat"><span class="mp-dot"></span>'+escapeHtml(it.kind)+'</span>'
             +'<span class="mp-badges"><span class="mp-badge">'+escapeHtml(it.subject||'')+'</span></span>'
           +'</div>'
-          +'<div class="mp-body">'+escapeHtml(it.text)+'</div>'
+          +'<div class="mp-body">'+escapeHtml(it.text)+'</div>'+mpTagsHtml(it)
           +'<div class="mp-meta"><span>'+escapeHtml(String(it.created_at||'').slice(0,10))+'</span></div>'
           +'<div class="mp-actions">'
             +'<button type="button" class="mp-btn ghost" onclick="sinkMemPoolSimilar(\''+it.id+'\')">沉底</button>'

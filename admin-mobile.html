@@ -67,6 +67,49 @@
        <div id="cross-inject-config-msg" class="cc-cfg-msg"></div>
      </div>
    </div>
+   <div class="card" data-collapse-id="relevant-config" data-default="collapsed">
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>相关记忆注入</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">?</span><span class="collapse-arrow">▾</span></div>
+     <div class="hint-card">
+       <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px;">只注入 event 类（「记住的一件事/做出来的东西」，之后聊天可能还会引用）。命中机制：triggers 关键词命中才入围（无命中不入围），混合分 = 词面×词面权重 + 语义×语义权重（vibe 影响语义向量），每轮最多 1 条，分低于门槛不注入。真注入开关关闭时，预览开关会照常算分，把「本应注入哪条」写进下方预览卡；点头后再开真注入。存量记忆需先重跑补标签（triggers/vibe/worth），否则 event 池为空、注入/预览都不触发。</div>
+     </div>
+     <div class="card-body">
+       <div class="cc-cfg-grid">
+         <label class="cc-cfg-item"><span>真注入（进 prompt）</span>
+           <span class="switch"><input type="checkbox" id="relevant-enabled"><span class="slider"></span></span>
+         </label>
+         <label class="cc-cfg-item"><span>观察模式（预览）</span>
+           <span class="switch"><input type="checkbox" id="relevant-preview-sw"><span class="slider"></span></span>
+         </label>
+         <label class="cc-cfg-item"><span>词面权重</span>
+           <input type="number" id="relevant-ww" min="0" step="0.05" style="width:80px">
+         </label>
+         <label class="cc-cfg-item"><span>语义权重</span>
+           <input type="number" id="relevant-sw" min="0" step="0.05" style="width:80px">
+         </label>
+         <label class="cc-cfg-item"><span>混合分门槛</span>
+           <input type="number" id="relevant-ms" min="0" max="1" step="0.05" style="width:80px">
+         </label>
+         <label class="cc-cfg-item"><span>每轮最多条数</span>
+           <input type="number" id="relevant-tk" min="1" step="1" style="width:80px">
+         </label>
+       </div>
+       <div class="cc-cfg-btns">
+         <button type="button" class="cc-btn primary" onclick="saveRelevantConfig()">保存</button>
+         <button type="button" class="cc-btn secondary" onclick="loadRelevantConfig()">重新载入</button>
+       </div>
+       <div id="relevant-config-msg" class="cc-cfg-msg"></div>
+     </div>
+   </div>
+   <div class="card" data-collapse-id="relevant-preview" data-default="collapsed">
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>相关注入预览（近 20 轮）</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">?</span><span class="collapse-arrow">▾</span></div>
+     <div class="hint-card">
+       <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px;">观察模式下，每轮聊天后这里记录「本应注入哪条 + 混合分」（不进 prompt、不浮现、不打点）。词面命中即 ≥0.5（词面权重 0.5 起）；语义分再往上加，语义低说明 vibe 语境不搭，自然排不上去。</div>
+     </div>
+     <div class="card-body">
+       <div id="relevant-preview-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+     </div>
+   </div>
+
    <div class="card" data-collapse-id="distill-config" data-default="collapsed">
      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆蒸馏 · 定时设置</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">?</span><span class="collapse-arrow">▾</span></div>
      <div class="hint-card">
