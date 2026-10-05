@@ -6093,6 +6093,63 @@ app.delete("/admin/logs/context-digest-prompt", { preHandler: basicAuth }, async
     reply.code(500).send({ error: err.message });
   }
 });
+// 1005 补回：永久注入上下文（pinned memories）CRUD
+app.get("/admin/logs/pinned", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const list = engine.getPinnedMemories ? engine.getPinnedMemories() : [];
+    reply.send({ list });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+app.post("/admin/logs/pinned", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const { title, content, order } = req.body || {};
+    const mem = await engine.addPinnedMemory({ title, content, order }, { allowDeleted: true });
+    reply.send({ success: true, memory: mem });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+app.put("/admin/logs/pinned/:id", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const { title, content, order } = req.body || {};
+    const updates = {};
+    if (title !== undefined) updates.title = title;
+    if (content !== undefined) updates.content = content;
+    if (order !== undefined) updates.order = order;
+    const mem = await engine.updatePinnedMemory(req.params.id, updates);
+    if (!mem) return reply.code(404).send({ error: "not found" });
+    reply.send({ success: true, memory: mem });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+app.post("/admin/logs/pinned/reorder", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const ids = (req.body || {}).ids;
+    const list = await engine.reorderPinnedMemory(ids);
+    if (!list) return reply.code(400).send({ error: "无效的排序数据" });
+    reply.send({ success: true, list });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+app.delete("/admin/logs/pinned/:id", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const engine = require("./memory-engine");
+    const ok = await engine.deletePinnedMemory(req.params.id);
+    reply.send({ ok });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
+
+// 1005 补回：最后一次发给 LLM 的完整上下文
+app.get("/admin/logs/context", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    if (!lastLLMMessages) { reply.send({ messages: [], total: 0, captureTime: null }); return; }
+    const messages = lastLLMMessages.map(m => {
+      if (m.role === "_divider") return { role: "_divider", content: m.content };
+      return { role: m.role, content: m.content, images: m.images, attachments: m.attachments, tool_calls: m.tool_calls, tool_call_id: m.tool_call_id };
+    });
+    reply.send({ messages, total: messages.length, captureTime: lastLLMCaptureTime });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
 
 // 多模态 content 拆分：文字保留原文，图片/音频/文件只留标记，
 // 避免 base64 大字符串进入管理台上下文面板导致手机渲染卡死
