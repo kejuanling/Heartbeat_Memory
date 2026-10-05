@@ -1467,6 +1467,8 @@ body[data-theme="crt"] #chat[data-layout="claude"] #chatSwitching{
   background:rgba(10,9,6,.88)!important;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
 body[data-theme="crt"] #chatSwitching .cs-text{color:#E0B36A!important}
 /* ===== CRT 工单 001-005（2026-10-05）===== */
+/* CRT 思考链默认展开（.rw-c 默认 display:none，CRT 下强制显示） */
+body[data-theme="crt"] #chat[data-layout="claude"] .rw .rw-c{display:block!important;max-height:none!important;overflow:visible!important}
 /* 001 用户消息靠左，与 AI 同一条流 */
 body[data-theme="crt"] #chat[data-layout="claude"] .msg.user .mrow{flex-direction:row!important}
 body[data-theme="crt"] #chat[data-layout="claude"] .msg.user .mcol{align-items:flex-start!important}
