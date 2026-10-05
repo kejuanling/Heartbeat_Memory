@@ -768,7 +768,7 @@ def tool_memory_search(args):
 
 
 TOOLS["memory_search"] = {
-    "description": "检索长期记忆池：纯关键词命中，返回命中记忆的正文与 id（无命中返回空列表）。排序=命中的关键词数多的在前，命中数相同按最新在前。id 交给 memory_pin 置顶/沉底，或交给 memory_update 改正文。这里查到的是已经进入长期记忆池的记忆，不是原始对话；要找原文用 context_search。",
+    "description": "检索长期记忆池：输入关键词、问题或模糊描述，返回最相关的几条记忆及 id。建议用完整的一句话描述想查的内容（例如\"她上次说想学画画那件事\"）：一句话比单个关键词更容易命中——短关键词主要靠字面匹配，一句话会带语义匹配，意思相近也能搜到。排序=词面命中与语义相关混合打分，相关度高的在前。id 交给 memory_pin 置顶/沉底，或交给 memory_update 改正文。这里查到的是已经进入长期记忆池的记忆，不是原始对话；要找原文用 context_search。",
     "inputSchema": {
         "type": "object",
         "properties": {
