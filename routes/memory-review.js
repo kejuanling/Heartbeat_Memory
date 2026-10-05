@@ -33,6 +33,9 @@ module.exports = function registerMemoryReviewRoutes(app, { basicAuth, admission
       },
       // 0928 合并草稿：此前一直没被映射出来，管理台那段「既有 / 候选 / 合并后」对照是死代码
       merge: q.merge || null,
+      // 1004-04：judge 的纯信息输出 {worth, worth_reason, volatility, volatility_reason, similar[]}，
+      // 供待审卡片显示两个分数 + 相似记忆清单（每条可逐条沉底）。judge 不参与决策。
+      judge: q.judge || null,
       provenance: q.draft.provenance || null,
       reasons: q.details || [],
     }));

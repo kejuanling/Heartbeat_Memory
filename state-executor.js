@@ -72,6 +72,9 @@ function createStateExecutor(opts = {}) {
       // 0928 合并草稿：{ merged_text, from_id, from_kind, from_text }——approve 时以 merged_text 覆盖正文，
       // 旧条目（from_id）置 superseded(reason=merged)；reject 时旧条目原样不动
       merge: meta.merge && typeof meta.merge === "object" ? meta.merge : null,
+      // 1004-04：judge 的纯信息输出 {worth, worth_reason, volatility, volatility_reason, similar[]}。
+      // 只供待审页面展示（分数卡 + 相似清单 + 逐条沉底），judge 不参与任何入库决策。
+      judge: meta.judge && typeof meta.judge === "object" ? meta.judge : null,
     };
     q.push(rec);
     flushQueue();
