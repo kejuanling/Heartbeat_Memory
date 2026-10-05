@@ -1469,6 +1469,10 @@ body[data-theme="crt"] #chatSwitching .cs-text{color:#E0B36A!important}
 /* ===== CRT 工单 001-005（2026-10-05）===== */
 /* CRT 思考链默认展开（.rw-c 默认 display:none，CRT 下强制显示） */
 body[data-theme="crt"] #chat[data-layout="claude"] .rw .rw-c{display:block!important;max-height:none!important;overflow:visible!important}
+/* 1005-19 CRT：工具链默认展开；思考链/工具链点击就地收起（.open=收起），不弹抽屉 */
+body[data-theme="crt"] #chat[data-layout="claude"] .tool-trace .tt-body{display:block!important;max-height:none!important;overflow:visible!important}
+body[data-theme="crt"] #chat[data-layout="claude"] .rw.open .rw-c,
+body[data-theme="crt"] #chat[data-layout="claude"] .tool-trace.open .tt-body{display:none!important}
 /* 001 用户消息靠左，与 AI 同一条流 */
 body[data-theme="crt"] #chat[data-layout="claude"] .msg.user .mrow{flex-direction:row!important}
 body[data-theme="crt"] #chat[data-layout="claude"] .msg.user .mcol{align-items:flex-start!important}
@@ -3290,9 +3294,10 @@ function renderAiContent(msgEl, bubble, content, reasoning){   // 2026-09-24 P2-
       var rwCls = (chatEl && chatEl.dataset.layout==="claude" && showThink && _streamActive) ? "rw-h shimmer" : "rw-h";
       ph+='<div class="rw"><span class="'+rwCls+'">'+(chatEl && chatEl.dataset.layout==="claude" ? '' : '<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1 0-2-.2-2.9-.5L4 21l1.5-5.6A8.5 8.5 0 1 1 21 11.5z"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="13" x2="14" y2="13"/></svg> ')+thinkLabel+'<span class="rw-a">▾</span></span><div class="rw-c">'+rc+'</div></div>';
       pre.innerHTML=ph;
-      pre.querySelectorAll(".rw").forEach(rw=>rw.addEventListener("click",function(){
+      pre.querySelectorAll(".rw").forEach(rw=>rw.addEventListener("click",function(e){
         if(chatEl && chatEl.dataset.layout==="claude"){
-          // claude 主题：打开底部抽屉
+          // claude 主题：打开底部抽屉（CRT 例外：就地收起/展开）
+          if(document.body.dataset.theme==="crt"){ rw.classList.toggle("open"); e.stopPropagation(); return; }
           var body=rw.querySelector(".rw-c");
           if(body) openThinkSheet(body.innerHTML);
         } else {
@@ -3303,8 +3308,9 @@ function renderAiContent(msgEl, bubble, content, reasoning){   // 2026-09-24 P2-
     // 2026-09-28：本段无思考内容时不动 pre——多段正文复用本消息思考链时，不能因后续段无 reasoning 清空它
   }
   // 来自正文的工具胶囊（模型抄进 content 的【工具 · name】块）也需要绑定点击折叠
-  if(toolEcho) bubble.querySelectorAll(".tool-trace").forEach(tt=>tt.addEventListener("click",function(){
+  if(toolEcho) bubble.querySelectorAll(".tool-trace").forEach(tt=>tt.addEventListener("click",function(e){
   if(chatEl && chatEl.dataset.layout==="claude"){
+    if(document.body.dataset.theme==="crt"){ tt.classList.toggle("open"); e.stopPropagation(); return; }
     var name=tt.querySelector(".tt-name");
     var body=tt.querySelector(".tt-body");
     var nameText=name?name.textContent.trim():"Tool";
@@ -3318,6 +3324,13 @@ function renderAiContent(msgEl, bubble, content, reasoning){   // 2026-09-24 P2-
 // 全局事件委托：claude 主题下点击工具卡/思考链打开抽屉
 document.addEventListener("click",function(e){
   if(!(chatEl && chatEl.dataset.layout==="claude")) return;
+  if(document.body.dataset.theme==="crt"){
+    // CRT：思考链/工具链就地收起/展开，不弹抽屉
+    var crtTt=e.target.closest(".tool-trace");
+    if(crtTt){ crtTt.classList.toggle("open"); return; }
+    var crtRw=e.target.closest(".rw-wrap .rw");
+    if(crtRw){ crtRw.classList.toggle("open"); return; }
+  }
   var tt=e.target.closest(".tool-trace");
   if(tt){
     e.preventDefault();
