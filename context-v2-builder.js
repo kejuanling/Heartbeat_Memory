@@ -266,8 +266,9 @@ function buildRelevant(input, cfg, fixedIdSet) {
       && m.kind === "event"
       && !fixedIdSet.has(String(m.id)) && !excluded.has(String(m.id)));
   // 1005-17：来源会话去重——本会话发生的事件 AI 上下文里已有，不重复注入
+  // 1005-26：多会话支持——source_session 逗号串（存量追溯可多会话），包含当前会话即排除
   const curSession = strSafe(input.sessionId);
-  if (curSession) pool = pool.filter(m => strSafe(m.source_session) !== curSession);
+  if (curSession) pool = pool.filter(m => ("," + strSafe(m.source_session) + ",").indexOf("," + curSession + ",") === -1);
   if (!pool.length) return { lines: [], fixedIds: [] };
 
   const wLit = Number(cfg.relevantWordWeight); const wl = (wLit >= 0) ? wLit : 0.5;
