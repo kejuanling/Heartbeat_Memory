@@ -1011,6 +1011,7 @@
 
 .mp-tags{display:flex;gap:5px;flex-wrap:wrap;margin:2px 0 0 0}
 .mp-tag{font-size:10px;padding:1px 7px;border-radius:999px;background:rgba(22,160,133,.1);color:#16a085;border:1px solid rgba(22,160,133,.25)}
+.mp-tag-empty{background:rgba(127,140,141,.06);color:var(--text3);border:1px dashed rgba(127,140,141,.3)}
 .mp-vibe{font-size:10px;color:var(--text3);font-style:italic;opacity:.8}
 .rel-row{border:1px solid rgba(127,140,141,.2);border-radius:8px;padding:6px 8px;font-size:11px;background:rgba(255,255,255,.35)}
 .rel-row-head{color:var(--text2);font-weight:600;margin-bottom:2px}

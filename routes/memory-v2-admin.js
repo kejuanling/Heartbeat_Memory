@@ -6,7 +6,7 @@ const path = require("path");
 const { createStore } = require("../memory-v2");
 const v2vectors = require("../memory-v2-vectors");
 
-const KIND_MAP = { "关于她": "fact", "认账": "rule", "拓本": "fact", fact: "fact", rule: "rule" }; // 旧池类名 → V2 kind（管理台表单仍传类名，落库前翻译；1002-14 删 quote/milestone）
+const KIND_MAP = { "关于她": "fact", "认账": "rule", "拓本": "fact", fact: "fact", rule: "rule", event: "event" }; // 旧池类名 → V2 kind（管理台表单仍传类名，落库前翻译；1002-14 删 quote/milestone，1005-19 加 event）
 
 module.exports = function registerMemoryV2Admin(app, deps) {
   const { basicAuth, admission, baseDir } = deps;
@@ -58,6 +58,9 @@ module.exports = function registerMemoryV2Admin(app, deps) {
         worth_reason: e.worth_reason || null,
         volatility: e.volatility || null,
         volatility_reason: e.volatility_reason || null,
+        // 1005-19：关键词/氛围透传（记忆池卡片 mpTagsHtml 渲染用；此前漏映射导致前端恒显示暂无关键词）
+        triggers: Array.isArray(e.triggers) ? e.triggers : [],
+        vibe: e.vibe || null,
       }));
       if (q) mapped = mapped.filter(x => x.content.includes(q));
       if (category) mapped = mapped.filter(x => x.category === category);
@@ -155,7 +158,7 @@ module.exports = function registerMemoryV2Admin(app, deps) {
       if (b.content != null) patch.text = String(b.content);
       if (b.category != null) {
         const kind = KIND_MAP[String(b.category).trim()];
-        if (!kind) return reply.code(400).send({ error: "category 非法（fact/rule）" });
+        if (!kind) return reply.code(400).send({ error: "category 非法（fact/rule/event）" });
         patch.kind = kind;
       }
       if (b.pinned != null) patch.anchor = !!b.pinned;

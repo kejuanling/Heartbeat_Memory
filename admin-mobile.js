@@ -3027,12 +3027,13 @@ function ccArmAllGapAutoLoad(){
   function mpCatColor(c){ return MP_CAT_COLORS[c]||'#7f8c8d'; }
 
   // 1005-17：triggers 关键词 + vibe 氛围 展示（有才渲染）
+    // 1005-19：triggers 关键词 + vibe 氛围 展示（恒显示区域：无关键词显示灰色占位，审后标签进来即亮）
   function mpTagsHtml(it){
     const tr=Array.isArray(it.triggers)?it.triggers.filter(Boolean):[];
     const vb=(it.vibe&&String(it.vibe).trim())||'';
-    if(!tr.length&&!vb) return '';
     let h='<div class="mp-tags">';
-    tr.forEach(function(t){ h+='<span class="mp-tag">'+escapeHtml(t)+'</span>'; });
+    if(tr.length){ tr.forEach(function(t){ h+='<span class="mp-tag">'+escapeHtml(t)+'</span>'; }); }
+    else{ h+='<span class="mp-tag mp-tag-empty">暂无关键词</span>'; }
     if(vb) h+='<span class="mp-vibe">'+escapeHtml(vb)+'</span>';
     return h+'</div>';
   }
@@ -3051,7 +3052,7 @@ function ccArmAllGapAutoLoad(){
   function populateMemPoolCatOptions(){
     const sel=document.getElementById('mempool-cat');
     const ed=document.getElementById('mempool-edit-cat');
-    const cats=['fact','rule'];
+    const cats=['fact','rule','event'];
     // 筛选与编辑统一只允许 V2 四类；旧分类存量由后台迁移处理，不再暴露为可选项。
     if(sel){ sel.innerHTML='<option value="">全部分类</option>'+cats.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join(''); }
     if(ed){ ed.innerHTML=cats.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join(''); }
