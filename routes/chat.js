@@ -1046,15 +1046,21 @@ app.post("/v1/chat/completions", async (req, reply) => {
 
     // 1005：非 kind:diary 的 assistant 消息剥掉 [DIARY] 块——日记已由 kind:diary 消息单独保留，避免重复
     for (const _m of sanitizedMessages) {
-      if (_m.kind === 'diary') continue;
       if (_m.role !== 'assistant') continue;
       if (typeof _m.content !== 'string') continue;
       if (_m.content.indexOf('[DIARY]') === -1) continue;
+      const _diaryOrig = _m.content;
       _m.content = _m.content
         .replace(/\[DIARY\]([\s\S]*?)\[\/DIARY\]/gi, '')
         .replace(/\[DIARY\][\s\S]*$/i, '')
         .replace(/\[DIARY\]|\[\/DIARY\]/gi, '')
         .trim();
+      // 2026-10-05 修复（s_mump5y8o_r1dy56 发消息 400）：prepareModelMessages 出口 sanitizeForUpstream
+      // 已丢弃 kind 字段，旧版「kind==='diary' 则跳过」判断永远不成立，整条 [DIARY] 日记消息被剥成
+      // 空串 → kimi 上游 400 "assistant must not be empty"。
+      // 现改为：剥除后为空且原文非空时还原原文——kind:diary 日记本体保留完整 [DIARY] 内容，
+      // 夹杂 [DIARY] 块的普通回复剥除后非空，行为不变。
+      if (!_m.content && _diaryOrig) _m.content = _diaryOrig;
     }
 
     // role 出口映射（2026-09-15）：内部 developer 块按供应商 profile 翻译后再发上游

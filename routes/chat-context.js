@@ -121,9 +121,17 @@ function convertToolsFieldToToolRole(msgs) {
     });
     const rc = (typeof m.reasoning_content === "string" && m.reasoning_content)
       || (typeof m.reasoning === "string" && m.reasoning) || "";
-    out.push(Object.assign({ role: "assistant", content: "", tool_calls: toolCalls }, rc ? { reasoning_content: rc } : {}));
+    // 方案A（2026-10-05）：带 tool_calls 的 assistant 直接携带原文正文（OpenAI/LangChain 标准语义：
+    // assistant 可同时有 content 与 tool_calls），不再生成 content 为空的 assistant——kimi 系上游
+    // 拒绝空 content 的 assistant（HTTP 400 "must not be empty"）。原文正文为空时给占位符兜底，
+    // 保证 content 永不为空串；删除原末尾重复的纯正文 assistant，正文内容一字不变。
+    const bodyText = String(m.content || "").trim();
+    out.push(Object.assign({
+      role: "assistant",
+      content: bodyText || "（工具调用）",
+      tool_calls: toolCalls
+    }, rc ? { reasoning_content: rc } : {}));
     for (const tm of toolMsgs) out.push(tm);
-    out.push({ role: "assistant", content: String(m.content || "") });
     converted++;
   }
   if (converted) console.log("[tool-field] 已将 " + converted + " 条 assistant.tools 还原为 role=tool 消息组");
