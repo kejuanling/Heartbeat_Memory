@@ -2762,10 +2762,12 @@ function _streamUpdateThink(text){
     var c=_streamThinkEl.querySelector(".rw-c");
     if(c){
       // 2026-09-26 B 方案：展开态跟随直播滚动；用户上滑阅读（离底>48px）则不打扰
+      // 1005-19d CRT 兼容：CRT 下 .open=收起（语义反转），统一按“当前是否收起”判断展开态
       var _rw=c.parentElement;
-      var _stick=(!_rw||!_rw.classList.contains("open"))||(c.scrollHeight-c.scrollTop-c.clientHeight<48);
+      var _hidden = _rw ? ((document.body.dataset.theme==="crt") ? _rw.classList.contains("open") : !_rw.classList.contains("open")) : false;
+      var _stick=_hidden||(c.scrollHeight-c.scrollTop-c.clientHeight<48);
       c.innerHTML=(cfg.thinking_md?renderMd(String(text||"")):escapeHtml(String(text||"")));
-      if(_rw&&_rw.classList.contains("open")&&_stick) c.scrollTop=c.scrollHeight;
+      if(_rw&&!_hidden&&_stick) c.scrollTop=c.scrollHeight;
     }
   }
   if(autoScroll)scrollBottom();
