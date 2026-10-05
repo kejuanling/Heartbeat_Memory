@@ -1044,6 +1044,19 @@ app.post("/v1/chat/completions", async (req, reply) => {
       logPrefix: "[context-replacements]"
     });
 
+    // 1005：非 kind:diary 的 assistant 消息剥掉 [DIARY] 块——日记已由 kind:diary 消息单独保留，避免重复
+    for (const _m of sanitizedMessages) {
+      if (_m.kind === 'diary') continue;
+      if (_m.role !== 'assistant') continue;
+      if (typeof _m.content !== 'string') continue;
+      if (_m.content.indexOf('[DIARY]') === -1) continue;
+      _m.content = _m.content
+        .replace(/\[DIARY\]([\s\S]*?)\[\/DIARY\]/gi, '')
+        .replace(/\[DIARY\][\s\S]*$/i, '')
+        .replace(/\[DIARY\]|\[\/DIARY\]/gi, '')
+        .trim();
+    }
+
     // role 出口映射（2026-09-15）：内部 developer 块按供应商 profile 翻译后再发上游
     // （default：developer→system；claude：并顶层 system+tool 裹 user；gemini：assistant→model）。
     const providerProfile = (prov && prov.profile) || 'default';
