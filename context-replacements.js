@@ -2063,6 +2063,8 @@ function applyReplacements(messages, source) {
         if (sm.role === "tool" || sm.tool_calls) continue;
         // 标星优先：标星的记忆浮现/特殊事件也以原句保留（与特殊事件清理口径一致）
         if (marks[contentKey(sm)]) starred.push(sm);
+        // 1005：kind:diary 日记消息也提升到摘要前面（固定前缀，提升缓存命中）
+        if (isRealDiary(sm)) starred.push(sm);
       }
       starred.forEach(function (sm) { final.push(sm); });
       // 删除型替换（message=null）不注入：该块区间从上下文消失，只剩标星句/不可压缩消息
@@ -2075,6 +2077,7 @@ function applyReplacements(messages, source) {
         if (m.role === "tool" || m.tool_calls) continue;
         if (isReplacementMemoryMessage(m)) { final.push(m); continue; }
         if (marks[contentKey(m)]) continue; // 标星原句已放到摘要前
+        if (isRealDiary(m)) continue; // 日记已提升到摘要前
         if (!isCompressible(m, true)) final.push(m);
       }
       i = replacements[r].endIdx;
