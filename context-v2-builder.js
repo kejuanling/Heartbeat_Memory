@@ -41,8 +41,10 @@ const DEFAULT_CONFIG = {
   // 0.55 语义 + 0.25 词面（语义为主，0920 二次拍板；重要级×衰减项已删），≥0.28 入选，最多 3 条。
   // 校准实测（旧公式口径）：相关命中 0.475-0.594、带门槛闲聊 ≤0.299；删项后相关命中约 ×0.8。vecScores 缺场回落字面（上行）。
   relevantLitGate: 0.25,   // 2026-10-02 用户拍板 0.20→0.25：0.20 太频繁（换说法类全进来）；0.15(0920)→0.30(0921)→0.20(1001-10)→0.25(今)。第二道门混合分 ≥0.28 仍兜底
-  relevantMinHybridScore: 0.28,   // 0920 删重要级×衰减项后等比换算（原 0.35/满分1.0 → ×0.8）
-  relevantHybridTopK: 3,
+  relevantMinHybridScore: 0.30,   // 1005-17 用户拍板 0.3（先试）；triggers 命中即 0.5 起，此门槛为保险丝
+  relevantHybridTopK: 1,          // 1005-17 用户拍板：每轮最多 1 条（有就递一条分高的，没有就不递）
+  relevantWordWeight: 0.5,        // 1005-17：混合分 = 词面×权重 + 语义×权重（管理台可调）
+  relevantSemWeight: 0.15,
 };
 
 // ---- 块定义（顺序=组装顺序冻结；context_assembly 为顶层引导，恒注入）----
@@ -247,40 +249,58 @@ function buildContinuity(input, cfg) {
   return { lines, fixedIds: [] };
 }
 
-// [6] Possibly Relevant Memories：V2 检索（排除固定块已注入成员、anchor 置顶条、input.excludeIds
-// ——本会话已写入时间线的浮现记忆，命中后由生产链路落时间线永久在场，不再重复注入；anchor 属常驻块不二次出现），
-// score desc → id；宁缺毋滥（允许空）。条目带轻量日期后缀；超预算从尾部减条。
-// 0920 混合模式：input.vecScores（bge 余弦，调用方算好）在场时——词面 ≥relevantLitGate（现 0.25）当门槛 +
-// 混合分（0.55语义+0.25词面，语义为主）≥0.28 入选，最多 3 条；无向量条目不参与。重要级×衰减项已删。
-// vecScores 缺场回落字面（embed 熔断/shadow 诊断）。两种模式的排除逻辑完全一致。
+// [6] Possibly Relevant Memories：V2 event 检索（1005-17 重写）。
+// 范围只留 event（"记住的一件事/做出来的东西"）——fact/rule 是"对人"的稳定信息，
+// 由 Core Identity / Long-term Understanding 常驻块覆盖；Relevant 是"对事"的浮动补充。
+// 命中机制（用户拍板）：triggers 关键词命中为主——query 含 trigger 子串或双字词元交叠即入围；
+// 无 triggers 命中不入围（宁缺毋滥）。混合分 = 词面权重×词面分 + 语义权重×语义分（0.5/0.15 起步，
+// 管理台可调）；语义 = query 向量 vs 记忆向量（含 vibe）余弦——语义分低自然排不上去（vibe 拦截语境不搭的注入）。
+// 双重去重：fixedIdSet/excludeIds（已注入/浮现）+ source_session===当前会话（本会话发生的不重复注入）。
+// 每轮最多 1 条（topK 可调）；预算 relevant_memories 兜底。
 function buildRelevant(input, cfg, fixedIdSet) {
   const q = strSafe(input.query);
   if (!q) return { lines: [], fixedIds: [] };
   const excluded = new Set((Array.isArray(input.excludeIds) ? input.excludeIds : []).map(String));
-  const pool = (Array.isArray(input.memoriesV2) ? input.memoriesV2 : [])
+  let pool = (Array.isArray(input.memoriesV2) ? input.memoriesV2 : [])
     .filter(m => m && m.status === "active" && m.id != null && m.anchor !== true
+      && m.kind === "event"
       && !fixedIdSet.has(String(m.id)) && !excluded.has(String(m.id)));
+  // 1005-17：来源会话去重——本会话发生的事件 AI 上下文里已有，不重复注入
+  const curSession = strSafe(input.sessionId);
+  if (curSession) pool = pool.filter(m => strSafe(m.source_session) !== curSession);
   if (!pool.length) return { lines: [], fixedIds: [] };
+
+  const wLit = Number(cfg.relevantWordWeight); const wl = (wLit >= 0) ? wLit : 0.5;
+  const wSem = Number(cfg.relevantSemWeight); const ws = (wSem >= 0) ? wSem : 0.15;
+  const minScore = Number(cfg.relevantMinHybridScore); const gate = (minScore >= 0) ? minScore : 0.30;
+  const maxK = Math.max(1, Math.floor(Number(cfg.relevantHybridTopK) || 1));
   const vecScores = (input.vecScores && typeof input.vecScores === "object") ? input.vecScores : null;
+
+  const qt = tokenize(q);
+  const qset = new Set(qt.filter(function (x) { return x.length >= 2; }));
   const scored = [];
-  if (vecScores) {
-    const qt = tokenize(q);
-    for (const m of pool) {
-      const lit = Math.round(similarity(qt, m.text + " " + (m.kind || "")) * 1000) / 1000;
-      if (lit < cfg.relevantLitGate) continue; // 词面门槛（过滤层；入围后排序语义为主）
-      const sem = vecScores[String(m.id)];
-      if (typeof sem !== "number" || !(sem >= 0)) continue; // 无向量条目不参与（宁缺毋滥）
-      const score = Math.round((0.55 * sem + 0.25 * lit) * 1000) / 1000; // 0920 二次拍板：门槛词面、排序语义为主
-      if (score < cfg.relevantMinHybridScore) continue;
-      scored.push({ m, score });
+  for (const m of pool) {
+    // triggers 命中：query 含 trigger 子串 → 1.0；否则双字词元交叠按比例
+    const tr = Array.isArray(m.triggers) ? m.triggers : [];
+    let lit = 0;
+    if (tr.length) {
+      for (const t of tr) {
+        const s = String(t || "").trim();
+        if (!s) continue;
+        if (q.indexOf(s) >= 0) { lit = 1; break; }
+        const tt = tokenize(s).filter(function (x) { return x.length >= 2; });
+        if (tt.length && qset.size) {
+          let h = 0;
+          for (const x of tt) if (qset.has(x)) h++;
+          if (h > 0) lit = Math.max(lit, h / tt.length);
+        }
+      }
     }
-  } else {
-    const qt = tokenize(q);
-    for (const m of pool) {
-      const score = Math.round(similarity(qt, m.text) * 1000) / 1000;
-      if (score < cfg.relevantMinScore) continue;
-      scored.push({ m, score });
-    }
+    if (!(lit > 0)) continue; // 无 triggers 命中不入围（存量未重跑完时注入自然为空，符合"重跑完才开注入"）
+    const sem = vecScores ? (vecScores[String(m.id)] != null ? vecScores[String(m.id)] : 0) : 0;
+    const score = Math.round((wl * lit + ws * sem) * 1000) / 1000;
+    if (score < gate) continue;
+    scored.push({ m, score });
   }
   scored.sort((a, b) => b.score - a.score
     || String(a.m.id).localeCompare(String(b.m.id)));
@@ -289,7 +309,6 @@ function buildRelevant(input, cfg, fixedIdSet) {
   let used = headerCost;
   const lines = [];
   const hits = [];
-  const maxK = vecScores ? cfg.relevantHybridTopK : cfg.relevantTopK;
   for (const s of scored) {
     if (lines.length >= maxK) break;
     const line = entryLine(s.m.text, strSafe(s.m.established_at) || strSafe(s.m.created_at));
