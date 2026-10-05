@@ -23,8 +23,10 @@ const { nowIso } = require("./time_utils");
 const READONLY = process.env.MEMORY_V2_READONLY === "1";
 
 // ---- Schema v2.0 常量（冻结：改动任何枚举/语义必须升 schema_ver 并走迁移说明） ----
+// 1005-17：kind 扩展 event（向后兼容枚举扩展，fact/rule 语义不变；可选字段 triggers/vibe/source_session
+// 同 1005-16 worth/volatility 先例按可选字段模式加，不升版本、不动存量数据）。
 const SCHEMA_VER = 2;
-const KINDS = ["fact", "rule"];
+const KINDS = ["fact", "rule", "event"];
 const SUBJECTS = ["user", "self", "relationship", "external"];
 const STATUSES = ["active", "superseded", "archived"]; // pending_review 在队列文件，不在集合
 const ORIGINS = ["memory_tag", "tool", "manual", "promotion", "import"];
@@ -44,6 +46,7 @@ const VOLATILITY_REASON_MAX = 200;
 // ---- 1002 记忆改造 §8 第 4 项：schema 演进新增字段（全部可选，缺按默认值补，向后兼容） ----
 // sensitive：高敏（注入前脱敏）；triggers：命中即优先浮现的触发词；last_hit_at：最后被检索命中时间（系统字段，评估用，写入方不可指定）
 const TRIGGER_MAX = 40;
+  const VIBE_MAX = 60;
 const TRIGGERS_MAX = 12;
 
 // 状态机（13.txt 第四节）：非法迁移一律拒绝。
@@ -236,6 +239,14 @@ function _buildEntry(input, cfg) {
     volatility_reason = strOrNull(input.volatility_reason);
     if (volatility_reason && volatility_reason.length > VOLATILITY_REASON_MAX) throw new Error(`volatility_reason 超长（>${VOLATILITY_REASON_MAX}）`);
   }
+  // 1005-17：vibe（可选，蒸馏产出，LLM 感受到的氛围质感）/ source_session（来源会话，蒸馏落库时反查）
+  let vibe = null;
+  if (input.vibe != null) {
+    vibe = strOrNull(input.vibe);
+    if (vibe && vibe.length > VIBE_MAX) throw new Error(`vibe 超长（>${VIBE_MAX}）`);
+  }
+  let source_session = null;
+  if (input.source_session != null) source_session = strOrNull(input.source_session);
 
   const now = nowIso();
   return {
@@ -259,6 +270,8 @@ function _buildEntry(input, cfg) {
     note,
     sensitive,
     triggers,
+    vibe,
+    source_session,
     worth,
     worth_reason,
     volatility,
@@ -435,7 +448,7 @@ function createStore(opts = {}) {
   // 1005-16：白名单随 schema v2 精简（删 speaker/related_subjects/source/scope/valid_from/valid_to/action_hint），加评估标签 4 字段
   // last_hit_at 为系统字段，不开放编辑
   const UPDATABLE_FIELDS = ["text", "note", "kind", "subject", "direction", "established_at", "anchor",
-    "sensitive", "triggers", "worth", "worth_reason", "volatility", "volatility_reason"];
+    "sensitive", "triggers", "vibe", "source_session", "worth", "worth_reason", "volatility", "volatility_reason"];
   function updateFields(id, patch) {
     if (readonly) return fail("readonly 模式拒绝写入");
     const e = get(id);
@@ -479,6 +492,12 @@ function createStore(opts = {}) {
           for (const x of arr) if (x.length > TRIGGER_MAX) return fail("triggers 项超长");
           e.triggers = [...new Set(arr)].slice(0, TRIGGERS_MAX);
         }
+      } else if (k === "vibe") {
+        const vb = strOrNull(v);
+        if (vb && vb.length > VIBE_MAX) return fail("vibe 超长");
+        e.vibe = vb;
+      } else if (k === "source_session") {
+        e.source_session = strOrNull(v);
       } else if (k === "worth") {
         if (v == null) { e.worth = null; }
         else {
