@@ -1,5 +1,9 @@
 {
-  "disabled": [],
+  "disabled": [
+    "context_digest",
+    "memory_pin",
+    "context_star"
+  ],
   "descriptions": {
     "diary_comment": "回复她的碎碎念。",
     "diary_list": "查看她的碎碎念",
