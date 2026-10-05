@@ -435,8 +435,51 @@ function createAdmission(opts = {}) {
     // 1002 第 4 项：检索命中打点（评估用）。两个集合都打（影子库命中同样计），
     // 复用本实例持有的 store（不新建），避免多实例并发写覆盖。
     markHit: (ids) => {
-      try { return (mainStore.markHit(ids) || 0) + (shadowStore.markHit(ids) || 0); }
+      try {
+        // 1005-17：命中 event 时 worth +0.05（封顶 0.95）——"注入次数多，百分比增加一点"
+        const arr = Array.isArray(ids) ? ids : [ids];
+        for (const id of arr) {
+          const e = mainStore.get(String(id));
+          if (e && e.kind === "event" && e.status === "active" && typeof e.worth === "number") {
+            mainStore.updateFields(String(id), { worth: Math.min(0.95, Math.round((e.worth + 0.05) * 100) / 100) });
+          }
+        }
+        return (mainStore.markHit(ids) || 0) + (shadowStore.markHit(ids) || 0);
+      }
       catch (_) { return 0; }
+    },
+    // 1005-17：event 衰减扫描——自 last_decay_at（无则 last_hit_at/created_at）起每天 -0.01；
+    // 跌破 0.2 → 归档（updateStatus archived）+ 进待审（mainExecutor.review，人工决定保留/删除）。
+    // 幂等：每次衰减后 last_decay_at 置 now，重复调用不会重复扣。
+    decayEvents: () => {
+      try {
+        const rows = mainStore.list({ kind: "event", status: "active" });
+        const now = Date.now();
+        let decayed = 0, moved = 0;
+        for (const e of rows) {
+          const base = e.last_decay_at || e.last_hit_at || e.created_at;
+          const t0 = base ? new Date(base).getTime() : 0;
+          if (!(t0 > 0)) continue;
+          const days = (now - t0) / 86400000;
+          if (days < 1) continue;
+          if (typeof e.worth !== "number") continue; // 未评估的 event 不衰减（等重跑/评估补 worth）
+          const next = Math.max(0, Math.round((e.worth - 0.01 * days) * 100) / 100);
+          if (next >= 0.2) {
+            mainStore.updateFields(e.id, { worth: next, last_decay_at: new Date(now).toISOString() });
+            decayed++;
+          } else {
+            mainStore.updateStatus(e.id, "archived", { reason: "event 衰减至 " + Math.round(next * 100) + "%" });
+            mainExecutor.review({
+              text: e.text, kind: e.kind, subject: e.subject,
+              worth: next,
+              provenance: e.provenance || null,
+              backfill: { action: "decay", target_id: e.id, old_text: e.text, reason: "event 长期未注入，衰减至 20% 以下，待人工决定保留/删除" },
+            }, "event 衰减到 20% 以下", { details: ["decayEvents"] });
+            moved++;
+          }
+        }
+        return { decayed, moved };
+      } catch (_) { return { decayed: 0, moved: 0 }; }
     },
   };
   _lastAdmission = inst; // 模块级缓存最新实例：tag-parser 等轻量写者复用 executorMain（唯一写手）

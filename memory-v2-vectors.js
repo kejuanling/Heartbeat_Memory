@@ -22,6 +22,13 @@ const EMBED_TIMEOUT_MS = 12000;
 
 let vectorCache = null;
 
+// 1005-17：embed 文本拼 vibe（kind：text，情景：vibe）——语义向量带上氛围质感；
+// 注意：存量向量未含 vibe，重跑补标签后需重算向量才生效（改法：memory_v2_vectors.json 删除后自动补算）。
+function embedText(r) {
+  const vibe = r && typeof r.vibe === "string" && r.vibe.trim() ? r.vibe.trim() : null;
+  return r.kind + "：" + r.text + (vibe ? "，情景：" + vibe : "");
+}
+
 function vecMap() {
   if (!vectorCache) {
     try { vectorCache = fs.readJsonSync(VECTOR_FILE); } catch (e) { vectorCache = {}; }
@@ -58,7 +65,7 @@ async function ensureVectors(rows) {
   if (embedClient.fused()) return false;
   for (let i = 0; i < missing.length; i += EMBED_BATCH_SIZE) {
     const batch = missing.slice(i, i + EMBED_BATCH_SIZE);
-    const vecs = await embedClient.embedBatch(batch.map(function (r) { return r.kind + "：" + r.text; }), false, EMBED_TIMEOUT_MS);
+    const vecs = await embedClient.embedBatch(batch.map(function (r) { return embedText(r); }), false, EMBED_TIMEOUT_MS);
     if (!vecs || vecs.length !== batch.length) return false;
     const m = vecMap();
     batch.forEach(function (r, j) {
@@ -87,7 +94,7 @@ async function warmVectors() {
       const missing = missingVectors(rows);
       if (!missing.length) break;
       const batch = missing.slice(0, WARM_BATCH_SIZE);
-      const vecs = await embedClient.embedBatch(batch.map(function (r) { return r.kind + "：" + r.text; }), false, EMBED_TIMEOUT_MS);
+      const vecs = await embedClient.embedBatch(batch.map(function (r) { return embedText(r); }), false, EMBED_TIMEOUT_MS);
       if (!vecs || vecs.length !== batch.length) return completed > 0;
       const m = vecMap();
       batch.forEach(function (r, i) {

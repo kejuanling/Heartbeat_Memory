@@ -74,7 +74,7 @@ function minimalAssembleInput(opts) {
   // 1002 §8 第 6 项：快照模式也要能重建两块总结（不能被快照冻住），故 pinned 与总结缓存都要读。
   // pinned 进 Core Identity 块（手工固定的人设常驻内容保留），总结替代条目原文直注。
   const pinnedData = shadow.readPinnedEntries(dataDir);
-  return { pinnedEntries: pinnedData.pinnedEntries, timeline: [], diaryEntries: [], memoriesV2: memoriesV2, query: query, excludeIds: excludeIds, config: { diaryCount: 0 }, map: null, summaryBlocks: shadow.readSummaryBlocks(dataDir) };
+  return { pinnedEntries: pinnedData.pinnedEntries, timeline: [], diaryEntries: [], memoriesV2: memoriesV2, query: query, excludeIds: excludeIds, config: { diaryCount: 0 }, map: null, summaryBlocks: shadow.readSummaryBlocks(dataDir), sessionId: opts.sessionId || null };
 }
 
 // 语义算分（0919 注入语义升级：Relevant 打分用 bge 余弦；失败回落字面，注入不致全灭）
@@ -154,6 +154,10 @@ async function assembleAndApply(opts) {
     const adm = require('./memory-admission').getAdmission();
     if (adm && typeof adm.markHit === 'function' && relevantHits.length) {
       adm.markHit(relevantHits.map(function (h) { return h && h.id; }));
+    }
+    // 1005-17：event 衰减（注入 +0.05 在 markHit 内；这里跑每日 -0.01 扫描，跌破 0.2 归档+进待审）
+    if (adm && typeof adm.decayEvents === 'function') {
+      try { adm.decayEvents(); } catch (_) { /* 衰减失败不影响主链路 */ }
     }
   } catch (_) { /* 打点失败不影响主链路 */ }
   // 会话级跨窗口开关（1003-19 用户拍板「让它生效」）：override=false 时本会话不注入 Earlier Days

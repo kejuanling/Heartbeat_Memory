@@ -253,7 +253,7 @@ function assembleInput(opts) {
   const diaryEntries = cutoffDate
     ? readDiaryEntriesForShadow(opts.baseDir).filter(e => e.date <= cutoffDate && !e.hidden && e.session !== selfSession)
     : [];
-  return { pinnedEntries, timeline, diaryEntries, memoriesV2, query, excludeIds, map: shadowMap, config: { diaryCount }, summaryBlocks: readSummaryBlocks(dataDir) };
+  return { pinnedEntries, timeline, diaryEntries, memoriesV2, query, excludeIds, map: shadowMap, config: { diaryCount }, summaryBlocks: readSummaryBlocks(dataDir), sessionId: opts.sessionId || null };
 }
 
 module.exports = {

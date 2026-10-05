@@ -277,6 +277,7 @@ function _buildEntry(input, cfg) {
     volatility,
     volatility_reason,
     last_hit_at: null, // 系统字段：检索命中时由 markHit 更新，写入方不可指定
+    last_decay_at: null, // 1005-17 系统字段：event 衰减时间戳（幂等：每次衰减后置 now），写入方不可指定
   };
 }
 
@@ -448,7 +449,7 @@ function createStore(opts = {}) {
   // 1005-16：白名单随 schema v2 精简（删 speaker/related_subjects/source/scope/valid_from/valid_to/action_hint），加评估标签 4 字段
   // last_hit_at 为系统字段，不开放编辑
   const UPDATABLE_FIELDS = ["text", "note", "kind", "subject", "direction", "established_at", "anchor",
-    "sensitive", "triggers", "vibe", "source_session", "worth", "worth_reason", "volatility", "volatility_reason"];
+    "sensitive", "triggers", "vibe", "source_session", "worth", "worth_reason", "volatility", "volatility_reason", "last_decay_at"];
   function updateFields(id, patch) {
     if (readonly) return fail("readonly 模式拒绝写入");
     const e = get(id);
