@@ -2603,6 +2603,9 @@ function inlineMd(s){
   s=s.replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>");
   s=s.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g,"$1<em>$2</em>");
   s=s.replace(/~~([^~]+)~~/g,"<del>$1</del>");
+  // 2026-10-06 1006-14 新增图片渲染：![alt](url) → <img>。必须放在链接正则之前（否则被 [x](url) 吃掉）；
+  // 加载失败用 onerror 换成占位文字，避免裂图；alt 转义已由 escapeHtml 处理。
+  s=s.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g,function(m,alt,url){return '<img src="'+url+'" alt="'+alt+'" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement(\'span\'),{className:\'img-fallback\',textContent:\'图片加载失败：'+url+'\'}))">';});
   s=s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
   return s;
 }
@@ -2665,6 +2668,17 @@ function renderTextBlocks(text){
     let m=b.match(/^(#{1,4})\s+(.+)$/);
     if(m){const l=m[1].length;html+="<h"+l+">"+inlineMd(m[2])+"</h"+l+">";continue;}
     if(/^>/.test(b)){const lines=b.split("\n").map(x=>x.replace(/^>\s?/,"")).join("<br>");html+="<blockquote>"+inlineMd(lines)+"</blockquote>";continue;}
+    // 2026-10-06 1006-14 新增任务清单：- [x] / - [ ] 连续行 → checkbox 列表（识别"整块全是任务项"才走，避免误伤普通列表）
+    const _tlLines=b.split("\n").map(x=>x.trim());
+    if(_tlLines.length>=1 && _tlLines.every(function(x){return /^[-*]\s*\[([ xX])\]\s*/.test(x);})){
+      const _tls=_tlLines.map(function(x){
+        const mm=x.match(/^[-*]\s*\[([ xX])\]\s*([\s\S]*)$/);
+        const done=mm&&mm[1]&&mm[1].toLowerCase()!=="x"?false:true;
+        const txt=mm?mm[2]:"";
+        return '<li class="task-item '+(done?"task-done":"task-undone")+'"><span class="task-check">'+(done?"&#10003;":"&#9675;")+'</span>'+inlineMd(txt)+'</li>';
+      }).join("");
+      html+='<ul class="task-list">'+_tls+'</ul>'; continue;
+    }
     if(/^[-*]\s/m.test(b)){const items=b.split("\n").map(x=>x.replace(/^\s*[-*]\s+/,"")).filter(x=>x);html+="<ul>"+items.map(i=>"<li>"+inlineMd(i)+"</li>").join("")+"</ul>";continue;}
     if(/^\d+\.\s/m.test(b)){const items=b.split("\n").map(x=>x.replace(/^\s*\d+\.\s+/,"")).filter(x=>x);html+="<ol>"+items.map(i=>"<li>"+inlineMd(i)+"</li>").join("")+"</ol>";continue;}
     if(/^(-{3,}|\*{3,})$/.test(b)){html+="<hr>";continue;}
