@@ -736,7 +736,7 @@ module.exports = function registerChatRoutes(app, deps) {
       const sessionId = String(body.session_id || req.headers['x-session-id'] || '').trim();
       // 新 diff 分支：body.ops = [{op:'edit',id,newContent} | {op:'delete',id}]，按 id 定点，不重排
       if (Array.isArray(body.ops)) {
-        let ok = 0, miss = 0, del = 0;
+        let ok = 0, miss = 0, del = 0, editedIds = [];
         // 批量：一次 load+save，避免多选删除大段时逐 op 各读写盘一次
         const timeline = loadTimeline(sessionId);
         let changed = false;
@@ -746,6 +746,12 @@ module.exports = function registerChatRoutes(app, deps) {
           if (idx < 0) { miss++; continue; }
           if (op.op === 'edit') {
             const updated = { ...timeline[idx], content: op.newContent, id: op.id };
+            // 2026-10-07 1007-04：编辑正文后旧 stream_timeline 不再可信，删除之。
+            // 前端 2026-09-25 ⑦ 已约定编辑后丢弃 timeline 走「旧数据合成」，服务端此前漏同步：
+            // 只更新 content、stream_timeline 残留流式旧正文 → 重开应用 fetchHistory 拉回
+            // content 新 + timeline 旧，气泡渲染读 timeline 显示旧正文、编辑弹窗读 content 显示
+            // 新正文（用户误以为编辑没生效）。与服务端渲染口径一致后两者对齐。
+            if (Array.isArray(updated.stream_timeline) && updated.stream_timeline.length) delete updated.stream_timeline;
             // 编辑特殊事件（推送回显/唤醒回显）：手动改 content 后，结构化元数据不再可信，
             // 用规范格式重新解析并同步更新字段；解析失败则清除字段退化为普通消息，
             // 避免管理台「推送管理」与聊天显示不一致。
@@ -767,6 +773,7 @@ module.exports = function registerChatRoutes(app, deps) {
             }
             timeline[idx] = updated;
             ok++;
+            editedIds.push(op.id);
           } else if (op.op === 'delete') {
             timeline.splice(idx, 1);
             del++;
@@ -786,7 +793,7 @@ module.exports = function registerChatRoutes(app, deps) {
           }
           sseNotify(sessionId);
         }
-        console.log(`[timeline-sync] diff编辑/删除同步 (session=${sessionId || 'default'}, 改=${ok}, 删=${del}, 未命中=${miss})`);
+        console.log(`[timeline-sync] diff编辑/删除同步 (session=${sessionId || 'default'}, 改=${ok}, 删=${del}, 未命中=${miss}, 编辑ids=${editedIds.length ? editedIds.join(',') : '-'})`);
         return reply.send({ ok: true, edited: ok, deleted: del, missed: miss, session_id: sessionId || 'default' });
       }
       // 旧整份分支（老前端/退化场景）：改「以盘上为基同步请求差量」（2026-09-20 审查 F-2）——
