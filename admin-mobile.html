@@ -409,23 +409,7 @@
          </div>
        </div>
      </div>
-       <div class="card" data-collapse-id="reparse-prompt-config" data-default="collapsed">
-      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆池·解析提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">?</span><span class="collapse-arrow">▾</span></div>
-      <div class="card-body">
-        <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:6px;">下面展示「解析」用的提示词（系统 + 用户）——解析对象是压缩块覆盖区间的对话原文，产出候选全部进记忆 review 队列人工把关。可直接修改、保存后覆盖内置；点「恢复内置默认」会清空自定义、回到内置版。</div>
-        <div class="cc-cfg-msg" id="reparse-prompt-msg" style="margin-bottom:8px"></div>
-        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">System 提示词</div>
-        <textarea id="reparse-sys-prompt" rows="4" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;margin-bottom:10px"></textarea>
-        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">User 提示词（不含记忆文本，运行时自动追加）</div>
-        <textarea id="reparse-user-prompt" rows="10" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,0.85);font-size:12px;font-family:inherit;margin-bottom:10px"></textarea>
-        <div style="display:flex;gap:10px">
-          <button type="button" class="cc-btn primary" onclick="saveReparsePrompt()">保存提示词</button>
-          <button type="button" class="cc-btn secondary" onclick="resetReparsePrompt()">恢复内置默认</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="card" data-collapse-id="judge-prompt-config" data-default="collapsed">
+           <div class="card" data-collapse-id="judge-prompt-config" data-default="collapsed">
       <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆流水线·判定提示词</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">?</span><span class="collapse-arrow">▾</span></div>
       <div class="card-body">
         <div class="hint-body" style="font-size:11px;color:var(--text3);margin-bottom:6px;">新记忆入库前，流水线用它调用 LLM 判定「候选 × 已有记忆」的关系（duplicate=重复 / update=更新 / coexist=共存 / need_review=待审）并决定去向：重复拒收、更新与待审进人工队列、共存直接入库。占位符 ${existing_kind} ${existing_text} ${candidate_kind} ${candidate_text} 运行时自动填充。可直接修改保存覆盖内置；「恢复内置默认」清空自定义。</div>

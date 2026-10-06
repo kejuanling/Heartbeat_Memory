@@ -54,7 +54,7 @@ const cases = [
     assert.ok(got, "get 应命中");
     assert.strictEqual(got.text, "她习惯白天睡、半夜醒着");
     assert.strictEqual(got.kind, "fact");
-    assert.strictEqual(got.subject, "user");
+    assert.ok(!("subject" in got), "subject 已删");
     assert.strictEqual(got.status, "active");
     assert.strictEqual(got.confidence, 0.8);
     assert.strictEqual(store.get("mv2_nonexistent"), null, "未命中返回 null");
@@ -82,15 +82,15 @@ const cases = [
     fs.removeSync(tmpDir);
   }],
 
-  ["list 过滤：kind/subject/status/limit，最新在前", () => {
+  ["list 过滤：kind/status/limit，最新在前（subject 已删：传入过滤不生效）", () => {
     const { store, tmpDir } = makeTmpStore("list");
     store.create(baseFact("fact-user-1"));
     store.create(baseFact("rule-user", { kind: "rule" }));
-    store.create(baseFact("fact-self", { subject: "self" }));
+    store.create(baseFact("fact-self"));
     assert.strictEqual(store.list().length, 3);
     assert.strictEqual(store.list({ kind: "fact" }).length, 2);
-    assert.strictEqual(store.list({ subject: "self" }).length, 1);
-    assert.strictEqual(store.list({ kind: "rule", subject: "user" }).length, 1);
+    assert.strictEqual(store.list({ subject: "self" }).length, 0, "subject 已删：按它过滤恒 0");
+    assert.strictEqual(store.list({ kind: "rule" }).length, 1);
     assert.strictEqual(store.list({ status: "active" }).length, 3);
     assert.strictEqual(store.list({ status: "superseded" }).length, 0);
     const top2 = store.list({ limit: 2 });

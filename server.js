@@ -3463,9 +3463,9 @@ function sliceTimelineOriginal(sessionId, range) {
   } catch (e) { return null; }
 }
 
-// ---------------- 摘要解析（reparse）提示词配置（2026-09-28 从 V1 记忆池迁出） ----------------
-// V1 记忆池已删除，reparse_system_prompt/user_prompt/reparse_merge_max_chars 改存独立文件，
-// 管理台端点 /admin/reparse/config 读写（原 /admin/memory-pool/config）。
+// ---------------- 摘要解析（reparse）内置提示词（2026-09-28 从 V1 记忆池迁出） ----------------
+// 1007：管理台「记忆池·解析提示词」配置卡已删（压缩块已下架，配置入口随之下线）。
+// 读配置函数保留以兼容 reparse_config.json 遗留（无自定义则走内置默认 buildReparsePrompt）。
 const REPARSE_CONFIG_FILE = path.join(__dirname, "data", "reparse_config.json");
 function readReparseConfig() {
   try { return fs.readJsonSync(REPARSE_CONFIG_FILE) || {}; } catch (e) { return {}; }
@@ -3480,13 +3480,6 @@ function buildReparsePrompt() {
   const user = "从下面的对话原文中提取长期记忆候选。只输出 JSON 数组，不要输出解释。每项格式为 {\"text\":\"记忆内容\",\"kind\":\"fact|rule\"}。没有真正值得长期记住的信息就输出 []。\n\n判断标准：如果删掉这条信息，未来再次与她交流时基本不会改变你的理解或行为，就不要提取。";
   return { system, user };
 }
-function saveReparseConfig(patch) {
-  const cur = readReparseConfig();
-  Object.assign(cur, patch || {});
-  try { fs.writeJsonSync(REPARSE_CONFIG_FILE, cur, { spaces: 2 }); } catch (e) { throw e; }
-  return cur;
-}
-
 // LLM 候选提取：从对话原文提取值得长期记住的稳定信息（简短风格 prompt，JSON 数组输出）
 async function extractMemoryCandidates(sourceText) {
   const { provider, model } = resolveRoleModel("reparse");
@@ -3527,32 +3520,6 @@ async function extractMemoryCandidates(sourceText) {
     .map(x => (x && typeof x === "object" ? { text: String(x.text || "").trim(), kind: KINDS.includes(x.kind) ? x.kind : "fact" } : null))
     .filter(x => x && x.text.length >= 4 && x.text.length <= 500);
 }
-
-// 摘要解析提示词配置（2026-09-28 从 /admin/memory-pool/config 迁出，V1 记忆池已删除）
-app.get("/admin/reparse/config", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const cfg = readReparseConfig();
-    const def = buildReparsePrompt();
-    reply.send({
-      reparse_system_prompt: String(cfg.reparse_system_prompt || ""),
-      reparse_user_prompt: String(cfg.reparse_user_prompt || ""),
-      reparse_merge_max_chars: Number(cfg.reparse_merge_max_chars) || 8000,
-      default_reparse_system_prompt: def.system,
-      default_reparse_user_prompt: def.user,
-    });
-  } catch (err) { reply.code(500).send({ error: err.message }); }
-});
-
-app.post("/admin/reparse/config", { preHandler: basicAuth }, async (req, reply) => {
-  try {
-    const b = req.body || {};
-    const patch = {};
-    if (b.reparse_system_prompt !== undefined) patch.reparse_system_prompt = String(b.reparse_system_prompt).trim();
-    if (b.reparse_user_prompt !== undefined) patch.reparse_user_prompt = String(b.reparse_user_prompt).trim();
-    if (b.reparse_merge_max_chars !== undefined) patch.reparse_merge_max_chars = Number(b.reparse_merge_max_chars) || 8000;
-    reply.send(saveReparseConfig(patch));
-  } catch (err) { reply.code(500).send({ error: err.message }); }
-});
 
 // ========================
 // 记忆蒸馏配置 / 手动触发 / 状态（1002 记忆改造 §8 3.1）

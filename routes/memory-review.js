@@ -23,7 +23,6 @@ module.exports = function registerMemoryReviewRoutes(app, { basicAuth, admission
       candidate: {
         text: q.draft.text,
         kind: q.draft.kind,
-        subject: q.draft.subject,
         speaker: q.draft.speaker || null,
         direction: q.draft.direction || null,
         origin: q.draft.origin,
@@ -44,7 +43,7 @@ module.exports = function registerMemoryReviewRoutes(app, { basicAuth, admission
 
   app.post("/admin/memory-review/queue/:id/approve", auth, async (req, reply) => {
     if (!ready()) return reply.code(503).send({ error: "memory-v2 admission 未初始化" });
-    const edit = (req.body || {}).edit || null; // 可选字段修订 {kind?,subject?,...}
+    const edit = (req.body || {}).edit || null; // 可选字段修订 {kind?,speaker?,...}
     const r = admission.resolveReview(req.params.id, "approve", { edit });
     if (!r.ok) return reply.code(400).send({ error: r.error });
     // 1002-22：老数据重跑的候选，把旧条目沉底结果回给前端（管理台据此提示「旧记忆 N 条已沉底」）
@@ -54,7 +53,7 @@ module.exports = function registerMemoryReviewRoutes(app, { basicAuth, admission
   app.post("/admin/memory-review/queue/:id/edit", auth, async (req, reply) => {
     if (!ready()) return reply.code(503).send({ error: "memory-v2 admission 未初始化" });
     const patch = {};
-    for (const k of ["text", "kind", "subject", "speaker", "direction"]) {
+    for (const k of ["text", "kind", "speaker", "direction"]) {
       if ((req.body || {})[k] !== undefined) patch[k] = (req.body || {})[k];
     }
     const r = admission.editQueue(req.params.id, patch);
@@ -66,7 +65,7 @@ module.exports = function registerMemoryReviewRoutes(app, { basicAuth, admission
       created_at: q ? q.created_at : null,
       reason: q ? q.reason : null,
       audit_id: q ? q.audit_id : null,
-      candidate: q ? { text: q.draft.text, kind: q.draft.kind, subject: q.draft.subject, speaker: q.draft.speaker || null, direction: q.draft.direction || null, origin: q.draft.origin } : null,
+      candidate: q ? { text: q.draft.text, kind: q.draft.kind, speaker: q.draft.speaker || null, direction: q.draft.direction || null, origin: q.draft.origin } : null,
       provenance: q ? q.draft.provenance || null : null,
       reasons: q ? q.details || [] : [],
     };

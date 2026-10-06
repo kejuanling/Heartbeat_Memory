@@ -6,7 +6,7 @@
 // 输出契约（冻结）：{ allowed, reasons[], matched_rules[] } —— 全部命中规则一次性收集，不只报第一个。
 // 规则总表：
 //   V1  隐私/凭据模式（review 不可豁免）        V6  文本卫生（空/仅标点/超长）
-//   V2  （已废 1002-14：quote 类已删）          V7  枚举白名单（kind/subject/origin/direction/speaker）
+//   V2  （已废 1002-14：quote 类已删）          V7  枚举白名单（kind/origin/direction/speaker）
 //   V3  运行时标签残留                          V8  tag/tool 来源必须有 provenance 锚点
 //   V4  instruction 禁止进入 Memory             V8b origin×method 一致性（含 import 仅 migration_batch）
 //   V5  工具输出原文                            V9  （已废 1002-14：quote 类已删；provenance.quote 仍作可选溯源）
@@ -78,7 +78,7 @@ function strOrNull(v) {
 }
 
 // ---------------- 主入口 ----------------
-// candidate：{ text, kind, subject, origin, speaker?, direction?, provenance?, source? }
+// candidate：{ text, kind, origin, speaker?, direction?, provenance?, source? }
 //   source：预筛信号（chat_user/chat_ai/manual/tool_output/diary/summary），可选
 // deps：{ resolveOriginalText?(msg_id) => string|null }  可选；提供且 msg_id 命中时才做 V9b 原文比对
 // 返回（冻结）：{ allowed, reasons[], matched_rules[] }
@@ -135,7 +135,7 @@ function validate(candidate, deps = {}) {
   }
 
   // V7 枚举白名单
-  for (const [field, list] of [["kind", CONSTANTS.KINDS], ["subject", CONSTANTS.SUBJECTS], ["origin", CONSTANTS.ORIGINS]]) {
+  for (const [field, list] of [["kind", CONSTANTS.KINDS], ["origin", CONSTANTS.ORIGINS]]) {
     const v = c[field];
     if (v == null) {
       matched.push("V7");

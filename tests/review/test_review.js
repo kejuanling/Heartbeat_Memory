@@ -84,7 +84,7 @@ const cases = [
     assert.strictEqual(item.id, sub.queue_id);
     assert.strictEqual(item.candidate.text, "涵：「只能我先说晚安」");
     assert.strictEqual(item.candidate.kind, "fact");
-    assert.strictEqual(item.candidate.subject, "user");
+    assert.ok(!("subject" in item.candidate), "subject 已删");
     assert.ok(item.provenance && item.provenance.method === "admin_form");
     assert.ok(item.reason, "挂起原因可见");
     fs.removeSync(tmpDir);

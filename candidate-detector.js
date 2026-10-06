@@ -4,17 +4,15 @@
 // Candidate Detector（C3）——发现「可能值得记的东西」
 // 职责边界（17.txt / 14.txt）：只做候选发现与粗分类，不判断是否进入 Memory（那是
 // validator/judge 的事），不写任何文件，不用 LLM，不依赖向量。
-// 输入：{ text, source?, explicitKind?, explicitSubject? }
+// 输入：{ text, source?, explicitKind? }
 //   source: chat_user | chat_ai | manual | tool_output | diary | summary
-// 输出（冻结）：{ candidate, kind_guess, subject_guess, confidence, reasons[] }
+// 输出（冻结）：{ candidate, kind_guess, confidence, reasons[] }
 //   kind_guess: fact|rule|diary_only|history_only|unknown（1002-14 删 quote/milestone）
-//   subject_guess: user|self|relationship|external|unknown
 // 规则层级（命中即短路，从强到弱）：来源路由 → 人工显式 → 行为规则
 //   → 当日状态(diary) → 流水账(history) → 长篇叙事(diary) → 稳定谓词(fact) → 闲聊兜底
 // ========================
 
 const KIND_GUESSES = ["fact", "rule", "diary_only", "history_only", "unknown"];
-const SUBJECT_GUESSES = ["user", "self", "relationship", "external", "unknown"];
 
 // 行为规则信号（未来指向）
 const FUTURE_RE = /(以后|以后别|以后不要|以后不许|不许|不准|别再|不要再|永远不[要能]|每次(都)?要|只能我|记得要|要记得|答应|保证|承诺)/;
@@ -39,65 +37,46 @@ const FACT_PREDICATE_RE = /(喜欢|讨厌|爱吃|爱喝|爱看|爱听|习惯|总
 // 流水账：多日期罗列
 const DATE_TOKEN_RE = /\d{1,2}月\d{1,2}[日号]/g;
 
-function guessSubject(text, source) {
-  if (/我们|我俩|咱俩/.test(text)) return "relationship";
-  if (/她|涵/.test(text)) return "user";
-  if (/(^|[^她他])我/.test(text)) {
-    if (source === "chat_ai") return "self";
-    if (source === "chat_user") return "user";
-    return "unknown";
-  }
-  return "unknown";
-}
-
-function out(candidate, kind, subject, confidence, reasons) {
-  return { candidate, kind_guess: kind, subject_guess: subject, confidence, reasons };
+function out(candidate, kind, confidence, reasons) {
+  return { candidate, kind_guess: kind, confidence, reasons };
 }
 
 function detect(input = {}) {
   const text = typeof input.text === "string" ? input.text.trim() : "";
   const source = input.source || "chat_user";
-  if (!text) return out(false, "unknown", "unknown", 0, ["空文本"]);
+  if (!text) return out(false, "unknown", 0, ["空文本"]);
 
   // 0) 来源路由（与 validator V5/PREF.* 同源，双保险）
-  if (source === "tool_output") return out(false, "unknown", "unknown", 0, ["工具输出不产候选（运行时环境数据）"]);
-  if (source === "diary") return out(false, "diary_only", "unknown", 0.7, ["叙事源直达 Diary 层"]);
-  if (source === "summary") return out(false, "history_only", "unknown", 0.7, ["压缩摘要直达 Compressed History 层"]);
+  if (source === "tool_output") return out(false, "unknown", 0, ["工具输出不产候选（运行时环境数据）"]);
+  if (source === "diary") return out(false, "diary_only", 0.7, ["叙事源直达 Diary 层"]);
+  if (source === "summary") return out(false, "history_only", 0.7, ["压缩摘要直达 Compressed History 层"]);
 
   // 1) 人工/入口显式标记：直接采信（显式判断即隐式准入，validator 仍会复检）
   if (input.explicitKind && KIND_GUESSES.includes(input.explicitKind)) {
-    return out(true, input.explicitKind, input.explicitSubject || guessSubject(text, source), 0.95, ["入口显式标记 kind=" + input.explicitKind]);
+    return out(true, input.explicitKind, 0.95, ["入口显式标记 kind=" + input.explicitKind]);
   }
 
   // 4) 行为规则：未来指向词
   if (FUTURE_RE.test(text)) {
-    let subject;
-    if (COMMITMENT_RE.test(text)) {
-      subject = "self";
-    } else if (HER_DEMAND_RE.test(text) || source === "chat_user") {
-      subject = "user";
-    } else {
-      subject = "self";
-    }
     const conf = HEDGE_RE.test(text) ? 0.5 : 0.7;
-    return out(true, "rule", subject, conf, ["未来指向词：「" + (text.match(FUTURE_RE) || []).join("/") + "」（可复用触发条件由 validator/judge 级判定）"]);
+    return out(true, "rule", conf, ["未来指向词：「" + (text.match(FUTURE_RE) || []).join("/") + "」（可复用触发条件由 validator/judge 级判定）"]);
   }
 
   // 5) 当日/短暂状态（diary_only，不产候选）
   if (TEMP_TIME_RE.test(text) && TEMP_STATE_RE.test(text)) {
-    return out(false, "diary_only", guessSubject(text, source), 0.7, ["当日状态：「" + (text.match(TEMP_STATE_RE) || []).join("/") + "」+ 时限词，留 Working History"]);
+    return out(false, "diary_only", 0.7, ["当日状态：「" + (text.match(TEMP_STATE_RE) || []).join("/") + "」+ 时限词，留 Working History"]);
   }
 
   // 6) 流水账：多日期罗列（history_only，不产候选）
   const dates = text.match(DATE_TOKEN_RE) || [];
   if (dates.length >= 2) {
-    return out(false, "history_only", "unknown", 0.7, ["多日期罗列（" + dates.length + " 处）——时间组织内容归 Compressed History"]);
+    return out(false, "history_only", 0.7, ["多日期罗列（" + dates.length + " 处）——时间组织内容归 Compressed History"]);
   }
 
   // 7) 长篇第一人称叙事（diary_only，不产候选）
   const selfMentions = (text.match(/我/g) || []).length;
   if (text.length >= 200 && selfMentions >= 5) {
-    return out(false, "diary_only", "self", 0.5, ["长篇第一人称叙事（" + text.length + " 字/「我」×" + selfMentions + "）归 Diary 层"]);
+    return out(false, "diary_only", 0.5, ["长篇第一人称叙事（" + text.length + " 字/「我」×" + selfMentions + "）归 Diary 层"]);
   }
 
   // 8) 稳定谓词（fact）
@@ -107,11 +86,11 @@ function detect(input = {}) {
     const notes = ["稳定谓词：「" + factMatch[0] + "」"];
     if (HEDGE_RE.test(text)) { conf = 0.4; notes.push("弱确定性词降置信"); }
     else if (RECENT_RE.test(text)) { conf = 0.45; notes.push("近期时限词降置信"); }
-    return out(true, "fact", guessSubject(text, source), conf, notes);
+    return out(true, "fact", conf, notes);
   }
 
   // 9) 兜底：无任何信号 → 普通闲聊，不产候选
-  return out(false, "unknown", "unknown", 0.2, ["无稳定谓词/规则/引用/节点信号——按普通闲聊处理"]);
+  return out(false, "unknown", 0.2, ["无稳定谓词/规则/引用/节点信号——按普通闲聊处理"]);
 }
 
 module.exports = { detect };

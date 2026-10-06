@@ -19,18 +19,18 @@ const cases = [
     const r = d("我喜欢猫", "chat_user");
     assert.strictEqual(r.candidate, true);
     assert.strictEqual(r.kind_guess, "fact");
-    assert.strictEqual(r.subject_guess, "user");
+    assert.ok(!("subject_guess" in r), "subject_guess 已删");
   }],
   ["fact：chat_ai「她喜欢吃辣」→ fact·user", () => {
     const r = d("她喜欢吃辣", "chat_ai");
     assert.strictEqual(r.candidate, true);
     assert.strictEqual(r.kind_guess, "fact");
-    assert.strictEqual(r.subject_guess, "user");
+    assert.ok(!("subject_guess" in r), "subject_guess 已删");
   }],
   ["fact：chat_user「我住在杭州」→ fact·user", () => {
     const r = d("我住在杭州", "chat_user");
     assert.strictEqual(r.kind_guess, "fact");
-    assert.strictEqual(r.subject_guess, "user");
+    assert.ok(!("subject_guess" in r), "subject_guess 已删");
   }],
   ["fact：chat_ai「她怕黑」→ fact·user", () => {
     const r = d("她怕黑", "chat_ai");
@@ -46,7 +46,7 @@ const cases = [
     const r = d("她妈是老师，从小对她很严", "chat_ai");
     assert.strictEqual(r.candidate, true, JSON.stringify(r));
     assert.strictEqual(r.kind_guess, "fact");
-    assert.strictEqual(r.subject_guess, "user");
+    assert.ok(!("subject_guess" in r), "subject_guess 已删");
   }],
 
   // ---- rule（5）----
@@ -54,29 +54,29 @@ const cases = [
     const r = d("以后不许催我睡觉", "chat_user");
     assert.strictEqual(r.candidate, true);
     assert.strictEqual(r.kind_guess, "rule");
-    assert.strictEqual(r.subject_guess, "user");
+    assert.ok(!("subject_guess" in r), "subject_guess 已删");
   }],
   ["rule：chat_user「以后不要这样回答」→ rule·user", () => {
     const r = d("以后不要这样回答", "chat_user");
     assert.strictEqual(r.candidate, true);
     assert.strictEqual(r.kind_guess, "rule");
-    assert.strictEqual(r.subject_guess, "user");
+    assert.ok(!("subject_guess" in r), "subject_guess 已删");
   }],
   ["rule：chat_user「我保证再也不编造了」→ rule·self（自承诺）", () => {
     const r = d("我保证再也不编造了", "chat_user");
     assert.strictEqual(r.kind_guess, "rule");
-    assert.strictEqual(r.subject_guess, "self");
+    assert.ok(!("subject_guess" in r), "subject_guess 已删");
   }],
   ["rule：chat_ai「以后我要少写废话」→ rule·self", () => {
     const r = d("以后我要少写废话", "chat_ai");
     assert.strictEqual(r.candidate, true);
     assert.strictEqual(r.kind_guess, "rule");
-    assert.strictEqual(r.subject_guess, "self");
+    assert.ok(!("subject_guess" in r), "subject_guess 已删");
   }],
   ["rule：chat_user「每次都要先跟我确认」→ rule·user", () => {
     const r = d("每次都要先跟我确认", "chat_user");
     assert.strictEqual(r.kind_guess, "rule");
-    assert.strictEqual(r.subject_guess, "user");
+    assert.ok(!("subject_guess" in r), "subject_guess 已删");
   }],
 
   // ---- 1002-14：quote / milestone 两类已删，原话与里程碑信号不再产出这两类 ----
@@ -192,7 +192,7 @@ const cases = [
   }],
   ["边界：输出契约五键齐备且枚举合法", () => {
     const r = d("她喜欢猫", "chat_ai");
-    assert.deepStrictEqual(Object.keys(r).sort(), ["candidate", "confidence", "kind_guess", "reasons", "subject_guess"]);
+    assert.deepStrictEqual(Object.keys(r).sort(), ["candidate", "confidence", "kind_guess", "reasons"]);
     assert.ok(Array.isArray(r.reasons) && r.reasons.length > 0);
     assert.ok(r.confidence >= 0 && r.confidence <= 1);
   }],

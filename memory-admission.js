@@ -94,8 +94,8 @@ function fmtW(w) { return (w == null) ? "-" : Math.round(w * 100) + "%"; }
 async function runJudge(candidateText, existingEntry, detection, opts) {
   try {
     const prompt = buildPrompt(candidateText, existingEntry ? existingEntry.text : "（无相似记忆）", {
-      candidateKind: detection.kind_guess, candidateSubject: detection.subject_guess,
-      existingKind: existingEntry ? (existingEntry.kind + "/" + (existingEntry.subject || "") + "/" + (existingEntry.status || "")) : "none",
+      candidateKind: detection.kind_guess,
+      existingKind: existingEntry ? (existingEntry.kind + "/" + (existingEntry.status || "")) : "none",
     });
     const raw = await (typeof opts.callLLM === "function" ? opts.callLLM : defaultCallLLM)(prompt, 1);
     const parsed = parseJudgeOutput(raw);
@@ -131,11 +131,11 @@ async function defaultCallLLM(prompt) {
   } finally { clearTimeout(timer); }
 }
 
-// 旧池 category → V2 kind/subject 翻译（manual 兼容层专用；未映射类别交 detector 自判）
+// 旧池 category → V2 kind 翻译（manual 兼容层专用；未映射类别交 detector 自判）
 const CATEGORY_MAP = {
-  "关于她": { kind: "fact", subject: "user" },
-  "认账": { kind: "rule", subject: "self", direction: "self_discipline" },
-  "拓本": { kind: "fact", subject: "user" },
+  "关于她": { kind: "fact" },
+  "认账": { kind: "rule", direction: "self_discipline" },
+  "拓本": { kind: "fact" },
 };
 
 function readConfigFile(file) {
@@ -207,7 +207,7 @@ function createAdmission(opts = {}) {
     const speakerVal = explicitSpeaker || (mapped ? mapped.speaker || null : null);
 
     // [1] candidate_detector（manual 显式类别优先，否则自动粗分）
-    const detection = detect({ text, source: originVal, explicitKind: mapped ? mapped.kind : b.kind, explicitSubject: mapped ? mapped.subject : b.subject });
+    const detection = detect({ text, source: originVal, explicitKind: mapped ? mapped.kind : b.kind });
 
     // [2] provenance_builder（manual：无 session/msg → null，不伪造；promotion：block_id 必带（压缩块溯源），msg_id=null）
     // method 一律用契约内合法值（2026-09-28 拍板方案B：原 chat_manual_pick 不在 LEGAL_METHODS 会被静默置 null）
@@ -233,7 +233,6 @@ function createAdmission(opts = {}) {
       validation = validate({
         text,
         kind: detection.kind_guess,
-        subject: detection.subject_guess,
         origin: originVal,
         speaker: speakerVal,
         direction: mapped ? mapped.direction || null : null,
@@ -314,7 +313,6 @@ function createAdmission(opts = {}) {
     const draft = {
       text,
       kind: detection.kind_guess,
-      subject: detection.subject_guess,
       direction: mapped ? mapped.direction || null : null,
       speaker: speakerVal,
       origin: originVal,
@@ -373,7 +371,7 @@ function createAdmission(opts = {}) {
 
     return {
       action: execResult.ok ? action : "error",
-      candidate: { text, kind: detection.kind_guess, subject: detection.subject_guess, detector: detection, provenance },
+      candidate: { text, kind: detection.kind_guess, detector: detection, provenance },
       validation,
       judge: judgeNote,
       judge_meta: judgeMeta || null,
@@ -475,7 +473,7 @@ function createAdmission(opts = {}) {
           } else {
             mainStore.updateStatus(e.id, "archived", { reason: "event 衰减至 " + Math.round(next * 100) + "%" });
             mainExecutor.review({
-              text: e.text, kind: e.kind, subject: e.subject,
+              text: e.text, kind: e.kind,
               worth: next,
               provenance: e.provenance || null,
               backfill: { action: "decay", target_id: e.id, old_text: e.text, reason: "event 长期未注入，衰减至 20% 以下，待人工决定保留/删除" },

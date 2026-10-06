@@ -2,7 +2,7 @@
 
 // ========================
 // Memory V2 存储层（C1）
-// 六轴单集合记忆：kind(fact/rule) × subject(user/self/relationship/external)（1002-14 删除 quote/milestone 两类）
+// 单集合记忆：kind(fact/rule/event)（1002-14 删除 quote/milestone 两类；1007 删 subject 字段）
 // × status(active/superseded/archived) × confidence × origin × provenance。（priority/重要级已删，0920 用户拍板）
 // Schema v2.0（1005-16）：删 10 字段（priority/speaker/updated_at/action_hint/related_subjects/source/scope/valid_from/valid_to/related_memories——全部死字段或预留无消费），
 // 加 4 字段（worth/worth_reason/volatility/volatility_reason——评估标签，judge 判定与离线探针产出，1005-16 用户拍板入库）。
@@ -159,8 +159,8 @@ function _buildEntry(input, cfg) {
 
   const kind = input.kind;
   if (!KINDS.includes(kind)) throw new Error(`kind 非法: ${kind}（允许 ${KINDS.join("/")}）`);
-  const subject = input.subject;
-  if (!SUBJECTS.includes(subject)) throw new Error(`subject 非法: ${subject}（允许 ${SUBJECTS.join("/")}）`);
+  // 1007：subject 字段删除——传入值宽容忽略，不再写入新条目
+  void input.subject;
   const origin = input.origin;
   if (!ORIGINS.includes(origin)) throw new Error(`origin 非法: ${origin}（允许 ${ORIGINS.join("/")}）`);
 
@@ -254,7 +254,6 @@ function _buildEntry(input, cfg) {
     schema_ver: SCHEMA_VER,
     text,
     kind,
-    subject,
     direction,
     status: "active", // 创建恒为 active；superseded/archived 只能经 updateStatus 状态机到达
     confidence,
@@ -448,7 +447,7 @@ function createStore(opts = {}) {
   // 管理台人工编辑（0919）：白名单字段直改；text 变化刷 content_updated_at；枚举与 kind 联动铁律同 create
   // 1005-16：白名单随 schema v2 精简（删 speaker/related_subjects/source/scope/valid_from/valid_to/action_hint），加评估标签 4 字段
   // last_hit_at 为系统字段，不开放编辑
-  const UPDATABLE_FIELDS = ["text", "note", "kind", "subject", "direction", "established_at", "anchor",
+  const UPDATABLE_FIELDS = ["text", "note", "kind", "direction", "established_at", "anchor",
     "sensitive", "triggers", "vibe", "source_session", "worth", "worth_reason", "volatility", "volatility_reason", "last_decay_at"];
   function updateFields(id, patch) {
     if (readonly) return fail("readonly 模式拒绝写入");
@@ -472,9 +471,6 @@ function createStore(opts = {}) {
         if (!KINDS.includes(v)) return fail("kind 非法: " + v);
         // 1002-14：quote/milestone 分类已删，kind 仅 fact/rule（speaker 字段 1005-16 已删）
         e.kind = v;
-      } else if (k === "subject") {
-        if (!SUBJECTS.includes(v)) return fail("subject 非法: " + v);
-        e.subject = v;
       } else if (k === "direction") {
         if (e.kind !== "rule") return fail("direction 仅 rule 可用");
         if (v != null && !DIRECTIONS.includes(v)) return fail("direction 非法: " + v);

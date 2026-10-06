@@ -52,7 +52,6 @@ module.exports = function registerMemoryV2Admin(app, deps) {
         retrieval_count: 0, // V2 检索恒只读无计数（旧池污染字段的结构性根除）
         source: e.origin,
         status: e.status,
-        subject: e.subject,
         // 1005-16：评估标签透传（judge/探针产出；未评估为 null，前端显示占位）
         worth: (typeof e.worth === "number") ? e.worth : null,
         worth_reason: e.worth_reason || null,
@@ -97,7 +96,7 @@ module.exports = function registerMemoryV2Admin(app, deps) {
         max_sim: g.max_sim,
         items: g.ids.map((id) => {
           const e = byId.get(id);
-          return { id: e.id, text: e.text, kind: e.kind, subject: e.subject, created_at: e.created_at };
+          return { id: e.id, text: e.text, kind: e.kind, created_at: e.created_at };
         }),
       }));
       reply.send({ success: true, threshold: th, group_count: groups.length, groups });
@@ -122,7 +121,6 @@ module.exports = function registerMemoryV2Admin(app, deps) {
         if (!kind) return reply.code(400).send({ error: "category 必须是 fact/rule" });
         const r2 = store().create({
           text: content, kind,
-          subject: String(b.subject || "user"),
           origin: "manual",
           provenance: { method: "admin_form" },
         });
@@ -162,7 +160,6 @@ module.exports = function registerMemoryV2Admin(app, deps) {
         patch.kind = kind;
       }
       if (b.pinned != null) patch.anchor = !!b.pinned;
-      if (b.subject != null) patch.subject = String(b.subject);
       const r = store().updateFields(req.params.id, patch);
       if (!r.ok) return reply.code(400).send({ error: r.error });
       reply.send({ success: true, entry: r.entry });

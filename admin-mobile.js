@@ -834,42 +834,7 @@ function toast(msg){
       toast('跨窗口注入日记条数已保存');
     }catch(e){ if(msg) msg.textContent='保存失败: '+e.message; toast('保存失败: '+e.message); }
   }
-  async function loadReparsePrompt(){
-    const msg=document.getElementById('reparse-prompt-msg');
-    try{
-      const r=await fetch(ADMIN_API + '/reparse/config');
-      const c=await r.json();
-      const s=document.getElementById('reparse-sys-prompt'); if(s) s.value=c.reparse_system_prompt||c.default_reparse_system_prompt||'';
-      const u=document.getElementById('reparse-user-prompt'); if(u) u.value=c.reparse_user_prompt||c.default_reparse_user_prompt||'';
-      if(msg) msg.textContent='已载入内置默认提示词；可修改保存覆盖，或点“恢复内置默认”。';
-    }catch(e){ if(msg) msg.textContent='读取提示词失败: '+e.message; }
-  }
-  async function saveReparsePrompt(){
-    const msg=document.getElementById('reparse-prompt-msg');
-    const s=document.getElementById('reparse-sys-prompt').value;
-    const u=document.getElementById('reparse-user-prompt').value;
-    try{
-      const r=await fetch(ADMIN_API+'/reparse/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reparse_system_prompt:s.trim(),reparse_user_prompt:u.trim()})});
-      const d=await r.json();
-      if(d.error){ if(msg) msg.textContent='保存失败: '+d.error; return; }
-      if(msg) msg.textContent='已保存，下次解析入库/再解析生效。';
-      toast('解析提示词已保存');
-    }catch(e){ if(msg) msg.textContent='保存失败: '+e.message; }
-  }
-  async function resetReparsePrompt(){
-    const s=document.getElementById('reparse-sys-prompt');
-    const u=document.getElementById('reparse-user-prompt');
-    const _c=await (await fetch(ADMIN_API + '/reparse/config')).json() || {};
-    if(s) s.value=_c.default_reparse_system_prompt||'';
-    if(u) u.value=_c.default_reparse_user_prompt||'';
-    try{
-      const r=await fetch(ADMIN_API+'/reparse/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reparse_system_prompt:'',reparse_user_prompt:''})});
-      const d=await r.json();
-      if(d.error){ toast('恢复失败: '+d.error); return; }
-      toast('已恢复内置默认提示词');
-      const m=document.getElementById('reparse-prompt-msg'); if(m) m.textContent='已恢复内置默认';
-    }catch(e){ toast('网络错误: '+e.message); }
-  }
+
 
 
 function escapeHtml(s){
@@ -1315,13 +1280,7 @@ function reconcileCcList(el, html){
    updateMultiSelectBar();
  }
 
-  async function loadCcReparseMaxChars(){
-    try{
-      const r=await fetch(ADMIN_API + '/reparse/config');
-      const c=await r.json();
-      AppState.ccReparseMergeMaxChars = (c && c.reparse_merge_max_chars!=null) ? Number(c.reparse_merge_max_chars) : 8000;
-    }catch(e){ /* 读取失败用默认值 */ }
-  }
+
 
  function updateMultiSelectBar(){
    const bar = document.getElementById('cc-multi-bar');
@@ -2118,7 +2077,7 @@ function ccArmAllGapAutoLoad(){
   if(name==='memory'){ if(!window.__memPoolInited){ initMemPoolView(); window.__memPoolInited=true; } loadReviewQueue(); }
   if(name!=='config' && typeof stopBackfillWatch==='function'){ stopBackfillWatch(); }
   if(name==='compaction'){ if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompaction(); } if(AppState.compactionPlan) renderCompactionConfig(); }
-  if(name==='prompts'){loadWakePrompt();loadContextDigestPrompt();loadCtxLimitPrompt();loadCsPrompt();loadReparsePrompt();loadJudgePrompt();loadDistillPrompt();loadSummaryPrompt();loadBackfillPrompt();}
+  if(name==='prompts'){loadWakePrompt();loadContextDigestPrompt();loadCtxLimitPrompt();loadCsPrompt();loadJudgePrompt();loadDistillPrompt();loadSummaryPrompt();loadBackfillPrompt();}
   if(name==='config'){loadToolsConfig(); loadCrossInjectConfig();
     // 1003：记忆蒸馏 / 两块总结 / 老数据重跑三张设置卡已搬到本页（跨窗口注入卡片下方）。
     // 三个 load 原本挂在 initMemPoolView（只跑一次且必须先进记忆页才触发），搬走后若从配置页直接进来会加载不到 → 输入框全空。
@@ -3399,7 +3358,6 @@ function ccArmAllGapAutoLoad(){
         html+='<div class="mp-card" style="--mp-cat:'+mpCatColor(it.kind)+'">'
           +'<div class="mp-card-head">'
             +'<span class="mp-cat"><span class="mp-dot"></span>'+escapeHtml(it.kind)+'</span>'
-            +'<span class="mp-badges"><span class="mp-badge">'+escapeHtml(it.subject||'')+'</span></span>'
           +'</div>'
           +'<div class="mp-body">'+escapeHtml(it.text)+'</div>'+mpTagsHtml(it)
           +'<div class="mp-meta"><span>'+escapeHtml(String(it.created_at||'').slice(0,10))+'</span></div>'

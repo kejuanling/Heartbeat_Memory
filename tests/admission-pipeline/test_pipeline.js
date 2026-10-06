@@ -37,7 +37,7 @@ const cases = [
     assert.strictEqual(r.action, "admit", JSON.stringify(r));
     assert.ok(r.entry_id, "有 entry_id");
     assert.strictEqual(r.candidate.kind, "fact", "关于她→fact");
-    assert.strictEqual(r.candidate.subject, "user");
+    assert.ok(!("subject" in r.candidate), "subject 已删");
     // 影子集合有货
     const shadow = fs.readJsonSync(adm.paths.shadow.collection);
     assert.strictEqual(shadow.length, 1);
@@ -72,7 +72,7 @@ const cases = [
     assert.strictEqual(queue.length, 1);
     assert.strictEqual(queue[0].status, "pending_review");
     assert.strictEqual(queue[0].draft.kind, "fact");
-    assert.strictEqual(queue[0].draft.subject, "user");
+    assert.ok(!("subject" in queue[0].draft), "subject 已删");
     assert.strictEqual(shadowCount(adm), 0, "挂起不进集合");
     fs.removeSync(tmpDir);
   }],

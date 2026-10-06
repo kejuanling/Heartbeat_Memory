@@ -60,6 +60,12 @@ function createStateExecutor(opts = {}) {
   // meta.auditId 关联审计行，meta.details 携带 validator/detector 的拒绝或存疑原因供人工查看
   function review(draft, reason, meta = {}) {
     if (readonly) return { ok: false, action: "review", error: "readonly" };
+    // 1007：subject 删除——任何入口落队列前剥除（低层兜底，与 admission 层双保险）
+    if (draft && typeof draft === "object" && "subject" in draft) {
+      const _d = Object.assign({}, draft);
+      delete _d.subject;
+      draft = _d;
+    }
     const q = loadQueue();
     const rec = {
       id: newQueueId(),
@@ -159,7 +165,7 @@ function createStateExecutor(opts = {}) {
   // 编辑痕迹 push 进 details（路由回显 reasons），rec.edited 标记供前端展示
   function editQueue(queueId, patch = {}) {
     if (readonly) return { ok: false, error: "readonly" };
-    const ALLOW = ["text", "kind", "subject", "speaker", "direction"];
+    const ALLOW = ["text", "kind", "speaker", "direction"];
     const clean = {};
     for (const k of ALLOW) {
       if (patch[k] === undefined) continue;

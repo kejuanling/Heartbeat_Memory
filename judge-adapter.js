@@ -110,9 +110,10 @@ function buildPrompt(candidateText, existingText, meta = {}) {
   const custom = loadJudgeTemplate();
   if (custom) return interpolateJudgeTemplate(custom, candidateText, existingText, meta);
   // 2026-10-01 单源收敛：兜底组装直接复用 JUDGE_TEMPLATE_DEFAULT（此前这里有一份独立硬编码文案，
-  // 与常量双副本并存——改常量不动这里等于没改，benchmark 实测抓到）。富 kind 信息（subject/status）保留。
-  const ek = meta.existingKind ? `${meta.existingKind}/${meta.existingSubject || ""}/${meta.existingStatus || ""}` : "";
-  const ck = meta.candidateKind ? `${meta.candidateKind}/${meta.candidateSubject || ""}` : "";
+  // 与常量双副本并存——改常量不动这里等于没改，benchmark 实测抓到）。富 kind 信息（status）保留。
+  // 1007：subject 删除，不再拼进 kind 串。
+  const ek = meta.existingKind ? `${meta.existingKind}/${meta.existingStatus || ""}` : "";
+  const ck = meta.candidateKind ? `${meta.candidateKind}` : "";
   return interpolateJudgeTemplate(JUDGE_TEMPLATE_DEFAULT, candidateText, existingText, {
     existingKind: ek, candidateKind: ck,
   });

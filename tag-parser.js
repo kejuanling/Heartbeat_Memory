@@ -161,7 +161,6 @@ async function extractAndStore(text, ctx) {
     const draft = {
       text: text,
       kind: kind,
-      subject: "user",
       origin: "memory_tag",
       provenance: { method: "tag_inline", session_id: sessionId || null },
     };
