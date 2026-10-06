@@ -2910,7 +2910,7 @@ function _streamUpdateThink(text){
       // 2026-09-26 B 方案：展开态跟随直播滚动；用户上滑阅读（离底>48px）则不打扰
       // 1005-19d CRT 兼容：CRT 下 .open=收起（语义反转），统一按“当前是否收起”判断展开态
       var _rw=c.parentElement;
-      var _hidden = _rw ? ((document.body.dataset.theme==="crt") ? _rw.classList.contains("open") : !_rw.classList.contains("open")) : false;
+      var _hidden = _rw ? (((document.body.dataset.theme==="crt"||document.body.dataset.theme==="crtlight")) ? _rw.classList.contains("open") : !_rw.classList.contains("open")) : false;
       var _stick=_hidden||(c.scrollHeight-c.scrollTop-c.clientHeight<48);
       c.innerHTML=(cfg.thinking_md?renderMd(String(text||"")):escapeHtml(String(text||"")));
       if(_rw&&!_hidden&&_stick) c.scrollTop=c.scrollHeight;
@@ -3445,7 +3445,7 @@ function renderAiContent(msgEl, bubble, content, reasoning){   // 2026-09-24 P2-
       pre.querySelectorAll(".rw").forEach(rw=>rw.addEventListener("click",function(e){
         if(chatEl && (chatEl.dataset.layout==="claude"||chatEl.dataset.layout==="crt")){
           // claude 主题：打开底部抽屉（CRT 例外：就地收起/展开）
-          if(document.body.dataset.theme==="crt"){
+          if((document.body.dataset.theme==="crt"||document.body.dataset.theme==="crtlight")){
             if(e.target.closest(".rw-h")) rw.classList.toggle("open");
             e.stopPropagation();
             return;
@@ -3462,7 +3462,7 @@ function renderAiContent(msgEl, bubble, content, reasoning){   // 2026-09-24 P2-
   // 来自正文的工具胶囊（模型抄进 content 的【工具 · name】块）也需要绑定点击折叠
   if(toolEcho) bubble.querySelectorAll(".tool-trace").forEach(tt=>tt.addEventListener("click",function(e){
   if(chatEl && (chatEl.dataset.layout==="claude"||chatEl.dataset.layout==="crt")){
-    if(document.body.dataset.theme==="crt"){
+    if((document.body.dataset.theme==="crt"||document.body.dataset.theme==="crtlight")){
       if(e.target.closest(".tt-h")) tt.classList.toggle("open");
       e.stopPropagation();
       return;
@@ -3480,7 +3480,7 @@ function renderAiContent(msgEl, bubble, content, reasoning){   // 2026-09-24 P2-
 // 全局事件委托：claude 主题下点击工具卡/思考链打开抽屉
 document.addEventListener("click",function(e){
   if(!(chatEl && (chatEl.dataset.layout==="claude"||chatEl.dataset.layout==="crt"))) return;
-  if(document.body.dataset.theme==="crt"){
+  if((document.body.dataset.theme==="crt"||document.body.dataset.theme==="crtlight")){
     // CRT：仅点击标题（Thought / 工具名）就地收起/展开，不弹抽屉；点内容不触发
     var crtTt=e.target.closest(".tool-trace .tt-h");
     if(crtTt){ crtTt.closest(".tool-trace").classList.toggle("open"); return; }
@@ -3767,7 +3767,7 @@ function makeMsgEl(m,idx){
           const _tmp=document.createElement("div");_tmp.innerHTML=renderToolCapsule(_u.tool);
           const _card=_tmp.firstChild;
           if(_card){_card.addEventListener("click",function(e){
-            if(document.body.dataset.theme==="crt"){
+            if((document.body.dataset.theme==="crt"||document.body.dataset.theme==="crtlight")){
               if(e.target.closest(".tt-h")) _card.classList.toggle("open");
               e.stopPropagation();
               return;
