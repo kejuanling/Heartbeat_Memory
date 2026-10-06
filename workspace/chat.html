@@ -2595,7 +2595,17 @@ function syncTimelineLocal(payload){
     headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-Client":"dylan-chat","X-CSRF-Token":getCookie("admin_csrf")},
     body:JSON.stringify(body),
     credentials:"include"
-  }).then(function(r){ return r.json().catch(function(){return {};}); })
+  }).then(function(r){
+    // 2026-10-07 1007-04：检查 HTTP 状态与响应体有效性——此前不检查 r.ok，
+    // 服务端返回 403/500（带 JSON error）或异常响应体时前端误判"已保存"（内存更新但未落盘，
+    // 重开应用内容回退）。非 2xx 或响应体无 ok 字段 → 明确失败，调用方走失败提示。
+    return r.json().catch(function(){return {};}).then(function(j){
+      if(!r.ok || j===null || typeof j!=="object" || typeof j.ok==="undefined"){
+        return {ok:false, status:r.status, error:(j&&j.error)||("HTTP "+r.status)};
+      }
+      return j;
+    });
+  })
     .catch(function(){ return null; });
 }
 
