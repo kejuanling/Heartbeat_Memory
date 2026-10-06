@@ -1789,7 +1789,8 @@ require("./routes/chat")(app, {
   sseNotify,
   SSE_HEARTBEAT_MS,
   recentReplies,
-  activeGenMap,
+  activeGenMap,
+
   ACTIVE_GEN_TTL_MS,
   isRecentReplyCacheable,
   IDEMPOTENCY_TTL_MS,
@@ -3841,8 +3842,32 @@ function isPushEchoContent(s) {
 }
 // 解析推送回显内容
 // 2026-09-22 审查 R19：注入 loadTimeline/saveTimeline，让推送编辑/删除走时间线四道守卫 + 快照指纹
+// 2026-10-06 1006-03 恢复：df1b765 误删 routes/push-events.js 与挂载行，前端推送管理卡仍在调用，恢复挂载
+require("./routes/push-events")(app, { basicAuth, baseDir: __dirname, loadTimeline, saveTimeline });
 
-// 跨窗口注入参数（日记条数，V2 Earlier Days 篇数同源）
+// 2026-10-06 1006-03 恢复：df1b765 误删 /admin/cross-window-inject，前端后台活动「跨窗口注入」卡仍在调用，
+// 原实现自 df1b765^ 恢复。生产恒为 V2：与主聊天同源（assembleInput + buildContextBlocks 实时拼注入内容），
+// Relevant 块依赖当轮用户消息，预览不含；mode 恒为 v2，前端仅用于一行 tip 文案。
+app.get("/admin/cross-window-inject", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const sid = String(req.query && req.query.session_id ? req.query.session_id : "").trim() || "default";
+    let v2Text = "";
+    try {
+      const v2Input = ctxV2Shadow.assembleInput({
+        baseDir: __dirname,
+        sessionId: sid,
+        llmMessages: [],
+        loadTimeline: loadTimeline,
+        normalizeContentToText: normalizeContentToText,
+      });
+      const built = buildContextBlocks(v2Input);
+      v2Text = (built.blocks || [])
+        .filter(function (b) { return b && !b.empty && b.key !== "relevant_memories"; })
+        .map(function (b) { return b.content; }).join("\n\n");
+    } catch (cx) { console.warn("[cross-inject] V2 预览失败:", cx.message); }
+    reply.send({ text: v2Text, session_id: sid, mode: "v2" });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
+});
 app.get("/admin/cross-inject/config", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const c = readCrossInjectConfig();
@@ -4072,6 +4097,101 @@ function serviceControl(svc, action) {
   }
   return { ok: false, error: "未知服务类型" };
 }
+
+// 2026-10-06 1006-03 恢复：df1b765 误删 /admin/alerts，前端后台活动「后台提醒」卡仍在调用，原实现自 df1b765^ 恢复。
+// 批次4 C5：后台活动「提醒」板块数据源：网易云 Cookie 失效 / 会话上下文达容量上限 / 服务异常
+app.get("/admin/alerts", { preHandler: basicAuth }, async (req, reply) => {
+  const alerts = [];
+  // 1) 网易云 Cookie 失效：配置了 MUSIC_U 但网易云账号接口取不到资料
+  try {
+    const session = readNeteaseSession();
+    if (session && session.musicU) {
+      const cookieHeader = "MUSIC_U=" + session.musicU + (session.csrf ? "; __csrf=" + session.csrf : "");
+      const account = await fetchNeteaseAccount(cookieHeader);
+      if (!account || !account.nickname) {
+        alerts.push({ type: "netease", level: "warn", title: "网易云 Cookie 失效", desc: "登录会话已失效，需重新设置 MUSIC_U" });
+      }
+    }
+  } catch (e) { console.warn("[alerts] netease:", e.message); }
+  // 2) 会话 token 达提醒上限：最近活跃会话时间线按容量守卫同口径估算用量，达到「提醒上限」（ctx_limit_alert_tokens，独立配置，与容量提醒/压缩无关）即报，带会话 id/名称/用量
+  const sessNames = {};
+  try { Object.assign(sessNames, readJsonFileSafe(SESSION_NAMES_FILE, {})); } catch (e) {}
+  try {
+    const limit = Number(contextCompactor.loadConfig().ctx_limit_alert_tokens) || 0;
+    if (limit) {
+      const files = [];
+      try { files.push({ f: TIMELINE_FILE, m: fs.statSync(TIMELINE_FILE).mtimeMs }); } catch (e) {}
+      for (const f of fs.readdirSync(__dirname)) {
+        if (/^enhanced_messages_s_.*\.json$/.test(f)) {
+          try { files.push({ f: f, m: fs.statSync(path.join(__dirname, f)).mtimeMs }); } catch (e) {}
+        }
+      }
+      files.sort(function (a, b) { return b.m - a.m; });
+      const recent = files.slice(0, 9);
+      for (const { f } of recent) {
+        try {
+          const tl = JSON.parse(fs.readFileSync(path.join(__dirname, f), "utf-8"));
+          if (!Array.isArray(tl)) continue;
+          const actual = latestActualPromptTokens(tl);
+          const used = actual != null ? actual : estimateAlertTokens(tl);
+          if (used < limit) continue; // 用量达到上限才提醒（不依赖是否已塞容量提醒；降回上限以下自动消失）
+          const sid = f === TIMELINE_FILE ? "default" : f.replace(/^enhanced_messages_/, "").replace(/\.json$/, "");
+          alerts.push({ type: "capacity", level: "warn", title: "会话 token 达提醒上限", session_id: sid, session_name: sessNames[sid] || null, token_used: used, token_limit: limit, token_source: actual != null ? "actual" : "estimate", desc: actual != null ? "最近一轮上游实际 prompt_tokens" : "估算（无最近 usage 记录）" });
+        } catch (e) {}
+      }
+    }
+  } catch (e) { console.warn("[alerts] capacity:", e.message); }
+  // 4) 日志哨兵事件（ops/log_sentinel.py 落盘 data/sentinel_events.json）：24h 内的新IP登录/SSH爆破/MCP入口异常/服务掉线
+  try {
+    const sentEv = readJsonFileSafe(path.join(__dirname, "data", "sentinel_events.json"), null);
+    const evList = sentEv && Array.isArray(sentEv.events) ? sentEv.events : [];
+    const cutoff = Date.now() - 24 * 3600 * 1000;
+    const fresh = evList.filter(function (ev) { return ev && typeof ev.ts === "number" && ev.ts >= cutoff; });
+    fresh.slice(-10).forEach(function (ev) {
+      const d = new Date(ev.ts);
+      const when = (d.getMonth() + 1) + "月" + d.getDate() + "日 " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+      alerts.push({ type: "sentinel", level: "warn", title: ev.title || "哨兵事件", desc: when + " · " + (ev.body || "") });
+    });
+  } catch (e) { console.warn("[alerts] sentinel:", e.message); }
+  // 5) 上游余额不足：最近 402 记录（24h 窗口），数据来自 lib/upstream-alert（各上游调用点 note402）
+  try {
+    const ua = upstreamAlert.snapshot();
+    if (ua.last402At && (Date.now() - ua.last402At) < 24 * 3600 * 1000) {
+      const d = new Date(ua.last402At);
+      const when = (d.getMonth() + 1) + "月" + d.getDate() + "日 " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+      alerts.push({ type: "balance", level: "warn", title: "上游模型余额不足", desc: when + " · " + (ua.lastModel || "模型未知") + "（24h 内累计 " + (ua.count || 0) + " 次 402）" });
+    }
+  } catch (e) { console.warn("[alerts] balance:", e.message); }
+  // 3) 服务状态：列出全部实际部署的服务（pm2 存在 / systemd unit 存在 / 端口型全部），异常高亮
+  const services = [];
+  try {
+    const pm2Out = runShellCommand("pm2 jlist").output || "[]";
+    const pm2ByName = {};
+    try { JSON.parse(pm2Out).forEach(function (a) { pm2ByName[a.name] = a.pm2_env && a.pm2_env.status; }); } catch (e) {}
+    const ssOut = String(runShellCommand("ss -ltn 2>/dev/null").output || "");
+    const ports = new Set();
+    const mm = ssOut.match(/:(\d{2,5})\s/g) || [];
+    mm.forEach(function (s) { ports.add(s.replace(/[:\s]/g, "")); });
+    for (const svc of MANAGED_SERVICES) {
+      let ok = true, status = "unknown";
+      if (svc.type === "pm2") {
+        if (!(svc.name in pm2ByName)) continue; // 未部署，跳过
+        status = pm2ByName[svc.name] || "unknown";
+        ok = status === "online";
+      } else if (svc.type === "port") {
+        status = ports.has(String(svc.port)) ? "running" : "stopped";
+        ok = status === "running";
+      } else if (svc.type === "systemd") {
+        const en = runShellCommand("systemctl is-enabled " + svc.name + " 2>/dev/null").output || "";
+        if (en !== "enabled" && en !== "disabled") continue; // unit 不存在，跳过
+        status = runShellCommand("systemctl is-active " + svc.name).output || "unknown";
+        ok = status === "active";
+      }
+      services.push({ name: svc.name, label: svc.label || svc.name, status: status, ok: ok });
+    }
+  } catch (e) { console.warn("[alerts] services:", e.message); }
+  reply.send({ ok: true, alerts: alerts, services: services, ts: Date.now() });
+});
 
 app.get("/admin/tools", { preHandler: basicAuth }, async (req, reply) => {
   try {
