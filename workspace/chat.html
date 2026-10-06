@@ -4834,8 +4834,14 @@ function openAct(idx){
       if(m.tokens&&(m.tokens.prompt_tokens!=null||m.tokens.completion_tokens!=null)){
         const p=m.tokens.prompt_tokens||0,c=m.tokens.completion_tokens||0,tot=p+c;
         html='<span class="tok-c">上下文 '+p+'</span><span class="tok-c">回复 '+c+'</span>';
-        if(m.tokens.prompt_cache_hit_tokens!=null){ html+='<span class="tok-c">命中 '+m.tokens.prompt_cache_hit_tokens+'</span>'; }
-        if(m.tokens.prompt_cache_miss_tokens!=null){ html+='<span class="tok-c">未命中 '+m.tokens.prompt_cache_miss_tokens+'</span>'; }
+        // 1006-17 缓存命中兼容两种 usage 格式：DeepSeek 等返回顶层 prompt_cache_hit_tokens/miss_tokens；
+        // GLM(百炼) 返回嵌套 prompt_tokens_details.cached_tokens（命中数），未命中 = prompt_tokens - cached_tokens。
+        var _hit = (m.tokens.prompt_cache_hit_tokens!=null) ? m.tokens.prompt_cache_hit_tokens
+                 : (m.tokens.prompt_tokens_details && m.tokens.prompt_tokens_details.cached_tokens!=null) ? m.tokens.prompt_tokens_details.cached_tokens : null;
+        var _miss = (m.tokens.prompt_cache_miss_tokens!=null) ? m.tokens.prompt_cache_miss_tokens
+                  : (_hit!=null && m.tokens.prompt_tokens!=null) ? Math.max(0, m.tokens.prompt_tokens - _hit) : null;
+        if(_hit!=null){ html+='<span class="tok-c">命中 '+_hit+'</span>'; }
+        if(_miss!=null){ html+='<span class="tok-c">未命中 '+_miss+'</span>'; }
       }else{
         const est=estTokens(msgText(m))+estTokens(m.reasoning||"");
         html='<span>≈ '+est+' tokens</span>';
