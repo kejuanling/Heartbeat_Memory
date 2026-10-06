@@ -5483,6 +5483,10 @@ function glassBubbleBind(){
 }
 glassBubbleBind();
 
+/*2026-10-06 主题预设分组（方案A：仅展示层合并，主题数据不动）：暖白/暖陶/夜航 与 极简/黑夜 各自组卡 + seg 变体切换*/
+var THEME_GRP={sms:["warm","terra","night"],claude:["claude","dark"]};
+var THEME_DESC={warm:"暖白 · 短信式",wx:"微信绿 · 微信式",claude:"灰白 · Claude 风",dark:"深色 · Claude 风",glass:"清透 · 毛玻璃风",terra:"赤陶 · 编辑式",night:"墨夜灯塔 · 衬线慢排",crt:"琥珀 · CRT"};
+function syncThemeGrid(){var name=THEME_PRESETS[cfg.theme]?cfg.theme:"warm";var grid=document.getElementById("themeGrid");if(!grid)return;grid.querySelectorAll(".theme-choice").forEach(function(card){var g=card.getAttribute("data-group");var inGroup=g&&THEME_GRP[g]&&THEME_GRP[g].indexOf(name)>-1;card.classList.toggle("active",card.getAttribute("data-theme")===name||inGroup);if(inGroup){card.setAttribute("data-theme",name);var sw=card.querySelector(".theme-swatch");if(sw)sw.className="theme-swatch"+(name==="warm"?"":" "+name);var st=card.querySelector("strong");if(st)st.textContent=THEME_PRESETS[name].name;var sm=card.querySelector("small");if(sm)sm.textContent=THEME_DESC[name]||sm.textContent;card.querySelectorAll(".seg button").forEach(function(sb){sb.classList.toggle("active",sb.getAttribute("data-v")===name);});}});}
 function applyTheme(){const name=THEME_PRESETS[cfg.theme]?cfg.theme:"warm";cfg.theme=name;const root=document.documentElement.style;for(var _ti=0;_ti<THEME_KEYS.length;_ti++)root.removeProperty(THEME_KEYS[_ti]);/*2026-10-01 先清后设：上一主题注入的变量全部移除，防止残留值泄漏（此前 warm 切 claude 后 13 个变量残留 warm 值压住 CSS 兜底）*/Object.keys(THEME_PRESETS[name].vars).forEach(function(k){root.setProperty(k,THEME_PRESETS[name].vars[k]);});document.body.setAttribute("data-theme",name);document.body.setAttribute("data-style","classic");document.body.setAttribute("data-bgblur","0");/*2026-10-05 crt：终端主题下输入条迁入消息流末尾（纸缝随流），切走时归位*/
 document.body.style.fontFamily="";document.body.style.background="";
   // 2026-09-28：背景图/不透明度按主题独立读取
@@ -5509,10 +5513,6 @@ document.body.style.fontFamily="";document.body.style.background="";
   syncThemeGrid();}
 applyTheme();
 // （初始输入框值已由 applyTheme 末尾按主题同步；旧全局 bg_image 在 loadCfg 迁移至 bg_by_theme）
-/*2026-10-06 主题预设分组（方案A：仅展示层合并，主题数据不动）：暖白/暖陶/夜航 与 极简/黑夜 各自组卡 + seg 变体切换*/
-var THEME_GRP={sms:["warm","terra","night"],claude:["claude","dark"]};
-var THEME_DESC={warm:"暖白 · 短信式",wx:"微信绿 · 微信式",claude:"灰白 · Claude 风",dark:"深色 · Claude 风",glass:"清透 · 毛玻璃风",terra:"赤陶 · 编辑式",night:"墨夜灯塔 · 衬线慢排",crt:"琥珀 · CRT"};
-function syncThemeGrid(){var name=THEME_PRESETS[cfg.theme]?cfg.theme:"warm";var grid=document.getElementById("themeGrid");if(!grid)return;grid.querySelectorAll(".theme-choice").forEach(function(card){var g=card.getAttribute("data-group");var inGroup=g&&THEME_GRP[g]&&THEME_GRP[g].indexOf(name)>-1;card.classList.toggle("active",card.getAttribute("data-theme")===name||inGroup);if(inGroup){card.setAttribute("data-theme",name);var sw=card.querySelector(".theme-swatch");if(sw)sw.className="theme-swatch"+(name==="warm"?"":" "+name);var st=card.querySelector("strong");if(st)st.textContent=THEME_PRESETS[name].name;var sm=card.querySelector("small");if(sm)sm.textContent=THEME_DESC[name]||sm.textContent;card.querySelectorAll(".seg button").forEach(function(sb){sb.classList.toggle("active",sb.getAttribute("data-v")===name);});}});}
 const themeGrid=document.getElementById("themeGrid");if(themeGrid)themeGrid.addEventListener("click",function(e){const segBtn=e.target.closest(".seg button");if(segBtn){cfg.theme=segBtn.getAttribute("data-v")||"warm";saveCfg();applyTheme();renderAllNoAnim(true);return;}const b=e.target.closest(".theme-choice");if(!b)return;cfg.theme=b.dataset.theme||"warm";saveCfg();applyTheme();renderAllNoAnim(true);});   // 2026-09-25：切主题保留滚动位置与已补载窗口（原 renderAll() 会重置窗口并跳到底部）；2026-10-06 组卡 seg 按钮优先分支
 populateSettings();
 // 设置分组：点折叠头展开对应组、其余收起（一屏内折叠，不单独成页）
