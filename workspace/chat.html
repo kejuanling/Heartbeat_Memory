@@ -2646,6 +2646,22 @@ function renderTextBlocks(text){
   let html="";
   for(let b of blocks){
     b=b.trim(); if(!b)continue;
+    // 2026-10-06 1006-13 新增 markdown 表格渲染：首行表头 + 第二行分隔符（| --- | :---: |）才识别，
+    // 避免误伤普通含竖线文本。分隔行剔除；表头行 <th>，数据行 <td>；单元格走 inlineMd 支持行内语法。
+    const _tblRows=b.split("\n").filter(function(x){return x.trim();});
+    if(_tblRows.length>=2 && /^\s*\|?[\s:|-]+\|?\s*$/.test(_tblRows[1]) && _tblRows[0].indexOf("|")>=0){
+      const _sepRe=/^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+      const _cells=function(row){return row.replace(/^\s*\|?\s*/,"").replace(/\s*\|?\s*$/,"").split("|").map(function(c){return inlineMd(c.trim());});};
+      let _h="<table>"; let _first=true;
+      for(const _row of _tblRows){
+        if(_sepRe.test(_row)) continue;
+        const cs=_cells(_row);
+        if(_first){ _h+="<thead><tr><th>"+cs.join("</th><th>")+"</th></tr></thead><tbody>"; _first=false; }
+        else{ _h+="<tr><td>"+cs.join("</td><td>")+"</td></tr>"; }
+      }
+      _h+="</tbody></table>";
+      html+=_h; continue;
+    }
     let m=b.match(/^(#{1,4})\s+(.+)$/);
     if(m){const l=m[1].length;html+="<h"+l+">"+inlineMd(m[2])+"</h"+l+">";continue;}
     if(/^>/.test(b)){const lines=b.split("\n").map(x=>x.replace(/^>\s?/,"")).join("<br>");html+="<blockquote>"+inlineMd(lines)+"</blockquote>";continue;}
