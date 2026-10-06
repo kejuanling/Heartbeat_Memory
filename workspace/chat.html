@@ -1568,7 +1568,7 @@ body[data-theme="crtlight"] #chat[data-layout="crt"] .msg.user .bubble{
 }
 body[data-theme="crtlight"] #chat[data-layout="crt"] .msg.user .bubble::before{
   content:"涵@港口:~$ ";
-  color:#B0A283;
+  color:var(--accent);
   text-shadow:none;
 }
 
@@ -1611,7 +1611,7 @@ body[data-theme="crtlight"] #chat[data-layout="crt"] .rw-wrap>*:first-child:last
 /* 005 消息流底部 40% 留白 */
 /* 006b 用户命令内联：markdown 的块级段落拍扁成行内，提示符与命令同一行 */
 body[data-theme="crtlight"] #chat[data-layout="crt"] .msg.user .bubble p{display:inline;margin:0!important}
-body[data-theme="crtlight"] #chat[data-layout="crt"] .msg.user .bubble p+p::before{content:"\A涵@港口:~$ ";white-space:pre;color:#B0A283;text-shadow:none}
+body[data-theme="crtlight"] #chat[data-layout="crt"] .msg.user .bubble p+p::before{content:"\A涵@港口:~$ ";white-space:pre;color:var(--accent);text-shadow:none}
 /* 007 AI 前缀：谢@机房（正文较长，前缀作文件头行，不内联拍扁） */
 body[data-theme="crtlight"] #chat[data-layout="crt"] .msg.ai .bubble::before{
   content:"谢@机房:~$ ";display:inline;color:#B0A283;
@@ -4608,6 +4608,7 @@ async function send(){
   const _newMid=newMsgId();
   msgs.push({id:_newMid,role:"user",content:userContent,time:new Date().toISOString(), _callB:(_call&&_call.open)?_call.batchId:undefined});
   inputEl.value="";inputEl.style.height="auto";imgData=[];fileData=[];renderPreviews();
+  syncFixedFooterPad();
   updateSelBar();
   renderAll();scrollBottom();     // 先立即显示用户消息，再进入 AI 加载/流式
   request(msgs,true);
@@ -4644,7 +4645,19 @@ sendBtn.addEventListener("click",()=>{
   if(sending&&chatEl&&(chatEl.dataset.layout==="claude"||chatEl.dataset.layout==="crt")){ stopGeneration(); return; }
   send();
 });
-inputEl.addEventListener("input",()=>{inputEl.style.height="auto";inputEl.style.height=Math.min(inputEl.scrollHeight,120)+"px";});
+function syncFixedFooterPad(){
+  // 1006-19：claude/crt 底栏 fixed 布局下，输入框变高时聊天区底部留白跟随底栏实际高度并自动滚底，防最新消息被盖
+  const f=document.querySelector("footer");
+  if(!f||!chatEl)return;
+  if(getComputedStyle(f).position!=="fixed")return;
+  const pad=Math.max(f.offsetHeight+24,Math.round(window.innerHeight*0.25));
+  chatEl.style.setProperty("padding-bottom","calc(env(safe-area-inset-bottom) + "+pad+"px)","important");
+  if(nearBottom())scrollBottom();
+}
+inputEl.addEventListener("input",()=>{
+  inputEl.style.height="auto";inputEl.style.height=Math.min(inputEl.scrollHeight,120)+"px";
+  syncFixedFooterPad();
+});
 inputEl.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}});
 
 /* ================= 按住说话（浏览器 SpeechRecognition，向上滑取消） ================= */
@@ -9967,7 +9980,7 @@ body:is([data-theme="crt"],[data-theme="crtlight"]):has(#chat[data-layout="crt"]
 body:is([data-theme="crt"],[data-theme="crtlight"]):has(#chat[data-layout="crt"]) footer .inputbar #input{order:1}
 body:is([data-theme="crt"],[data-theme="crtlight"]):has(#chat[data-layout="crt"]) footer .inputbar #imgBtn{order:2}
 body:is([data-theme="crt"],[data-theme="crtlight"]):has(#chat[data-layout="crt"]) .jump-fab{display:none!important}
-body:is([data-theme="crt"],[data-theme="crtlight"]):has(#chat[data-layout="crt"]) #chat[data-layout="crt"]{padding-bottom:calc(env(safe-area-inset-bottom) + 20%)!important}
+body:is([data-theme="crt"],[data-theme="crtlight"]):has(#chat[data-layout="crt"]) #chat[data-layout="crt"]{padding-bottom:calc(env(safe-area-inset-bottom) + 25vh)!important}
 /* 2026-10-05 增强：fab 默认 10% 淡隐、hover/点击/展开 40%；AI 流式输出块光标 */
 body:is([data-theme="crt"],[data-theme="crtlight"]):has(#chat[data-layout="crt"]) .claude-fab-left,
 body:is([data-theme="crt"],[data-theme="crtlight"]):has(#chat[data-layout="crt"]) .claude-fab-right{
