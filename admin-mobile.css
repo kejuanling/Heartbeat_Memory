@@ -830,7 +830,13 @@
  .mp-js-vol{font-size:14px;font-weight:700}
  .mp-js-vol.stable{color:#27845a}.mp-js-vol.volatile{color:#b8860b}.mp-js-vol.situational{color:#c0392b}
  /* ===== 相似记忆清单（每条带关系标签 + 匹配分 + 理由 + 沉底按钮） ===== */
- .mp-sim{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff}
+ .mp-sugg{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0 0;padding:7px 10px;border:1px dashed var(--accent);border-radius:10px;background:#f5f9ff;font-size:12px}
+.mp-sugg-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;background:var(--accent);color:#fff;font-weight:600;font-size:11px}
+.mp-sugg-why{flex:1;min-width:0;color:var(--text2);line-height:1.5;word-break:break-word}
+.mp-sugg-btn{margin-left:auto;padding:4px 12px;border:1px solid var(--accent);border-radius:8px;background:#fff;color:var(--accent);font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
+.mp-sugg-btn:hover{background:var(--accent);color:#fff}
+.mp-sugg-btn:disabled{opacity:.55;cursor:default}
+.mp-sim{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff}
  .mp-sim-h{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 10px;background:#f5f0f1;font-size:11px;color:var(--text2);font-weight:600;flex-wrap:wrap}
  .mp-sim-i{display:flex;align-items:flex-start;gap:10px;padding:9px 10px;border-top:1px solid var(--border);background:#fafafa}
  .mp-sim-main{flex:1;min-width:0}

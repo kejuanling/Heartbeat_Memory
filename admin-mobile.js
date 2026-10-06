@@ -3469,6 +3469,26 @@ function ccArmAllGapAutoLoad(){
       loadReviewQueue();
     }catch(e){ toast('网络错误: '+e.message); }
   }
+  // 1007：门卫分类建议「更换」——一键把待审条目的分类改成门卫建议值（复用 edit 接口，审批时按新分类入库）
+  async function applySuggestedKind(id){
+    if(!id){ toast('缺少待审条目 id'); return; }
+    const q=window.__reviewQueue||[];
+    let it=null;
+    q.forEach(function(x){ if(x.id===id) it=x; });
+    const sk=it&&it.judge&&it.judge.suggested_kind;
+    if(!sk){ toast('没有可应用的建议分类'); return; }
+    if(!confirm('把这条待审记忆的分类改为「'+sk+'」？审批通过后将按新分类入库。')) return;
+    const btn=document.getElementById('sugg-btn-'+id);
+    if(btn){ btn.disabled=true; btn.textContent='更换中…'; }
+    try{
+      const r=await apiRequest('POST', ADMIN_API+'/memory-review/queue/'+encodeURIComponent(id)+'/edit', {kind: sk});
+      if(!r.ok){ toast('更换失败: '+(r.error||('HTTP '+r.status))); if(btn){ btn.disabled=false; btn.textContent='更换'; } return; }
+      const d=r.data||{};
+      if(d.error){ toast('更换失败: '+d.error); if(btn){ btn.disabled=false; btn.textContent='更换'; } return; }
+      toast('已应用建议分类：'+sk);
+      loadReviewQueue();
+    }catch(e){ toast('网络错误: '+e.message); if(btn){ btn.disabled=false; btn.textContent='更换'; } }
+  }
   async function loadReviewQueue(){
     try{
       const r=await fetch(ADMIN_API + '/memory-review/queue');
@@ -3496,6 +3516,17 @@ function ccArmAllGapAutoLoad(){
     const j=it&&it.judge;
     if(!j)return '';
     let h='';
+    // --- 1007：门卫分类建议（只建议不操作）——建议分类与当前不一致时显示徽标 + 更换按钮 ---
+    const sk=j.suggested_kind||null;
+    const curKind=it.candidate&&it.candidate.kind;
+    if(sk && sk!==curKind){
+      const SK_LABEL={fact:'事实',rule:'规则',event:'事件'};
+      h+='<div class="mp-sugg">'
+        +'<span class="mp-sugg-badge">建议 '+escapeHtml(SK_LABEL[sk]||sk)+'</span>'
+        +(j.suggested_kind_reason?'<span class="mp-sugg-why">'+escapeHtml(j.suggested_kind_reason)+'</span>':'')
+        +'<button type="button" class="mp-sugg-btn" id="sugg-btn-'+escapeHtml(it.id)+'" onclick="applySuggestedKind(\''+it.id+'\')">更换</button>'
+        +'</div>';
+    }
     // --- 两个分数卡 ---
     const w=(typeof j.worth==='number')?j.worth:null;
     const wPct=w!=null?Math.round(w*100):null;

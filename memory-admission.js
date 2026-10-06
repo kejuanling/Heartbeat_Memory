@@ -89,7 +89,7 @@ function readEnvValue(key) {
 function fmtW(w) { return (w == null) ? "-" : Math.round(w * 100) + "%"; }
 
 // 1004-04：单次 judge 调用（existing 为 null 表示"无相似对照"，只取 worth/volatility）。
-// 返回 {ok:true, relation, relation_reason, worth, worth_reason, volatility, volatility_reason}
+// 返回 {ok:true, relation, relation_reason, worth, worth_reason, volatility, volatility_reason, suggested_kind, suggested_kind_reason}
 // 或 {ok:false, error}。
 async function runJudge(candidateText, existingEntry, detection, opts) {
   try {
@@ -258,12 +258,14 @@ function createAdmission(opts = {}) {
       try { hits = await findSimilarExisting(mainStore, text); }
       catch (e) { judgeNote = "相似检索失败(" + ((e && e.message) || e) + ")"; }
       let worth = null, worthReason = null, volatility = null, volatilityReason = null;
+      let suggestedKind = null, suggestedKindReason = null;   // 1007：门卫分类建议（只建议不操作）
       if (!hits.length) {
         // 无相似：仍跑一次 judge，只为拿 worth / volatility（用户 1004-04 拍板：没有相似也跑）
         const jr = await runJudge(text, null, detection, opts);
         if (jr && jr.ok) {
           worth = jr.worth; worthReason = jr.worth_reason;
           volatility = jr.volatility; volatilityReason = jr.volatility_reason;
+          suggestedKind = jr.suggested_kind || null; suggestedKindReason = jr.suggested_kind_reason || null;
           judgeNote = "judge(无相似):worth=" + fmtW(worth) + "/" + (volatility || "-");
         } else if (jr) judgeNote = "judge 失败(" + jr.error + ")";
       } else {
@@ -278,6 +280,8 @@ function createAdmission(opts = {}) {
             item.judge_confidence = jr.confidence;
             // worth/volatility 是「候选记忆本身」的属性，取第一条成功判定的即可（同一候选，多个对照）
             if (worth == null && jr.worth != null) { worth = jr.worth; worthReason = jr.worth_reason; volatility = jr.volatility; volatilityReason = jr.volatility_reason; }
+            // 1007：分类建议同 worth 一样是候选本身属性，取第一条成功判定的
+            if (suggestedKind == null && jr.suggested_kind) { suggestedKind = jr.suggested_kind; suggestedKindReason = jr.suggested_kind_reason || null; }
           } else if (jr) {
             item.judge_error = jr.error;
           }
@@ -287,7 +291,8 @@ function createAdmission(opts = {}) {
           + similarList.map(x => x.relation || "?").join("/") + ")/worth=" + fmtW(worth);
       }
       judgeMeta = { worth, worth_reason: worthReason, volatility, volatility_reason: volatilityReason,
-                    similar: similarList };
+                    similar: similarList,
+                    suggested_kind: suggestedKind, suggested_kind_reason: suggestedKindReason };
       // 1004-04：命中相似一律进 review（不再 duplicate→reject、不再 coexist→admit、不再生成合并草稿）
       if (similarList.length) {
         action = "review";

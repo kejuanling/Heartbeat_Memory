@@ -4,7 +4,7 @@
 // Judge Adapter（C6）——Admission 流程中唯一允许 LLM 的模块（16.txt 契约）
 // 边界：只判「候选 × 既有」的关系并可选产出合并文本；不写任何文件；不 require
 // state_executor / memory-v2 / 旧记忆模块；不改 admission 决策（本模块对调用方只给建议）。
-// 输出（0928 扩展四键）：{ relation, confidence, reason, merged_text }
+// 输出（0928 扩展四键；1007 加分类建议）：{ relation, confidence, reason, merged_text, suggested_kind, suggested_kind_reason }
 //   relation ∈ duplicate | update | contradiction | coexist | need_review
 //   merged_text：duplicate/update 时 LLM 合并后的唯一记忆文本（可空→调用方回退原行为）；
 //                coexist/need_review 时恒为 null
@@ -31,7 +31,8 @@ function judgeMock(candidateText, existingText) {
   const c = normalizeText(candidateText);
   const e = normalizeText(existingText);
   const M = (relation, conf, reason) => ({ relation, confidence: conf, relation_reason: reason,
-    worth: null, worth_reason: null, volatility: null, volatility_reason: null, merged_text: null });
+    worth: null, worth_reason: null, volatility: null, volatility_reason: null, merged_text: null,
+    suggested_kind: null, suggested_kind_reason: null });
   if (!c || !e) return M("need_review", 0.5, "mock：空输入无法判定");
   if (c === e) return M("duplicate", 1, "mock：规范化后完全一致");
   if (e.includes(c) || c.includes(e)) {
@@ -70,8 +71,9 @@ const JUDGE_TEMPLATE_DEFAULT =
   "价值判断（只针对【候选】这条记忆本身，与【既有】无关，即使没有相似也要判断）：\n" +
   "- worth=这条候选值得长期保留吗（0 到 1 的小数）：0.9-1.0 长期稳定且会反复影响互动（性格、长期偏好、约定、边界、底线）；0.6-0.9 有用但不一定常触发（作息习惯、饮食偏好、说话风格；以及值得记住的具体事 event——做过的东西、重要经历、之后聊天还可能引用的一次性事件）；0.3-0.6 偏事实记录，保留价值有限（普通单次细节、一般事实记录）；0-0.3 不该进长期记忆（当日状态、临时情绪、吃喝琐事、无信息量的聊天碎片）。\n" +
   "- volatility 三选一：stable=不会随时间改变（性格、喜好、长期模式）；volatile=会随时间改变但当前描述仍成立（住址、在读状态、当前作息、当前关系阶段）；situational=一次性事件或具体情境——先分清两类：值得记住的具体事（event：做过的东西、重要时刻、之后还可能被聊到、能引用的信息）仍应入库，worth 按上面的 event 档给；纯粹一次性琐事（吃喝、寒暄、某天偶然发生的小事、某次对话的细碎细节）才判本不该进长期记忆库。\n" +
+  "分类建议（1007 加，只建议不操作）：suggested_kind 判断【候选】这条的分类是否与内容实质相符——fact=稳定事实（偏好/经历/双方之间的稳定事实）；rule=规则、边界、承诺、交互约定（\"以后不要……\"\"记住……\"这类）；event=具体发生过的一件事或做出来的东西（做过的东西、重要经历、之后聊天还可能引用的一次性事件）。分类相符填 null（不用换）；明显不符才建议改成 fact/rule/event 之一；拿不准填 null。suggested_kind_reason 一句话说明为什么建议换（只有 suggested_kind 非 null 时才写）。\n" +
   "约束：只依据给定文本判定，不臆测文本之外的信息；字面包含关系本身不构成 duplicate 的充分理由（先检查形态与分层）；禁止输出规定词之外的词；merged_text 恒输出 null（合并由人工决定，机器不做合并）；三个 reason 各只写一句话。\n" +
-  '输出单行 JSON：{"relation":"duplicate|update|contradiction|coexist|need_review","confidence":0到1的小数,"relation_reason":"一句话","worth":0到1的小数,"worth_reason":"一句话","volatility":"stable|volatile|situational","volatility_reason":"一句话","merged_text":null}\n' +
+  '输出单行 JSON：{"relation":"duplicate|update|contradiction|coexist|need_review","confidence":0到1的小数,"relation_reason":"一句话","worth":0到1的小数,"worth_reason":"一句话","volatility":"stable|volatile|situational","volatility_reason":"一句话","merged_text":null,"suggested_kind":null,"suggested_kind_reason":null}\n' +
   "【既有】（${existing_kind}）：${existing_text}\n" +
   "【候选】（${candidate_kind}）：${candidate_text}";
 
@@ -142,6 +144,11 @@ function parseJudgeOutput(raw) {
   const vol = String(obj.volatility == null ? "" : obj.volatility).trim();
   const volOk = VOLATILITIES.indexOf(vol) >= 0;
   // merged_text：1004 起判重不再自动合并，恒为 null（保留字段仅供契约兼容）
+  // 1007：suggested_kind 分类建议（只建议不操作）——枚举 fact|rule|event|null，非法/缺失降级 null
+  const sk = String(obj.suggested_kind == null ? "" : obj.suggested_kind).trim();
+  const skOk = sk === "" || sk === "null" || ["fact", "rule", "event"].indexOf(sk) >= 0;
+  const suggested_kind = (skOk && sk !== "" && sk !== "null") ? sk : null;
+  const suggested_kind_reason = suggested_kind ? String(obj.suggested_kind_reason || "").slice(0, 200) : null;
   return {
     ok: true,
     relation: obj.relation,
@@ -153,6 +160,8 @@ function parseJudgeOutput(raw) {
     volatility: volOk ? vol : null,
     volatility_reason: volOk ? String(obj.volatility_reason || "").slice(0, 200) : null,
     merged_text: null,
+    suggested_kind: suggested_kind,
+    suggested_kind_reason: suggested_kind_reason,
   };
 }
 
@@ -160,7 +169,7 @@ function parseJudgeOutput(raw) {
 async function judgeLLM(candidateText, existingText, opts = {}) {
   const call = opts.callLLM;
   if (typeof call !== "function") {
-    return { relation: "need_review", confidence: 0.5, relation_reason: "llm 通道未配置（callLLM 缺失），转人工", worth: null, worth_reason: null, volatility: null, volatility_reason: null, merged_text: null };
+    return { relation: "need_review", confidence: 0.5, relation_reason: "llm 通道未配置（callLLM 缺失），转人工", worth: null, worth_reason: null, volatility: null, volatility_reason: null, merged_text: null, suggested_kind: null, suggested_kind_reason: null };
   }
   const prompt = buildPrompt(candidateText, existingText, opts.meta || {});
   let lastErr = "unknown";
