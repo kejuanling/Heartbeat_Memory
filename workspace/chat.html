@@ -2205,7 +2205,13 @@ async function pushSettingsToCloud(){
 }
 async function pullSettingsFromCloud(){
   try{
-    const r=await fetch(CLOUD_SETTINGS_URL,{ headers:{ "X-CSRF-Token":getCookie("admin_csrf") }, credentials:"include" });
+    // 2026-10-07 1007-02 P3：设置接口挂起时 init 会卡死首屏（无超时）。加 8s 超时，失败走降级。
+    const _ac=new AbortController();
+    const _t=setTimeout(function(){ _ac.abort(); },8000);
+    let r;
+    try{
+      r=await fetch(CLOUD_SETTINGS_URL,{ headers:{ "X-CSRF-Token":getCookie("admin_csrf") }, credentials:"include", signal:_ac.signal });
+    }finally{ clearTimeout(_t); }
     if(!r.ok) return false;
     const j=await r.json().catch(function(){return {};});
     if(!j || j.exists!==true || !j.data) return false;
@@ -4957,7 +4963,22 @@ function saveEdit(){
   const m=msgs[editIdx];if(!m){closeEdit();return;}
   const v=editInput.value;
   const mid=m.id;   // 编辑前记住 id，用于 diff 定点同步
-  if(!mid){ closeEdit(); showToast("该消息无稳定 id，仅本地修改，无法同步网关"); return; }
+  // 2026-10-07 1007-02 P2：无稳定 id（本地导入的旧消息/异常数据）退化为纯本地修改——
+  // 原实现提示「仅本地修改」却直接 return 没改本地，文案与行为不符。
+  // 与成功分支同一口径：图片消息保留图、text 更新；丢弃 stream_timeline 走旧数据合成。
+  if(!mid){
+    let _nc;
+    if(Array.isArray(m.content)&&m.content.some(x=>x&&x.type==="image_url")){
+      const _imgs=m.content.filter(x=>x&&x.type==="image_url");
+      _nc=v?[..._imgs,{type:"text",text:v}]:_imgs;
+    }else{ _nc=v; }
+    m.content=_nc;
+    if(Array.isArray(m.stream_timeline)&&m.stream_timeline.length){ m.stream_timeline=null; }
+    renderAll();
+    closeEdit();
+    showToast("该消息无稳定 id，已本地修改（无法同步网关）");
+    return;
+  }
   let newContent;
   if(Array.isArray(m.content)&&m.content.some(x=>x&&x.type==="image_url")){
     const imgs=m.content.filter(x=>x&&x.type==="image_url");

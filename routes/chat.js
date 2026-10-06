@@ -776,7 +776,16 @@ module.exports = function registerChatRoutes(app, deps) {
           }
           changed = true;
         }
-        if (changed) { saveTimeline(timeline, sessionId); sseNotify(sessionId); }
+        if (changed) {
+          const saved = saveTimeline(timeline, sessionId);
+          // 2026-10-07 1007-02 P1：saveTimeline 三道写守卫（损坏/快照过期/墓碑）拒写时返回 false，
+          // 此前不检查返回值 → 接口照回 ok:true，前端显示「已保存」实际未落盘。拒写时回 ok:false。
+          if (!saved) {
+            console.error("[timeline-sync] 编辑/删除未落盘：saveTimeline 拒写 (session=" + (sessionId || 'default') + ", 改=" + ok + ", 删=" + del + ")");
+            return reply.send({ ok: false, error: "时间线写入被拒（文件损坏/快照过期/会话墓碑），本次修改未保存", edited: ok, deleted: del, missed: miss, session_id: sessionId || 'default' });
+          }
+          sseNotify(sessionId);
+        }
         console.log(`[timeline-sync] diff编辑/删除同步 (session=${sessionId || 'default'}, 改=${ok}, 删=${del}, 未命中=${miss})`);
         return reply.send({ ok: true, edited: ok, deleted: del, missed: miss, session_id: sessionId || 'default' });
       }
