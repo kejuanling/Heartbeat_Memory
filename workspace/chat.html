@@ -4650,7 +4650,7 @@ function syncFixedFooterPad(){
   const f=document.querySelector("footer");
   if(!f||!chatEl)return;
   if(getComputedStyle(f).position!=="fixed")return;
-  const pad=Math.max(f.offsetHeight+24,Math.round(window.innerHeight*0.25));
+  const pad=Math.max(f.offsetHeight+24,Math.round(chatEl.clientWidth*0.25));
   chatEl.style.setProperty("padding-bottom","calc(env(safe-area-inset-bottom) + "+pad+"px)","important");
   if(nearBottom())scrollBottom();
 }
@@ -9980,7 +9980,7 @@ body:is([data-theme="crt"],[data-theme="crtlight"]):has(#chat[data-layout="crt"]
 body:is([data-theme="crt"],[data-theme="crtlight"]):has(#chat[data-layout="crt"]) footer .inputbar #input{order:1}
 body:is([data-theme="crt"],[data-theme="crtlight"]):has(#chat[data-layout="crt"]) footer .inputbar #imgBtn{order:2}
 body:is([data-theme="crt"],[data-theme="crtlight"]):has(#chat[data-layout="crt"]) .jump-fab{display:none!important}
-body:is([data-theme="crt"],[data-theme="crtlight"]):has(#chat[data-layout="crt"]) #chat[data-layout="crt"]{padding-bottom:calc(env(safe-area-inset-bottom) + 25vh)!important}
+body:is([data-theme="crt"],[data-theme="crtlight"]):has(#chat[data-layout="crt"]) #chat[data-layout="crt"]{padding-bottom:calc(env(safe-area-inset-bottom) + 25%)!important}
 /* 2026-10-05 增强：fab 默认 10% 淡隐、hover/点击/展开 40%；AI 流式输出块光标 */
 body:is([data-theme="crt"],[data-theme="crtlight"]):has(#chat[data-layout="crt"]) .claude-fab-left,
 body:is([data-theme="crt"],[data-theme="crtlight"]):has(#chat[data-layout="crt"]) .claude-fab-right{
