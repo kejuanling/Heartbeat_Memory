@@ -277,20 +277,6 @@
          原先这里有一行「压缩只走状态机…」的说明（cs-mode），用户要求去掉：
          页面上只有一个视图时，这句话是废话。 -->
 
-    <!-- 1007 上下文快照 v2：前缀缓存（人设+V2块+工具+历史冻死，三类事件重建） -->
-    <div class="cs-card" style="margin-bottom:14px">
-      <div class="cs-state-head">
-        <span class="cs-state-title">上下文快照（前缀缓存）</span>
-        <span class="cs-state-meta" id="snapv2-meta"></span>
-      </div>
-      <div class="cs-state-body" id="snapv2-body" style="font-size:12px;color:var(--text3)">加载中…</div>
-      <div class="cs-acts">
-        <button type="button" class="cs-btn" onclick="snapv2Refresh()">刷新</button>
-        <button type="button" class="cs-btn danger" onclick="snapv2Rebuild()">手动重建</button>
-      </div>
-      <div class="cs-chain-hint">快照内容全部冻死，只有状态摘要更新 / 编辑消息 / 历史摘要更新会触发自动重建；工具定义、人设、V2 块变化不重建，靠「手动重建」刷新。</div>
-    </div>
-
     <!-- 状态机面板 -->
     <div id="cs-panel" class="cs-panel">
 
@@ -805,63 +791,6 @@
 .hide{display:none!important}
 </style>
 
-<script>
-/* ── 1007 上下文快照 v2：前缀缓存管理（压缩页顶部卡片） ─────── */
-(function () {
-  "use strict";
-  var SNAP_API = location.pathname.indexOf('/heartbeat/admin/') === 0 ? '/heartbeat/admin/ctx-snapshot-v2' : '/admin/ctx-snapshot-v2';
-  function snapv2Sid() {
-    var sel = document.getElementById('adm-session-sel');
-    return (sel && sel.value) || '';
-  }
-  window.snapv2Refresh = function () {
-    var sid = snapv2Sid();
-    var body = document.getElementById('snapv2-body');
-    var meta = document.getElementById('snapv2-meta');
-    if (!sid) { if (body) body.textContent = '未选择会话（请在上方选择要操作的会话）'; return; }
-    if (body) body.textContent = '加载中…';
-    fetch(SNAP_API + '?session=' + encodeURIComponent(sid), { credentials: 'same-origin' })
-      .then(function (r) { return r.json(); })
-      .then(function (j) {
-        if (!j || !j.ok) { if (body) body.textContent = '读取失败: ' + (j && j.error || '未知'); return; }
-        if (meta) meta.textContent = j.exists ? ('快照 ' + (j.updated_at || '').replace('T', ' ').slice(0, 16)) : '无快照';
-        if (body) {
-          if (!j.exists) { body.textContent = '该会话还没有快照——下次请求会自动生成（会话新建即建）。'; }
-          else {
-            body.innerHTML =
-              '历史消息 ' + j.history_len + ' 条 · V2 注入块 ' + j.v2_blocks + ' 个 · 工具 ' +
-              (typeof j.tools === 'number' ? j.tools + ' 个' : j.tools) + ' · 尾部起点 tail_start=' + j.tail_start +
-              (j.stale ? ' · <b style="color:#d33">已失效（下次请求重建）</b>' : ' · 生效中');
-          }
-        }
-      })
-      .catch(function (e) { if (body) body.textContent = '读取失败: ' + (e && e.message || e); });
-  };
-  window.snapv2Rebuild = function () {
-    var sid = snapv2Sid();
-    if (!sid) { alert('请先选择会话'); return; }
-    if (!confirm('手动重建该会话的上下文快照？
-
-会删除现有快照，下次请求自动按最新人设/V2块/工具/历史重新生成。')) return;
-    fetch(SNAP_API + '/rebuild', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session: sid })
-    })
-      .then(function (r) { return r.json(); })
-      .then(function (j) {
-        if (j && j.ok) { alert('已触发重建：' + (j.message || '')); snapv2Refresh(); }
-        else { alert('重建失败: ' + (j && j.error || '未知')); }
-      })
-      .catch(function (e) { alert('重建失败: ' + (e && e.message || e)); });
-  };
-  // 会话切换时联动刷新
-  document.addEventListener('DOMContentLoaded', function () {
-    var sel = document.getElementById('adm-session-sel');
-    if (sel) sel.addEventListener('change', function () { setTimeout(snapv2Refresh, 200); });
-  });
-})();
 
 <script>
 /* ── 会话状态机前端 ────────────────────────────────────────────── */
