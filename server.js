@@ -1852,6 +1852,46 @@ app.addHook("onRequest", (req, reply, done) => {
 // ========================
 // Models
 // ========================
+// ---- 快照过期检测（1008-10：会话列表「重建快照」红点，纯只读）----
+// 判定「快照冻结前缀与最新实际状态有变化」（新消息追加不算）：
+//   format 旧格式快照（无 v3 content/snap_point）；edited 失效标记（编辑/状态机/压缩）；
+//   tools 当前注入工具指纹 vs 快照冻结指纹；system 当前系统提示 vs 快照。
+let _injectedToolsFpCache = null; // 全局注入工具指纹缓存（MCP 配置热重载时同步失效）
+async function injectedToolsFp() {
+  if (_injectedToolsFpCache) return _injectedToolsFpCache.fp;
+  try {
+    const mcpSvc = require("./mcp-service");
+    const routes = await mcpSvc.loadTools(getMcpClients());
+    const tools = mcpSvc.toOpenAITools(routes);
+    _injectedToolsFpCache = { fp: require("./context-snapshot-v2").toolsFpOf(tools), at: Date.now() };
+  } catch (e) {
+    _injectedToolsFpCache = { fp: null, at: Date.now() }; // MCP 不可达：跳过 tools 维度（不误报）
+  }
+  return _injectedToolsFpCache.fp;
+}
+async function snapshotStaleOf(sessionId) {
+  try {
+    const sv2 = require("./context-snapshot-v2");
+    const snap = sv2.loadSnapshot(__dirname, sessionId);
+    if (!snap) return { stale: false, reasons: [] };
+    const reasons = [];
+    if (!Array.isArray(snap.content) || !Number.isFinite(snap.snap_point)) reasons.push("format");
+    if (sv2.isStale(__dirname, sessionId)) reasons.push("edited");
+    try {
+      const gfp = await injectedToolsFp();
+      if (gfp && Array.isArray(snap.tools) && snap.tools.length && sv2.toolsFpOf(snap.tools) !== gfp) reasons.push("tools");
+    } catch (e) {}
+    try {
+      const cur = (typeof resolveSessionSystemPrompt === "function") ? (resolveSessionSystemPrompt(sessionId) || "") : "";
+      if (String(snap.system || "") !== cur) reasons.push("system");
+    } catch (e) {}
+    return { stale: reasons.length > 0, reasons: reasons.slice(0, 4) };
+  } catch (e) {
+    return { stale: false, reasons: [] };
+  }
+}
+
+
 require("./routes/chat")(app, {
   baseDir: __dirname,
   configuredModelName,
@@ -1892,6 +1932,7 @@ require("./routes/chat")(app, {
   stripPosition,
   resolveChatModel,
   resolveSessionSystemPrompt,
+  snapshotStaleOf,
   sessionModelProviderOverride,
   saveSessionModelProviderOverride,
   sessionModelNameOverride,
@@ -4501,6 +4542,7 @@ app.put("/admin/mcp/servers", { preHandler: mcpManageAuth }, async (req, reply) 
     }).filter(function (s) { return s.id && s.name; });
     writeJsonFileAtomic(MCP_SERVERS_CONFIG, { servers: clean });
     _mcpClientsCache = null; // 强制下次重载
+    _injectedToolsFpCache = null; // 工具指纹缓存同步失效
     reply.send({ ok: true, restart: "hot-reload", count: clean.length });
   } catch (err) {
     console.error("[PUT /admin/mcp/servers] error:", err.message);

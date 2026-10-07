@@ -1004,6 +1004,23 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .session-item .s-op:hover{background:var(--accent-faint)}
 .session-item .s-more{margin-left:auto;border:none;background:none;color:var(--ink3);cursor:pointer;padding:3px 6px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;transition:all .12s}
 .session-item .s-more:hover{color:var(--session-action-hover-color,var(--accent-deep));background:var(--session-action-hover-bg,var(--accent-faint))}
+/* 1008-10：重建快照红点（主题色，点击弹横幅） */
+.snap-dot{width:10px;height:10px;border-radius:50%;background:var(--accent-deep,var(--accent,#d96a5a));box-shadow:0 0 5px rgba(var(--accent-rgb),.55);display:inline-block;flex:none;cursor:pointer;margin-left:auto;vertical-align:middle}
+/* 1008-10：顶部横幅弹窗（替代原生 alert/confirm/prompt；参考管理台 mp-reason-banner，层级最顶） */
+#bannerHost{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:1000;width:min(94vw,640px);display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.banner{pointer-events:auto;position:relative;background:var(--sheet-bg,var(--card-solid,rgba(255,255,255,.9)));backdrop-filter:blur(50px) saturate(1.15);-webkit-backdrop-filter:blur(50px) saturate(1.15);border:.5px solid var(--line);border-radius:12px;box-shadow:0 8px 40px rgba(var(--shadow-rgb),.16);padding:10px 38px 10px 14px;display:flex;flex-direction:column;gap:6px;animation:bannerIn .22s ease}
+.banner-title{font-size:13px;font-weight:600;color:var(--accent-deep,var(--accent));letter-spacing:.02em}
+.banner-text{font-size:13px;color:var(--ink2);line-height:1.7;word-break:break-word;white-space:pre-line}
+.banner-x{position:absolute;top:8px;right:10px;background:none;border:none;font-size:18px;color:var(--ink3,var(--ink2));cursor:pointer;padding:2px 6px;border-radius:6px;line-height:1;transition:all .2s}
+.banner-x:hover{background:rgba(0,0,0,.06);color:var(--ink)}
+.banner-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:2px}
+.banner-btn{border:1px solid var(--line);background:var(--bg1);color:var(--ink);padding:7px 16px;border-radius:9px;font-size:13px;cursor:pointer;transition:all .15s}
+.banner-btn:hover{filter:brightness(1.05)}
+.banner-btn.primary{background:var(--accent-grad,var(--accent));border-color:transparent;color:#fff;font-weight:600}
+.banner-btn.danger{background:rgba(var(--bad-rgb),.14);border-color:rgba(var(--bad-rgb),.35);color:var(--bad-deep,var(--bad))}
+.banner-input{width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:var(--bg1);color:var(--ink);font-size:13px;outline:none}
+.banner-input:focus{border-color:var(--accent)}
+@keyframes bannerIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
 .sess-menu{position:fixed;z-index:999;min-width:128px;background:var(--menu-bg,#fff);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 22px rgba(var(--shadow-rgb),.14);padding:5px;display:flex;flex-direction:column}
 .sess-menu.hidden{display:none}
 .sess-menu-item{border:none;background:none;text-align:left;padding:9px 14px;font-size:13px;color:var(--ink);border-radius:7px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:background .12s,color .12s;white-space:nowrap}
@@ -2760,6 +2777,106 @@ function dayDivider(t){
   const d=(t instanceof Date)?t:new Date(t);
   if(isNaN(d.getTime()))return "";
   return d.getFullYear()+"年"+pad(d.getMonth()+1)+"月"+pad(d.getDate())+"日";
+}
+// ---- 1008-10：顶部横幅弹窗（替代原生 alert/confirm/prompt；层级最高，参考管理台 mp-reason-banner）----
+let _bannerHostEl=null;
+function bannerHost(){
+  if(_bannerHostEl)return _bannerHostEl;
+  _bannerHostEl=document.createElement("div");
+  _bannerHostEl.id="bannerHost";
+  document.body.appendChild(_bannerHostEl);
+  return _bannerHostEl;
+}
+function _bannerButton(text,extra){
+  const b=document.createElement("button");
+  b.type="button";
+  b.className="banner-btn"+(extra&&extra.primary?" primary":"")+(extra&&extra.danger?" danger":"");
+  b.textContent=text;
+  return b;
+}
+function showBanner(opts){
+  const o=opts||{};
+  const host=bannerHost();
+  const el=document.createElement("div");
+  el.className="banner";
+  if(o.title){ const t=document.createElement("div"); t.className="banner-title"; t.textContent=o.title; el.appendChild(t); }
+  if(o.text){ const b=document.createElement("div"); b.className="banner-text"; b.textContent=o.text; el.appendChild(b); }
+  let done=false;
+  const finish=function(val,cb){
+    if(done)return; done=true;
+    if(el._t){ clearTimeout(el._t); el._t=null; }
+    if(el.parentNode) el.parentNode.removeChild(el);
+    if(cb) cb(val);
+  };
+  const x=document.createElement("button");
+  x.type="button"; x.className="banner-x"; x.innerHTML="&times;"; x.title="关闭";
+  x.addEventListener("click",function(){ finish(false, o.onCancel||null); });
+  el.appendChild(x);
+  let inputEl=null;
+  if(o.input){
+    inputEl=document.createElement("input");
+    inputEl.className="banner-input";
+    inputEl.value=(o.input.value!=null)?o.input.value:"";
+    inputEl.placeholder=o.input.placeholder||"";
+    el.appendChild(inputEl);
+  }
+  const actions=document.createElement("div"); actions.className="banner-actions";
+  const btns=(o.buttons&&o.buttons.length)?o.buttons:null;
+  if(btns){
+    btns.forEach(function(bcfg){
+      const b=_bannerButton(bcfg.text||"确定",bcfg);
+      b.addEventListener("click",function(){ finish(bcfg.value!==undefined?bcfg.value:true, bcfg.onClick||null); });
+      actions.appendChild(b);
+    });
+  }else if(o.type!=="info"){
+    const ok=_bannerButton(o.okText||"确定",{primary:true});
+    ok.addEventListener("click",function(){ finish(inputEl?inputEl.value:true, o.onOk||null); });
+    actions.appendChild(ok);
+    if(o.showCancel!==false){
+      const c=_bannerButton(o.cancelText||"取消",{danger:!!o.danger});
+      c.addEventListener("click",function(){ finish(false, o.onCancel||null); });
+      actions.appendChild(c);
+    }
+  }
+  if(actions.childNodes.length) el.appendChild(actions);
+  if(inputEl){
+    setTimeout(function(){ try{ inputEl.focus(); inputEl.select(); }catch(e){} },30);
+    inputEl.addEventListener("keydown",function(ev){
+      if(ev.key==="Enter"){ const _ok=actions.querySelector(".banner-btn.primary"); if(_ok) _ok.click(); }
+      else if(ev.key==="Escape"){ finish(false, o.onCancel||null); }
+    });
+  }
+  if(o.autoHide>0) el._t=setTimeout(function(){ finish(null, o.onTimeout||null); }, o.autoHide);
+  host.appendChild(el);
+  return el;
+}
+function bannerConfirm(text,opts){
+  const o=opts||{};
+  return new Promise(function(res){
+    showBanner({ type:"confirm", title:o.title||"确认操作", text:text, okText:o.okText||"确定", cancelText:o.cancelText||"取消", danger:o.danger, onOk:function(){res(true);}, onCancel:function(){res(false);} });
+  });
+}
+function bannerAlert(text,opts){
+  const o=opts||{};
+  showBanner({ type:"info", title:o.title||"提示", text:text, autoHide:o.autoHide||2600 });
+}
+function bannerPrompt(text,defaultValue,opts){
+  const o=opts||{};
+  return new Promise(function(res){
+    showBanner({ type:"prompt", title:o.title||"输入", text:text, okText:o.okText||"确定", cancelText:o.cancelText||"取消", input:{ value:defaultValue, placeholder:o.placeholder||"" }, onOk:function(v){ res(v); }, onCancel:function(){ res(null); } });
+  });
+}
+// 重建快照红点横幅：说明过期原因 + 立即重建（免二次确认）
+function showSnapStaleBanner(sid,reasons){
+  const map={ tools:"工具清单有变化（如新增/修改工具描述）", system:"系统提示词有变化（如人设/备份调整）", edited:"消息被编辑、压缩或状态摘要更新", format:"快照为旧格式，重建可升级到新结构" };
+  const lines=(reasons||[]).map(function(r){ return "· "+(map[r]||("前缀状态变化（"+r+"）")); });
+  showBanner({
+    type:"snapstale", title:"该会话快照已过期",
+    text:"重建后会立即应用最新内容：\n"+(lines.length?lines.join("\n"):"· 前缀状态有变化"),
+    okText:"立即重建", cancelText:"关闭",
+    onOk:function(){ snapRebuildSession(sid,true); },
+    onCancel:function(){}
+  });
 }
 function showToast(t){
   toastEl.textContent=t;toastEl.classList.add("show");
@@ -5158,7 +5275,7 @@ async function branchFromMsg(idx){
   showToast("已开启新分支会话");
 }
 actBranch.addEventListener("click",function(){ const idx=actIdx; if(idx<0)return; closeAct(); branchFromMsg(idx); });
-actRegen.addEventListener("click",()=>{
+actRegen.addEventListener("click",async ()=>{
   const idx=actIdx;
   if(sending||idx<0)return;
   const m=msgs[idx];
@@ -5173,7 +5290,7 @@ actRegen.addEventListener("click",()=>{
   if(ui<0){showToast("前面没有可参考的消息");closeAct();return;}
   // 2026-09-23：原生 confirm 的按钮文案无法自定义（只能是「确定 / 取消」），故在问句里
   // 显式引导用户点哪个按钮。用户明确要求不展示「删除范围」提示文案，故不再赘述。
-  if(!confirm("重新生成这条消息？\n\n▶ 点「确定」＝清空这条消息之后的内容，从这条重新发起\n▶ 点「取消」＝放弃，不做任何改动"))return;
+  if(!(await bannerConfirm("重新生成这条消息？\n\n▶ 点「确定」＝清空这条消息之后的内容，从这条重新发起\n▶ 点「取消」＝放弃，不做任何改动")))return;
   const base=msgs.slice(0,ui+1);
   // 2026-09-23：把锚点（重新发起的这条 user 消息）的 id 一并上报，服务端据此按 id 精确截断
   const _anchorId=(base[base.length-1]&&base[base.length-1].id)||"";
@@ -5483,7 +5600,7 @@ function renderPromptBackups(){
       +'</div>';
   }).join('');
   Array.prototype.forEach.call(el.querySelectorAll(".pb-item"),function(it){
-    it.addEventListener("click",function(ev){
+    it.addEventListener("click",async function(ev){
       const t=ev.target.closest?ev.target.closest("[data-pbact]"):null; if(!t) return;
       ev.stopPropagation();
       const act=t.getAttribute("data-pbact"), id=it.getAttribute("data-id");
@@ -5507,7 +5624,7 @@ function renderPromptBackups(){
             putPromptBackupOps([b],null).then(function(j){ showToast(j&&j.saved?"备份已更新":"备份更新失败"); renderPromptBackups(); });
           },"保存");
       } else if(act==="del"){
-        if(!confirm("删除这个提示词备份？引用它的会话将同步恢复为跟随全局人设。")) return;
+        if(!(await bannerConfirm("删除这个提示词备份？引用它的会话将同步恢复为跟随全局人设。"))) return;
         promptBackups=promptBackups.filter(function(x){return x.id!==id;});
         putPromptBackupOps(null,[id]).then(function(j){ showToast(j&&j.saved?"已删除（引用会话已恢复跟随全局）":"删除失败"); renderPromptBackups(); });
       }
@@ -5945,7 +6062,7 @@ async function saveMcpServers(){
   }catch(e){ mcpMsg.textContent="保存失败: "+e.message; }
 }
 async function deleteMcp(i){
-  if(!confirm("删除该 MCP 服务器？")) return;
+  if(!(await bannerConfirm("删除该 MCP 服务器？"))) return;
   const body={ servers: _mcpServers.filter(function(_,k){ return k!==i; }).map(function(s){ return { id:s.id, name:s.name, type:s.type, url:s.url, command:s.command, args:s.args||[], headers:s.headers||{}, allowTools:s.allowTools, blockTools:s.blockTools, enabled:s.enabled!==false }; }) };
   try{
     const r=await fetch("/heartbeat/admin/mcp/servers",{ method:"PUT", headers: mcpAuthHeaders(), body: JSON.stringify(body), credentials:"include" });
@@ -6280,7 +6397,7 @@ function renderModelRoles(roles){
   });
 }
 async function deleteProv(i){
-  if(!confirm("删除该 AI 供应商？")) return;
+  if(!(await bannerConfirm("删除该 AI 供应商？"))) return;
   const body={ providers: provPayloadList().filter(function(_,k){ return k!==i; }) };
   try{
     const r=await fetch("/heartbeat/admin/ai-providers",{ method:"PUT", headers: mcpAuthHeaders(), body: JSON.stringify(body), credentials:"include" });
@@ -6406,7 +6523,7 @@ async function setActiveVoiceProvider(i){
   await putVoiceConfig(body);
 }
 async function deleteVoiceProvider(i){
-  if(!confirm("删除该语音供应商？")) return;
+  if(!(await bannerConfirm("删除该语音供应商？"))) return;
   const removed=_voiceProviders[i];
   const body={ enabled:_voiceCfg.enabled, active_provider:(_voiceActiveId===removed.id?"":_voiceActiveId), providers:_voiceProviders.filter(function(_,k){return k!==i;}).map(function(x){return cleanVoiceProvider(x);}) };
   if(!body.active_provider && body.providers.length) body.active_provider=body.providers[0].id;
@@ -6440,7 +6557,7 @@ function renderVpDraftVoices(){
     inp.addEventListener('change',function(){ if(_voiceDraftVoices[+inp.dataset.vi]) _voiceDraftActive=_voiceDraftVoices[+inp.dataset.vi].value; });
   });
   vpVoicesEl.querySelectorAll('button[data-act="vdel"]').forEach(function(b){
-    b.addEventListener('click',function(){ if(!confirm("删除该音色？")) return; var i=+b.dataset.vi; var rm=_voiceDraftVoices[i]?_voiceDraftVoices[i].value:""; _voiceDraftVoices.splice(i,1); if(_voiceDraftActive===rm)_voiceDraftActive=""; renderVpDraftVoices(); });
+    b.addEventListener('click',async function(){ if(!(await bannerConfirm("删除该音色？"))) return; var i=+b.dataset.vi; var rm=_voiceDraftVoices[i]?_voiceDraftVoices[i].value:""; _voiceDraftVoices.splice(i,1); if(_voiceDraftActive===rm)_voiceDraftActive=""; renderVpDraftVoices(); });
   });
   // 点击音色行：设为当前音色并自动试听
   vpVoicesEl.querySelectorAll('.mcp-item').forEach(function(li){
@@ -6947,8 +7064,8 @@ document.getElementById("sessionBackdrop").onclick=closeDrawer;
 (function(){
   const b=document.getElementById("logoutBtn");
   if(!b) return;
-  b.addEventListener("click",function(){
-    if(!window.confirm("确定要退出登录吗？")){ closeSettingsDrawer(); return; }
+  b.addEventListener("click",async function(){
+    if(!(await bannerConfirm("确定要退出登录吗？"))){ closeSettingsDrawer(); return; }
     closeSettingsDrawer();
     try{ localStorage.removeItem(LS_LOGIN); }catch(e){}
     showLogin();
@@ -7321,20 +7438,20 @@ async function csAct(btn, sid){
     btn.disabled=true;
     try{
       var r = await csReq("/rollback", {method:"POST", query:"?session_id="+encodeURIComponent(sid), body:{ session: sid, version: Number(ver) }});
-      if(!r||r.ok===false){ alert("切回失败："+((r&&r.error)||"未知")); }
-    }catch(e){ alert("切回失败："+e.message); }
+      if(!r||r.ok===false){ bannerAlert("切回失败："+((r&&r.error)||"未知")); }
+    }catch(e){ bannerAlert("切回失败："+e.message); }
     btn.disabled=false;
     loadSessionCcState(sid);
     return;
   }
 
   if(act==="undo"){
-    if(!confirm("撤销最后一次并入？\n\n覆盖区间会退回，那段原文回到上下文里（可再次并入）。如果这一版顶掉过旧块，它们会一并放回来。")) return;
+    if(!(await bannerConfirm("撤销最后一次并入？\n\n覆盖区间会退回，那段原文回到上下文里（可再次并入）。如果这一版顶掉过旧块，它们会一并放回来。"))) return;
     btn.disabled=true;
     try{
       var r = await csReq("/undo", {method:"POST", query:"?session_id="+encodeURIComponent(sid), body:{ session: sid, confirm: true }});
-      if(!r||r.ok===false){ alert("撤销失败："+((r&&r.error)||"未知")); }
-    }catch(e){ alert("撤销失败："+e.message); }
+      if(!r||r.ok===false){ bannerAlert("撤销失败："+((r&&r.error)||"未知")); }
+    }catch(e){ bannerAlert("撤销失败："+e.message); }
     btn.disabled=false;
     loadSessionCcState(sid);
     return;
@@ -7606,12 +7723,16 @@ function openSessMenu(sid, anchorEl, inArchive){
     el.style.left=left2+"px"; el.style.top=top2+"px";
     return;
   }
+  // 1008-10：该会话快照过期 → 「重建快照」旁亮主题色红点（点击弹横幅）
+  const _ssListNow=(SessionStore.getSessionList()||[]);
+  const _ssItemNow=_ssListNow.find(function(x){return x.id===sid;});
+  const _ssDotNow=(_ssItemNow&&_ssItemNow.snap_stale)?'<span class="snap-dot" title="快照已过期，点击查看"></span>':'';
   el.innerHTML='<button class="sess-menu-item" data-op="rename">改名</button>'
     +'<button class="sess-menu-item" data-op="cc">压缩</button>'
     +'<button class="sess-menu-item'+(lockOn?' on':'')+'" data-op="lock">唤醒'+(lockOn?' ✓':'')+'</button>'
     +'<button class="sess-menu-item" data-op="persona">设定</button>'
     +'<button class="sess-menu-item" data-op="cross">跨窗口</button>'
-    +'<button class="sess-menu-item" data-op="snaprebuild">重建快照</button>'
+    +'<button class="sess-menu-item" data-op="snaprebuild">重建快照'+_ssDotNow+'</button>'
     +'<button class="sess-menu-item" data-op="provider">模型</button>'
     +'<button class="sess-menu-item" data-op="export">导出</button>'
     +'<button class="sess-menu-item danger" data-op="del">归档</button>';
@@ -7626,6 +7747,18 @@ function openSessMenu(sid, anchorEl, inArchive){
       else if(op==="persona")openSessionPersona(sid);
       else if(op==="cross")openSessionCrossInject(sid);
       else if(op==="snaprebuild")snapRebuildSession(sid);
+      // 1008-10：红点点击 → 横幅（过期原因 + 立即重建）
+      if(op==="snaprebuild"){
+        const _dot=btn.querySelector(".snap-dot");
+        if(_dot){
+          _dot.addEventListener("click",function(ev){
+            ev.stopPropagation();
+            closeSessMenu();
+            const _rr=(_ssItemNow&&Array.isArray(_ssItemNow.snap_stale_reasons))?_ssItemNow.snap_stale_reasons:[];
+            showSnapStaleBanner(sid,_rr);
+          });
+        }
+      }
       else if(op==="provider")openSessionProvider(sid);
       else if(op==="lock")toggleWakeLockSession(sid);
       else if(op==="del")archiveSession(sid);
@@ -7876,13 +8009,13 @@ async function doMergeSessions(){
 }
 
 // 置顶/取消置顶会话（本地），置顶的排在列表最前；与唤醒锁定完全独立（锁定在「…」菜单）
-function togglePinSession(id){
+async function togglePinSession(id){
   let pinnedArr=[];
   try{ pinnedArr=JSON.parse(localStorage.getItem("han_pinned_sessions")||"[]"); }catch(e){ pinnedArr=[]; }
   const i=pinnedArr.indexOf(id);
   const s=(SessionStore.getSessionList()||[]).find(function(x){return x.id===id;});
   const nm=(s&&s.name)||(id==="default"?"主会话":id);
-  if(!window.confirm(i>=0?("取消置顶「"+nm+"」？"):("置顶「"+nm+"」？"))) return;
+  if(!(await bannerConfirm(i>=0?("取消置顶「"+nm+"」？"):("置顶「"+nm+"」？")))) return;
   if(i>=0){
     pinnedArr.splice(i,1);
     try{ localStorage.setItem("han_pinned_sessions",JSON.stringify(pinnedArr)); }catch(e){}
@@ -8134,8 +8267,8 @@ function createSessionWithPrompt(backupId, providerId, modelName){
 
 // 删除会话：调用后端 DELETE /v1/sessions/:id 真正删除独立时间线文件
 // 重建会话注入前缀快照（1002-12）：清除快照，下一轮请求按当前人设/记忆/日记重新生成
-function snapRebuildSession(sid){
-  if(!confirm('清除该会话的注入前缀快照？下一轮请求将用当前人设/记忆/日记重新生成。'))return;
+async function snapRebuildSession(sid, skipConfirm){
+  if(!skipConfirm && !(await bannerConfirm('清除该会话的注入前缀快照？下一轮请求将用当前人设/记忆/日记重新生成。')))return;
   fetch('/v1/sessions/'+encodeURIComponent(sid)+'/snapshot/rebuild',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+api_key,'X-CSRF-Token':getCookie('admin_csrf')},credentials:'include',body:'{}'})
     .then(function(r){return r.json().catch(function(){return {};})})
     .then(function(d){
@@ -8146,7 +8279,7 @@ function snapRebuildSession(sid){
 }
 async function deleteSession(id){
   if(id==="default"){showToast("主会话不能删除");return;}
-  if(!confirm("确定删除这个会话？删除后无法恢复。"))return;
+  if(!(await bannerConfirm("确定删除这个会话？删除后无法恢复。")))return;
   try{
     const r=await fetch("/v1/sessions/"+encodeURIComponent(id),{method:"DELETE",headers:{"Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include"});
     const j=await r.json().catch(()=>({}));
@@ -8174,10 +8307,10 @@ async function deleteSession(id){
 }
 
 // 重命名会话(存到本地映射)
-function renameSession(id){
+async function renameSession(id){
   const cur=SessionStore.getSessionList().find(s=>s.id===id);
   const old=cur&&cur.name?(cur.name==="主会话"?"主会话":cur.name):id;
-  const nn=prompt("给这个会话起个名字",old);
+  const nn=await bannerPrompt("给这个会话起个名字",old);
   if(!nn||nn.trim()==="")return;
   const map=JSON.parse(localStorage.getItem("han_session_names")||"{}");
   map[id]=nn.trim();
@@ -8499,8 +8632,8 @@ function exportAllLocalData(){
 // 清空本地缓存：移除当前浏览器的 han_messages_* / 会话名 / 当前会话，再重新从服务器拉取。
 // 用于 iOS 等浏览器 localStorage 脏了(历史遗留/重复消息)导致显示不完整、滚动错位的场景。
 // 注意：不删服务器上的数据，只清本机缓存；导入但未同步到服务器的会话会被清掉。
-function clearLocalCache(){
-  if(!confirm("清空本机缓存？这会移除本浏览器本地保存的消息缓存，并从服务器重新拉取。\n（不会删除服务器上的真实对话；但仅存在本地的导入会话会被清除）"))return;
+async function clearLocalCache(){
+  if(!(await bannerConfirm("清空本机缓存？这会移除本浏览器本地保存的消息缓存，并从服务器重新拉取。\n（不会删除服务器上的真实对话；但仅存在本地的导入会话会被清除）")))return;
   let removed=0;
   try{
     for(let i=localStorage.length-1;i>=0;i--){
@@ -9106,9 +9239,9 @@ function openDiaryModal(name, body){
       else{ document.getElementById('diaryModalMsg').textContent='保存失败: '+(j.error||''); }
     });
   });
-  document.getElementById('diaryModalDel').addEventListener('click',function(){
+  document.getElementById('diaryModalDel').addEventListener('click',async function(){
     var name=window.__diaryName, body=window.__diaryBody;
-    if(!confirm('确认删除 '+name+'？')) return;
+    if(!(await bannerConfirm('确认删除 '+name+'？'))) return;
     admPost(BASE+'/diary/delete',{name:name}).then(function(j){
       if(j.success){ toast('已删除'); dm.classList.add('hidden'); renderDiary(body); }
       else{ document.getElementById('diaryModalMsg').textContent='删除失败'; }
@@ -9274,10 +9407,10 @@ function catColor(c){
 }
 function bindMemPool(container, body){
   Array.prototype.forEach.call(container.querySelectorAll('button[data-mp]'), function(b){
-    b.addEventListener('click', function(){
+    b.addEventListener('click', async function(){
       var act=b.getAttribute('data-mp'), id=b.getAttribute('data-id');
       if(act==='edit'){ editMemPool(id, body); return; }
-      if(act==='del'){ if(!confirm('确认删除这条记忆？')) return; admFetch(BASE+'/memory-pool/'+encodeURIComponent(id),{method:'DELETE'}).then(function(r){return r.json();}).then(function(j){ if(j.success){ toast('已删除'); refreshMemPoolList(); } }); return; }
+      if(act==='del'){ if(!(await bannerConfirm('确认删除这条记忆？'))) return; admFetch(BASE+'/memory-pool/'+encodeURIComponent(id),{method:'DELETE'}).then(function(r){return r.json();}).then(function(j){ if(j.success){ toast('已删除'); refreshMemPoolList(); } }); return; }
       if(act==='sink'){ admPost(BASE+'/memory-pool/sink',{id:id}).then(function(){ refreshMemPoolList(); }); return; }
       if(act==='pin'){ admFetch(BASE+'/memory-pool/'+encodeURIComponent(id),{method:'PUT',body:{pinned:b.getAttribute('data-pin')==='1'?true:false}}).then(function(r){return r.json();}).then(function(){ refreshMemPoolList(); }); return; }
     });
@@ -9306,8 +9439,8 @@ function editMemPool(id, body){
       });
   });
 }
-function tidyMemPool(body){
-  if(!confirm('整理记忆池？将去重/合并/沉底/重分类，可能改动多条记忆。')) return;
+async function tidyMemPool(body){
+  if(!(await bannerConfirm('整理记忆池？将去重/合并/沉底/重分类，可能改动多条记忆。'))) return;
   admPost(BASE+'/memory-pool/clean',{preview:false}).then(function(j){
     if(j&&j.changes){ toast('整理完成'); }
     else{ toast('整理完成'); }
@@ -9371,10 +9504,10 @@ function bindMarked(body){
       ev.stopPropagation();
       txt.classList.toggle('open');
     });
-    it.addEventListener('click', function(ev){
+    it.addEventListener('click', async function(ev){
       var btn=ev.target.closest('button'); if(!btn)return;
       var act=btn.getAttribute('data-act'), key=btn.getAttribute('data-key');
-      if(act==='unmark'){ if(confirm('取消标星该条消息？')){ admPost(BASE+'/context-compaction/mark',{key:key,marked:false}).then(function(){ if(it && it.parentNode) it.parentNode.removeChild(it); var _tip=body.querySelector('.adm-tip'); if(_tip) _tip.textContent='共 '+body.querySelectorAll('.adm-mark').length+' 条 ★ 取消标星，点「编辑」修改。'; }); } return; }
+      if(act==='unmark'){ if(await bannerConfirm('取消标星该条消息？')){ admPost(BASE+'/context-compaction/mark',{key:key,marked:false}).then(function(){ if(it && it.parentNode) it.parentNode.removeChild(it); var _tip=body.querySelector('.adm-tip'); if(_tip) _tip.textContent='共 '+body.querySelectorAll('.adm-mark').length+' 条 ★ 取消标星，点「编辑」修改。'; }); } return; }
       if(act==='edit'){ openEditModal('编辑标星消息',
           '<div style="font-size:12px;color:var(--ink3);margin-bottom:6px">'+esc(btn.getAttribute('data-iidx')||'')+'</div>'
           +'<textarea id="em-content" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:16px;color:var(--ink);background:var(--field-bg,#fff);min-height:300px;resize:vertical;font-family:inherit;line-height:1.6">'+esc(it.getAttribute('data-full')||'')+'</textarea>',
@@ -9428,9 +9561,9 @@ function loadPinList(body){
       return '<div class="adm-item"><div class="adm-item-h"><span>#'+(i+1)+'</span>'+(m.title?'<span style="font-weight:600">'+esc(m.title)+'</span>':'')+(mt?'<span style="color:var(--ink3);font-size:10px">'+esc(mt)+'</span>':'')+'<span style="margin-left:auto"></span></div><div class="adm-item-b">'+esc(m.content)+'</div><div class="adm-item-a"><button data-pinact="up" data-id="'+esc(m.id)+'" title="上移">↑</button><button data-pinact="down" data-id="'+esc(m.id)+'" title="下移">↓</button><button data-pinact="edit" data-id="'+esc(m.id)+'">编辑</button><button data-pinact="del" data-id="'+esc(m.id)+'" class="danger">删除</button></div></div>';
     }).join('');
     Array.prototype.forEach.call(listBox.querySelectorAll('button[data-pinact]'), function(b){
-      b.addEventListener('click', function(){
+      b.addEventListener('click', async function(){
         var act=b.getAttribute('data-pinact'), id=b.getAttribute('data-id');
-        if(act==='del'){ if(!confirm('确认删除？')) return; admFetch(BASE+'/logs/pinned/'+encodeURIComponent(id),{method:'DELETE'}).then(function(r){return r.json();}).then(function(j){ if(j.success){ toast('已删除'); loadPinList(body); } }); return; }
+        if(act==='del'){ if(!(await bannerConfirm('确认删除？'))) return; admFetch(BASE+'/logs/pinned/'+encodeURIComponent(id),{method:'DELETE'}).then(function(r){return r.json();}).then(function(j){ if(j.success){ toast('已删除'); loadPinList(body); } }); return; }
         if(act==='edit'){ openPinEdit(id, body); return; }
         if(act==='up'||act==='down'){ reorderPin(id, act, body); return; }
       });
@@ -9542,13 +9675,13 @@ function renderReqCtx(body){
       }).join('')+'</div>';
   }).catch(function(e){ body.innerHTML='<div class="adm-empty">加载失败: '+esc(e.message)+'</div>'; });
 }
-function editPush(pos, body, isDel){
+async function editPush(pos, body, isDel){
   // 与管理台一致：全窗口列表里定位该条，操作带该条自己的 session_id（落到它所属窗口的时间线）
-  admFetch(BASE+'/push-events',{sid:false}).then(function(r){ return r.json(); }).then(function(j){
+  admFetch(BASE+'/push-events',{sid:false}).then(function(r){ return r.json(); }).then(async function(j){
     var it=((j&&j.items)||[]).find(function(x){return String(x.position)===String(pos);});
     if(!it){ toast('未找到该记录'); return; }
     if(isDel){
-      if(!confirm('确定删除这条推送？')) return;
+      if(!(await bannerConfirm('确定删除这条推送？'))) return;
       admPost(BASE+'/push-events/delete',{position:Number(pos),content:it.content,session_id:it.session_id||'default'}).then(function(j){
         if(j.success){
           toast('已删除');
