@@ -402,7 +402,6 @@ function createStore(opts = {}) {
     for (let i = r.length - 1; i >= 0; i--) {
       const e = r[i];
       if (filter.kind != null && e.kind !== filter.kind) continue;
-      if (filter.subject != null && e.subject !== filter.subject) continue;
       if (filter.status != null && e.status !== filter.status) continue;
       if (filter.origin != null && e.origin !== filter.origin) continue;
       out.push(e);
