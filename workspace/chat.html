@@ -2621,7 +2621,7 @@ function syncTimelineLocal(payload){
 }
 
 /* ================= markdown ================= */
-function stripInnerTags(t){return String(t||"").replace(/<\s*memory\b[^>]*>[\s\S]*?<\s*\/memory\s*>/gi,"").replace(/<\s*pin\b[^>]*>[\s\S]*?<\s*\/pin\s*>/gi,"").replace(/<\s*wake\b[^>]*>[\s\S]*?<\s*\/wake\s*>/gi,"").replace(/<\s*quiet\b[^>]*>[\s\S]*?<\s*\/quiet\s*>/gi,"").replace(/<\s*phone\b[^>]*>[\s\S]*?<\s*\/phone\s*>/gi,"").replace(/<\s*result\b[^>]*>[\s\S]*?<\s*\/result\s*>/gi,"").replace(/<\s*call_id\b[^>]*>[\s\S]*?<\s*\/call_id\s*>/gi,"").replace(/<\s*star\b[^>]*>(?:\s*<\s*\/star\s*>)?/gi,"").replace(/<\s*paper\b[^>]*>(?:[\s\S]*?<\s*\/paper\s*>)?/gi,"").replace(/\[DIARY\][\s\S]*?\[\/DIARY\]/gi,"").replace(/\[DIARY\][\s\S]*$/i,"").replace(/\[DIARY\]|\[\/DIARY\]/gi,"");}
+function stripInnerTags(t){return String(t||"").replace(/<\s*memory\b[^>]*>[\s\S]*?<\s*\/memory\s*>/gi,"").replace(/<\s*pin\b[^>]*>[\s\S]*?<\s*\/pin\s*>/gi,"").replace(/<\s*wake\b[^>]*>[\s\S]*?<\s*\/wake\s*>/gi,"").replace(/<\s*quiet\b[^>]*>[\s\S]*?<\s*\/quiet\s*>/gi,"").replace(/<\s*phone\b[^>]*>[\s\S]*?<\s*\/phone\s*>/gi,"").replace(/<\s*result\b[^>]*>[\s\S]*?<\s*\/result\s*>/gi,"").replace(/<\s*call_id\b[^>]*>[\s\S]*?<\s*\/call_id\s*>/gi,"").replace(/<\s*star\b[^>]*>(?:\s*<\s*\/star\s*>)?/gi,"").replace(/<\s*paper\b[^>]*>(?:[\s\S]*?<\s*\/paper\s*>)?/gi,"").replace(/\[push\]\s*([\s\S]*?)\s*\[\/push\]/gi,"$1").replace(/\[DIARY\][\s\S]*?\[\/DIARY\]/gi,"").replace(/\[DIARY\][\s\S]*$/i,"").replace(/\[DIARY\]|\[\/DIARY\]/gi,"");}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 function inlineMd(s){
   s=escapeHtml(s);
