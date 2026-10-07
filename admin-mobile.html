@@ -1199,7 +1199,9 @@
     return null;
   }
 
-  /* ── 预览（调模型，不落盘）── */
+  /* ── 预览（调模型，不落盘）──
+     1007-05 异步化：生成已挪到独立进程 state-worker，这里提交任务后轮询
+     GET /admin/conversation-state 的 candidate（算好即出现）与日志（logId 精确匹配失败/中断）。 */
   window.csPreview = function () {
     if (CS.busy) return;
     var sid = currentSession();
@@ -1218,25 +1220,71 @@
     }
     CS.busy = true;
     var btn = $('cs-preview-btn');
-    btn.disabled = true; btn.textContent = '正在调模型…';
-    msg('正在算新状态（会调模型，可能几十秒到几分钟）');
+    btn.disabled = true; btn.textContent = '已提交，后台计算中…';
+    msg('已提交生成（后台计算，几十秒到几分钟），算好后这里出 diff');
     show($('cs-diff'), false);
 
     req(CS_API + '/preview?session=' + encodeURIComponent(sid), { method: 'POST', body: { start: r.start, end: r.end } })
       .then(function (j) {
-        CS.preview = j;
-        renderDiff(j);
-        renderPreviewMsgs(r);
-        // 后端已把这版候选落盘，这里同步状态卡上的提示（刷新后仍在）
-        if (CS.state) renderNote({ candidate: { exists: true, candidate: j }, seed_from_legacy: false });
-        msg('算好了（已存在服务器上，刷新不会丢），确认无误再并入');
+        if (j && j.ok && j.submitted) {
+          // 异步任务已受理：轮询候选出现 / 日志翻失败
+          startCsPolling(sid, r, j.logId);
+        } else if (j && j.ok) {
+          // 兼容旧同步响应（改造后不再发生，保留兜底）
+          CS.preview = j;
+          renderDiff(j);
+          renderPreviewMsgs(r);
+          // 后端已把这版候选落盘，这里同步状态卡上的提示（刷新后仍在）
+          if (CS.state) renderNote({ candidate: { exists: true, candidate: j }, seed_from_legacy: false });
+          msg('算好了（已存在服务器上，刷新不会丢），确认无误再并入');
+          finishCsPreview();
+        } else {
+          throw new Error((j && j.error) || '提交失败');
+        }
       })
-      .catch(function (e) { msg(e.message, 'err'); })
-      .finally(function () {
-        CS.busy = false;
-        btn.disabled = false; btn.textContent = '▸ 并入状态';
-      });
+      .catch(function (e) { msg(e.message, 'err'); finishCsPreview(); });
   };
+
+  var _csPollTimer = null;
+  function startCsPolling(sid, range, logId) {
+    stopCsPolling();
+    _csPollTimer = setInterval(function () {
+      req(CS_API + '?session=' + encodeURIComponent(sid), { method: 'GET' })
+        .then(function (j) {
+          var cand = j && j.candidate;
+          if (cand && cand.state) {
+            // 候选出现 = 算好了（worker 已落盘，刷新不丢）
+            stopCsPolling();
+            CS.preview = cand;
+            renderDiff(cand);
+            renderPreviewMsgs(range);
+            if (CS.state) renderNote({ candidate: { exists: true, candidate: cand }, seed_from_legacy: false });
+            msg('算好了（已存在服务器上，刷新不会丢），确认无误再并入');
+            finishCsPreview();
+            return;
+          }
+          // 没出候选：查本轮日志是否翻 error / interrupted（按 logId 精确匹配，避免命中历史日志）
+          if (!logId) return;
+          req(ccApi('/context-compaction/logs'), { method: 'GET' })
+            .then(function (lg) {
+              var sl = ((lg && lg.logs) || []).find(function (l) { return l && l.id === logId && l.status !== 'pending'; });
+              if (sl && (sl.status === 'error' || sl.status === 'interrupted')) {
+                stopCsPolling();
+                msg(sl.message || (sl.status === 'error' ? '生成失败' : '生成被中断，可重新生成'), 'err');
+                finishCsPreview();
+              }
+            }).catch(function () {});
+        })
+        .catch(function () { /* 网络抖动，下轮再试 */ });
+    }, 4000);
+  }
+  function stopCsPolling() { if (_csPollTimer) { clearInterval(_csPollTimer); _csPollTimer = null; } }
+  function finishCsPreview() {
+    CS.busy = false;
+    var btn = $('cs-preview-btn');
+    if (btn) { btn.disabled = false; btn.textContent = '▸ 并入状态'; }
+    stopCsPolling();
+  }
 
   function renderPreviewMsgs(r) {
     var sid = currentSession();

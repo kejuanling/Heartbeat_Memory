@@ -11,6 +11,16 @@ module.exports = {
       interpreter: "node",
       autorestart: true,
       max_memory_restart: "900M"
+    },
+    // 1007-05：状态机生成独立进程（gateway 只登记任务，本进程后台调 LLM；
+    // gateway 重启/推送不再掐断生成）。
+    {
+      name: "state-worker",
+      script: "state-worker.js",
+      cwd: "/opt/dylan-heartbeat",
+      interpreter: "node",
+      autorestart: true,
+      max_memory_restart: "600M"
     }
   ]
 };
