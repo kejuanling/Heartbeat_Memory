@@ -306,6 +306,7 @@ const contextCompactor = require("./context-compactor");
 const contextReplacements = require("./context-replacements");
 const contextDigest = require("./context-digest");
 const conversationState = require("./lib/conversation-state");
+const { httpPostJson } = require("./lib/http_json"); // 1007-05：状态机独立进程转发 worker 用
 // 状态机日志接进压缩页悬浮球（addCompactionLog 是函数声明，提升可用；闭包隔开 compactionLogs 的 TDZ）
 conversationState.setLogFn(function (entry) {
   // 1004-12：状态机日志统一打 action=state 标签，前端压缩页日志按"状态机压缩"分组
@@ -2328,6 +2329,22 @@ function fmtEventDateTime(iso) {
     return p.month + "-" + p.day + " " + p.hour + ":" + p.minute;
   } catch (e) { return ""; }
 }
+// 状态机 worker 日志回调（1007-05）：state-worker 进程不直接写 compaction_log
+//（避免与 gateway 双进程覆盖，日志唯一写者仍是 gateway），统一走这里更新。
+// 鉴权沿用 /internal/ 的 X-Internal-Key（顶部 onRequest 钩子）。
+app.post("/internal/state-log", async (req, reply) => {
+  const entry = req.body || {};
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return reply.send({ ok: false, error: "bad entry" });
+  }
+  try {
+    const r = addCompactionLog(Object.assign({ action: "state" }, entry));
+    return reply.send(r || { ok: true });
+  } catch (err) {
+    reply.code(500).send({ ok: false, error: (err && err.message) || String(err) });
+  }
+});
+
 app.post("/internal/timeline-event", async (req, reply) => {
   try {
     const body = req.body || {};
@@ -3146,7 +3163,7 @@ app.post("/internal/memory-pool/add", async (req, reply) => {
     if (!content) return reply.code(400).send({ error: "content 必填" });
     if (memoryV2Admission) {
       const v2 = await memoryV2Admission.submitV2(
-        { content, category: b.category },
+        { content, category: b.category, kind: b.kind },
         { sessionId: String(b.session_id || "").trim() }
       );
       if (v2.action !== "skipped_shadow_off") {
@@ -4509,6 +4526,10 @@ function pickBalance(json) {
     const b = json.balance_infos[0];
     return { balance: b.total_balance, currency: b.currency || "CNY" };
   }
+  // StepFun 官方（2026-10-07 实测）：{object:"account",type:"prepaid",balance:14.35,total_cash_balance,total_voucher_balance}
+  if (json.object === "account" && (typeof json.balance === "number" || (typeof json.balance === "string" && String(json.balance).trim() !== ""))) {
+    return { balance: json.balance, currency: "CNY" };
+  }
   // one-api/new-api 系：{ balance, quota } 或 { data:{balance} }
   for (const k of ["balance", "total_balance", "amount", "balance_usd"]) {
     if (typeof json[k] === "number" || typeof json[k] === "string") {
@@ -4521,6 +4542,22 @@ function pickBalance(json) {
     // OpenRouter（2026-10-01 实测）：{data:{limit_remaining,limit,usage,...}}——limit_remaining=剩余信用额度
     if (typeof json.data.limit_remaining === "number" && typeof json.data.limit === "number") return { balance: json.data.limit_remaining, currency: "USD" };
     return pickBalance(json.data);
+  }
+  // MiniMax Token Plan（2026-10-07 实测）：{model_remains:{...},base_resp:{status_code,status_msg}}；未开通返回 status_code 2062
+  if (json.base_resp && typeof json.base_resp === "object") {
+    const sc = json.base_resp.status_code;
+    if (sc != null && String(sc) !== "0") {
+      return { balance: null, note: String(json.base_resp.status_msg || ("套餐状态码 " + sc)) };
+    }
+    if (json.model_remains && typeof json.model_remains === "object") {
+      const keys = Object.keys(json.model_remains);
+      if (keys.length) {
+        const v = json.model_remains[keys[0]];
+        const b = (v && typeof v === "object") ? (v.remaining != null ? v.remaining : (v.quota != null ? v.quota : null)) : (typeof v === "number" ? v : null);
+        if (b != null) return { balance: b, currency: "CNY", note: "MiniMax 套餐剩余（" + keys[0] + "）" };
+      }
+    }
+    return null;
   }
   return null;
 }
@@ -4542,7 +4579,7 @@ app.post("/admin/providers/balance", { preHandler: mcpManageAuth }, async (req, 
     if (!resp.ok) return reply.send({ ok: false, error: "余额接口 HTTP " + resp.status });
     const j = await resp.json().catch(function(){ return {}; });
     const hit = pickBalance(j);
-    if (hit) return reply.send({ ok: true, balance: hit.balance, currency: hit.currency, latency_ms: Date.now() - started });
+    if (hit) return reply.send({ ok: true, balance: hit.balance, currency: hit.currency, note: hit.note || "", latency_ms: Date.now() - started });
     return reply.send({ ok: false, error: "无法解析余额（接口返回格式未知）", raw: JSON.stringify(j).slice(0, 300) });
   } catch (err) {
     return reply.send({ ok: false, error: "余额查询失败：" + (err && err.name === "AbortError" ? "超时(15s)" : (err && err.message || err)) });
@@ -5474,6 +5511,23 @@ function _csSessionOf(req) {
   return String(q.session || q.session_id || b.session || b.session_id || "").trim();
 }
 
+// ── 状态机任务文件（1007-05：独立 worker 进程）──
+// gateway 登记任务（status running）→ worker 完成后翻 done/error；
+// gateway 启动钩子据它判断「这条 pending 是不是 worker 还在跑」（避免误标中断）。
+const STATE_TASKS_FILE = path.join(__dirname, "data", "state_tasks.json");
+function readStateTasks() {
+  try { return JSON.parse(fs.readFileSync(STATE_TASKS_FILE, "utf8")); } catch (e) { return []; }
+}
+function writeStateTasks(tasks) {
+  const tmp = STATE_TASKS_FILE + "." + process.pid + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(tasks));
+  fs.renameSync(tmp, STATE_TASKS_FILE); // 原子换名，防双进程并发读读到半个文件
+}
+function stateWorkerUrl() {
+  const port = Number(process.env.STATE_WORKER_PORT || 3110);
+  return "http://127.0.0.1:" + port;
+}
+
 app.get("/admin/conversation-state", { preHandler: basicAuth }, async (req, reply) => {
   const sid = _csSessionOf(req);
   if (!sid) return reply.code(400).send({ error: "缺少 session 参数" });
@@ -5509,21 +5563,55 @@ app.get("/admin/conversation-state/version", { preHandler: basicAuth }, async (r
   }
 });
 
-// 预览：调 LLM 出候选状态 + 操作清单，**不落盘**。前端拿去做 diff 面板。
+// 预览：调 LLM 出候选状态 + 操作清单。前端拿去做 diff 面板。
+// 1007-05 异步化：原实现是 gateway 进程内同步长请求（nginx 620s 超时 + gateway 重启/推送即掐断，
+// 10-07 实测两次被断）。现改为：登记任务（写 pending 日志 + 任务文件）→ 转发独立进程
+// state-worker（后台调 LLM）→ 立即返回 submitted。候选由 worker 落盘 CANDIDATE_FILE，
+// 日志由 worker 回调 /internal/state-log 更新，前端轮询 /admin/conversation-state 收结果。
 app.post("/admin/conversation-state/preview", { preHandler: basicAuth }, async (req, reply) => {
   const body = req.body || {};
   const sid = _csSessionOf(req);
   if (!sid) return reply.code(400).send({ error: "缺少 session 参数" });
-  try {
-    const r = await conversationState.previewMerge({
-      session: sid,
-      start: body.start,
-      end: body.end,
-    });
-    reply.send(r);
-  } catch (err) {
-    reply.code(400).send({ error: (err && err.message) || String(err) });
+  const start = Number(body.start);
+  const end = Number(body.end);
+  if (!Number.isInteger(start) || !Number.isInteger(end) || end < start) {
+    return reply.code(400).send({ error: "区间参数不正确" });
   }
+  if (end - start + 1 > 1000) {
+    return reply.code(400).send({ error: "区间过大（1000 条以内），分几次并入" });
+  }
+  // 同一会话已有任务在跑 → 拒绝（worker 侧还有 running 判重，双保险）
+  try {
+    const tasksNow = readStateTasks();
+    if (tasksNow.some(function (t) { return t && t.session === sid && t.status === "running"; })) {
+      return reply.code(409).send({ error: "这个会话已经有一个生成任务在跑，等它出结果再试" });
+    }
+  } catch (e) { /* 任务文件读失败不阻断，worker 侧兜底 */ }
+  // 1) 登记 pending 日志（id 传给 worker，跨进程更新同一日志条目）
+  const entry = addCompactionLog({
+    label: "状态并入 · " + sid.slice(-12),
+    status: "pending",
+    action: "state",
+    message: "正在算新状态：第 " + start + "~" + end + " 条（" + (end - start + 1) + " 条，后台计算中）",
+  });
+  // 2) 写任务文件
+  try {
+    const tasks = readStateTasks();
+    tasks.push({ id: entry.id, session: sid, start: start, end: end, status: "running", createdAt: new Date().toISOString() });
+    writeStateTasks(tasks);
+  } catch (e) { console.warn("[state-worker] 任务文件写入失败:", e.message); }
+  // 3) 转发 worker（不可达/拒绝 → 日志翻 error，前端能看到）
+  try {
+    const r = await httpPostJson(stateWorkerUrl() + "/state/run", JSON.stringify({
+      logId: entry.id, session: sid, start: start, end: end,
+    }), { "X-Internal-Key": readEnvValue("INTERNAL_API_KEY") }, 8000);
+    if (r && r.ok === false) {
+      addCompactionLog({ id: entry.id, status: "error", message: String(r.error || "worker 拒绝任务") });
+    }
+  } catch (e) {
+    addCompactionLog({ id: entry.id, status: "error", message: "生成服务（state-worker）不可达：" + ((e && e.message) || String(e)) });
+  }
+  reply.send({ ok: true, submitted: true, logId: entry.id });
 });
 
 // 确认并入：blocked 里列出的 remove 不生效（前端「阻止删除」）
@@ -5761,9 +5849,17 @@ function persistCompactionLogs() {
 // → 判定为重启中断，标 status=interrupted，前端显示「中断」。
 (function markInterruptedOnBoot(){
   try {
+    // 1007-05：任务文件里还在 running 的（独立进程 state-worker 还活着在算）不标中断，
+    // 等 worker 完成回调翻状态；无任务记录的残留 pending（老路径）照旧标中断。
+    const runningTaskIds = (function () {
+      try {
+        return readStateTasks().filter(function (t) { return t && t.status === "running"; }).map(function (t) { return t.id; });
+      } catch (e) { return []; }
+    })();
     let changed = false;
     compactionLogs.forEach(function (l) {
       if (!l || l.status !== "pending") return;
+      if (runningTaskIds.indexOf(l.id) !== -1) return;
       const idUpdated = compactionLogs.some(function (o) { return o !== l && o.id === l.id && o.status !== "pending"; });
       if (idUpdated) return;
       const laterDone = compactionLogs.some(function (o) {

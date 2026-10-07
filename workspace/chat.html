@@ -5964,9 +5964,10 @@ async function checkProviderBalance(i,btn){
     const r=await fetch("/heartbeat/admin/providers/balance",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},mcpAuthHeaders()),credentials:"include",body:JSON.stringify({id:p.id,balance_url:(p.balance_url||provPresetBalance(p.api_url)||"")})});
     const j=await r.json().catch(function(){return {};});
     if(j&&j.ok){
-      chatToast(p.name+" 余额："+j.balance+" "+(j.currency||""));
+      const _hasB=(j.balance!=null&&String(j.balance).trim()!=="");
+      chatToast(_hasB?(p.name+" 余额："+j.balance+" "+(j.currency||"")):((j.note)?(p.name+"："+j.note):(p.name+"：接口连通但无余额数据")));
       // 2026-10-01：余额查询结果缓存到本地并在供应商卡片常驻显示（下次打开页面仍可见，点 ¥ 刷新）
-      try{ var _b=JSON.parse(localStorage.getItem("han_prov_balances")||"{}"); _b[p.id]={v:String(j.balance),c:(j.currency||""),t:Date.now()}; localStorage.setItem("han_prov_balances",JSON.stringify(_b)); }catch(e){}
+      try{ if(_hasB){ var _b=JSON.parse(localStorage.getItem("han_prov_balances")||"{}"); _b[p.id]={v:String(j.balance),c:(j.currency||""),t:Date.now()}; localStorage.setItem("han_prov_balances",JSON.stringify(_b)); } }catch(e){}
       renderProviders();
     }else chatToast(p.name+"："+(j&&j.error||"查询失败"));
   }catch(e){ chatToast("余额查询失败:"+(e&&e.message||e)); }
@@ -6061,6 +6062,8 @@ const PROVIDER_TYPES={
   silicon:{label:"硅基流动", base:"https://api.siliconflow.cn/v1", path:"/chat/completions", profile:"default", balance:""},
   openrouter:{label:"OpenRouter", base:"https://openrouter.ai/api/v1", path:"/chat/completions", profile:"default", balance:"https://openrouter.ai/api/v1/key"},
   moonshot:{label:"Kimi/月之暗面", base:"https://api.moonshot.cn/v1", path:"/chat/completions", profile:"default", balance:"https://api.moonshot.cn/v1/users/me/balance"},
+  stepfun:{label:"阶跃星辰", base:"https://api.stepfun.com/v1", path:"/chat/completions", profile:"default", balance:"https://api.stepfun.com/v1/accounts"},
+  minimax:{label:"MiniMax", base:"https://api.minimax.cn/v1", path:"/chat/completions", profile:"default", balance:"https://api.minimax.cn/v1/token_plan/remains"},
   bailian:{label:"阿里百炼", base:"https://dashscope.aliyuncs.com/compatible-mode/v1", path:"/chat/completions", profile:"default", balance:""},
   qianfan:{label:"百度千帆", base:"https://qianfan.baidubce.com/v2", path:"/chat/completions", profile:"default", balance:""}
 };
