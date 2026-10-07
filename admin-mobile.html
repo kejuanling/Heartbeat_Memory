@@ -1252,13 +1252,14 @@
       req(CS_API + '?session=' + encodeURIComponent(sid), { method: 'GET' })
         .then(function (j) {
           var cand = j && j.candidate;
-          if (cand && cand.state) {
+          // GET /admin/conversation-state 的 candidate 是壳（{ok,exists,candidate:{...}}），正文在 cand.candidate
+          if (cand && cand.exists && cand.candidate && cand.candidate.state) {
             // 候选出现 = 算好了（worker 已落盘，刷新不丢）
             stopCsPolling();
-            CS.preview = cand;
-            renderDiff(cand);
+            CS.preview = cand.candidate;
+            renderDiff(cand.candidate);
             renderPreviewMsgs(range);
-            if (CS.state) renderNote({ candidate: { exists: true, candidate: cand }, seed_from_legacy: false });
+            if (CS.state) renderNote({ candidate: { exists: true, candidate: cand.candidate }, seed_from_legacy: false });
             msg('算好了（已存在服务器上，刷新不会丢），确认无误再并入');
             finishCsPreview();
             return;
