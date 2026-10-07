@@ -185,7 +185,7 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
      for(const s of sessions){
        const cnt = (s && s.real!=null) ? s.real : (s ? (s.total||0) : 0);
        const nm = (s && s.name) || (s && s.id) || '';
-       html += '<option value="'+escHtml(s.id)+'">'+escHtml(nm)+'（'+cnt+'条）</option>';
+       html += '<option value="'+escHtml(s.id)+'" data-count="'+cnt+'">'+escHtml(nm)+'（'+cnt+'条）</option>';
      }
      sel.innerHTML = html;
      const saved = localStorage.getItem('han_admin_session') || '';
@@ -1053,11 +1053,17 @@ function ccBuildMergedItems(d){
  * @returns {string}
  */
 function ccBuildSummaryStatsHtml(d, t){
+  // 1007-14：总条数 = 下拉框选中会话的实际条数（/v1/sessions 的 real，经 option data-count 透传），
+  // 不是可压缩条数（totalCompressible 是未覆盖区间条数，与用户认知的「该会话实际条数」不符）。
+  var selCnt = 0;
+  try{
+    var sel = document.getElementById('adm-session-sel');
+    var o = sel && sel.selectedOptions && sel.selectedOptions[0];
+    if (o) selCnt = parseInt(o.getAttribute('data-count') || '0', 10) || 0;
+  }catch(e){}
   return '<div class="cc-stats">'
     +'<span class="cc-mini-main"><span class="l">实际约</span><b>'+fmtCcNum(t.estCompressedChars||0)+'</b><span class="unit">字</span></span>'
-    // 1007-14：删「重复字数」「块数」「缓存」（totalChars 与主数字重复，块/缓存无信息量）；
-    // 总条数用户要求加回（10-07 追加）。保留：总条数 / 积压tok / 总tok / 隐藏。
-    +'<span class="cc-mini-item"><b>'+d.totalCompressible+'</b><i>条</i></span>'
+    +'<span class="cc-mini-item"><b>'+selCnt+'</b><i>条</i></span>'
     +'<span class="cc-mini-item" title="未覆盖对话积压的 token 估算（触发容量提醒的口径）"><b>'+fmtCcNum(t.estUncoveredTokens||0)+'</b><i>积压tok</i></span>'
     +'<span class="cc-mini-item'+(t.estTotalTokens?'':' zero')+'" title="实际发送 token 估算 = 未覆盖积压 + 摘要块 + 标星原句 + 图片 + 置顶记忆（永久上下文）。估算口径：中文≈1字/token、英文≈4字符/token、图片每张约1000。"><b>'+fmtCcNum(t.estTotalTokens||0)+'</b><i>总tok</i></span>'
     +((t.hiddenCount>0||t.manualHiddenCount>0)?'<span class="cc-mini-item zero"><b>'+((t.hiddenCount||0)+(t.manualHiddenCount||0))+'</b><i>隐藏</i></span>':'')
