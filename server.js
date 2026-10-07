@@ -3912,9 +3912,11 @@ app.delete("/admin/memory-backfill/prompt", { preHandler: basicAuth }, async (re
 // 推送管理（时间线里的推送回显）
 // ========================
 // 判断是否为「成功发送的推送回显」（排除“未发送”）
+// 2026-10-08 回执简化：新格式「发送成功，时间：xxx」；旧格式「（时间 刚刚给X发了X推送：」兼容
 function isPushEchoContent(s) {
   const c = String(s || "");
-  return !!c && !c.includes("本次未发送") && /刚刚给.{1,24}发了.{1,24}?推送：/.test(c);
+  return !!c && !c.includes("本次未发送") && !c.includes("未发送推送") && !c.includes("本次未推送") &&
+    (/^发送成功，时间：/.test(c) || /刚刚给.{1,24}发了.{1,24}?推送：/.test(c));
 }
 // 解析推送回显内容
 // 2026-09-22 审查 R19：注入 loadTimeline/saveTimeline，让推送编辑/删除走时间线四道守卫 + 快照指纹

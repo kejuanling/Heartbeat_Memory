@@ -3630,14 +3630,14 @@ function msgTime(m){
 //  - "push"  ：自动唤醒并推送了内容，用消息气泡样式
 //  - "silent"：自动唤醒但未推送（本次未发送推送），用居中日期/时间样式
 //  - "diary" ：醒来写了日记（旧数据「自动写了日记」兼容），保持原样
-// 特殊事件都以「（时间 」开头的惯例格式，用 /^（/ 限定避免误伤普通对话。
+// 旧格式特殊事件以「（时间 」开头；2026-10-08 回执简化后新格式以「发送成功，时间：」/「本次未推送」/「未发送推送」开头，也放行。
 function classifyTimelineEvent(msg){
   if(!msg||typeof msg.content!=="string")return null;
   const c=msg.content.trim();
-  if(c.indexOf("（")!==0)return null;
+  if(c.indexOf("（")!==0 && !/^(发送成功，时间：|本次未推送|未发送推送)/.test(c))return null;
   if(/醒来写了日记|自动写了日记/.test(c))return "diary";
-  if(/自动唤醒/.test(c)&&/未发送推送|未推送|本次未发送/.test(c))return "silent";
-  if(!c.includes("本次未发送")&&/刚刚给.{1,24}发了.{1,24}?推送：/.test(c))return "push";
+  if(/未发送推送|未推送|本次未发送/.test(c))return "silent";
+  if(/^发送成功，时间：/.test(c)||/刚刚给.{1,24}发了.{1,24}?推送：/.test(c))return "push";
   return null;
 }
 function fillMav(av,isAI){

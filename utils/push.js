@@ -1,10 +1,15 @@
 'use strict';
 // 推送回显 / 时间 纯工具(自 server.js 抽出, 逻辑零改动)
 
-// 解析「成功推送回显」正文：格式=（时间 刚刚给某人了某渠道推送：标题｜正文）尾缀
+// 解析「成功推送回显」正文：旧格式=（时间 刚刚给某人了某渠道推送：标题｜正文）尾缀；
+// 2026-10-08 起新格式=「发送成功，时间：xxx」（组合句用「。」分隔），只有时间无渠道/正文。
 // → { at, user, channel, title, body, tail }；非回显格式返回 null
 function parsePushEcho(content) {
   const c = String(content || '').trim();
+  const mNew = c.match(/^发送成功，时间：([^。；]*?)(?:[。；]|$)/);
+  if (mNew) {
+    return { at: (mNew[1] || '').trim(), user: process.env.USER_DISPLAY_NAME || '用户', channel: 'webpush', title: '', body: '', tail: '' };
+  }
   const m = c.match(/^（([^（]*?)刚刚给([^：]*?)发了([^：]*?)推送：(.+)$/);
   if (!m) return null;
   const at = (m[1] || '').trim();
@@ -20,11 +25,16 @@ function parsePushEcho(content) {
   else { body = rest.trim(); }
   return { at: at, user: user, channel: channel, title: title, body: body, tail: tail };
 }
-// 解析「未发送推送」的唤醒回显正文：（时间 自动唤醒：本次未发送推送…）
+// 解析「未发送推送」的唤醒回显正文：旧格式=（时间 自动唤醒：本次未发送推送…）；
+// 2026-10-08 起新格式=「本次未推送」/「未发送推送：原因」（组合句用「。」分隔）。
 // → channel 固定 '未发送'，原因文字进 body；非回显格式返回 null
 function parseWakeEcho(content) {
   const c = String(content || '').trim();
-  const m = c.match(/^（([^（]*?)自动唤醒：本次未发送推送(.*)$/);
+  let m = c.match(/^本次未推送/);
+  if (m) return { at: '', channel: '未发送', title: '自动唤醒', body: '', tail: '' };
+  m = c.match(/^未发送推送[：:]\s*(.*)$/);
+  if (m) return { at: '', channel: '未发送', title: '自动唤醒', body: (m[1] || '').trim(), tail: '' };
+  m = c.match(/^（([^（]*?)自动唤醒：本次未发送推送(.*)$/);
   if (!m) return null;
   const at = (m[1] || '').trim();
   let rest = m[2] || '';
@@ -38,7 +48,7 @@ function parseWakeEcho(content) {
 // 由推送元数据反向拼出标准回显行（管理台编辑推送后重建 content 用，与 parsePushEcho 互逆）
 function buildPushEcho(meta) {
   const user = meta.user || (process.env.USER_DISPLAY_NAME || '用户');
-  const channel = meta.channel || 'Bark';
+  const channel = meta.channel || 'webpush';
   const tail = meta.tail || '';
   return '（' + (meta.at || '') + ' 刚刚给' + user + '发了' + channel + '推送：' + (meta.title || '') + '｜' + (meta.body || '') + '）' + tail;
 }
@@ -58,13 +68,13 @@ function pushEchoMeta(msg) {
       position: msg.position, content: msg.content,
       at: msg.push_at || fmtLocalAt(msg.time) || '',
       user: msg.push_user || (process.env.USER_DISPLAY_NAME || '用户'),
-      channel: msg.push_channel || 'Bark', title: msg.push_title || '', body: msg.push_body || '', tail: msg.push_tail || '', structured: true, sent: true
+      channel: msg.push_channel || 'webpush', title: msg.push_title || '', body: msg.push_body || '', tail: msg.push_tail || '', structured: true, sent: true
     };
   }
   const parsed = parsePushEcho(msg.content) || parseWakeEcho(msg.content);
   if (!parsed) return null;
   const wake = parsed.channel === '未发送';
-  return { position: msg.position, content: msg.content, structured: false, sent: !wake, at: parsed.at || fmtLocalAt(msg.time) || '', user: parsed.user || (process.env.USER_DISPLAY_NAME || '用户'), channel: parsed.channel || 'Bark', title: parsed.title || '', body: parsed.body || '', tail: parsed.tail || '' };
+  return { position: msg.position, content: msg.content, structured: false, sent: !wake, at: parsed.at || fmtLocalAt(msg.time) || '', user: parsed.user || (process.env.USER_DISPLAY_NAME || '用户'), channel: parsed.channel || 'webpush', title: parsed.title || '', body: parsed.body || '', tail: parsed.tail || '' };
 }
 // 「YYYY-MM-DD HH:mm」→ 本地 epoch 毫秒（推送列表按时间排序用）；解析不出返回 null
 function toEpoch(at) {
