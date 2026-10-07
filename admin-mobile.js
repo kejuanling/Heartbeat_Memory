@@ -183,6 +183,9 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
      try{ const j = await r.json(); if(j && j.sessions) sessions = j.sessions; }catch(e){}
      let html = '<option value="">跟随聊天页当前会话</option>';
      for(const s of sessions){
+       // 1007-14：下拉框排除已归档会话（用户拍板）。若本地保存的会话恰好是归档的，
+       // 下方 sel.value 匹配不到会走「清除残留 → 跟随聊天页当前会话」的回退。
+       if (s && s.archived) continue;
        const cnt = (s && s.real!=null) ? s.real : (s ? (s.total||0) : 0);
        const nm = (s && s.name) || (s && s.id) || '';
        html += '<option value="'+escHtml(s.id)+'" data-count="'+cnt+'">'+escHtml(nm)+'（'+cnt+'条）</option>';
