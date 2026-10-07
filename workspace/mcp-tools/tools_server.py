@@ -1148,6 +1148,55 @@ def tool_memory_update(args):
     return {"error": out.get("error", "更新失败")}
 
 
+def tool_memory_add(args):
+    content = (args.get("content") or "").strip()
+    if not content:
+        return {"error": "content 必填：要提交的记忆正文"}
+    kind = (args.get("kind") or "").strip() or None
+    if kind is not None and kind not in ("fact", "rule", "event"):
+        return {"error": "kind 只能是 fact / rule / event（或省略）"}
+    data = {"content": content}
+    if kind:
+        data["kind"] = kind
+    url = f"{BASE_URL}:3000/internal/memory-pool/add"
+    req = urllib.request.Request(url,
+        data=json.dumps(data).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-internal-key": INTERNAL_KEY},
+        method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            out = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            out = json.loads(e.read().decode("utf-8"))
+        except Exception:
+            out = {"error": f"HTTP {e.code}"}
+    except Exception as e:
+        return {"error": str(e)}
+    if out.get("success"):
+        return {
+            "success": True,
+            "action": out.get("action"),
+            "queue_id": out.get("queue_id") or None,
+            "message": out.get("note") or "已提交记忆，走流水线"
+        }
+    return {"error": out.get("error", "提交失败")}
+
+
+TOOLS["memory_add"] = {
+    "description": "使用本工具可提交一条记忆。kind 分类：fact/rule/event。fact 和 rule 分别会成为系统注入的两大块总结——「Long-term Understanding」和「Core Identity」——的素材，每次对话开头常驻注入；event 则是对方消息命中相关记忆关键词时直接注入对话。提交会走记忆流水线（分类校验 → 门卫打分 → 人工待审），不代表一定最终入池；kind 可省略，门卫会补分类建议。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "content": {"type": "string", "description": "想提交的记忆正文；基于真实对话，不编造"},
+            "kind": {"type": "string", "enum": ["fact", "rule", "event"], "description": "分类：fact=稳定事实（进 Long-term Understanding 总结素材）、rule=规则/边界/承诺（进 Core Identity 总结素材）、event=具体发生的事（关键词命中时注入）。可省略"}
+        },
+        "required": ["content"]
+    },
+    "handler": tool_memory_add
+}
+
+
 TOOLS["memory_update"] = {
     "description": "直接覆盖更新一条长期记忆的正文。先用 memory_search 找到它的 id，再传 id 和新 content，正文被整体替换（不追加）。适用于：发现某条记忆内容过时/有误/需要补充修正，且新内容能完整替代旧内容时。本工具是「确认旧条目该被这句替换」时的直改通道；发现某条已经过时、失效，改用 memory_pin 沉底。",
     "inputSchema": {

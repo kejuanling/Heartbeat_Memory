@@ -135,8 +135,13 @@ function validate(candidate, deps = {}) {
   }
 
   // V7 枚举白名单
+  // 1007：kind 缺失放行（不再拒）——分类为空时进待审，由门卫出分类建议、人工更换后再入库；
+  //       origin 仍必填（缺失拒）。
   for (const [field, list] of [["kind", CONSTANTS.KINDS], ["origin", CONSTANTS.ORIGINS]]) {
     const v = c[field];
+    if (field === "kind" && v == null) {
+      continue; // kind 可空（待审补分类）
+    }
     if (v == null) {
       matched.push("V7");
       reasons.push(`V7 ${field} 缺失`);

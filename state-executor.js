@@ -112,6 +112,10 @@ function createStateExecutor(opts = {}) {
       if (rec.merge && rec.merge.merged_text) {
         draft.text = rec.merge.merged_text;
       }
+      // 1007：kind 可空进待审（门卫建议+人工更换）——approve 时仍未分类则明确拒绝，提示先更换
+      if (draft.kind == null || !["fact", "rule", "event"].includes(draft.kind)) {
+        return { ok: false, error: "kind 未分类：请先在待审页选择/更换分类（可用门卫建议）再通过" };
+      }
       const r = store.create(draft);
       if (!r.ok) return { ok: false, error: r.error };
       // 1002-22 老数据重跑（记忆改造第 5 项）：批准即「新条目入池 + 旧条目沉底」，一步到位不留重复。

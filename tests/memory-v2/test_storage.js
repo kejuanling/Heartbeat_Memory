@@ -89,7 +89,7 @@ const cases = [
     store.create(baseFact("fact-self"));
     assert.strictEqual(store.list().length, 3);
     assert.strictEqual(store.list({ kind: "fact" }).length, 2);
-    assert.strictEqual(store.list({ subject: "self" }).length, 0, "subject 已删：按它过滤恒 0");
+    assert.strictEqual(store.list({ subject: "self" }).length, 3, "subject 已删：过滤参数被忽略，返回全部");
     assert.strictEqual(store.list({ kind: "rule" }).length, 1);
     assert.strictEqual(store.list({ status: "active" }).length, 3);
     assert.strictEqual(store.list({ status: "superseded" }).length, 0);

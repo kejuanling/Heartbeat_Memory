@@ -21,7 +21,6 @@
 
 const fs = require("fs-extra");
 const path = require("path");
-const { detect } = require("./candidate-detector");
 const { buildProvenance } = require("./provenance-builder");
 const { validate } = require("./admission-validator");
 const { createAuditLogger } = require("./admission-audit");
@@ -91,10 +90,10 @@ function fmtW(w) { return (w == null) ? "-" : Math.round(w * 100) + "%"; }
 // 1004-04：单次 judge 调用（existing 为 null 表示"无相似对照"，只取 worth/volatility）。
 // 返回 {ok:true, relation, relation_reason, worth, worth_reason, volatility, volatility_reason, suggested_kind, suggested_kind_reason}
 // 或 {ok:false, error}。
-async function runJudge(candidateText, existingEntry, detection, opts) {
+async function runJudge(candidateText, existingEntry, kindVal, opts) {
   try {
     const prompt = buildPrompt(candidateText, existingEntry ? existingEntry.text : "（无相似记忆）", {
-      candidateKind: detection.kind_guess,
+      candidateKind: kindVal ? String(kindVal) : "",
       existingKind: existingEntry ? (existingEntry.kind + "/" + (existingEntry.status || "")) : "none",
     });
     const raw = await (typeof opts.callLLM === "function" ? opts.callLLM : defaultCallLLM)(prompt, 1);
@@ -131,7 +130,7 @@ async function defaultCallLLM(prompt) {
   } finally { clearTimeout(timer); }
 }
 
-// 旧池 category → V2 kind 翻译（manual 兼容层专用；未映射类别交 detector 自判）
+// 旧池 category → V2 kind 翻译（manual 兼容层专用；未映射类别 kind 为空进待审）
 const CATEGORY_MAP = {
   "关于她": { kind: "fact" },
   "认账": { kind: "rule", direction: "self_discipline" },
@@ -206,8 +205,10 @@ function createAdmission(opts = {}) {
     const explicitSpeaker = strSafe(b.speaker) || null;
     const speakerVal = explicitSpeaker || (mapped ? mapped.speaker || null : null);
 
-    // [1] candidate_detector（manual 显式类别优先，否则自动粗分）
-    const detection = detect({ text, source: originVal, explicitKind: mapped ? mapped.kind : b.kind });
+    // [1] 分类：直接取上游显式 kind（蒸馏/重跑/提炼/工具提交都已由 LLM 或人工分好类）。
+    // 1007：不再机械粗分——分类为空则 null，进待审由门卫给分类建议、人工更换后入库。
+    const rawKind = mapped ? mapped.kind : (strSafe(b.kind) || null);
+    const kindVal = (rawKind && ["fact", "rule", "event"].includes(rawKind)) ? rawKind : null;
 
     // [2] provenance_builder（manual：无 session/msg → null，不伪造；promotion：block_id 必带（压缩块溯源），msg_id=null）
     // method 一律用契约内合法值（2026-09-28 拍板方案B：原 chat_manual_pick 不在 LEGAL_METHODS 会被静默置 null）
@@ -227,30 +228,25 @@ function createAdmission(opts = {}) {
     if (strSafe(b.msg_time)) provenance.msg_time = String(b.msg_time).trim();
     if (isPromo && strSafe(b.block_id)) provenance.block_id = strSafe(b.block_id);
 
-    // [3] validator（仅真实候选类别需要校验；非候选直接走拒绝）
-    let validation = null;
-    if (detection.candidate) {
-      validation = validate({
-        text,
-        kind: detection.kind_guess,
-        origin: originVal,
-        speaker: speakerVal,
-        direction: mapped ? mapped.direction || null : null,
-        provenance,
-        source: originVal,
-      });
-    } else {
-      validation = { allowed: false, matched_rules: ["DET.not_candidate"], reasons: detection.reasons.slice() };
-    }
+    // [3] validator（恒跑；kind 可空由 V7 放行）
+    const validation = validate({
+      text,
+      kind: kindVal,
+      origin: originVal,
+      speaker: speakerVal,
+      direction: mapped ? mapped.direction || null : null,
+      provenance,
+      source: originVal,
+    });
 
     // [4] 决策（judge LLM 判定 + 保守回退）
-    let { action, why } = decide(detection, validation);
+    let { action, why } = decide(validation);
     let judgeNote = null;
     let mergeDraft = null; // 1004-04 起恒为 null（judge 不再生成合并草稿，保留变量供返回契约兼容）
     let judgeMeta = null; // 1004-04：{worth, worth_reason, volatility, volatility_reason, similar[]}
     // 1004-04：judge 退化为「只提供信息的人」——无条件跑、只打标、不做任何自动决策。
     // 有相似：逐条判关系（有上限，几条就调几次）；无相似：也跑一次只拿 worth/volatility。
-    const judgeApplies = (formal || isManualReviewGate) && detection.candidate && validation.allowed && judgeMode !== "off";
+    const judgeApplies = (formal || isManualReviewGate) && validation.allowed && judgeMode !== "off";
     const similarList = [];   // 待审页展示用：[{id,text,kind,score,relation,relation_reason}]
     if (judgeApplies) {
       let hits = [];
@@ -260,7 +256,7 @@ function createAdmission(opts = {}) {
       let suggestedKind = null, suggestedKindReason = null;   // 1007：门卫分类建议（只建议不操作）
       if (!hits.length) {
         // 无相似：仍跑一次 judge，只为拿 worth / volatility（用户 1004-04 拍板：没有相似也跑）
-        const jr = await runJudge(text, null, detection, opts);
+        const jr = await runJudge(text, null, kindVal, opts);
         if (jr && jr.ok) {
           worth = jr.worth; worthReason = jr.worth_reason;
           volatility = jr.volatility; volatilityReason = jr.volatility_reason;
@@ -269,7 +265,7 @@ function createAdmission(opts = {}) {
         } else if (jr) judgeNote = "judge 失败(" + jr.error + ")";
       } else {
         for (const h of hits) {
-          const jr = await runJudge(text, h.entry, detection, opts);
+          const jr = await runJudge(text, h.entry, kindVal, opts);
           const item = { id: h.entry.id, text: h.entry.text, kind: h.entry.kind,
                          score: h.score, lit: h.lit, sem: h.sem,
                          relation: null, relation_reason: null, judge_error: null };
@@ -312,7 +308,7 @@ function createAdmission(opts = {}) {
     //     review 路径先落审计拿 audit_id（队列记录要回链）；admit/reject 执行后记最终动作
     const draft = {
       text,
-      kind: detection.kind_guess,
+      kind: kindVal,
       direction: mapped ? mapped.direction || null : null,
       speaker: speakerVal,
       origin: originVal,
@@ -345,7 +341,7 @@ function createAdmission(opts = {}) {
     if (action === "review") {
       auditRec = audit.append(audit.buildRecord({
         candidateText: text, origin: originVal, validator: validation, action: "review",
-        notes: { shadow: !formal && !isPromo, detector_kind: detection.kind_guess, why, judge: judgeNote,
+        notes: { shadow: !formal && !isPromo, kind: kindVal, why, judge: judgeNote,
                  judge_meta: judgeMeta ? { worth: judgeMeta.worth, volatility: judgeMeta.volatility, similar_count: (judgeMeta.similar || []).length } : null },
       }));
       execResult = exec.review(draft, why, {
@@ -359,19 +355,19 @@ function createAdmission(opts = {}) {
       auditRec = audit.append(audit.buildRecord({
         candidateText: text, origin: originVal, validator: validation,
         action: execResult.ok ? "admit" : "error",
-        notes: { shadow: !formal && !isPromo, detector_kind: detection.kind_guess, why, judge: judgeNote, entry_id: execResult.entry ? execResult.entry.id : null, error: execResult.error || null },
+        notes: { shadow: !formal && !isPromo, kind: kindVal, why, judge: judgeNote, entry_id: execResult.entry ? execResult.entry.id : null, error: execResult.error || null },
       }));
     } else {
       execResult = exec.reject(draft, why);
       auditRec = audit.append(audit.buildRecord({
         candidateText: text, origin: originVal, validator: validation, action: "reject",
-        notes: { shadow: !formal && !isPromo, detector_kind: detection.kind_guess, why, judge: judgeNote },
+        notes: { shadow: !formal && !isPromo, kind: kindVal, why, judge: judgeNote },
       }));
     }
 
     return {
       action: execResult.ok ? action : "error",
-      candidate: { text, kind: detection.kind_guess, detector: detection, provenance },
+      candidate: { text, kind: kindVal, provenance },
       validation,
       judge: judgeNote,
       judge_meta: judgeMeta || null,
@@ -492,8 +488,8 @@ function createAdmission(opts = {}) {
 // 1004-04：safeMerged 已随「judge 不再生成合并文本」整体下线——合并改为人工在待审页对照决定。
 // （原 0928 逻辑：LLM 合并产物安检，隐私命中/超长即丢弃。现零调用，删除避免误当活代码。）
 
-function decide(detection, validation) {
-  if (!detection.candidate) return { action: "reject", why: "detector 非候选（" + detection.kind_guess + "）" };
+function decide(validation) {
+  // 1007：detector 已移除，不再有"非候选"概念——只有 validator 硬规则能自动拒
   if (!validation.allowed) return { action: "reject", why: "validator 硬规则命中: " + validation.matched_rules.join("/") };
   return { action: "admit", why: "校验通过" };
 }

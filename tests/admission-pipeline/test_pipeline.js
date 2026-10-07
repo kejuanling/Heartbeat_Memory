@@ -107,7 +107,7 @@ const cases = [
     assert.strictEqual(line.action, "admit");
     assert.ok(line.ts && line.candidate_hash.startsWith("sha256:"));
     assert.strictEqual(line.notes.shadow, true, "影子标记在场");
-    assert.strictEqual(line.notes.detector_kind, "fact");
+    assert.strictEqual(line.notes.kind, "fact");
     fs.removeSync(tmpDir);
   }],
 
@@ -163,12 +163,19 @@ const cases = [
     fs.removeSync(tmpDir);
   }],
 
-  ["非候选拒绝：当日状态不产候选（无 category 时 detector 层拒绝）", async () => {
-    const { adm, tmpDir } = makeTmpAdmission("noncand");
+  ["无分类进待审：kind=null 放行（1007 detector 移除），approve 前必须补分类", async () => {
+    const { adm, tmpDir } = makeTmpAdmission("nokind");
     const r = await adm.submitManual({ content: "今天好累啊" });
-    assert.strictEqual(r.action, "reject");
-    assert.ok(r.validation.matched_rules.includes("DET.not_candidate"));
-    assert.strictEqual(shadowCount(adm), 0);
+    // validator 放行（V7 对 kind null 不再拒），action 走到 admit 但存储层拒绝 kind null
+    assert.strictEqual(r.validation.allowed, true, JSON.stringify(r.validation));
+    assert.ok(!r.entry_id, "kind null 不应入库");
+    // 显式挂起进队列后可正常 approve（kind 已补）
+    const q1 = adm.executor.review(
+      { text: "今天好累啊", kind: "event", origin: "manual", provenance: { method: "admin_form" } },
+      "1007 测试"
+    );
+    const ok = adm.executor.resolveQueue(q1.queue_id, "approve");
+    assert.strictEqual(ok.ok, true, ok.error);
     fs.removeSync(tmpDir);
   }],
 
