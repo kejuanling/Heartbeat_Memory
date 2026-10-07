@@ -527,7 +527,8 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 }
 .act-tok{grid-column:1 / -1}
 .act-item{
-  display:flex;align-items:center;gap:14px;
+  /* 1007-14：两列网格各自内容水平居中（图标+文字在各自格子内居中），不再靠左 */
+  display:flex;align-items:center;justify-content:center;gap:14px;
   padding:14px 16px;border:none;background:none;width:100%;
   font-size:16px;color:var(--act-item-ink,var(--ink));cursor:pointer;border-radius:var(--radius-sm);
 }
