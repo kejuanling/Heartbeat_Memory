@@ -2049,7 +2049,10 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         max_tokens: body.max_tokens,
         onEvent: (body.stream === true) ? onEvent : null,
         sessionId,
-        onDiaryWritten: onDiaryToolWritten
+        onDiaryWritten: onDiaryToolWritten,
+        // 1007 上下文快照 v2：工具冻死
+        snapshotV2: Object.assign(require("./context-snapshot-v2"), { baseDir }),
+        baseDir
       });
     } catch (toolLoopErr) {
       // 一旦已经向客户端发出 SSE，就不能再从头跑一遍 runWithTools：
@@ -2064,7 +2067,10 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         serverClients: clients,
         onEvent: (body.stream === true) ? onEvent : null,
         sessionId,
-        onDiaryWritten: onDiaryToolWritten
+        onDiaryWritten: onDiaryToolWritten,
+        // 1007 上下文快照 v2：工具冻死
+        snapshotV2: Object.assign(require("./context-snapshot-v2"), { baseDir }),
+        baseDir
       });
     }
 
@@ -5541,6 +5547,50 @@ app.get("/admin/conversation-state", { preHandler: basicAuth }, async (req, repl
   }
 });
 
+// 1007 上下文快照 v2：状态查询 + 手动重建（管理台按钮）
+// 快照 = 前缀缓存（人设+V2块+工具+历史冻死）。三类自动重建：状态摘要更新/编辑消息/历史摘要更新；
+// 其余（工具定义/人设变化）一律不重建，靠这里手动重建。
+app.get("/admin/ctx-snapshot-v2", { preHandler: basicAuth }, async (req, reply) => {
+  const sid = _csSessionOf(req);
+  if (!sid) return reply.code(400).send({ error: "缺少 session 参数" });
+  try {
+    const sv = require("./context-snapshot-v2");
+    const snap = sv.loadSnapshot(__dirname, sid);
+    return reply.send({
+      ok: true,
+      session_id: sid,
+      exists: !!snap,
+      stale: sv.isStale(__dirname, sid),
+      created_at: snap && snap.created_at || null,
+      updated_at: snap && snap.updated_at || null,
+      history_len: snap && Array.isArray(snap.history) ? snap.history.length : 0,
+      v2_blocks: snap && Array.isArray(snap.v2_blocks) ? snap.v2_blocks.length : 0,
+      tools: snap && Array.isArray(snap.tools) ? snap.tools.length : (snap && snap.tools === null ? "pending(未回填)" : 0),
+      tail_start: snap ? (Number(snap.tail_start) || 0) : null,
+      fp: snap && snap.fp || "",
+      state_fp: snap && snap.state_fp || "",
+      tools_fp: snap && snap.tools_fp || "",
+    });
+  } catch (err) {
+    return reply.code(400).send({ error: err.message });
+  }
+});
+
+app.post("/admin/ctx-snapshot-v2/rebuild", { preHandler: basicAuth }, async (req, reply) => {
+  const sid = _csSessionOf(req);
+  if (!sid) return reply.code(400).send({ error: "缺少 session 参数" });
+  try {
+    const sv = require("./context-snapshot-v2");
+    // 手动重建：删除快照文件 + 清失效标记 → 下次请求懒生成全新快照
+    sv.deleteSnapshot(__dirname, sid);
+    sv.clearStale(__dirname, sid);
+    console.log("[ctx-snapshot-v2] 手动重建已触发 session=" + sid);
+    return reply.send({ ok: true, session_id: sid, message: "快照已删除，下次请求自动重建" });
+  } catch (err) {
+    return reply.code(400).send({ error: err.message });
+  }
+});
+
 // 丢弃某会话的待确认候选（用户不想要这份了；不调模型、不可恢复——要留着就点确认并入）
 app.post("/admin/conversation-state/candidate/discard", { preHandler: basicAuth }, async (req, reply) => {
   const sid = _csSessionOf(req);
@@ -5620,6 +5670,8 @@ app.post("/admin/conversation-state/commit", { preHandler: basicAuth }, async (r
   const sid = _csSessionOf(req);
   if (!sid) return reply.code(400).send({ error: "缺少 session 参数" });
   try {
+    // 1007 上下文快照 v2：状态摘要更新 → 标记快照失效（下次请求重建）
+    require("./context-snapshot-v2").markStale(__dirname, sid, "state-commit");
     const r = conversationState.commitMerge({
       session: sid,
       state: body.state,
@@ -5650,6 +5702,8 @@ app.post("/admin/conversation-state/edit", { preHandler: basicAuth }, async (req
     return reply.code(400).send({ error: "改写状态正文需要显式确认：请带 confirm:true（会直接覆盖当前版本的正文）" });
   }
   try {
+    // 1007 上下文快照 v2：状态正文编辑 → 标记快照失效
+    require("./context-snapshot-v2").markStale(__dirname, sid, "state-edit");
     reply.send(conversationState.editStateText({ session: sid, text: body.text }));
   } catch (err) {
     reply.code(400).send({ error: (err && err.message) || String(err) });
@@ -5661,6 +5715,8 @@ app.post("/admin/conversation-state/rollback", { preHandler: basicAuth }, async 
   const sid = _csSessionOf(req);
   if (!sid) return reply.code(400).send({ error: "缺少 session 参数" });
   try {
+    // 1007 上下文快照 v2：状态回滚 → 标记快照失效
+    require("./context-snapshot-v2").markStale(__dirname, sid, "state-rollback");
     reply.send(conversationState.rollback({ session: sid, version: body.version }));
   } catch (err) {
     reply.code(400).send({ error: (err && err.message) || String(err) });

@@ -139,6 +139,33 @@ function createThinkStripper() {
     }
   };
 }
+// 1007 上下文快照 v2：工具定义冻死。
+// 取工具顺序：快照里有 tools → 直接用（不拉 MCP）；没有 → loadTools 并回填快照。
+// 快照 tools 为 null（尚未回填）时仍以快照存在为准：首次请求拉取后回填，之后永远用快照的。
+async function getToolsForSession(snapshotV2, baseDir, sessionId, serverClients) {
+  if (snapshotV2 && baseDir && sessionId) {
+    try {
+      const snap = snapshotV2.loadSnapshot(baseDir, sessionId);
+      if (snap && Array.isArray(snap.tools) && snap.tools.length > 0) {
+        return snap.tools; // 冻死：永远用快照里的
+      }
+      // 快照存在但 tools 未回填（或为空）→ 拉取一次并回填
+      const routes = await loadTools(serverClients);
+      const openaiTools = toOpenAITools(routes || []);
+      if (snap && openaiTools.length > 0) {
+        const updated = Object.assign({}, snap, { tools: openaiTools, tools_fp: snapshotV2.toolsFpOf(openaiTools) });
+        snapshotV2.saveSnapshot(baseDir, sessionId, updated);
+        console.log("[ctx-snapshot-v2] 工具已回填快照 session=" + sessionId + " tools=" + openaiTools.length);
+      }
+      return openaiTools;
+    } catch (e) {
+      console.warn("[ctx-snapshot-v2] 快照取工具失败，回退实时拉取:", e && e.message);
+    }
+  }
+  const routes = await loadTools(serverClients);
+  return toOpenAITools(routes || []);
+}
+
 async function runWithTools({
   upstreamUrl,
   upstreamKey,
@@ -153,12 +180,13 @@ async function runWithTools({
   resume = null,
   onEvent = null,
   sessionId = null,
-  onDiaryWritten = null
+  onDiaryWritten = null,
+  snapshotV2 = null,
+  baseDir = null
 }) {
-  // 1. 加载 MCP 工具，转成 OpenAI tools[]
-  const routes = await loadTools(serverClients);
-  const allRoutes = routes || [];
-  const openaiTools = toOpenAITools(allRoutes);
+  // 1. 加载 MCP 工具，转成 OpenAI tools[]（1007：快照优先，冻死）
+  const openaiTools = await getToolsForSession(snapshotV2, baseDir, sessionId, serverClients);
+  const allRoutes = openaiTools;
   // 2026-10-03：onDiaryWritten 必须进 toolCtx —— executeToolCalls 读的是 ctx.onDiaryWritten，
   // 而本函数的参数表此前根本不接受它、toolCtx 也不带，server.js 传的回调在签名这层就被丢掉，
   // 0929-03 那次「修复」实际从未生效：diary_add 写的日记两条路径都没落过时间线。
@@ -454,10 +482,11 @@ async function streamToolLoop({
   onEvent = null,
   fetchFn = fetch,
   sessionId = null,
-  onDiaryWritten = null
+  onDiaryWritten = null,
+  snapshotV2 = null,
+  baseDir = null
 }) {
-  const routes = await loadTools(serverClients);
-  const openaiTools = toOpenAITools(routes || []);
+  const openaiTools = await getToolsForSession(snapshotV2, baseDir, sessionId, serverClients);
   let working = messages.slice();
   let totalUsage = null;
   let rounds = 0;
@@ -761,5 +790,6 @@ module.exports = {
   DEFAULT_MAX_TOOL_ROUNDS,
   buildToolResultContent,
   splitThinkBlock,
-  createThinkStripper
+  createThinkStripper,
+  getToolsForSession
 };

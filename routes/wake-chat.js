@@ -225,7 +225,10 @@ async function runWakeCompletion(deps, opts) {
           top_p: sampling.topP,
           onEvent: null,
           // 2026-10-03：与对话侧同一实现——唤醒时用 diary_add 工具写的日记同样要落时间线
-          onDiaryWritten: deps.onDiaryWritten || null
+          onDiaryWritten: deps.onDiaryWritten || null,
+          // 1007 上下文快照 v2：工具冻死
+          snapshotV2: Object.assign(require("../context-snapshot-v2"), { baseDir: deps.baseDir }),
+          baseDir: deps.baseDir
         });
         if (r && typeof r.text === "string" && deps.normalizeContentToText(r.text).trim()) {
           text = r.text;
@@ -291,7 +294,9 @@ function ensureBuilder(deps) {
       resolveSessionSystemPrompt: deps.resolveSessionSystemPrompt,
       loadSnapshot: (sid) => require("../context-snapshot").loadSnapshot(deps.baseDir, sid),   // 1002-11 注入前缀快照
       incrementalContext: deps.incrementalContext,   // 0929 增量：块摘要化+尾部现算
-      fullCache: deps.fullCache !== false   // 0929 唤醒：整体缓存命中直接返回（时间线未变）
+      fullCache: deps.fullCache !== false,   // 0929 唤醒：整体缓存命中直接返回（时间线未变）
+      // 1007 上下文快照 v2：前缀缓存（与聊天侧共用，冻死块）
+      snapshotV2: Object.assign(require("../context-snapshot-v2"), { baseDir: deps.baseDir })
     });
   }
   return buildConversation;

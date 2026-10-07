@@ -151,18 +151,10 @@ async function assembleAndApply(opts) {
     blocks = existing.fixed_blocks
       .filter(function (b) { return b && b.content; })
       .map(function (b) { return { key: b.key, title: b.title || '', content: b.content, empty: false }; });
-    // 1002 §8 第 6 项 + 1002-20：两块 LLM 总结与顶层引导都不能被快照冻住——
-    // 记忆池一变总结就重生成、pinned(assembly) 文案一改就应即时生效，
-    // 而快照只重算 relevant。故这些块永远用本次实时构建的结果覆盖/插入。
-    ['context_assembly', 'core_identity', 'long_term_understanding'].forEach(function (key) {
-      const nb = built.blocks.find(function (b) { return b.key === key && !b.empty; });
-      if (!nb) return;
-      const i = blocks.findIndex(function (b) { return b.key === key; });
-      if (i >= 0) { blocks[i] = nb; return; }
-      // 老快照里没这块（当时为空）：插在 Earlier Days 之后、Relevant 之前，保住块序
-      const j = blocks.findIndex(function (b) { return b.key === 'conversation_continuity'; });
-      if (j >= 0) blocks.splice(j + 1, 0, nb); else blocks.push(nb);
-    });
+    // 1007 用户拍板：V2 注入块全部冻死（System Instructions / Core Identity / Long-term Understanding /
+    // Earlier Days 都从快照读，不再实时构建覆盖）。此前 1002 §8 的"两块总结实时覆盖"逻辑已删除——
+    // 记忆池/总结/文案变化都不会再即时反映，只有手动重建快照（或状态摘要/编辑消息触发重建）才更新。
+    // 唯一仍动态的是 relevant_memories（相关记忆按本轮 user 消息现算）。
     const rel = built.blocks.find(function (b) { return b.key === 'relevant_memories' && !b.empty; });
     if (rel) blocks.push(rel);
     relevantHits = built.relevantHits || [];

@@ -449,6 +449,8 @@ function createCtxLimitReminderGuard(deps) {
 function createConversationBuilder(deps) {
   const { loadTimeline, prepareMessageForLLM, stripPosition, resolveSessionSystemPrompt } = deps;
   const incrementalContext = deps.incrementalContext || null;
+  // 1007 上下文快照 v2：前缀缓存。快照有效时直接复用 history（含状态块/摘要块），尾部现算。
+  const snapshotV2 = deps.snapshotV2 || null;
   // 2026-09-29 缓存分层（用户拍板）：整体缓存只服务「时间线未变」的场景（唤醒/重试）——
   // 聊天每次发消息 fp 必变、整体缓存必 miss，跳过 get/set 省一次 Map 查找，
   // 且避免聊天把唤醒的缓存项挤出（_convCache 上限 10）。聊天一律走增量路径（块摘要+尾部现算）。
@@ -471,6 +473,8 @@ function createConversationBuilder(deps) {
     }
     _convCache.set(key, msgs);
   }
+  // 1007 快照 v2：本组装是否触发快照懒生成（声明在顶部，避免 TDZ）
+  let _snapshotPending = false;
   return function buildConversation(sessionId) {
     const timeline = loadTimeline(sessionId);
     const fp = (timeline && timeline.__fp) || "";
@@ -496,6 +500,61 @@ function createConversationBuilder(deps) {
         if (m && m.role === "system" && !m.deleted) systemRaw = m;
       }
     }
+    // 1007 快照 v2 路径：快照存在且未失效 → 复用快照 history，尾部现算。
+    // 快照 history = 构建时固化的 head（含状态块/摘要块，位置不变）；tail_start 之后为动态尾部。
+    if (snapshotV2) {
+      const _snap = snapshotV2.loadSnapshot(snapshotV2.baseDir, sessionId);
+      if (_snap && !snapshotV2.isStale(snapshotV2.baseDir, sessionId)) {
+        const sysPrep = systemRaw ? prepareMessageForLLM(systemRaw) : null;
+        if (sysPrep) msgs.push(sysPrep);
+        // V2 注入块（快照里冻死，不再实时构建覆盖）
+        if (Array.isArray(_snap.v2_blocks)) {
+          for (const b of _snap.v2_blocks) {
+            if (!b) continue;
+            msgs.push(b);
+          }
+        }
+        // 快照 history：原文已 prepare 过直接透传，_ctxRep 块原样
+        // （history 不含 system——增量 head 与全量兜底都剥了；防御性跳过）
+        const turnStart = _tailTurnStart(timeline);
+        for (const m of _snap.history) {
+          if (!m || m.role === "system") continue;
+          if (m._ctxRep) { msgs.push(m); continue; }
+          const p = prepareMessageForLLM(m);
+          if (!p) continue;
+          msgs.push(downgradeHistoryImages(p));
+        }
+        // 尾部增量：tail_start 之后的消息现算（含最新 user，图片保真）
+        const _ts = Number(_snap.tail_start) || 0;
+        for (let k = _ts; k < timeline.length; k++) {
+          const m = timeline[k];
+          if (!m || m.role === "system" || m.deleted) continue;
+          const p = prepareMessageForLLM(m);
+          if (!p) continue;
+          msgs.push(k < turnStart ? downgradeHistoryImages(p) : p);
+        }
+        // 1007 新消息落盘 → 并入快照尾部（廉价追加，惰性写回；不触发重建）。
+        // 仅当时间线比快照长时追加，且不在失效重建流程中（此处是快照有效路径）。
+        if (timeline.length > _ts) {
+          try {
+            const _merged = Object.assign({}, _snap, {
+              history: (_snap.history || []).concat(timeline.slice(_ts, timeline.length)
+                .filter(function (m) { return m && m.role !== "system" && !m.deleted; })
+                .map(function (m) { return Object.assign({}, m); })),
+              tail_start: timeline.length,
+            });
+            snapshotV2.saveSnapshot(snapshotV2.baseDir, sessionId, _merged);
+          } catch (e) {
+            console.warn("[ctx-snapshot-v2] 快照尾部并入失败（下次请求重试）:", e && e.message);
+          }
+        }
+        return msgs;
+      }
+      // 1007 快照懒生成：快照缺失/失效 → 走下方原路径组装；组装完成后在本函数末尾生成快照。
+      // 生成与"读取"共用同一增量 head 口径，保证位置一致。
+      _snapshotPending = true;
+    }
+
     // 缓存命中判断（fp 非空 + 大会话才缓存；小会话重建便宜不缓存）
     const cacheable = !!(fp && timeline && timeline.length >= _CONV_CACHE_MIN_MSGS);
     const cacheKey = cacheable ? _convCacheKey(sessionId, fp, null, systemRaw) : null;
@@ -537,6 +596,7 @@ function createConversationBuilder(deps) {
           msgs.push(k < turnStart ? downgradeHistoryImages(p) : p);
         }
         if (useFullCache && incKey) _convCacheSet(incKey, msgs);
+        _maybeBuildSnapshot(sessionId, timeline, msgs);
         return msgs;
       }
     }
@@ -559,8 +619,79 @@ function createConversationBuilder(deps) {
       msgs.push(k < turnStart ? downgradeHistoryImages(prepared) : prepared);
     }
     if (useFullCache && cacheKey) _convCacheSet(cacheKey, msgs);
+    _maybeBuildSnapshot(sessionId, timeline, msgs);
     return msgs;
   };
+
+  // 1007 快照 v2：懒生成。在增量/全量路径组装完成后，把"可固化前缀"落盘。
+  // 快照内容：system + v2_blocks(从 ctx-v2 注入快照读冻死块) + history(增量 head，含状态块/摘要块) + tools + tail_start。
+  // 生成条件：快照缺失或失效标记；生成后清除失效标记。
+  // 注意：v2_blocks 只在 ctx-v2 enabled 时有（assembleAndApply 之后），这里从 session_inject_snapshots 读，
+  // 与 ctx-v2 快照模式同源——即"冻死的 V2 块"。若该文件没有此会话（未装配过 ctx-v2），v2_blocks 为空数组。
+  function _maybeBuildSnapshot(sessionId, timeline, assembledMsgs) {
+    if (!snapshotV2 || !_snapshotPending) return;
+    _snapshotPending = false;
+    try {
+      const stale = snapshotV2.isStale(snapshotV2.baseDir, sessionId);
+      const exists = snapshotV2.hasSnapshot(snapshotV2.baseDir, sessionId);
+      if (exists && !stale) return; // 已存在且未失效，不重建
+      // 生成 history：优先用增量 head（含 _ctxRep 块，位置正确）
+      let head = null, tailStart = 0;
+      if (incrementalContext && timeline && timeline.length) {
+        try {
+          const inc = incrementalContext(sessionId, timeline);
+          // 1007：增量 head 为空且 tailStart=0 = 无可用块（会话从未压缩）——增量不可用，
+          // 降级全量固化（与 buildIncrementalContext 的「tailStart=0 判定不可用」同口径），
+          // 否则快照 history 空、请求全靠尾部现算，前缀缓存形同虚设。
+          const incUsable = inc && Array.isArray(inc.head) && (inc.head.length > 0 || Number(inc.tailStart) > 0);
+          if (incUsable) { head = inc.head; tailStart = Number(inc.tailStart) || 0; }
+        } catch (e) { head = null; }
+      }
+      if (!head) {
+        // 无增量块路径：全量历史（剥 system/已删）。
+        // tailStart 语义 = 时间线数组下标（与读取路径尾部循环 k=tailStart 对齐）：
+        // history 已剥掉 system 后长度可能小于 tailStart，但尾部循环从 tailStart 起，
+        // 只发 tailStart 之后的消息——system 在第 0 位已被 history 覆盖（快照读取时跳过 system 条目）。
+        // 这里 history 存"剥 system 后的消息"，tailStart 存"时间线总长度"：
+        // 读取路径尾部 k=tailStart(=timeline.length) 起 → 无尾部，全部在 history 里。
+        head = (Array.isArray(timeline) ? timeline : [])
+          .filter(function (m) { return m && m.role !== "system" && !m.deleted; })
+          .map(function (m) { return Object.assign({}, m); });
+        tailStart = (Array.isArray(timeline) ? timeline.length : head.length);
+      }
+      // v2_blocks：从 ctx-v2 注入快照读冻死块（与 ctx-v2 快照模式同源）
+      let v2Blocks = [];
+      try {
+        const inj = JSON.parse(fs.readFileSync(snapshotV2.injFile(snapshotV2.baseDir), "utf8"));
+        const s = inj.sessions && inj.sessions[sessionId];
+        if (s && Array.isArray(s.fixed_blocks)) {
+          v2Blocks = s.fixed_blocks
+            .filter(function (b) { return b && b.content; })
+            .map(function (b) { return { role: "developer", content: b.content }; });
+        }
+      } catch (e) { v2Blocks = []; }
+      // system（人设）：从组装结果里取第一条 system
+      let sysPrep = null;
+      for (const m of (assembledMsgs || [])) { if (m && m.role === "system") { sysPrep = m; break; } }
+      // tools：本次组装未含 tools，由 mcp-tool-loop 读取时从快照取；此处先用占位，
+      // 实际 tools 由 ensureSnapshotTools 在首次 MCP 拉取后回填（见 mcp-tool-loop.js）。
+      const snapData = {
+        system: sysPrep ? { role: sysPrep.role, content: sysPrep.content } : null,
+        v2_blocks: v2Blocks,
+        history: head,
+        tools: null,
+        tail_start: tailStart,
+        fp: (timeline && timeline.__fp) || "",
+        state_fp: "",
+        tools_fp: "",
+      };
+      const ok = snapshotV2.saveSnapshot(snapshotV2.baseDir, sessionId, snapData);
+      if (ok) snapshotV2.clearStale(snapshotV2.baseDir, sessionId);
+      console.log("[ctx-snapshot-v2] 快照已生成 session=" + sessionId + " head=" + head.length + " tailStart=" + tailStart + " v2blocks=" + v2Blocks.length);
+    } catch (e) {
+      console.warn("[ctx-snapshot-v2] 快照生成失败（不影响本次请求）:", e && e.message);
+    }
+  }
 
   // 增量路径用：时间线末尾连续 user 起点（图片保真），口径与全量路径一致
   function _tailTurnStart(timeline) {

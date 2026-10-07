@@ -195,7 +195,9 @@ module.exports = function registerChatRoutes(app, deps) {
     resolveSessionSystemPrompt,
     loadSnapshot: (sid) => require("../context-snapshot").loadSnapshot(baseDir, sid),   // 1002-11 注入前缀快照
     incrementalContext: contextReplacements.buildIncrementalContext,   // 0929 增量：块摘要化+尾部现算
-    fullCache: false   // 0929 聊天只走增量；整体缓存留给唤醒/重试（fp 不变场景）
+    fullCache: false,   // 0929 聊天只走增量；整体缓存留给唤醒/重试（fp 不变场景）
+    // 1007 上下文快照 v2：前缀缓存（人设+V2块+工具+历史冻死，仅三类事件重建）
+    snapshotV2: Object.assign(require("../context-snapshot-v2"), { baseDir })
   });
 
   // 日记共享模块（2026-09-16）：日常聊天 [DIARY] 提取与保存（与唤醒共用 lib/diary.js）
@@ -791,6 +793,12 @@ module.exports = function registerChatRoutes(app, deps) {
             console.error("[timeline-sync] 编辑/删除未落盘：saveTimeline 拒写 (session=" + (sessionId || 'default') + ", 改=" + ok + ", 删=" + del + ")");
             return reply.send({ ok: false, error: "时间线写入被拒（文件损坏/快照过期/会话墓碑），本次修改未保存", edited: ok, deleted: del, missed: miss, session_id: sessionId || 'default' });
           }
+          // 1007 上下文快照 v2：编辑了历史消息 → 标记快照失效（下次请求重建）。
+          // 只编辑了增量区（tail_start 之后）的消息则快照本就不含它们，失效标记无害。
+          if (editedIds.length) {
+            try { require("../context-snapshot-v2").markStale(baseDir, sessionId, "timeline-edit:" + editedIds.join(",")); }
+            catch (e) { console.warn("[ctx-snapshot-v2] 编辑标记快照失效失败:", e && e.message); }
+          }
           sseNotify(sessionId);
         }
         console.log(`[timeline-sync] diff编辑/删除同步 (session=${sessionId || 'default'}, 改=${ok}, 删=${del}, 未命中=${miss}, 编辑ids=${editedIds.length ? editedIds.join(',') : '-'})`);
@@ -982,6 +990,32 @@ app.post("/v1/chat/completions", async (req, reply) => {
             normalizeContentToText: normalizeContentToText,
           });
           llmMessages = r.messages;
+          // 1007 上下文快照 v2：ctx-v2 装配后回填 V2 块到快照。
+          // 时序：buildConversation 生成快照时 session_inject_snapshots 可能还没有该会话
+          //（首轮才生成），故 v2_blocks 在快照里为空——这里装配完成后补一次。
+          // 只回填（不改 history/tail_start/tools），块内容与 ctx-v2 快照同源（冻死）。
+          try {
+            const _sv2 = require("../context-snapshot-v2");
+            const _snap = _sv2.loadSnapshot(baseDir, sessionId);
+            if (_snap && !Array.isArray(_snap.v2_blocks) || (_snap && Array.isArray(_snap.v2_blocks) && _snap.v2_blocks.length === 0)) {
+              let _vb = [];
+              try {
+                const inj = JSON.parse(require("fs").readFileSync(_sv2.injFile(baseDir), "utf8"));
+                const s = inj.sessions && inj.sessions[sessionId];
+                if (s && Array.isArray(s.fixed_blocks)) {
+                  _vb = s.fixed_blocks
+                    .filter(function (b) { return b && b.content; })
+                    .map(function (b) { return { role: "developer", content: b.content }; });
+                }
+              } catch (e2) { _vb = []; }
+              if (_vb.length) {
+                _sv2.saveSnapshot(baseDir, sessionId, Object.assign({}, _snap, { v2_blocks: _vb }));
+                console.log("[ctx-snapshot-v2] V2 块已回填快照 session=" + sessionId + " blocks=" + _vb.length);
+              }
+            }
+          } catch (e3) {
+            console.warn("[ctx-snapshot-v2] V2 块回填失败（下次请求重试）:", e3 && e3.message);
+          }
           // 记忆浮现：命中的记忆原样写入时间线永久在场（hidden 前端不显示；清单防重复由 builder excludeIds 保证）
           if (r.relevantHits && r.relevantHits.length) {
             const n = ctxV2Runtime.floatMemoriesToTimeline({ appendMessages, sessionId, mems: r.relevantHits, baseDir });
