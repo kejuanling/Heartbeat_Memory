@@ -1010,24 +1010,27 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 #bannerHost{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:1000;width:min(94vw,640px);display:flex;flex-direction:column;gap:8px;pointer-events:none}
 #bannerHostMid{position:fixed;top:40%;left:50%;transform:translateX(-50%);z-index:1000;width:75%;display:flex;flex-direction:column;gap:8px;pointer-events:none}
 /* 1008-11：交互类横幅文字放大一号（纯消息型顶部不变） */
-#bannerHostMid .banner-title{font-size:15px}
+#bannerHostMid .banner-title{font-size:15px;color:var(--ink)}
 #bannerHostMid .banner-text{font-size:14px}
-#bannerHostMid .banner-btn{font-size:14px;padding:8px 18px}
-#bannerHostMid .banner-input{font-size:14px}
-#bannerHostMid .banner-actions{flex-direction:column;align-items:stretch}
-.banner{pointer-events:auto;position:relative;background:var(--sheet-bg,var(--card-solid,rgba(255,255,255,.9)));backdrop-filter:blur(50px) saturate(1.15);-webkit-backdrop-filter:blur(50px) saturate(1.15);border:.5px solid var(--line);border-radius:12px;box-shadow:0 8px 40px rgba(var(--shadow-rgb),.16);padding:10px 38px 10px 14px;display:flex;flex-direction:column;gap:6px;animation:bannerIn .22s ease}
-.banner-title{font-size:13px;font-weight:600;color:var(--accent-deep,var(--accent));letter-spacing:.02em}
+#bannerHostMid .banner-input{font-size:16px}
+.banner{pointer-events:auto;position:relative;background:var(--sheet-bg,var(--card-solid,rgba(255,255,255,.9)));backdrop-filter:blur(50px) saturate(1.15);-webkit-backdrop-filter:blur(50px) saturate(1.15);border:.5px solid rgba(150,120,90,.20);border-radius:18px;box-shadow:0 18px 60px rgba(var(--shadow-rgb),.22),0 2px 8px rgba(var(--shadow-rgb),.08);padding:16px 18px;display:flex;flex-direction:column;gap:8px;animation:bannerIn .22s cubic-bezier(.2,.8,.3,1)}
+.banner-title{font-size:13px;font-weight:600;color:var(--ink);letter-spacing:.02em}
 .banner-text{font-size:13px;color:var(--ink2);line-height:1.7;word-break:break-word;white-space:pre-line}
-.banner-x{position:absolute;top:8px;right:10px;background:none;border:none;font-size:18px;color:var(--ink3,var(--ink2));cursor:pointer;padding:2px 6px;border-radius:6px;line-height:1;transition:all .2s}
-.banner-x:hover{background:rgba(0,0,0,.06);color:var(--ink)}
-.banner-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:2px}
-.banner-btn{border:1px solid var(--line);background:var(--bg1);color:var(--ink);padding:7px 16px;border-radius:9px;font-size:13px;cursor:pointer;transition:all .15s}
+.banner-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:14px}
+.banner-btn{flex:1;border:1px solid var(--line);background:rgba(120,100,80,.07);color:var(--ink);padding:12px 16px;border-radius:12px;font-size:14px;cursor:pointer;transition:all .15s}
 .banner-btn:hover{filter:brightness(1.05)}
-.banner-btn.primary{background:var(--accent-grad,var(--accent));border-color:transparent;color:#fff;font-weight:600}
-.banner-btn.danger{background:rgba(var(--bad-rgb),.14);border-color:rgba(var(--bad-rgb),.35);color:var(--bad-deep,var(--bad))}
-.banner-input{width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:var(--bg1);color:var(--ink);font-size:13px;outline:none}
+.banner-btn.secondary{background:rgba(120,100,80,.07);color:var(--ink)}
+.banner-btn.secondary:hover{background:rgba(120,100,80,.12)}
+.banner-btn.primary{background:var(--accent-grad,var(--accent));border-color:transparent;color:#fff;font-weight:600;box-shadow:0 6px 18px rgba(var(--accent-rgb),.28)}
+.banner-btn.danger{background:rgba(var(--bad-rgb),.10);border-color:rgba(var(--bad-rgb),.30);color:var(--bad)}
+.banner-input{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid var(--line);border-radius:11px;background:rgba(255,255,255,.7);color:var(--ink);font-size:14px;outline:none}
 .banner-input:focus{border-color:var(--accent)}
-@keyframes bannerIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes bannerIn{from{opacity:0;transform:translateY(-10px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
+.banner.out{animation:bannerOut .16s ease forwards}
+@keyframes bannerOut{to{opacity:0;transform:translateY(-6px) scale(.985)}}
+.banner-reasons{margin-top:2px;display:flex;flex-direction:column;gap:5px}
+.banner-reasons li{list-style:none;display:flex;align-items:flex-start;gap:7px;font-size:13px;color:var(--ink2);line-height:1.6}
+.banner-reasons li::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--accent);flex:none;margin-top:7px}
 .sess-menu{position:fixed;z-index:999;min-width:128px;background:var(--menu-bg,#fff);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 22px rgba(var(--shadow-rgb),.14);padding:5px;display:flex;flex-direction:column}
 .sess-menu.hidden{display:none}
 .sess-menu-item{border:none;background:none;text-align:left;padding:9px 14px;font-size:13px;color:var(--ink);border-radius:7px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:background .12s,color .12s;white-space:nowrap}
@@ -2805,7 +2808,7 @@ function bannerHostMid(){
 function _bannerButton(text,extra){
   const b=document.createElement("button");
   b.type="button";
-  b.className="banner-btn"+(extra&&extra.primary?" primary":"")+(extra&&extra.danger?" danger":"");
+  b.className="banner-btn"+(extra&&extra.primary?" primary":"")+(extra&&extra.danger?" danger":"")+(extra&&extra.secondary?" secondary":"");
   b.textContent=text;
   return b;
 }
@@ -2817,6 +2820,11 @@ function showBanner(opts){
   el.className="banner";
   if(o.title){ const t=document.createElement("div"); t.className="banner-title"; t.textContent=o.title; el.appendChild(t); }
   if(o.text){ const b=document.createElement("div"); b.className="banner-text"; b.textContent=o.text; el.appendChild(b); }
+  if(o.reasons&&o.reasons.length){
+    const ul=document.createElement("ul"); ul.className="banner-reasons";
+    o.reasons.forEach(function(r){ const li=document.createElement("li"); li.textContent=r; ul.appendChild(li); });
+    el.appendChild(ul);
+  }
   let done=false;
   const finish=function(val,cb){
     if(done)return; done=true;
@@ -2824,10 +2832,6 @@ function showBanner(opts){
     if(el.parentNode) el.parentNode.removeChild(el);
     if(cb) cb(val);
   };
-  const x=document.createElement("button");
-  x.type="button"; x.className="banner-x"; x.innerHTML="&times;"; x.title="关闭";
-  x.addEventListener("click",function(){ finish(false, o.onCancel||null); });
-  el.appendChild(x);
   let inputEl=null;
   if(o.input){
     inputEl=document.createElement("input");
@@ -2849,7 +2853,7 @@ function showBanner(opts){
     ok.addEventListener("click",function(){ finish(inputEl?inputEl.value:true, o.onOk||null); });
     actions.appendChild(ok);
     if(o.showCancel!==false){
-      const c=_bannerButton(o.cancelText||"取消",{danger:!!o.danger});
+      const c=_bannerButton(o.cancelText||"取消",{secondary:true});
       c.addEventListener("click",function(){ finish(false, o.onCancel||null); });
       actions.appendChild(c);
     }
@@ -2885,10 +2889,11 @@ function bannerPrompt(text,defaultValue,opts){
 // 重建快照红点横幅：说明过期原因 + 立即重建（免二次确认）
 function showSnapStaleBanner(sid,reasons){
   const map={ tools:"工具清单有变化（如新增/修改工具描述）", system:"系统提示词有变化（如人设/备份调整）", edited:"消息被编辑、压缩或状态摘要更新", format:"快照为旧格式，重建可升级到新结构" };
-  const lines=(reasons||[]).map(function(r){ return "· "+(map[r]||("前缀状态变化（"+r+"）")); });
+  const rs=(reasons||[]).map(function(r){ return map[r]||("前缀状态变化（"+r+"）"); });
   showBanner({
     type:"snapstale", title:"该会话快照已过期",
-    text:"重建后会立即应用最新内容：\n"+(lines.length?lines.join("\n"):"· 前缀状态有变化"),
+    text:"重建后会立即应用最新内容：",
+    reasons:(rs.length?rs:["前缀状态有变化"]),
     okText:"立即重建", cancelText:"关闭",
     onOk:function(){ snapRebuildSession(sid,true); },
     onCancel:function(){}
