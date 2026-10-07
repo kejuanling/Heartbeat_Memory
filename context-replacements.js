@@ -1533,6 +1533,15 @@ function restoreRetiredBlocks(retired) {
 // ========================
 // 应用到发送给 AI 的上下文（统一生效逻辑）
 // ========================
+// 1007-17 冻结块 gitid 的内容指纹：内容一变指纹就变，供快照/前缀缓存识别「这块内容动过」。
+// 只取 8 位十六进制，够用且不会把上下文撑大；这些字段在出口被 sanitizeForUpstream 白名单剥掉，
+// 不会发给上游，只存在于内部消息对象里。
+function contentRevHash(s) {
+  try {
+    return crypto.createHash("sha256").update(String(s == null ? "" : s)).digest("hex").slice(0, 8);
+  } catch (e) { return ""; }
+}
+
 function buildMemoryMessage(item) {
   // 占位头 0919 起改英文块头（Context Assembly 0918 定稿命名），时间段紧跟一个空格；旧「（对话摘要」头仅存在于历史会话
   // 2026-09-28 用户拍板：压缩替换块在上下文中显示为 developer 段（与其他 V2 注入块同层）；
@@ -1542,7 +1551,12 @@ function buildMemoryMessage(item) {
   const isState = item && item.source === "state";
   const header = isState ? "## Conversation State" : "## Historical Summary";
   const label = item.range_label ? " " + item.range_label : "";
-  return { role: "developer", _ctxRep: true, content: header + label + "\n" + recordText(item) };
+  const body = header + label + "\n" + recordText(item);
+  // 1007-17：_ctxRep 块运行时生成、不落盘，本身没有 id。这里补 repId = 记录 id + 内容指纹：
+  // state 记录是 upsert 同一条（id 固定、内容会被状态机改写），只挂 item.id 检测不到内容变化，
+  // 所以必须带指纹——内容一变 repId 就变，符合「改动即换 id」的 git 版本语义。
+  const rid = (item && item.id) ? String(item.id) : "ctxrep";
+  return { role: "developer", _ctxRep: true, repId: rid + ":" + contentRevHash(body), content: body };
 }
 
 // ---------------- 重要内容标记（星星） ----------------
@@ -1589,13 +1603,25 @@ function saveMarks(marks) {
 }
 
 function findContentByKey(key) {
+  const k = String(key || "");
+  if (!k) return null;
   try {
     const timeline = loadTimeline();
+    // 1007-17 标星改 msgid：key 可能是消息 id（新标星）也可能是原内容键（存量/AI 自标星），
+    // 两种都要能反查到原文，否则只传 key 没传 content 的调用会标星失败。
+    for (const m of timeline) {
+      if (!m || m.role === "system") continue;
+      if (m.deleted === true) continue;
+      if (m.id && String(m.id) === k) {
+        const c0 = contentToText(m);
+        if (c0) return { content: c0, role: m.role || "", time: m.time || "" };
+      }
+    }
     for (const m of timeline) {
       if (!m || m.role === "system") continue;
       if (m.deleted === true) continue;
       try {
-        if (contentKey(m) === key) {
+        if (contentKey(m) === k) {
           const c = contentToText(m);
           if (c) return { content: c, role: m.role || "", time: m.time || "" };
         }
@@ -1605,8 +1631,32 @@ function findContentByKey(key) {
   return null;
 }
 
+// 1007-17 标星改 msgid：marks 的 key 优先用消息 id（稳定，不随编辑漂移）。
+// 判定口径统一走 markKeyFor(msg)：有 id 用 id，无 id 才回落内容键。
+// 存量条目（内容键）与孤儿条目（既无 id 也查不到）保持原样命中，故此处只加不删。
+function markKeyFor(msg) {
+  if (msg && msg.id) return String(msg.id);
+  try { return contentKey(msg); } catch (e) { return ""; }
+}
+
+// 标星命中判定：先按消息 id 查，查不到再按内容键查（兼容 1007-17 之前的存量条目）。
+// 返回 true 表示该消息当前处于"已标星"状态。
+function isMarkedMsg(msg, marks) {
+  if (!msg) return false;
+  const m = marks || loadMarks();
+  if (!m || typeof m !== "object") return false;
+  const byId = msg.id ? m[String(msg.id)] : null;
+  if (byId) return true;
+  let k = "";
+  try { k = contentKey(msg); } catch (e) { return false; }
+  return k ? !!m[k] : false;
+}
+
 function setMark(key, marked, opt) {
   const marks = loadMarks();
+  // 1007-17：key 可能是消息 id 或内容键（存量）。取消标星时两种都要清，
+  // 否则同一条消息会残留旧内容键条目，导致"取消后压缩仍按原句保留"。
+  const altKey = (opt && opt.alt_key) ? String(opt.alt_key) : "";
   if (marked) {
     const entry = { markedAt: new Date().toISOString() };
     if (opt && opt.content) entry.content = opt.content;
@@ -1627,6 +1677,7 @@ function setMark(key, marked, opt) {
     marks[key] = entry;
   } else {
     delete marks[key];
+    if (altKey && altKey !== key) delete marks[altKey];
   }
   saveMarks(marks);
   return { ok: true, marked: !!marked };
@@ -2041,7 +2092,7 @@ function applyReplacements(messages, source) {
   for (let i = 0; i < out.length; i++) {
     // 特殊事件时间落在已替换范围内 → 一并清掉
     const m0 = out[i];
-    if (m0 && !isDiaryEvent(m0) && !marks[contentKey(m0)] && isSpecialEvent(m0)) {
+    if (m0 && !isDiaryEvent(m0) && !isMarkedMsg(m0, marks) && isSpecialEvent(m0)) {
       let t0 = null;
       if (m0.time) { const d = new Date(m0.time); if (!isNaN(d.getTime())) t0 = d; }
       if (!t0) t0 = tlEventTimeByKey.get(normalizedCompareKey(m0)) || null;
@@ -2062,7 +2113,7 @@ function applyReplacements(messages, source) {
         if (!sm) continue;
         if (sm.role === "tool" || sm.tool_calls) continue;
         // 标星优先：标星的记忆浮现/特殊事件也以原句保留（与特殊事件清理口径一致）
-        if (marks[contentKey(sm)]) starred.push(sm);
+        if (isMarkedMsg(sm, marks)) starred.push(sm);
         // 1005：kind:diary 日记消息也提升到摘要前面（固定前缀，提升缓存命中）
         if (isRealDiary(sm)) starred.push(sm);
       }
@@ -2076,7 +2127,7 @@ function applyReplacements(messages, source) {
         if (isMemoryFlash(m)) continue;
         if (m.role === "tool" || m.tool_calls) continue;
         if (isReplacementMemoryMessage(m)) { final.push(m); continue; }
-        if (marks[contentKey(m)]) continue; // 标星原句已放到摘要前
+        if (isMarkedMsg(m, marks)) continue; // 标星原句已放到摘要前
         if (isRealDiary(m)) continue; // 日记已提升到摘要前
         if (!isCompressible(m, true)) final.push(m);
       }
@@ -2953,13 +3004,16 @@ function searchCompactionOriginal(keyword, maxResults) {
     const t = messageTime(e.msg);
     const info = map[i];
     const key = contentKey(e.msg);
+    // 1007-17 标星改 msgid：搜索结果一并返回消息 id，供管理台按 msgid 标星。
+    const _mId = (e.msg && e.msg.id) ? String(e.msg.id) : "";
     results.push({
       index: i + 1,
       role: e.msg.role || "",
       time: t ? fmtWall(t) : "",
       content: content.length > 300 ? content.slice(0, 300) + "…" : content,
       key: key,
-      marked: !!_loopMarks[key],
+      id: _mId,
+      marked: isMarkedMsg(e.msg, _loopMarks),
       chunk: info ? {
         chunkIndex: info.chunkIndex,
         chunkId: info.chunkId,
@@ -3032,6 +3086,57 @@ function computeTailStart(sessionId, timeline) {
     if (e > lastEnd) { lastEnd = e; lastEndId = eId; }
   }
   return { tailIndex: lastEnd + 1, lastEndId: lastEndId, blockFp: blockFp };
+}
+
+// 2026-10-08 方案A：向调用方暴露「当前会话可见压缩块的定位区间」。
+// 与 buildIncrementalContext 的 located 完全同口径（matched 首尾 id → 当前时间线下标 + 窗口过滤），
+// 供编辑/删除/重生成的「区间禁止 / 截断点之后是否有 rep 块」判定使用。
+// 返回 [{ id, s, e, hidden }]；hidden=true 的块区间原文本来就不进上下文，调用方按需过滤。
+function locateEnabledRanges(sessionId, timeline) {
+  const tl = Array.isArray(timeline) ? timeline : [];
+  const out = [];
+  if (!tl.length) return out;
+  const curSession = activeSessionOr() || sessionId || "default";
+  let items = loadItems().filter(function (it) {
+    if (it.removed || it.enabled === false) return false;
+    if (!recordText(it)) return false;
+    if (it.session && it.session !== curSession) return false;
+    return true;
+  });
+  if (!items.length) return out;
+  const idPos = new Map();
+  for (let i = 0; i < tl.length; i++) {
+    const m = tl[i];
+    if (!m || m.role === "system" || m.deleted) continue;
+    const id = m.id ? String(m.id) : "";
+    if (id && !idPos.has(id)) idPos.set(id, i);
+  }
+  const windowStartMs = currentWindowStartMs(tl);
+  for (const it of items) {
+    const matched = (Array.isArray(it.matched) && it.matched.length > 0) ? it.matched : null;
+    if (!matched || matched.length === 0) continue;
+    let aStart = null;
+    let aEnd = null;
+    for (const m of matched) { if (!isSpecialEvent(m)) { aStart = m; break; } }
+    for (let i = matched.length - 1; i >= 0; i--) { if (!isSpecialEvent(matched[i])) { aEnd = matched[i]; break; } }
+    if (!aStart || !aEnd) continue;
+    const sId = aStart && aStart.id ? String(aStart.id) : "";
+    const eId = aEnd && aEnd.id ? String(aEnd.id) : "";
+    if (!sId || !eId) continue;
+    const s = idPos.get(sId);
+    const e = idPos.get(eId);
+    if (s === undefined || e === undefined || e < s) continue;
+    if (windowStartMs !== null) {
+      let anchorM = null;
+      for (let i = s; i <= e; i++) { if (!isSpecialEvent(tl[i])) { anchorM = tl[i]; break; } }
+      if (anchorM) {
+        const t = messageTime(anchorM);
+        if (t && t.getTime() < windowStartMs) continue;
+      }
+    }
+    out.push({ id: it.id, s: s, e: e, hidden: it.hidden === true });
+  }
+  return out;
 }
 
 // ========================
@@ -3132,7 +3237,7 @@ function buildIncrementalContext(sessionId, timeline) {
         const m = tl[i];
         if (!m || m.role === "system" || m.deleted) continue;
         if (m.role === "tool" || m.tool_calls) continue;
-        if (marks[contentKey(m)]) starred.push(m);
+        if (isMarkedMsg(m, marks)) starred.push(m);
       }
       starred.forEach(function (sm) { out.head.push(sm); });
       for (let i = loc.s; i <= loc.e; i++) {
@@ -3141,7 +3246,7 @@ function buildIncrementalContext(sessionId, timeline) {
         if (isMemoryFlash(m)) continue;
         if (m.role === "tool" || m.tool_calls) continue;
         if (isReplacementMemoryMessage(m)) { out.head.push(m); continue; }
-        if (marks[contentKey(m)]) continue;
+        if (isMarkedMsg(m, marks)) continue;
         if (!isCompressible(m, true)) out.head.push(m);
       }
       out.head.push(buildMemoryMessage(loc.it));
@@ -3206,7 +3311,9 @@ module.exports = {
   recordText,
   buildIncrementalContext,
   computeTailStart,
+  locateEnabledRanges,
   buildMemoryMessage,
+  contentRevHash,
   // 手工记录管理
   removeManualRecord,
   removeManualRecordById,
@@ -3234,6 +3341,8 @@ module.exports = {
   loadMarks,
   setMark,
   updateMark,
+  isMarkedMsg,
+  markKeyFor,
   findMessagesByIds,
   contentKey,
   // 特殊事件结构化识别与注入窗口过滤（供 context-compactor / server 复用同一口径）

@@ -358,9 +358,14 @@ function createCtxLimitReminderGuard(deps) {
     const CHUNK_TARGET = 100;
     let starredKeys = null;
     try { starredKeys = contextReplacements.loadMarks(); } catch (e) { starredKeys = null; }
+    // 1007-17 标星改 msgid：判定走 isMarkedMsg 双查（先消息 id、后原内容键），
+    // 新标星按 msgid 存、存量标星按内容键存，两者都要认，否则新标星在此处会被漏判。
     const isStarredMsg = m => {
       if (!starredKeys || !m) return false;
-      try { return Boolean(starredKeys[contextReplacements.contentKey(m)]); } catch (e) { return false; }
+      try {
+        if (contextReplacements.isMarkedMsg) return contextReplacements.isMarkedMsg(m, starredKeys);
+        return Boolean(starredKeys[contextReplacements.contentKey(m)]);
+      } catch (e) { return false; }
     };
     const picked = [];
     for (const m of llmMessages) {
@@ -500,11 +505,20 @@ function createConversationBuilder(deps) {
         if (m && m.role === "system" && !m.deleted) systemRaw = m;
       }
     }
-    // 1007 快照 v2 路径：快照存在且未失效 → 复用快照 history，尾部现算。
-    // 快照 history = 构建时固化的 head（含状态块/摘要块，位置不变）；tail_start 之后为动态尾部。
+    // 1008 方案A：快照 v3 = 冻结 content（消息副本，含 rep 块）+ snap_point（尾部起点下标）。
+    // 读取 = 冻结 content + 时间线 slice(snap_point) 尾部现取，**无任何写操作**
+    //（不再 id 差集、不再 _added 永久追加——旧 P0：rep 块无 id，其替代的原文永远被当尾部捞回并永久追加）。
+    // 编辑/删除/重生成对 content 区消息用「截断」（routes/chat.js），而非全量重建。
     if (snapshotV2) {
       const _snap = snapshotV2.loadSnapshot(snapshotV2.baseDir, sessionId);
-      if (_snap && !snapshotV2.isStale(snapshotV2.baseDir, sessionId)) {
+      let _snapUsable = !!(_snap && !snapshotV2.isStale(snapshotV2.baseDir, sessionId)
+        && Array.isArray(_snap.content) && Number.isFinite(_snap.snap_point));
+      if (_snapUsable && timeline.length === 0 && Array.isArray(_snap.content) && _snap.content.length > 0) {
+        // 保护：时间线被整体清空/重置而快照还有冻结内容 → 不能发旧内容，标失效走下方重建
+        try { snapshotV2.markStale(snapshotV2.baseDir, sessionId, "timeline-reset"); } catch (e) {}
+        _snapUsable = false;
+      }
+      if (_snapUsable) {
         const sysPrep = systemRaw ? prepareMessageForLLM(systemRaw) : null;
         if (sysPrep) msgs.push(sysPrep);
         // V2 注入块（快照里冻死，不再实时构建覆盖）
@@ -514,41 +528,35 @@ function createConversationBuilder(deps) {
             msgs.push(b);
           }
         }
-        // 快照 history：原文已 prepare 过直接透传，_ctxRep 块原样
-        // （history 不含 system——增量 head 与全量兜底都剥了；防御性跳过）
         const turnStart = _tailTurnStart(timeline);
-        for (const m of _snap.history) {
-          if (!m || m.role === "system") continue;
-          if (m._ctxRep) { msgs.push(m); continue; }
-          const p = prepareMessageForLLM(m);
+        // 冻结 content（含 rep 块，位置不变）
+        for (const it of _snap.content) {
+          if (!it) continue;
+          if (it._ctxRep) {
+            msgs.push({ role: "developer", _ctxRep: true, repId: it.repId || "", content: it.content });
+            continue;
+          }
+          if (it.role === "system") continue;
+          const p = prepareMessageForLLM(it);
           if (!p) continue;
           msgs.push(downgradeHistoryImages(p));
         }
-        // 尾部增量：tail_start 之后的消息现算（含最新 user，图片保真）
-        const _ts = Number(_snap.tail_start) || 0;
-        for (let k = _ts; k < timeline.length; k++) {
+        // 尾部现取：snap_point 起（含最新 user，图片保真）。
+        // 时间线被缩短（清尾/删除尾部）时收缩 snap_point 防错位——旧结构卡死的根因，这里天然自愈。
+        let sp = Number(_snap.snap_point) || 0;
+        if (sp > timeline.length) sp = timeline.length;
+        for (let k = sp; k < timeline.length; k++) {
           const m = timeline[k];
           if (!m || m.role === "system" || m.deleted) continue;
           const p = prepareMessageForLLM(m);
           if (!p) continue;
           msgs.push(k < turnStart ? downgradeHistoryImages(p) : p);
         }
-        // 1007 新消息落盘 → 并入快照尾部（廉价追加，惰性写回；不触发重建）。
-        // 仅当时间线比快照长时追加，且不在失效重建流程中（此处是快照有效路径）。
-        if (timeline.length > _ts) {
-          try {
-            const _merged = Object.assign({}, _snap, {
-              history: (_snap.history || []).concat(timeline.slice(_ts, timeline.length)
-                .filter(function (m) { return m && m.role !== "system" && !m.deleted; })
-                .map(function (m) { return Object.assign({}, m); })),
-              tail_start: timeline.length,
-            });
-            snapshotV2.saveSnapshot(snapshotV2.baseDir, sessionId, _merged);
-          } catch (e) {
-            console.warn("[ctx-snapshot-v2] 快照尾部并入失败（下次请求重试）:", e && e.message);
-          }
-        }
         return msgs;
+      }
+      // 旧结构（entries/history，无 content）→ 标失效，走下方原路径重建成 v3 结构
+      if (_snap && !Array.isArray(_snap.content)) {
+        try { snapshotV2.markStale(snapshotV2.baseDir, sessionId, "format-upgrade-v3"); } catch (e) {}
       }
       // 1007 快照懒生成：快照缺失/失效 → 走下方原路径组装；组装完成后在本函数末尾生成快照。
       // 生成与"读取"共用同一增量 head 口径，保证位置一致。
@@ -673,13 +681,37 @@ function createConversationBuilder(deps) {
       // system（人设）：从组装结果里取第一条 system
       let sysPrep = null;
       for (const m of (assembledMsgs || [])) { if (m && m.role === "system") { sysPrep = m; break; } }
+      // 1008 方案A：content 存「冻结消息副本」（普通消息按 id 存副本；rep 块连内容一起存）。
+      // snap_point = head 的尾部起点（时间线下标）——读取侧从 snap_point 起尾部现取。
+      // 相比第三步「存 id 列表」：id 列表的差集尾部会把 rep 块替代的原文永久捞回（P0），
+      // 冻结内容 + 下标尾部不会——rep 块替代的原文根本不在 content 里，尾部从快照点起干净截断。
+      const content = [];
+      for (const m of (head || [])) {
+        if (!m) continue;
+        if (m._ctxRep) {
+          content.push({ role: "developer", _ctxRep: true, repId: (m.repId ? String(m.repId) : ""), content: m.content });
+          continue;
+        }
+        if (m.role === "system") continue;
+        if (!m.id) continue;   // 无 id 的消息不冻结，走尾部现取
+        content.push(Object.assign({}, m));
+      }
+      // 人设版本标识（第二步打的 spRev）：只作诊断留痕，读取路径仍用冻结的 system 内容
+      let spRev = "";
+      for (const m of (Array.isArray(timeline) ? timeline : [])) {
+        if (m && m.role === "system" && m.spRev) { spRev = String(m.spRev); break; }
+      }
       // tools：本次组装未含 tools，由 mcp-tool-loop 读取时从快照取；此处先用占位，
-      // 实际 tools 由 ensureSnapshotTools 在首次 MCP 拉取后回填（见 mcp-tool-loop.js）。
+      // 实际 tools 由 getToolsForSession 在首次 MCP 拉取后回填（见 mcp-tool-loop.js）。
       const snapData = {
+        v: 3,
         system: sysPrep ? { role: sysPrep.role, content: sysPrep.content } : null,
+        sp_rev: spRev,
         v2_blocks: v2Blocks,
-        history: head,
+        content: content,
+        snap_point: tailStart,
         tools: null,
+        // tail_start 仅作诊断留痕：读取路径已改为按 snap_point 下标取尾部
         tail_start: tailStart,
         fp: (timeline && timeline.__fp) || "",
         state_fp: "",
@@ -687,7 +719,7 @@ function createConversationBuilder(deps) {
       };
       const ok = snapshotV2.saveSnapshot(snapshotV2.baseDir, sessionId, snapData);
       if (ok) snapshotV2.clearStale(snapshotV2.baseDir, sessionId);
-      console.log("[ctx-snapshot-v2] 快照已生成 session=" + sessionId + " head=" + head.length + " tailStart=" + tailStart + " v2blocks=" + v2Blocks.length);
+      console.log("[ctx-snapshot-v2] 快照已生成 session=" + sessionId + " content=" + content.length + " snap_point=" + tailStart + " v2blocks=" + v2Blocks.length + " spRev=" + spRev);
     } catch (e) {
       console.warn("[ctx-snapshot-v2] 快照生成失败（不影响本次请求）:", e && e.message);
     }

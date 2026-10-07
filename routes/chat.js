@@ -676,6 +676,12 @@ module.exports = function registerChatRoutes(app, deps) {
       if (!sessionId || sessionId === 'default') return reply.code(400).send({ error: '主会话不需要重建快照' });
       const safe = sessionId.replace(/[^A-Za-z0-9_-]/g, '');
       if (safe !== sessionId) return reply.code(400).send({ error: '非法会话ID' });
+      // 2026-10-08 方案A：重建入口接到 v2 快照系统上——此前调旧 context-snapshot.deleteSnapshot
+      // 只删旧注入快照，v2 快照文件纹丝不动（「重建快照」点了没效果的根因）。
+      // 现在删 v2 快照 + 清失效标记 + 保留删旧注入快照，下次请求懒生成全新 v2 快照。
+      const sv2 = require("../context-snapshot-v2");
+      sv2.deleteSnapshot(baseDir, safe);
+      sv2.clearStale(baseDir, safe);
       const r = require('../context-snapshot').deleteSnapshot(baseDir, safe);
       reply.send({ ok: true, session_id: safe, existed: r.existed });
     } catch (err) {
@@ -741,7 +747,28 @@ module.exports = function registerChatRoutes(app, deps) {
         let ok = 0, miss = 0, del = 0, editedIds = [];
         // 批量：一次 load+save，避免多选删除大段时逐 op 各读写盘一次
         const timeline = loadTimeline(sessionId);
+        // 2026-10-08 方案A：压缩块区间内禁改 + 编辑/删除改「截断」而非全量重建
+        const sv2 = require("../context-snapshot-v2");
+        const _snap = sv2.loadSnapshot(baseDir, sessionId);
+        const snapPoint = (_snap && Array.isArray(_snap.content) && Number.isFinite(_snap.snap_point)) ? Number(_snap.snap_point) : null;
+        const ranges = (contextReplacements.locateEnabledRanges ? contextReplacements.locateEnabledRanges(sessionId, timeline) : []);
+        // 预检：任一 op 落在可见压缩块区间 → 整批拒绝（不落盘）
+        const rejected = [];
+        for (const op of body.ops) {
+          if (!op || !op.id) continue;
+          const idx = timeline.findIndex(m => m && m.id === op.id);
+          if (idx < 0) continue;
+          for (const r of ranges) {
+            if (r.hidden) continue;
+            if (idx >= r.s && idx <= r.e) { rejected.push({ id: op.id, idx: idx }); break; }
+          }
+        }
+        if (rejected.length) {
+          console.warn("[timeline-sync] 压缩块区间内禁止编辑/删除，整批拒绝 (session=" + (sessionId || 'default') + ", " + rejected.length + "条)");
+          return reply.send({ ok: false, error: "压缩块区间内的消息不能编辑或删除（先停用该压缩块再试）", rejected: rejected.map(r => r.id), session_id: sessionId || 'default' });
+        }
         let changed = false;
+        let minContentIdx = null;   // 方案A：content 区被操作的最小 index（截断点候选）
         for (const op of body.ops) {
           if (!op || !op.id) continue;
           const idx = timeline.findIndex(m => m && m.id === op.id);
@@ -776,9 +803,11 @@ module.exports = function registerChatRoutes(app, deps) {
             timeline[idx] = updated;
             ok++;
             editedIds.push(op.id);
+            if (snapPoint !== null && idx < snapPoint) minContentIdx = (minContentIdx === null || idx < minContentIdx) ? idx : minContentIdx;
           } else if (op.op === 'delete') {
             timeline.splice(idx, 1);
             del++;
+            if (snapPoint !== null && idx < snapPoint) minContentIdx = (minContentIdx === null || idx < minContentIdx) ? idx : minContentIdx;
           } else {
             miss++;
             continue;
@@ -793,12 +822,22 @@ module.exports = function registerChatRoutes(app, deps) {
             console.error("[timeline-sync] 编辑/删除未落盘：saveTimeline 拒写 (session=" + (sessionId || 'default') + ", 改=" + ok + ", 删=" + del + ")");
             return reply.send({ ok: false, error: "时间线写入被拒（文件损坏/快照过期/会话墓碑），本次修改未保存", edited: ok, deleted: del, missed: miss, session_id: sessionId || 'default' });
           }
-          // 1007 上下文快照 v2：编辑了历史消息 → 标记快照失效（下次请求重建）。
-          // 只编辑了增量区（tail_start 之后）的消息则快照本就不含它们，失效标记无害。
-          if (editedIds.length) {
-            try { require("../context-snapshot-v2").markStale(baseDir, sessionId, "timeline-edit:" + editedIds.join(",")); }
-            catch (e) { console.warn("[ctx-snapshot-v2] 编辑标记快照失效失败:", e && e.message); }
+          // 2026-10-08 方案A：快照处理——编辑/删除落在 content 区时「截断」而非全量重建；
+          // 截断点之后仍有 rep 块 → 全量重建（避免摘要丢失）；尾部区操作快照不含 → 无需处理。
+          if (snapPoint !== null && minContentIdx !== null) {
+            const hasRepAfter = ranges.some(function (r) { return !r.hidden && r.e > minContentIdx; });
+            if (hasRepAfter) {
+              try { sv2.markStale(baseDir, sessionId, "timeline-edit-truncate-rep"); }
+              catch (e) { console.warn("[ctx-snapshot-v2] 编辑标记快照失效失败:", e && e.message); }
+            } else {
+              const keepIds = [];
+              for (let i = 0; i < minContentIdx && i < timeline.length; i++) { const m = timeline[i]; if (m && m.id) keepIds.push(m.id); }
+              const okT = sv2.truncateSnapshot(baseDir, sessionId, keepIds, minContentIdx);
+              if (okT) console.log("[ctx-snapshot-v2] 快照已截断 session=" + (sessionId || 'default') + " snap_point=" + minContentIdx);
+              else console.warn("[ctx-snapshot-v2] 快照截断失败（读取侧自愈兜底） session=" + (sessionId || 'default'));
+            }
           }
+          // 纯尾部区操作：快照不含尾部消息，无需失效标记（原「编辑即全量 markStale」按方案A废弃）
           sseNotify(sessionId);
         }
         console.log(`[timeline-sync] diff编辑/删除同步 (session=${sessionId || 'default'}, 改=${ok}, 删=${del}, 未命中=${miss}, 编辑ids=${editedIds.length ? editedIds.join(',') : '-'})`);
@@ -943,6 +982,18 @@ app.post("/v1/chat/completions", async (req, reply) => {
     // 故放宽原先「必须 x-client=dylan-chat 才写」的门槛——第三方客户端(如 Kelivo)不带该头
     // 且已带上真实消息，也能正常写入，供自建前端(chat.html)看到。
     if (kelivoMessages.some(isRealMessageForTimeline) || oldTimeline.length === 0) {
+      // 2026-10-08 方案A：重生成锚点位于压缩块区间内 → 拒绝（区间内消息禁止重新生成）
+      if (body.regen_anchor_id) {
+        try {
+          const _ranges = (contextReplacements.locateEnabledRanges ? contextReplacements.locateEnabledRanges(sessionId, oldTimeline) : []);
+          const _ai = oldTimeline.findIndex(m => m && m.id === String(body.regen_anchor_id).trim());
+          const inRange = _ai >= 0 && _ranges.some(function (r) { return !r.hidden && _ai >= r.s && _ai <= r.e; });
+          if (inRange) {
+            console.warn("[timeline] 重生成锚点位于压缩块区间内，拒绝 session=" + (sessionId || 'default') + " idx=" + _ai);
+            return reply.code(400).send({ error: "该消息位于已压缩区间，不能重新生成（先停用该压缩块再试）" });
+          }
+        } catch (e) {}
+      }
       // 方案二增量：落盘改为以盘上为基同步差量（新消息补齐/人设同步/重生成清尾），
       // 不再拿请求全量重建覆盖；通知由同步函数按需发出。
       // 2026-09-23：透传重生成锚点 id（前端「重新生成」时上报），服务端按 id 截断锚点 user 之后的全部内容
@@ -1243,7 +1294,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
           // 解析 <wake> 闹钟标签并写入调度（标签随后被剥离，不显示给用户）
           parseWakeTagAndSchedule(aiContent, sessionId);
           // 提取并存储记忆，同时拿到清洗后的文本
-          const cleanText = await tagParser.extractAndStore(aiContent, { sessionId }).catch(err => {
+          // 1007-17 标星改 msgid：把落盘用的 reply_msg_id 一并传入，AI 自标星 <star> 按消息 id 存
+          const cleanText = await tagParser.extractAndStore(aiContent, { sessionId, msgId: replyMsgId || undefined }).catch(err => {
             console.warn("[memory] 非流式标签解析失败:", err.message);
             return aiContent;
           });
@@ -1464,7 +1516,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
         // 解析 <wake> 闹钟标签并写入调度（标签随后被剥离，不显示给用户）
         parseWakeTagAndSchedule(aiFullContent, sessionId);
         // 提取并存储记忆，并拿到清洗后的文本
-        const cleanFull = await tagParser.extractAndStore(aiFullContent, { sessionId }).catch(err => {
+        // 1007-17 标星改 msgid：把落盘用的 reply_msg_id 一并传入，AI 自标星 <star> 按消息 id 存
+        const cleanFull = await tagParser.extractAndStore(aiFullContent, { sessionId, msgId: replyMsgId || undefined }).catch(err => {
           console.warn("[memory] 流式标签解析失败:", err.message);
           return aiFullContent;
         });

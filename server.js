@@ -202,23 +202,29 @@ const {
 
 // ---- 人设权威（2026-09-24 B 方案）：服务端自己决定该会话该用哪个人设，前端请求带的 system 不再决定盘上存什么 ----
 // 解析顺序：data/session-prompts.json(sid->backupId) -> data/prompt-backups.json 内容 -> chat-settings.json 全局 system_prompt
+// 1007-17 人设 gitid：把「该会话当前引用哪份人设备份」单独抽出来，供人设版本化取标识。
+// 原逻辑就藏在 resolveSessionSystemPrompt 里，抽出来后两边共用同一口径，不会漂移。
+function sessionPromptBackupId(sessionId) {
+  try {
+    const sid = String(sessionId || "default").trim() || "default";
+    const spFile = path.join(__dirname, "data", "session-prompts.json");
+    if (fs.existsSync(spFile)) {
+      const j = JSON.parse(fs.readFileSync(spFile, "utf-8"));
+      // 0929-30：session-prompts.json 是顶层结构 {sid: backupId}（无 prompts 包裹），
+      // 旧读取 j.prompts[sid] 永远读不到 → 会话级人设一直回退全局。兼容两种结构。
+      if (j && typeof j === "object") {
+        if (typeof j[sid] === "string") return j[sid];
+        if (j.prompts && typeof j.prompts[sid] === "string") return j.prompts[sid];
+      }
+    }
+  } catch (e) {}
+  return "";
+}
 function resolveSessionSystemPrompt(sessionId) {
   try {
     const sid = String(sessionId || "default").trim() || "default";
     // 1) 会话级映射
-    let backupId = "";
-    try {
-      const spFile = path.join(__dirname, "data", "session-prompts.json");
-      if (fs.existsSync(spFile)) {
-        const j = JSON.parse(fs.readFileSync(spFile, "utf-8"));
-        // 0929-30：session-prompts.json 是顶层结构 {sid: backupId}（无 prompts 包裹），
-        // 旧读取 j.prompts[sid] 永远读不到 → 会话级人设一直回退全局。兼容两种结构。
-        if (j && typeof j === "object") {
-          if (typeof j[sid] === "string") backupId = j[sid];
-          else if (j.prompts && typeof j.prompts[sid] === "string") backupId = j.prompts[sid];
-        }
-      }
-    } catch (e) {}
+    const backupId = sessionPromptBackupId(sid);
     if (backupId) {
       try {
         const pbFile = path.join(__dirname, "data", "prompt-backups.json");
@@ -956,6 +962,18 @@ function saveTimeline(messages, sessionId) {
   // 稳定 id：任何写盘路径都保证每条消息有唯一 id（老数据首次被写时补齐），
   // 供「编辑/删除 diff 协议」按 id 定点 patch，position 不动、不再重排。system 也统一给 id。
   for (const m of messages) { if (m && !m.id) m.id = crypto.randomUUID(); }
+  // 1007-17 日记版本化（gitid）：日记消息 id 稳定，但正文会经 /xie-diary 编辑后同步回时间线
+  // （syncDiaryTimelineMessages 改 content、不动 id）。只按 id 认就察觉不到内容变了。
+  // 统一放在写盘出口补：覆盖全部创建路径（对话/MCP/唤醒）+ 编辑同步路径，不会漏打。
+  // 指纹是确定性的：内容没变时重算值不变，重复写盘不会产生假变更。
+  for (const m of messages) {
+    if (!m || m.kind !== "diary") continue;
+    try {
+      const _dt = (typeof m.content === "string") ? m.content : normalizeContentToText(m.content);
+      const _dh = contextReplacements.contentRevHash ? contextReplacements.contentRevHash(_dt) : "";
+      if (_dh) m.diaryRev = "diary:" + ((m.diary_id != null) ? String(m.diary_id) : "") + ":" + _dh;
+    } catch (e) { /* 单条失败不阻断写盘 */ }
+  }
   const sp = messages.find(m => m.role === "system");
   const nonSP = messages.filter(m => m.role !== "system");
   // 兜底：任何写入路径都补齐缺失的 time（system 除外），避免历史消息/特殊事件缺时间
@@ -1321,11 +1339,15 @@ function appendRequestMessages(sessionId, reqMsgs, opts) {
   //    防御：锚点须存在、须是 user（只删「该 user 之后的回复」）、且不能在盘尾（无内容可删则跳过）。
   //    不传该参数时行为与改动前**完全一致**（旧客户端/第三方客户端不受影响）。
   const _anchorId = String(opts.regenAnchorId || "").trim();
+  let _regenAnchorIdx = null;   // 2026-10-08 方案A：重生成锚点 index（清尾后快照处理用）
+  let _regenRemoved = 0;
   if (_anchorId) {
     const _ai = existing.findIndex(function (m) { return m && m.id === _anchorId; });
     if (_ai >= 0 && _ai < existing.length - 1 && existing[_ai].role === "user") {
       const _removed = existing.length - (_ai + 1);
       existing.splice(_ai + 1);
+      _regenAnchorIdx = _ai;
+      _regenRemoved = _removed;
       changed = true;
       console.log("[regen] 按锚点 id 截断时间线: session=" + (sessionId || "default") +
         " anchor=" + _anchorId.slice(0, 8) + " 移除=" + _removed);
@@ -1343,12 +1365,23 @@ function appendRequestMessages(sessionId, reqMsgs, opts) {
   const authoritativeSP = (typeof resolveSessionSystemPrompt === "function")
     ? (resolveSessionSystemPrompt(sessionId) || "") : "";
   if (authoritativeSP.trim()) {
+    // 1007-17 人设版本化（gitid）：人设是原地改 content、id 不变的（见下面 diskSP.content = ...），
+    // 只按消息 id 认不出「人设换过了」。故打 spRev = 备份标识 + 内容指纹：
+    // 换人设（backupId 变）/ 编辑同一份备份的正文（指纹变）都会落成不同版本。
+    // 该字段在出口被 sanitizeForUpstream 剥掉，不进上游；只供内部识别版本。
+    const _spGit = "sp:" + (sessionPromptBackupId(sessionId) || "global") + ":"
+      + (contextReplacements.contentRevHash ? contextReplacements.contentRevHash(authoritativeSP) : "");
     const diskSP = existing.find(function (m) { return m && m.role === "system"; });
     if (!diskSP) {
-      existing.unshift({ role: "system", content: authoritativeSP, position: 0 });
+      existing.unshift({ role: "system", content: authoritativeSP, position: 0, spRev: _spGit });
       changed = true;
     } else if (normalizeContentToText(diskSP.content) !== authoritativeSP) {
       diskSP.content = authoritativeSP;
+      diskSP.spRev = _spGit;
+      changed = true;
+    } else if (diskSP.spRev !== _spGit) {
+      // 内容一致但标识缺失或过期（存量数据 / 换了备份但正文恰好相同）→ 只补标识，不动内容
+      diskSP.spRev = _spGit;
       changed = true;
     }
   }
@@ -1381,8 +1414,10 @@ function appendRequestMessages(sessionId, reqMsgs, opts) {
     }
   }
   let removedTail = 0;
+  let _tailAnchorIdx = null;   // 2026-10-08 方案A：尾部对齐场景的锚点 index（清尾后快照处理用）
   if (cut < existing.length) {
     removedTail = existing.length - cut;
+    _tailAnchorIdx = anchor;
     existing.splice(cut);
     changed = true;
   }
@@ -1416,8 +1451,55 @@ function appendRequestMessages(sessionId, reqMsgs, opts) {
     saveTimeline(existing, sessionId);
     unarchiveSession(sessionId);   // 新消息落库 → 自动取消归档
     sseNotify(sessionId);
+    // 2026-10-08 方案A：清尾（重生成）后按锚点位置处理快照——
+    // 尾部区 → 无操作（读取侧收缩自愈）；content 区且其后无 rep 块 → 截断；其后有 rep 块 → 全量重建。
+    const _cutAnchor = (_regenAnchorIdx !== null) ? _regenAnchorIdx : _tailAnchorIdx;
+    if ((_regenRemoved > 0 || removedTail > 0) && _cutAnchor !== null) {
+      handleSnapshotAfterTailCut(sessionId, existing, _cutAnchor);
+    }
   }
   return { appended: appended.length, removedTail: removedTail, changed: changed };
+}
+
+// 2026-10-08 方案A：清尾（重生成截断/尾部对齐）后的 v2 快照处理。
+// 语义：重生成删掉了锚点之后的消息。若锚点在 content 区 → 冻结内容里残留旧回复，必须截断/重建；
+// 若在尾部区 → 快照不含尾部，只需在时间线变短时收缩 snap_point（写回保持自洽）。
+function handleSnapshotAfterTailCut(sessionId, timeline, anchorIdx) {
+  try {
+    const sv2 = require("./context-snapshot-v2");
+    const snap = sv2.loadSnapshot(__dirname, sessionId);
+    if (!snap || !Array.isArray(snap.content) || !Number.isFinite(snap.snap_point)) return;
+    const sp = Number(snap.snap_point);
+    const tl = Array.isArray(timeline) ? timeline : [];
+    if (anchorIdx === null || anchorIdx === undefined || anchorIdx < 0) {
+      sv2.markStale(__dirname, sessionId, "tail-cut-no-anchor");
+      return;
+    }
+    if (anchorIdx < sp) {
+      // content 区：其后有 rep 块 → 全量重建（避免摘要丢失）；否则截断
+      const ranges = (contextReplacements.locateEnabledRanges ? contextReplacements.locateEnabledRanges(sessionId, tl) : []);
+      const hasRepAfter = ranges.some(function (r) { return !r.hidden && r.e > anchorIdx; });
+      if (hasRepAfter) {
+        sv2.markStale(__dirname, sessionId, "regen-content-rep");
+        console.log("[ctx-snapshot-v2] 清尾后快照全量重建（锚点后仍有 rep 块） session=" + (sessionId || 'default') + " anchor=" + anchorIdx);
+        return;
+      }
+      const keepIds = [];
+      for (let i = 0; i < anchorIdx && i < tl.length; i++) { const m = tl[i]; if (m && m.id) keepIds.push(m.id); }
+      const okT = sv2.truncateSnapshot(__dirname, sessionId, keepIds, anchorIdx);
+      console.log(okT
+        ? ("[ctx-snapshot-v2] 清尾快照已截断 session=" + (sessionId || 'default') + " snap_point=" + anchorIdx)
+        : ("[ctx-snapshot-v2] 清尾快照截断失败（读取侧自愈兜底） session=" + (sessionId || 'default')));
+    } else if (tl.length < sp) {
+      // 尾部区删除且时间线变短 → 收缩 snap_point 写回（保持快照自洽，读取侧不再每次收缩）
+      snap.snap_point = tl.length;
+      sv2.saveSnapshot(__dirname, sessionId, snap);
+      console.log("[ctx-snapshot-v2] 清尾后 snap_point 收缩 " + sp + "→" + tl.length + " session=" + (sessionId || 'default'));
+    }
+    // anchorIdx >= sp 且时间线未短于快照点 → 尾部区操作，无处理
+  } catch (e) {
+    console.warn("[ctx-snapshot-v2] 清尾快照处理失败:", e && e.message);
+  }
 }
 
 // ========================
@@ -2051,8 +2133,10 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         sessionId,
         onDiaryWritten: onDiaryToolWritten,
         // 1007 上下文快照 v2：工具冻死
-        snapshotV2: Object.assign(require("./context-snapshot-v2"), { baseDir }),
-        baseDir
+        // 1007-17 修复：此处原写裸 baseDir，全文件无该变量 → ReferenceError，
+        // 导致流式工具循环必失败、回退非流式后又必失败（工具功能整体失效）。
+        snapshotV2: Object.assign(require("./context-snapshot-v2"), { baseDir: __dirname }),
+        baseDir: __dirname
       });
     } catch (toolLoopErr) {
       // 一旦已经向客户端发出 SSE，就不能再从头跑一遍 runWithTools：
@@ -2069,8 +2153,9 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         sessionId,
         onDiaryWritten: onDiaryToolWritten,
         // 1007 上下文快照 v2：工具冻死
-        snapshotV2: Object.assign(require("./context-snapshot-v2"), { baseDir }),
-        baseDir
+        // 1007-17 修复：同上，原裸 baseDir 未定义
+        snapshotV2: Object.assign(require("./context-snapshot-v2"), { baseDir: __dirname }),
+        baseDir: __dirname
       });
     }
 
@@ -3111,7 +3196,8 @@ app.post("/internal/context-mark", async (req, reply) => {
     const starred = [];
     const failed = [];
     for (const m of r.found) {
-      const res = contextReplacements.setMark(m.key, marked, { content: m.content, role: m.role, msg_time: m.time });
+      // 1007-17 标星改 msgid：m.msg_id 即消息 id，直接作 marks 主键（编辑后仍跟随）
+      const res = contextReplacements.setMark(m.msg_id || m.key, marked, { content: m.content, role: m.role, msg_time: m.time, alt_key: marked ? "" : m.key });
       if (res && res.ok) starred.push({ msg_id: m.msg_id, role: m.role, time: m.time });
       else failed.push({ msg_id: m.msg_id, error: (res && res.error) || "标星失败" });
     }
@@ -3873,10 +3959,31 @@ app.post("/admin/cross-inject/config", { preHandler: basicAuth }, async (req, re
 
 
 
+// 2026-10-08 方案A：压缩块内容/启停变化 → 对应会话快照全量重建。
+// 快照 content 冻结了 rep 块（摘要），块被撤销/停用/隐藏/改正文而快照不重建 = 改动永远不生效。
+function snapshotSessionOfBlock(id) {
+  try {
+    const it = contextReplacements.loadItems().find(function (x) { return x && x.id === id; });
+    return (it && it.session) ? String(it.session) : "";
+  } catch (e) { return ""; }
+}
+function invalidateSnapshotForSession(sid, reason) {
+  if (!sid) return;
+  try {
+    require("./context-snapshot-v2").markStale(__dirname, sid, reason);
+    console.log("[ctx-snapshot-v2] 压缩块变化已标快照失效 session=" + sid + " reason=" + reason);
+  } catch (e) {
+    console.warn("[ctx-snapshot-v2] 压缩块变化标失效失败:", e && e.message);
+  }
+}
+
 // 上下文记忆替换：管理台撤销（压缩页 AI 块的「撤销」按钮用）
 app.post("/admin/context-replacements/undo", { preHandler: basicAuth }, async (req, reply) => {
   try {
-    reply.send(contextReplacements.removeReplacement(String((req.body || {}).id || "").trim()));
+    const id = String((req.body || {}).id || "").trim();
+    const sid = snapshotSessionOfBlock(id);
+    reply.send(contextReplacements.removeReplacement(id));
+    invalidateSnapshotForSession(sid, "block-undo");
   } catch (err) {
     console.error("[POST /admin/context-replacements/undo] error:", err.message);
     reply.code(500).send({ error: err.message });
@@ -3888,12 +3995,16 @@ app.post("/admin/context-replacements/undo", { preHandler: basicAuth }, async (r
 app.post("/admin/context-replacements/toggle", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const body = req.body || {};
+    const id = String(body.id || "").trim();
+    const sid = snapshotSessionOfBlock(id);
     if (body.hidden !== undefined) {
-      reply.send(contextReplacements.setReplacementHidden(String(body.id || "").trim(), body.hidden === true));
+      reply.send(contextReplacements.setReplacementHidden(id, body.hidden === true));
+      invalidateSnapshotForSession(sid, "block-hidden:" + (body.hidden === true));
       return;
     }
     const enabled = body.enabled !== false;
-    reply.send(contextReplacements.toggleReplacement(String(body.id || "").trim(), enabled));
+    reply.send(contextReplacements.toggleReplacement(id, enabled));
+    invalidateSnapshotForSession(sid, "block-toggle:" + enabled);
   } catch (err) {
     console.error("[POST /admin/context-replacements/toggle] error:", err.message);
     reply.code(500).send({ error: err.message });
@@ -3905,8 +4016,10 @@ app.post("/admin/context-replacements/toggle", { preHandler: basicAuth }, async 
 app.post("/admin/context-replacements/update", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const body = req.body || {};
-    const r = contextReplacements.updateReplacement(String(body.id || "").trim(), String(body.memory || ""));
+    const id = String(body.id || "").trim();
+    const r = contextReplacements.updateReplacement(id, String(body.memory || ""));
     if (!r.ok) return reply.send({ ok: false, error: r.error });
+    invalidateSnapshotForSession(snapshotSessionOfBlock(id), "block-update");
     return reply.send({ ok: true, item: r.item });
   } catch (err) {
     console.error("[POST /admin/context-replacements/update] error:", err.message);
@@ -5163,7 +5276,9 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
         // 手工块：编号=存储起点+块内序号（matched 与压缩切片一一对应），避免锚点撞键漂移；
         // 存储编号失效（换窗口）时退回内容锚点编号
         const _num = (hasStoredIdx && storedValid) ? (storedStart + i) : (itemPosByKey.has(nKeyOf(m)) ? itemPosByKey.get(nKeyOf(m)) : null);
-        return { role: m.role, content: typeof m.content === "string" ? m.content : "", key: _key, marked: !!_marks[_key], num: _num, id: m && m.id ? String(m.id) : undefined };
+        // 1007-17：标星判定改双查（先 msgid 后内容键），兼容存量条目
+        const _mk = contextReplacements.isMarkedMsg ? contextReplacements.isMarkedMsg(m, _marks) : !!_marks[_key];
+        return { role: m.role, content: typeof m.content === "string" ? m.content : "", key: _key, marked: _mk, num: _num, id: m && m.id ? String(m.id) : undefined };
         };
       })()) : undefined,
       pos: compStart
@@ -5279,7 +5394,7 @@ function buildUnifiedReplacementPreview(includeMessages, excludeGapMsgs) {
   let markedTokens = 0, imageTokens = 0;
   (nonSys || []).forEach(function (m) {
     if (!m) return;
-    try { if (_previewMarks[contextReplacements.contentKey(m)]) markedTokens += msgTextTokens(m); } catch (e) { /* 单条失败忽略 */ }
+    try { if (contextReplacements.isMarkedMsg ? contextReplacements.isMarkedMsg(m, _previewMarks) : !!_previewMarks[contextReplacements.contentKey(m)]) markedTokens += msgTextTokens(m); } catch (e) { /* 单条失败忽略 */ }
     imageTokens += msgImageCount(m) * contextCompactor.EST_IMAGE_TOKENS;
   });
   let pinnedTokens = 0;
@@ -5398,8 +5513,12 @@ app.post("/admin/context-compaction/config", { preHandler: basicAuth }, async (r
 // 重要内容标记（恢复：前端按消息 key 标记，引擎 buildCompactionPrompt 会重点保留）
 app.post("/admin/context-compaction/mark", { preHandler: basicAuth }, async (req, reply) => {
   const body = req.body || {};
-  const key = String(body.key || "").trim();
-  if (!key) return reply.code(400).send({ error: "key 无效" });
+  // 1007-17 标星改 msgid：优先用 msg_id 作 marks 主键（稳定、编辑不漂移）；
+  // 无 msg_id（老前端/存量调用）时回落原内容键，行为与改动前完全一致。
+  // 取消标星时两种 key 都要清（alt_key），避免残留旧内容键导致"取消后仍按原句保留"。
+  const key = String(body.msg_id || body.key || "").trim();
+  if (!key) return reply.code(400).send({ error: "msg_id/key 无效" });
+  const altKey = String(body.key || "").trim();
   try {
     // 标星时把原文一并传给 setMark 存进 marks 文件，
     // 跨窗口注入就能直接读原文，不再依赖回查时间线/替换池
@@ -5427,7 +5546,7 @@ app.post("/admin/context-compaction/mark", { preHandler: basicAuth }, async (req
     }
     // 标星与记忆池完全拆开（I5，2026-09-12）：标星只做「原文保留在上下文」，
     // 不再自动写入记忆池；想存记忆走长按菜单「入池」或 AI 工具，池内去重兜底。
-    const markRes = contextReplacements.setMark(key, body.marked === true, { content: content, role: role, msg_time: String(body.msg_time || "") });
+    const markRes = contextReplacements.setMark(key, body.marked === true, { content: content, role: role, msg_time: String(body.msg_time || ""), alt_key: body.marked === true ? "" : altKey });
     if (!markRes || markRes.ok === false) {
       return reply.code(400).send({ error: (markRes && markRes.error) || "标星失败" });
     }
@@ -5481,6 +5600,7 @@ app.post("/admin/context-compaction/restore", { preHandler: basicAuth }, async (
     if (!chunk || !chunk.id) return reply.code(404).send({ error: "块 #" + chunkIndex + " 不存在" });
     const restored = contextReplacements.restoreHistory(chunk.id, historyIndex);
     if (!restored.ok) return reply.code(400).send({ error: restored.error || restored.message });
+    invalidateSnapshotForSession(snapshotSessionOfBlock(chunk.id), "block-restore");
     reply.send({ ok: true, summary: restored.summary, generatedAt: restored.generatedAt, length: restored.summary.length });
   } catch (err) {
     reply.code(400).send({ error: err.message });
@@ -5563,7 +5683,12 @@ app.get("/admin/ctx-snapshot-v2", { preHandler: basicAuth }, async (req, reply) 
       stale: sv.isStale(__dirname, sid),
       created_at: snap && snap.created_at || null,
       updated_at: snap && snap.updated_at || null,
+      // 1007-17 第三步：新结构存 entries（id 列表），旧结构存 history；1008 方案A：v3 存 content+snap_point。
+      // 三个都给，便于诊断迁移状态。
+      entries_len: snap && Array.isArray(snap.entries) ? snap.entries.length : 0,
       history_len: snap && Array.isArray(snap.history) ? snap.history.length : 0,
+      content_len: snap && Array.isArray(snap.content) ? snap.content.length : 0,
+      snap_point: snap && Number.isFinite(snap.snap_point) ? Number(snap.snap_point) : null,
       v2_blocks: snap && Array.isArray(snap.v2_blocks) ? snap.v2_blocks.length : 0,
       tools: snap && Array.isArray(snap.tools) ? snap.tools.length : (snap && snap.tools === null ? "pending(未回填)" : 0),
       tail_start: snap ? (Number(snap.tail_start) || 0) : null,

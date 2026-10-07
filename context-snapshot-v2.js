@@ -45,7 +45,11 @@ function loadSnapshot(baseDir, sessionId) {
   try {
     const f = snapFile(baseDir, sessionId);
     const j = JSON.parse(fs.readFileSync(f, "utf8"));
-    if (j && typeof j === "object" && Array.isArray(j.history)) return j;
+    // 1007-17 第三步：新快照存 entries（id 列表），旧快照存 history（完整消息副本）。
+    // 1008 方案A（第四步）：v3 快照存 content（冻结消息副本）+ snap_point（尾部起点下标）。
+    // 三种都能读进来，由调用方按结构判定走新逻辑还是标失效重建，
+    // 这样工具侧（只读 snap.tools）不受结构切换影响。
+    if (j && typeof j === "object" && (Array.isArray(j.entries) || Array.isArray(j.history) || Array.isArray(j.content))) return j;
     return null;
   } catch (e) { return null; }
 }
@@ -70,6 +74,27 @@ function saveSnapshot(baseDir, sessionId, data) {
 }
 function deleteSnapshot(baseDir, sessionId) {
   try { fs.unlinkSync(snapFile(baseDir, sessionId)); return true; } catch (e) { return false; }
+}
+
+// 2026-10-08 方案A：截断快照（编辑/删除/重生成落在 content 区且其后无 rep 块时调用）。
+// keepIds = 截断点之前（时间线下标 < newSnapPoint）的消息 id 集合；
+// rep 块（_ctxRep）整体保留——调用方已保证截断点落在所有可见压缩块区间之后。
+// 截断后 snap_point = newSnapPoint，截断点之后的消息下次读取时从时间线尾部现取（前缀 token 保留）。
+function truncateSnapshot(baseDir, sessionId, keepIds, newSnapPoint) {
+  try {
+    const snap = loadSnapshot(baseDir, sessionId);
+    if (!snap || !Array.isArray(snap.content) || !Number.isFinite(newSnapPoint)) return false;
+    const keep = new Set(Array.isArray(keepIds) ? keepIds.map(function (x) { return String(x); }) : []);
+    const next = [];
+    for (const it of snap.content) {
+      if (!it) continue;
+      if (it._ctxRep) { next.push(it); continue; }
+      if (it.id && keep.has(String(it.id))) next.push(it);
+    }
+    snap.content = next;
+    snap.snap_point = Number(newSnapPoint);
+    return saveSnapshot(baseDir, sessionId, snap);
+  } catch (e) { return false; }
 }
 
 // 会话快照存在性（重建/失效标记用）
@@ -100,6 +125,7 @@ function clearStale(baseDir, sessionId) {
 
 module.exports = {
   loadSnapshot, saveSnapshot, deleteSnapshot, hasSnapshot,
+  truncateSnapshot,
   markStale, isStale, clearStale,
   fpOf, toolsFpOf, snapFile, injFile,
 };
