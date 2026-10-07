@@ -5246,7 +5246,6 @@ async function branchFromMsg(idx){
   if(sending){showToast("正在回复中，暂不能分支");return;}
   const m=msgs[idx];if(!m)return;
   const srcSession=SessionStore.getCurrentSession();
-  const branchMsgs=JSON.parse(JSON.stringify(msgs.slice(0,idx+1)));
   const sid=genSessionId();
   let parents={};
   try{ parents=JSON.parse(localStorage.getItem("han_branch_parents")||"{}"); }catch(e){}
@@ -5261,19 +5260,7 @@ async function branchFromMsg(idx){
   try{ localStorage.setItem("han_session_names",JSON.stringify(nameMap)); }catch(e){}
   var _nmSet={}; _nmSet[sid]=named;
   pushSessionNamesDelta(_nmSet, []);   // 跨设备同步改名（单键变更）
-  saveMsgs();
-  SessionStore.setCurrentSession(sid);
-  applyHeader();
-  msgs=branchMsgs; saveMsgs();
-  renderAll(); scrollBottom();
-  closeAct();
-  SessionStore.removeSession("default");
-  SessionStore.removeSession(sid);
-  SessionStore.upsertSession({id:sid,name:named,total:branchMsgs.length,real:branchMsgs.length,last_time:(branchMsgs[branchMsgs.length-1]&&branchMsgs[branchMsgs.length-1].time)||new Date().toISOString(),is_default:false});
-  renderSessionList();
-  pushSessionNames();
-  startLiveEvents();
-  syncTimelineLocal({messages:branchMsgs});   // 分支=把父会话到分支点的消息一次性落盘到新会话
+  saveMsgs();   // 先落盘当前会话，再切分支
   // 0929-30：分支继承父会话的人设 + 模型 override（父会话跟随全局则不复制，新会话同样跟随全局）
   try{
     const _ppMap=getSessionPromptMap();
@@ -5284,15 +5271,38 @@ async function branchFromMsg(idx){
       if(_mj&&_mj.follow_global===false&&_mj.model_name){ saveSessionProvider(sid, _mj.model_provider_id||null, _mj.model_name, sid); }
     }catch(e){}
   }catch(e){}
-  // 继承父会话中完全落在分支点之前的压缩块（复制语义，父会话块保留）
+  // 1008 分支继承改造：服务端全量复制（父时间线原文到分支点 + 状态块摘要继承 + 注入快照父口径）。
+  // 不再前端本地 slice 落盘（本地副本会重写时间戳/丢服务端原文），分支后从服务端拉取新会话历史。
+  let _br=null;
   try{
-    await fetch("/v1/sessions/branch-inherit",{
+    _br=await fetch("/v1/sessions/branch-inherit",{
       method:"POST",
       headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},
-      body:JSON.stringify({srcSession:srcSession,newSession:sid,branchIndex:idx,anchorId:(msgs[idx]&&msgs[idx].id)||""}),
+      body:JSON.stringify({srcSession:srcSession,newSession:sid,branchIndex:idx,anchorId:(m&&m.id)||""}),
       credentials:"include"
     });
-  }catch(e){ /* 继承失败不影响分支本身 */ }
+  }catch(e){ showToast("分支失败，请检查网络"); return; }
+  if(!_br.ok){
+    let _err="分支失败";
+    try{ const _j=await _br.json(); if(_j&&_j.error)_err+="："+_j.error; }catch(e){ _err+="（HTTP "+_br.status+"）"; }
+    showToast(_err);
+    return;
+  }
+  SessionStore.setCurrentSession(sid);
+  applyHeader();
+  msgs=[];
+  let _h=null;
+  try{ _h=await fetchHistory({mode:"tail",limit:200}); }catch(e){}
+  if(_h&&_h.items&&_h.items.length){ msgs=_h.items; }
+  saveMsgs();
+  renderAll(); scrollBottom();
+  closeAct();
+  SessionStore.removeSession("default");
+  SessionStore.removeSession(sid);
+  SessionStore.upsertSession({id:sid,name:named,total:msgs.length,real:msgs.length,last_time:(msgs[msgs.length-1]&&msgs[msgs.length-1].time)||new Date().toISOString(),is_default:false});
+  renderSessionList();
+  pushSessionNames();
+  startLiveEvents();
   showToast("已开启新分支会话");
 }
 actBranch.addEventListener("click",function(){ const idx=actIdx; if(idx<0)return; closeAct(); branchFromMsg(idx); });
