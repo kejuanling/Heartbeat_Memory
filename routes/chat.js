@@ -621,6 +621,16 @@ module.exports = function registerChatRoutes(app, deps) {
       }
       const stat = contextReplacements.inheritSessionBlocks(srcSession, newSession, branchIndex, body.anchorId ? String(body.anchorId) : undefined);
       if (stat.error) return reply.code(404).send({ error: stat.error });
+      // 2026-10-08 方案A配套（分支/合并审查）：继承块后清目标会话 v2 快照。
+      // 防御异常路径——newSession 已存在且带旧快照时，不重建则继承块永不生效；
+      // 正常新建会话无快照，deleteSnapshot/clearStale 幂等零副作用。
+      if (stat.inherited > 0) {
+        try {
+          const sv2 = require("../context-snapshot-v2");
+          sv2.deleteSnapshot(baseDir, newSession);
+          sv2.clearStale(baseDir, newSession);
+        } catch (e) { console.error('[sessions/branch-inherit] 清目标会话快照失败:', e.message); }
+      }
       reply.send({ ok: true, inherited: stat.inherited, skippedNoMatch: stat.skippedNoMatch, skippedCross: stat.skippedCross });
     } catch (err) {
       console.error('[POST /v1/sessions/branch-inherit] error:', err.message);
