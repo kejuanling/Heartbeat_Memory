@@ -209,11 +209,15 @@ async function extractAndStore(text, ctx) {
   //     与用户手动标星 / context_star 工具共用同一套 marks 存储）。注意：唤醒路径本函数会被执行两次
   //     （wake_up 传剥过 <wake> 的文本、网关传原文），前者的 key 与落盘原文不一致会留一条不命中的幽灵
   //     marks 条目——无害，真正生效的是网关侧那次；setMark 幂等，重复写只是刷新 markedAt。 ---
+  //     1007-17 标星改 msgid：主对话路径（routes/chat.js 流式/非流式两处）落盘前就能拿到前端预生成的
+  //     reply_msg_id，ctx.msgId 传进来后按消息 id 存，编辑后不漂移。MCP 分支与唤醒路径的落盘在标签解析
+  //     之后、拿不到 id，ctx.msgId 为空 → 回落原内容键；marks 判定已是双查，内容键同样认，行为不变。 ---
   if (/<\s*star\b/i.test(text)) {
     promises.push(
       Promise.resolve().then(function () {
         const cr = require("./context-replacements");
-        const key = cr.contentKey({ role: "assistant", content: text });
+        const _mid = (ctx && ctx.msgId) ? String(ctx.msgId).trim() : "";
+        const key = _mid || cr.contentKey({ role: "assistant", content: text });
         const r = cr.setMark(key, true, { content: text, role: "assistant", msg_time: new Date().toISOString() });
         if (r && r.ok) console.log("[tag-parser] <star> 已标星本条回复 key=", key);
         return r;

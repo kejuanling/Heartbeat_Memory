@@ -4909,19 +4909,26 @@ function openAct(idx){
   actMask.classList.add("show");actSheet.classList.add("show");
 }
 // 判断消息是否已标星（读本地标星缓存 han_starred_keys）
+// 1007-17 标星改 msgid：本地星标 key 优先用消息 id（编辑后仍跟随），
+// 兼容存量 djb2 内容键——判定时两种 key 任一命中即算已标星，取消时两种一起清。
+function _starKeysOf(m){
+  const out=[];
+  if(m&&m.id) out.push(String(m.id));
+  try{ const k=msgStarKeySync(m); if(k) out.push(k); }catch(e){}
+  return out;
+}
 function isStarredMsg(m){
   try{
     const keys=JSON.parse(localStorage.getItem("han_starred_keys")||"[]");
-    const k=msgStarKeySync(m);
-    return keys.indexOf(k)>=0;
+    return _starKeysOf(m).some(function(k){ return keys.indexOf(k)>=0; });
   }catch(e){ return false; }
 }
 function setStarMsgLocal(m,on){
   try{
     let keys=JSON.parse(localStorage.getItem("han_starred_keys")||"[]");
-    const k=msgStarKeySync(m);
-    const i=keys.indexOf(k);
-    if(on){ if(i<0)keys.push(k); } else { if(i>=0)keys.splice(i,1); }
+    const ks=_starKeysOf(m);
+    if(on){ ks.forEach(function(k){ if(keys.indexOf(k)<0)keys.push(k); }); }
+    else{ keys=keys.filter(function(k){ return ks.indexOf(k)<0; }); }
     localStorage.setItem("han_starred_keys",JSON.stringify(keys));
   }catch(e){}
   const t=document.getElementById("actStarTxt");
@@ -4935,8 +4942,10 @@ async function toggleStarMsg(){
   const want=!isStarredMsg(m);   // 当前未标 → 标星
   const content=msgText(m); const role=m.role||"";
   try{
+    // 1007-17：优先上报 msg_id（服务端据此作 marks 主键）；key 仍带上供取消时清理存量条目
     const key=await msgStarKeyBackend(m);
-    const r=await fetch(ccBase()+"/context-compaction/mark",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":ccGetCookie("admin_csrf")},body:JSON.stringify({key:key,marked:want,content:content,role:role,msg_time:(m&&m.time)||""}),credentials:"include"});
+    const msgId=(m&&m.id)?String(m.id):"";
+    const r=await fetch(ccBase()+"/context-compaction/mark",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":ccGetCookie("admin_csrf")},body:JSON.stringify({msg_id:msgId,key:key,marked:want,content:content,role:role,msg_time:(m&&m.time)||""}),credentials:"include"});
     if(!r.ok){ showToast("标星失败: HTTP "+r.status); return; }
     const j=await r.json().catch(function(){return {};});
     if(j&&j.ok===false){ showToast("标星失败: "+(j.error||"")); return; }

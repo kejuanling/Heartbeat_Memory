@@ -231,7 +231,8 @@ function rangePreview(start, end, opts) {
       reasoning: (m && typeof m.reasoning === "string" && m.reasoning) ? m.reasoning : "",
       time: t ? formatTime(t) : "",
       key: contentKey(m),
-      marked: !!marks[contentKey(m)]
+      // 1007-17 标星改 msgid：双查（先 id 后内容键），新/旧标星都要显示为已标星
+      marked: contextReplacements.isMarkedMsg ? contextReplacements.isMarkedMsg(m, marks) : !!marks[contentKey(m)]
     };
   });
   let minT = null;

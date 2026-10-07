@@ -187,6 +187,13 @@ async function runWithTools({
   // 1. 加载 MCP 工具，转成 OpenAI tools[]（1007：快照优先，冻死）
   const openaiTools = await getToolsForSession(snapshotV2, baseDir, sessionId, serverClients);
   const allRoutes = openaiTools;
+  // 1007-17 修复：下面 toolCtx 与函数返回值都引用了 routes，但 1007-16 把工具加载改成
+  // getToolsForSession 后只留下 openaiTools，routes 已无人定义 → ReferenceError，
+  // 工具循环一进来就崩、回退原逻辑。这里补回原始 MCP 路由：
+  // 注意两者不是一回事——openaiTools 是发给上游的工具定义（走快照冻死），
+  // routes 是「按暴露名找到并执行工具」用的原始路由（含 exposedName/serverId/tool.name），
+  // callToolByExposedName 只认后者，不能用 openaiTools 顶替。
+  const routes = await loadTools(serverClients);
   // 2026-10-03：onDiaryWritten 必须进 toolCtx —— executeToolCalls 读的是 ctx.onDiaryWritten，
   // 而本函数的参数表此前根本不接受它、toolCtx 也不带，server.js 传的回调在签名这层就被丢掉，
   // 0929-03 那次「修复」实际从未生效：diary_add 写的日记两条路径都没落过时间线。
@@ -487,6 +494,10 @@ async function streamToolLoop({
   baseDir = null
 }) {
   const openaiTools = await getToolsForSession(snapshotV2, baseDir, sessionId, serverClients);
+  // 1007-17 修复：同上——本函数返回值里也引用了 routes（原加载被 getToolsForSession 替换后
+  // 就没人定义了）。这是「回复整条丢失」的直接原因：流程全部跑完、到最后 return 才抛错，
+  // catch 拿不到 r，外层只能回退。
+  const routes = await loadTools(serverClients);
   let working = messages.slice();
   let totalUsage = null;
   let rounds = 0;

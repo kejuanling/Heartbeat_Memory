@@ -937,7 +937,7 @@ function escapeHtml(s){
          '<span class="mem-tag">'+escapeHtml(x.role||'')+'</span>' +
          '<span class="mem-time">'+escapeHtml(x.time||'')+'</span>' +
          chunkTag +
-         '<button class="cc-msg-mark'+(x.marked?' on':'')+'" data-key="'+x.key+'" style="margin-left:auto" onclick="event.stopPropagation();toggleCcOrigMark(this)" title="标星：压缩后以原句保留，不被摘要覆盖" aria-pressed="'+(x.marked?'true':'false')+'" aria-label="标星此消息">'+(x.marked?'★':'☆')+'</button>' +
+         '<button class="cc-msg-mark'+(x.marked?' on':'')+'" data-key="'+x.key+'" data-id="'+(x.id||'')+'" style="margin-left:auto" onclick="event.stopPropagation();toggleCcOrigMark(this)" title="标星：压缩后以原句保留，不被摘要覆盖" aria-pressed="'+(x.marked?'true':'false')+'" aria-label="标星此消息">'+(x.marked?'★':'☆')+'</button>' +
          '</div>' +
          '<div class="cc-orig-content">'+escapeHtml(x.content)+'</div>' +
          '</div>';
@@ -953,13 +953,15 @@ function escapeHtml(s){
  */
 
  function toggleCcOrigMark(btn){
-   if(!btn) return;
-   const key = btn.getAttribute('data-key');
-   const next = !(btn.classList.contains('on'));
-   fetch(ADMIN_API + '/context-compaction/mark',{
-     method:'POST',headers:{'Content-Type':'application/json'},
-     body:JSON.stringify({key:key, marked:next})
-   }).then(function(r){return r.json()}).then(function(d){
+  if(!btn) return;
+  const key = btn.getAttribute('data-key');
+  // 1007-17 标星改 msgid：优先按消息 id 标星（编辑后不漂移）；key 一并发，取消时服务端双清。
+  const msgId = btn.getAttribute('data-id') || '';
+  const next = !(btn.classList.contains('on'));
+  fetch(ADMIN_API + '/context-compaction/mark',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({msg_id:msgId, key:key, marked:next})
+  }).then(function(r){return r.json()}).then(function(d){
      if(d && d.error){ alert('标记失败: '+d.error); return; }
      btn.classList.toggle('on', next);
      btn.textContent = next ? '★' : '☆';
@@ -1997,12 +1999,13 @@ function ccArmAllGapAutoLoad(){
    if(!c) return;
    const msgs=c.msgs||AppState.ccMsgBySig[c.signature];
    if(!msgs || !msgs[i]) return;
-   const m=msgs[i];
-   const next=!m.marked;
-   fetch(ADMIN_API + '/context-compaction/mark',{
-     method:'POST',headers:{'Content-Type':'application/json'},
-     body:JSON.stringify({key:m.key, marked:next})
-   }).then(function(r){return r.json()}).then(function(d){
+  const m=msgs[i];
+  const next=!m.marked;
+  // 1007-17 标星改 msgid：压缩预览已返回消息 id，优先按 id 标星。
+  fetch(ADMIN_API + '/context-compaction/mark',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({msg_id:(m.id||''), key:m.key, marked:next})
+  }).then(function(r){return r.json()}).then(function(d){
      if(d && d.error){ alert('标记失败: '+d.error); return; }
      m.marked=next;
      if(AppState.ccMsgsHtmlCache[c.signature]) delete AppState.ccMsgsHtmlCache[c.signature];
