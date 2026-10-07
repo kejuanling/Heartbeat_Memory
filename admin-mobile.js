@@ -406,7 +406,15 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
        '<div class="log-item-time">' + formatLogTime(l.time) + '</div>' +
      '</div>';
    };
-   const groupHtml = function(title, list, collapsed){
+   // 1007-12：分组折叠状态记忆——后台任务默认折叠，但用户展开后要能保持
+   //（否则日志每次轮询重渲染都会收回默认值，展开又自动收起）。折叠状态记进 localStorage。
+   const groupCollapsed = function(title, def){
+     let v = null;
+     try { v = localStorage.getItem('log-group-collapsed-' + title); } catch(e){}
+     return v === null ? def : v === '1';
+   };
+   const groupHtml = function(title, list, defCollapsed){
+     const collapsed = groupCollapsed(title, defCollapsed);
      return '<details class="log-group"' + (collapsed ? '' : ' open') + '><summary>' + title + '（' + list.length + '）</summary>' +
        list.map(function(l){ return itemHtml(l, title === '后台任务'); }).join('') + '</details>';
    };
@@ -415,6 +423,15 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    if (groups.state.length) html += groupHtml('状态机压缩', groups.state, false);
    if (groups.sys.length) html += groupHtml('后台任务', groups.sys, true);
    body.innerHTML = html;
+   // 展开/收起时写入记忆（summary 文本如「后台任务（3）」，取「（」之前做键）
+   Array.prototype.forEach.call(body.querySelectorAll('details.log-group'), function(d){
+     d.addEventListener('toggle', function(){
+       try {
+         const key = d.querySelector('summary') ? String(d.querySelector('summary').textContent).split('（')[0] : '';
+         if (key) localStorage.setItem('log-group-collapsed-' + key, d.open ? '0' : '1');
+       } catch(e){}
+     });
+   });
  }
 
  // —— 生成中状态恢复（0926）：解析/生成摘要是服务端同步任务，页面被杀或重进后前端 fetch 已丢，
