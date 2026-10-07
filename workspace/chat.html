@@ -1008,7 +1008,12 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .snap-dot{width:10px;height:10px;border-radius:50%;background:var(--accent-deep,var(--accent,#d96a5a));box-shadow:0 0 5px rgba(var(--accent-rgb),.55);display:inline-block;flex:none;cursor:pointer;margin-left:auto;vertical-align:middle}
 /* 1008-10：顶部横幅弹窗（替代原生 alert/confirm/prompt；参考管理台 mp-reason-banner，层级最顶） */
 #bannerHost{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:1000;width:min(94vw,640px);display:flex;flex-direction:column;gap:8px;pointer-events:none}
-#bannerHostMid{position:fixed;top:30%;left:50%;transform:translateX(-50%);z-index:1000;width:65%;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+#bannerHostMid{position:fixed;top:40%;left:50%;transform:translateX(-50%);z-index:1000;width:75%;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+/* 1008-11：交互类横幅文字放大一号（纯消息型顶部不变） */
+#bannerHostMid .banner-title{font-size:14px}
+#bannerHostMid .banner-text{font-size:14px}
+#bannerHostMid .banner-btn{font-size:14px;padding:8px 18px}
+#bannerHostMid .banner-input{font-size:14px}
 .banner{pointer-events:auto;position:relative;background:var(--sheet-bg,var(--card-solid,rgba(255,255,255,.9)));backdrop-filter:blur(50px) saturate(1.15);-webkit-backdrop-filter:blur(50px) saturate(1.15);border:.5px solid var(--line);border-radius:12px;box-shadow:0 8px 40px rgba(var(--shadow-rgb),.16);padding:10px 38px 10px 14px;display:flex;flex-direction:column;gap:6px;animation:bannerIn .22s ease}
 .banner-title{font-size:13px;font-weight:600;color:var(--accent-deep,var(--accent));letter-spacing:.02em}
 .banner-text{font-size:13px;color:var(--ink2);line-height:1.7;word-break:break-word;white-space:pre-line}
