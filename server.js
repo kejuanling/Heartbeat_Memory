@@ -5753,6 +5753,31 @@ try {
 function persistCompactionLogs() {
   try { fs.writeFileSync(COMPACTION_LOG_FILE, JSON.stringify(compactionLogs.filter(inCompactionLogDay))); } catch (e) { /* 持久化失败不影响运行 */ }
 }
+
+// 1007-05：启动时把"残留 pending"标为中断——生成/状态机任务是内存态，gateway 重启即中断，
+// 但 pending 日志条目不翻状态会永远显示"进行中"（02:43/17:18 两次实测）。规则：
+// status=pending 且 无同 id 已被翻状态的条目（同 id 更新=同一任务的 pending→success/error）
+// 且 无更晚的同 action 成功/失败条目（distill「开始跑」与「完成」是两条独立条目，有后继=已完成）
+// → 判定为重启中断，标 status=interrupted，前端显示「中断」。
+(function markInterruptedOnBoot(){
+  try {
+    let changed = false;
+    compactionLogs.forEach(function (l) {
+      if (!l || l.status !== "pending") return;
+      const idUpdated = compactionLogs.some(function (o) { return o !== l && o.id === l.id && o.status !== "pending"; });
+      if (idUpdated) return;
+      const laterDone = compactionLogs.some(function (o) {
+        return o !== l && o.action === l.action && (o.status === "success" || o.status === "error" || o.status === "skipped") &&
+          new Date(o.time).getTime() > new Date(l.time).getTime();
+      });
+      if (laterDone) return;
+      l.status = "interrupted";
+      l.message = "（服务重启中断）" + String(l.message || "");
+      changed = true;
+    });
+    if (changed) persistCompactionLogs();
+  } catch (e) { /* 标记失败不影响启动 */ }
+})();
 function addCompactionLog(entry) {
   const now = new Date().toISOString();
   // 1003-25：防字符串入参（memory-summary/backfill 的 log 曾直接传字符串，

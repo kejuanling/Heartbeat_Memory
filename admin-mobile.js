@@ -394,7 +394,7 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
    });
    const esc = function(s){ return String(s == null ? '' : s).replace(/</g,'&lt;'); };
    const itemHtml = function(l, msgAsLabel){
-     const statusText = l.status === 'success' ? '成功' : (l.status === 'error' ? '失败' : (l.status === 'skipped' ? '跳过' : '进行中'));
+     const statusText = l.status === 'success' ? '成功' : (l.status === 'error' ? '失败' : (l.status === 'skipped' ? '跳过' : (l.status === 'interrupted' ? '中断' : '进行中')));
      const labelText = msgAsLabel ? esc(l.message || l.label || '后台任务').replace(/\n/g,'<br>') : esc(l.label || '未知操作');
      const msgText = msgAsLabel ? '' : esc(l.message || '').replace(/\n/g,'<br>');
      return '<div class="log-item ' + (l.status || 'pending') + '">' +

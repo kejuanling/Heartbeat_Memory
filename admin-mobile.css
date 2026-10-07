@@ -1025,3 +1025,5 @@
 .rel-hit{display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding:1px 0}
 .rel-hit-score{font-family:ui-monospace,monospace;font-weight:700;color:#16a085;background:rgba(22,160,133,.1);padding:0 5px;border-radius:4px}
 .rel-hit-id{color:#95a5a6;font-size:10px}
+.log-item.interrupted{border-left-color:#8e44ad;background:rgba(243,234,250,0.8)}
+.log-item.interrupted .log-item-status{background:#ecd9f7;color:#8e44ad}
