@@ -688,7 +688,8 @@ function migrateSessionBlocks(sourceIds, targetId) {
   const items = loadItems();
   const out = items.slice();
   const seenSig = new Set();
-  let migrated = 0, skippedDup = 0, skippedNoMatch = 0;
+  let migrated = 0, skippedDup = 0, skippedNoMatch = 0, skippedManual = 0;
+  // 1008 手动块失效：只迁移状态块（ctxrep_state_），与分支继承口径一致。
   // 目标会话可锚定序列（普通 user/assistant 对话，与分支继承的 real 口径一致）
   const targetTl = loadTimeline(targetId) || [];
   const anchorSeq = [];
@@ -705,6 +706,7 @@ function migrateSessionBlocks(sourceIds, targetId) {
   items.forEach(function (it) {
     if (!it || it.removed) return;
     if (!it.session || !src.has(it.session)) return;
+    if (!String(it.id || "").startsWith("ctxrep_state_")) { skippedManual++; return; }
     const matched = (Array.isArray(it.matched) && it.matched.length > 0) ? it.matched : [];
     if (matched.length === 0) { skippedNoMatch++; return; }
     const sig = matchedShareSig(matched);
@@ -751,9 +753,9 @@ function migrateSessionBlocks(sourceIds, targetId) {
     migrated++;
   });
   saveItems(out);
-  console.log("[context-replacements] 会话合并复制压缩块: " + sourceIds.length + " 源会话 -> " + targetId +
-    " 复制=" + migrated + " 去重=" + skippedDup + " 无匹配=" + skippedNoMatch);
-  return { migrated: migrated, skippedDup: skippedDup, skippedNoMatch: skippedNoMatch };
+  console.log("[context-replacements] 会话合并复制状态块: " + sourceIds.length + " 源会话 -> " + targetId +
+    " 复制=" + migrated + " 去重=" + skippedDup + " 无匹配=" + skippedNoMatch + " 手动块跳过=" + skippedManual);
+  return { migrated: migrated, skippedDup: skippedDup, skippedNoMatch: skippedNoMatch, skippedManual: skippedManual };
 }
 
 // 会话分支时继承压缩块：把源会话中「完全落在分支点之前」的块复制到新会话。
@@ -761,71 +763,80 @@ function migrateSessionBlocks(sourceIds, targetId) {
 // 索引空间与前端 msgs 一致（/v1/history 的 isRealMessageForTimeline 口径：排除 system/tool/特殊事件），
 // 分支点用前端传入的 msgs 下标 branchIndex 直接定位，块用内容锚点定位。
 // 跨边界块不继承（摘要不完整）。源会话块保留（复制语义），新块打新会话标签，只在新会话内套用。
-function inheritSessionBlocks(srcSession, newSession, branchIndex, anchorId) {
+function inheritSessionBlocks(srcSession, newSession, branchIndex, anchorId, branchIdxHint) {
+  // 1008 分支会话继承改造（仅状态块）：
+  // 手动块已失效不再继承；只认状态块（ctxrep_state_<src>）。
+  // 分支点定位用「时间线数组下标」坐标（与状态块 range 同坐标系）：
+  //   bIdx > 区间终点 end_index → 分支点在状态块之后 → 继承摘要（复制块到分支，锚点/range 原样保留）
+  //   否则（无状态块 / 分支点在区间内或之前）→ 不继承，分支时间线 1..b 原文全量已含区间内容。
   if (!srcSession || !newSession || !Number.isInteger(branchIndex) || branchIndex < 0) {
     return { inherited: 0, skippedNoMatch: 0, skippedCross: 0 };
   }
   const items = loadItems();
   const out = items.slice();
   const timeline = loadTimeline(srcSession);
-  const real = [];
-  (Array.isArray(timeline) ? timeline : []).forEach(function (m, i) {
-    if (!m || m.role === "system") return;
-    if (m.tool_calls) return;
-    if (isSpecialEvent(m)) return;
-    const text = contentToText(m);
-    if (m.role === "user" && String(text).trim().startsWith("<system>")) return;
-    if (m.role !== "user" && m.role !== "assistant") return;
-    real.push({ msg: m, arrIdx: i });
-  });
-  // 优先用分支点消息 id 反查真实位置：前端 msgs 与服务端 real 下标空间可能不一致
-  //（前端本地新消息/服务端多写消息都会让下标错位），id 反查避免 over/under-inherit；无 id 或未命中回退前端下标。
-  let branchPos = branchIndex;
-  if (anchorId) {
-    const byId = real.findIndex(function(e) { return e.msg && e.msg.id === anchorId; });
-    if (byId >= 0) branchPos = byId;
+  // 分支点 = 时间线数组下标：branchIdxHint（服务端已定位）优先；否则 anchorId 反查；
+  // 都失败回退 branchIndex（前端 msgs 可见序列下标 → 时间线数组下标映射）。
+  let bIdx = (Number.isInteger(branchIdxHint) && branchIdxHint >= 0) ? branchIdxHint : -1;
+  if (bIdx < 0 && anchorId && Array.isArray(timeline)) {
+    for (let i = 0; i < timeline.length; i++) { if (timeline[i] && timeline[i].id === anchorId) { bIdx = i; break; } }
   }
-  if (branchPos >= real.length) {
-    return { inherited: 0, skippedNoMatch: 0, skippedCross: 0, error: "分支点下标超出源会话消息数" };
+  if (bIdx < 0) {
+    const visible = [];
+    (Array.isArray(timeline) ? timeline : []).forEach(function (m, i) {
+      if (!m || m.role === "system") return;
+      if (m.tool_calls) return;
+      if (isSpecialEvent(m)) return;
+      const text = contentToText(m);
+      if (m.role === "user" && String(text).trim().startsWith("<system>")) return;
+      if (m.role !== "user" && m.role !== "assistant") return;
+      visible.push(i);
+    });
+    if (branchIndex < 0 || branchIndex >= visible.length) {
+      return { inherited: 0, skippedNoMatch: 0, skippedCross: 0, error: "分支点下标超出源会话消息数" };
+    }
+    bIdx = visible[branchIndex];
   }
-  const keyToPos = new Map();
-  real.forEach(function (e, p) {
-    const k = normalizedCompareKey(e.msg);
-    if (!keyToPos.has(k)) keyToPos.set(k, p);
-  });
-  // id 反查表：分支时间线与源会话同源，消息 id 原样保留。块末条位置优先按 id 反查（唯一不撞键），
-  // 「哥哥」这类高频短语按内容首现会低估末条位置，把跨边界块误判成"分支点之前"而过度继承。
-  const idToPos = new Map();
-  real.forEach(function (e, p) {
-    if (e.msg && e.msg.id != null && e.msg.id !== "") idToPos.set(String(e.msg.id), p);
-  });
+  if (bIdx < 0) {
+    return { inherited: 0, skippedNoMatch: 0, skippedCross: 0, error: "分支点定位失败" };
+  }
   let inherited = 0, skippedNoMatch = 0, skippedCross = 0;
   items.forEach(function (it) {
-    if (!it || it.removed) return;
+    if (!it || it.removed || it.enabled === false) return;
     if (it.session !== srcSession) return;
-    const matched = (Array.isArray(it.matched) && it.matched.length > 0) ? it.matched : [];
-    if (matched.length === 0) { skippedNoMatch++; return; }
-    let lastPos = -1;
-    for (let i = matched.length - 1; i >= 0; i--) {
-      if (isSpecialEvent(matched[i])) continue;
-      const mi = matched[i];
-      const pi = (mi && mi.id != null && mi.id !== "") ? idToPos.get(String(mi.id)) : undefined;
-      if (pi !== undefined) { lastPos = pi; break; }
-      const p = keyToPos.get(normalizedCompareKey(mi));
-      if (p !== undefined) { lastPos = p; break; }
+    if (!String(it.id || "").startsWith("ctxrep_state_")) { skippedNoMatch++; return; }
+    // 区间终点：优先 range.end_index（时间线数组下标）；缺失时用 matched 末条 id 反查数组下标
+    let eIdx = -1;
+    if (it.range && Number.isFinite(it.range.end_index)) {
+      eIdx = Number(it.range.end_index);
+    } else {
+      const matched = (Array.isArray(it.matched) && it.matched.length > 0) ? it.matched : [];
+      for (let i = matched.length - 1; i >= 0; i--) {
+        const mi = matched[i];
+        if (mi && mi.id != null && mi.id !== "" && Array.isArray(timeline)) {
+          const pi = timeline.findIndex(function (m) { return m && m.id === mi.id; });
+          if (pi >= 0) { eIdx = pi; break; }
+        }
+      }
+      if (eIdx < 0) { skippedNoMatch++; return; }
     }
-    if (lastPos < 0) { skippedNoMatch++; return; }
-    if (lastPos > branchPos) { skippedCross++; return; }
-    out.push(Object.assign({}, it, {
-      session: newSession,
-      id: "ctxrep_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8),
-      created_at: nowIso()
-    }));
-    inherited++;
+    if (bIdx > eIdx) {
+      const copy = Object.assign({}, it, {
+        session: newSession,
+        id: "ctxrep_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8),
+        created_at: nowIso(),
+        updated_at: nowIso()
+      });
+      delete copy.removed;
+      out.push(copy);
+      inherited++;
+    } else {
+      skippedCross++;
+    }
   });
-  saveItems(out);
-  console.log("[context-replacements] 会话分支继承压缩块: " + srcSession + " -> " + newSession +
-    " 继承=" + inherited + " 无匹配=" + skippedNoMatch + " 跨边界=" + skippedCross);
+  if (inherited > 0) saveItems(out);
+  console.log("[context-replacements] 会话分支继承状态块: " + srcSession + " -> " + newSession +
+    " 继承=" + inherited + " 无匹配=" + skippedNoMatch + " 区间内不继承=" + skippedCross + " 分支点=" + bIdx);
   return { inherited: inherited, skippedNoMatch: skippedNoMatch, skippedCross: skippedCross };
 }
 

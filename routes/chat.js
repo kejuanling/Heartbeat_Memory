@@ -17,6 +17,8 @@ const { parsePushEcho, parseWakeEcho } = require('../utils/push');
 const chatCtx = require('./chat-context');
 const ctxV2Runtime = require('../context-v2-runtime'); // Context V2 共享运行时（0920 完全统一：聊天唤醒同一组装入口）
 const { mapMessagesForProvider } = require('../lib/role-mapper');
+const { buildContextBlocks } = require('../context-v2-builder'); // 1008 分支注入快照（父口径组装）
+const contextV2Shadow = require('../context-v2-shadow'); // 1008 分支注入快照（assembleInput）
 
 // 推送回显（成功推送的「刚刚给 X 发了 X 推送：」记录）需要在聊天页显示给用户看，
 // 其余特殊事件（容量提醒/唤醒/日记/记忆浮现等）保持对前端隐藏。
@@ -564,6 +566,36 @@ module.exports = function registerChatRoutes(app, deps) {
 
   // 会话合并：读多个源会话时间线，按消息时间稳定排序合并写入新会话时间线；源会话不动。
   // 前端生成新 sid 传入（与 newSession 流程一致），服务端只负责合并与落盘。
+  // 1008 分支/合并共享：按源会话口径为新会话生成系统注入快照（几大块完整继承）。
+  // 用源会话的 sessionId 组装（cutoffDate=源首条消息日期、system=源人设），写入目标会话名下。
+  function buildInjectSnapshotForNewSession(srcSessionId, newSessionId, srcTl) {
+    let blocks = 0;
+    try {
+      const injFile = require('../context-snapshot-v2').injFile(baseDir);
+      const input = contextV2Shadow.assembleInput({
+        baseDir,
+        sessionId: srcSessionId,
+        llmMessages: [],
+        loadTimeline,
+        normalizeContentToText
+      });
+      const built = buildContextBlocks(input);
+      const fixed = built.blocks
+        .filter(b => b && b.key !== 'relevant_memories' && !b.empty)
+        .map(b => ({ key: b.key, title: b.title || '', content: b.content }));
+      let inj = {};
+      try { inj = JSON.parse(fsp.readFileSync(injFile, 'utf8')); } catch (e) { inj = { sessions: {} }; }
+      const srcSys = (srcTl && srcTl[0] && srcTl[0].role === 'system' && srcTl[0].content) ? srcTl[0].content : '';
+      inj.sessions = inj.sessions || {};
+      inj.sessions[newSessionId] = { created_at: new Date().toISOString(), system_prompt: srcSys, fixed_blocks: fixed };
+      fsp.writeFileSync(injFile, JSON.stringify(inj, null, 2));
+      blocks = fixed.length;
+    } catch (e) {
+      console.warn('[branch/merge] 注入快照生成失败（会话仍可用）:', e.message);
+    }
+    return blocks;
+  }
+
   app.post('/v1/sessions/merge', async (req, reply) => {
     try {
       const body = (req.body && typeof req.body === 'object') ? req.body : {};
@@ -595,15 +627,37 @@ module.exports = function registerChatRoutes(app, deps) {
       entries.sort((a, b) => (a.ts - b.ts) || (a.si - b.si) || (a.oi - b.oi));
       const rebuilt = buildTimeline(entries.map(e => e.m), target);
       saveTimeline(rebuilt, target);
-      // 源会话压缩块复制到合并会话：matched 内容锚点在目标时间线重定位，按内容序列去重。
+      // 源会话状态块复制到合并会话：matched 内容锚点在目标时间线重定位，按内容序列去重。
       // 复制语义：源会话块保留（源会话继续显示摘要），同时复制一份归属到目标会话。
+      // 1008 手动块失效：migrateSessionBlocks 只迁移状态块（ctxrep_state_）。
       let migrateStat = null;
       try {
         migrateStat = contextReplacements.migrateSessionBlocks(ids, target);
-        if (migrateStat) console.log(`[sessions/merge] 复制压缩块:`, JSON.stringify(migrateStat));
-      } catch (e) { console.error('[sessions/merge] 复制压缩块失败:', e.message); }
-      console.log(`[sessions/merge] 合并 ${ids.length} 个会话 -> ${target}（${total} 条源消息）`);
-      reply.send({ ok: true, session_id: target, merged: total, total: rebuilt.filter(isRealMessageForTimeline).length });
+        if (migrateStat) console.log(`[sessions/merge] 复制状态块:`, JSON.stringify(migrateStat));
+      } catch (e) { console.error('[sessions/merge] 复制状态块失败:', e.message); }
+      // 1008 合并注入快照：按最近活跃的源会话口径生成几大块（用户拍板 B 方案），
+      // 合并会话系统注入完整继承该源（cutoffDate/人设/记忆都与该源一致）。
+      let injectBlocks = 0;
+      try {
+        let injectSrc = ids[0], injectSrcTs = -1;
+        for (const id of ids) {
+          let lastTs = 0;
+          const srcTl = loadTimeline(id);
+          if (Array.isArray(srcTl)) {
+            for (const m of srcTl) { if (m && m.time) { const t = Number(new Date(m.time)); if (t > lastTs) lastTs = t; } }
+          }
+          if (lastTs > injectSrcTs) { injectSrcTs = lastTs; injectSrc = id; }
+        }
+        injectBlocks = buildInjectSnapshotForNewSession(injectSrc, target, loadTimeline(injectSrc));
+      } catch (e) { console.warn('[sessions/merge] 注入快照生成失败:', e.message); }
+      // 1008 快照防御：目标会话异常残留旧 v2 快照时清掉（正常新建无快照，幂等零副作用）
+      try {
+        const sv2 = require('../context-snapshot-v2');
+        sv2.deleteSnapshot(baseDir, target);
+        sv2.clearStale(baseDir, target);
+      } catch (e) { console.error('[sessions/merge] 清目标会话快照失败:', e.message); }
+      console.log(`[sessions/merge] 合并 ${ids.length} 个会话 -> ${target}（${total} 条源消息）注入源=${injectSrc || ''} 注入块=${injectBlocks}`);
+      reply.send({ ok: true, session_id: target, merged: total, total: rebuilt.filter(isRealMessageForTimeline).length, inject_blocks: injectBlocks });
     } catch (err) {
       console.error('[POST /v1/sessions/merge] error:', err.message);
       reply.code(500).send({ error: err.message });
@@ -624,25 +678,51 @@ module.exports = function registerChatRoutes(app, deps) {
       if (!/^[A-Za-z0-9_-]+$/.test(srcSession) || !/^[A-Za-z0-9_-]+$/.test(newSession)) {
         return reply.code(400).send({ error: '非法会话ID' });
       }
-      const stat = contextReplacements.inheritSessionBlocks(srcSession, newSession, branchIndex, body.anchorId ? String(body.anchorId) : undefined);
-      if (stat.error) return reply.code(404).send({ error: stat.error });
-      // 2026-10-08 方案A配套（分支/合并审查）：继承块后清目标会话 v2 快照。
-      // 防御异常路径——newSession 已存在且带旧快照时，不重建则继承块永不生效；
-      // 正常新建会话无快照，deleteSnapshot/clearStale 幂等零副作用。
-      if (stat.inherited > 0) {
-        try {
-          const sv2 = require("../context-snapshot-v2");
-          sv2.deleteSnapshot(baseDir, newSession);
-          sv2.clearStale(baseDir, newSession);
-        } catch (e) { console.error('[sessions/branch-inherit] 清目标会话快照失败:', e.message); }
+      const anchorId = body.anchorId ? String(body.anchorId) : '';
+      // 1008 分支会话继承改造：
+      // 1) 父完整时间线 + 分支点定位（时间线数组下标；anchorId 反查优先，回退前端可见序列映射）
+      const tl = loadTimeline(srcSession);
+      if (!Array.isArray(tl) || tl.length === 0) return reply.code(404).send({ error: '源会话时间线为空' });
+      let bIdx = -1;
+      if (anchorId) { for (let i = 0; i < tl.length; i++) { if (tl[i] && tl[i].id === anchorId) { bIdx = i; break; } } }
+      if (bIdx < 0) {
+        const visible = [];
+        for (let i = 0; i < tl.length; i++) {
+          const m = tl[i];
+          if (!m || m.role === 'system') continue;
+          if (m.tool_calls) continue;
+          if (m.role !== 'user' && m.role !== 'assistant') continue;
+          const t = normalizeContentToText(m.content) || '';
+          if (m.role === 'user' && String(t).trim().startsWith('<system>')) continue;
+          visible.push(i);
+        }
+        if (branchIndex < 0 || branchIndex >= visible.length) {
+          return reply.code(404).send({ error: '分支点消息在源会话时间线中找不到' });
+        }
+        bIdx = visible[branchIndex];
       }
-      reply.send({ ok: true, inherited: stat.inherited, skippedNoMatch: stat.skippedNoMatch, skippedCross: stat.skippedCross });
+      // 2) 分支时间线 = 父时间线 1..分支点 原文全量复制（保留 time/position/id，含 system 兜底人设）
+      const branchTimeline = tl.slice(0, bIdx + 1).map(m => Object.assign({}, m));
+      // 3) 状态块继承（inheritSessionBlocks 内部只认状态块；bIdx 以 hint 传入避免二次定位）
+      const stat = contextReplacements.inheritSessionBlocks(srcSession, newSession, branchIndex, anchorId, bIdx);
+      if (stat.error) return reply.code(404).send({ error: stat.error });
+      // 4) 注入快照：按父会话口径生成几大块（Context Assembly / System Instructions / Core Identity /
+      //    Long-term Understanding / Earlier Days），分支会话系统注入完整继承旧会话
+      const injectBlocks = buildInjectSnapshotForNewSession(srcSession, newSession, tl);
+      // 5) 写分支时间线 + 清目标会话旧快照（防御异常路径：newSession 已存在且带旧快照时，
+      //    不重建则继承块/新时间线不生效；正常新建会话无快照，deleteSnapshot/clearStale 幂等零副作用）
+      saveTimeline(branchTimeline, newSession);
+      try {
+        const sv2 = require('../context-snapshot-v2');
+        sv2.deleteSnapshot(baseDir, newSession);
+        sv2.clearStale(baseDir, newSession);
+      } catch (e) { console.error('[sessions/branch-inherit] 清目标会话快照失败:', e.message); }
+      reply.send({ ok: true, inherited: stat.inherited, skippedNoMatch: stat.skippedNoMatch, skippedCross: stat.skippedCross, timeline_count: branchTimeline.length, inject_blocks: injectBlocks, branch_point: bIdx });
     } catch (err) {
       console.error('[POST /v1/sessions/branch-inherit] error:', err.message);
       reply.code(500).send({ error: err.message });
     }
   });
-
   // 会话级跨窗口注入覆盖（新建会话时设置）：true=本会话强制注入, false=本会话关闭, null=跟随全局。
   // 仅影响该会话是否注入跨窗口记忆，不触碰管理台全局配置。
   app.get('/v1/sessions/:id/cross-inject', async (req, reply) => {
