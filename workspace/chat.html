@@ -536,7 +536,9 @@ body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-we
 .act-item.danger{color:var(--act-danger-ink,var(--bad))}
 .act-item.on{color:var(--accent)}
 .act-item.on .ai-lg{color:var(--accent)}
-.act-item#actDel{grid-column:1 / -1;justify-content:center}
+.act-item#actDel{grid-column:1 / -1;justify-content:center;position:relative}
+/* 1007-14：删除整行文字真居中——图标绝对定位不参与 flex 占位（否则文字被图标挤偏右） */
+.act-item#actDel .ai-lg{position:absolute;left:calc(50% - 44px);pointer-events:none}
 
 /* ============ 引导 / 设置弹层 ============ */
 .mask{
