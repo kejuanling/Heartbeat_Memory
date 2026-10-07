@@ -1,3 +1,4 @@
+90a51a603b7d188370e122219878a8fe  workspace/chat.html
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -7072,9 +7073,10 @@ async function loadSessionCc(id){
     const t=(j&&j.totals)||{};
 
     // 2026-10-04 分流：会话里还有非 state 的旧块 → 旧块视图；一条不剩 → 状态机视图。
-    // 判定直接用 preview 已返回的 chunks[].source，不新增接口。
-    // 过渡期是常态（存量会话按需逐个并入后自动切换），两个视图长期并存。
-    var hasLegacy = chunks.some(function(c){ return c.source !== "state"; });
+    // 2026-10-07 用户拍板收紧口径：只有「还有替换中（cached 且启用且未隐藏）的旧块」才显示旧压缩页；
+    // 没有替换中的块（已停用/已隐藏/待生成的旧块都不算）→ 直接进状态机视图。
+    // 判定直接用 preview 已返回的 chunks[].source / cached / enabled / hidden，不新增接口。
+    var hasLegacy = chunks.some(function(c){ return c.source !== "state" && c.cached && c.enabled !== false && !c.hidden; });
     if(!hasLegacy){ return loadSessionCcState(id); }
 
     if(!chunks.length&&!gaps.length){ body.innerHTML='<div class="adm-empty">该会话暂无压缩块</div>'; return; }
