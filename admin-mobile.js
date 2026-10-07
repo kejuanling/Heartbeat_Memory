@@ -1055,8 +1055,9 @@ function ccBuildMergedItems(d){
 function ccBuildSummaryStatsHtml(d, t){
   return '<div class="cc-stats">'
     +'<span class="cc-mini-main"><span class="l">实际约</span><b>'+fmtCcNum(t.estCompressedChars||0)+'</b><span class="unit">字</span></span>'
-    // 1007-14：删掉「条数」「重复字数」「块数」「缓存」四项——条数页头会话选择器已显示（如 s_xxx（605条）），
-    // totalChars 与主数字「实际约 X 字」重复，块/缓存数日常操作无信息量。保留：积压tok / 总tok / 隐藏。
+    // 1007-14：删「重复字数」「块数」「缓存」（totalChars 与主数字重复，块/缓存无信息量）；
+    // 总条数用户要求加回（10-07 追加）。保留：总条数 / 积压tok / 总tok / 隐藏。
+    +'<span class="cc-mini-item"><b>'+d.totalCompressible+'</b><i>条</i></span>'
     +'<span class="cc-mini-item" title="未覆盖对话积压的 token 估算（触发容量提醒的口径）"><b>'+fmtCcNum(t.estUncoveredTokens||0)+'</b><i>积压tok</i></span>'
     +'<span class="cc-mini-item'+(t.estTotalTokens?'':' zero')+'" title="实际发送 token 估算 = 未覆盖积压 + 摘要块 + 标星原句 + 图片 + 置顶记忆（永久上下文）。估算口径：中文≈1字/token、英文≈4字符/token、图片每张约1000。"><b>'+fmtCcNum(t.estTotalTokens||0)+'</b><i>总tok</i></span>'
     +((t.hiddenCount>0||t.manualHiddenCount>0)?'<span class="cc-mini-item zero"><b>'+((t.hiddenCount||0)+(t.manualHiddenCount||0))+'</b><i>隐藏</i></span>':'')
