@@ -602,6 +602,8 @@ async function streamToolLoop({
         const payload = trimmed.slice(5).replace(/^\s+/, "");
         if (!payload || payload === "[DONE]") continue;
         let evt; try { evt = JSON.parse(payload); } catch { continue; }
+        // 1008-16 修复：Kimi/Moonshot 等上游的 usage 帧 choices 为空数组，此前被 !choice continue 跳过 → 落盘 tokens 恒 null
+        if (evt && evt.usage) totalUsage = evt.usage;
         const choice = evt && evt.choices && evt.choices[0]; if (!choice) continue;
         const delta = choice.delta || {};
         if (typeof delta.reasoning_content === "string" && delta.reasoning_content.length) {
@@ -635,6 +637,7 @@ async function streamToolLoop({
         const payload = trimmed.slice(5).replace(/^\s+/, "");
         if (payload && payload !== "[DONE]") {
           let evt; try { evt = JSON.parse(payload); } catch { evt = null; }
+          if (evt && evt.usage) totalUsage = evt.usage;
           const choice = evt && evt.choices && evt.choices[0];
           if (choice) {
             const delta = choice.delta || {};
