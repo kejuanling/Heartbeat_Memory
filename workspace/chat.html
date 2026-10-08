@@ -3842,10 +3842,27 @@ function buildTimelineUnits(timeline, m){
   const fromTimeline=!!tl;
   if(!tl){
     // b) 旧消息合成：content 按分隔符拆段为 text 节点序列；有工具则统一插到首段之后
+    // 1008-20 修复：<voice>…</voice> 块先整体提取再拆段——块内英文段落空行会把配对标签劈开
+    // （含 <voice> 的段被剥标签、含 </voice> 的段 hasVoice 只认开标签 → 字面残留显示），
+    // voice 块作为独立 text 单元、不再按空行拆。
     const full=stripCurrentTime(stripInnerTags(msgText(m))).clean;
-    let ps=splitBubbleText(full);
-    if(ps.length<=1)ps=[full];
-    tl=ps.map(function(_p){return {type:"text",text:_p};});
+    const _segs=[]; let _last=0,_m;
+    const _vre=/<voice>[\s\S]*?<\/voice>/gi;
+    while((_m=_vre.exec(full))!==null){
+      const _pre=String(full.slice(_last,_m.index)).trim();
+      if(_pre) _segs.push({type:"text",text:_pre});
+      _segs.push({type:"voice",text:_m[0]});
+      _last=_vre.lastIndex;
+    }
+    const _tail=String(full.slice(_last)).trim();
+    if(_tail) _segs.push({type:"text",text:_tail});
+    if(!_segs.length) _segs.push({type:"text",text:full});
+    tl=[];
+    _segs.forEach(function(_s){
+      if(_s.type==="voice"){ tl.push({type:"text",text:_s.text}); return; }
+      const _ps=splitBubbleText(_s.text);
+      (_ps.length?_ps:[_s.text]).forEach(function(_p){ tl.push({type:"text",text:_p}); });
+    });
     const _mTools=(cfg.show_tools!==false&&Array.isArray(m.tools))?m.tools.filter(function(_t){return _t&&_t.name;}):[];
     if(_mTools.length){
       tl=tl.slice(0,1).concat(_mTools.map(function(_t){return {type:"tool",tool:_t};}), tl.slice(1));
@@ -3867,7 +3884,9 @@ function buildTimelineUnits(timeline, m){
       // a) 拆段：分隔符在此统一消费（2026-09-24 P0-2 语义），工具卡位置由 timeline 顺序决定
       // 2026-09-25 ⑥：claude(极简/黑夜) 是"连续文本"设计（实时 feed 也不拆段）→ 重建同样不拆，
       // 否则同一回复会出现"实时一整块、刷新后分段"的差异（段间还会多出 mrow 间距）。
-      const _ps=(chatEl && (chatEl.dataset.layout==="claude"||chatEl.dataset.layout==="crt"))?[_txt]:splitBubbleText(_txt);
+      // 1008-20：含完整 <voice>…</voice> 的段不拆（内部空行会劈开配对标签）
+      const _wholeVoice=(_txt.indexOf("<voice")>=0 && _txt.indexOf("</voice>")>=0);
+      const _ps=(_wholeVoice||(chatEl && (chatEl.dataset.layout==="claude"||chatEl.dataset.layout==="crt")))?[_txt]:splitBubbleText(_txt);
       (_ps.length?_ps:[_txt]).forEach(function(_p){
         units.push({kind:"text",text:_p,reasoning:(!reasoningAssigned)?(m&&m.reasoning||""):""});
         reasoningAssigned=true;
