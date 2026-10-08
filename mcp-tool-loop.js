@@ -93,6 +93,9 @@ function splitThinkBlock(text) {
 
 // 2026-10-01 MiniMax 跨帧剥离状态机：SSE 帧可能把 <think> 拆成 <th / ink> 等多帧，
 // 逐帧正则匹配不到，必须 buffer 累积：完整块提取进思考链，残片（含未闭合 <think> 前缀）等下一帧。
+// 1008-16 修复：push 兜底分支此前从 buf[0] 切片输出，完整 think 块匹配后（last 已越过该块）
+// 又把思考链原样复制回正文 → MiniMax 正文出现 thinking 链且折叠区也有一份（复制而非移除）。
+// 改为从 last 切片，仅输出未处理的尾部；拆帧（<th/ink> 等）由 PREFIXES 保留逻辑继续兜底。
 function createThinkStripper() {
   let buf = "";
   let thinking = "";
@@ -119,10 +122,10 @@ function createThinkStripper() {
           if (buf.endsWith(PREFIXES[i])) keep = Math.max(keep, PREFIXES[i].length);
         }
         if (keep > 0) {
-          out += buf.slice(0, buf.length - keep);
+          out += buf.slice(last, buf.length - keep);
           buf = buf.slice(buf.length - keep);
         } else {
-          out += buf;
+          out += buf.slice(last);
           buf = "";
         }
       }
