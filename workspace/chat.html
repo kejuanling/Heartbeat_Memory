@@ -10191,7 +10191,7 @@ body:has(#chat:is([data-layout="claude"],[data-layout="crt"])) #thinkSheetBody d
 /* 0929-25 极简主题底部 35vh 留白改为主题级（不依赖 data-layout 属性，防 layout 异常时失效） */
 
 /* ===== 极简 ChatGPT mobile v4：Liquid Glass ===== */
-body[data-theme="claude"] #chat{padding-left:3.2%!important;padding-right:3.2%!important;padding-top:calc(env(safe-area-inset-top) + 82px)!important;padding-bottom:calc(env(safe-area-inset-bottom) + 30vh)!important}
+body[data-theme="claude"] #chat{padding-left:3.2%!important;padding-right:3.2%!important;padding-top:calc(env(safe-area-inset-top) + 82px)!important;padding-bottom:calc(env(safe-area-inset-bottom) + 20vh)!important}
 
 body[data-theme="claude"] .claude-fab-left,body[data-theme="claude"] .claude-fab-right .fab-btn{width:40px!important;height:40px!important;background:rgba(255,255,255,.48)!important;backdrop-filter:blur(26px) saturate(145%) brightness(1.05)!important;-webkit-backdrop-filter:blur(26px) saturate(145%) brightness(1.05)!important;border:1px solid rgba(255,255,255,.72)!important;box-shadow:inset 0 1px 1px rgba(255,255,255,.92),inset 0 -1px 1px rgba(0,0,0,.025),0 5px 18px rgba(0,0,0,.055)!important;color:#3b3b3b!important}
 
@@ -10321,7 +10321,7 @@ body[data-theme="dark"]:has(#chat[data-layout="claude"])::after{background:linea
 /* 2026-09-24 P0：dark 布局同样去 !important，让用户背景图在黑夜主题也能生效；无背景图时 #1a1a1a 兜底 */
 body[data-theme="dark"]:has(#chat[data-layout="claude"]){background:#1a1a1a}
 
-body[data-theme="dark"]:has(#chat[data-layout="claude"]) #chat{padding-bottom:calc(env(safe-area-inset-bottom) + 30vh)!important}
+body[data-theme="dark"]:has(#chat[data-layout="claude"]) #chat{padding-bottom:calc(env(safe-area-inset-bottom) + 20vh)!important}
 
 
 
