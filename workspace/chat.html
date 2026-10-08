@@ -441,6 +441,8 @@ footer{
 /* 按住说话：禁止页面选字/滚动（录完确认发送，无需手势取消） */
 body.vm-lock{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 body.vm-lock .bubble,body.vm-lock #input,body.vm-lock #chat{user-select:none;-webkit-user-select:none}
+/* 1008-16 长按弹菜单时锁定文本选择：防止移动端系统同时触发全选/选择柄 */
+body.lp-lock,body.lp-lock *{user-select:none!important;-webkit-user-select:none!important;-webkit-touch-callout:none!important}
 @keyframes vmRec{0%,100%{box-shadow:0 0 0 0 rgba(var(--bad-rgb),.5)}50%{box-shadow:0 0 0 7px rgba(var(--bad-rgb),0)}}
 #send{
   width:34px;height:34px;border:none;border-radius:50%;flex-shrink:0;
@@ -5114,7 +5116,7 @@ async function addToPoolMsg(){
   }catch(e){ showToast("入池失败:"+e.message); }
 }
 
-function closeAct(){actMask.classList.remove("show");actSheet.classList.remove("show");actIdx=-1;}
+function closeAct(){actMask.classList.remove("show");actSheet.classList.remove("show");actIdx=-1;document.body.classList.remove("lp-lock");}
 actMask.addEventListener("click",closeAct);
 
 /* ================= 就地编辑（用户 & AI 消息） ================= */
@@ -5493,15 +5495,25 @@ chatEl.addEventListener("click",e=>{
 
 /* 长按触发操作菜单 */
 let pressTimer=null;
+let pressFired=false;
 chatEl.addEventListener("touchstart",e=>{
   const el=e.target.closest(".msg");if(!el)return;
   const idx=el.dataset.idx;
   if(idx==null||idx<0)return;
-  const startX=e.touches[0].clientX,startY=e.touches[0].clientY;
-  pressTimer=setTimeout(()=>{openAct(Number(idx));navigator.vibrate&&navigator.vibrate(10);},500);
+  // 1008-16 修复：长按期间锁定文本选择，防止系统同时触发全选/选择柄（气泡主题最易复现）
+  pressFired=false;
+  document.body.classList.add("lp-lock");
+  pressTimer=setTimeout(()=>{
+    if(pressFired)return;
+    pressFired=true;
+    openAct(Number(idx));
+    navigator.vibrate&&navigator.vibrate(10);
+  },500);
 }, {passive:true});
 ["touchmove","touchend","touchcancel"].forEach(ev=>chatEl.addEventListener(ev,e=>{
   clearTimeout(pressTimer);
+  // 未触发菜单（滚动/松手取消）→ 解锁；已弹窗保持锁定，closeAct 时解锁
+  if(!pressFired) document.body.classList.remove("lp-lock");
 }, {passive:true}));
 chatEl.addEventListener("contextmenu",e=>{
   const el=e.target.closest(".msg");if(!el)return;
