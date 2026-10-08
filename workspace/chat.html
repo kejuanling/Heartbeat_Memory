@@ -888,11 +888,10 @@ body.lp-lock,body.lp-lock *{user-select:none!important;-webkit-user-select:none!
 .drawer-panel{
   position:absolute;top:0;left:0;bottom:0;width:82%;max-width:300px;
   background:var(--bg1);
-  box-shadow:var(--shadow-float);
   transform:translateX(-100%);transition:transform .28s cubic-bezier(.3,.8,.3,1);
   display:flex;flex-direction:column;pointer-events:auto;
 }
-.drawer.open .drawer-panel{transform:translateX(0)}
+.drawer.open .drawer-panel{transform:translateX(0);box-shadow:var(--shadow-float)}
 /* 主菜单抽屉：从右侧滑入 + 全屏（仅菜单，不影响左侧的会话抽屉） */
 #navDrawer .drawer-panel{
   left:0;right:auto;width:100%;max-width:none;
