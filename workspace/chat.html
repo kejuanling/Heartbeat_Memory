@@ -2737,7 +2737,7 @@ function renderTextBlocks(text){
     }
     if(/^[-*]\s/m.test(b)){const items=b.split("\n").map(x=>x.replace(/^\s*[-*]\s+/,"")).filter(x=>x);html+="<ul>"+items.map(i=>"<li>"+inlineMd(i)+"</li>").join("")+"</ul>";continue;}
     if(/^\d+\.\s/m.test(b)){const items=b.split("\n").map(x=>x.replace(/^\s*\d+\.\s+/,"")).filter(x=>x);html+="<ol>"+items.map(i=>"<li>"+inlineMd(i)+"</li>").join("")+"</ol>";continue;}
-    if(/^(-{3,}|\*{3,})$/.test(b)){html+="<hr>";continue;}
+    if(/^(-{3,}|\*{3,})$/.test(b)){html+='<hr style="border:none;border-top:1px solid currentColor;height:0;margin:8px 0;opacity:.45">';continue;}
     html+="<p>"+inlineMd(b)+"</p>";
   }
   return html;
