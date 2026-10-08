@@ -5017,9 +5017,12 @@ function openAct(idx){
         // 2) 顶层 cached_tokens：kimi(moonshot)
         // 3) 嵌套 prompt_tokens_details.cached_tokens：豆包/openrouter/百炼/glm/minimax/openai
         // 未命中：厂商给出顶层 miss 就用它；否则用 prompt_tokens - 命中数 推算（无缓存字段时整段不显示）。
+        var _pd = (m.tokens.prompt_tokens_details)||{};
+        // 1008 K3 兼容：cache_write_tokens 形态（本轮写缓存、未命中）→ 命中按 0 计、未命中=prompt_tokens 全量
         var _hit = (m.tokens.prompt_cache_hit_tokens!=null) ? m.tokens.prompt_cache_hit_tokens
                  : (m.tokens.cached_tokens!=null) ? m.tokens.cached_tokens
-                 : (m.tokens.prompt_tokens_details && m.tokens.prompt_tokens_details.cached_tokens!=null) ? m.tokens.prompt_tokens_details.cached_tokens : null;
+                 : (_pd.cached_tokens!=null) ? _pd.cached_tokens
+                 : (_pd.cache_write_tokens!=null) ? 0 : null;
         var _miss = (m.tokens.prompt_cache_miss_tokens!=null) ? m.tokens.prompt_cache_miss_tokens
                   : (_hit!=null && m.tokens.prompt_tokens!=null) ? Math.max(0, m.tokens.prompt_tokens - _hit) : null;
         if(_hit!=null){ html+='<span class="tok-c">命中 '+_hit+'</span>'; }
