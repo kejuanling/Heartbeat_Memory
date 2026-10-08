@@ -3576,7 +3576,11 @@ function renderAiContent(msgEl, bubble, content, reasoning){   // 2026-09-24 P2-
     });
     bubble.innerHTML=h;
   }else{
-    bubble.innerHTML=(typeof content==="string"&&content)?(cfg.ai_md?renderMd(stripTtsCtl(content)):escapeHtml(stripTtsCtl(content))):"";
+    // 1008-21：纯 markdown 分隔线段（---/***/___，空行拆分成独立气泡）走文本兜底，不渲染 <hr>——
+    // 部分 WebView/主题下 hr 默认无边框不可见，空气泡。直接显示分隔线原文，任何环境可见。
+    const _t=typeof content==="string"?content:"";
+    const _pureHr=_t&&/^[-*_]{3,}\s*$/.test(_t.trim());
+    bubble.innerHTML=_t?(_pureHr?escapeHtml(stripTtsCtl(_t)):(cfg.ai_md?renderMd(stripTtsCtl(_t)):escapeHtml(stripTtsCtl(_t)))):"";
   }
   // 2026-09-25 ⑨：原「if(Array.isArray(content)) → 渲染 AI 侧图片/文件卡片」分支已删。
   // 理由：renderAiContent 的三个调用点（_streamFillBubble / makeMsgEl 两个 unit 分支）传入的 content 恒为字符串，
