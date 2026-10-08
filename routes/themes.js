@@ -119,6 +119,36 @@ module.exports = function registerThemeRoutes(app, deps) {
 
   // 通用附件转存（聊天窗口发 PDF/文本/音视频等）：body {name, mime, data(base64 无 dataURL 前缀)}
   // 上限与 /v1/upload-image 同一设置项（cfg.upload_max_mb）；前端 0910 已调用本路由但后端缺失（404），此处补齐。
+  // 1008-20 文档正文提取：PDF/docx 上传时解析正文存 <原文件>.txt 缓存，
+  // 供 LLM 上下文注入（模型只见文本；LLM 不解析 file 结构）。解析失败不阻塞上传，降级为元信息摘要。
+  const DOC_TEXT_MAX = 15000;
+  async function extractDocTextToCache(fp, mime, name) {
+    try {
+      let text = "";
+      const ext = String(name || "").split(".").pop().toLowerCase();
+      if (ext === "pdf" || mime === "application/pdf") {
+        // pdf-parse 2.x：PDFParse 类 + getText() → { pages, text, total }
+        const { PDFParse } = require("pdf-parse");
+        const parser = new PDFParse({ data: require("fs").readFileSync(fp), verbosity: 0 });
+        const data = await parser.getText();
+        text = String((data && data.text) || "");
+      } else if (ext === "docx" || String(mime || "").indexOf("wordprocessingml") >= 0) {
+        const mammoth = require("mammoth");
+        const res = await mammoth.extractRawText({ path: fp });
+        text = String((res && res.value) || "");
+      }
+      text = text.replace(/\u0000/g, "").replace(/\s+/g, " ").trim();
+      if (!text) return false;
+      if (text.length > DOC_TEXT_MAX) text = text.slice(0, DOC_TEXT_MAX) + "\n…(内容过长已截断)";
+      await fsp.writeFile(fp + ".txt", text);
+      console.log("[upload-file] 文档正文已提取: " + name + " → " + text.length + " 字");
+      return true;
+    } catch (e) {
+      console.warn("[upload-file] 文档正文提取失败（降级为摘要）: " + name + ": " + ((e && e.message) || e));
+      return false;
+    }
+  }
+
   app.post('/v1/upload-file', async (req, reply) => {
     if (!uploadRateOk(clientIpOf(req))) {
       reply.code(429).send({ ok: false, error: '上传过于频繁，请稍后再试' });
@@ -144,6 +174,10 @@ module.exports = function registerThemeRoutes(app, deps) {
     await fsp.ensureDir(uploadsDir);
     const name = 'file-' + Date.now().toString(36) + '-' + crypto.randomBytes(4).toString('hex') + '.' + ext;
     await fsp.writeFile(path.join(uploadsDir, name), buf);
+    // 1008-20：PDF/docx 上传后同步提取正文缓存（await：用户随后的消息要能立刻读到内容）
+    if (ext === "pdf" || ext === "docx") {
+      await extractDocTextToCache(path.join(uploadsDir, name), outMime, name);
+    }
     reply.send({ ok: true, name: keepName, url: imageAbsUrl(req, '/uploads/' + name), size: buf.length, mime: outMime });
   });
 

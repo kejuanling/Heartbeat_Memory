@@ -462,6 +462,29 @@ function isTextFilePart(fileObj) {
     mt === "application/javascript" || mt === "application/x-javascript" ||
     mt === "application/yaml" || mt === "application/x-yaml";
 }
+// 1008-20：文档类文件（PDF/Word docx）——正文走上传时提取的 <原文件>.txt 缓存，模型可见内容
+function isDocFilePart(fileObj) {
+  const f = fileObj && typeof fileObj === "object" ? fileObj : {};
+  const m = String(f.name || "").match(/\.([a-zA-Z0-9]{1,12})$/);
+  const ext = m ? m[1].toLowerCase() : "";
+  if (ext === "pdf" || ext === "docx") return true;
+  const mt = String(f.mime || "").toLowerCase();
+  return mt === "application/pdf" || mt.indexOf("wordprocessingml") >= 0;
+}
+// 读文档正文缓存（<原文件>.txt，上传时由 /v1/upload-file 生成；旧文件/解析失败无缓存返回 null）
+function readDocCacheFile(fileObj) {
+  const f = fileObj && typeof fileObj === "object" ? fileObj : {};
+  const url = String(f.url || "");
+  const m = url.match(/\/uploads\/([^/?#]+)/);
+  if (!m) return null;
+  let name;
+  try { name = decodeURIComponent(m[1]); } catch (e) { name = m[1]; }
+  const fp = path.join(UPLOADS_DIR, path.basename(name)) + ".txt";
+  try {
+    const s = fs.readFileSync(fp, "utf8");
+    return s || null;
+  } catch (e) { return null; }
+}
 // 从 /uploads/<file> URL 读取本地文件正文（同步，只读前 maxLen+1 字节，超长截断）。失败返回 null。
 function readUploadedFileContent(fileObj, maxLen) {
   maxLen = maxLen || 10000;
@@ -489,10 +512,16 @@ function filePartTextForLLM(part) {
   const summary = filePartSummary(part);
   const f = part && typeof part === "object" && part.file ? part.file : null;
   if (!f) return summary;
-  if (!isTextFilePart(f)) return summary;
-  const content = readUploadedFileContent(f);
-  if (content === null || !content.trim()) return summary;
-  return summary + "\n【文件内容】\n" + content;
+  if (!isTextFilePart(f) && !isDocFilePart(f)) return summary;
+  if (isTextFilePart(f)) {
+    const content = readUploadedFileContent(f);
+    if (content === null || !content.trim()) return summary;
+    return summary + "\n【文件内容】\n" + content;
+  }
+  // 1008-20：PDF/docx 读上传时提取的正文缓存；无缓存（旧文件/解析失败）保持元信息摘要
+  const docText = readDocCacheFile(f);
+  if (docText && docText.trim()) return summary + "\n【文件内容】\n" + docText;
+  return summary;
 }
 
 function getTextFromContentPart(part) {
