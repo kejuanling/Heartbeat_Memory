@@ -2588,8 +2588,11 @@ function applyWakeEventV2(body) {
     // → developer 系统层消息落时间线，前端不显示（与 [唤醒] 块同层）
     if (eventRaw) appended.push({ role: "developer", content: eventRaw });
     if (appended.length) appendMessages(evSession, appended);
-    // 静默但调过工具：工具记录回填到本次的 developer [唤醒] 块上，不丢工具痕迹
-    if (!appended.length && wakeTools.length && wake_block_id) {
+    // 静默但调过工具：工具记录回填到本次的 developer [唤醒] 块上，不丢工具痕迹。
+    // 1008-19 修复：event 判定记录（发送成功/未推送）恒有值，原 !appended.length 判断是死代码，
+    // AI 完全无正文输出（speak/diary 均空）但调过工具时工具痕迹会丢——改为按"有无 assistant 输出"判断。
+    const hasAssistantOut = appended.some(function (m) { return m && m.role === "assistant"; });
+    if (!hasAssistantOut && wakeTools.length && wake_block_id) {
       try { patchMessage(evSession, wake_block_id, { tools: wakeTools }); } catch (e) {}
     }
     console.log(`[wake-event] v2 落库 (session ${evSession || "default"}, speak=${speakRaw ? 1 : 0}, diary=${diaryRaw ? 1 : 0}, push=${pushMeta ? 1 : 0}, event=${eventRaw ? 1 : 0}, tools=${wakeTools.length})`);
