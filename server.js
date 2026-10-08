@@ -1883,9 +1883,24 @@ async function snapshotStaleOf(sessionId) {
     } catch (e) {}
     try {
       const cur = (typeof resolveSessionSystemPrompt === "function") ? (resolveSessionSystemPrompt(sessionId) || "") : "";
-      if (String(snap.system || "") !== cur) reasons.push("system");
+      // 1008-13 修复：快照 system 是 {role,content} 对象，String 化恒为 "[object Object]" → 恒红误报；改为比 content
+      if (String((snap.system && snap.system.content) || "") !== cur) reasons.push("system");
     } catch (e) {}
-    return { stale: reasons.length > 0, reasons: reasons.slice(0, 4) };
+    try {
+      // 1008-13 新增：系统注入块（人设/记忆/日记等固定块）变化检测——快照冻结 v2_blocks vs 当前注入块指纹
+      const injF = (sv2 && sv2.injFile) ? sv2.injFile(__dirname) : path.join(__dirname, "data", "session_inject_snapshots.json");
+      if (fs.existsSync(injF)) {
+        const inj = JSON.parse(fs.readFileSync(injF, "utf-8"));
+        const curBlocks = (inj && inj.sessions && inj.sessions[sessionId] && Array.isArray(inj.sessions[sessionId].fixed_blocks) && inj.sessions[sessionId].fixed_blocks.length)
+          ? inj.sessions[sessionId].fixed_blocks : null;
+        const snapBlocks = (Array.isArray(snap.v2_blocks) && snap.v2_blocks.length) ? snap.v2_blocks : null;
+        if (curBlocks && snapBlocks) {
+          const fpOf = function (blocks) { return blocks.map(function (b) { return (b && b.content) ? String(b.content) : ""; }).join("\u0000"); };
+          if (fpOf(curBlocks) !== fpOf(snapBlocks)) reasons.push("blocks");
+        }
+      }
+    } catch (e) {}
+    return { stale: reasons.length > 0, reasons: reasons.slice(0, 6) };
   } catch (e) {
     return { stale: false, reasons: [] };
   }

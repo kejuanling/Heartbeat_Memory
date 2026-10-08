@@ -2873,7 +2873,7 @@ function showBanner(opts){
 function bannerConfirm(text,opts){
   const o=opts||{};
   return new Promise(function(res){
-    showBanner({ type:"confirm", title:o.title||"确认操作", text:text, okText:o.okText||"确定", cancelText:o.cancelText||"取消", danger:o.danger, onOk:function(){res(true);}, onCancel:function(){res(false);} });
+    showBanner({ type:"confirm", title:o.title||"确认操作", text:text, reasons:o.reasons, okText:o.okText||"确定", cancelText:o.cancelText||"取消", danger:o.danger, onOk:function(){res(true);}, onCancel:function(){res(false);} });
   });
 }
 function bannerAlert(text,opts){
@@ -2888,7 +2888,7 @@ function bannerPrompt(text,defaultValue,opts){
 }
 // 重建快照红点横幅：说明过期原因 + 立即重建（免二次确认）
 function showSnapStaleBanner(sid,reasons){
-  const map={ tools:"工具清单有变化（如新增/修改工具描述）", system:"系统提示词有变化（如人设/备份调整）", edited:"消息被编辑、压缩或状态摘要更新", format:"快照为旧格式，重建可升级到新结构" };
+  const map={ tools:"工具清单有变化（如新增/修改工具描述）", system:"系统提示词有变化（如人设/备份调整）", edited:"消息被编辑、压缩或状态摘要更新", format:"快照为旧格式，重建可升级到新结构", blocks:"系统注入块有变化（人设/记忆/日记已更新）" };
   const rs=(reasons||[]).map(function(r){ return map[r]||("前缀状态变化（"+r+"）"); });
   showBanner({
     type:"snapstale", title:"该会话快照已过期",
@@ -7766,6 +7766,16 @@ function openSessMenu(sid, anchorEl, inArchive){
     +'<button class="sess-menu-item" data-op="provider">模型</button>'
     +'<button class="sess-menu-item" data-op="export">导出</button>'
     +'<button class="sess-menu-item danger" data-op="del">归档</button>';
+  // 1008-13 修复：红点 listener 独立绑定（此前挂在按钮 click 内部，首次点击冒泡到按钮直接弹重建确认，红点"点不到"）
+  const _dotBind=el.querySelector(".snap-dot");
+  if(_dotBind){
+    _dotBind.addEventListener("click",function(ev){
+      ev.stopPropagation();
+      closeSessMenu();
+      const _rr2=(_ssItemNow&&Array.isArray(_ssItemNow.snap_stale_reasons))?_ssItemNow.snap_stale_reasons:[];
+      showSnapStaleBanner(sid,_rr2);
+    });
+  }
   Array.prototype.forEach.call(el.querySelectorAll(".sess-menu-item"),function(btn){
     btn.addEventListener("click",function(e){
       e.stopPropagation();
@@ -7777,18 +7787,6 @@ function openSessMenu(sid, anchorEl, inArchive){
       else if(op==="persona")openSessionPersona(sid);
       else if(op==="cross")openSessionCrossInject(sid);
       else if(op==="snaprebuild")snapRebuildSession(sid);
-      // 1008-10：红点点击 → 横幅（过期原因 + 立即重建）
-      if(op==="snaprebuild"){
-        const _dot=btn.querySelector(".snap-dot");
-        if(_dot){
-          _dot.addEventListener("click",function(ev){
-            ev.stopPropagation();
-            closeSessMenu();
-            const _rr=(_ssItemNow&&Array.isArray(_ssItemNow.snap_stale_reasons))?_ssItemNow.snap_stale_reasons:[];
-            showSnapStaleBanner(sid,_rr);
-          });
-        }
-      }
       else if(op==="provider")openSessionProvider(sid);
       else if(op==="lock")toggleWakeLockSession(sid);
       else if(op==="del")archiveSession(sid);
@@ -8298,7 +8296,17 @@ function createSessionWithPrompt(backupId, providerId, modelName){
 // 删除会话：调用后端 DELETE /v1/sessions/:id 真正删除独立时间线文件
 // 重建会话注入前缀快照（1002-12）：清除快照，下一轮请求按当前人设/记忆/日记重新生成
 async function snapRebuildSession(sid, skipConfirm){
-  if(!skipConfirm && !(await bannerConfirm('清除该会话的注入前缀快照？下一轮请求将用当前人设/记忆/日记重新生成。')))return;
+  let _rr=[];
+  if(!skipConfirm){
+    const _lst=(SessionStore.getSessionList()||[]);
+    const _it=_lst.find(function(x){return x.id===sid;});
+    if(_it&&Array.isArray(_it.snap_stale_reasons)) _rr=_it.snap_stale_reasons.slice(0,6);
+    if(_rr.length){
+      const map={ tools:"工具清单有变化（如新增/修改工具描述）", system:"系统提示词有变化（如人设/备份调整）", edited:"消息被编辑、压缩或状态摘要更新", format:"快照为旧格式，重建可升级到新结构", blocks:"系统注入块有变化（人设/记忆/日记已更新）" };
+      _rr=_rr.map(function(r){ return map[r]||("前缀状态变化（"+r+"）"); });
+    }
+  }
+  if(!skipConfirm && !(await bannerConfirm('清除该会话的注入前缀快照？下一轮请求将用当前人设/记忆/日记重新生成。',{reasons:_rr.length?_rr:undefined})))return;
   fetch('/v1/sessions/'+encodeURIComponent(sid)+'/snapshot/rebuild',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+api_key,'X-CSRF-Token':getCookie('admin_csrf')},credentials:'include',body:'{}'})
     .then(function(r){return r.json().catch(function(){return {};})})
     .then(function(d){
