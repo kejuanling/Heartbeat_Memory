@@ -246,7 +246,8 @@ function createAdmission(opts = {}) {
     let judgeMeta = null; // 1004-04：{worth, worth_reason, volatility, volatility_reason, similar[]}
     // 1004-04：judge 退化为「只提供信息的人」——无条件跑、只打标、不做任何自动决策。
     // 有相似：逐条判关系（有上限，几条就调几次）；无相似：也跑一次只拿 worth/volatility。
-    const judgeApplies = (formal || isManualReviewGate) && validation.allowed && judgeMode !== "off";
+    // 1008-13：老数据重跑（backfill）产出的记忆一律不经门卫模型——自带 kind/triggers/vibe/worth，直接进待审
+    const judgeApplies = (formal || isManualReviewGate) && validation.allowed && judgeMode !== "off" && !(b.skip_judge === true);
     const similarList = [];   // 待审页展示用：[{id,text,kind,score,relation,relation_reason}]
     if (judgeApplies) {
       let hits = [];
