@@ -3517,12 +3517,25 @@ function bindVoiceMsg(el, text){
   });
   el.addEventListener("contextmenu", function(ev){ ev.preventDefault(); });
 }
+// 1008-21c：纯 markdown 分隔线段（---/***/___）不独立成气泡——空行拆分把它们切成孤立段，
+// 渲染成不可见 hr 留下空气泡。统一并入下一段开头（与流式 hrBuffer 同口径），段内 markdown 正常渲染。
+const HR_LINE_RE=/^[-*_]{3,}\s*$/;
+function mergeHrSegments(ps){
+  const out=[];let hrBuf="";
+  for(let i=0;i<ps.length;i++){
+    const p=ps[i];
+    if(HR_LINE_RE.test(p)){hrBuf=(hrBuf?hrBuf+"\n\n":"")+p;continue;}
+    out.push(hrBuf?hrBuf+"\n\n"+p:p);hrBuf="";
+  }
+  if(hrBuf)out.push(hrBuf);
+  return out;
+}
 function splitBubbleText(text){
   const s=String(text||"").replace(/\r\n/g,"\n");
   const delim=String(cfg&&cfg.bubble_delim||"").trim();
-  if(!delim) return s.split(/\n\s*\n+/).map(function(p){return p.trim();}).filter(Boolean);
+  if(!delim) return mergeHrSegments(s.split(/\n\s*\n+/).map(function(p){return p.trim();}).filter(Boolean));
   const esc=delim.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
-  return s.split(new RegExp("\\n\\s*"+esc+"\\s*\n")).map(function(p){return p.trim();}).filter(Boolean);
+  return mergeHrSegments(s.split(new RegExp("\\n\\s*"+esc+"\\s*\n")).map(function(p){return p.trim();}).filter(Boolean));
 }
 function renderAiContent(msgEl, bubble, content, reasoning){   // 2026-09-24 P2-8：tools/segments 参数随死分支删除（两调用点恒传 []/null）
   // 2026-09-25 ④：数组型 content 先取文本部分——否则下面的 stripInnerTags(String(content)) 会把它归一成
@@ -4210,7 +4223,7 @@ function segGapFor(t){
 function segSplitText(text){   // 与 makeMsgEl 相同的拆段逻辑（先剥标签再按分隔符拆）
   const c=(stripCurrentTime(stripInnerTags(text)).clean)||"";
   const de=(cfg.bubble_delim||"").replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
-  let ps=c.split(new RegExp("\\n\\s*"+de+"\\s*\\n")).map(function(p){return p.trim();}).filter(function(p){return p;});
+  let ps=mergeHrSegments(c.split(new RegExp("\\n\\s*"+de+"\\s*\\n")).map(function(p){return p.trim();}).filter(function(p){return p;}));
   if(!ps.length)ps=[""];
   return ps;
 }
@@ -4254,10 +4267,14 @@ function makeSegPlayer(srcMsg){
   // 两级分段：tool event 负责切区间；区间内部的空行负责切 bubble。
   let cursor=0, playedSegments=[];
   function cleanFull(full){ return (stripCurrentTime(stripInnerTags(full)).clean)||""; }
+  let hrBuf="";
   function emitText(text){
     const t=String(text==null?"":text);
-    if(!t.trim())return;
-    const out=t;
+    const _t=t.trim();
+    if(!_t)return;
+    // 1008-21c：纯分隔线段不独立成气泡，暂存并入下一段开头（与 mergeHrSegments 同口径），避免空气泡
+    if(HR_LINE_RE.test(_t)){ hrBuf=(hrBuf?hrBuf+"\n\n":"")+t; return; }
+    const out=hrBuf?hrBuf+"\n\n"+t:t; hrBuf="";
     playedSegments.push(out);
     if(_streamActive){
       if(chatEl && (chatEl.dataset.layout==="claude"||chatEl.dataset.layout==="crt")){ _streamPushText(out,srcMsg||null); }
