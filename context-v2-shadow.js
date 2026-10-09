@@ -150,7 +150,7 @@ function readDiaryEntriesForShadow(baseDir) {
   const tz = resolveTimeZone();
   return diaryStore.listEntries(baseDir).map(e => {
     const p = getDatePartsInTimeZone(new Date(e.created_at), tz);
-    return { id: e.id, date: `${p.year}-${p.month}-${p.day}`, content: e.content, hidden: e.hidden, session: e.session };
+    return { id: e.id, date: `${p.year}-${p.month}-${p.day}`, content: e.content, hidden: e.hidden, session: e.session, pin: e.pin === true };
   });
 }
 

@@ -85,6 +85,9 @@ h1{
 .diary-hidden-tag{font-size:0.6rem;color:#c08080;border:1px solid rgba(192,128,128,0.4);border-radius:8px;padding:0.05rem 0.5rem;letter-spacing:1px;flex:none}
 .diary-hide-btn{background:none;border:1px solid rgba(181,131,122,0.35);border-radius:10px;color:#b5837a;font-family:inherit;font-size:0.65rem;letter-spacing:1px;padding:0.15rem 0.6rem;cursor:pointer;flex:none}
 .diary-hide-btn:hover{background:rgba(240,196,192,0.25)}
+.diary-pin-tag{font-size:0.6rem;color:#8a756a;border:1px solid rgba(138,117,106,0.4);border-radius:8px;padding:0.05rem 0.5rem;letter-spacing:1px;flex:none}
+.diary-pin-btn{background:none;border:1px solid rgba(138,117,106,0.35);border-radius:10px;color:#8a756a;font-family:inherit;font-size:0.65rem;letter-spacing:1px;padding:0.15rem 0.6rem;cursor:pointer;flex:none}
+.diary-pin-btn:hover{background:rgba(220,205,195,0.3)}
 .diary-edit-btn{background:none;border:1px solid rgba(181,131,122,0.35);border-radius:10px;color:#b5837a;font-family:inherit;font-size:0.65rem;letter-spacing:1px;padding:0.15rem 0.6rem;cursor:pointer;flex:none}
 .diary-edit-btn:hover{background:rgba(240,196,192,0.25)}
 .diary-hist-btn{background:none;border:1px solid rgba(181,131,122,0.35);border-radius:10px;color:#b5837a;font-family:inherit;font-size:0.65rem;letter-spacing:1px;padding:0.15rem 0.6rem;cursor:pointer;flex:none}
@@ -189,7 +192,7 @@ h1{
       body=raw.slice(m[0].length).replace(/^\n+/,'').replace(/\s+$/,'');
     } else { date=''; time=''; body=raw.replace(/^\n+/,'').replace(/\s+$/,''); }
     return { id:e.id, date:date, time:normTime(time),
-      src:e.session?('窗口 '+e.session):'', text:body, hidden:!!e.hidden, vc:e.vc||0 };
+      src:e.session?('窗口 '+e.session):'', text:body, hidden:!!e.hidden, pin:!!e.pin, vc:e.vc||0 };
   }
 
   // 单张卡 HTML
@@ -198,10 +201,12 @@ h1{
       +'<div class="day-head"><span class="day-time">#'+esc(d.id)+(d.time?' · '+esc(d.time):'')+'</span>'
       +(d.src?'<span class="day-src">'+esc(d.src)+'</span>':'')
       +'<span class="diary-hidden-tag"'+(d.hidden?'':' style="display:none"')+'>已隐藏</span>'
+      +'<span class="diary-pin-tag"'+(d.pin?'':' style="display:none"')+'>置顶</span>'
       +'<span class="day-ops" style="margin-left:auto;display:inline-flex;gap:0.35rem;flex:none">'
       +'<button class="diary-edit-btn" data-id="'+esc(d.id)+'">编辑</button>'
       +(d.vc?'<button class="diary-hist-btn" data-id="'+esc(d.id)+'">历史'+(d.vc>1?'·'+d.vc:'')+'</button>':'')
       +'<button class="diary-hide-btn" data-id="'+esc(d.id)+'" data-hidden="'+(d.hidden?'1':'0')+'">'+(d.hidden?'显示':'隐藏')+'</button>'
+      +'<button class="diary-pin-btn" data-id="'+esc(d.id)+'" data-pin="'+(d.pin?'1':'0')+'">'+(d.pin?'取消置顶':'置顶')+'</button>'
       +'</span>'
       +'</div>'
       +'<div class="day-body" id="'+bodyId+'">'+renderParas(needClip?clipText(d.text):d.text,kw)+'</div>'
@@ -216,6 +221,15 @@ h1{
       card.classList.toggle('diary-is-hidden',toHidden);
       var tag=card.querySelector('.diary-hidden-tag'); if(tag) tag.style.display=toHidden?'':'none';
       var hb=card.querySelector('.diary-hide-btn'); if(hb){ hb.textContent=toHidden?'显示':'隐藏'; hb.setAttribute('data-hidden',toHidden?'1':'0'); hb.disabled=false; }
+    });
+  }
+  // 就地更新置顶状态
+  function applyPin(id, toPin){
+    Array.prototype.forEach.call(document.querySelectorAll('#list .day-card[data-id]'),function(card){
+      if(card.getAttribute('data-id')!==String(id)) return;
+      var tag=card.querySelector('.diary-pin-tag'); if(tag) tag.style.display=toPin?'':'none';
+      var pb=card.querySelector('.diary-pin-btn');
+      if(pb){ pb.textContent=toPin?'取消置顶':'置顶'; pb.setAttribute('data-pin',toPin?'1':'0'); pb.disabled=false; }
     });
   }
   // 保存后就地重渲某张卡
@@ -298,6 +312,23 @@ h1{
         api('/xie-diary/api/hide',{id:id,hidden:toHidden})
           .then(function(j){
             if(j&&j.success){ applyHidden(id,toHidden); }
+            else { alert('操作失败：'+((j&&j.error)||'未知错误')); btn.disabled=false; }
+          })
+          .catch(function(e){ if(e.message!=='需要访问口令') alert('操作失败：'+e.message); btn.disabled=false; });
+      });
+    });
+    // 置顶/取消置顶
+    Array.prototype.forEach.call(root.querySelectorAll('.diary-pin-btn'),function(btn){
+      btn.addEventListener('click',function(){
+        var id=btn.getAttribute('data-id');
+        var d=null;
+        Array.prototype.forEach.call(writings,function(o){ if(!d && String(o.id)===String(id)) d=o; });
+        if(!d) return;
+        var wantPin=btn.getAttribute('data-pin')!=='1';
+        btn.disabled=true;
+        api('/xie-diary/api/pin',{id:id,pin:wantPin})
+          .then(function(j){
+            if(j&&j.success){ d.pin=wantPin; applyPin(id,wantPin); }
             else { alert('操作失败：'+((j&&j.error)||'未知错误')); btn.disabled=false; }
           })
           .catch(function(e){ if(e.message!=='需要访问口令') alert('操作失败：'+e.message); btn.disabled=false; });

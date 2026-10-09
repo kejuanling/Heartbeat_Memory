@@ -230,23 +230,35 @@ function buildUnderstanding(input, cfg) {
 // 质量优先（0918 拍板）：日记是对抗压缩块劣化的原话保真通道，全量注入。
 function buildContinuity(input, cfg) {
   // 2026-10-03：日记改按 id（创建顺序）排序，取 id 最大的 n 篇（原按 date 字符串）
+  // 1010-13：置顶日记（pin=true）固定注入、占份数，排最前（按 id 升序=时间正序）；
+  // 其余名额从最近篇目补满；整体保持时间正序（旧在上、新在下）。
   const diary = (Array.isArray(input.diaryEntries) ? input.diaryEntries : [])
     .slice()
     .sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
   const n = Math.max(1, Number(cfg.diaryCount) || 3);
-  const recent = diary.slice(-n);
+  const pinned = diary.filter(d => d.pin === true);
+  const rest = diary.filter(d => d.pin !== true);
+  const recent = rest.slice(-Math.max(0, n - pinned.length));
   const budget = cfg.budgets.conversation_continuity;
   let used = estimateTokens(HEADERS.conversation_continuity);
-  const lines = [];
+  const pinnedLines = [];
+  for (const d of pinned) { // 置顶在前，按时间正序
+    const line = strSafe(d.content);
+    const cost = estimateTokens(line);
+    if (used + cost > budget) continue;
+    pinnedLines.push(line);
+    used += cost;
+  }
+  const restLines = [];
   for (let i = recent.length - 1; i >= 0; i--) { // 从最新往最旧装，装不下跳过更旧的
     const d = recent[i];
     const line = strSafe(d.content);
     const cost = estimateTokens(line);
     if (used + cost > budget) continue;
-    lines.unshift(line); // 保持时间正序呈现
+    restLines.unshift(line); // 保持时间正序呈现
     used += cost;
   }
-  return { lines, fixedIds: [] };
+  return { lines: pinnedLines.concat(restLines), fixedIds: [] };
 }
 
 // [6] Possibly Relevant Memories：V2 event 检索（1005-17 重写）。

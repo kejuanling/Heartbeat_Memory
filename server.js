@@ -6445,7 +6445,7 @@ app.get("/xie-diary/api/list", { preHandler: xieDiaryAuth }, async (req, reply) 
   try {
     // 2026-10-03：日记改 data/diary.json，按 id 点名；list 回 id/session/hidden/created_at/content/vc
     const entries = diaryStore.listEntries(__dirname).slice().sort((a, b) => b.id - a.id).map(e => ({
-      id: e.id, session: e.session, hidden: e.hidden, created_at: e.created_at,
+      id: e.id, session: e.session, hidden: e.hidden, pin: e.pin === true, created_at: e.created_at,
       content: e.content, vc: countDiaryVersions(e.id)
     }));
     reply.send({ entries });
@@ -6467,6 +6467,30 @@ app.post("/xie-diary/api/hide", { preHandler: xieDiaryAuth }, async (req, reply)
     reply.send({ success: true, id: e.id, hidden: wantHidden });
   } catch (err) {
     console.error("[xie-diary] 切换隐藏失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 小世界门户：置顶/取消置顶某篇日记（1010-13）。置顶日记在跨窗口注入（Earlier Days）固定排最前、占份数；
+// 置顶上限 = cross_inject_diary_count（管理台跨窗口注入日记条数）。与 list/hide 同级公开。
+app.post("/xie-diary/api/pin", { preHandler: xieDiaryAuth }, async (req, reply) => {
+  try {
+    const body = req.body || {};
+    const e = diaryStore.getEntry(__dirname, body.id);
+    if (!e) return reply.code(404).send({ error: "日记不存在：id=" + body.id });
+    const wantPin = body.pin === true;
+    if (wantPin) {
+      const limit = Math.max(1, Number(readCrossInjectConfig().cross_inject_diary_count) || 3);
+      const curPinned = diaryStore.listEntries(__dirname).filter(x => x.pin === true).length;
+      if (!e.pin && curPinned >= limit) {
+        return reply.code(400).send({ error: "置顶已满（最多 " + limit + " 条），先取消一条再置顶" });
+      }
+    }
+    diaryStore.updateEntry(__dirname, e.id, { pin: wantPin });
+    const after = diaryStore.listEntries(__dirname).filter(x => x.pin === true).length;
+    reply.send({ success: true, id: e.id, pin: wantPin, pinned_count: after, limit: Math.max(1, Number(readCrossInjectConfig().cross_inject_diary_count) || 3) });
+  } catch (err) {
+    console.error("[xie-diary] 切换置顶失败:", err);
     reply.code(500).send({ error: err.message });
   }
 });
