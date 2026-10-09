@@ -45,9 +45,10 @@ function getWakeMcpClients(baseDir) {
 // （HTTP 400 "invalid temperature: only 1 is allowed for this model"——0930 10:20 闹钟两次全败的根因）；
 // top_p 只接受 0.95（同日晚实证 400 "invalid top_p: only 0.95 is allowed for this model"，
 // 初版误钳 1 导致聊天侧流式每轮 400 回退非流式）；其他模型维持调用方传入值（唤醒默认 0.8/0.95）。
-function adaptSamplingForModel(model, temperature, topP) {
-  if (/kimi/i.test(String(model || ""))) return { temperature: 1, topP: 0.95 };
-  return { temperature: temperature, topP: topP };
+// 1010-14：后台温度统一不传（用模型默认），仅保留 topP 适配
+function adaptSamplingForModel(model, topP) {
+  if (/kimi/i.test(String(model || ""))) return { topP: 0.95 };
+  return { topP: topP };
 }
 
 // 2026-09-30 唤醒链路错误/警告日志统一带本地时间前缀（error.log 无时间戳，此前排障需人工对照 out.log）
@@ -72,7 +73,7 @@ async function runWakeCompletion(deps, opts) {
   const sessionId = String(opts.session_id || "").trim();
   if (!sessionId) throw new Error("session_id is required");
   const wakeBlock = String(opts.wake_block || "").trim();
-  const temperature = Number(opts.temperature) || 0.8;
+  // 1010-14：temperature 不再显式传，用模型默认
   const topP = Number(opts.top_p) || 0.95;
   const withTools = opts.with_tools !== false;
   let reasoning = "";   // 2026-09-24 P3-3：思考链透出（默认空串，直连兜底路径无思考链）
@@ -170,7 +171,7 @@ async function runWakeCompletion(deps, opts) {
     const key = (prov && prov.api_key) || deps.readEnvValue("TARGET_API_KEY");
     if (!url || !key) throw new Error("TARGET_API_URL / TARGET_API_KEY 或 AI 供应商未配置");
     // 2026-09-30 按最终模型适配采样参数（kimi → 1/1）
-    const sampling = adaptSamplingForModel(model, temperature, topP);
+    const sampling = adaptSamplingForModel(model, topP);
     const profile = (prov && prov.profile) || "default";
     const outbound = mapMessagesForProvider(profile, sanitized);
 
@@ -221,7 +222,6 @@ async function runWakeCompletion(deps, opts) {
           messages: outbound,
           serverClients: clients,
           sessionId,
-          temperature: sampling.temperature,
           top_p: sampling.topP,
           onEvent: null,
           // 2026-10-03：与对话侧同一实现——唤醒时用 diary_add 工具写的日记同样要落时间线
@@ -253,7 +253,7 @@ async function runWakeCompletion(deps, opts) {
         resp = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-          body: JSON.stringify({ model, messages: outbound, temperature: sampling.temperature, top_p: sampling.topP, stream: false }),
+          body: JSON.stringify({ model, messages: outbound, top_p: sampling.topP, stream: false }),
           signal: controller.signal
         });
         // body 读取也必须在超时窗口内（2026-09-15 修复）：此前 finally 在 fetch 返回即清定时器，
