@@ -235,7 +235,7 @@ module.exports = function registerChatRoutes(app, deps) {
       const archiveSet = new Set((typeof readSessionArchive === "function" ? readSessionArchive() : []));
       for (const f of files) {
         const sid = f.replace(/^enhanced_messages_/, '').replace(/\.json$/, '');
-        if (!sid || sid === 'default') continue;
+        if (!sid) continue;
         seen.add(sid);
         try {
           // 1008-10：快照过期检测（重建快照红点），纯只读，不触碰会话数据
@@ -279,7 +279,7 @@ module.exports = function registerChatRoutes(app, deps) {
   app.delete('/v1/sessions/:id', async (req, reply) => {
     try {
       const id = String(req.params.id || '').trim();
-      if (!id || id === 'default') return reply.code(400).send({ error: '主会话不能删除' });
+      if (!id) return reply.code(400).send({ error: '会话ID不能为空' });
       const safe = id.replace(/[^A-Za-z0-9_-]/g, '');
       if (safe !== id) return reply.code(400).send({ error: '非法会话ID' });
       const file = timelineFileFor(safe);
@@ -602,7 +602,7 @@ module.exports = function registerChatRoutes(app, deps) {
       const ids = Array.isArray(body.ids) ? body.ids.map(x => String(x || '').trim()).filter(Boolean) : [];
       if (ids.length < 2) return reply.code(400).send({ error: '至少选择两个会话' });
       for (const id of ids) {
-        if (id === 'default') return reply.code(400).send({ error: '主会话不参与合并' });
+        // 1009-06：default 主会话概念已清理，不再特殊拒绝
         if (!/^[A-Za-z0-9_-]+$/.test(id)) return reply.code(400).send({ error: '非法会话ID: ' + id });
       }
       const target = String(body.target || '').trim();
@@ -768,7 +768,7 @@ module.exports = function registerChatRoutes(app, deps) {
   app.post('/v1/sessions/:id/snapshot/rebuild', async (req, reply) => {
     try {
       const sessionId = String(req.params.id || '').trim();
-      if (!sessionId || sessionId === 'default') return reply.code(400).send({ error: '主会话不需要重建快照' });
+      if (!sessionId) return reply.code(400).send({ error: '会话ID不能为空' });
       const safe = sessionId.replace(/[^A-Za-z0-9_-]/g, '');
       if (safe !== sessionId) return reply.code(400).send({ error: '非法会话ID' });
       // 2026-10-08 方案A：重建入口接到 v2 快照系统上——此前调旧 context-snapshot.deleteSnapshot

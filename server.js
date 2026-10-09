@@ -372,8 +372,9 @@ const { safeSessionToken } = require("./lib/session-token");
 const upstreamAlert = require("./lib/upstream-alert"); // 2026-09-28 上游 402（余额不足）提醒
 upstreamAlert.setPushFn(function (opts) { return sendPushNotification(opts); });
 function timelineFileFor(sessionId) {
+  // 1009-06：default「主会话」概念已清理（早期遗留，无主/副之分）——default 不再映射主时间线，
+  // 与其他会话同一路径 enhanced_messages_<token>.json
   const token = safeSessionToken(sessionId);
-  if (token === "default") return TIMELINE_FILE;
   return "enhanced_messages_" + token + ".json";
 }
 // 批注 2026-07-17：管理页保存 .env 后要让 PM2 刷新进程环境；保留原进程名，
