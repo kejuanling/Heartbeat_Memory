@@ -102,7 +102,7 @@ function load(){
       var t=p.title||'(无标题)';
       /* 1003-20：不显示会话编号，仅无 session 的纸标记「共享」 */
       var tag=p.session?'':'<em>共享</em>';
-      return '<div class="paper" onclick="openPaper('+i+')"><div class="t">#'+esc(p.id)+' · '+esc(t)+'</div><div class="m">'+esc(p.time||'')+' '+tag+'</div></div>';
+      return '<div class="paper" onclick="openPaper('+i+')"><div class="t">#'+(i+1)+' · '+esc(t)+'</div><div class="m">'+esc(p.time||'')+' '+tag+'</div></div>';
     }).join('');
   }).catch(function(){
     document.getElementById('list').innerHTML='<div class="empty">加载失败，刷新重试</div>';

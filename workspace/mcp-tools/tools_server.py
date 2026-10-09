@@ -222,21 +222,30 @@ TOOLS["leave_paper"] = {
 # ── 翻看留过的纸（2026-09-12；2026-10-03 改内部接口）：不带参数=列表（序号+时间+标题），带 sn=看对应那张全文 ──
 def tool_view_paper(args):
     if args.get("sn") in (None, ""):
-        data = api_get_key("%s:3000/internal/paper/view" % BASE_URL)
+        try:
+            limit = int(args.get("limit") or 10)
+        except (TypeError, ValueError):
+            limit = 10
+        if limit < 1:
+            limit = 10
+        if limit > 50:
+            limit = 50
+        data = api_get_key("%s:3000/internal/paper/view?limit=%d" % (BASE_URL, limit))
         if "_error" in data:
             return {"error": data["_error"]}
         papers = data.get("papers") or []
         items = []
-        for i, p in enumerate(papers, 1):
+        for i, p in enumerate(papers[:limit], 1):
             items.append({"sn": i, "time": p.get("time"),
                           "title": p.get("title") or "(无标题)"})
         return {"papers": items, "total": data.get("total") or len(items),
-                "message": "带 sn=序号 再调一次可看对应那张的全文"}
+                "message": "带 sn=序号 再调一次可看对应那张的全文；limit 可调返回张数（默认10，最多50）"}
     try:
         sn = int(args.get("sn"))
     except Exception:
         return {"error": "sn 需为列表返回的序号数字"}
-    data = api_get_key("%s:3000/internal/paper/view" % BASE_URL)
+    # 取全文按最大列表范围定位（50 张内），保证 limit 里列出的 sn 都能取到
+    data = api_get_key("%s:3000/internal/paper/view?limit=50" % BASE_URL)
     if "_error" in data:
         return {"error": data["_error"]}
     papers = data.get("papers") or []
@@ -254,6 +263,7 @@ TOOLS["view_paper"] = {
         "type": "object",
         "properties": {
             "sn": {"type": "integer", "description": "可选：要看的第几张（列表返回的 sn）"},
+            "limit": {"type": "integer", "description": "可选：列表返回张数（默认 10，最多 50）。不带 sn 时有效"},
             "session_id": {"type": "string", "description": "内部参数：由系统自动注入当前窗口标识，无需填写"}
         }
     },

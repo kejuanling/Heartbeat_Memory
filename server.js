@@ -6323,11 +6323,15 @@ app.get("/internal/paper/view", async (req, reply) => {
       const _dp = _tu.getDatePartsInTimeZone(new Date(e.created_at), _tu.resolveTimeZone());
       return reply.send({ id: e.id, title: e.title, time: _dp.year + "-" + _dp.month + "-" + _dp.day + " " + _dp.hour + ":" + _dp.minute, content: String(e.content || "").trim() });
     }
-    const list = papers.listPapers().slice(0, 10).map(e => ({
+    // 1009-10：limit 控制列表张数（默认 10，上限 50），tools_server view_paper 透传
+    let limit = parseInt(String((req.query || {}).limit || "10"), 10);
+    if (!Number.isInteger(limit) || limit < 1) limit = 10;
+    if (limit > 50) limit = 50;
+    const list = papers.listPapers().slice(0, limit).map(e => ({
       id: e.id, title: e.title, time: e.time,
     }));
     reply.send({ papers: list, total: papers.listPapers().length,
-      message: "带 id=编号 可看对应那张全文" });
+      message: "带 id=编号 可看对应那张全文；limit 控制列表张数（默认10，最多50）" });
   } catch (err) {
     console.error("[internal/paper/view] 读留纸失败:", err);
     reply.code(500).send({ error: err.message });
