@@ -3767,6 +3767,49 @@ app.get("/admin/memory-v2/relevant-preview", { preHandler: basicAuth }, async (r
     reply.send({ items: Array.isArray(arr) ? arr : [] });
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
+// 1009-11 两块总结版本存档 CRUD（Core Identity / Long-term Understanding 的历史生成内容）
+const _SUMMARY_HIST_FILE = path.join(__dirname, "data", "memory_summary_history.json");
+function _readSummaryHistory() {
+  try { const j = JSON.parse(fs.readFileSync(_SUMMARY_HIST_FILE, "utf8")); return (j && typeof j === "object") ? j : {}; } catch (e) { return {}; }
+}
+function _writeSummaryHistory(h) {
+  try { fs.writeFileSync(_SUMMARY_HIST_FILE, JSON.stringify(h, null, 2), "utf8"); } catch (e) { console.error("[memory-summary/history] 写存档失败:", e.message); }
+}
+app.get("/admin/memory-summary/history", { preHandler: basicAuth }, async (req, reply) => {
+  const h = _readSummaryHistory();
+  reply.send({ core_identity: h.core_identity || [], understanding: h.understanding || [] });
+});
+app.post("/admin/memory-summary/history", { preHandler: basicAuth }, async (req, reply) => {
+  const b = req.body || {};
+  const key = String(b.block || "").trim();
+  if (key !== "core_identity" && key !== "understanding") return reply.code(400).send({ error: "block 需为 core_identity 或 understanding" });
+  const ver = Number(b.version);
+  if (!Number.isInteger(ver) || ver < 1) return reply.code(400).send({ error: "version 需为正整数" });
+  const text = String(b.text || "").trim();
+  if (!text) return reply.code(400).send({ error: "text 不能为空" });
+  const h = _readSummaryHistory();
+  const arr = h[key] || [];
+  const hit = arr.find(e => Number(e.version) === ver);
+  if (!hit) return reply.code(404).send({ error: "版本不存在：v" + ver });
+  hit.text = text;
+  hit.edited_at = new Date().toISOString();
+  h[key] = arr;
+  _writeSummaryHistory(h);
+  reply.send({ ok: true, block: key, version: ver, edited_at: hit.edited_at });
+});
+app.delete("/admin/memory-summary/history", { preHandler: basicAuth }, async (req, reply) => {
+  const key = String((req.query || {}).block || "").trim();
+  if (key !== "core_identity" && key !== "understanding") return reply.code(400).send({ error: "block 需为 core_identity 或 understanding" });
+  const ver = Number((req.query || {}).version);
+  if (!Number.isInteger(ver) || ver < 1) return reply.code(400).send({ error: "version 需为正整数" });
+  const h = _readSummaryHistory();
+  const arr = (h[key] || []).filter(e => Number(e.version) !== ver);
+  if (arr.length === (h[key] || []).length) return reply.code(404).send({ error: "版本不存在：v" + ver });
+  h[key] = arr;
+  _writeSummaryHistory(h);
+  reply.send({ ok: true, block: key, version: ver });
+});
+
 app.get("/admin/memory-distill/config", { preHandler: basicAuth }, async (req, reply) => {
   if (!requireDistill(reply)) return;
   try { reply.send(memoryDistill.readConfig()); }

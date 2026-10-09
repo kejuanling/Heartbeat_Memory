@@ -110,6 +110,27 @@
      </div>
    </div>
 
+   <div class="card" data-collapse-id="summary-history" data-default="collapsed">
+     <div class="card-title collapsible" onclick="toggleCard(this)"><span>两块总结版本存档</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">?</span><span class="collapse-arrow">▾</span></div>
+     <div class="hint-card">
+       <div class="hint-body" style="font-size:11px;color:var(--text3);margin-top:6px;">系统注入的两大块总结（Core Identity 自我准则 / Long-term Understanding 长期理解）每次生成的新内容都会自动存一版，每块保留最近 10 版。可展开看全文、编辑文本、删除某一版。</div>
+     </div>
+     <div class="card-body">
+       <style>
+         #summary-history-box .sh-block{border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:#fff;margin-bottom:8px}
+         #summary-history-box .sh-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;font-weight:600;color:var(--text)}
+         #summary-history-box .sh-head .sh-meta{font-weight:400;color:var(--text3);font-size:11px}
+         #summary-history-box .sh-head .sh-sp{flex:1}
+         #summary-history-box .sh-act{font-size:10px;padding:2px 8px;border-radius:6px;border:1px solid rgba(120,120,120,.35);background:none;color:var(--text2);cursor:pointer}
+         #summary-history-box .sh-act:hover{color:var(--accent);border-color:var(--accent)}
+         #summary-history-box .sh-body{margin-top:6px;font-size:11px;color:var(--text2);line-height:1.65;white-space:pre-wrap;word-break:break-word}
+         #summary-history-box .sh-toggle{cursor:pointer;font-size:11px;color:var(--accent);padding-top:4px}
+         #summary-history-box .sh-sec{font-size:11px;font-weight:600;color:var(--text2);letter-spacing:1px;margin:4px 0 6px}
+       </style>
+       <div id="summary-history-box" style="display:flex;flex-direction:column;gap:10px;"></div>
+     </div>
+   </div>
+
    <div class="card" data-collapse-id="distill-config" data-default="collapsed">
      <div class="card-title collapsible" onclick="toggleCard(this)"><span>记忆蒸馏 · 定时设置</span><span class="hint-i" onclick="event.stopPropagation();showHintCard(this)">?</span><span class="collapse-arrow">▾</span></div>
      <div class="hint-card">

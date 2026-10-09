@@ -2109,7 +2109,7 @@ function ccArmAllGapAutoLoad(){
   if(name==='config'){loadToolsConfig(); loadCrossInjectConfig();
     // 1003：记忆蒸馏 / 两块总结 / 老数据重跑三张设置卡已搬到本页（跨窗口注入卡片下方）。
     // 三个 load 原本挂在 initMemPoolView（只跑一次且必须先进记忆页才触发），搬走后若从配置页直接进来会加载不到 → 输入框全空。
-    loadDistillConfig(); loadSummaryConfig(); loadBackfillConfig(); loadRelevantConfig(); loadRelevantPreview();
+    loadDistillConfig(); loadSummaryConfig(); loadBackfillConfig(); loadRelevantConfig(); loadRelevantPreview(); loadSummaryHistory();
     // 2026-10-01 修复：压缩参数配置卡在配置 tab，但值依赖压缩预览先加载——原加载链只在压缩 tab/换会话/压缩操作后触发，
     // 直接进配置 tab（含刷新后恢复停留在配置 tab）时 preview 从未拉取，十二个输入框静默全空
     if(!AppState.compactionPlan || !AppState.ccPreviewLoadedAt || Date.now()-AppState.ccPreviewLoadedAt>15000){ loadCompactionPreview(); } else { renderCompactionConfig(); }
@@ -2656,6 +2656,78 @@ function ccArmAllGapAutoLoad(){
       loadDistillConfig();
     }catch(e){ if(msg) msg.textContent='跑失败: '+e.message; toast('跑失败: '+e.message); }
     finally{ if(btn){ btn.disabled=false; btn.textContent='立即跑一次'; } }
+
+  // ============ 两块总结版本存档（1009-11） ============
+  const SUMMARY_BLOCK_LABEL = { core_identity: "Core Identity（自我准则）", understanding: "Long-term Understanding（长期理解）" };
+  function loadSummaryHistory(){
+    const box=document.getElementById('summary-history-box');
+    if(!box) return;
+    fetch(ADMIN_API+'/memory-summary/history').then(function(r){return r.json()}).then(function(d){
+      if(d.error){ box.innerHTML='<div style="font-size:11px;color:var(--text3);">读取失败：'+escapeHtml(d.error)+'</div>'; return; }
+      let h='';
+      ['core_identity','understanding'].forEach(function(key){
+        const arr=d[key]||[];
+        h+='<div class="sh-sec">'+escapeHtml(SUMMARY_BLOCK_LABEL[key]||key)+' · '+arr.length+' 版</div>';
+        if(!arr.length){ h+='<div style="font-size:11px;color:var(--text3);padding:4px 2px;">还没有版本存档——两大块总结每次生成新内容后会自动存一版。</div>'; return; }
+        arr.slice().reverse().forEach(function(v){
+          const t=String(v.text||'');
+          const edited=v.edited_at?(' · <span style="color:var(--accent)">已编辑 '+escapeHtml(String(v.edited_at).slice(0,16).replace('T',' '))+'</span>'):'';
+          h+='<div class="sh-block"><div class="sh-head"><span>v'+v.version+'</span>'+
+            '<span class="sh-meta">'+escapeHtml(String(v.updated_at||'').slice(0,16).replace('T',' '))+' · '+(v.mode==='incremental'?'增量':'全量')+'</span>'+
+            '<span class="sh-sp"></span>'+
+            '<button class="sh-act" data-shact="edit" data-block="'+key+'" data-ver="'+v.version+'">编辑</button>'+
+            '<button class="sh-act" data-shact="del" data-block="'+key+'" data-ver="'+v.version+'">删除</button></div>'+
+            '<div class="sh-body"><div class="sh-fade">'+escapeHtml(t.slice(0,220))+'</div>'+
+            '<div class="sh-full" style="display:none">'+escapeHtml(t)+'</div>'+
+            '<div class="sh-toggle">展开全文 ▾</div></div></div>'+edited;
+        });
+      });
+      box.innerHTML=h;
+      box.querySelectorAll('.sh-toggle').forEach(function(t){
+        t.addEventListener('click', function(){
+          const b=t.closest('.sh-block');
+          const full=b?b.querySelector('.sh-full'):null;
+          const fade=b?b.querySelector('.sh-fade'):null;
+          if(!full) return;
+          const vis=full.style.display!=='none';
+          full.style.display=vis?'none':'block';
+          if(fade) fade.style.display=vis?'block':'none';
+          t.textContent=vis?'展开全文 ▾':'收起全文 ▴';
+        });
+      });
+      box.querySelectorAll('[data-shact]').forEach(function(b){
+        b.addEventListener('click', function(){ summaryHistoryAct(b); });
+      });
+    }).catch(function(e){
+      box.innerHTML='<div style="font-size:11px;color:var(--text3);">读取失败：'+escapeHtml(e.message)+'</div>';
+    });
+  }
+  async function summaryHistoryAct(btn){
+    const act=btn.dataset.shact, block=btn.dataset.block, ver=btn.dataset.ver;
+    if(act==='del'){
+      if(!confirm('删除存档 v'+ver+'（'+escapeHtml(SUMMARY_BLOCK_LABEL[block]||block)+'）？只删存档，不影响当前缓存与注入。')) return;
+      try{
+        const r=await apiRequest('DELETE', ADMIN_API+'/memory-summary/history?block='+encodeURIComponent(block)+'&version='+ver, null, { busy: btn });
+        if(!r.ok){ if(r.error) toast('删除失败:'+r.error); return; }
+        toast('已删除 v'+ver); loadSummaryHistory();
+      }catch(e){ toast('删除失败:'+e.message); }
+      return;
+    }
+    if(act==='edit'){
+      const cur=btn.closest('.sh-block');
+      const full=cur?cur.querySelector('.sh-full'):null;
+      const fade=cur?cur.querySelector('.sh-fade'):null;
+      const oldText=(full&&full.style.display!=='none')?full.textContent:(fade?fade.textContent:'');
+      const nt=prompt('编辑 v'+ver+' 的文本：', oldText);
+      if(nt===null) return;
+      if(!String(nt).trim()){ toast('文本不能为空'); return; }
+      try{
+        const r=await apiRequest('POST', ADMIN_API+'/memory-summary/history', {block:block,version:Number(ver),text:nt}, { busy: btn });
+        if(!r.ok){ if(r.error) toast('编辑失败:'+r.error); return; }
+        toast('已保存 v'+ver); loadSummaryHistory();
+      }catch(e){ toast('编辑失败:'+e.message); }
+    }
+  }
 
   // ============ 相关记忆注入配置 + 注入预览（1005-17） ============
   async function loadRelevantConfig(){
