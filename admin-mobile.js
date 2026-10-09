@@ -2331,6 +2331,7 @@ function ccArmAllGapAutoLoad(){
    if(id){try{localStorage.setItem('card-collapse-'+id,nowCollapsed?'open':'collapsed')}catch(e){}}
    if(header && header.setAttribute) header.setAttribute('aria-expanded', nowCollapsed ? 'true' : 'false');
    // 展开时拉取最新（折叠→展开瞬间 nowCollapsed=true）
+   if(id==='summary-history' && nowCollapsed){ try{ loadSummaryHistory(); }catch(_){} }
  }
  // 全局H2：问号图标说明弹窗（收集卡片内 .hint-body）
  function showHintCard(el){
@@ -2662,7 +2663,13 @@ function ccArmAllGapAutoLoad(){
   function loadSummaryHistory(){
     const box=document.getElementById('summary-history-box');
     if(!box) return;
-    fetch(ADMIN_API+'/memory-summary/history').then(function(r){return r.json()}).then(function(d){
+    fetch(ADMIN_API+'/memory-summary/history').then(function(r){
+      if(!r.ok){
+        if(r.status===401||r.status===302) throw new Error('登录可能已过期，请刷新页面后重试（HTTP '+r.status+'）');
+        throw new Error('HTTP '+r.status);
+      }
+      return r.json();
+    }).then(function(d){
       if(d.error){ box.innerHTML='<div style="font-size:11px;color:var(--text3);">读取失败：'+escapeHtml(d.error)+'</div>'; return; }
       let h='';
       ['core_identity','understanding'].forEach(function(key){
