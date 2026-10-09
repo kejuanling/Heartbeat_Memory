@@ -2657,6 +2657,7 @@ function ccArmAllGapAutoLoad(){
       loadDistillConfig();
     }catch(e){ if(msg) msg.textContent='跑失败: '+e.message; toast('跑失败: '+e.message); }
     finally{ if(btn){ btn.disabled=false; btn.textContent='立即跑一次'; } }
+  }
 
   // ============ 两块总结版本存档（1009-11） ============
   const SUMMARY_BLOCK_LABEL = { core_identity: "Core Identity（自我准则）", understanding: "Long-term Understanding（长期理解）" };
@@ -2802,7 +2803,6 @@ function ccArmAllGapAutoLoad(){
       });
       el.innerHTML=h;
     }catch(e){ el.innerHTML='<div style="font-size:11px;color:#c0392b;padding:4px 2px;">读取失败: '+escapeHtml(e.message)+'</div>'; }
-  }
   }
 
   // ============ 两块总结配置（1002 记忆改造 §8 6.5：Core Identity / Long-term Understanding 缓存 + 每晚定时检查） ============
