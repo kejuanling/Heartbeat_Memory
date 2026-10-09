@@ -228,9 +228,8 @@ def tool_view_paper(args):
         papers = data.get("papers") or []
         items = []
         for i, p in enumerate(papers, 1):
-            items.append({"sn": i, "id": p.get("id"), "time": p.get("time"),
-                          "title": p.get("title") or "(无标题)",
-                          "session": p.get("session") or "(共享)"})
+            items.append({"sn": i, "time": p.get("time"),
+                          "title": p.get("title") or "(无标题)"})
         return {"papers": items, "total": data.get("total") or len(items),
                 "message": "带 sn=序号 再调一次可看对应那张的全文"}
     try:
