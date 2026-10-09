@@ -6303,7 +6303,7 @@ app.post("/internal/paper", async (req, reply) => {
       content: body.content, title: body.title, sessionId: body.session_id,
     });
     if (!r || !r.ok) return reply.code(400).send({ error: (r && r.error) || "留纸失败" });
-    reply.send({ success: true, id: r.id, title: r.title, chars: r.chars, time: r.time, session: r.session });
+    reply.send({ success: true, id: r.id, title: r.title, chars: r.chars, time: r.time });
   } catch (err) {
     console.error("[internal/paper] 留纸失败:", err);
     reply.code(500).send({ error: err.message });

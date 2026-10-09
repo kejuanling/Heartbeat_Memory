@@ -26,29 +26,27 @@ function stamp(date) {
 }
 
 // 落一张纸（savePaper）：内容截 3 万字上限；首行标题 +（日期 时间）头。
-// 2026-10-03：改存 data/papers.json（lib/paper-store），返回 {ok, id, title, chars, time, session}
+// 1009-10：留纸全局共享，不再存 session 字段、内容头不注入会话编号
 function savePaper(opts) {
   const clean = String((opts && opts.content) || "").trim();
   if (!clean) return { ok: false, error: "内容为空" };
   const body = clean.slice(0, MAX_PAPER_CHARS);
-  const token = sessionToken(opts && opts.sessionId) || SHARED_TOKEN;
   const title = String((opts && opts.title) || "").trim().slice(0, 100);
   try {
     const s = stamp(new Date());
-    const header = (title ? "# " + title + "\n\n" : "") + "（" + s.date + " " + s.hm + (token === SHARED_TOKEN ? "" : " · " + token) + "）\n\n";
+    const header = (title ? "# " + title + "\n\n" : "") + "（" + s.date + " " + s.hm + "）\n\n";
     const id = paperStore.addEntry(__dirname, {
-      session: token === SHARED_TOKEN ? null : token,
       title,
       created_at: new Date().toISOString(),
       content: header + body + "\n",
     });
-    return { ok: true, id, title, chars: body.length, time: s.date + " " + s.hm, session: token === SHARED_TOKEN ? null : token };
+    return { ok: true, id, title, chars: body.length, time: s.date + " " + s.hm };
   } catch (e) {
     return { ok: false, error: e.message || String(e) };
   }
 }
 
-// 全量列表（门户/管理台用）：data/papers.json 全部，id 倒序（最新在前），每张带 id/session/title/time/摘要
+// 全量列表（门户/管理台用）：data/papers.json 全部，id 倒序（最新在前），每张带 id/title/time/摘要
 function listPapers(limit) {
   const tz = timeZone();
   const out = paperStore.listEntries(__dirname)
@@ -57,7 +55,7 @@ function listPapers(limit) {
     .map(e => {
       const p = getDatePartsInTimeZone(new Date(e.created_at), tz);
       return {
-        id: e.id, session: e.session, title: e.title || "",
+        id: e.id, title: e.title || "",
         time: p.year + "-" + p.month + "-" + p.day + " " + p.hour + ":" + p.minute,
         created_at: e.created_at,
         content: String(e.content || "").slice(0, 24000),
