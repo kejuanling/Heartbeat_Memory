@@ -785,6 +785,33 @@ module.exports = function registerChatRoutes(app, deps) {
     }
   });
 
+  // 一键删除全部会话注入前缀快照（1009-04）：清空 v2 快照目录全部文件（含失效标记）+ v1 旧快照文件，
+  // 之后各会话下一轮请求按当前人设/记忆/日记懒生成全新快照
+  app.post('/v1/snapshots/clear-all', async (req, reply) => {
+    try {
+      const fs2 = require('fs');
+      const path2 = require('path');
+      const v2dir = path2.join(baseDir, "data", "session_ctx_snapshots_v2");
+      let deleted = 0;
+      if (fs2.existsSync(v2dir)) {
+        for (const name of fs2.readdirSync(v2dir)) {
+          if (name.endsWith('.json')) {
+            try { fs2.unlinkSync(path2.join(v2dir, name)); deleted++; } catch (e) {}
+          }
+        }
+      }
+      const v1f = path2.join(baseDir, "data", "session_inject_snapshots.json");
+      if (fs2.existsSync(v1f)) {
+        try { fs2.unlinkSync(v1f); deleted++; } catch (e) {}
+      }
+      console.log('[snapshot-clear-all] 已清空全部快照: 删除 ' + deleted + ' 个文件');
+      reply.send({ ok: true, deleted });
+    } catch (err) {
+      console.error('[POST /v1/snapshots/clear-all] error:', err.message);
+      reply.code(500).send({ error: err.message });
+    }
+  });
+
   app.post('/v1/sessions/:id/model-provider', async (req, reply) => {
     try {
       const sessionId = String(req.params.id || '').trim();

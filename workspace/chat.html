@@ -2120,8 +2120,9 @@ body[data-theme="crtlight"] #chat[data-layout="crt"] .msg.ai .bubble p+p::before
             <div class="data-actions">
               <button type="button" class="mcp-btn" id="exportAllDataBtn">导出全部本地数据</button>
               <button type="button" class="mcp-btn danger" id="clearLocalCacheBtn">清空本地缓存</button>
+              <button type="button" class="mcp-btn danger" id="clearAllSnapshotsBtn">一键删除快照</button>
             </div>
-            <div class="data-tip">导出：把本浏览器所有会话的消息、改名、置顶打包为 JSON（换设备可恢复）。清空：仅清本机缓存，不删服务器对话；仅存在本地的导入会话会被清除。</div>
+            <div class="data-tip">导出：把本浏览器所有会话的消息、改名、置顶打包为 JSON（换设备可恢复）。清空：仅清本机缓存，不删服务器对话；仅存在本地的导入会话会被清除。删除快照：清空服务器全部会话的注入前缀快照，不删消息，下次对话自动重建。</div>
           </div></div>
       
     </ul>
@@ -8376,6 +8377,17 @@ async function snapRebuildSession(sid, skipConfirm){
     })
     .catch(function(e){ toast('重建快照失败: '+e.message); });
 }
+// 一键删除全部会话注入前缀快照（1009-04）：清空服务器全部快照，下次对话按当前人设/记忆/日记重建
+async function clearAllSnapshots(){
+  if(!(await bannerConfirm('清除所有会话的注入前缀快照？下一轮对话将按当前人设/记忆/日记重新生成。')))return;
+  fetch('/v1/snapshots/clear-all',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+api_key,'X-CSRF-Token':getCookie('admin_csrf')},credentials:'include',body:'{}'})
+    .then(function(r){return r.json().catch(function(){return {};})})
+    .then(function(d){
+      if(d&&d.error){ toast('删除快照失败: '+d.error); return; }
+      toast(d&&typeof d.deleted==='number'?'已删除 '+d.deleted+' 个快照文件，下次对话自动重建':'快照已清除，下次对话自动重建');
+    })
+    .catch(function(e){ toast('删除快照失败: '+e.message); });
+}
 async function deleteSession(id){
   if(id==="default"){showToast("主会话不能删除");return;}
   if(!(await bannerConfirm("确定删除这个会话？删除后无法恢复。")))return;
@@ -8700,6 +8712,7 @@ async function importSession(file){
 })();
 // 数据管理按钮：设置面板里
 if(document.getElementById("clearLocalCacheBtn"))document.getElementById("clearLocalCacheBtn").onclick=clearLocalCache;
+if(document.getElementById("clearAllSnapshotsBtn"))document.getElementById("clearAllSnapshotsBtn").onclick=clearAllSnapshots;
 if(document.getElementById("exportAllDataBtn"))document.getElementById("exportAllDataBtn").onclick=exportAllLocalData;
 // 导出全部本地数据：打包本浏览器所有会话(消息/改名/置顶)为 JSON，供备份或换设备恢复
 function exportAllLocalData(){
