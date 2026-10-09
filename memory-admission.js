@@ -249,7 +249,11 @@ function createAdmission(opts = {}) {
     // 1008-13：老数据重跑（backfill）产出的记忆一律不经门卫模型——自带 kind/triggers/vibe/worth，直接进待审
     const judgeApplies = (formal || isManualReviewGate) && validation.allowed && judgeMode !== "off" && !(b.skip_judge === true);
     const similarList = [];   // 待审页展示用：[{id,text,kind,score,relation,relation_reason}]
+    const JUDGE_TOTAL_TIMEOUT_MS = 90000; // 1010-16：judge 整体 90s 超时降级（长内容/高相似命中串行 judge 曾超 300s 致 memory_add timed out）
     if (judgeApplies) {
+      // 抽成独立阶段：整体 90s 上限，超时降级入待审（judge 1004-04 起只打标不决策，缺失不影响准入，入待审人工把关最稳）
+      async function runJudgeStage() {
+
       let hits = [];
       try { hits = await findSimilarExisting(mainStore, text); }
       catch (e) { judgeNote = "相似检索失败(" + ((e && e.message) || e) + ")"; }
@@ -286,17 +290,18 @@ function createAdmission(opts = {}) {
         judgeNote = "judge:" + similarList.length + "条相似("
           + similarList.map(x => x.relation || "?").join("/") + ")/worth=" + fmtW(worth);
       }
-      judgeMeta = { worth, worth_reason: worthReason, volatility, volatility_reason: volatilityReason,
-                    similar: similarList,
-                    suggested_kind: suggestedKind, suggested_kind_reason: suggestedKindReason };
-      // 1004-04：命中相似一律进 review（不再 duplicate→reject、不再 coexist→admit、不再生成合并草稿）
-      if (similarList.length) {
+
+      }
+      const judgeRace = await Promise.race([
+        runJudgeStage().then(function () { return "done"; }),
+        new Promise(function (resolve) { setTimeout(function () { resolve("timeout"); }, JUDGE_TOTAL_TIMEOUT_MS); }),
+      ]);
+      if (judgeRace === "timeout") {
+        // 超时降级：强制入待审（judge 后台即使最终完成，其标注也已错过本次响应，直接丢弃）
         action = "review";
-        why = "命中 " + similarList.length + " 条相似记忆，交人工裁决（judge 不做自动决策）";
-      } else if (worth != null && worth < 0.35) {
-        // 无相似但 judge 判定"不值得记"：1004 起同样交人工（不自动 reject），只提示
-        action = "review";
-        why = "judge 判定值得记 " + fmtW(worth) + "（低），交人工裁决";
+        why = "judge 判定超时（" + Math.round(JUDGE_TOTAL_TIMEOUT_MS / 1000) + "s），降级入待审人工裁决";
+        judgeNote = "judge 超时，降级入待审";
+        judgeMeta = null;
       }
     }
     if (isManualReviewGate && action === "admit") {
