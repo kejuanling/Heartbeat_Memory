@@ -956,7 +956,8 @@ function notifyTimelineWriteRejected(reason, sessionId) {
   try {
     sendPushNotification({
       title: "⚠️ 时间线写入被拒",
-      body: `会话 ${sessionId || "default"}：${reason}。该会话可能已冻结/消息未落盘，请尽快人工处理。`
+      body: `会话 ${sessionId || "default"}：${reason}。该会话可能已冻结/消息未落盘，请尽快人工处理。`,
+      channel: "bark"
     }).catch(e => console.error("[timeline] 拒写告警推送失败:", e.message));
   } catch (e) { console.error("[timeline] 拒写告警推送异常:", e.message); }
 }
@@ -2321,7 +2322,7 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         const _subs = sseSubscribers.get(sessionId);
         if (!_subs || _subs.size === 0) {
           const _pushBody = String(r.text || "").replace(/<[^>]+>/g, "").replace(/[#*`>\n]/g, " ").trim().slice(0, 200);
-          if (_pushBody) sendPushNotification({ title: "", body: _pushBody, sessionId }).catch(function () {});
+          if (_pushBody) sendPushNotification({ title: "", body: _pushBody, sessionId, channel: "webpush" }).catch(function () {});
         }
       } catch (e) {}
       // 方案二增量：以盘上为基同步请求差量（人设同步/去重补齐/重生成尾部对齐），
@@ -6782,17 +6783,11 @@ function splitMultimodalContent(content) {
 // 推送（Bark / WebPush，与唤醒系统同一套配置）
 // sessionId：目标会话（WebPush 通道按会话定向订阅；bark 忽略此字段）。
 // 唤醒/告警类调用方必须传；后台回复类由 /v1/notify/reply-done 带入。
-async function sendPushNotification({ title, body, sessionId } = {}) {
+async function sendPushNotification({ title, body, sessionId, channel } = {}) {
   // 15s 超时：Bark 对端挂起时不能卡住免打扰释放等调用方
   const pushController = new AbortController();
   const pushTimer = setTimeout(() => pushController.abort(), 15000);
-  try {
-    const provider = (readEnvValue("PUSH_PROVIDER") || "bark").trim().toLowerCase();
-    if (provider === "webpush") {
-      clearTimeout(pushTimer);
-      return await require("./lib/webpush").sendToSession({ title, body, sessionId });
-    }
-    if (provider !== "bark") return { ok: false, reason: `不支持的 PUSH_PROVIDER：${provider}` };
+  const doBark = async function () {
     const barkKey = readEnvValue("BARK_KEY");
     if (!barkKey) return { ok: false, reason: "Bark Key 未配置" };
     const response = await fetch("https://api.day.app/push", {
@@ -6808,6 +6803,21 @@ async function sendPushNotification({ title, body, sessionId } = {}) {
       return { ok: false, reason: result.message || `HTTP ${response.status}` };
     }
     return { ok: true };
+  };
+  try {
+    // 2026-10-09 双渠道分流：channel 显式指定时按类型走（AI 消息提醒=webpush、后台告警=bark），
+    // 未指定时按 PUSH_PROVIDER 兜底（旧行为不变）。webpush 失败自动回退 Bark 保底，不漏提醒。
+    const provider = (channel || readEnvValue("PUSH_PROVIDER") || "bark").trim().toLowerCase();
+    if (provider === "webpush") {
+      const r = await require("./lib/webpush").sendToSession({ title, body, sessionId });
+      if (r && r.ok) return r;
+      // webpush 失败回退 Bark（timer 仍有效，bark 受 15s 超时保护；成功路径由 finally 统一清 timer）
+      const br = await doBark();
+      if (br.ok) return { ok: true, providerLabel: "Bark", fallback: "webpush", fallbackReason: (r && r.reason) || "webpush 失败" };
+      return r;
+    }
+    if (provider !== "bark") return { ok: false, reason: `不支持的 PUSH_PROVIDER：${provider}` };
+    return await doBark();
   } catch (err) {
     return { ok: false, reason: err.name === "AbortError" ? "推送超时(15s)" : err.message };
   } finally {
@@ -6822,7 +6832,7 @@ app.post("/v1/notify/reply-done", async (req, reply) => {
     if (!preview) return reply.send({ ok: false, reason: "empty" });
     const sessionId = String((req.body && req.body.session_id) || "").trim() || "default";
     // 2026-09-26 用户拍板：通知不显示标题行，preview 全文作为正文（title 置空）
-    const r = await sendPushNotification({ title: "", body: preview.slice(0, 200), sessionId });
+    const r = await sendPushNotification({ title: "", body: preview.slice(0, 200), sessionId, channel: "webpush" });
     reply.send(r);
   } catch (e) { reply.code(500).send({ error: e.message }); }
 });
