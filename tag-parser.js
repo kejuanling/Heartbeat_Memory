@@ -128,8 +128,7 @@ async function extractAndStore(text, ctx) {
   //   每次入库在 _buildEntry 抛错且失败路径静默无日志 → memory_v2.json 里 origin=memory_tag 恒为 0。
   //   现改为：复用 admission.executorMain 走 review 队列（人工批准才落主集合，与 V2「先审后入」一致），
   //   主集合+待审队列双查重，失败/跳过均有日志。（1002-14：quote 类已删，speaker 兜底逻辑随之移除）
-  const V2_KIND_MAP = { "关于她": "fact", "认账": "rule", "拓本": "fact", "压缩摘要": "fact", "对话碎片": "fact", "关于我们": "fact", "锚点": "fact", "信号": "fact", "对话摘要": "fact" };
-  const V2_KINDS = ["fact", "rule"];
+  const V2_KINDS = ["fact", "rule", "event"];
   function getReviewExecutor() {
     // 优先复用 admission 单例 executorMain（唯一写手，避免多实例并发覆盖队列）；未初始化时自建兜底
     try {
@@ -140,7 +139,7 @@ async function extractAndStore(text, ctx) {
     const { createStateExecutor } = require("./state-executor");
     return createStateExecutor({ store: createStore({ config: {} }) });
   }
-  function memoryTagToV2(body, category, pinned, sessionId) {
+  function memoryTagToV2(body, category, sessionId) {
     const { createStore } = require("./memory-v2");
     const store = createStore({ config: {} });
     const text = String(body || "").trim();
@@ -149,8 +148,8 @@ async function extractAndStore(text, ctx) {
     const dup = (store.list({ status: "active" }) || []).some(function (e) { return String(e.text || "").trim() === text; });
     if (dup) return { skipped: true };
     // 分类映射：旧类名 → kind；V2 枚举（fact/rule）直用（1002-14：quote/milestone 已删）
-    let kind = category ? (V2_KIND_MAP[category] || (V2_KINDS.includes(category) ? category : null)) : null;
-    if (!kind) kind = "fact";
+    // 只认 fact/rule/event 三枚举；空或不合法一律留空（null）进待审，由门卫 judge 补 suggested_kind / 人工裁决
+    let kind = category ? (V2_KINDS.includes(category) ? category : null) : null;
     // 去重2：待审队列 pending_review 同正文（防 AI 每轮回复重复写同一标签堆队列）
     const executor = getReviewExecutor();
     let dupQueue = false;
@@ -164,32 +163,34 @@ async function extractAndStore(text, ctx) {
       origin: "memory_tag",
       provenance: { method: "tag_inline", session_id: sessionId || null },
     };
-    const r = executor.review(draft, "AI 标签（<memory>）自动进审，待人工裁决", { details: [{ source: "memory_tag", category: category || null, pinned: pinned === true }] });
+    const r = executor.review(draft, "AI 标签（<memory>）自动进审，待人工裁决", { details: [{ source: "memory_tag", category: category || null }] });
     return r && r.ok ? { added: 1, queue_id: r.queue_id } : { skipped: false, error: r && r.error };
   }
 
-  // --- <memory> 轻量辅助：AI 顺手写的重要记忆 → 记忆池（自动去重，非必需） ---
-  // 只允许前三类（关于她/认账/拓本），标签内开头写 {category:"认账"} 指定分类（重要级已删，0920），如
-  //   <memory>{category:"认账"}她情绪低落时先抱住她，别急着讲道理</memory>
-  //   <memory>{category:"拓本"}涵（9-12）："因为是你。"</memory>
-  // 写了别的分类（压缩摘要/对话碎片/旧类名）一律视为没写，交给 LLM 从前三类里判
+  // --- <memory> 轻量辅助：AI 顺手写的重要记忆 → V2 待审池（自动去重；人工批准才落库） ---
+  // kind 直接写三枚举（fact/rule/event），如
+  //   <memory>{kind:"rule"}她情绪低落时先抱住她，别急着讲道理</memory>
+  //   <memory>{kind:"event"}涵（9-12）："因为是你。"</memory>
+  // kind 不写、写错、写旧分类名 → 一律视为没写（留空进待审，由门卫 judge 补 suggested_kind/人工裁决）
   const memoryMatches = text.matchAll(MEMORY_TAG_RE);
   for (const match of memoryMatches) {
     const raw = (match[1] || "").trim();
     if (!raw) continue;
-    let body = raw, category = "", pinned = false;
+    let body = raw, category = "";
     const metaMatch = raw.match(/^\s*\{[\s\S]*?\}\s*([\s\S]*)$/);
     if (metaMatch && /^\s*\{/.test(raw)) {
       const head = raw.slice(0, raw.indexOf("}") + 1);
-      const kv = parseKeyValueBlock(head, ["category", "type", "pinned"]); // importance 已删：残留值不解析静默丢弃
-      if (kv.category) category = String(kv.category).trim();
-      if (kv.pinned) pinned = (String(kv.pinned) === "true" || String(kv.pinned) === "1");
+      // importance 已删：残留值不解析静默丢弃；pinned 已删：V2 无标签置顶语义，写了一律忽略
+      const kv = parseKeyValueBlock(head, ["category", "type", "kind"]);
+      if (kv.kind) category = String(kv.kind).trim();
+      else if (kv.category) category = String(kv.category).trim();
+      else if (kv.type) category = String(kv.type).trim();
       body = metaMatch[1].trim();
     }
     if (!body) continue;
     promises.push(
       Promise.resolve().then(function () {
-        return memoryTagToV2(body, category, pinned, ctx && ctx.sessionId);
+        return memoryTagToV2(body, category, ctx && ctx.sessionId);
       }).then(function (r) {
         if (r && r.added) {
           console.log("[tag-parser] <memory> 已进待审池:", body.slice(0, 50), r.queue_id || "");
