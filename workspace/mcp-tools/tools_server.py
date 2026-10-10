@@ -1167,13 +1167,17 @@ def tool_memory_add(args):
     data = {"content": content}
     if kind:
         data["kind"] = kind
+    # 1010-17：服务端（mcp-tool-loop）会注入 session_id=当前会话，透传给 gateway 写 source_session 溯源
+    if args.get("session_id"):
+        data["session_id"] = str(args["session_id"]).strip()
     url = f"{BASE_URL}:3000/internal/memory-pool/add"
     req = urllib.request.Request(url,
         data=json.dumps(data).encode("utf-8"),
         headers={"Content-Type": "application/json", "x-internal-key": INTERNAL_KEY},
         method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        # 1010-17：judge 阶段整体 90s 超时降级入待审，工具侧超时 10s 会先掐断致 timed out；放宽到 100s（>90s+余量）
+        with urllib.request.urlopen(req, timeout=100) as resp:
             out = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         try:
