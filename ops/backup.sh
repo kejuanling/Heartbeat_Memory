@@ -2,7 +2,7 @@
 # Dylan Heartbeat 关键数据备份 + 轮转（运维自动化）：排除应用自动生成的备份/临时文件，归档保持精简
 set -u
 BASE="/opt/dylan-heartbeat"
-BK="$BASE/backups"
+BK="$BASE/archives"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$BK"
 BODY=()
