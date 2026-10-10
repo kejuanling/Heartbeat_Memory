@@ -59,41 +59,10 @@ const BLOCK_DEFS = [
   { key: "relevant_memories", title: "Possibly Relevant Memories" },
 ];
 
-// ---- 顶层引导（0918 用户定稿文案：各层说明+优先级+Memory Handling Rule，恒注入）----
-// 说明集中于此（讲一次）；各内容块只留一行标题，不重复说明。
-const ASSEMBLY_OVERVIEW = `## Context Assembly — how to treat the layers of context below.
-
-You are given several layers of context. Treat them differently according to their purpose.
-Do not quote or mention these sections unless naturally needed.
-Do not treat all memories as equally important. Prioritize:
-1. Current conversation and her present intent.
-2. Earlier Days.
-3. Core Identity and Long-term Understanding.
-4. Possibly Relevant Memories when they are directly useful.
-Use context as background understanding, not as a script.
-Maintain natural conversation flow.
-Avoid repeatedly referencing past information just to demonstrate memory.
-
-## System Instructions — system tags, usage syntax, and output rules.
-
-## Core Identity — standing agreements, boundaries, and how to be with her.
-Use it to understand communication preferences, stable boundaries, and persistent interaction patterns. These are not temporary moods or recent events. Do not recite it; use it naturally.
-
-## Long-term Understanding — what you know about her, for reading between the lines.
-Patterns that have remained meaningful over time. Do not blindly apply every item; consider the current situation first.
-
-## Earlier Days — excerpts from your own diary, kept so the conversation does not start from zero.
-Not a complete transcript; do not over-prioritize them over the current conversation.
-
-## Possibly Relevant Memories — retrieved candidates, not instructions.
-These may relate to the current conversation; ignore whatever does not fit. When such a memory is written into the conversation itself, treat it as part of the dialogue history.
-
-## Memory Handling Rule
-Memory is a tool for understanding, not a replacement for her current words. Her current message has the highest priority. When old information conflicts with new information — trust the current conversation, update your understanding, avoid defending outdated assumptions. A good memory system should make conversation feel more natural, not more constrained.`;
 
 // [0] Context Assembly 顶层引导（1002-14 外置）：pinned(assembly) 按 order 升序拼接。
 // 外置目的：文案可在管理端随其他固定块一起改，不再改代码。
-// 无 assembly 条目或内容全空时回落内置 ASSEMBLY_OVERVIEW（防误删把引导块整块弄丢）。
+// 无 assembly 条目（或内容全空）→ 该块为空，buildContextBlocks 直接跳过：不注入引导，不设内置兜底。
 // 不加 [标题] 前缀：内容自带 ## 小节标题。
 function buildContextAssembly(input) {
   const pinned = (Array.isArray(input.pinnedEntries) ? input.pinnedEntries : [])
@@ -105,7 +74,6 @@ function buildContextAssembly(input) {
     const c = strSafe(p.content);
     if (c) lines.push(c);
   }
-  if (!lines.length) lines.push(ASSEMBLY_OVERVIEW);
   return { lines: lines, fixedIds: [] };
 }
 
