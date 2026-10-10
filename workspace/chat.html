@@ -9225,7 +9225,8 @@ var CARDS = [
   { group:'log', id:'cross',      n:'跨窗口注入', d:'AI 实际收到的记忆注入内容', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' },
   { group:'log', id:'pin',        n:'永久注入上下文', d:'固定注入 · 排序', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 3h6l1 7 2 2H6l2-2z"/></svg>' },
   { group:'log', id:'marked',     n:'标星管理',   d:'查看 · 编辑 · 取消标星', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>' },
-  { group:'log', id:'repllog',    n:'替换记录',   d:'每次请求的压缩/替换记录', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>' }
+  { group:'log', id:'repllog',    n:'替换记录',   d:'每次请求的压缩/替换记录', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>' },
+  { group:'log', id:'backup',     n:'备份状态',   d:'最近备份 · 断档告警', i:'<svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>' }
 ];
 var CARD_GROUPS = [
   { key:'sys', n:'系统配置' },
@@ -9278,6 +9279,28 @@ function renderAlerts(body){
     }
     body.innerHTML='<div class="alerts-scroll">'+html+'</div>';
   }).catch(function(e){ body.innerHTML='<div class="alerts-empty">加载失败</div>'; });
+}
+
+function renderBackup(body){
+  body.innerHTML='<div class="adm-load">加载中…</div>';
+  function fmtSize(b){ return (b/1048576).toFixed(0)+' MB'; }
+  function fmtMtime(ms){ var d=new Date(ms); return (d.getMonth()+1)+'月'+d.getDate()+'日 '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+  function refresh(){
+    body.innerHTML='<div class="adm-load">加载中…</div>';
+    admGet(BASE+'/backup/status').then(paint).catch(function(){ body.innerHTML='<div class="alerts-empty">加载失败</div>'; });
+  }
+  function paint(j){
+    if(!j||!j.ok){ body.innerHTML='<div class="alerts-empty">获取失败</div>'; return; }
+    var html='<div class="adm-head"><button type="button" class="bk-refresh" style="margin-left:auto;border:1px solid var(--line);background:none;border-radius:7px;font-size:11px;color:var(--ink2);padding:3px 9px;cursor:pointer">刷新</button></div>';
+    html += j.latest ? '<div class="bk-item"><div class="bk-t">最近备份</div><div class="bk-d">'+esc(j.latest.file)+'（'+fmtSize(j.latest.size)+' · '+fmtMtime(j.latest.mtime)+'）</div></div>' : '<div class="bk-item"><div class="bk-t">最近备份</div><div class="bk-d">从未产生备份</div></div>';
+    var status = j.is_today ? '<span class="bk-badge ok">今日已备份</span>' : (j.latest ? '<span class="bk-badge warn">断档 '+j.stale_days+' 天</span>' : '<span class="bk-badge warn">无备份</span>');
+    html += '<div class="bk-item"><div class="bk-t">状态</div><div class="bk-d">'+status+' · 存档 '+j.count+' 份</div></div>';
+    html += '<div class="bk-item"><div class="bk-t">说明</div><div class="bk-d">每晚 4 点自动备份到 archives/，每日 4:15 检查是否断档，失败会推 Bark 并显示在此。</div></div>';
+    body.innerHTML='<div class="alerts-scroll">'+html+'</div>';
+    var btn=body.querySelector('.bk-refresh');
+    if(btn) btn.addEventListener('click', refresh);
+  }
+  admGet(BASE+'/backup/status').then(paint).catch(function(){ body.innerHTML='<div class="alerts-empty">加载失败</div>'; });
 }
 
 function toggleCard(id){
@@ -9335,6 +9358,7 @@ function renderCard(id, body){
       case 'cross': return renderCross(body);
       case 'push': return renderPush(body);
       case 'reqctx': return renderReqCtx(body);
+      case 'backup': return renderBackup(body);
       default: body.innerHTML='<div class="adm-empty">未知卡片</div>';
     }
   }catch(e){

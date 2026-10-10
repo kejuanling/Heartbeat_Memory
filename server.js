@@ -4461,6 +4461,34 @@ app.get("/admin/alerts", { preHandler: basicAuth }, async (req, reply) => {
   reply.send({ ok: true, alerts: alerts, services: services, ts: Date.now() });
 });
 
+app.get("/admin/backup/status", { preHandler: basicAuth }, async (req, reply) => {
+  // 1010-20 备份状态：archives/ 最新 ops_*.tar.gz + 断档天数（配套 ops/backup_watch.py 每日守卫）
+  try {
+    const dir = path.join(__dirname, "archives");
+    let files = [];
+    try {
+      files = fs.readdirSync(dir)
+        .filter(function (f) { return /^ops_\d{8}_\d{6}\.tar\.gz$/.test(f); })
+        .map(function (f) {
+          const st = fs.statSync(path.join(dir, f));
+          return { file: f, ymd: f.slice(4, 12), mtime: st.mtimeMs, size: st.size };
+        })
+        .sort(function (a, b) { return b.mtime - a.mtime; });
+    } catch (e) { console.warn("[backup-status] scan:", e.message); }
+    const latest = files[0] || null;
+    let stale_days = null;
+    if (latest) {
+      const y = Number(latest.ymd.slice(0, 4)), mo = Number(latest.ymd.slice(4, 6)) - 1, d = Number(latest.ymd.slice(6, 8));
+      const d1 = new Date(y, mo, d); d1.setHours(0, 0, 0, 0);
+      const now = new Date(); now.setHours(0, 0, 0, 0);
+      stale_days = Math.round((now - d1) / 86400000);
+    }
+    const nowd = new Date();
+    const today = "" + nowd.getFullYear() + String(nowd.getMonth() + 1).padStart(2, "0") + String(nowd.getDate()).padStart(2, "0");
+    reply.send({ ok: true, latest: latest, count: files.length, stale_days: stale_days, today: today, is_today: latest ? latest.ymd === today : false });
+  } catch (e) { reply.send({ ok: false, error: e.message }); }
+});
+
 app.get("/admin/tools", { preHandler: basicAuth }, async (req, reply) => {
   try {
     const manifest = readJsonFileSafe(MCP_TOOLS_MANIFEST, null);
