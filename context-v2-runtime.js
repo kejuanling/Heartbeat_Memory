@@ -206,6 +206,9 @@ async function attachVecScores(input) {
 async function assembleAndApply(opts) {
   // 相关记忆开关（1002 拍板）：关=不检索、不注入、不写时间线、不调 embed。
   const relOn = relevantEnabled(opts.baseDir);
+  // 会话级跨窗口总开关（1010-28 用户拍板）：关闭 = 本会话不注入任何跨窗口内容，且**不生成注入快照**
+  //（反正也不做跨窗口组装）；之后重新开启，下一轮照常懒生成。
+  const crossOff = createSessionCfg(opts.baseDir).sessionCrossInjectOverride(opts.sessionId) === false;
   // 1005-17 预览模式：注入关闭但 relevant.preview=true 时，照常检索算分观察"本应注入哪条"，
   // 但不进 prompt、不浮现时间线、不打点（真实命中打点只在真注入时发生）。
   let relPreview = false;
@@ -273,18 +276,22 @@ async function assembleAndApply(opts) {
         })
       : built.blocks;
 
-    const sysMsg = (opts.messages || []).find(function (m) { return m && m.role === 'system'; });
-    try {
-      snapStore.saveSnapshot(opts.baseDir, opts.sessionId, {
-        created_at: new Date().toISOString(),
-        system_prompt: sysMsg && sysMsg.content ? String(sysMsg.content) : '',
-        fixed_blocks: selected
-          .filter(function (b) { return b.key !== 'relevant_memories' && !b.empty; })
-          .map(function (b) { return { key: b.key, title: b.title || '', content: b.content }; }),
-      });
-      console.log('[ctx-v2] 会话注入快照已生成: session=' + opts.sessionId);
-    } catch (e) {
-      console.warn('[ctx-v2] 快照保存失败（不影响本次请求，下次重试生成）:', e && e.message);
+    if (!crossOff) {
+      const sysMsg = (opts.messages || []).find(function (m) { return m && m.role === 'system'; });
+      try {
+        snapStore.saveSnapshot(opts.baseDir, opts.sessionId, {
+          created_at: new Date().toISOString(),
+          system_prompt: sysMsg && sysMsg.content ? String(sysMsg.content) : '',
+          fixed_blocks: selected
+            .filter(function (b) { return b.key !== 'relevant_memories' && !b.empty; })
+            .map(function (b) { return { key: b.key, title: b.title || '', content: b.content }; }),
+        });
+        console.log('[ctx-v2] 会话注入快照已生成: session=' + opts.sessionId);
+      } catch (e) {
+        console.warn('[ctx-v2] 快照保存失败（不影响本次请求，下次重试生成）:', e && e.message);
+      }
+    } else {
+      console.log('[ctx-v2] 跨窗口总开关关闭，跳过生成注入快照: session=' + opts.sessionId);
     }
     blocks = selected;
     relevantHits = built.relevantHits || [];
@@ -325,7 +332,7 @@ async function assembleAndApply(opts) {
   //（system 角色的人设 + 时间线本身），连引导块/永久上下文块也一并去掉。
   // 相关记忆（relevant_memories）是独立功能，不受本开关控制，故保留。
   // 只作用于本次输出、不改快照文件：关掉再打开能恢复（与"重建快照"不同）。
-  if (createSessionCfg(opts.baseDir).sessionCrossInjectOverride(opts.sessionId) === false) {
+  if (crossOff) {
     blocks = blocks.filter(function (b) { return b && b.key === 'relevant_memories'; });
   }
   return { messages: apply(opts.messages, blocks), relevantHits: relevantHits };
