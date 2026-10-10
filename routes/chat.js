@@ -750,6 +750,37 @@ module.exports = function registerChatRoutes(app, deps) {
       // 1010 需求3：多选注入块一并保存（body.inject_blocks 数组；缺省=不改动/全部注入）
       let savedBlocks = null;
       if (body.inject_blocks !== undefined) savedBlocks = deps.saveInjectBlocks(sessionId, body.inject_blocks);
+      // 1010-29 需求3承载：新建会话勾选「最近对话」→ 把「最后一次聊天的会话」末尾 N 轮对话复制进本会话
+      // 时间线（developer + hidden + silent：前端不显示、搜索不到，只给 LLM 看），运行时不组装。
+      // 守卫：仅当本会话时间线还是空的（=真新建）才写——写完即有内容，天然只写一次。
+      //（不能按"有无真实消息"判：继承内容本身是 developer，不算真实消息，重复 POST 会写第二份。）
+      try {
+        const _keys = (savedBlocks && Array.isArray(savedBlocks.inject_blocks)) ? savedBlocks.inject_blocks : [];
+        if (_keys.indexOf('recent_dialog') >= 0) {
+          const _tl = deps.loadTimeline(sessionId);
+          const _isNew = !Array.isArray(_tl) || _tl.length === 0;
+          if (_isNew) {
+            const _src = createLastChatSession(baseDir).read();
+            if (_src && _src !== sessionId) {
+              let _rounds = Number(body.recent_dialog_rounds);
+              if (!isFinite(_rounds) || _rounds < 1) _rounds = 20;
+              if (_rounds > 100) _rounds = 100;
+              const _srcReal = deps.loadTimeline(_src).filter(function (m) {
+                return deps.isRealMessageForTimeline(m) && String(deps.normalizeContentToText(m.content) || '').trim();
+              }).slice(-(_rounds * 2));
+              if (_srcReal.length) {
+                const _out = _srcReal.map(function (m) {
+                  const _who = m.role === 'user' ? '[我] ' : '[对方] ';
+                  return { role: 'developer', hidden: true, kind: 'recent_inherit', content: _who + String(deps.normalizeContentToText(m.content) || '').trim() };
+                });
+                _out.unshift({ role: 'developer', hidden: true, kind: 'recent_inherit', content: '（承接上一个会话的最后 ' + _srcReal.length + ' 条对话）' });
+                deps.appendMessages(sessionId, _out, { silent: true });
+                console.log('[cross-inject] 最近对话承载: ' + sessionId + ' <- ' + _src + '（' + _srcReal.length + ' 条 / ' + _rounds + ' 轮）');
+              }
+            }
+          }
+        }
+      } catch (e) { console.warn('[cross-inject] 最近对话承载失败（不影响建会话）:', e && e.message); }
       reply.send({ ok: true, session_id: sessionId, cross_inject_enabled: val, saved: saved, inject_blocks: savedBlocks });
     } catch (err) {
       console.error('[POST /v1/sessions/:id/cross-inject] error:', err.message);

@@ -55,7 +55,6 @@ const BLOCK_DEFS = [
   { key: "long_term_understanding", title: "Long-term Understanding" },
   { key: "conversation_continuity", title: "Earlier Days" },
   { key: "starred_dialog", title: "Starred Dialog" },
-  { key: "recent_dialog", title: "Recent Dialog" },
   { key: "relevant_memories", title: "Possibly Relevant Memories" },
 ];
 
@@ -84,7 +83,6 @@ const HEADERS = {
   long_term_understanding: "## Long-term Understanding",
   conversation_continuity: "## Earlier Days",
   starred_dialog: "## Starred Dialog",
-  recent_dialog: "## Recent Dialog",
   relevant_memories: "## Possibly Relevant Memories",
 };
 
@@ -240,13 +238,6 @@ function buildStarredDialog(input, cfg) {
   return { lines: lines, fixedIds: [] };
 }
 
-// [5b] Recent Dialog（1010 需求3）：最后一次聊天会话的最近 20 条对话原文（跨窗口注入用）。
-// 行由装配层算好传入 input.recentDialogLines——builder 保持纯函数。
-function buildRecentDialog(input, cfg) {
-  const lines = (Array.isArray(input.recentDialogLines) ? input.recentDialogLines : []).map(strSafe).filter(Boolean);
-  return { lines: lines, fixedIds: [] };
-}
-
 // [6] Possibly Relevant Memories：V2 event 检索（1005-17 重写）。
 // 范围只留 event（"记住的一件事/做出来的东西"）——fact/rule 是"对人"的稳定信息，
 // 由 Core Identity / Long-term Understanding 常驻块覆盖；Relevant 是"对事"的浮动补充。
@@ -351,7 +342,6 @@ function buildContextBlocks(input, opts) {
   const fixedIdSet = new Set([].concat(sysIns.fixedIds, identity.fixedIds, understanding.fixedIds));
   const continuity = buildContinuity(input_, cfg);
   const starredDialog = buildStarredDialog(input_, cfg);
-  const recentDialog = buildRecentDialog(input_, cfg);
   const relevant = buildRelevant(input_, cfg, fixedIdSet);
   const relevantHits = relevant.hits || [];
 
@@ -362,7 +352,6 @@ function buildContextBlocks(input, opts) {
     long_term_understanding: understanding,
     conversation_continuity: continuity,
     starred_dialog: starredDialog,
-    recent_dialog: recentDialog,
     relevant_memories: relevant,
   };
 

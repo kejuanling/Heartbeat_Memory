@@ -24,7 +24,6 @@ const crypto = require('crypto'); // 1010 需求3：标星 contentKey 同口径
 const { createSessionCfg } = require('./lib/session-cfg');   // 2026-10-03：会话级跨窗口开关
 const { getInheritedState } = require('./lib/conversation-state'); // 1010 需求2：状态机快照继承（最后一次聊天会话）
 const { safeSessionToken } = require('./lib/session-token'); // 1010 需求3：标星跨会话扫描时间线文件
-const { createLastChatSession } = require('./lib/last-chat-session'); // 1010 需求3：最近20条对话原文的继承源
 
 // 1005-17：相关注入参数（memory_v2_config.json relevant 段，管理台可调）
 function readRelevantCfg(baseDir) {
@@ -105,30 +104,6 @@ function readStarredDialogLines(baseDir, loadTimeline) {
   collect.sort(function (a, b) { return (a.time < b.time) ? -1 : (a.time > b.time ? 1 : 0); });
   const N = 20;
   return collect.slice(-N).map(function (x) { return x.text; });
-}
-
-// 1010 需求3：最后一次聊天会话的最近 20 条对话原文。继承源同需求2（last_chat_session.json）。
-// 取该会话时间线尾部 20 条真实消息（role user/assistant，排除 system/developer/tool/diary/特殊事件），
-// 保持时间正序呈现（旧在上新在下）。
-function readRecentDialogLines(baseDir, loadTimeline) {
-  let last = null;
-  try { last = createLastChatSession(baseDir).read(); } catch (e) { last = null; }
-  if (!last) return [];
-  let tl = [];
-  try { tl = loadTimeline(last) || []; } catch (e) { tl = []; }
-  const real = (Array.isArray(tl) ? tl : []).filter(function (m) {
-    if (!m) return false;
-    if (m.role === 'system' || m.role === 'developer' || m.role === 'tool') return false;
-    if (m.kind === 'diary' || m.kind === 'noaction') return false;
-    if (!(m.content && typeof m.content === 'string' && String(m.content).trim())) return false;
-    if (String(m.content).trim().indexOf('（记忆浮现') === 0) return false; // 特殊事件不注入
-    return true;
-  });
-  const lines = real.slice(-20).map(function (m) {
-    const who = m.role === 'user' ? '我' : '对方';
-    return '[' + who + '] ' + String(m.content).trim();
-  });
-  return lines;
 }
 
 // 把 builder 输出套进消息：剔除旧 [永久上下文]/[跨窗口] developer 块 →
@@ -249,10 +224,9 @@ async function assembleAndApply(opts) {
       loadTimeline: opts.loadTimeline,
       normalizeContentToText: opts.normalizeContentToText,
     });
-    // 1010 需求3：多选注入块的两个新增数据源（标星消息 / 最近20条对话原文），
-    // 装配层算好行传给 builder（builder 保持纯函数）。失败静默（空块自然被跳过）。
+    // 1010 需求3：标星消息原文——装配层算好行传给 builder（builder 保持纯函数）。失败静默（空块自然被跳过）。
+    //（最近对话已改为 1010-29 建会话时写进时间线，不再运行时组装。）
     try { input.starredLines = readStarredDialogLines(opts.baseDir, opts.loadTimeline); } catch (e) { input.starredLines = []; }
-    try { input.recentDialogLines = readRecentDialogLines(opts.baseDir, opts.loadTimeline); } catch (e) { input.recentDialogLines = []; }
     if (relOn || relPreview) { if (!relOn) input.previewOnly = true; await attachVecScores(input); } else input.query = '';
     const built = buildContextBlocks(input);
 
@@ -267,7 +241,7 @@ async function assembleAndApply(opts) {
 
     // 顶层引导 context_assembly 恒注入（不在多选内）；relevant_memories 不受多选控制（独立总闸）。
     // 其余块 key 与多选 key 一一对应（system_instructions / core_identity / long_term_understanding /
-    // conversation_continuity / starred_dialog / recent_dialog）。
+    // conversation_continuity / starred_dialog）。
     const selected = wantBlocks
       ? built.blocks.filter(function (b) {
           if (!b || !b.key) return true;
@@ -301,12 +275,9 @@ async function assembleAndApply(opts) {
     try {
       const inh = getInheritedState(opts.sessionId);
       if (inh && inh.text && wantBlocks && wantBlocks.has('state_inherit')) {
-        // 顺序（用户拍板）：日记 → 标星的对话 → 状态机 → 最近20条对话原文。
-        // 故继承块插到 recent_dialog 之前（而非追加末尾，否则会排到最近20条后面）。
+        // 顺序（用户拍板）：日记 → 标星的对话 → 状态机；最近对话已改为建会话时写进时间线，不再组装成块。
         const inheritBlock = { key: 'state_inherit', title: '', content: '## Conversation State\n\n' + inh.text, empty: false };
-        const recIdx = blocks.findIndex(function (b) { return b && b.key === 'recent_dialog'; });
-        if (recIdx >= 0) { blocks.splice(recIdx, 0, inheritBlock); }
-        else { blocks = blocks.concat([inheritBlock]); }
+        blocks = blocks.concat([inheritBlock]);
         console.log('[ctx-v2] 状态机继承注入: session=' + opts.sessionId + ' <- ' + inh.session + '（' + String(inh.text).length + ' 字，一次性不固化）');
       }
     } catch (e) { console.warn('[ctx-v2] 状态机继承注入失败（跳过）:', e && e.message); }

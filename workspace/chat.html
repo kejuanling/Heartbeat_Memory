@@ -8334,11 +8334,11 @@ async function newSession(){
       +'<label class="np-blk"><input type="checkbox" value="diary" checked> 日记（Earlier Days）</label>'
       +'<label class="np-blk"><input type="checkbox" value="starred_dialog"> 标星的对话（增强）</label>'
       +'<label class="np-blk"><input type="checkbox" value="state"> 状态机快照（增强）</label>'
-      +'<label class="np-blk"><input type="checkbox" value="recent_dialog"> 最近20条对话原文（增强）</label>'
+      +'<label class="np-blk"><input type="checkbox" value="recent_dialog"> 最近对话原文（增强）<input type="number" id="np-recent-rounds" value="20" min="1" max="100" style="width:52px;margin-left:6px" title="继承轮数，1轮=2条"> 轮</label>'
       +'<label class="np-blk np-blk-off"><input type="checkbox" value="relevant" disabled> 相关记忆（未启用）</label>'
       +'</div>'
       +'<div class="np-tip">跟随全局默认注入前三项；勾选带「增强」的项即本会话单独开启（连同基础项一起注入）。</div></div>'
-      +'<div class="np-tip" style="color:#888">注入顺序：永久上下文 → 记忆两大块总结 → 日记 → 标星的对话 → 状态机快照 → 最近20条对话原文。</div></div>',
+      +'<div class="np-tip" style="color:#888">注入顺序：永久上下文 → 记忆两大块总结 → 日记 → 标星的对话 → 状态机快照。（最近对话原文在建会话时写入本会话时间线）</div></div>',
       function(){ try{
         const pid=(document.getElementById("np-provider")||{}).value||"";
         const mdl=(document.getElementById("np-model")||{}).value||"";
@@ -8405,6 +8405,12 @@ function createSessionWithPrompt(backupId, providerId, modelName){
   }
   // 跟随全局且无增强勾选 → 不提交（服务端 null=跟随全局默认三块）；全不勾且开启 → inject_blocks=[]（什么都不注入）
   if(crossState==="1" && picked.length===0) submitBody={enabled:true, inject_blocks:[]};
+  // 1010-29：勾选「最近对话」时附继承轮数（默认 20 轮 = 40 条；服务端建会话时按此从上一个聊天会话截取）
+  if(submitBody && picked.indexOf("recent_dialog")>=0){
+    let rd=parseInt((document.getElementById("np-recent-rounds")||{}).value||"20",10);
+    if(!isFinite(rd)||rd<1) rd=20; if(rd>100) rd=100;
+    submitBody.recent_dialog_rounds=rd;
+  }
   if(submitBody){
     try{ fetch("/v1/sessions/"+encodeURIComponent(sid)+"/cross-inject",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify(submitBody)}); }
     catch(e){ console.warn("[cross-inject] 会话级设置提交失败:",e&&e.message); }
