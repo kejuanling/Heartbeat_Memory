@@ -1533,6 +1533,8 @@ function appendRequestMessages(sessionId, reqMsgs, opts) {
   //    （= 重生成：user 消息双方都在，仅回复被换掉）时才清除；锚点也不在请求集
   //    （= 跨设备/局部请求滞后，别端刚写的回复）则原样保留，绝不误删。
   let cut = existing.length;
+  let anchor = -1;   // 1010-31 紧急修复：原 let 声明在内层块、下方 _tailAnchorIdx = anchor 外层引用
+                     // → 尾部切割一旦发生必抛 ReferenceError: anchor is not defined → 聊天请求 500（消息"秒没了"）
   if (reqLastReal && reqLastReal.role === "user") {
     for (let i = existing.length - 1; i >= 0; i--) {
       const m = existing[i];
@@ -1542,7 +1544,7 @@ function appendRequestMessages(sessionId, reqMsgs, opts) {
       break;
     }
     if (cut < existing.length) {
-      let anchor = -1;
+      anchor = -1;
       for (let i = cut - 1; i >= 0; i--) {
         const m = existing[i];
         if (!m || m.role === "system" || isToolNoteMessage(m) || isSpecialEvent(m)) continue;
