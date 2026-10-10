@@ -21,6 +21,7 @@ const { buildContextBlocks } = require('./context-v2-builder');
 const shadow = require('./context-v2-shadow');
 const snapStore = require('./context-snapshot');
 const { createSessionCfg } = require('./lib/session-cfg');   // 2026-10-03：会话级跨窗口开关
+const { getInheritedState } = require('./lib/conversation-state'); // 1010 需求2：状态机快照继承（最后一次聊天会话）
 
 // 1005-17：相关注入参数（memory_v2_config.json relevant 段，管理台可调）
 function readRelevantCfg(baseDir) {
@@ -189,6 +190,20 @@ async function assembleAndApply(opts) {
     }
     blocks = built.blocks;
     relevantHits = built.relevantHits || [];
+    // 1010 需求2：状态机快照继承（仅首次、无快照会话）——
+    // b 没有自己的状态机时，把「最后一次聊天的会话 a」的状态正文作为 Conversation State 块 live 注入。
+    // 三个不进快照的原因：a) 继承块是"一次性的"，进快照会让 b 永远冻结 a 的状态；
+    //   b) b 一旦自己 commitMerge，现有替换块通道（ctxrep_state_<b>）自然接管，继承块不应残留；
+    //   c) 与需求3 的"状态机快照"多选项语义一致（该块不固化、随会话演化）。
+    // 继承块 key 用 conversation_state_inherit：apply() 会把它当普通 developer 块插入（非 relevant、
+    // 非 empty），且 _v2Heads 不含 "## Conversation State" 头 → 不会被清除。
+    try {
+      const inh = getInheritedState(opts.sessionId);
+      if (inh && inh.text) {
+        blocks = blocks.concat([{ key: 'conversation_state_inherit', title: '', content: '## Conversation State\n\n' + inh.text, empty: false }]);
+        console.log('[ctx-v2] 状态机快照继承注入: session=' + opts.sessionId + ' <- ' + inh.session + '（' + String(inh.text).length + ' 字，一次性不固化）');
+      }
+    } catch (e) { console.warn('[ctx-v2] 状态机快照继承注入失败（跳过）:', e && e.message); }
     // 1005-17 预览：记录本应注入条目后清空（不浮现、不打点）；真注入时此段不触发
     if (relPreview && relevantHits.length) {
       try { appendPreview(opts.baseDir, opts.sessionId, input.query, relevantHits); } catch (_) {}
@@ -218,7 +233,8 @@ async function assembleAndApply(opts) {
   // 只过滤本次输出、不改快照文件：关掉再打开能恢复，不会像「重建快照」那样把记忆冻死。
   // true / null（跟随全局）一律放行——V2 没有全局总开关，跟随即等于现有行为。
   if (createSessionCfg(opts.baseDir).sessionCrossInjectOverride(opts.sessionId) === false) {
-    blocks = blocks.filter(function (b) { return b && b.key !== 'conversation_continuity'; });
+    // 1010 需求2：状态机快照继承块同样属于跨窗口注入内容，override=false 时一并剔除
+    blocks = blocks.filter(function (b) { return b && b.key !== 'conversation_continuity' && b.key !== 'conversation_state_inherit'; });
   }
   return { messages: apply(opts.messages, blocks), relevantHits: relevantHits };
 }

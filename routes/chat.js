@@ -18,6 +18,7 @@ const chatCtx = require('./chat-context');
 const ctxV2Runtime = require('../context-v2-runtime'); // Context V2 共享运行时（0920 完全统一：聊天唤醒同一组装入口）
 const { mapMessagesForProvider } = require('../lib/role-mapper');
 const { buildContextBlocks } = require('../context-v2-builder'); // 1008 分支注入快照（父口径组装）
+const { createLastChatSession } = require('../lib/last-chat-session'); // 1010 需求2：最后一次聊天会话记录
 const contextV2Shadow = require('../context-v2-shadow'); // 1008 分支注入快照（assembleInput）
 
 // 推送回显（成功推送的「刚刚给 X 发了 X 推送：」记录）需要在聊天页显示给用户看，
@@ -1147,6 +1148,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
     // 非主聊天（标题总结等旁路请求）保持客户端直通，不注入完整上下文。
     // ========================
     if (isMainChat) {
+      // 1010 需求2：主聊天请求 → 记录「最后一次聊天的会话」（继承源判定用，服务端语义，不依赖前端）
+      try { createLastChatSession(baseDir).record(sessionId); } catch (e) { /* 记录失败不影响聊天 */ }
       // S4 修复：服务端时间线重建必须先于一切上下文加工（0919 静态测试抓出漏行）
       llmMessages = buildConversation(sessionId);
       // 开关在请求开始时快照读取（17.txt：防切换瞬间半新半旧）
