@@ -454,6 +454,9 @@ function createCtxLimitReminderGuard(deps) {
 function createConversationBuilder(deps) {
   const { loadTimeline, prepareMessageForLLM, stripPosition, resolveSessionSystemPrompt } = deps;
   const incrementalContext = deps.incrementalContext || null;
+  // 1010-24：_snapshotPending 用 var 提升至函数顶部声明，彻底消除快照懒生成分支的 TDZ
+  // （此前 let 声明在函数体中段，日志出现 Cannot access '_snapshotPending' before initialization）
+  var _snapshotPending = false;
   // 1007 上下文快照 v2：前缀缓存。快照有效时直接复用 history（含状态块/摘要块），尾部现算。
   const snapshotV2 = deps.snapshotV2 || null;
   // 2026-09-29 缓存分层（用户拍板）：整体缓存只服务「时间线未变」的场景（唤醒/重试）——
@@ -478,8 +481,6 @@ function createConversationBuilder(deps) {
     }
     _convCache.set(key, msgs);
   }
-  // 1007 快照 v2：本组装是否触发快照懒生成（声明在顶部，避免 TDZ）
-  let _snapshotPending = false;
   return function buildConversation(sessionId) {
     const timeline = loadTimeline(sessionId);
     const fp = (timeline && timeline.__fp) || "";
@@ -513,6 +514,14 @@ function createConversationBuilder(deps) {
       const _snap = snapshotV2.loadSnapshot(snapshotV2.baseDir, sessionId);
       let _snapUsable = !!(_snap && !snapshotV2.isStale(snapshotV2.baseDir, sessionId)
         && Array.isArray(_snap.content) && Number.isFinite(_snap.snap_point));
+      if (_snapUsable && Number.isFinite(_snap.snap_point) && Number(_snap.snap_point) > timeline.length) {
+        // 1010-24：时间线被缩短（清尾/删除/误删恢复）时 snap_point 是旧长度；
+        // 收缩到 timeline.length 会让尾部 slice 为空，content 之外的新增消息全部丢失
+        // （恢复场景 snap_point=770 vs timeline=30，用户新消息进不了实际请求上下文）。
+        // 直接标失效走重建，重建后 snap_point 取当前长度，尾部正常现取。
+        try { snapshotV2.markStale(snapshotV2.baseDir, sessionId, "timeline-shrunk"); } catch (e) {}
+        _snapUsable = false;
+      }
       if (_snapUsable && timeline.length === 0 && Array.isArray(_snap.content) && _snap.content.length > 0) {
         // 保护：时间线被整体清空/重置而快照还有冻结内容 → 不能发旧内容，标失效走下方重建
         try { snapshotV2.markStale(snapshotV2.baseDir, sessionId, "timeline-reset"); } catch (e) {}
