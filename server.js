@@ -85,6 +85,34 @@ function sweepSseSubscribers() {
 setInterval(sweepSseSubscribers, SSE_ZOMBIE_SCAN_MS).unref();
 
 // ========================
+// 沉底记忆自动清理（1010-17 用户需求）：archived（沉底）超过 7 天的记忆自动硬删除。
+// 沉底时间取 superseded_at（updateStatus 归档时写入，revive 恢复时会清空该字段，天然不会被误删）。
+// 删除不可恢复，删除前打日志留痕（id + 沉底时间）。每 6 小时扫一次，重启时先扫一遍兜底。
+// ========================
+const MEMORY_ARCHIVE_TTL_DAYS = 7;
+const MEMORY_ARCHIVE_SCAN_MS = 6 * 60 * 60 * 1000;
+function sweepArchivedMemories() {
+  try {
+    const store = require("./memory-v2").createStore({ rootDir: __dirname, config: {} });
+    const cutoff = Date.now() - MEMORY_ARCHIVE_TTL_DAYS * 24 * 3600 * 1000;
+    const rows = store.list({ status: "archived" });
+    const doomed = rows.filter(function (e) {
+      if (!e.superseded_at) return false; // 缺沉底时间戳不删，保守兜底
+      return new Date(e.superseded_at).getTime() < cutoff;
+    });
+    for (const e of doomed) {
+      const r = store.hardDelete(e.id);
+      console.log("[memory-archive-cleanup] 删除沉底超 " + MEMORY_ARCHIVE_TTL_DAYS + " 天记忆 id=" + e.id + " 沉底时间=" + (e.superseded_at || "") + " ok=" + r.ok);
+    }
+    if (doomed.length) console.log("[memory-archive-cleanup] 本次清理沉底记忆 " + doomed.length + " 条");
+  } catch (err) {
+    console.error("[memory-archive-cleanup] error:", err && err.message);
+  }
+}
+setInterval(sweepArchivedMemories, MEMORY_ARCHIVE_SCAN_MS).unref();
+sweepArchivedMemories(); // 启动先扫一次
+
+// ========================
 // 幂等回放：同一 client_msg_id 的重复请求直接回放上次已生成的回复，
 // 避免网络重发导致上游重复生成 + 时间线重复写入。
 // ========================

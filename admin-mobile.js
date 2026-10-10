@@ -3120,8 +3120,13 @@ function ccArmAllGapAutoLoad(){
     const ed=document.getElementById('mempool-edit-cat');
     const cats=['fact','rule','event'];
     // 筛选与编辑统一只允许 V2 四类；旧分类存量由后台迁移处理，不再暴露为可选项。
+    // 1010-17：重建选项前记录当前选中值，重建后恢复——否则每次打开编辑弹窗都会把顶部分类筛选/弹窗分类重置掉
+    const prevSel = sel ? sel.value : '';
+    const prevEd = ed ? ed.value : '';
     if(sel){ sel.innerHTML='<option value="">全部分类</option>'+cats.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join(''); }
     if(ed){ ed.innerHTML=cats.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join(''); }
+    if(sel && prevSel && [].some.call(sel.options,function(o){return o.value===prevSel;})) sel.value=prevSel;
+    if(ed && prevEd && [].some.call(ed.options,function(o){return o.value===prevEd;})) ed.value=prevEd;
   }
   function mempoolSearchInput(v){
     clearTimeout(AppState.memPoolSearchTimer);
