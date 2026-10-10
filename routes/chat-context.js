@@ -492,7 +492,13 @@ function createConversationBuilder(deps) {
     // 1002-11 快照优先：会话已有注入快照 → 人设取快照值（永久不变，改全局人设不影响）；
     // 无快照走原权威解析（resolveSessionSystemPrompt 会话级 → 全局）。
     let snapSystem = "";
-    if (typeof deps.loadSnapshot === "function") {
+    // 1010-30 阶段4a：人设优先取 v2 快照冻结值（B.system）；旧注入快照（A.system_prompt）过渡回落。
+    //（此前只读 A——4a 起新会话不再写 A，不补这条会退化成每次现解析全局人设、冻结失效。）
+    try {
+      const _bs = snapshotV2 && snapshotV2.loadSnapshot ? snapshotV2.loadSnapshot(snapshotV2.baseDir, sessionId) : null;
+      if (_bs && _bs.system && typeof _bs.system.content === "string") snapSystem = _bs.system.content;
+    } catch (e) { snapSystem = ""; }
+    if (!snapSystem && typeof deps.loadSnapshot === "function") {
       try {
         const _sp = deps.loadSnapshot(sessionId);
         snapSystem = _sp && typeof _sp.system_prompt === "string" ? _sp.system_prompt : "";

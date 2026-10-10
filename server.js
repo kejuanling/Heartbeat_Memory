@@ -2040,6 +2040,31 @@ async function snapshotStaleOf(sessionId) {
         }
       }
     } catch (e) {}
+    try {
+      // 1010-30 阶段4a：注入块已并入 v2 快照的会话——「当前应有 vs 快照冻结」红点（用户拍板口径）。
+      // 低成本等价实现：按会话冻结的块 key 比对对应源文件 mtime vs inject_meta.created_at
+      //（源文件在固化后有改动 = 冻结内容已过期，语义等价且免跑 builder）。
+      // legacy 会话（块还在 A、B 无 inject_meta）不适用，仍走上面的 A↔B 比对。
+      if (Array.isArray(snap.fixed_blocks) && snap.fixed_blocks.length && snap.inject_meta && snap.inject_meta.created_at) {
+        const _cut = Number(new Date(snap.inject_meta.created_at)) || 0;
+        const _srcOf = {
+          context_assembly: "pinned.json",
+          system_instructions: "pinned.json",
+          core_identity: "memory_summary_cache.json",
+          long_term_understanding: "memory_summary_cache.json",
+          conversation_continuity: "diary.json",
+          starred_dialog: "context_compaction_marks.json",
+        };
+        const _needFiles = new Set();
+        for (const b of snap.fixed_blocks) { if (b && _srcOf[b.key]) _needFiles.add(_srcOf[b.key]); }
+        for (const fn of _needFiles) {
+          try {
+            const st2 = fs.statSync(path.join(__dirname, "data", fn));
+            if (st2.mtimeMs > _cut) { reasons.push("blocks"); break; }
+          } catch (e2) {}
+        }
+      }
+    } catch (e) {}
     return { stale: reasons.length > 0, reasons: reasons.slice(0, 6) };
   } catch (e) {
     return { stale: false, reasons: [] };

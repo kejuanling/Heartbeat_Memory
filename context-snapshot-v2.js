@@ -97,6 +97,54 @@ function truncateSnapshot(baseDir, sessionId, keepIds, newSnapPoint) {
   } catch (e) { return false; }
 }
 
+// 1010-30 阶段4a：注入固定块并入 v2 快照（B 成为唯一快照文件；A 只作过渡回落读）。
+// fixed_blocks=[{key,title,content}]（带 key，runtime apply 要区分 relevant）+ v2_blocks（派生，
+// 供 legacy 读取路径与旧红点比对）+ inject_meta.created_at（红点"块源改动"判定基准）。
+// merge 模式（默认）：保留 B 已有 content/snap_point/tools 等——_maybeBuildSnapshot 先写 B，
+// 这里只补注入块；B 缺失时补齐 v3 必需结构（content=[] + snap_point=0，读取路径尾部现取=整条时间线）。
+// overwriteShell 模式（分支/合并预置）：整体重置为「注入块 + 空 content」壳，不残留旧内容。
+function mergeInjectBlocks(baseDir, sessionId, fixedBlocks, opts) {
+  const o = opts || {};
+  const fb = (Array.isArray(fixedBlocks) ? fixedBlocks : [])
+    .filter(function (b) { return b && b.content; })
+    .map(function (b) { return { key: String(b.key || ""), title: String(b.title || ""), content: String(b.content) }; });
+  const prev = loadSnapshot(baseDir, sessionId);
+  const now = new Date().toISOString();
+  const v2b = fb.map(function (b) { return { role: "developer", content: b.content }; });
+  let payload;
+  if (o.overwriteShell) {
+    payload = {
+      v: 3,
+      system: o.systemContent ? { role: "system", content: String(o.systemContent) } : null,
+      sp_rev: "",
+      v2_blocks: v2b,
+      fixed_blocks: fb,
+      inject_meta: { created_at: now },
+      content: [],
+      snap_point: 0,
+      tools: null,
+      tail_start: 0,
+      fp: "", state_fp: "", tools_fp: "",
+    };
+  } else {
+    payload = Object.assign({}, prev || {}, {
+      v: (prev && prev.v) || 3,
+      system: (prev && prev.system) || (o.systemContent ? { role: "system", content: String(o.systemContent) } : null),
+      fixed_blocks: fb,
+      v2_blocks: v2b,
+      inject_meta: { created_at: (prev && prev.inject_meta && prev.inject_meta.created_at) || o.createdAt || now },
+    });
+    if (!prev) {
+      payload.content = [];
+      payload.snap_point = 0;
+      payload.tools = null;
+      payload.tail_start = 0;
+      payload.fp = ""; payload.state_fp = ""; payload.tools_fp = "";
+    }
+  }
+  return saveSnapshot(baseDir, sessionId, payload) ? fb.length : -1;
+}
+
 // 会话快照存在性（重建/失效标记用）
 function hasSnapshot(baseDir, sessionId) {
   try { return fs.existsSync(snapFile(baseDir, sessionId)); } catch (e) { return false; }
@@ -125,7 +173,7 @@ function clearStale(baseDir, sessionId) {
 
 module.exports = {
   loadSnapshot, saveSnapshot, deleteSnapshot, hasSnapshot,
-  truncateSnapshot,
+  truncateSnapshot, mergeInjectBlocks,
   markStale, isStale, clearStale,
   fpOf, toolsFpOf, snapFile, injFile,
 };

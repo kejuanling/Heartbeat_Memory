@@ -191,7 +191,27 @@ async function assembleAndApply(opts) {
     try { relPreview = fsp.readJsonSync(path.join(opts.baseDir, 'data', 'memory_v2_config.json')).relevant.preview === true; }
     catch (_) { relPreview = false; }
   }
-  const existing = snapStore.loadSnapshot(opts.baseDir, opts.sessionId);
+  // 1010-30 阶段4a：注入块读 v2 快照（B）优先；无则回落旧注入快照（A，存量过渡）。
+  // 回落命中且 B 已存在时顺手把 A 的块并入 B（懒迁移，仅一次；created_at 沿用 A 的原固化时间）。
+  let existing = null;
+  try {
+    const sv2 = require('./context-snapshot-v2');
+    const _b = sv2.loadSnapshot(opts.baseDir, opts.sessionId);
+    if (_b && (Array.isArray(_b.fixed_blocks) || _b.inject_meta)) {
+      existing = { fixed_blocks: Array.isArray(_b.fixed_blocks) ? _b.fixed_blocks : [] };
+    } else {
+      const _a = snapStore.loadSnapshot(opts.baseDir, opts.sessionId);
+      if (_a && Array.isArray(_a.fixed_blocks)) {
+        existing = { fixed_blocks: _a.fixed_blocks };
+        if (_b) {
+          try {
+            sv2.mergeInjectBlocks(opts.baseDir, opts.sessionId, _a.fixed_blocks, { createdAt: _a.created_at });
+            console.log('[ctx-v2] A→B 注入块懒迁移完成: session=' + opts.sessionId);
+          } catch (e) {}
+        }
+      }
+    }
+  } catch (e) { existing = null; }
   let blocks;
   let relevantHits = [];
   if (existing && Array.isArray(existing.fixed_blocks)) {
@@ -251,18 +271,20 @@ async function assembleAndApply(opts) {
       : built.blocks;
 
     if (!crossOff) {
+      // 1010-30 阶段4a：注入块直写 v2 快照（B 唯一快照；不再写旧注入快照 A）。
+      // merge 语义保留 B 已有 content/snap_point（buildConversation 先写的），这里只补注入块。
       const sysMsg = (opts.messages || []).find(function (m) { return m && m.role === 'system'; });
       try {
-        snapStore.saveSnapshot(opts.baseDir, opts.sessionId, {
-          created_at: new Date().toISOString(),
-          system_prompt: sysMsg && sysMsg.content ? String(sysMsg.content) : '',
-          fixed_blocks: selected
-            .filter(function (b) { return b.key !== 'relevant_memories' && !b.empty; })
-            .map(function (b) { return { key: b.key, title: b.title || '', content: b.content }; }),
+        const sv2 = require('./context-snapshot-v2');
+        const _fixed = selected
+          .filter(function (b) { return b.key !== 'relevant_memories' && !b.empty; })
+          .map(function (b) { return { key: b.key, title: b.title || '', content: b.content }; });
+        const _n = sv2.mergeInjectBlocks(opts.baseDir, opts.sessionId, _fixed, {
+          systemContent: sysMsg && sysMsg.content ? String(sysMsg.content) : '',
         });
-        console.log('[ctx-v2] 会话注入快照已生成: session=' + opts.sessionId);
+        console.log('[ctx-v2] 会话注入块已并入 v2 快照: session=' + opts.sessionId + ' blocks=' + _n);
       } catch (e) {
-        console.warn('[ctx-v2] 快照保存失败（不影响本次请求，下次重试生成）:', e && e.message);
+        console.warn('[ctx-v2] 注入块并入快照失败（不影响本次请求，下次重试）:', e && e.message);
       }
     } else {
       console.log('[ctx-v2] 跨窗口总开关关闭，跳过生成注入快照: session=' + opts.sessionId);

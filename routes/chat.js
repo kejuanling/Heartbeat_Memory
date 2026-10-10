@@ -322,6 +322,12 @@ module.exports = function registerChatRoutes(app, deps) {
         const sr = require('../context-snapshot').deleteSnapshot(baseDir, safe);
         if (sr.existed) cleaned++;
       } catch (e) {}
+      // 1010-30 阶段4a：v2 快照与失效标记一并清（此前漏删，同 id 重建会继承旧前缀缓存）
+      try {
+        const sv2 = require('../context-snapshot-v2');
+        if (sv2.deleteSnapshot(baseDir, safe)) cleaned++;
+        sv2.clearStale(baseDir, safe);
+      } catch (e) {}
       console.log(`[sessions] 会话 ${safe} 已删除，周边文件清理 ${cleaned} 处`);
       reply.send({ ok: true, deleted: true, cleaned });
     } catch (err) {
@@ -572,7 +578,7 @@ module.exports = function registerChatRoutes(app, deps) {
   function buildInjectSnapshotForNewSession(srcSessionId, newSessionId, srcTl) {
     let blocks = 0;
     try {
-      const injFile = require('../context-snapshot-v2').injFile(baseDir);
+      const sv2 = require('../context-snapshot-v2');
       const input = contextV2Shadow.assembleInput({
         baseDir,
         sessionId: srcSessionId,
@@ -584,13 +590,11 @@ module.exports = function registerChatRoutes(app, deps) {
       const fixed = built.blocks
         .filter(b => b && b.key !== 'relevant_memories' && !b.empty)
         .map(b => ({ key: b.key, title: b.title || '', content: b.content }));
-      let inj = {};
-      try { inj = JSON.parse(fsp.readFileSync(injFile, 'utf8')); } catch (e) { inj = { sessions: {} }; }
       const srcSys = (srcTl && srcTl[0] && srcTl[0].role === 'system' && srcTl[0].content) ? srcTl[0].content : '';
-      inj.sessions = inj.sessions || {};
-      inj.sessions[newSessionId] = { created_at: new Date().toISOString(), system_prompt: srcSys, fixed_blocks: fixed };
-      fsp.writeFileSync(injFile, JSON.stringify(inj, null, 2));
-      blocks = fixed.length;
+      // 1010-30 阶段4a：预置块直写 v2 快照（overwriteShell：content=[] + snap_point=0，
+      // 读取路径尾部现取=整条新时间线；不再写旧注入快照 A）
+      const n = sv2.mergeInjectBlocks(baseDir, newSessionId, fixed, { overwriteShell: true, systemContent: srcSys });
+      blocks = n >= 0 ? n : 0;
     } catch (e) {
       console.warn('[branch/merge] 注入快照生成失败（会话仍可用）:', e.message);
     }
@@ -649,14 +653,17 @@ module.exports = function registerChatRoutes(app, deps) {
           }
           if (lastTs > injectSrcTs) { injectSrcTs = lastTs; injectSrc = id; }
         }
-        injectBlocks = buildInjectSnapshotForNewSession(injectSrc, target, loadTimeline(injectSrc));
       } catch (e) { console.warn('[sessions/merge] 注入快照生成失败:', e.message); }
-      // 1008 快照防御：目标会话异常残留旧 v2 快照时清掉（正常新建无快照，幂等零副作用）
+      // 1008 快照防御 + 1010-30 阶段4a：先清目标会话旧 v2 快照再预置注入块
+      //（预置已直写 v2 快照，后清会把刚写的清掉——顺序必须"先清后写"）
       try {
         const sv2 = require('../context-snapshot-v2');
         sv2.deleteSnapshot(baseDir, target);
         sv2.clearStale(baseDir, target);
       } catch (e) { console.error('[sessions/merge] 清目标会话快照失败:', e.message); }
+      try {
+        injectBlocks = buildInjectSnapshotForNewSession(injectSrc, target, loadTimeline(injectSrc));
+      } catch (e) { console.warn('[sessions/merge] 注入快照预置失败:', e.message); }
       console.log(`[sessions/merge] 合并 ${ids.length} 个会话 -> ${target}（${total} 条源消息）注入源=${injectSrc || ''} 注入块=${injectBlocks}`);
       reply.send({ ok: true, session_id: target, merged: total, total: rebuilt.filter(isRealMessageForTimeline).length, inject_blocks: injectBlocks });
     } catch (err) {
@@ -707,17 +714,16 @@ module.exports = function registerChatRoutes(app, deps) {
       // 3) 状态块继承（inheritSessionBlocks 内部只认状态块；bIdx 以 hint 传入避免二次定位）
       const stat = contextReplacements.inheritSessionBlocks(srcSession, newSession, branchIndex, anchorId, bIdx);
       if (stat.error) return reply.code(404).send({ error: stat.error });
-      // 4) 注入快照：按父会话口径生成几大块（Context Assembly / System Instructions / Core Identity /
-      //    Long-term Understanding / Earlier Days），分支会话系统注入完整继承旧会话
-      const injectBlocks = buildInjectSnapshotForNewSession(srcSession, newSession, tl);
-      // 5) 写分支时间线 + 清目标会话旧快照（防御异常路径：newSession 已存在且带旧快照时，
-      //    不重建则继承块/新时间线不生效；正常新建会话无快照，deleteSnapshot/clearStale 幂等零副作用）
-      saveTimeline(branchTimeline, newSession);
+      // 4) 清目标会话旧 v2 快照（防御异常路径残留；必须先清——预置注入块直写 v2 快照，后清会清掉刚写的）
       try {
         const sv2 = require('../context-snapshot-v2');
         sv2.deleteSnapshot(baseDir, newSession);
         sv2.clearStale(baseDir, newSession);
       } catch (e) { console.error('[sessions/branch-inherit] 清目标会话快照失败:', e.message); }
+      // 5) 注入块预置（1010-30 阶段4a：按父会话口径直写 v2 快照，分支会话系统注入完整继承旧会话）
+      const injectBlocks = buildInjectSnapshotForNewSession(srcSession, newSession, tl);
+      // 6) 写分支时间线
+      saveTimeline(branchTimeline, newSession);
       reply.send({ ok: true, inherited: stat.inherited, skippedNoMatch: stat.skippedNoMatch, skippedCross: stat.skippedCross, timeline_count: branchTimeline.length, inject_blocks: injectBlocks, branch_point: bIdx });
     } catch (err) {
       console.error('[POST /v1/sessions/branch-inherit] error:', err.message);
@@ -1209,32 +1215,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
             normalizeContentToText: normalizeContentToText,
           });
           llmMessages = r.messages;
-          // 1007 上下文快照 v2：ctx-v2 装配后回填 V2 块到快照。
-          // 时序：buildConversation 生成快照时 session_inject_snapshots 可能还没有该会话
-          //（首轮才生成），故 v2_blocks 在快照里为空——这里装配完成后补一次。
-          // 只回填（不改 history/tail_start/tools），块内容与 ctx-v2 快照同源（冻死）。
-          try {
-            const _sv2 = require("../context-snapshot-v2");
-            const _snap = _sv2.loadSnapshot(baseDir, sessionId);
-            if (_snap && !Array.isArray(_snap.v2_blocks) || (_snap && Array.isArray(_snap.v2_blocks) && _snap.v2_blocks.length === 0)) {
-              let _vb = [];
-              try {
-                const inj = JSON.parse(require("fs").readFileSync(_sv2.injFile(baseDir), "utf8"));
-                const s = inj.sessions && inj.sessions[sessionId];
-                if (s && Array.isArray(s.fixed_blocks)) {
-                  _vb = s.fixed_blocks
-                    .filter(function (b) { return b && b.content; })
-                    .map(function (b) { return { role: "developer", content: b.content }; });
-                }
-              } catch (e2) { _vb = []; }
-              if (_vb.length) {
-                _sv2.saveSnapshot(baseDir, sessionId, Object.assign({}, _snap, { v2_blocks: _vb }));
-                console.log("[ctx-snapshot-v2] V2 块已回填快照 session=" + sessionId + " blocks=" + _vb.length);
-              }
-            }
-          } catch (e3) {
-            console.warn("[ctx-snapshot-v2] V2 块回填失败（下次请求重试）:", e3 && e3.message);
-          }
+          // 1010-30 阶段4a：V2 块回填逻辑删除——注入块已由 assembleAndApply 直接并入 v2 快照
+          //（fixed_blocks + 派生 v2_blocks），无需装配后再补写。
           // 记忆浮现：命中的记忆原样写入时间线永久在场（hidden 前端不显示；清单防重复由 builder excludeIds 保证）
           if (r.relevantHits && r.relevantHits.length) {
             const n = ctxV2Runtime.floatMemoriesToTimeline({ appendMessages, sessionId, mems: r.relevantHits, baseDir });
