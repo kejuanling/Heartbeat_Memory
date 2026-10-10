@@ -4566,6 +4566,8 @@ async function request(finalMsgs, fromSend, regenAnchorId){
       resp=await doFetch();
     }
     if(!resp.ok){const t=await resp.text().catch(()=>"");throw new Error("HTTP "+resp.status+" : "+(t.slice(0,200)||resp.statusText));}
+    // 1010-27：本轮请求触发了快照懒生成（rebuild 后首次发消息）→ 弹横幅通知重建成功
+    try{ if(resp.headers.get('X-Snapshot-Rebuilt')==='1'){ bannerAlert('快照已重建，最新内容已生效',{title:'重建快照'}); } }catch(e){}
     if(!isStream){
       // 非流式：直接读整段 JSON 回复（不显示思考链/工具痕迹）；展示同样走 QQ 式分段连播
       const j=await resp.json().catch(()=>null);
@@ -8441,7 +8443,7 @@ async function snapRebuildSession(sid, skipConfirm){
     .then(function(r){return r.json().catch(function(){return {};})})
     .then(function(d){
       if(d&&d.error){ bannerAlert('重建快照失败: '+d.error,{title:'重建快照失败'}); return; }
-      bannerAlert(d&&d.snapshot_built?'快照已重建，最新内容已生效':'快照已清除，下一轮对话将重建',{title:'重建快照'});
+      bannerAlert('快照已清除，下一轮对话将重建',{title:'重建快照'});
     })
     .catch(function(e){ bannerAlert('重建快照失败: '+e.message,{title:'重建快照失败'}); });
 }

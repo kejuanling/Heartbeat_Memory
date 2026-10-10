@@ -784,28 +784,9 @@ module.exports = function registerChatRoutes(app, deps) {
       sv2.deleteSnapshot(baseDir, safe);
       sv2.clearStale(baseDir, safe);
       const r = require('../context-snapshot').deleteSnapshot(baseDir, safe);
-      // 1010-25：删后当场触发懒生成 + hasSnapshot 校验，失败即时报错（不再"删了等下次请求"静默）。
-      // noCache=true 强制绕过整体缓存（大会话缓存命中会短路懒生成，导致校验误报失败）。
-      let built = false, buildErr = null;
-      try {
-        buildConversation(safe, { noCache: true });
-        built = sv2.hasSnapshot(baseDir, safe);
-      } catch (e) { buildErr = e; }
-      if (buildErr || !built) {
-        let reason = buildErr ? String(buildErr.message || buildErr) : "懒生成未产出快照文件";
-        try {
-          const fsx = require('fs'), pathx = require('path');
-          const sf = pathx.join(baseDir, 'data', 'session_ctx_snapshots_v2', '.stale-' + safe.replace(/[^A-Za-z0-9_.-]/g, '_') + '.json');
-          if (fsx.existsSync(sf)) {
-            const j = JSON.parse(fsx.readFileSync(sf, 'utf8'));
-            if (j && j.reason) reason = String(j.reason).replace(/^build-failed:/, '') || reason;
-          }
-        } catch (e2) {}
-        console.warn('[POST /v1/sessions/:id/snapshot/rebuild] 快照重建失败: ' + reason);
-        reply.code(500).send({ error: '快照重建失败: ' + reason });
-        return;
-      }
-      reply.send({ ok: true, session_id: safe, existed: r.existed, snapshot_built: true });
+      // 1010-27 回退：rebuild 只删快照，不当场重建；下次发消息时自然懒生成，
+      // 成功后聊天响应头 X-Snapshot-Rebuilt=1 通知前端弹横幅。
+      reply.send({ ok: true, session_id: safe, existed: r.existed });
     } catch (err) {
       console.error('[POST /v1/sessions/:id/snapshot/rebuild] error:', err.message);
       reply.code(500).send({ error: err.message });
@@ -1014,6 +995,7 @@ module.exports = function registerChatRoutes(app, deps) {
 app.post("/v1/chat/completions", async (req, reply) => {
   // 2026-09-23（F8）：提到 try 外声明——catch 中需要用它释放 pending 占位
   let clientMsgId = "";
+  let snapshotRebuilt = false;  // 1010-27：本轮请求是否触发了快照懒生成（从无到有），用于响应头通知前端弹横幅
   try {
     const body = req.body;
     // 批注 2026-07-15：公开部署时日志不能默认写入完整上下文；
@@ -1177,7 +1159,11 @@ app.post("/v1/chat/completions", async (req, reply) => {
       // 1010 需求2：主聊天请求 → 记录「最后一次聊天的会话」（继承源判定用，服务端语义，不依赖前端）
       try { createLastChatSession(baseDir).record(sessionId); } catch (e) { /* 记录失败不影响聊天 */ }
       // S4 修复：服务端时间线重建必须先于一切上下文加工（0919 静态测试抓出漏行）
+      // 1010-27：快照懒生成成功检测（buildConversation 前无、后有 = 本轮新建）
+      const _sv2 = require("../context-snapshot-v2");
+      const _hadSnap = _sv2.hasSnapshot(baseDir, sessionId);
       llmMessages = buildConversation(sessionId);
+      try { snapshotRebuilt = !_hadSnap && _sv2.hasSnapshot(baseDir, sessionId); } catch (e) { snapshotRebuilt = false; }
       // 开关在请求开始时快照读取（17.txt：防切换瞬间半新半旧）
       const v2Cfg = await fsp.readJson(path.join(baseDir, 'data', 'memory_v2_config.json')).catch(() => ({}));
       if (v2Cfg && v2Cfg.ctx_v2_enabled === true) {
@@ -1355,6 +1341,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
       // 历史遗留：content 可能是字符串里内嵌 data:image（极少数），这里不动——字符串型图片上游走 base64 由上游判断
     } catch (_e) { console.warn("[chat] 图片URL补全忽略:", _e.message); }
 
+    // 1010-27：MCP 循环前统一 setHeader（MCP 分支内部 writeHead 后 return，不到直连 writeHead）
+    try { reply.raw.setHeader("X-Snapshot-Rebuilt", snapshotRebuilt ? "1" : "0"); } catch(e) {}
     // === MCP_TOOL_LOOP_BEGIN ===
     // MCP 工具循环：启用时若为主聊天，走 MCP 分支（工具轮次非流式，最终流式回传）
     // 这里传入已处理好的 sanitizedMessages，完整保留记忆/时间线/替换/裁剪上下文
@@ -1492,6 +1480,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
       return reply
         .code(response.status)
         .header("Content-Type", upstreamContentType || "application/json")
+        .header("X-Snapshot-Rebuilt", snapshotRebuilt ? "1" : "0")
         .send(finalResponseText);
     }
 
@@ -1535,7 +1524,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
     reply.raw.writeHead(response.status, {
       "Content-Type": upstreamContentType || "text/event-stream",
       "Cache-Control": "no-cache",
-      Connection: "keep-alive"
+      Connection: "keep-alive",
+      "X-Snapshot-Rebuilt": snapshotRebuilt ? "1" : "0"
     });
 
     const reader = response.body.getReader();
