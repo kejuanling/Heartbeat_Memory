@@ -137,9 +137,12 @@ function readRecentDialogLines(baseDir, loadTimeline) {
 function apply(messages, blocks) {
   const old = [];
   // 1004-11：V2 块头是 "## System Instructions" 等（HEADERS），旧前缀 [永久上下文]/[跨窗口] 是
-  // V1 时代遗留——只匹配旧前缀时防御失效（新块清不掉）。精确匹配 V2 五个块头 + 保留旧前缀兼容历史；
-  // 不匹配 "## Conversation State"（状态块，不能清）。
-  const _v2Heads = ['## System Instructions', '## Core Identity', '## Long-term Understanding', '## Earlier Days', '## Possibly Relevant Memories'];
+  // V1 时代遗留——只匹配旧前缀时防御失效（新块清不掉）。
+  // 1010-26：补齐 V2 全部块头（含顶层引导与新增的标星/最近）。此前漏了 Context Assembly / Starred Dialog /
+  //   Recent Dialog，导致"快照里已有一份 + apply 再插一份"→ 这三块双份注入。
+  //   引导块内容前缀是无空格的 "##Context Assembly"（面板自带），内置兜底是有空格的 "## Context Assembly"，两种都收。
+  //   刻意不匹配 "## Conversation State"——那是会话自身状态块，不能清。
+  const _v2Heads = ['##Context Assembly', '## Context Assembly', '## System Instructions', '## Core Identity', '## Long-term Understanding', '## Earlier Days', '## Starred Dialog', '## Recent Dialog', '## Possibly Relevant Memories'];
   (messages || []).forEach((m, i) => {
     if (m && m.role === 'developer' && typeof m.content === 'string' &&
       (m.content.startsWith('[永久上下文]') || m.content.startsWith('[跨窗口]') || _v2Heads.some(function (h) { return m.content.startsWith(h); }))) old.push(i);
@@ -249,12 +252,33 @@ async function assembleAndApply(opts) {
     try { input.recentDialogLines = readRecentDialogLines(opts.baseDir, opts.loadTimeline); } catch (e) { input.recentDialogLines = []; }
     if (relOn || relPreview) { if (!relOn) input.previewOnly = true; await attachVecScores(input); } else input.query = '';
     const built = buildContextBlocks(input);
+
+    // 1010-26：先把会话级多选（inject_blocks）解析出来，**过滤之后再固化快照**。
+    // 旧实现是先冻全量、再过滤本次输出 → "新建会话时定型"根本不成立（快照里始终是全部块）。
+    let wantBlocks = null; // 注入块白名单；null = 未解析成功（不过滤，保守放行）
+    try {
+      const cfg = createSessionCfg(opts.baseDir);
+      const inj = cfg.readInjectBlocks(opts.sessionId);
+      wantBlocks = new Set(Array.isArray(inj) ? inj : cfg.DEFAULT_INJECT_BLOCKS);
+    } catch (e) { console.warn('[ctx-v2] inject_blocks 解析失败（本次不过滤）:', e && e.message); }
+
+    // 顶层引导 context_assembly 恒注入（不在多选内）；relevant_memories 不受多选控制（独立总闸）。
+    // 其余块 key 与多选 key 一一对应（system_instructions / core_identity / long_term_understanding /
+    // conversation_continuity / starred_dialog / recent_dialog）。
+    const selected = wantBlocks
+      ? built.blocks.filter(function (b) {
+          if (!b || !b.key) return true;
+          if (b.key === 'context_assembly' || b.key === 'relevant_memories') return true;
+          return wantBlocks.has(b.key);
+        })
+      : built.blocks;
+
     const sysMsg = (opts.messages || []).find(function (m) { return m && m.role === 'system'; });
     try {
       snapStore.saveSnapshot(opts.baseDir, opts.sessionId, {
         created_at: new Date().toISOString(),
         system_prompt: sysMsg && sysMsg.content ? String(sysMsg.content) : '',
-        fixed_blocks: built.blocks
+        fixed_blocks: selected
           .filter(function (b) { return b.key !== 'relevant_memories' && !b.empty; })
           .map(function (b) { return { key: b.key, title: b.title || '', content: b.content }; }),
       });
@@ -262,51 +286,23 @@ async function assembleAndApply(opts) {
     } catch (e) {
       console.warn('[ctx-v2] 快照保存失败（不影响本次请求，下次重试生成）:', e && e.message);
     }
-    blocks = built.blocks;
+    blocks = selected;
     relevantHits = built.relevantHits || [];
-    // 1010 需求3：会话级多选注入块（inject_blocks）——新建会话时选定的注入内容。
-    // 缺省/null = 跟随全局默认三块（1010-21 用户澄清口径：全局默认注入永久上下文+记忆两大块总结+日记，
-    // 标星的对话/状态机快照/最近20条对话原文是增强项，仅会话级明确勾选才注入）。过滤后的集合在首轮固化成快照，
-    // 之后该会话按快照冻结（与"新建会话时选择"的语义一致）。
-    // 映射：permanent=system_instructions, summary=core_identity+long_term_understanding,
-    //       diary=conversation_continuity, starred_dialog, state=conversation_state_inherit(下方),
-    //       recent_dialog。relevant_memories 不受此开关控制（独立总闸）。
-    let wantBlocks = null; // 注入块白名单；null 表示未解析成功（不过滤，保守放行）
-    try {
-      const cfg = createSessionCfg(opts.baseDir);
-      const inj = cfg.readInjectBlocks(opts.sessionId);
-      wantBlocks = new Set(Array.isArray(inj) ? inj : cfg.DEFAULT_INJECT_BLOCKS);
-      blocks = blocks.filter(function (b) {
-        if (!b || !b.key) return true;
-        if (b.key === 'system_instructions') return wantBlocks.has('permanent');
-        if (b.key === 'core_identity' || b.key === 'long_term_understanding') return wantBlocks.has('summary');
-        if (b.key === 'conversation_continuity') return wantBlocks.has('diary');
-        if (b.key === 'starred_dialog') return wantBlocks.has('starred_dialog');
-        if (b.key === 'recent_dialog') return wantBlocks.has('recent_dialog');
-        if (b.key === 'conversation_state_inherit') return wantBlocks.has('state');
-        return true;
-      });
-    } catch (e) { console.warn('[ctx-v2] inject_blocks 过滤失败（本次不过滤）:', e && e.message); }
-    // 1010 需求2：状态机快照继承（仅首次、无快照会话）——
-    // b 没有自己的状态机时，把「最后一次聊天的会话 a」的状态正文作为 Conversation State 块 live 注入。
-    // 三个不进快照的原因：a) 继承块是"一次性的"，进快照会让 b 永远冻结 a 的状态；
-    //   b) b 一旦自己 commitMerge，现有替换块通道（ctxrep_state_<b>）自然接管，继承块不应残留；
-    //   c) 与需求3 的"状态机快照"多选项语义一致（该块不固化、随会话演化）。
-    // 继承块 key 用 conversation_state_inherit：apply() 会把它当普通 developer 块插入（非 relevant、
-    // 非 empty），且 _v2Heads 不含 "## Conversation State" 头 → 不会被清除。
+    // 1010-26：继承状态块（可选 state_inherit）——b 没有自己的状态机时，把「最后一次聊天的会话 a」的
+    // 状态正文作为 ## Conversation State 块 live 注入。不进快照：b 一旦自己 commitMerge，
+    // 由替换块通道 ctxrep_state_<b> 自然接管。
     try {
       const inh = getInheritedState(opts.sessionId);
-      // 1010-21 口径修正：跟随全局（无 state 勾选）时不注入继承块——全局默认不含状态机快照
-      if (inh && inh.text && wantBlocks && wantBlocks.has('state')) {
-        // 1010 需求3 顺序（用户拍板）：日记 → 标星的对话 → 状态机快照 → 最近20条对话原文。
+      if (inh && inh.text && wantBlocks && wantBlocks.has('state_inherit')) {
+        // 顺序（用户拍板）：日记 → 标星的对话 → 状态机 → 最近20条对话原文。
         // 故继承块插到 recent_dialog 之前（而非追加末尾，否则会排到最近20条后面）。
-        const inheritBlock = { key: 'conversation_state_inherit', title: '', content: '## Conversation State\n\n' + inh.text, empty: false };
+        const inheritBlock = { key: 'state_inherit', title: '', content: '## Conversation State\n\n' + inh.text, empty: false };
         const recIdx = blocks.findIndex(function (b) { return b && b.key === 'recent_dialog'; });
         if (recIdx >= 0) { blocks.splice(recIdx, 0, inheritBlock); }
         else { blocks = blocks.concat([inheritBlock]); }
-        console.log('[ctx-v2] 状态机快照继承注入: session=' + opts.sessionId + ' <- ' + inh.session + '（' + String(inh.text).length + ' 字，一次性不固化）');
+        console.log('[ctx-v2] 状态机继承注入: session=' + opts.sessionId + ' <- ' + inh.session + '（' + String(inh.text).length + ' 字，一次性不固化）');
       }
-    } catch (e) { console.warn('[ctx-v2] 状态机快照继承注入失败（跳过）:', e && e.message); }
+    } catch (e) { console.warn('[ctx-v2] 状态机继承注入失败（跳过）:', e && e.message); }
     // 1005-17 预览：记录本应注入条目后清空（不浮现、不打点）；真注入时此段不触发
     if (relPreview && relevantHits.length) {
       try { appendPreview(opts.baseDir, opts.sessionId, input.query, relevantHits); } catch (_) {}
@@ -325,22 +321,12 @@ async function assembleAndApply(opts) {
       try { adm.decayEvents(); } catch (_) { /* 衰减失败不影响主链路 */ }
     }
   } catch (_) { /* 打点失败不影响主链路 */ }
-  // 会话级跨窗口开关（1003-19 用户拍板「让它生效」）：override=false 时本会话不注入 Earlier Days
-  //（= 其它会话写的日记，块 key conversation_continuity）。
-  //
-  // 为什么放这里而不是 context-v2-shadow 的日记过滤点：快照模式下 minimalAssembleInput 返回的
-  // diaryEntries 恒为 []（固定块来自 data/session_inject_snapshots.json），在 shadow 里过滤对
-  // 「已有快照的存量会话」完全无效——实测 12 个会话全部已固化 conversation_continuity。
-  // 放这里则首次组装与快照复用两条路径都生效，切换开关下一轮请求即刻见效。
-  //
-  // 只过滤本次输出、不改快照文件：关掉再打开能恢复，不会像「重建快照」那样把记忆冻死。
-  // true / null（跟随全局）一律放行——V2 没有全局总开关，跟随即等于现有行为。
+  // 会话级跨窗口总开关（1010-26 口径）：关闭 = 本会话不注入任何跨窗口内容，只剩人设
+  //（system 角色的人设 + 时间线本身），连引导块/永久上下文块也一并去掉。
+  // 相关记忆（relevant_memories）是独立功能，不受本开关控制，故保留。
+  // 只作用于本次输出、不改快照文件：关掉再打开能恢复（与"重建快照"不同）。
   if (createSessionCfg(opts.baseDir).sessionCrossInjectOverride(opts.sessionId) === false) {
-    // 1010 需求2/3：跨窗口注入内容在 override=false 时一并剔除（Earlier Days + 状态继承 + 标星 + 最近20条）
-    blocks = blocks.filter(function (b) {
-      return b && b.key !== 'conversation_continuity' && b.key !== 'conversation_state_inherit'
-        && b.key !== 'starred_dialog' && b.key !== 'recent_dialog';
-    });
+    blocks = blocks.filter(function (b) { return b && b.key === 'relevant_memories'; });
   }
   return { messages: apply(opts.messages, blocks), relevantHits: relevantHits };
 }
