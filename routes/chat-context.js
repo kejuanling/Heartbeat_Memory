@@ -492,18 +492,12 @@ function createConversationBuilder(deps) {
     // 1002-11 快照优先：会话已有注入快照 → 人设取快照值（永久不变，改全局人设不影响）；
     // 无快照走原权威解析（resolveSessionSystemPrompt 会话级 → 全局）。
     let snapSystem = "";
-    // 1010-30 阶段4a：人设优先取 v2 快照冻结值（B.system）；旧注入快照（A.system_prompt）过渡回落。
-    //（此前只读 A——4a 起新会话不再写 A，不补这条会退化成每次现解析全局人设、冻结失效。）
+    // 1010-30 阶段4a：人设优先取 v2 快照冻结值（B.system），防改全局人设冲掉会话冻结人设。
+    // 1010-31 阶段4c：A 回落已随 v1 注入快照退役删除；无 B 会话走权威解析（原首次行为）。
     try {
       const _bs = snapshotV2 && snapshotV2.loadSnapshot ? snapshotV2.loadSnapshot(snapshotV2.baseDir, sessionId) : null;
       if (_bs && _bs.system && typeof _bs.system.content === "string") snapSystem = _bs.system.content;
     } catch (e) { snapSystem = ""; }
-    if (!snapSystem && typeof deps.loadSnapshot === "function") {
-      try {
-        const _sp = deps.loadSnapshot(sessionId);
-        snapSystem = _sp && typeof _sp.system_prompt === "string" ? _sp.system_prompt : "";
-      } catch (e) { snapSystem = ""; }
-    }
     const authoritativeSP = snapSystem
       || ((typeof resolveSessionSystemPrompt === "function") ? (resolveSessionSystemPrompt(sessionId) || "") : "");
     if (authoritativeSP.trim()) {
@@ -683,17 +677,9 @@ function createConversationBuilder(deps) {
           .map(function (m) { return Object.assign({}, m); });
         tailStart = (Array.isArray(timeline) ? timeline.length : head.length);
       }
-      // v2_blocks：从 ctx-v2 注入快照读冻死块（与 ctx-v2 快照模式同源）
+      // 1010-31 阶段4c：v2_blocks 不再读旧注入快照（A 已退役）——注入块由 assembleAndApply
+      // 在本请求内 mergeInjectBlocks 并入（fixed_blocks+派生 v2_blocks）；此处先置空，B 生成后同请求补齐。
       let v2Blocks = [];
-      try {
-        const inj = JSON.parse(fs.readFileSync(snapshotV2.injFile(snapshotV2.baseDir), "utf8"));
-        const s = inj.sessions && inj.sessions[sessionId];
-        if (s && Array.isArray(s.fixed_blocks)) {
-          v2Blocks = s.fixed_blocks
-            .filter(function (b) { return b && b.content; })
-            .map(function (b) { return { role: "developer", content: b.content }; });
-        }
-      } catch (e) { v2Blocks = []; }
       // system（人设）：从组装结果里取第一条 system
       let sysPrep = null;
       for (const m of (assembledMsgs || [])) { if (m && m.role === "system") { sysPrep = m; break; } }

@@ -19,7 +19,6 @@ const fs = require('fs');
 const fsp = require('fs-extra');
 const { buildContextBlocks } = require('./context-v2-builder');
 const shadow = require('./context-v2-shadow');
-const snapStore = require('./context-snapshot');
 const crypto = require('crypto'); // 1010 需求3：标星 contentKey 同口径
 const { createSessionCfg } = require('./lib/session-cfg');   // 2026-10-03：会话级跨窗口开关
 const { getInheritedState } = require('./lib/conversation-state'); // 1010 需求2：状态机快照继承（最后一次聊天会话）
@@ -191,25 +190,13 @@ async function assembleAndApply(opts) {
     try { relPreview = fsp.readJsonSync(path.join(opts.baseDir, 'data', 'memory_v2_config.json')).relevant.preview === true; }
     catch (_) { relPreview = false; }
   }
-  // 1010-30 阶段4a：注入块读 v2 快照（B）优先；无则回落旧注入快照（A，存量过渡）。
-  // 回落命中且 B 已存在时顺手把 A 的块并入 B（懒迁移，仅一次；created_at 沿用 A 的原固化时间）。
+  // 1010-31 阶段4c：注入块唯一来源=v2 快照（B.fixed_blocks/inject_meta）。
+  // 旧注入快照 A 已退役：存量经 4b 批量迁移 + 4a 懒迁移全部入 B；无 B 的会话走下方首次组装从当前源重算。
   let existing = null;
   try {
-    const sv2 = require('./context-snapshot-v2');
-    const _b = sv2.loadSnapshot(opts.baseDir, opts.sessionId);
+    const _b = require('./context-snapshot-v2').loadSnapshot(opts.baseDir, opts.sessionId);
     if (_b && (Array.isArray(_b.fixed_blocks) || _b.inject_meta)) {
       existing = { fixed_blocks: Array.isArray(_b.fixed_blocks) ? _b.fixed_blocks : [] };
-    } else {
-      const _a = snapStore.loadSnapshot(opts.baseDir, opts.sessionId);
-      if (_a && Array.isArray(_a.fixed_blocks)) {
-        existing = { fixed_blocks: _a.fixed_blocks };
-        if (_b) {
-          try {
-            sv2.mergeInjectBlocks(opts.baseDir, opts.sessionId, _a.fixed_blocks, { createdAt: _a.created_at });
-            console.log('[ctx-v2] A→B 注入块懒迁移完成: session=' + opts.sessionId);
-          } catch (e) {}
-        }
-      }
     }
   } catch (e) { existing = null; }
   let blocks;

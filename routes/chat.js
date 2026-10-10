@@ -196,7 +196,6 @@ module.exports = function registerChatRoutes(app, deps) {
     prepareMessageForLLM,
     stripPosition,
     resolveSessionSystemPrompt,
-    loadSnapshot: (sid) => require("../context-snapshot").loadSnapshot(baseDir, sid),   // 1002-11 注入前缀快照
     incrementalContext: contextReplacements.buildIncrementalContext,   // 0929 增量：块摘要化+尾部现算
     fullCache: false,   // 0929 聊天只走增量；整体缓存留给唤醒/重试（fp 不变场景）
     // 1007 上下文快照 v2：前缀缓存（人设+V2块+工具+历史冻死，仅三类事件重建）
@@ -317,12 +316,7 @@ module.exports = function registerChatRoutes(app, deps) {
           }
         }
       } catch (e) {}
-      // 1002-12：会话删除时注入前缀快照条目一并清除（防同 id 重建继承旧快照）
-      try {
-        const sr = require('../context-snapshot').deleteSnapshot(baseDir, safe);
-        if (sr.existed) cleaned++;
-      } catch (e) {}
-      // 1010-30 阶段4a：v2 快照与失效标记一并清（此前漏删，同 id 重建会继承旧前缀缓存）
+      // 1010-30 阶段4a：v2 快照与失效标记一并清（防同 id 重建继承旧前缀缓存；v1 注入快照已退役）
       try {
         const sv2 = require('../context-snapshot-v2');
         if (sv2.deleteSnapshot(baseDir, safe)) cleaned++;
@@ -818,20 +812,21 @@ module.exports = function registerChatRoutes(app, deps) {
       // 只删旧注入快照，v2 快照文件纹丝不动（「重建快照」点了没效果的根因）。
       // 现在删 v2 快照 + 清失效标记 + 保留删旧注入快照，下次请求懒生成全新 v2 快照。
       const sv2 = require("../context-snapshot-v2");
+      const existed = sv2.hasSnapshot(baseDir, safe);
       sv2.deleteSnapshot(baseDir, safe);
       sv2.clearStale(baseDir, safe);
-      const r = require('../context-snapshot').deleteSnapshot(baseDir, safe);
       // 1010-27 回退：rebuild 只删快照，不当场重建；下次发消息时自然懒生成，
       // 成功后聊天响应头 X-Snapshot-Rebuilt=1 通知前端弹横幅。
-      reply.send({ ok: true, session_id: safe, existed: r.existed });
+      // 1010-31 阶段4c：v1 注入快照已退役，只删 v2（existed 按 v2 快照判定）。
+      reply.send({ ok: true, session_id: safe, existed: existed });
     } catch (err) {
       console.error('[POST /v1/sessions/:id/snapshot/rebuild] error:', err.message);
       reply.code(500).send({ error: err.message });
     }
   });
 
-  // 一键删除全部会话注入前缀快照（1009-04）：清空 v2 快照目录全部文件（含失效标记）+ v1 旧快照文件，
-  // 之后各会话下一轮请求按当前人设/记忆/日记懒生成全新快照
+  // 一键删除全部会话注入前缀快照（1009-04）：清空 v2 快照目录全部文件（含失效标记）。
+  // 1010-31 阶段4c：v1 注入快照已退役（A 文件归档于 archives/），不再涉及。
   app.post('/v1/snapshots/clear-all', async (req, reply) => {
     try {
       const fs2 = require('fs');
@@ -845,10 +840,7 @@ module.exports = function registerChatRoutes(app, deps) {
           }
         }
       }
-      const v1f = path2.join(baseDir, "data", "session_inject_snapshots.json");
-      if (fs2.existsSync(v1f)) {
-        try { fs2.unlinkSync(v1f); deleted++; } catch (e) {}
-      }
+
       console.log('[snapshot-clear-all] 已清空全部快照: 删除 ' + deleted + ' 个文件');
       reply.send({ ok: true, deleted });
     } catch (err) {

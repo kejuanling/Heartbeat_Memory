@@ -8326,19 +8326,20 @@ async function newSession(){
       +'<div class="field" style="margin-top:8px"><label>模型</label><select class="np-sel" id="np-model">'+modelOptsFor("")+'</select>'
       +'<div class="np-tip">选定后这个会话单独走该供应商；「默认」跟随全局。供应商停用或删除会自动回退全局。</div></div>'
       +'<div class="field" style="margin-top:12px"><div class="np-sw-row"><label>跨窗口注入</label><label class="np-switch"><input type="checkbox" id="np-cross-toggle" indeterminate><span class="np-sl"></span></label><button type="button" id="np-cross-global" class="np-link">跟随全局</button></div>'
-      +'<div class="np-tip">是否注入其它会话的跨窗口内容。默认跟随全局：只注入永久上下文、记忆两大块总结、日记；勾选下方其它项即本会话单独开启注入。</div></div>'
+      +'<div class="np-tip">是否注入其它会话的跨窗口内容。默认跟随全局：注入永久上下文、Core Identity、Long-term Understanding、日记；改动勾选即本会话单独设置。</div></div>'
       +'<div class="field" style="margin-top:12px" id="np-inject-blocks-wrap"><label>跨窗口注入内容（多选）</label>'
       +'<div class="np-blocks" id="np-inject-blocks">'
-      +'<label class="np-blk"><input type="checkbox" value="permanent" checked> 永久上下文</label>'
-      +'<label class="np-blk"><input type="checkbox" value="summary" checked> 记忆两大块总结</label>'
-      +'<label class="np-blk"><input type="checkbox" value="diary" checked> 日记（Earlier Days）</label>'
+      +'<label class="np-blk"><input type="checkbox" value="system_instructions" checked disabled> 永久上下文（固定注入）</label>'
+      +'<label class="np-blk"><input type="checkbox" value="state_machine" checked disabled> 状态机（固定启用）</label>'
+      +'<label class="np-blk"><input type="checkbox" value="core_identity" checked> Core Identity</label>'
+      +'<label class="np-blk"><input type="checkbox" value="long_term_understanding" checked> Long-term Understanding</label>'
+      +'<label class="np-blk"><input type="checkbox" value="conversation_continuity" checked> 日记（Earlier Days）</label>'
       +'<label class="np-blk"><input type="checkbox" value="starred_dialog"> 标星的对话</label>'
-      +'<label class="np-blk"><input type="checkbox" value="state"> 状态机快照</label>'
+      +'<label class="np-blk"><input type="checkbox" value="state_inherit"> 继承上个会话状态</label>'
       +'<label class="np-blk"><input type="checkbox" value="recent_dialog"> 最近对话原文<input type="number" id="np-recent-rounds" value="20" min="1" max="100" style="width:52px;margin-left:6px" title="继承轮数，1轮=2条"> 轮</label>'
-      +'<label class="np-blk np-blk-off"><input type="checkbox" value="relevant" disabled> 相关记忆（未启用）</label>'
       +'</div>'
-      +'<div class="np-tip">跟随全局默认注入前三项；勾选其余项即本会话单独开启（连同基础项一起注入）。</div></div>'
-      +'<div class="np-tip" style="color:#888">注入顺序：永久上下文 → 记忆两大块总结 → 日记 → 标星的对话 → 状态机快照。（最近对话原文在建会话时写入本会话时间线）</div></div>',
+      +'<div class="np-tip">前两项固定注入不可取消；其余按需勾选（默认勾选 Core Identity / Long-term Understanding / 日记）。</div></div>'
+      +'<div class="np-tip" style="color:#888">块顺序：永久上下文 → Core Identity → Long-term Understanding → 日记 → 标星的对话 → 状态机；「继承上个会话状态」首轮临时注入；「最近对话原文」建会话时写入本会话时间线。</div></div>',
       function(){ try{
         const pid=(document.getElementById("np-provider")||{}).value||"";
         const mdl=(document.getElementById("np-model")||{}).value||"";
@@ -8381,8 +8382,9 @@ function createSessionWithPrompt(backupId, providerId, modelName){
   pushCurrentSession();   // 跨设备同步：新会话也上报
   setSessionPrompt(sid, backupId);
   if(providerId){ saveSessionProvider(sid, providerId, modelName, sid); }
-  // 1010-21 跨窗口注入总开关 + 多选注入内容（用户澄清口径：跟随全局=只注入永久/总结/日记三块；
-  // 其余项（标星对话/状态机快照/最近对话原文）勾选即本会话单独开启）
+  // 1010-31 阶段5：8 键契约（锁死2：system_instructions/state_machine 不可取消；默认3：core_identity/
+  // long_term_understanding/conversation_continuity；按需3：starred_dialog/state_inherit/recent_dialog）。
+  // 跟随全局且勾选与默认完全一致 → 不提交（null=跟随全局）；有差异或显式开启/关闭 → 会话级覆盖。
   const crossToggle=document.getElementById("np-cross-toggle");
   const crossState=crossToggle? (crossToggle.indeterminate?"":(crossToggle.checked?"1":"0")) : "";
   const blkSel=document.getElementById("np-inject-blocks");
@@ -8390,21 +8392,15 @@ function createSessionWithPrompt(backupId, providerId, modelName){
   if(blkSel){
     blkSel.querySelectorAll("input[type=checkbox]:checked").forEach(function(cb){
       const v=(cb&&cb.value)||"";
-      if(v==="relevant") return;   // 置灰未启用项
-      picked.push(v);
+      if(v) picked.push(v);   // 锁死项 disabled+checked 也匹配 :checked，一并提交（后端 normalize 兜底）
     });
   }
-  const BASE_BLOCKS=["permanent","summary","diary"];
-  const hasBoost=picked.some(function(v){ return BASE_BLOCKS.indexOf(v)<0; });
+  const FOLLOW_DEFAULT=["system_instructions","state_machine","core_identity","long_term_understanding","conversation_continuity"];
+  const sameAsFollow = picked.length===FOLLOW_DEFAULT.length && FOLLOW_DEFAULT.every(function(k){ return picked.indexOf(k)>=0; });
   let submitBody=null;
-  if(crossState==="1" || (crossState==="" && hasBoost)){
-    submitBody={enabled:true};
-    if(picked.length) submitBody.inject_blocks=picked;
-  } else if(crossState==="0"){
-    submitBody={enabled:false};
-  }
-  // 跟随全局且无额外勾选 → 不提交（服务端 null=跟随全局默认三块）；全不勾且开启 → inject_blocks=[]（什么都不注入）
-  if(crossState==="1" && picked.length===0) submitBody={enabled:true, inject_blocks:[]};
+  if(crossState==="0"){ submitBody={enabled:false}; }
+  else if(crossState==="1"){ submitBody={enabled:true, inject_blocks:picked.slice()}; }
+  else if(!sameAsFollow){ submitBody={enabled:true, inject_blocks:picked.slice()}; }
   // 1010-29：勾选「最近对话」时附继承轮数（默认 20 轮 = 40 条；服务端建会话时按此从上一个聊天会话截取）
   if(submitBody && picked.indexOf("recent_dialog")>=0){
     let rd=parseInt((document.getElementById("np-recent-rounds")||{}).value||"20",10);

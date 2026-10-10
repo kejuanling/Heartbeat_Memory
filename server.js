@@ -2027,20 +2027,6 @@ async function snapshotStaleOf(sessionId) {
       if (String((snap.system && snap.system.content) || "") !== cur) reasons.push("system");
     } catch (e) {}
     try {
-      // 1008-13 新增：系统注入块（人设/记忆/日记等固定块）变化检测——快照冻结 v2_blocks vs 当前注入块指纹
-      const injF = (sv2 && sv2.injFile) ? sv2.injFile(__dirname) : path.join(__dirname, "data", "session_inject_snapshots.json");
-      if (fs.existsSync(injF)) {
-        const inj = JSON.parse(fs.readFileSync(injF, "utf-8"));
-        const curBlocks = (inj && inj.sessions && inj.sessions[sessionId] && Array.isArray(inj.sessions[sessionId].fixed_blocks) && inj.sessions[sessionId].fixed_blocks.length)
-          ? inj.sessions[sessionId].fixed_blocks : null;
-        const snapBlocks = (Array.isArray(snap.v2_blocks) && snap.v2_blocks.length) ? snap.v2_blocks : null;
-        if (curBlocks && snapBlocks) {
-          const fpOf = function (blocks) { return blocks.map(function (b) { return (b && b.content) ? String(b.content) : ""; }).join("\u0000"); };
-          if (fpOf(curBlocks) !== fpOf(snapBlocks)) reasons.push("blocks");
-        }
-      }
-    } catch (e) {}
-    try {
       // 1010-30 阶段4a：注入块已并入 v2 快照的会话——「当前应有 vs 快照冻结」红点（用户拍板口径）。
       // 低成本等价实现：按会话冻结的块 key 比对对应源文件 mtime vs inject_meta.created_at
       //（源文件在固化后有改动 = 冻结内容已过期，语义等价且免跑 builder）。
