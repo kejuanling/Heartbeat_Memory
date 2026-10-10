@@ -2011,6 +2011,43 @@ async function injectedToolsFp() {
   }
   return _injectedToolsFpCache.fp;
 }
+// 1010-11 阶段4a改：注入块红点改为「内容指纹（token 序列）真变」判断。
+// 与主聊天同源组装当前注入块（assembleInput + buildContextBlocks，与 /admin/cross-window-inject 预览同链），
+// 供 snapshotStaleOf 与快照冻结的 fixed_blocks 逐块比对：当前内容以冻结内容为前缀（startsWith）
+// = 冻结 token 仍是当前前缀 → 不红；冻结块被替换/修改/消失 → 红。
+// 新日记追加在 diary 块末尾（或 cutoff 不注入）→ 前缀不变 → 不红。不再用源文件 mtime（碰一下/追加即误红）。
+// 缓存：按 (会话, 源文件 mtime 签名) 短 TTL，避免会话列表逐会话重复读大文件。
+const _injBlkCache = new Map(); // sessionId -> { sig, at, map }
+function buildCurrentInjectBlocksFor(sessionId) {
+  try {
+    const sid = String(sessionId || "default").trim() || "default";
+    let sig = "";
+    const _srcFiles = ["pinned.json", "memory_v2.json", "cross_inject_config.json", "diary.json", "memory_summary_cache.json", "context_compaction_marks.json"];
+    for (const fn of _srcFiles) {
+      try { sig += fs.statSync(path.join(__dirname, "data", fn)).mtimeMs + "|"; } catch (e) { sig += "0|"; }
+    }
+    const _now = Date.now();
+    const c = _injBlkCache.get(sid);
+    if (c && c.sig === sig && _now - c.at < 4000 && c.map) return c.map;
+    const input = ctxV2Shadow.assembleInput({
+      baseDir: __dirname,
+      sessionId: sid,
+      llmMessages: [],
+      loadTimeline: loadTimeline,
+      normalizeContentToText: normalizeContentToText,
+    });
+    const built = buildContextBlocks(input);
+    const map = {};
+    for (const b of (built.blocks || [])) {
+      if (b && b.key && !b.empty && typeof b.content === "string" && b.content) map[b.key] = b.content;
+    }
+    if (_injBlkCache.size > 30) _injBlkCache.clear();
+    _injBlkCache.set(sid, { sig: sig, at: _now, map: map });
+    return map;
+  } catch (e) {
+    return null;
+  }
+}
 async function snapshotStaleOf(sessionId) {
   try {
     const sv2 = require("./context-snapshot-v2");
@@ -2029,27 +2066,22 @@ async function snapshotStaleOf(sessionId) {
       if (String((snap.system && snap.system.content) || "") !== cur) reasons.push("system");
     } catch (e) {}
     try {
-      // 1010-30 阶段4a：注入块已并入 v2 快照的会话——「当前应有 vs 快照冻结」红点（用户拍板口径）。
-      // 低成本等价实现：按会话冻结的块 key 比对对应源文件 mtime vs inject_meta.created_at
-      //（源文件在固化后有改动 = 冻结内容已过期，语义等价且免跑 builder）。
-      // legacy 会话（块还在 A、B 无 inject_meta）不适用，仍走上面的 A↔B 比对。
-      if (Array.isArray(snap.fixed_blocks) && snap.fixed_blocks.length && snap.inject_meta && snap.inject_meta.created_at) {
-        const _cut = Number(new Date(snap.inject_meta.created_at)) || 0;
-        const _srcOf = {
-          context_assembly: "pinned.json",
-          system_instructions: "pinned.json",
-          core_identity: "memory_summary_cache.json",
-          long_term_understanding: "memory_summary_cache.json",
-          conversation_continuity: "diary.json",
-          starred_dialog: "context_compaction_marks.json",
-        };
-        const _needFiles = new Set();
-        for (const b of snap.fixed_blocks) { if (b && _srcOf[b.key]) _needFiles.add(_srcOf[b.key]); }
-        for (const fn of _needFiles) {
-          try {
-            const st2 = fs.statSync(path.join(__dirname, "data", fn));
-            if (st2.mtimeMs > _cut) { reasons.push("blocks"); break; }
-          } catch (e2) {}
+      // 1010-11 阶段4a改：注入块红点改为「内容指纹（token 序列）真变」判断。
+      // 与主聊天同源组装当前注入块，与快照冻结的 fixed_blocks 逐块比对：
+      // 当前内容以冻结内容为前缀 = 冻结 token 仍是当前前缀 → 不红；
+      // 冻结块被替换/修改/消失 → 红。新日记追加在块末尾（或 cutoff 不注入）→ 前缀不变 → 不红。
+      // 旧实现按源文件 mtime vs inject_meta.created_at，文件被碰/追加即误红，已废弃。
+      if (Array.isArray(snap.fixed_blocks) && snap.fixed_blocks.length) {
+        const _curMap = buildCurrentInjectBlocksFor(sessionId);
+        if (_curMap) {
+          let _blocksChanged = false;
+          for (const fb of snap.fixed_blocks) {
+            if (!fb || !fb.key) continue;
+            const _cur = _curMap[fb.key];
+            if (typeof _cur !== "string" || !_cur) { _blocksChanged = true; break; }
+            if (typeof fb.content === "string" && fb.content && !_cur.startsWith(fb.content)) { _blocksChanged = true; break; }
+          }
+          if (_blocksChanged) reasons.push("blocks");
         }
       }
     } catch (e) {}
