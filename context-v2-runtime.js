@@ -265,26 +265,27 @@ async function assembleAndApply(opts) {
     blocks = built.blocks;
     relevantHits = built.relevantHits || [];
     // 1010 需求3：会话级多选注入块（inject_blocks）——新建会话时选定的注入内容。
-    // 缺省/null = 全部注入（向后兼容现有行为）。过滤后的集合在首轮固化成快照，
+    // 缺省/null = 跟随全局默认三块（1010-21 用户澄清口径：全局默认注入永久上下文+记忆两大块总结+日记，
+    // 标星的对话/状态机快照/最近20条对话原文是增强项，仅会话级明确勾选才注入）。过滤后的集合在首轮固化成快照，
     // 之后该会话按快照冻结（与"新建会话时选择"的语义一致）。
     // 映射：permanent=system_instructions, summary=core_identity+long_term_understanding,
     //       diary=conversation_continuity, starred_dialog, state=conversation_state_inherit(下方),
     //       recent_dialog。relevant_memories 不受此开关控制（独立总闸）。
+    let wantBlocks = null; // 注入块白名单；null 表示未解析成功（不过滤，保守放行）
     try {
-      const inj = createSessionCfg(opts.baseDir).readInjectBlocks(opts.sessionId);
-      if (Array.isArray(inj)) {
-        const want = new Set(inj);
-        blocks = blocks.filter(function (b) {
-          if (!b || !b.key) return true;
-          if (b.key === 'system_instructions') return want.has('permanent');
-          if (b.key === 'core_identity' || b.key === 'long_term_understanding') return want.has('summary');
-          if (b.key === 'conversation_continuity') return want.has('diary');
-          if (b.key === 'starred_dialog') return want.has('starred_dialog');
-          if (b.key === 'recent_dialog') return want.has('recent_dialog');
-          if (b.key === 'conversation_state_inherit') return want.has('state');
-          return true;
-        });
-      }
+      const cfg = createSessionCfg(opts.baseDir);
+      const inj = cfg.readInjectBlocks(opts.sessionId);
+      wantBlocks = new Set(Array.isArray(inj) ? inj : cfg.DEFAULT_INJECT_BLOCKS);
+      blocks = blocks.filter(function (b) {
+        if (!b || !b.key) return true;
+        if (b.key === 'system_instructions') return wantBlocks.has('permanent');
+        if (b.key === 'core_identity' || b.key === 'long_term_understanding') return wantBlocks.has('summary');
+        if (b.key === 'conversation_continuity') return wantBlocks.has('diary');
+        if (b.key === 'starred_dialog') return wantBlocks.has('starred_dialog');
+        if (b.key === 'recent_dialog') return wantBlocks.has('recent_dialog');
+        if (b.key === 'conversation_state_inherit') return wantBlocks.has('state');
+        return true;
+      });
     } catch (e) { console.warn('[ctx-v2] inject_blocks 过滤失败（本次不过滤）:', e && e.message); }
     // 1010 需求2：状态机快照继承（仅首次、无快照会话）——
     // b 没有自己的状态机时，把「最后一次聊天的会话 a」的状态正文作为 Conversation State 块 live 注入。
@@ -295,7 +296,8 @@ async function assembleAndApply(opts) {
     // 非 empty），且 _v2Heads 不含 "## Conversation State" 头 → 不会被清除。
     try {
       const inh = getInheritedState(opts.sessionId);
-      if (inh && inh.text) {
+      // 1010-21 口径修正：跟随全局（无 state 勾选）时不注入继承块——全局默认不含状态机快照
+      if (inh && inh.text && wantBlocks && wantBlocks.has('state')) {
         // 1010 需求3 顺序（用户拍板）：日记 → 标星的对话 → 状态机快照 → 最近20条对话原文。
         // 故继承块插到 recent_dialog 之前（而非追加末尾，否则会排到最近20条后面）。
         const inheritBlock = { key: 'conversation_state_inherit', title: '', content: '## Conversation State\n\n' + inh.text, empty: false };

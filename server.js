@@ -113,6 +113,85 @@ setInterval(sweepArchivedMemories, MEMORY_ARCHIVE_SCAN_MS).unref();
 sweepArchivedMemories(); // 启动先扫一次
 
 // ========================
+// 时间线守卫（1010-21 用户需求：会话记录文件被删除时自动强备份，防误删事故重演）。
+// 两层：1) 写时保护——saveTimeline 每次落盘后同步副本到 data/timeline_guard/（每会话保留最近 N 份轮转）；
+//       2) watchdog——每 5 分钟扫描，发现 enhanced_messages_*.json 缺失（guard 有副本且不在墓碑期）
+//       即从副本自动恢复 + 落盘 sentinel_events（后台提醒栏可见）+ Bark 推送。
+// 主动删除（墓碑期）不恢复，尊重用户删会话的意图。
+// ========================
+const TIMELINE_GUARD_DIR = path.join(__dirname, "data", "timeline_guard");
+const TIMELINE_GUARD_KEEP = 3;                 // 每会话保留最近 N 份副本（含最新，轮转）
+const TIMELINE_GUARD_SCAN_MS = 5 * 60 * 1000;  // watchdog 巡检间隔
+
+// 写时保护：saveTimeline 落盘后同步一份副本（JSON 字符串与盘上一致）。轮转：<name> → <name>.1 → .2 → .3，删 .4
+function guardTimelineCopy(file, content) {
+  try {
+    fs.ensureDirSync(TIMELINE_GUARD_DIR);
+    const gName = path.basename(file);
+    // 旧副本 shift（最多 KEEP-1 份历史）
+    for (let i = TIMELINE_GUARD_KEEP - 1; i >= 1; i--) {
+      const from = path.join(TIMELINE_GUARD_DIR, gName + "." + i);
+      const to = path.join(TIMELINE_GUARD_DIR, gName + "." + (i + 1));
+      if (fs.existsSync(from)) { try { fs.renameSync(from, to); } catch (e) {} }
+    }
+    const latest = path.join(TIMELINE_GUARD_DIR, gName + ".1");
+    if (fs.existsSync(path.join(TIMELINE_GUARD_DIR, gName))) {
+      try { fs.renameSync(path.join(TIMELINE_GUARD_DIR, gName), latest); } catch (e) {}
+    }
+    // 最新主副本原子写
+    const tmp = path.join(TIMELINE_GUARD_DIR, gName + ".tmp");
+    fs.writeFileSync(tmp, content);
+    fs.renameSync(tmp, path.join(TIMELINE_GUARD_DIR, gName));
+  } catch (e) { console.warn("[timeline-guard] 写保护失败:", e.message); }
+}
+
+// 事件落盘（与 log_sentinel.py 同格式，后台活动「后台提醒」栏 24h 窗口可见；保留最近 50 条）
+function appendSentinelEvent(rule, title, body) {
+  try {
+    const file = path.join(__dirname, "data", "sentinel_events.json");
+    let data = { events: [] };
+    try {
+      const o = readJsonFileSafe(file, null);
+      if (o && Array.isArray(o.events)) data = o;
+    } catch (e) {}
+    data.events.push({ ts: Date.now(), rule: rule, title: title, body: body });
+    data.events = data.events.slice(-50);
+    // 用 function 声明的 atomicWriteFileSync（const _writeJsonAtomicBase 在启动兜底时尚未初始化，TDZ）
+    atomicWriteFileSync(file, JSON.stringify(data));
+  } catch (e) { console.warn("[timeline-guard] 事件落盘失败:", e.message); }
+}
+
+// watchdog：巡检根目录时间线 vs guard 副本，缺失即恢复（墓碑期跳过）
+function scanTimelineGuard() {
+  try {
+    if (!fs.existsSync(TIMELINE_GUARD_DIR)) return;
+    const guardFiles = fs.readdirSync(TIMELINE_GUARD_DIR).filter(function (f) {
+      if (!/^enhanced_messages_.*\.json$/.test(f)) return false;
+      return f.indexOf(".") === f.lastIndexOf(".");  // 只认最新主副本（不带 .N 后缀）
+    });
+    for (const g of guardFiles) {
+      const target = path.join(__dirname, g);
+      if (fs.existsSync(target)) continue;           // 正常存在
+      const token = g.replace(/^enhanced_messages_/, "").replace(/\.json$/, "");
+      if (isSessionTombstoned(token)) continue;      // 主动删除（墓碑期）不恢复
+      const src = path.join(TIMELINE_GUARD_DIR, g);
+      let content = "";
+      try { content = fs.readFileSync(src, "utf8"); JSON.parse(content); } catch (e) { console.warn("[timeline-guard] 副本损坏，跳过恢复:", g); continue; }
+      atomicWriteFileSync(target, content);
+      appendSentinelEvent("timeline-guard-restore", "会话记录文件被删除，已自动恢复", "会话 " + token + " 的时间线文件缺失，已从自动备份恢复（" + g + "）。若非误删请人工确认。");
+      sendPushNotification({
+        title: "会话记录文件被删，已自动恢复",
+        body: "会话 " + token + " 的时间线文件缺失，已从自动备份恢复。若非误删请人工确认。",
+        channel: "bark"
+      }).catch(function (e) { console.error("[timeline-guard] 推送失败:", e.message); });
+      console.warn("[timeline-guard] 已恢复缺失时间线: " + g);
+    }
+  } catch (e) { console.warn("[timeline-guard] 扫描异常:", e.message); }
+}
+setInterval(scanTimelineGuard, TIMELINE_GUARD_SCAN_MS).unref();
+scanTimelineGuard(); // 启动兜底先扫一次
+
+// ========================
 // 幂等回放：同一 client_msg_id 的重复请求直接回放上次已生成的回复，
 // 避免网络重发导致上游重复生成 + 时间线重复写入。
 // ========================
@@ -1039,6 +1118,8 @@ function saveTimeline(messages, sessionId) {
   backfillMissingTimes(nonSP);
   // 不再截断：完全保留客户端发送的全部消息（仅将 SP 放在首位）
   const final = sp ? [sp, ...nonSP] : nonSP;
+  // 1010-21 写时保护：同步副本到 data/timeline_guard/（watchdog 巡检自动恢复，防误删）
+  try { guardTimelineCopy(file, JSON.stringify(final)); } catch (e) { console.warn("[timeline-guard] 写保护失败:", e.message); }
   atomicWriteJsonSync(file, final);
   return true;
 }

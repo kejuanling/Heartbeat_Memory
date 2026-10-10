@@ -727,6 +727,15 @@ body.lp-lock,body.lp-lock *{user-select:none!important;-webkit-user-select:none!
 .pb-empty{font-size:12px;color:var(--ink3);padding:4px 0}
 /* 新建会话弹窗下拉框 */
 .np-sel{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px 11px;font-size:13px;color:var(--ink);background:var(--field-bg,#fff);font-family:inherit;outline:none}
+.np-sw-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.np-switch{position:relative;display:inline-block;width:46px;height:26px;flex-shrink:0;cursor:pointer;vertical-align:middle}
+.np-switch input{position:absolute;opacity:0;width:0;height:0}
+.np-sl{position:absolute;inset:0;background:var(--line-strong,#bbb);border-radius:26px;transition:.2s}
+.np-sl:before{content:"";position:absolute;height:20px;width:20px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.np-switch input:checked + .np-sl{background:var(--accent,#4caf90)}
+.np-switch input:checked + .np-sl:before{transform:translateX(20px)}
+.np-switch input:indeterminate + .np-sl{background:var(--line-strong,#bbb);opacity:.55}
+.np-link{background:none;border:none;color:var(--accent,#4caf90);font-size:13px;cursor:pointer;padding:2px 6px}
 .np-tip{font-size:11px;color:var(--ink3);margin-top:6px}
 .np-blocks{display:flex;flex-wrap:wrap;gap:8px 14px;margin-top:8px}
 .np-blk{display:flex;align-items:center;gap:5px;font-size:13px;color:var(--ink);cursor:pointer}
@@ -8314,19 +8323,19 @@ async function newSession(){
       +'<div class="field" style="margin-top:12px"><label>本会话使用的模型</label><select class="np-sel" id="np-provider">'+provOpts+'</select></div>'
       +'<div class="field" style="margin-top:8px"><label>模型</label><select class="np-sel" id="np-model">'+modelOptsFor("")+'</select>'
       +'<div class="np-tip">选定后这个会话单独走该供应商；「默认」跟随全局。供应商停用或删除会自动回退全局。</div></div>'
-      +'<div class="field" style="margin-top:12px"><label>注入跨窗口日记</label><select class="np-sel" id="np-cross"><option value="">跟随全局</option><option value="1">开启</option><option value="0">关闭</option></select>'
-      +'<div class="np-tip">该会话是否注入其它会话的置顶记忆 / 近期日记。「跟随全局」则按设置页跨窗口注入总开关生效。</div>'
-      +'<div class="field" style="margin-top:12px" id="np-inject-blocks-wrap"><label>跨窗口注入内容（多选，默认全选）</label>'
+      +'<div class="field" style="margin-top:12px"><div class="np-sw-row"><label>跨窗口注入</label><label class="np-switch"><input type="checkbox" id="np-cross-toggle" indeterminate><span class="np-sl"></span></label><button type="button" id="np-cross-global" class="np-link">跟随全局</button></div>'
+      +'<div class="np-tip">是否注入其它会话的跨窗口内容。默认跟随全局：只注入永久上下文、记忆两大块总结、日记；勾选下方「增强」项即本会话单独开启注入。</div></div>'
+      +'<div class="field" style="margin-top:12px" id="np-inject-blocks-wrap"><label>跨窗口注入内容（多选）</label>'
       +'<div class="np-blocks" id="np-inject-blocks">'
       +'<label class="np-blk"><input type="checkbox" value="permanent" checked> 永久上下文</label>'
       +'<label class="np-blk"><input type="checkbox" value="summary" checked> 记忆两大块总结</label>'
       +'<label class="np-blk"><input type="checkbox" value="diary" checked> 日记（Earlier Days）</label>'
-      +'<label class="np-blk"><input type="checkbox" value="starred_dialog" checked> 标星的对话</label>'
-      +'<label class="np-blk"><input type="checkbox" value="state" checked> 状态机快照</label>'
-      +'<label class="np-blk"><input type="checkbox" value="recent_dialog" checked> 最近20条对话原文</label>'
+      +'<label class="np-blk"><input type="checkbox" value="starred_dialog"> 标星的对话（增强）</label>'
+      +'<label class="np-blk"><input type="checkbox" value="state"> 状态机快照（增强）</label>'
+      +'<label class="np-blk"><input type="checkbox" value="recent_dialog"> 最近20条对话原文（增强）</label>'
       +'<label class="np-blk np-blk-off"><input type="checkbox" value="relevant" disabled> 相关记忆（未启用）</label>'
       +'</div>'
-      +'<div class="np-tip">勾选哪些就在新会话注入哪些；不勾的注入项将不进入本会话上下文。</div></div>'
+      +'<div class="np-tip">跟随全局默认注入前三项；勾选带「增强」的项即本会话单独开启（连同基础项一起注入）。</div></div>'
       +'<div class="np-tip" style="color:#888">注入顺序：永久上下文 → 记忆两大块总结 → 日记 → 标星的对话 → 状态机快照 → 最近20条对话原文。</div></div>',
       function(){ try{
         const pid=(document.getElementById("np-provider")||{}).value||"";
@@ -8337,6 +8346,26 @@ async function newSession(){
     const npProv=document.getElementById("np-provider");
     const npMdl=document.getElementById("np-model");
     if(npProv&&npMdl){ npProv.addEventListener("change",function(){ npMdl.innerHTML=modelOptsFor(npProv.value); }); }
+    // 1010-21：跨窗口注入总开关（跟随全局/开启/关闭，indeterminate=跟随全局）
+    var npSw=document.getElementById("np-cross-toggle");
+    var npGl=document.getElementById("np-cross-global");
+    function syncCrossUI(){
+      var st=npSw? (npSw.indeterminate?"":(npSw.checked?"1":"0")) : "";
+      var wrap=document.getElementById("np-inject-blocks-wrap");
+      if(wrap) wrap.style.display=(st==="0")?"none":"";
+    }
+    if(npSw&&npGl){
+      npSw.addEventListener("change",function(){
+        // 首次点击 indeterminate：浏览器置 checked=true（=开启）；再点=关闭
+        npSw.indeterminate=false;
+        syncCrossUI();
+      });
+      npGl.addEventListener("click",function(){
+        npSw.indeterminate=true; npSw.checked=false;
+        syncCrossUI();
+      });
+      syncCrossUI();
+    }
   }catch(err){
     console.error("[newSession]",err);
     showToast("新建会话出错:"+(err&&err.message||err));
@@ -8350,25 +8379,33 @@ function createSessionWithPrompt(backupId, providerId, modelName){
   pushCurrentSession();   // 跨设备同步：新会话也上报
   setSessionPrompt(sid, backupId);
   if(providerId){ saveSessionProvider(sid, providerId, modelName, sid); }
-  // 会话级跨窗口注入覆盖：选「开启/关闭」则写入服务端；选「跟随全局」不提交（默认跟随全局总开关）
-  const crossInj=(document.getElementById("np-cross")||{}).value;
-  if(crossInj==="1"||crossInj==="0"){
-    try{ fetch("/v1/sessions/"+encodeURIComponent(sid)+"/cross-inject",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({enabled: crossInj==="1"})}); }
-    catch(e){ console.warn("[cross-inject] 会话级设置提交失败:",e&&e.message); }
-  }
-  // 1010 需求3：跨窗口注入内容多选（勾选哪些注入哪些；全部勾选=省略不传=全部注入）
-  const blkSel=(document.getElementById("np-inject-blocks")||null);
+  // 1010-21 跨窗口注入总开关 + 多选注入内容（用户澄清口径：跟随全局=只注入永久/总结/日记三块；
+  // 增强项（标星对话/状态机快照/最近20条原文）勾选即本会话单独开启）
+  const crossToggle=document.getElementById("np-cross-toggle");
+  const crossState=crossToggle? (crossToggle.indeterminate?"":(crossToggle.checked?"1":"0")) : "";
+  const blkSel=document.getElementById("np-inject-blocks");
+  const picked=[];
   if(blkSel){
-    const picked=[];
     blkSel.querySelectorAll("input[type=checkbox]:checked").forEach(function(cb){
       const v=(cb&&cb.value)||"";
       if(v==="relevant") return;   // 置灰未启用项
       picked.push(v);
     });
-    if(picked.length){   // 非全选时提交；全选=缺省行为（不写配置，保持向后兼容）
-      try{ fetch("/v1/sessions/"+encodeURIComponent(sid)+"/cross-inject",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({inject_blocks: picked})}); }
-      catch(e){ console.warn("[inject-blocks] 多选提交失败:",e&&e.message); }
-    }
+  }
+  const BASE_BLOCKS=["permanent","summary","diary"];
+  const hasBoost=picked.some(function(v){ return BASE_BLOCKS.indexOf(v)<0; });
+  let submitBody=null;
+  if(crossState==="1" || (crossState==="" && hasBoost)){
+    submitBody={enabled:true};
+    if(picked.length) submitBody.inject_blocks=picked;
+  } else if(crossState==="0"){
+    submitBody={enabled:false};
+  }
+  // 跟随全局且无增强勾选 → 不提交（服务端 null=跟随全局默认三块）；全不勾且开启 → inject_blocks=[]（什么都不注入）
+  if(crossState==="1" && picked.length===0) submitBody={enabled:true, inject_blocks:[]};
+  if(submitBody){
+    try{ fetch("/v1/sessions/"+encodeURIComponent(sid)+"/cross-inject",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify(submitBody)}); }
+    catch(e){ console.warn("[cross-inject] 会话级设置提交失败:",e&&e.message); }
   }
   msgs=[];saveMsgs();
   renderAll();
