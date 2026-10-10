@@ -734,7 +734,6 @@ body.lp-lock,body.lp-lock *{user-select:none!important;-webkit-user-select:none!
 .np-sl:before{content:"";position:absolute;height:20px;width:20px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.25)}
 .np-switch input:checked + .np-sl{background:var(--accent,#4caf90)}
 .np-switch input:checked + .np-sl:before{transform:translateX(20px)}
-.np-switch input:indeterminate + .np-sl{background:var(--line-strong,#bbb);opacity:.55}
 .np-link{background:none;border:none;color:var(--accent,#4caf90);font-size:13px;cursor:pointer;padding:2px 6px}
 .np-tip{font-size:11px;color:var(--ink3);margin-top:6px}
 .np-blocks{display:flex;flex-wrap:wrap;gap:8px 14px;margin-top:8px}
@@ -7929,15 +7928,15 @@ function openSessionPersona(sid){
 // 给【单个会话】单独设置「跨窗口注入」：开启/关闭 + 注入内容多选（8 键契约，与新建会话弹窗同款）
 async function openSessionCrossInject(sid){
   const nm=sessionDisplayName(sid)||(sid==="default"?"主会话":sid);
-  let cur="";   // ""=跟随全局, "1"=开启, "0"=关闭
-  let curBlocks=null;   // null=跟随全局默认；数组=会话级显式集合（归一化 8 键）
+  let cur="1";   // "1"=开启, "0"=关闭（未设置过=后端 null，按开启显示；保存后即显式）
+  let curBlocks=null;   // null=尚未显式设置（按默认三项勾选显示）；数组=会话级显式集合（归一化 8 键）
   try{
     const r=await fetch("/v1/sessions/"+encodeURIComponent(sid)+"/cross-inject",{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
     const j=await r.json();
     if(j&&typeof j.cross_inject_enabled==="boolean") cur=j.cross_inject_enabled?"1":"0";
     if(j&&Array.isArray(j.inject_blocks)) curBlocks=j.inject_blocks;
   }catch(e){}
-  const opts='<option value="">跟随全局</option><option value="1"'+(cur==="1"?" selected":"")+'>开启</option><option value="0"'+(cur==="0"?" selected":"")+'>关闭</option>';
+  const opts='<option value="1"'+(cur==="1"?" selected":"")+'>开启</option><option value="0"'+(cur==="0"?" selected":"")+'>关闭</option>';
   // 8 键多选：锁死2 不可取消；curBlocks=null 时默认勾三项（与后端 DEFAULT 口径一致）
   const LOCKED=["system_instructions","state_machine"];
   const DEFAULTS=[["core_identity","Core Identity"],["long_term_understanding","Long-term Understanding"],["conversation_continuity","日记（Earlier Days）"]];
@@ -7952,23 +7951,23 @@ async function openSessionCrossInject(sid){
     +'</div><div class="np-tip">前两项固定注入不可取消。注意：注入内容在会话新建时定型，此处改动需对该会话点「重建快照」后才生效。</div></div>';
   openEditModal("跨窗口 · "+nm,
     '<div class="field"><label>本会话是否注入跨窗口内容</label><select class="np-sel" id="xj-cross">'+opts+'</select>'
-    +'<div class="np-tip">「开启」= 本会话照常注入；「关闭」= 本会话不注入（只剩人设）；「跟随全局」= 未单独设置过。</div></div>'
+    +'<div class="np-tip">「开启」= 本会话照常注入；「关闭」= 本会话不注入任何跨窗口内容（相关记忆不受此开关影响）。</div></div>'
     +blocksHtml,
     function(){
-      const v=(document.getElementById("xj-cross")||{}).value||"";
-      const enabled = v==="1"?true:(v==="0"?false:null);
+      const v=(document.getElementById("xj-cross")||{}).value||"1";
+      const enabled = v==="1";
       const sel=document.getElementById("xj-inject-blocks");
       const picked=LOCKED.slice();
       if(sel){ sel.querySelectorAll("input[type=checkbox]:checked").forEach(function(cb){ const val=(cb&&cb.value)||""; if(val&&picked.indexOf(val)<0) picked.push(val); }); }
-      // 与加载时状态比对：块集合没变就不提交（保持"跟随全局默认"语义，不固化成显式集合）
+      // 与加载时状态比对：块集合没变就不提交（未显式设置过的会话不因打开弹窗就被固化集合）
       const loadedEditable=(curBlocks===null)?DEFAULTS.map(function(d){return d[0];}):curBlocks.filter(function(k){ return LOCKED.indexOf(k)<0; });
       const pickedEditable=picked.filter(function(k){ return LOCKED.indexOf(k)<0; });
       const sameSet=loadedEditable.length===pickedEditable.length&&loadedEditable.every(function(k){ return pickedEditable.indexOf(k)>=0; });
-      saveSessionCrossInject(sid, enabled, v==="", sameSet?null:picked);
+      saveSessionCrossInject(sid, enabled, sameSet?null:picked);
     },
     "应用");
 }
-async function saveSessionCrossInject(sid, enabled, followGlobal, injectBlocks){
+async function saveSessionCrossInject(sid, enabled, injectBlocks){
   try{
     const body={enabled:enabled};
     if(Array.isArray(injectBlocks)&&injectBlocks.length) body.inject_blocks=injectBlocks;
@@ -7976,7 +7975,7 @@ async function saveSessionCrossInject(sid, enabled, followGlobal, injectBlocks){
     const j=await r.json();
     if(!r.ok){ showToast(j.error||"保存失败"); return; }
     const blocksChanged=!!(Array.isArray(injectBlocks)&&injectBlocks.length);
-    showToast((followGlobal?"已恢复为跟随全局":(enabled?"已开启本会话跨窗口注入":"已关闭本会话跨窗口注入"))+(blocksChanged?"；勾选变化需「重建快照」后生效":""));
+    showToast((enabled?"已开启本会话跨窗口注入":"已关闭本会话跨窗口注入")+(blocksChanged?"；勾选变化需「重建快照」后生效":""));
   }catch(e){ showToast("保存失败:"+(e&&e.message||"")); }
 }
 // 给【单个会话】单独指定模型供应商：从当前已配置的 AI 供应商里选（默认=跟随全局），
@@ -8350,8 +8349,8 @@ async function newSession(){
       +'<div class="field" style="margin-top:12px"><label>本会话使用的模型</label><select class="np-sel" id="np-provider">'+provOpts+'</select></div>'
       +'<div class="field" style="margin-top:8px"><label>模型</label><select class="np-sel" id="np-model">'+modelOptsFor("")+'</select>'
       +'<div class="np-tip">选定后这个会话单独走该供应商；「默认」跟随全局。供应商停用或删除会自动回退全局。</div></div>'
-      +'<div class="field" style="margin-top:12px"><div class="np-sw-row"><label>跨窗口注入</label><label class="np-switch"><input type="checkbox" id="np-cross-toggle" indeterminate><span class="np-sl"></span></label><button type="button" id="np-cross-global" class="np-link">跟随全局</button></div>'
-      +'<div class="np-tip">是否注入其它会话的跨窗口内容。默认跟随全局：注入永久上下文、Core Identity、Long-term Understanding、日记；改动勾选即本会话单独设置。</div></div>'
+      +'<div class="field" style="margin-top:12px"><div class="np-sw-row"><label>跨窗口注入</label><label class="np-switch"><input type="checkbox" id="np-cross-toggle" checked><span class="np-sl"></span></label></div>'
+      +'<div class="np-tip">是否注入其它会话的跨窗口内容。默认开启：注入永久上下文、Core Identity、Long-term Understanding、日记；关闭则本会话不注入任何跨窗口内容（只剩人设）。</div></div>'
       +'<div class="field" style="margin-top:12px" id="np-inject-blocks-wrap"><label>跨窗口注入内容（多选）</label>'
       +'<div class="np-blocks" id="np-inject-blocks">'
       +'<label class="np-blk"><input type="checkbox" value="system_instructions" checked disabled> 永久上下文（固定注入）</label>'
@@ -8374,24 +8373,15 @@ async function newSession(){
     const npProv=document.getElementById("np-provider");
     const npMdl=document.getElementById("np-model");
     if(npProv&&npMdl){ npProv.addEventListener("change",function(){ npMdl.innerHTML=modelOptsFor(npProv.value); }); }
-    // 1010-21：跨窗口注入总开关（跟随全局/开启/关闭，indeterminate=跟随全局）
+    // 1010-31c：跨窗口注入总开关改纯开/关（跟随全局已按用户要求删除），默认开启
     var npSw=document.getElementById("np-cross-toggle");
-    var npGl=document.getElementById("np-cross-global");
     function syncCrossUI(){
-      var st=npSw? (npSw.indeterminate?"":(npSw.checked?"1":"0")) : "";
+      var on=npSw? !!npSw.checked : true;
       var wrap=document.getElementById("np-inject-blocks-wrap");
-      if(wrap) wrap.style.display=(st==="0")?"none":"";
+      if(wrap) wrap.style.display=on?"":"none";
     }
-    if(npSw&&npGl){
-      npSw.addEventListener("change",function(){
-        // 首次点击 indeterminate：浏览器置 checked=true（=开启）；再点=关闭
-        npSw.indeterminate=false;
-        syncCrossUI();
-      });
-      npGl.addEventListener("click",function(){
-        npSw.indeterminate=true; npSw.checked=false;
-        syncCrossUI();
-      });
+    if(npSw){
+      npSw.addEventListener("change",syncCrossUI);
       syncCrossUI();
     }
   }catch(err){
@@ -8407,11 +8397,10 @@ function createSessionWithPrompt(backupId, providerId, modelName){
   pushCurrentSession();   // 跨设备同步：新会话也上报
   setSessionPrompt(sid, backupId);
   if(providerId){ saveSessionProvider(sid, providerId, modelName, sid); }
-  // 1010-31 阶段5：8 键契约（锁死2：system_instructions/state_machine 不可取消；默认3：core_identity/
-  // long_term_understanding/conversation_continuity；按需3：starred_dialog/state_inherit/recent_dialog）。
-  // 跟随全局且勾选与默认完全一致 → 不提交（null=跟随全局）；有差异或显式开启/关闭 → 会话级覆盖。
+  // 1010-31c：8 键契约 + 跟随全局已删——新建会话恒提交显式集合（enabled 必为 true/false，
+  // 开启时 inject_blocks 至少含锁死 2 项；后端 normalize 兜底）。
   const crossToggle=document.getElementById("np-cross-toggle");
-  const crossState=crossToggle? (crossToggle.indeterminate?"":(crossToggle.checked?"1":"0")) : "";
+  const crossOn=crossToggle? !!crossToggle.checked : true;
   const blkSel=document.getElementById("np-inject-blocks");
   const picked=[];
   if(blkSel){
@@ -8420,12 +8409,9 @@ function createSessionWithPrompt(backupId, providerId, modelName){
       if(v) picked.push(v);   // 锁死项 disabled+checked 也匹配 :checked，一并提交（后端 normalize 兜底）
     });
   }
-  const FOLLOW_DEFAULT=["system_instructions","state_machine","core_identity","long_term_understanding","conversation_continuity"];
-  const sameAsFollow = picked.length===FOLLOW_DEFAULT.length && FOLLOW_DEFAULT.every(function(k){ return picked.indexOf(k)>=0; });
   let submitBody=null;
-  if(crossState==="0"){ submitBody={enabled:false}; }
-  else if(crossState==="1"){ submitBody={enabled:true, inject_blocks:picked.slice()}; }
-  else if(!sameAsFollow){ submitBody={enabled:true, inject_blocks:picked.slice()}; }
+  if(crossOn){ submitBody={enabled:true, inject_blocks:picked.slice()}; }
+  else { submitBody={enabled:false}; }
   // 1010-29：勾选「最近对话」时附继承轮数（默认 20 轮 = 40 条；服务端建会话时按此从上一个聊天会话截取）
   if(submitBody && picked.indexOf("recent_dialog")>=0){
     let rd=parseInt((document.getElementById("np-recent-rounds")||{}).value||"20",10);
