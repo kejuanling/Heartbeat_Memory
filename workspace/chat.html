@@ -8440,10 +8440,10 @@ async function snapRebuildSession(sid, skipConfirm){
   fetch('/v1/sessions/'+encodeURIComponent(sid)+'/snapshot/rebuild',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+api_key,'X-CSRF-Token':getCookie('admin_csrf')},credentials:'include',body:'{}'})
     .then(function(r){return r.json().catch(function(){return {};})})
     .then(function(d){
-      if(d&&d.error){ toast('重建快照失败: '+d.error); return; }
-      toast(d&&d.existed?'快照已清除，下一轮对话将重建':'本会话本就没有快照（下次请求自动生成）');
+      if(d&&d.error){ bannerAlert('重建快照失败: '+d.error,{title:'重建快照失败'}); return; }
+      bannerAlert(d&&d.snapshot_built?'快照已重建，最新内容已生效':'快照已清除，下一轮对话将重建',{title:'重建快照'});
     })
-    .catch(function(e){ toast('重建快照失败: '+e.message); });
+    .catch(function(e){ bannerAlert('重建快照失败: '+e.message,{title:'重建快照失败'}); });
 }
 // 一键删除全部会话注入前缀快照（1009-04）：清空服务器全部快照，下次对话按当前人设/记忆/日记重建
 async function clearAllSnapshots(){

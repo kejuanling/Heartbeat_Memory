@@ -481,7 +481,8 @@ function createConversationBuilder(deps) {
     }
     _convCache.set(key, msgs);
   }
-  return function buildConversation(sessionId) {
+  // 1010-25：opts.noCache 供 rebuild 等管理操作强制绕过整体缓存（必然走到懒生成）
+  return function buildConversation(sessionId, opts) {
     const timeline = loadTimeline(sessionId);
     const fp = (timeline && timeline.__fp) || "";
     const msgs = [];
@@ -592,7 +593,7 @@ function createConversationBuilder(deps) {
         if (useFullCache) {
           incKey = _convCacheKey(sessionId, fp, incResult.blockFp, systemRaw);
           const incHit = _convCache.get(incKey);
-          if (incHit) return incHit;
+          if (incHit && !(opts && opts.noCache)) return incHit;
         }
         // 增量构建：head（块摘要/保留/前缀/间隙，_ctxRep 直接透传） + 尾部现算
         const sysPrep = systemRaw ? prepareMessageForLLM(systemRaw) : null;
@@ -619,7 +620,7 @@ function createConversationBuilder(deps) {
     }
     if (useFullCache && cacheKey) {
       const hit = _convCache.get(cacheKey);
-      if (hit) return hit;
+      if (hit && !(opts && opts.noCache)) return hit;
     }
     if (systemRaw) {
       const sysPrep = prepareMessageForLLM(systemRaw);
@@ -731,6 +732,11 @@ function createConversationBuilder(deps) {
       console.log("[ctx-snapshot-v2] 快照已生成 session=" + sessionId + " content=" + content.length + " snap_point=" + tailStart + " v2blocks=" + v2Blocks.length + " spRev=" + spRev);
     } catch (e) {
       console.warn("[ctx-snapshot-v2] 快照生成失败（不影响本次请求）:", e && e.message);
+      // 1010-25：失败落盘错误原因（stale 标记带 build-failed:），供 rebuild 接口读取并即时提示
+      try {
+        const _reason = (e && e.message ? String(e.message) : "unknown").slice(0, 200);
+        snapshotV2.markStale(snapshotV2.baseDir, sessionId, "build-failed:" + _reason);
+      } catch (e2) {}
     }
   }
 

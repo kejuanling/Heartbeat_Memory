@@ -784,7 +784,28 @@ module.exports = function registerChatRoutes(app, deps) {
       sv2.deleteSnapshot(baseDir, safe);
       sv2.clearStale(baseDir, safe);
       const r = require('../context-snapshot').deleteSnapshot(baseDir, safe);
-      reply.send({ ok: true, session_id: safe, existed: r.existed });
+      // 1010-25：删后当场触发懒生成 + hasSnapshot 校验，失败即时报错（不再"删了等下次请求"静默）。
+      // noCache=true 强制绕过整体缓存（大会话缓存命中会短路懒生成，导致校验误报失败）。
+      let built = false, buildErr = null;
+      try {
+        buildConversation(safe, { noCache: true });
+        built = sv2.hasSnapshot(baseDir, safe);
+      } catch (e) { buildErr = e; }
+      if (buildErr || !built) {
+        let reason = buildErr ? String(buildErr.message || buildErr) : "懒生成未产出快照文件";
+        try {
+          const fsx = require('fs'), pathx = require('path');
+          const sf = pathx.join(baseDir, 'data', 'session_ctx_snapshots_v2', '.stale-' + safe.replace(/[^A-Za-z0-9_.-]/g, '_') + '.json');
+          if (fsx.existsSync(sf)) {
+            const j = JSON.parse(fsx.readFileSync(sf, 'utf8'));
+            if (j && j.reason) reason = String(j.reason).replace(/^build-failed:/, '') || reason;
+          }
+        } catch (e2) {}
+        console.warn('[POST /v1/sessions/:id/snapshot/rebuild] 快照重建失败: ' + reason);
+        reply.code(500).send({ error: '快照重建失败: ' + reason });
+        return;
+      }
+      reply.send({ ok: true, session_id: safe, existed: r.existed, snapshot_built: true });
     } catch (err) {
       console.error('[POST /v1/sessions/:id/snapshot/rebuild] error:', err.message);
       reply.code(500).send({ error: err.message });
