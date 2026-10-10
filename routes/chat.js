@@ -730,7 +730,9 @@ module.exports = function registerChatRoutes(app, deps) {
     try {
       const sessionId = String(req.params.id || '').trim();
       const override = deps.sessionCrossInjectOverride(sessionId);
-      reply.send({ session_id: sessionId, cross_inject_enabled: override, follow_global: override === null });
+      // 1010 需求3：多选注入块一并返回（null=全部注入）
+      const injectBlocks = deps.readInjectBlocks(sessionId);
+      reply.send({ session_id: sessionId, cross_inject_enabled: override, follow_global: override === null, inject_blocks: injectBlocks });
     } catch (err) {
       console.error('[GET /v1/sessions/:id/cross-inject] error:', err.message);
       reply.code(500).send({ error: err.message });
@@ -745,7 +747,10 @@ module.exports = function registerChatRoutes(app, deps) {
       else if (body.enabled === false || body.enabled === 'false') val = false;
       // 其余（undefined/null/''）→ null 跟随全局
       const saved = deps.saveSessionCrossInjectOverride(sessionId, val);
-      reply.send({ ok: true, session_id: sessionId, cross_inject_enabled: val, saved: saved });
+      // 1010 需求3：多选注入块一并保存（body.inject_blocks 数组；缺省=不改动/全部注入）
+      let savedBlocks = null;
+      if (body.inject_blocks !== undefined) savedBlocks = deps.saveInjectBlocks(sessionId, body.inject_blocks);
+      reply.send({ ok: true, session_id: sessionId, cross_inject_enabled: val, saved: saved, inject_blocks: savedBlocks });
     } catch (err) {
       console.error('[POST /v1/sessions/:id/cross-inject] error:', err.message);
       reply.code(500).send({ error: err.message });

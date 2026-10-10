@@ -23,7 +23,7 @@ const ctxV2Shadow = require("./context-v2-shadow");
 // context-v2-runtime.js 也得读同一份实现，而它是本文件 require 的——只能走 lib，不能反向引用。
 const { createSessionCfg } = require("./lib/session-cfg");
 const sessionCfg = createSessionCfg(__dirname);
-const { sessionCrossInjectOverride, saveSessionCrossInjectOverride } = sessionCfg;
+const { sessionCrossInjectOverride, saveSessionCrossInjectOverride, readInjectBlocks, saveInjectBlocks } = sessionCfg;
 
 // === MCP 工具循环接入（隔离式，ENABLE_MCP=true 才生效）===
 const mcp = require("./mcp-tool-loop");
@@ -1999,6 +1999,8 @@ require("./routes/chat")(app, {
   clearPendingReply,
   sessionCrossInjectOverride,
   saveSessionCrossInjectOverride,
+  readInjectBlocks,
+  saveInjectBlocks,
   prepareMessageForLLM,
   normalizeContentToText,
   isSpecialEvent,

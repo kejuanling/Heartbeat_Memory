@@ -20,8 +20,11 @@ const fsp = require('fs-extra');
 const { buildContextBlocks } = require('./context-v2-builder');
 const shadow = require('./context-v2-shadow');
 const snapStore = require('./context-snapshot');
+const crypto = require('crypto'); // 1010 需求3：标星 contentKey 同口径
 const { createSessionCfg } = require('./lib/session-cfg');   // 2026-10-03：会话级跨窗口开关
 const { getInheritedState } = require('./lib/conversation-state'); // 1010 需求2：状态机快照继承（最后一次聊天会话）
+const { safeSessionToken } = require('./lib/session-token'); // 1010 需求3：标星跨会话扫描时间线文件
+const { createLastChatSession } = require('./lib/last-chat-session'); // 1010 需求3：最近20条对话原文的继承源
 
 // 1005-17：相关注入参数（memory_v2_config.json relevant 段，管理台可调）
 function readRelevantCfg(baseDir) {
@@ -60,6 +63,73 @@ function appendPreview(baseDir, sessionId, query, hits) {
   } catch (_) {}
 }
 
+
+// 1010 需求3：标星的消息原文（跨窗口注入）。marks key = sha256(role+\0+正文) 前32位（与
+// context-replacements.contentKey 同口径）；遍历全部时间线文件，命中的真实消息收集原文。
+// 返回最近 N 条（按消息 time 排序，标星本身有限，默认全量），每条一行。
+function readStarredDialogLines(baseDir, loadTimeline) {
+  let marks = {};
+  try {
+    const d = JSON.parse(fs.readFileSync(path.join(baseDir, 'data', 'context_compaction_marks.json'), 'utf8'));
+    if (d && d.marks && typeof d.marks === 'object') marks = d.marks;
+  } catch (e) { return []; }
+  const markKeys = Object.keys(marks);
+  if (!markKeys.length) return [];
+  const contentKey = function (msg) {
+    const text = (msg && typeof msg.content === 'string') ? msg.content : '';
+    return crypto.createHash('sha256').update((msg && msg.role ? msg.role : '') + '\u0000' + text).digest('hex').slice(0, 32);
+  };
+  const collect = [];
+  const files = [];
+  try { files.push('enhanced_messages.json'); } catch (e) {}
+  try {
+    const dir = fs.readdirSync(baseDir);
+    for (const f of dir) { if (/^enhanced_messages_s_.*\.json$/.test(f)) files.push(f); }
+  } catch (e) {}
+  const seen = new Set();
+  for (const f of files) {
+    let tl = [];
+    try { tl = JSON.parse(fs.readFileSync(path.join(baseDir, f), 'utf8')); } catch (e) { continue; }
+    if (!Array.isArray(tl)) continue;
+    for (const m of tl) {
+      if (!m || m.role === 'system' || m.role === 'developer' || m.role === 'tool' || m.kind === 'diary' || m.kind === 'noaction') continue;
+      if (!(m.content && typeof m.content === 'string' && String(m.content).trim())) continue;
+      const k = contentKey(m);
+      if (!markKeys.includes(k)) continue;
+      const key2 = String(m.id || '') + '|' + k;
+      if (seen.has(key2)) continue;
+      seen.add(key2);
+      collect.push({ time: String(m.time || ''), text: String(m.content).trim() });
+    }
+  }
+  collect.sort(function (a, b) { return (a.time < b.time) ? -1 : (a.time > b.time ? 1 : 0); });
+  const N = 20;
+  return collect.slice(-N).map(function (x) { return x.text; });
+}
+
+// 1010 需求3：最后一次聊天会话的最近 20 条对话原文。继承源同需求2（last_chat_session.json）。
+// 取该会话时间线尾部 20 条真实消息（role user/assistant，排除 system/developer/tool/diary/特殊事件），
+// 保持时间正序呈现（旧在上新在下）。
+function readRecentDialogLines(baseDir, loadTimeline) {
+  let last = null;
+  try { last = createLastChatSession(baseDir).read(); } catch (e) { last = null; }
+  if (!last) return [];
+  let tl = [];
+  try { tl = loadTimeline(last) || []; } catch (e) { tl = []; }
+  const real = (Array.isArray(tl) ? tl : []).filter(function (m) {
+    if (!m) return false;
+    if (m.role === 'system' || m.role === 'developer' || m.role === 'tool') return false;
+    if (m.kind === 'diary' || m.kind === 'noaction') return false;
+    if (!(m.content && typeof m.content === 'string' && String(m.content).trim())) return false;
+    if (String(m.content).trim().indexOf('（记忆浮现') === 0) return false; // 特殊事件不注入
+    return true;
+  });
+  const lines = real.slice(-20).map(function (m) {
+    const who = m.role === 'user' ? '我' : '对方';
+    return '[' + who + '] ' + String(m.content).trim();
+  });
+  return lines;
+}
 
 // 把 builder 输出套进消息：剔除旧 [永久上下文]/[跨窗口] developer 块 →
 // 固定块插到开头连续 system 之后；relevant_memories 单独追加到
@@ -173,6 +243,10 @@ async function assembleAndApply(opts) {
       loadTimeline: opts.loadTimeline,
       normalizeContentToText: opts.normalizeContentToText,
     });
+    // 1010 需求3：多选注入块的两个新增数据源（标星消息 / 最近20条对话原文），
+    // 装配层算好行传给 builder（builder 保持纯函数）。失败静默（空块自然被跳过）。
+    try { input.starredLines = readStarredDialogLines(opts.baseDir, opts.loadTimeline); } catch (e) { input.starredLines = []; }
+    try { input.recentDialogLines = readRecentDialogLines(opts.baseDir, opts.loadTimeline); } catch (e) { input.recentDialogLines = []; }
     if (relOn || relPreview) { if (!relOn) input.previewOnly = true; await attachVecScores(input); } else input.query = '';
     const built = buildContextBlocks(input);
     const sysMsg = (opts.messages || []).find(function (m) { return m && m.role === 'system'; });
@@ -190,6 +264,28 @@ async function assembleAndApply(opts) {
     }
     blocks = built.blocks;
     relevantHits = built.relevantHits || [];
+    // 1010 需求3：会话级多选注入块（inject_blocks）——新建会话时选定的注入内容。
+    // 缺省/null = 全部注入（向后兼容现有行为）。过滤后的集合在首轮固化成快照，
+    // 之后该会话按快照冻结（与"新建会话时选择"的语义一致）。
+    // 映射：permanent=system_instructions, summary=core_identity+long_term_understanding,
+    //       diary=conversation_continuity, starred_dialog, state=conversation_state_inherit(下方),
+    //       recent_dialog。relevant_memories 不受此开关控制（独立总闸）。
+    try {
+      const inj = createSessionCfg(opts.baseDir).readInjectBlocks(opts.sessionId);
+      if (Array.isArray(inj)) {
+        const want = new Set(inj);
+        blocks = blocks.filter(function (b) {
+          if (!b || !b.key) return true;
+          if (b.key === 'system_instructions') return want.has('permanent');
+          if (b.key === 'core_identity' || b.key === 'long_term_understanding') return want.has('summary');
+          if (b.key === 'conversation_continuity') return want.has('diary');
+          if (b.key === 'starred_dialog') return want.has('starred_dialog');
+          if (b.key === 'recent_dialog') return want.has('recent_dialog');
+          if (b.key === 'conversation_state_inherit') return want.has('state');
+          return true;
+        });
+      }
+    } catch (e) { console.warn('[ctx-v2] inject_blocks 过滤失败（本次不过滤）:', e && e.message); }
     // 1010 需求2：状态机快照继承（仅首次、无快照会话）——
     // b 没有自己的状态机时，把「最后一次聊天的会话 a」的状态正文作为 Conversation State 块 live 注入。
     // 三个不进快照的原因：a) 继承块是"一次性的"，进快照会让 b 永远冻结 a 的状态；
@@ -200,7 +296,12 @@ async function assembleAndApply(opts) {
     try {
       const inh = getInheritedState(opts.sessionId);
       if (inh && inh.text) {
-        blocks = blocks.concat([{ key: 'conversation_state_inherit', title: '', content: '## Conversation State\n\n' + inh.text, empty: false }]);
+        // 1010 需求3 顺序（用户拍板）：日记 → 标星的对话 → 状态机快照 → 最近20条对话原文。
+        // 故继承块插到 recent_dialog 之前（而非追加末尾，否则会排到最近20条后面）。
+        const inheritBlock = { key: 'conversation_state_inherit', title: '', content: '## Conversation State\n\n' + inh.text, empty: false };
+        const recIdx = blocks.findIndex(function (b) { return b && b.key === 'recent_dialog'; });
+        if (recIdx >= 0) { blocks.splice(recIdx, 0, inheritBlock); }
+        else { blocks = blocks.concat([inheritBlock]); }
         console.log('[ctx-v2] 状态机快照继承注入: session=' + opts.sessionId + ' <- ' + inh.session + '（' + String(inh.text).length + ' 字，一次性不固化）');
       }
     } catch (e) { console.warn('[ctx-v2] 状态机快照继承注入失败（跳过）:', e && e.message); }
@@ -233,8 +334,11 @@ async function assembleAndApply(opts) {
   // 只过滤本次输出、不改快照文件：关掉再打开能恢复，不会像「重建快照」那样把记忆冻死。
   // true / null（跟随全局）一律放行——V2 没有全局总开关，跟随即等于现有行为。
   if (createSessionCfg(opts.baseDir).sessionCrossInjectOverride(opts.sessionId) === false) {
-    // 1010 需求2：状态机快照继承块同样属于跨窗口注入内容，override=false 时一并剔除
-    blocks = blocks.filter(function (b) { return b && b.key !== 'conversation_continuity' && b.key !== 'conversation_state_inherit'; });
+    // 1010 需求2/3：跨窗口注入内容在 override=false 时一并剔除（Earlier Days + 状态继承 + 标星 + 最近20条）
+    blocks = blocks.filter(function (b) {
+      return b && b.key !== 'conversation_continuity' && b.key !== 'conversation_state_inherit'
+        && b.key !== 'starred_dialog' && b.key !== 'recent_dialog';
+    });
   }
   return { messages: apply(opts.messages, blocks), relevantHits: relevantHits };
 }
