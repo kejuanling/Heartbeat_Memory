@@ -61,6 +61,7 @@ async function runTask(task) {
       start: task.start,
       end: task.end,
       logId: task.logId, // gateway 登记任务时创建的日志 id，跨进程直接复用更新
+      overwrite: task.overwrite === true, // 1011-03：只有用户确认覆盖（前端带 overwrite）才允许覆盖旧候选
     });
     updateTask(task.logId, r && r.ok ? "done" : "error");
     if (r && !r.ok) {
@@ -113,7 +114,7 @@ const server = http.createServer(function (req, res) {
       }
       running.set(sessionId, Date.now());
       json(res, 200, { ok: true, accepted: true });
-      runTask({ session: sessionId, start: start, end: end, logId: logId }).then(function () {}, function () {});
+      runTask({ session: sessionId, start: start, end: end, logId: logId, overwrite: body.overwrite === true }).then(function () {}, function () {});
       return;
     }
     json(res, 404, { ok: false, error: "not found" });

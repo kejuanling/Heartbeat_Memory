@@ -6082,6 +6082,23 @@ app.post("/admin/conversation-state/preview", { preHandler: basicAuth }, async (
       return reply.code(409).send({ error: "这个会话已经有一个生成任务在跑，等它出结果再试" });
     }
   } catch (e) { /* 任务文件读失败不阻断，worker 侧兜底 */ }
+  // 1011-03：已有未确认候选时禁止静默覆盖——除非前端确认后显式带 overwrite:true。
+  // 10-11 事故：旧候选被自动重算无条件覆盖丢失，用户没点丢弃的候选必须一直保留。
+  try {
+    const candNow = conversationState.getCandidate(sid);
+    if (candNow && candNow.ok && candNow.exists && body.overwrite !== true) {
+      const ex = candNow.candidate || {};
+      return reply.code(409).send({
+        error: "这个会话已有一份未确认的候选（" + String(ex.state || "").length + " 字，" +
+          (ex.created_at || "时间未知") + " 生成）。重新生成会覆盖它；确认覆盖请带 overwrite 重新提交",
+        conflict: true,
+        existing_candidate: {
+          chars: String(ex.state || "").length,
+          created_at: ex.created_at || null,
+        },
+      });
+    }
+  } catch (e) { /* 读候选失败不阻断，worker 侧 previewMerge 兜底 */ }
   // 1) 登记 pending 日志（id 传给 worker，跨进程更新同一日志条目）
   const entry = addCompactionLog({
     label: "状态并入 · " + sid.slice(-12),
@@ -6089,16 +6106,16 @@ app.post("/admin/conversation-state/preview", { preHandler: basicAuth }, async (
     action: "state",
     message: "正在算新状态：第 " + start + "~" + end + " 条（" + (end - start + 1) + " 条，后台计算中）",
   });
-  // 2) 写任务文件
+  // 2) 写任务文件（带 overwrite 标记，worker 执行 previewMerge 时透传）
   try {
     const tasks = readStateTasks();
-    tasks.push({ id: entry.id, session: sid, start: start, end: end, status: "running", createdAt: new Date().toISOString() });
+    tasks.push({ id: entry.id, session: sid, start: start, end: end, overwrite: body.overwrite === true, status: "running", createdAt: new Date().toISOString() });
     writeStateTasks(tasks);
   } catch (e) { console.warn("[state-worker] 任务文件写入失败:", e.message); }
   // 3) 转发 worker（不可达/拒绝 → 日志翻 error，前端能看到）
   try {
     const r = await httpPostJson(stateWorkerUrl() + "/state/run", JSON.stringify({
-      logId: entry.id, session: sid, start: start, end: end,
+      logId: entry.id, session: sid, start: start, end: end, overwrite: body.overwrite === true,
     }), { "X-Internal-Key": readEnvValue("INTERNAL_API_KEY") }, 8000);
     if (r && r.ok === false) {
       addCompactionLog({ id: entry.id, status: "error", message: String(r.error || "worker 拒绝任务") });

@@ -1240,31 +1240,55 @@
         ' 条）。\n\n真要重跑一遍吗？多数情况下结果会是「没有变更」，白花一次模型调用。建议先撤销，或把起点填到第 ' +
         (cr.end_index + 2) + ' 条。')) return;
     }
-    CS.busy = true;
-    var btn = $('cs-preview-btn');
-    btn.disabled = true; btn.textContent = '已提交，后台计算中…';
-    msg('已提交生成（后台计算，几十秒到几分钟），算好后这里出 diff');
-    show($('cs-diff'), false);
+    // 1011-03：提交前先查本会话是否已有未确认候选——有则询问，用户确认覆盖才允许提交。
+    // 10-11 事故：旧候选（2658 字）被自动重算无条件覆盖丢失，用户没点「丢弃」的候选必须保留。
+    var doCsSubmit = function (overwrite) {
+      CS.busy = true;
+      var btn = $('cs-preview-btn');
+      btn.disabled = true; btn.textContent = '已提交，后台计算中…';
+      msg('已提交生成（后台计算，几十秒到几分钟），算好后这里出 diff');
+      show($('cs-diff'), false);
 
-    req(CS_API + '/preview?session=' + encodeURIComponent(sid), { method: 'POST', body: { start: r.start, end: r.end } })
+      var body = { start: r.start, end: r.end };
+      if (overwrite) body.overwrite = true;
+
+      req(CS_API + '/preview?session=' + encodeURIComponent(sid), { method: 'POST', body: body })
+        .then(function (j) {
+          if (j && j.ok && j.submitted) {
+            // 异步任务已受理：轮询候选出现 / 日志翻失败
+            startCsPolling(sid, r, j.logId);
+          } else if (j && j.ok) {
+            // 兼容旧同步响应（改造后不再发生，保留兜底）
+            CS.preview = j;
+            renderDiff(j);
+            renderPreviewMsgs(r);
+            // 后端已把这版候选落盘，这里同步状态卡上的提示（刷新后仍在）
+            if (CS.state) renderNote({ candidate: { exists: true, candidate: j }, seed_from_legacy: false });
+            msg('算好了（已存在服务器上，刷新不会丢），确认无误再并入');
+            finishCsPreview();
+          } else {
+            throw new Error((j && j.error) || '提交失败');
+          }
+        })
+        .catch(function (e) { msg(e.message, 'err'); finishCsPreview(); });
+    };
+
+    req(CS_API + '?session=' + encodeURIComponent(sid), { method: 'GET' })
       .then(function (j) {
-        if (j && j.ok && j.submitted) {
-          // 异步任务已受理：轮询候选出现 / 日志翻失败
-          startCsPolling(sid, r, j.logId);
-        } else if (j && j.ok) {
-          // 兼容旧同步响应（改造后不再发生，保留兜底）
-          CS.preview = j;
-          renderDiff(j);
-          renderPreviewMsgs(r);
-          // 后端已把这版候选落盘，这里同步状态卡上的提示（刷新后仍在）
-          if (CS.state) renderNote({ candidate: { exists: true, candidate: j }, seed_from_legacy: false });
-          msg('算好了（已存在服务器上，刷新不会丢），确认无误再并入');
-          finishCsPreview();
+        var cand = j && j.candidate;
+        if (cand && cand.exists && cand.candidate && cand.candidate.state) {
+          var ex = cand.candidate;
+          var exChars = String(ex.state || '').length;
+          var exVer = ex.prev_version !== undefined && ex.prev_version !== null ? (Number(ex.prev_version) + 1) : null;
+          var exWhen = ex.created_at ? String(ex.created_at).replace('T', ' ').slice(0, 16) : '时间未知';
+          var tip = '这个会话已有一份未确认的候选（' + (exVer != null ? 'v' + exVer + '，' : '') + exChars + ' 字，' + exWhen + '）。\n\n重新生成会覆盖它，旧候选将无法找回。\n确定覆盖吗？（不覆盖就点取消，旧候选会继续保留）';
+          if (!confirm(tip)) return;   // 用户取消：旧候选原样保留，不提交
+          doCsSubmit(true);
         } else {
-          throw new Error((j && j.error) || '提交失败');
+          doCsSubmit(false);
         }
       })
-      .catch(function (e) { msg(e.message, 'err'); finishCsPreview(); });
+      .catch(function (e) { msg(e.message, 'err'); });
   };
 
   var _csPollTimer = null;
