@@ -1729,6 +1729,7 @@ function stripPosition(messages) {
 let wakeUpLastHeartbeat = null;
 let lastLLMMessages = null;
 let lastLLMCaptureTime = null;
+let lastLoggedContextCaptureTime = null; // 后台活动页同一份上下文只记一次，避免反复打开重复落盘
 // 供拆到 routes/chat.js 的 /v1/chat/completions 回写「当前请求上下文」捕获，
 // 保持与 server.js 内的 lastLLMMessages/lastLLMCaptureTime 同一引用(管理台 /admin/logs/context 读取)。
 function setLastLLMCapture(messages, time) {
@@ -7002,6 +7003,17 @@ app.get("/admin/logs/context", { preHandler: basicAuth }, async (req, reply) => 
       if (m.role === "_divider") return { role: "_divider", content: m.content };
       return { role: m.role, content: m.content, images: m.images, attachments: m.attachments, tool_calls: m.tool_calls, tool_call_id: m.tool_call_id };
     });
+    if (lastLLMCaptureTime && lastLLMCaptureTime !== lastLoggedContextCaptureTime) {
+      lastLoggedContextCaptureTime = lastLLMCaptureTime;
+      try {
+        require("./lib/llm_log").record("activity_last_request", {
+          url: "/admin/logs/context",
+          request: JSON.stringify({ captureTime: lastLLMCaptureTime }),
+          response: JSON.stringify({ messages, total: messages.length, captureTime: lastLLMCaptureTime }),
+          meta: { captureTime: lastLLMCaptureTime }
+        });
+      } catch (e) { /* 诊断日志不影响管理台读取上下文 */ }
+    }
     reply.send({ messages, total: messages.length, captureTime: lastLLMCaptureTime });
   } catch (err) { reply.code(500).send({ error: err.message }); }
 });
