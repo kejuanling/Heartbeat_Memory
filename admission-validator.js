@@ -154,10 +154,7 @@ function validate(candidate, deps = {}) {
     matched.push("V7");
     reasons.push(`V7 direction 非法: ${c.direction}`);
   }
-  if (c.speaker != null && !CONSTANTS.SPEAKERS.includes(c.speaker)) {
-    matched.push("V7");
-    reasons.push(`V7 speaker 非法: ${c.speaker}`);
-  }
+  // 1005-16：speaker 已从 Memory V2 schema 删除，历史输入宽容忽略；不能再读取已删除的 CONSTANTS.SPEAKERS。
 
   // V8 tag/tool 来源必须有 provenance 锚点（manual/promotion/import 豁免）
   if (c.origin === "memory_tag" || c.origin === "tool") {

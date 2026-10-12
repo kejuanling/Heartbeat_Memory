@@ -91,15 +91,17 @@ const cases = [
   }],
 
   // ---- V7 枚举 ----
-  ["V7 kind/subject/origin 缺失或非法各自命中", () => {
-    const r1 = validate(clean({ kind: undefined }));
-    hit(["V7"])(r1);
-    hit(["V7"])(validate(clean({ subject: "her" })));
+  ["V7 kind 可空待审；subject 已删除；origin 非法仍拒绝", () => {
+    // 1007：kind 缺失允许进入待审队列，审批前补分类。
+    pass(validate(clean({ kind: undefined })));
+    // 1007：subject 已从 schema 删除，历史传入值宽容忽略。
+    pass(validate(clean({ subject: "her" })));
     hit(["V7"])(validate(clean({ origin: "star" })));
   }],
-  ["V7 direction/speaker 枚举外命中", () => {
+  ["V7 direction 枚举外拒绝；speaker 已从 schema 删除并宽容忽略", () => {
     hit(["V7"])(validate(clean({ direction: "toward_she" })));
-    hit(["V7"])(validate(clean({ speaker: "robot" })));
+    // speaker 是历史字段，不能触发对已删除 CONSTANTS.SPEAKERS 的访问。
+    pass(validate(clean({ speaker: "robot" })));
   }],
 
   // ---- V8 来源完整性 ----
