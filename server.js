@@ -2036,6 +2036,13 @@ function buildCurrentInjectBlocksFor(sessionId) {
       loadTimeline: loadTimeline,
       normalizeContentToText: normalizeContentToText,
     });
+    // 1012-01b：比对侧补喂标星行——与 runtime 首次组装同源同限（readStarredDialogLines + 会话级 limit）。
+    // 缺此步：starred_dialog 在「当前注入块」组装中恒为空（starredLines 由 runtime 装配层塞，比对侧拿不到）
+    // → 凡快照含标星块的会话，红点恒亮（1010-31 标星块入快照时埋雷，比对侧未跟上）。
+    try {
+      input.starredLines = require("./context-v2-runtime").readStarredDialogLines(
+        __dirname, loadTimeline, sessionCfg.readStarredDialogLimit(sid));
+    } catch (e) { console.warn("[snapshotStale] 标星行组装失败:", e && e.message); }
     const built = buildContextBlocks(input);
     const map = {};
     for (const b of (built.blocks || [])) {
