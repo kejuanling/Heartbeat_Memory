@@ -23,7 +23,7 @@ const ctxV2Shadow = require("./context-v2-shadow");
 // context-v2-runtime.js 也得读同一份实现，而它是本文件 require 的——只能走 lib，不能反向引用。
 const { createSessionCfg } = require("./lib/session-cfg");
 const sessionCfg = createSessionCfg(__dirname);
-const { sessionCrossInjectOverride, saveSessionCrossInjectOverride, readInjectBlocks, saveInjectBlocks } = sessionCfg;
+const { sessionCrossInjectOverride, saveSessionCrossInjectOverride, readInjectBlocks, saveInjectBlocks, readStarredDialogLimit, saveStarredDialogLimit, readSessionDiaryCount, saveSessionDiaryCount } = sessionCfg;
 
 // === MCP 工具循环接入（隔离式，ENABLE_MCP=true 才生效）===
 const mcp = require("./mcp-tool-loop");
@@ -227,6 +227,7 @@ function _evictOldestReply() {
   if (recentReplies.size <= RECENT_REPLIES_MAX) return;
   let oldestKey = null, oldestTs = Infinity;
   for (const [k, v] of recentReplies) {
+    if (v && v.pending) continue; // 正在生成的占位不能被硬上限淘汰，否则同一消息会重复打上游
     if (v && typeof v.ts === "number" && v.ts < oldestTs) { oldestTs = v.ts; oldestKey = k; }
   }
   if (oldestKey === null) return;
@@ -243,19 +244,17 @@ function setRecentReply(id, entry) {
   // 2026-09-23（F8）：唤醒等待同 client_msg_id 的重入请求，让它们回放本次结果而非重复调上游
   if (prev && prev.pending) _wakeReplyWaiters(prev, entry);
 }
-// 2026-09-23（F8）：请求开始登记 pending 占位。
-// 返回 true = 登记成功（本请求负责生成）；false = 已有同 id 的处理中或已有可回放结果，
-// 调用方应走「回放」或「等待」分支，不要重复调用上游。
+// 请求开始登记 pending 占位。返回 owner 对象代表本请求取得生成权；false 表示已有结果/请求占位。
+// owner 身份必须一路传到 clearPendingReply，避免旧请求迟到收尾时删除新请求的占位。
 function beginPendingReply(id) {
   if (!id) return false;
   const cur = recentReplies.get(id);
-  // 已有未过期的真实结果 → 不是 pending，交给上层原回放分支
   if (cur && !cur.pending && isRecentReplyCacheable(cur) && (Date.now() - cur.ts) < IDEMPOTENCY_TTL_MS) return false;
-  // 已有未超时的 pending → 交给上层等待
-  if (cur && cur.pending && (Date.now() - cur.ts) < IDEMPOTENCY_PENDING_WAIT_MS) return false;
-  recentReplies.set(id, { pending: true, ts: Date.now(), waiters: [] });
+  if (cur && cur.pending) return false;
+  const owner = { pending: true, ts: Date.now(), waiters: [] };
+  recentReplies.set(id, owner);
   _evictOldestReply();
-  return true;
+  return owner;
 }
 // 等待同 id 的首个请求产出结果；超时或占位消失则返回 null（调用方降级为新请求处理）。
 function waitPendingReply(id, timeoutMs) {
@@ -278,11 +277,11 @@ function waitPendingReply(id, timeoutMs) {
     });
   });
 }
-// 2026-09-23（F8）：生成失败时释放占位，让后续重试能立刻重新开始（不必等满 90s）。
-function clearPendingReply(id) {
-  if (!id) return;
+// 生成失败时只允许占位所有者释放自己的 pending，避免迟到的旧请求清掉替代状态。
+function clearPendingReply(id, owner) {
+  if (!id || !owner) return;
   const cur = recentReplies.get(id);
-  if (cur && cur.pending) { recentReplies.delete(id); _wakeReplyWaiters(cur, null); }
+  if (cur === owner && cur.pending) { recentReplies.delete(id); _wakeReplyWaiters(cur, null); }
 }
 
 // ---- 模型供应商（多供应商路由）----
@@ -2134,6 +2133,10 @@ require("./routes/chat")(app, {
   saveSessionCrossInjectOverride,
   readInjectBlocks,
   saveInjectBlocks,
+  readStarredDialogLimit,
+  saveStarredDialogLimit,
+  readSessionDiaryCount,
+  saveSessionDiaryCount,
   prepareMessageForLLM,
   normalizeContentToText,
   isSpecialEvent,
@@ -2309,8 +2312,12 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
   if (!targetApiUrl || !targetApiKey) return false;
 
   // 方案2：工具循环逐轮即时回传。onEvent 把「本轮正文/思考 + 每工具 start/end」实时写成 SSE，
-  // 前端据此渲染工具卡与正文交错 + running→done 状态。仅流式请求启用；落盘/缓存仍用 r.toolHistory（终态）。
+  // 前端据此渲染工具卡与正文交错 + running→done 状态；显式停止也复用同一快照落盘。
   let streamStarted = false;
+  // 新一轮先清空旧快照，避免“刚点停止、尚未收到首个 token”时误存上一轮回复。
+  if (sessionId) {
+    activeGenMap.set(sessionId, { text: "", reasoning: "", tools: [], ts: Date.now(), done: false, persisted: false });
+  }
   const streamDelta = (deltaObj) => {
     if (!streamStarted) {
       reply.raw.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no", Connection: "keep-alive" });
@@ -2331,6 +2338,41 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
       choices: [{ index: 0, delta: deltaObj, finish_reason: null }]
     }) + "\n\n"); } catch (e) { /* socket 半死写失败：静默丢弃，不中断生成 */ }
   };
+  const _finishCancelledMcp = async () => {
+    const _ag = activeGenMap.get(sessionId) || { text: "", reasoning: "", tools: [], ts: Date.now(), done: false, persisted: false };
+    const _partial = String(_ag.text || "");
+    const _rid = (typeof body.reply_msg_id === "string" && body.reply_msg_id.trim()) ? body.reply_msg_id.trim().slice(0, 64) : null;
+    let _persisted = false;
+    try {
+      if (_partial.trim()) {
+        const _timeline = loadTimeline(sessionId);
+        const _exists = _timeline.some(m => m && !m.deleted && m.role === "assistant" && ((_rid && m.id === _rid) || m.content === _partial));
+        if (!_exists) appendMessages(sessionId, [{ id: _rid || undefined, role: "assistant", content: _partial, reasoning: _ag.reasoning || "", tools: _ag.tools || [], tokens: null }]);
+        _persisted = true;
+      }
+    } catch (_saveErr) {
+      console.warn("[mcp] 用户中断后的部分回复落盘失败:", _saveErr.message);
+    }
+    _ag.done = true;
+    _ag.persisted = _persisted;
+    _ag.ts = Date.now();
+    activeGenMap.set(sessionId, _ag);
+    console.warn("[mcp] 用户已停止生成，部分回复已收尾 (session=" + (sessionId || "default") + ", chars=" + _partial.length + ", persisted=" + _persisted + ")");
+    if (body.stream !== true) {
+      try { reply.code(200).send({ choices: [{ message: { role: "assistant", content: _partial }, finish_reason: "stop" }] }); } catch (e) {}
+      return true;
+    }
+    if (!streamStarted) {
+      try { reply.raw.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no", Connection: "keep-alive" }); } catch (e) {}
+    }
+    try {
+      if (_partial) reply.raw.write("data: " + JSON.stringify({ id: "chatcmpl-mcp", object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], final_content: _partial }) + "\n\n");
+      reply.raw.write("data: [DONE]\n\n");
+      reply.raw.end();
+    } catch (e) {}
+    return true;
+  };
+
   const onEvent = (evt) => {
     if (!evt) return;
     // 1004-05：实时累积快照（断流续显用）——lazy init，按 sessionId 一份
@@ -2342,6 +2384,7 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         // 存记忆副作用仍由收尾对完整文本做一次（extractAndStore）。
         const clean = stripToolEchoBlocks(tagParser.stripTags(evt.text));
         _ag.text += clean;
+        _ag.ts = Date.now();
         for (let i = 0; i < clean.length; i += 24) streamDelta({ content: clean.slice(i, i + 24) });
       } else if (evt.type === "reasoning") {
         const clean = tagParser.stripTags(evt.text);
@@ -2386,14 +2429,20 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         // 1007-17 修复：此处原写裸 baseDir，全文件无该变量 → ReferenceError，
         // 导致流式工具循环必失败、回退非流式后又必失败（工具功能整体失效）。
         snapshotV2: Object.assign(require("./context-snapshot-v2"), { baseDir: __dirname }),
-        baseDir: __dirname
+        baseDir: __dirname,
+        signal: req && req.chatAbortController ? req.chatAbortController.signal : null
       });
     } catch (toolLoopErr) {
+      // 显式停止：保存已生成的快照，再结束本轮；绝不降级重跑一遍模型。
+      if (req && req.chatAbortController && req.chatAbortController.signal.aborted) {
+        return await _finishCancelledMcp();
+      }
       // 一旦已经向客户端发出 SSE，就不能再从头跑一遍 runWithTools：
       // 否则客户端会收到两套事件，正文/工具卡可能重复或顺序损坏。
       if (streamStarted) throw toolLoopErr;
       console.warn("[mcp] 流式工具循环失败，回退 runWithTools (非流式):", toolLoopErr.message);
-      r = await mcp.runWithTools({
+      try {
+        r = await mcp.runWithTools({
         upstreamUrl: targetApiUrl,
         upstreamKey: targetApiKey,
         model,
@@ -2405,8 +2454,13 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
         // 1007 上下文快照 v2：工具冻死
         // 1007-17 修复：同上，原裸 baseDir 未定义
         snapshotV2: Object.assign(require("./context-snapshot-v2"), { baseDir: __dirname }),
-        baseDir: __dirname
+        baseDir: __dirname,
+        signal: req && req.chatAbortController ? req.chatAbortController.signal : null
       });
+      } catch (fallbackErr) {
+        if (req && req.chatAbortController && req.chatAbortController.signal.aborted) return await _finishCancelledMcp();
+        throw fallbackErr;
+      }
     }
 
   // 1004-05 兜底：不管本轮有没有正文，生成结束就把快照标 done（空回复/异常也别让前端一直轮询）。
@@ -2478,7 +2532,7 @@ async function handleMcpRequest(body, reply, req, messages, sessionId, kelivoMes
     try {
       // 1004-05：标记快照完成，前端补拉拿到最终内容
       const _agDone = activeGenMap.get(sessionId);
-      if (_agDone) { _agDone.text = r.text; _agDone.reasoning = r.reasoning || _agDone.reasoning; _agDone.done = true; _agDone.ts = Date.now(); }
+      if (_agDone) { _agDone.text = r.text; _agDone.reasoning = r.reasoning || _agDone.reasoning; _agDone.done = true; _agDone.persisted = true; _agDone.ts = Date.now(); }
       // 1004-06：服务端主动推送——iOS 后台会冻结前端 JS，前端 notify fetch 发不出去。
       // 落盘时检查该会话有无在线 SSE 订阅：无订阅=用户不在看这个会话（切后台/关页面）→ 直接发推送。
       try {

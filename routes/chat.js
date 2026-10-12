@@ -126,6 +126,8 @@ const searchIndexCache = { fp: null, index: null };
 // 2026-09-15 已搬至 routes/chat-context.js（对话侧/唤醒侧共用），此处经 chatCtx 调用。
 
 module.exports = function registerChatRoutes(app, deps) {
+  // 显式停止只取消对应会话/回复，不把普通浏览器断线误当成用户取消。
+  const activeChatRequests = new Map();
   const {
     baseDir,
     configuredModelName,
@@ -339,6 +341,32 @@ module.exports = function registerChatRoutes(app, deps) {
   //   GET /v1/history?session_id=X&before=<id>&limit=N → 更早窗口：before 为当前窗口最早消息 id，
   //                                                      返回其前 N 条原文（含压缩区间原文）
   // 1004-05：进行中生成快照查询——前端断流/切回前台后轮询这里续显，不用刷新
+  app.post('/v1/chat/stop', async (req, reply) => {
+    try {
+      if ((req.headers['x-client'] || '').trim() !== 'dylan-chat') return reply.code(403).send({ error: 'forbidden' });
+      const body = req.body || {};
+      const sessionId = String(body.session_id || '').trim();
+      const replyMsgId = String(body.reply_msg_id || '').trim();
+      if (!sessionId || !replyMsgId) return reply.code(400).send({ error: 'session_id and reply_msg_id required' });
+      const activeKey = sessionId + "\u0000" + replyMsgId;
+      const active = activeChatRequests.get(activeKey);
+      if (!active || active.replyMsgId !== replyMsgId || active.controller.signal.aborted) {
+        return reply.send({ ok: true, stopped: false });
+      }
+      active.cancelled = true;
+      active.controller.abort();
+      console.warn('[chat] 收到用户停止请求 (session=' + sessionId + ', reply=' + replyMsgId.slice(0, 8) + ')');
+      if (active.finished) {
+        let timeoutId;
+        await Promise.race([active.finished, new Promise(resolve => { timeoutId = setTimeout(resolve, 4000); })]);
+        if (timeoutId) clearTimeout(timeoutId);
+      }
+      return reply.send({ ok: true, stopped: true });
+    } catch (e) {
+      return reply.code(500).send({ error: e.message });
+    }
+  });
+
   app.get('/v1/chat/status', async (req, reply) => {
     try {
       if ((req.headers['x-client'] || '').trim() !== 'dylan-chat') return reply.code(403).send({ error: 'forbidden' });
@@ -347,7 +375,7 @@ module.exports = function registerChatRoutes(app, deps) {
       const ag = activeGenMap.get(sessionId);
       if (!ag) return reply.send({ active: false, done: true });
       if (ag.done && Date.now() - ag.ts > ACTIVE_GEN_TTL_MS) { activeGenMap.delete(sessionId); return reply.send({ active: false, done: true }); }
-      return reply.send({ active: !ag.done, done: ag.done, text: ag.text || "", reasoning: ag.reasoning || "", tools: ag.tools || [], ts: ag.ts });
+      return reply.send({ active: !ag.done, done: ag.done, text: ag.text || "", reasoning: ag.reasoning || "", tools: ag.tools || [], ts: ag.ts, persisted: !!ag.persisted });
     } catch (e) { return reply.send({ active: false, done: true }); }
   });
 
@@ -732,7 +760,7 @@ module.exports = function registerChatRoutes(app, deps) {
       const override = deps.sessionCrossInjectOverride(sessionId);
       // 1010 需求3：多选注入块一并返回（null=全部注入）
       const injectBlocks = deps.readInjectBlocks(sessionId);
-      reply.send({ session_id: sessionId, cross_inject_enabled: override, follow_global: override === null, inject_blocks: injectBlocks });
+      reply.send({ session_id: sessionId, cross_inject_enabled: override, follow_global: override === null, inject_blocks: injectBlocks, diary_count_override: typeof deps.readSessionDiaryCount === "function" ? deps.readSessionDiaryCount(sessionId) : null });
     } catch (err) {
       console.error('[GET /v1/sessions/:id/cross-inject] error:', err.message);
       reply.code(500).send({ error: err.message });
@@ -750,6 +778,8 @@ module.exports = function registerChatRoutes(app, deps) {
       // 1010 需求3：多选注入块一并保存（body.inject_blocks 数组；缺省=不改动/全部注入）
       let savedBlocks = null;
       if (body.inject_blocks !== undefined) savedBlocks = deps.saveInjectBlocks(sessionId, body.inject_blocks);
+      if (body.starred_dialog_limit !== undefined && typeof deps.saveStarredDialogLimit === 'function') deps.saveStarredDialogLimit(sessionId, body.starred_dialog_limit);
+      if (body.diary_count_override !== undefined && typeof deps.saveSessionDiaryCount === 'function') deps.saveSessionDiaryCount(sessionId, body.diary_count_override);
       // 1010-29 需求3承载：新建会话勾选「最近对话」→ 把「最后一次聊天的会话」末尾 N 轮对话复制进本会话
       // 时间线（developer + hidden + silent：前端不显示、搜索不到，只给 LLM 看），运行时不组装。
       // 守卫：仅当本会话时间线还是空的（=真新建）才写——写完即有内容，天然只写一次。
@@ -1022,8 +1052,12 @@ module.exports = function registerChatRoutes(app, deps) {
   // /v1/chat/completions（从 server.js 拆出）
   // ========================
 app.post("/v1/chat/completions", async (req, reply) => {
-  // 2026-09-23（F8）：提到 try 外声明——catch 中需要用它释放 pending 占位
+  // 幂等状态跨 try/catch/finally 使用：finally 只释放本请求认领的 pending 占位
   let clientMsgId = "";
+  let pendingOwner = null;
+  let requestController = null;
+  let activeRequestEntry = null;
+  let finishActiveRequest = null;
   let snapshotRebuilt = false;  // 1010-27：本轮请求是否触发了快照懒生成（从无到有），用于响应头通知前端弹横幅
   try {
     const body = req.body;
@@ -1126,15 +1160,31 @@ app.post("/v1/chat/completions", async (req, reply) => {
         }
         const finalEntry = recentReplies.get(clientMsgId);
         if (finalEntry && finalEntry.pending) {
-          // 总上限到首轮仍在生成：释放占位允许降级（此时前端大概率已放弃或连接早已断开）
-          recentReplies.delete(clientMsgId);
-          console.warn("[idempotency] 首轮超过 " + Math.round(waitTotalMs / 1000) + "s 仍未完成，释放占位降级按新请求处理");
+          console.warn("[idempotency] 首轮超过 " + Math.round(waitTotalMs / 1000) + "s 仍未完成，保留占位并拒绝重复生成");
+          return reply.code(409).send({ error: "同一消息仍在生成，请稍后重试" });
         }
-        console.warn("[idempotency] 首轮未产出可回放结果，本轮降级按新请求处理");
+        console.warn("[idempotency] 首轮未产出可回放结果，本轮尝试认领生成权");
       }
-      // ③ 登记 pending 占位，声明本请求负责生成（供后续重入请求等待）
-      beginPendingReply(clientMsgId);
+      pendingOwner = beginPendingReply(clientMsgId);
+      if (!pendingOwner) {
+        const latest = recentReplies.get(clientMsgId);
+        if (latest && !latest.pending && isRecentReplyCacheable(latest) && (Date.now() - latest.ts) < IDEMPOTENCY_TTL_MS) {
+          if (await _replayCachedReply(latest)) return;
+        }
+        return reply.code(409).send({ error: "同一消息仍在生成，请稍后重试" });
+      }
     }
+
+    // 只有通过幂等检查、真正取得生成权的请求才能注册为可停止任务；回放请求不能覆盖正在生成的任务。
+    requestController = new AbortController();
+    const activeKey = sessionId && replyMsgId ? sessionId + "\u0000" + replyMsgId : null;
+    activeRequestEntry = {
+      key: activeKey, replyMsgId: replyMsgId || '', controller: requestController, cancelled: false,
+      finished: new Promise(resolve => { finishActiveRequest = resolve; })
+    };
+    if (activeKey) activeChatRequests.set(activeKey, activeRequestEntry);
+    // MCP 路径通过 req 取得同一个取消信号；直通路径直接使用 requestController。
+    req.chatAbortController = requestController;
 
     const oldTimeline = loadTimeline(sessionId);
 
@@ -1369,7 +1419,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
     }
     // === MCP_TOOL_LOOP_END ===
     // 上游请求超时保护，避免上游挂起导致 /v1 请求永久阻塞
-    let upstreamController = new AbortController();
+    let upstreamController = requestController || new AbortController();
     let upstreamTimer = setTimeout(() => upstreamController.abort(), UPSTREAM_TIMEOUT_MS);
     let response;
     try {
@@ -1407,7 +1457,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
           if (degraded) {
             console.warn("[chat] 上游拉取图片失败(400)，本轮图片换占位后重试一次");
             clearTimeout(upstreamTimer);
-            upstreamController = new AbortController();
+            if (requestController && requestController.signal.aborted) throw new Error("用户已停止生成");
             upstreamTimer = setTimeout(() => upstreamController.abort(), UPSTREAM_TIMEOUT_MS);
             response = await doFetch();
           }
@@ -1539,6 +1589,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
     let aiFullContent = "";   // 2026-09-24 P3-2A：提升到 while 循环外（正常路径赋值 + 中断路径兜底解析共用）
     let aiThinking = "";
     let aiUsage = null;
+    // 放在流读取 try 外，后面的落盘阶段也需要更新同一份快照。
+    const _partialGen = { text: "", reasoning: "", tools: [], ts: Date.now(), done: false, persisted: false };
     try {
     // Streaming tag filter: 上游会把 <memory>/<pin> 拆成 <、memory、> 等多个事件，
     // 字节层匹配不到完整标签，必须在 content 文本层过滤后再重组 SSE 事件。
@@ -1549,7 +1601,21 @@ app.post("/v1/chat/completions", async (req, reply) => {
     // 改为静默丢弃下发但继续读完上游，流结束后按完整 fullRawSse 落盘。
     // 修复「停止后有时完整落盘、有时只落半截」的双现象（取决于 nginx 何时掐断 gateway socket）。
     let clientGone = false;
-    const _clientGoneMark = (why) => { if (!clientGone) { clientGone = true; console.warn("[stream] " + why + "，继续后台读完并完整落盘（A 方案）"); } };
+    const _publishPartialGen = () => {
+      try {
+        const previous = activeGenMap.get(sessionId);
+        if (previous && previous !== _partialGen && !previous.done) return;
+        _partialGen.ts = Date.now();
+        activeGenMap.set(sessionId, _partialGen);
+      } catch (e) {}
+    };
+    _publishPartialGen();
+    const _clientGoneMark = (why) => {
+      if (!clientGone) {
+        clientGone = true;
+        console.warn("[stream] " + why + "，继续后台读完并完整落盘（A 方案）");
+      }
+    };
     const _clientAlive = () => !reply.raw.destroyed && !reply.raw.writableEnded && !reply.raw.writableFinished;
     const safeWrite = (fn) => {
       if (!_clientAlive()) { _clientGoneMark("客户端已断开"); return; }
@@ -1589,17 +1655,25 @@ app.post("/v1/chat/completions", async (req, reply) => {
           continue;
         }
         const delta = evt && evt.choices && evt.choices[0] && evt.choices[0].delta;
+        if (delta && typeof delta.reasoning_content === "string" && delta.reasoning_content.length) {
+          _partialGen.reasoning += tagParser.stripTags(delta.reasoning_content);
+          _publishPartialGen();
+        }
         // 空字符串 content 常伴随 finish_reason/usage（如末尾事件），必须原样透传
         if (delta && typeof delta.content === "string" && delta.content.length > 0) {
           contentFilter.push(delta.content, (filtered) => {
             // 2026-10-01 MiniMax：content 内 <think> 块跨帧剥离，剥离的思考以 reasoning_content 增量帧转发（前端实时显示思考链）
             thinkStripper.push(filtered, (cleanText) => {
               if (!cleanText) return;
+              _partialGen.text += cleanText;
+              _publishPartialGen();
               delta.content = cleanText;
               safeWrite(() => reply.raw.write("data: " + JSON.stringify(evt) + "\n\n"));
             });
             const _td = thinkStripper.takeThinking();
             if (_td) {
+              _partialGen.reasoning += _td;
+              _publishPartialGen();
               safeWrite(() => reply.raw.write("data: " + JSON.stringify({
                 id: "chatcmpl-direct",
                 object: "chat.completion.chunk",
@@ -1622,6 +1696,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
     aiFullContent = _pp.content;
     aiThinking = _pp.thinking;
     aiUsage = _pp.usage;
+    _partialGen.text = aiFullContent || _partialGen.text;
+    _partialGen.reasoning = aiThinking || _partialGen.reasoning;
     if (_pp.parseErrors > 0) console.warn("[stream] 本轮共 " + _pp.parseErrors + " 帧解析失败，落盘回复可能不完整");
     if (aiUsage) console.log("[usage] " + JSON.stringify(aiUsage));
     if (aiFullContent) {
@@ -1662,7 +1738,11 @@ app.post("/v1/chat/completions", async (req, reply) => {
     try {
       // 中断路径兜底：while 循环抛错会跳过上方终止帧块（aiFullContent 仍为空），
       // 保留原「中断后仍落盘部分回复」语义（tailHasReply 保证重试时不重复写）
-      if (!aiFullContent && fullRawSse) {
+      if (requestController && requestController.signal.aborted) {
+        // 用户明确停止：只保存截至取消时已过滤的正文，绝不把断开的连接当成继续生成。
+        aiFullContent = _partialGen.text || "";
+        aiThinking = _partialGen.reasoning || "";
+      } else if (!aiFullContent && fullRawSse) {
         const _pp2 = _parseSseFull(fullRawSse);
         aiFullContent = _pp2.content;
         aiThinking = _pp2.thinking;
@@ -1697,6 +1777,10 @@ app.post("/v1/chat/completions", async (req, reply) => {
             }
             if (toAppend.length) appendMessages(sessionId, toAppend);
           }
+          _partialGen.persisted = true;
+          _partialGen.done = true;
+          _partialGen.ts = Date.now();
+          activeGenMap.set(sessionId, _partialGen);
         } else {
           console.log("[timeline] 跳过回复落盘 (流式)");
         }
@@ -1710,12 +1794,24 @@ app.post("/v1/chat/completions", async (req, reply) => {
     } catch (streamErr) {
       console.warn("[memory] 流式响应解析失败:", streamErr.message);
     }
+    // 即使用户在首个 token 前停止，快照也必须结束，不能让状态轮询一直显示 active。
+    if (!_partialGen.done) {
+      _partialGen.done = true;
+      _partialGen.ts = Date.now();
+      activeGenMap.set(sessionId, _partialGen);
+    }
   } catch (err) {
     console.error(err);
-    // 2026-09-23（F8）：生成失败时释放 pending 占位，让用户的「重试」能立即重新开始，
-    // 不必等满 90s 等待上限；同时唤醒可能有的一同等待的重入请求（它们会降级为新请求处理）。
-    if (clientMsgId) clearPendingReply(clientMsgId);
-    reply.code(500).send({ error: err.message });
+    // SSE 头已发送时不能再切换成普通 HTTP 500；只结束现有流。
+    if (!reply.raw.headersSent) reply.code(500).send({ error: err.message });
+    else { try { reply.raw.end(); } catch (e) {} }
+  } finally {
+    // 覆盖所有提前 return 路径；成功缓存替换 owner 后，这里不会误清缓存或其他请求。
+    if (clientMsgId && pendingOwner) clearPendingReply(clientMsgId, pendingOwner);
+    if (activeRequestEntry && activeRequestEntry.key && activeChatRequests.get(activeRequestEntry.key) === activeRequestEntry) {
+      activeChatRequests.delete(activeRequestEntry.key);
+    }
+    if (finishActiveRequest) finishActiveRequest();
   }
 });
 };

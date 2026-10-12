@@ -453,6 +453,9 @@ body.lp-lock,body.lp-lock *{user-select:none!important;-webkit-user-select:none!
   transition:background .2s,transform .15s;
 }
 @media (hover:hover){#send:hover{background:var(--send-hover-bg,var(--accent-deep))}}
+#send .send-plane{display:block;width:20px;height:20px;flex:none;overflow:visible;transform:none;transition:transform .16s cubic-bezier(.2,.8,.2,1)}
+
+@media(hover:hover){#send:hover .send-plane{transform:translateY(-1px)}}
 #send:active{transform:scale(.92)}
 #send.disabled{opacity:.5;cursor:not-allowed}
 /* 2026-09-29 极简主题中断输出：发送中停止符（红色方块） */
@@ -1028,7 +1031,11 @@ body.lp-lock,body.lp-lock *{user-select:none!important;-webkit-user-select:none!
 #bannerHostMid .banner-text{font-size:14px}
 #bannerHostMid .banner-input{font-size:16px}
 .banner{pointer-events:auto;position:relative;background:var(--sheet-bg,var(--card-solid,rgba(255,255,255,.9)));backdrop-filter:blur(50px) saturate(1.15);-webkit-backdrop-filter:blur(50px) saturate(1.15);border:.5px solid rgba(150,120,90,.20);border-radius:18px;box-shadow:0 18px 60px rgba(var(--shadow-rgb),.22),0 2px 8px rgba(var(--shadow-rgb),.08);padding:16px 18px;display:flex;flex-direction:column;gap:8px;animation:bannerIn .22s cubic-bezier(.2,.8,.3,1)}
-.banner-title{font-size:13px;font-weight:600;color:var(--ink);letter-spacing:.02em}
+.banner-title{font-size:13px;font-weight:600;color:var(--ink);letter-spacing:.02em;padding-right:28px}
+.banner-close{position:absolute;top:8px;right:8px;z-index:2;width:30px;height:30px;padding:0;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:10px;background:var(--accent-faint,rgba(120,100,80,.07));color:var(--ink2);font-family:inherit;font-size:22px;font-weight:400;line-height:1;cursor:pointer;transition:background .15s ease,color .15s ease,transform .15s ease;touch-action:manipulation}
+.banner-close:hover{background:var(--accent-soft);color:var(--ink)}
+.banner-close:active{transform:scale(.94)}
+.banner-close:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .banner-text{font-size:13px;color:var(--ink2);line-height:1.7;word-break:break-word;white-space:pre-line}
 .banner-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:14px}
 .banner-btn{flex:1;border:1px solid var(--line);background:rgba(120,100,80,.07);color:var(--ink);padding:12px 16px;border-radius:12px;font-size:14px;cursor:pointer;transition:all .15s}
@@ -1796,7 +1803,7 @@ body[data-theme="crtlight"] #chat[data-layout="crt"] .msg.ai .bubble p+p::before
     <button class="icon-btn" id="imgBtn" title="发图片" aria-label="发图片"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><svg class="crt-paperclip" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 6.59l-8.57 8.57a2 2 0 0 1-2.83-2.83l7.07-7.07"/></svg></button>
     <textarea id="input" rows="1" placeholder="说点什么…"></textarea>
     <button class="icon-btn" id="micBtn" title="按住说话（向上滑取消）" aria-label="按住说话"><svg class="ico" viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10.5V11a7 7 0 0 1-14 0v-.5"/><line x1="12" y1="18.5" x2="12" y2="21.5"/><line x1="8.5" y1="21.5" x2="15.5" y2="21.5"/></svg></button>
-    <button class="icon-btn" id="send" title="发送" aria-label="发送"><svg class="ico fill" viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" stroke="none"><path d="M3 20 L21 11 L3 2 L3 9 L14 11 L3 13 Z"/></svg></button>
+    <button class="icon-btn" id="send" title="发送" aria-label="发送"><svg class="ico send-plane" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 3.5 21 12 17.2 20.5 21 12 2Z"/><path d="M12 17.2V2"/></svg></button>
   </div>
   <input type="file" id="fileInput" accept="image/*,application/pdf,text/plain" multiple><input type="file" id="avatarFile" accept="image/*" style="display:none">
 </footer>
@@ -2217,11 +2224,12 @@ const DEFAULT_CFG={
 let api_key=localStorage.getItem(LS_KEY)||"";
 let system_prompt=localStorage.getItem(LS_PROMPT)||"";
 let cfg=loadCfg();
-let sending=false, aborter=null;
+let sending=false, aborter=null, _sessionInitBusy=false;
 let _silenceResetFn=null,_silenceClearFn=null;   // 流式静默计时器句柄（后台暂停/回前台重置用）
 let _archivedSessions=[];   // 归档会话集合（网关同步，渲染分流用）
 let _archFoldOpen=(localStorage.getItem("han_arch_fold_open")==="1");
-let _streamStoppedByUser=false;   // 2026-09-29 极简主题中断输出：用户主动停止（中断不显示错误条）
+let _streamStoppedByUser=false;   // 用户主动停止：不显示错误条
+let _activeReplyMsgId="";         // 显式停止 API 用稳定回复 id 精确定位本轮生成
 let _sendBtnOrigHTML="";          // 发送按钮原始图标（停止态结束后恢复）
 let _callAfterAI=false;   // 通话页文字发送后，AI 回复完成时朗读
 let _callPending=false;    // 已发出"来电"，待 AI 用 <phone> 表态接/不接
@@ -2847,6 +2855,18 @@ function showBanner(opts){
     if(el.parentNode) el.parentNode.removeChild(el);
     if(cb) cb(val);
   };
+  // 所有横幅统一提供关闭叉：提示直接关闭，确认/输入类按“取消”语义收尾，避免 Promise 悬空。
+  const closeBtn=document.createElement("button");
+  closeBtn.type="button";
+  closeBtn.className="banner-close";
+  closeBtn.setAttribute("aria-label","关闭提醒");
+  closeBtn.title="关闭";
+  closeBtn.textContent="×";
+  closeBtn.addEventListener("click",function(){
+    const interactive=o.type!=="info";
+    finish(interactive?false:null, o.onCancel||o.onClose||null);
+  });
+  el.appendChild(closeBtn);
   let inputEl=null;
   if(o.input){
     inputEl=document.createElement("input");
@@ -4517,6 +4537,7 @@ async function request(finalMsgs, fromSend, regenAnchorId){
   aborter=new AbortController();
   const sidAtStart=SessionStore.getCurrentSession();   // 收尾时校验：请求期间切了会话就不回写（防旧会话消息写进新会话的缓存）
   const _replyMid=newMsgId();   // 本条 AI 回复的稳定 id：随请求 reply_msg_id 上行，服务端 MCP 写回段落盘沿用同一 id——落库前后端 id 一致，落库后立刻编辑/删除也能 diff 定点
+  _activeReplyMsgId=_replyMid;
   appendTypingBox();
   let full="",reasoning="",usage=null,tools=[],reader=null,flushStreamSegs=null,streamedSegments=null,streamedTimeline=null,buf="";
   let _finalContent=null,_finalTimeline=null;   // 2026-09-24 B3：服务端终止帧下发的最终落盘版（含标签 storedText + 精简 timeline）
@@ -4754,6 +4775,7 @@ async function request(finalMsgs, fromSend, regenAnchorId){
     if(_silenceTimer){clearTimeout(_silenceTimer);_silenceTimer=null;}   // M17：清理静默超时计时器
     _silenceResetFn=null;_silenceClearFn=null;   // 清句柄，避免串到下一轮请求
     _streamStoppedByUser=false;
+    if(_activeReplyMsgId===_replyMid)_activeReplyMsgId="";
     sending=false;setSendState(false);aborter=null;
     _streamActive=false; _streamToolMode="live"; _streamRenderModel=[]; _streamRenderCursor=0; _streamModelDraining=false; if(_streamDrainTimer){clearTimeout(_streamDrainTimer);_streamDrainTimer=null;} if(_streamTextRerenderTimer){clearTimeout(_streamTextRerenderTimer);_streamTextRerenderTimer=null;} try{if(_streamRoot&&_streamRoot.parentNode){_streamRoot.classList.remove("stream-in");_streamRoot.classList.remove("crt-stream");}}catch(_se){} _streamRoot=null; _streamThinkEl=null; _streamThinkCAt=0; _twStop();   // 结束统一响应模型（节流 timer 清、容器/思考链引用释放——DOM 由 renderAll 重建接管；打字机 timer 显式停）
     showHeaderTyping(false);
@@ -4789,7 +4811,7 @@ async function request(finalMsgs, fromSend, regenAnchorId){
 }
 async function send(){
   const text=inputEl.value.trim();
-  if(sending)return false;
+  if(sending||_sessionInitBusy)return false;
   // 先占位再走 fetchHistory 异步窗口：否则快速连点/回车会在 sending 置位前双双入列
   sending=true;setSendState(true);
   if(!text&&!imgData.length&&!fileData.length){ sending=false;setSendState(false); return false; }
@@ -4867,9 +4889,21 @@ function setSendState(on){
     if(_sendBtnOrigHTML){ sendBtn.innerHTML=_sendBtnOrigHTML; _sendBtnOrigHTML=""; }
   }
 }
-// 2026-09-29 极简主题中断输出：abort 流（服务端检测客户端断开后停止上游/工具，已生成部分照常落盘）
-function stopGeneration(){
+// 显式停止：先通知服务端取消对应上游请求并等待部分回复落盘，再关闭浏览器流。
+async function stopGeneration(){
+  if(!sending||!_activeReplyMsgId)return;
   _streamStoppedByUser=true;
+  const sid=SessionStore.getCurrentSession();
+  const rid=_activeReplyMsgId;
+  try{
+    const stopReq=fetch("/v1/chat/stop",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-Client":"dylan-chat","X-CSRF-Token":getCookie("admin_csrf")},
+      credentials:"include",
+      body:JSON.stringify({session_id:sid,reply_msg_id:rid})
+    });
+    await Promise.race([stopReq.catch(function(){}),new Promise(function(resolve){setTimeout(resolve,4500);})]);
+  }catch(e){}
   try{ if(aborter) aborter.abort(); }catch(e){}
   showToast("已中断输出");
 }
@@ -5667,13 +5701,15 @@ async function saveSettingsAll(){
 let promptBackups=[];
 const LS_SESSION_PROMPTS="han_session_prompts";
 function getSessionPromptMap(){ try{ return JSON.parse(localStorage.getItem(LS_SESSION_PROMPTS)||"{}")||{}; }catch(e){ return {}; } }
-function setSessionPrompt(sid,backupId){
+function setSessionPrompt(sid,backupId,strict){
   const m=getSessionPromptMap(); if(backupId) m[sid]=backupId; else delete m[sid];
   try{ localStorage.setItem(LS_SESSION_PROMPTS,JSON.stringify(m)); }catch(e){}
   // 只提交本次变更（set/unset 单键），服务器按键合并，不做整表覆盖其它设备的设定
   const body={set:{},unset:[]};
   if(backupId) body.set[sid]=backupId; else body.unset.push(sid);
-  fetch("/heartbeat/admin/session-prompts",{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":getCookie("admin_csrf")},body:JSON.stringify(body),credentials:"include"}).catch(function(){});
+  const req=fetch("/heartbeat/admin/session-prompts",{method:"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":getCookie("admin_csrf")},body:JSON.stringify(body),credentials:"include"});
+  if(strict) return req.then(function(r){ if(!r.ok) throw new Error("保存失败"); return true; });
+  return req.catch(function(){});
 }
 function resolveSessionSystemPrompt(){
   const bid=SessionStore.getCurrentSession()&&getSessionPromptMap()[SessionStore.getCurrentSession()];
@@ -7930,11 +7966,13 @@ async function openSessionCrossInject(sid){
   const nm=sessionDisplayName(sid)||(sid==="default"?"主会话":sid);
   let cur="1";   // "1"=开启, "0"=关闭（未设置过=后端 null，按开启显示；保存后即显式）
   let curBlocks=null;   // null=尚未显式设置（按默认三项勾选显示）；数组=会话级显式集合（归一化 8 键）
+  let curDiaryCount=null; // null=跟随管理台全局篇数
   try{
     const r=await fetch("/v1/sessions/"+encodeURIComponent(sid)+"/cross-inject",{headers:{"Authorization":"Bearer "+api_key},credentials:"include"});
     const j=await r.json();
     if(j&&typeof j.cross_inject_enabled==="boolean") cur=j.cross_inject_enabled?"1":"0";
     if(j&&Array.isArray(j.inject_blocks)) curBlocks=j.inject_blocks;
+    if(j&&j.diary_count_override!=null) curDiaryCount=Number(j.diary_count_override)||null;
   }catch(e){}
   const opts='<option value="1"'+(cur==="1"?" selected":"")+'>开启</option><option value="0"'+(cur==="0"?" selected":"")+'>关闭</option>';
   // 8 键多选：锁死2 不可取消；curBlocks=null 时默认勾三项（与后端 DEFAULT 口径一致）
@@ -7948,7 +7986,7 @@ async function openSessionCrossInject(sid){
     +blk("state_machine","状态机",true,true)
     +DEFAULTS.map(function(d){ return blk(d[0],d[1],curBlocks===null?true:active.indexOf(d[0])>=0,false); }).join('')
     +OPTIONAL.map(function(d){ return blk(d[0],d[1],active.indexOf(d[0])>=0,false); }).join('')
-    +'</div><div class="np-tip">前两项固定注入不可取消。注意：注入内容在会话新建时定型，此处改动需对该会话点「重建快照」后才生效。</div></div>';
+    +'</div><div class="field" style="margin-top:10px"><label>日记（Earlier Days）注入篇数</label><input class="np-sel" type="number" id="xj-diary-count" min="1" max="1000" placeholder="跟随管理台" value="'+(curDiaryCount===null?'':String(curDiaryCount))+'"><div class="np-tip">留空=跟随管理台全局篇数；填写数字=仅本会话覆盖。更改后需重建快照生效。</div></div><div class="np-tip">前两项固定注入不可取消。注意：注入内容在会话新建时定型，此处改动需对该会话点「重建快照」后才生效。</div></div>';
   openEditModal("跨窗口 · "+nm,
     '<div class="field"><label>本会话是否注入跨窗口内容</label><select class="np-sel" id="xj-cross">'+opts+'</select>'
     +'<div class="np-tip">「开启」= 本会话照常注入；「关闭」= 本会话不注入任何跨窗口内容（相关记忆不受此开关影响）。</div></div>'
@@ -7963,19 +8001,22 @@ async function openSessionCrossInject(sid){
       const loadedEditable=(curBlocks===null)?DEFAULTS.map(function(d){return d[0];}):curBlocks.filter(function(k){ return LOCKED.indexOf(k)<0; });
       const pickedEditable=picked.filter(function(k){ return LOCKED.indexOf(k)<0; });
       const sameSet=loadedEditable.length===pickedEditable.length&&loadedEditable.every(function(k){ return pickedEditable.indexOf(k)>=0; });
-      saveSessionCrossInject(sid, enabled, sameSet?null:picked);
+      const diaryRaw=String((document.getElementById("xj-diary-count")||{}).value||"").trim();
+      let diaryCount=null; if(diaryRaw){ diaryCount=parseInt(diaryRaw,10); if(!isFinite(diaryCount)||diaryCount<1) diaryCount=1; if(diaryCount>1000) diaryCount=1000; }
+      saveSessionCrossInject(sid, enabled, sameSet?null:picked, diaryCount);
     },
     "应用");
 }
-async function saveSessionCrossInject(sid, enabled, injectBlocks){
+async function saveSessionCrossInject(sid, enabled, injectBlocks, diaryCountOverride){
   try{
     const body={enabled:enabled};
     if(Array.isArray(injectBlocks)&&injectBlocks.length) body.inject_blocks=injectBlocks;
+    if(diaryCountOverride!==undefined) body.diary_count_override=diaryCountOverride;
     const r=await fetch("/v1/sessions/"+encodeURIComponent(sid)+"/cross-inject",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify(body)});
     const j=await r.json();
     if(!r.ok){ showToast(j.error||"保存失败"); return; }
     const blocksChanged=!!(Array.isArray(injectBlocks)&&injectBlocks.length);
-    showToast((enabled?"已开启本会话跨窗口注入":"已关闭本会话跨窗口注入")+(blocksChanged?"；勾选变化需「重建快照」后生效":""));
+    showToast((enabled?"已开启本会话跨窗口注入":"已关闭本会话跨窗口注入")+((blocksChanged||diaryCountOverride!==undefined)?"；注入设置需「重建快照」后生效":""));
   }catch(e){ showToast("保存失败:"+(e&&e.message||"")); }
 }
 // 给【单个会话】单独指定模型供应商：从当前已配置的 AI 供应商里选（默认=跟随全局），
@@ -8114,14 +8155,17 @@ async function doMergeSessions(){
           }
           // 合并会话的人设/模型/跨窗口设置（弹窗里选的）
           const _bp=(document.getElementById("np-prompt")||{}).value||"";
-          if(_bp) setSessionPrompt(target, _bp);
+          if(_bp) await setSessionPrompt(target, _bp, true);
           const _pid=(document.getElementById("np-provider")||{}).value||"";
           const _mdl=(document.getElementById("np-model")||{}).value||"";
-          if(_pid) saveSessionProvider(target, _pid, _mdl, mergedName);
+          if(_pid){
+            const providerSaved=await saveSessionProvider(target, _pid, _mdl, mergedName);
+            if(providerSaved===false) throw new Error("保存失败");
+          }
           const _cx=(document.getElementById("np-cross")||{}).value;
           if(_cx==="1"||_cx==="0"){
-            try{ fetch("/v1/sessions/"+encodeURIComponent(target)+"/cross-inject",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({enabled:_cx==="1"})}); }
-            catch(e){ console.warn("[merge cross-inject] 提交失败:",e&&e.message); }
+            const cxResp=await fetch("/v1/sessions/"+encodeURIComponent(target)+"/cross-inject",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify({enabled:_cx==="1"})});
+            if(!cxResp.ok) throw new Error("保存失败");
           }
           mergeMode=false; mergeSel.clear();
           await loadSessions();
@@ -8290,7 +8334,7 @@ async function switchSessionAndLocate(sid,idx){
 async function switchSession(id){
   if(id===SessionStore.getCurrentSession()){closeDrawer();return;}
   // 回复/连播进行中切会话会让收尾逻辑把旧会话消息写进新会话缓存，先挡下
-  if(sending||_segBusy){ showToast("回复进行中，等这轮结束再切换会话"); return; }
+  if(sending||_segBusy||_sessionInitBusy){ showToast("回复进行中，等这轮结束再切换会话"); return; }
   // 保存当前会话到本地，再切到目标会话
   saveMsgs();
   SessionStore.setCurrentSession(id);
@@ -8345,29 +8389,29 @@ async function newSession(){
     };
     openEditModal("新建会话",
       '<div class="field"><label>本会话使用的提示词</label><select class="np-sel" id="np-prompt">'+opts+'</select>'
-      +'<div class="np-tip">选择的备份仅对这个会话生效；「默认」跟随设置里的全局人设。点取消则不创建。</div></div>'
+      +'<div class="np-tip">备份仅对本会话生效；默认使用全局人设。</div></div>'
       +'<div class="field" style="margin-top:12px"><label>本会话使用的模型</label><select class="np-sel" id="np-provider">'+provOpts+'</select></div>'
       +'<div class="field" style="margin-top:8px"><label>模型</label><select class="np-sel" id="np-model">'+modelOptsFor("")+'</select>'
-      +'<div class="np-tip">选定后这个会话单独走该供应商；「默认」跟随全局。供应商停用或删除会自动回退全局。</div></div>'
+      +'<div class="np-tip">可为本会话单独指定供应商；默认使用全局设置。</div></div>'
       +'<div class="field" style="margin-top:12px"><div class="np-sw-row"><label>跨窗口注入</label><label class="np-switch"><input type="checkbox" id="np-cross-toggle" checked><span class="np-sl"></span></label></div>'
-      +'<div class="np-tip">是否注入其它会话的跨窗口内容。默认开启：注入永久上下文、Core Identity、Long-term Understanding、日记；关闭则本会话不注入任何跨窗口内容（只剩人设）。</div></div>'
+      +'<div class="np-tip">开启后注入所选跨窗口内容；关闭则只使用本会话人设。</div></div>'
       +'<div class="field" style="margin-top:12px" id="np-inject-blocks-wrap"><label>跨窗口注入内容（多选）</label>'
       +'<div class="np-blocks" id="np-inject-blocks">'
       +'<label class="np-blk"><input type="checkbox" value="system_instructions" checked disabled> 永久上下文（固定注入）</label>'
       +'<label class="np-blk"><input type="checkbox" value="state_machine" checked disabled> 状态机（固定启用）</label>'
       +'<label class="np-blk"><input type="checkbox" value="core_identity" checked> Core Identity</label>'
       +'<label class="np-blk"><input type="checkbox" value="long_term_understanding" checked> Long-term Understanding</label>'
-      +'<label class="np-blk"><input type="checkbox" value="conversation_continuity" checked> 日记（Earlier Days）</label>'
-      +'<label class="np-blk"><input type="checkbox" value="starred_dialog"> 标星的对话</label>'
+      +'<label class="np-blk"><input type="checkbox" value="conversation_continuity" checked> 日记（Earlier Days） <input type="number" id="np-diary-count" placeholder="跟随管理台" min="1" max="1000" style="width:82px;margin-left:6px" title="留空则跟随管理台全局篇数"> 篇</label>'
+      +'<label class="np-blk"><input type="checkbox" value="starred_dialog"> 标星的对话 <input type="number" id="np-starred-limit" value="0" min="0" max="10000" style="width:64px;margin-left:6px" title="0 表示全量"> 条（0=全量）</label>'
       +'<label class="np-blk"><input type="checkbox" value="state_inherit"> 继承上个会话状态</label>'
       +'<label class="np-blk"><input type="checkbox" value="recent_dialog"> 最近对话原文<input type="number" id="np-recent-rounds" value="20" min="1" max="100" style="width:52px;margin-left:6px" title="继承轮数，1轮=2条"> 轮</label>'
       +'</div>'
-      +'<div class="np-tip">前两项固定注入不可取消；其余按需勾选（默认勾选 Core Identity / Long-term Understanding / 日记）。</div></div>'
-      +'<div class="np-tip" style="color:#888">块顺序：永久上下文 → Core Identity → Long-term Understanding → 日记 → 标星的对话 → 状态机；「继承上个会话状态」首轮临时注入；「最近对话原文」建会话时写入本会话时间线。</div></div>',
-      function(){ try{
+      +'<div class="np-tip">永久上下文和状态机固定启用；其余可按需选择。</div></div>'
+      +'<div class="np-tip" style="color:#888">注入顺序按列表排列；继承状态仅首轮注入，最近对话会写入本会话。</div></div>',
+      async function(){ try{
         const pid=(document.getElementById("np-provider")||{}).value||"";
         const mdl=(document.getElementById("np-model")||{}).value||"";
-        createSessionWithPrompt((document.getElementById("np-prompt")||{}).value||"", pid, mdl);
+        await createSessionWithPrompt((document.getElementById("np-prompt")||{}).value||"", pid, mdl);
       }catch(err){ showToast("新建失败:"+(err&&err.message||err)); } },
       "创建");
     const npProv=document.getElementById("np-provider");
@@ -8389,14 +8433,12 @@ async function newSession(){
     showToast("新建会话出错:"+(err&&err.message||err));
   }
 }
-function createSessionWithPrompt(backupId, providerId, modelName){
-  // 回复/连播进行中新建会话会让收尾逻辑把旧会话消息写进新会话缓存，先挡下
-  if(sending||_segBusy){ showToast("回复进行中，等这轮结束再新建会话"); return; }
+async function createSessionWithPrompt(backupId, providerId, modelName){
+  // 初始化设置尚未完成时禁止并发新建、发送或切换会话。
+  if(sending||_segBusy||_sessionInitBusy){ showToast("回复进行中，等这轮结束再新建会话"); return; }
+  _sessionInitBusy=true;
+  try{
   const sid=genSessionId();
-  SessionStore.setCurrentSession(sid);
-  pushCurrentSession();   // 跨设备同步：新会话也上报
-  setSessionPrompt(sid, backupId);
-  if(providerId){ saveSessionProvider(sid, providerId, modelName, sid); }
   // 1010-31c：8 键契约 + 跟随全局已删——新建会话恒提交显式集合（enabled 必为 true/false，
   // 开启时 inject_blocks 至少含锁死 2 项；后端 normalize 兜底）。
   const crossToggle=document.getElementById("np-cross-toggle");
@@ -8413,15 +8455,31 @@ function createSessionWithPrompt(backupId, providerId, modelName){
   if(crossOn){ submitBody={enabled:true, inject_blocks:picked.slice()}; }
   else { submitBody={enabled:false}; }
   // 1010-29：勾选「最近对话」时附继承轮数（默认 20 轮 = 40 条；服务端建会话时按此从上一个聊天会话截取）
+  if(submitBody && picked.indexOf("starred_dialog")>=0){
+    let sl=parseInt((document.getElementById("np-starred-limit")||{}).value||"0",10);
+    if(!isFinite(sl)||sl<0) sl=0; if(sl>10000) sl=10000;
+    submitBody.starred_dialog_limit=sl; // 0 = 全量
+  }
+  if(submitBody && picked.indexOf("conversation_continuity")>=0){
+    const dcRaw=String((document.getElementById("np-diary-count")||{}).value||"").trim();
+    if(dcRaw){ let dc=parseInt(dcRaw,10); if(!isFinite(dc)||dc<1) dc=1; if(dc>1000) dc=1000; submitBody.diary_count_override=dc; }
+  }
   if(submitBody && picked.indexOf("recent_dialog")>=0){
     let rd=parseInt((document.getElementById("np-recent-rounds")||{}).value||"20",10);
     if(!isFinite(rd)||rd<1) rd=20; if(rd>100) rd=100;
     submitBody.recent_dialog_rounds=rd;
   }
   if(submitBody){
-    try{ fetch("/v1/sessions/"+encodeURIComponent(sid)+"/cross-inject",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify(submitBody)}); }
-    catch(e){ console.warn("[cross-inject] 会话级设置提交失败:",e&&e.message); }
+    const crossResp=await fetch("/v1/sessions/"+encodeURIComponent(sid)+"/cross-inject",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+api_key,"X-CSRF-Token":getCookie("admin_csrf")},credentials:"include",body:JSON.stringify(submitBody)});
+    if(!crossResp.ok) throw new Error("保存失败");
   }
+  await setSessionPrompt(sid, backupId, true);
+  if(providerId){
+    const providerSaved=await saveSessionProvider(sid, providerId, modelName, sid);
+    if(providerSaved===false) throw new Error("保存失败");
+  }
+  SessionStore.setCurrentSession(sid);
+  await pushCurrentSession();
   msgs=[];saveMsgs();
   renderAll();
   closeDrawer();
@@ -8436,6 +8494,9 @@ function createSessionWithPrompt(backupId, providerId, modelName){
   renderSessionList();
   startLiveEvents();   // 空会话也订阅，等 AI 主动消息/别设备消息进来时即时可刷新
   showToast(backupId?"新会话已创建，本会话使用所选提示词":"新会话已创建");
+  }finally{
+    _sessionInitBusy=false;
+  }
 }
 
 // 删除会话：调用后端 DELETE /v1/sessions/:id 真正删除独立时间线文件
@@ -10138,7 +10199,7 @@ body:has(#chat:is([data-layout="claude"],[data-layout="crt"])) footer .inputbar 
 
 body:has(#chat:is([data-layout="claude"],[data-layout="crt"])) footer .inputbar #send{background:var(--send-bg,rgba(26,26,26,.82))!important;color:var(--send-icon,#fff)!important;border-radius:50%!important;width:36px!important;height:36px!important;display:flex!important;align-items:center!important;justify-content:center!important}
 
-body:has(#chat:is([data-layout="claude"],[data-layout="crt"])) footer .inputbar #send .ico{transform:rotate(-45deg)!important;transform-origin:center;width:24px!important;height:24px!important}
+body:has(#chat:is([data-layout="claude"],[data-layout="crt"])) footer .inputbar #send .send-plane{transform:none!important;width:20px!important;height:20px!important;stroke-width:1.9!important}
 
 body:has(#chat:is([data-layout="claude"],[data-layout="crt"])) footer .inputbar #send:active{transform:none!important}
 
@@ -11090,5 +11151,148 @@ body[data-theme="terra"] .session-title,body[data-theme="terra"] .set-acc-h{font
 /* 代码块圆角 */
 body[data-theme="terra"] #chat pre{border-radius:12px!important;}
 </style>
+
+<style id="modal-polish-20261012">
+/* 弹窗统一细节：不改业务逻辑，只统一尺寸、间距、滚动与触控反馈 */
+:root{--modal-radius:18px;--modal-gap:12px}
+.modal{
+  padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
+  overscroll-behavior: contain;
+}
+.modal-card{
+  width:min(100%, 520px);
+  max-width:min(520px, 94vw);
+  max-height:min(84dvh, 820px);
+  padding:20px;
+  border-radius:var(--modal-radius);
+  overflow-x:hidden;
+  overscroll-behavior:contain;
+  scrollbar-gutter:stable;
+  box-shadow:0 20px 64px rgba(var(--shadow-rgb),.18),0 2px 10px rgba(var(--shadow-rgb),.05);
+}
+.modal-card h3{
+  position:sticky;top:-20px;z-index:3;
+  margin:-2px 0 16px;padding:2px 0 12px;
+  border-bottom:1px solid var(--line);
+  background:var(--bg1);
+  font-size:16px;line-height:1.45;letter-spacing:.02em;
+}
+.modal-card .field{margin:0 0 16px;min-width:0}
+.modal-card .field:last-child{margin-bottom:0}
+.modal-card .field label{font-size:12px;line-height:1.5;letter-spacing:.02em}
+.modal-card input:not([type="checkbox"]):not([type="radio"]),
+.modal-card select,
+.modal-card textarea{
+  box-sizing:border-box;max-width:100%;min-width:0;
+  border-radius:10px;line-height:1.45;
+  transition:border-color .16s ease,box-shadow .16s ease,background-color .16s ease;
+}
+.modal-card input:focus-visible,.modal-card select:focus-visible,.modal-card textarea:focus-visible{
+  outline:none;border-color:var(--accent)!important;
+  box-shadow:0 0 0 3px rgba(var(--accent-rgb),.12);
+}
+.modal-card textarea{resize:vertical;max-width:100%}
+.modal-card .mcp-btns,
+.modal-card > div[style*="display:flex"][style*="margin-top"]{
+  display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+}
+.modal-card .mcp-btns .mcp-btn,
+.modal-card > div[style*="display:flex"][style*="margin-top"] > button{
+  min-height:40px;border-radius:11px;padding:9px 14px;
+}
+.modal-card .mcp-btns .mcp-btn.primary,
+.modal-card > div[style*="display:flex"][style*="margin-top"] > .primary{font-weight:600}
+.modal-card .mcp-msg{line-height:1.55;overflow-wrap:anywhere}
+.modal-card .np-tip,.modal-card .data-tip{line-height:1.65;overflow-wrap:anywhere}
+.modal-card .np-blocks{
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px;
+}
+.modal-card .np-blk{
+  box-sizing:border-box;min-width:0;min-height:40px;
+  padding:9px 10px;gap:7px;flex-wrap:wrap;align-content:center;
+  border:1px solid var(--line);border-radius:10px;
+  background:var(--card,rgba(var(--shadow-rgb),.025));
+  line-height:1.45;overflow-wrap:anywhere;
+}
+.modal-card .np-blk:has(input:checked){border-color:rgba(var(--accent-rgb),.35);background:var(--accent-faint)}
+.modal-card .np-blk input[type="checkbox"]{width:16px;height:16px;flex:0 0 auto;accent-color:var(--accent)}
+.modal-card .np-blk input[type="number"]{width:76px!important;max-width:100%;padding:6px 7px;font-size:14px}
+.modal-card .np-sel{min-height:42px;font-size:16px;padding:10px 12px}
+#diaryModal .modal-card,#editModal .modal-card{width:min(100%,520px)}
+#diaryModalContent{display:block;min-height:min(34vh,320px);max-height:56vh;line-height:1.65}
+#mcpModal .modal-card{
+  width:min(94vw,600px);height:min(74dvh,700px);max-height:84dvh;
+  padding:18px;gap:0;
+}
+#mcpModal .modal-card h3{top:-18px;margin-top:0}
+#mcpModal .mcp-tabs{max-width:100%;overflow-x:auto}
+#mcpModal .mcp-tab{min-height:36px;white-space:nowrap}
+#mcpModal .mcp-form-inner{min-width:0}
+#mcpModal .mcp-row input,#mcpModal .mcp-row select,#mcpModal .mcp-row textarea{min-width:0;max-width:100%;box-sizing:border-box}
+#mcpModal .mcp-btns{position:sticky;bottom:calc(-18px - env(safe-area-inset-bottom));z-index:4;padding:10px 0 calc(10px + env(safe-area-inset-bottom));background:var(--bg1);border-top:1px solid var(--line)}
+#provForm .prov-save-bar{bottom:calc(-18px - env(safe-area-inset-bottom));margin-left:-18px;margin-right:-18px;padding-left:18px;padding-right:18px}
+.sheet{
+  max-height:min(90dvh,900px);padding:20px 18px calc(env(safe-area-inset-bottom) + 20px);
+  border-radius:20px 20px 0 0;overscroll-behavior:contain;
+}
+.act-sheet{
+  max-height:min(82dvh,720px);overflow-y:auto;overscroll-behavior:contain;
+  padding-top:10px;padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right));
+}
+.act-item{min-height:46px;border-radius:12px;touch-action:manipulation}
+#bannerHost{width:min(640px,calc(100vw - 24px));top:calc(env(safe-area-inset-top) + 10px)}
+#bannerHostMid{width:min(420px,calc(100vw - 28px));max-width:calc(100vw - 28px)}
+.banner{border-radius:16px;padding:16px;gap:9px;max-height:calc(100dvh - 28px);overflow-y:auto;overscroll-behavior:contain}
+.banner-actions{gap:8px;flex-wrap:wrap}
+.banner-btn{min-height:42px;padding:10px 13px;border-radius:11px;touch-action:manipulation}
+#imgLightbox{padding:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom))}
+#imgLightbox .lb-box{max-width:96vw;max-height:90dvh;border-radius:14px}
+#imgLightbox .lb-box img{max-width:92vw;max-height:86dvh}
+/* 新建会话弹窗：压缩垂直留白，优化原生下拉框文字 */
+#editModal .modal-card{padding:16px 17px;max-height:min(80dvh,760px)}
+#editModal .modal-card h3{margin-bottom:12px;padding-bottom:9px;font-size:17px;line-height:1.35}
+#editModal .modal-card .field{margin-bottom:10px}
+#editModal .modal-card .field[style*="margin-top"]{margin-top:8px!important}
+#editModal .modal-card .np-tip{font-size:12px;line-height:1.45;margin-top:5px;color:var(--ink2,#888)}
+#editModal .modal-card .np-sel{min-height:38px;padding:8px 12px;font-size:15px;font-weight:450;letter-spacing:.01em;color:var(--ink,#222);background-color:var(--bg1,#fff);border:1px solid var(--line,#e7e7e7);border-radius:11px}
+#editModal .modal-card .np-blk{padding:7px 9px;min-height:36px;font-size:13px;gap:6px}
+@media(max-width:520px){#editModal .modal-card{max-height:calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 28px);padding:14px 13px}#editModal .modal-card .np-sel{font-size:15px;min-height:38px}#editModal .modal-card .np-blocks{gap:6px}}
+@media(max-width:520px){
+  .modal{padding:10px 10px max(10px,env(safe-area-inset-bottom))}
+  .modal-card{max-width:100%;max-height:calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 20px);padding:17px 15px;border-radius:16px}
+  .modal-card h3{top:-17px;margin-top:-1px;margin-bottom:13px;padding-bottom:10px}
+  .modal-card .np-blocks{grid-template-columns:minmax(0,1fr);gap:7px}
+  .modal-card .np-blk{min-height:42px}
+  #mcpModal .modal-card{width:100%;height:min(78dvh,720px);max-height:calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 20px);padding:15px}
+  #mcpModal .modal-card h3{top:-15px}
+  #mcpModal .mcp-btns{bottom:calc(-15px - env(safe-area-inset-bottom))}
+  #provForm .prov-save-bar{margin-left:-15px;margin-right:-15px;padding-left:15px;padding-right:15px}
+  .modal-card .mcp-btns .mcp-btn,.modal-card > div[style*="display:flex"][style*="margin-top"] > button{flex:1;min-width:0}
+  .sheet{padding-left:15px;padding-right:15px}
+  .banner-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .banner-btn{min-width:0}
+}
+/* 轻量交互润色：反馈清晰但不抢眼 */
+.modal-card,.banner,.act-sheet,.sheet{ -webkit-tap-highlight-color:transparent }
+.modal-card button,.modal-card .np-blk,.banner-btn,.sess-menu-item,.act-item{transition:background-color .16s ease,border-color .16s ease,color .16s ease,box-shadow .16s ease,transform .12s ease}
+.modal-card button:focus-visible,.banner-btn:focus-visible,.sess-menu-item:focus-visible,.act-item:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.modal-card button:active,.banner-btn:active,.sess-menu-item:active,.act-item:active{transform:scale(.985)}
+.modal-card .np-blk:not(:has(input:disabled)):hover{border-color:rgba(var(--accent-rgb),.28)}
+.modal-card .np-sel:hover{border-color:rgba(var(--accent-rgb),.32)}
+.modal-card input:not([type="checkbox"]):not([type="radio"]):hover,.modal-card select:hover,.modal-card textarea:hover{border-color:rgba(var(--accent-rgb),.30)}
+.modal-card input[type="checkbox"],.modal-card input[type="radio"]{accent-color:var(--accent);cursor:pointer}
+.banner-btn:focus-visible,.banner-input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.banner-input{transition:border-color .16s ease,box-shadow .16s ease,background-color .16s ease}
+.banner-input:focus{box-shadow:0 0 0 3px rgba(var(--accent-rgb),.12);background:var(--bg1,#fff)}
+.sess-menu-item:active{background:var(--accent-faint)}
+.modal-card::-webkit-scrollbar,.banner::-webkit-scrollbar,.sheet::-webkit-scrollbar,.act-sheet::-webkit-scrollbar{width:5px}
+.modal-card::-webkit-scrollbar-thumb,.banner::-webkit-scrollbar-thumb,.sheet::-webkit-scrollbar-thumb,.act-sheet::-webkit-scrollbar-thumb{background:rgba(var(--shadow-rgb),.20);border-radius:99px}
+@media(hover:none){.modal-card .np-blk:hover,.modal-card .np-sel:hover,.sess-menu-item:hover{border-color:var(--line)}.banner-btn:hover{filter:none}}
+@media(prefers-reduced-motion:reduce){
+  .modal-card input,.modal-card select,.modal-card textarea,.banner,.act-sheet,.sheet,.modal-card button,.modal-card .np-blk,.banner-btn,.sess-menu-item,.act-item,.banner-input{transition:none!important;animation:none!important}
+  .banner-close{transition:none!important}
+}
+</style>
+
 </body>
 </html>

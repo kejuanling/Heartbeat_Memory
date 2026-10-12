@@ -260,6 +260,10 @@ function assembleInput(opts) {
   // 0928：V1 memory_pool_config.json 已归档，篇数配置迁 data/cross_inject_config.json（管理台配置页可调）
   let diaryCount = 3;
   try { diaryCount = Number(JSON.parse(fs.readFileSync(path.join(dataDir, 'cross_inject_config.json'), 'utf8')).cross_inject_diary_count) || 3; } catch (e) {}
+  try {
+    const sessionOverride = require('./lib/session-cfg').createSessionCfg(opts.baseDir).readSessionDiaryCount(opts.sessionId);
+    if (sessionOverride !== null) diaryCount = sessionOverride;
+  } catch (e) {}
   // map 挂在 v2Input 上供溯源（builder 只读已知字段，多余键无害）
   // 日记过滤（1003-12 用户拍板）：注入「创建日当天及之前」（date <= 会话创建日）且未被隐藏的篇；
   // 本会话自己写的日记（session === 本会话）由时间线 [DIARY] 事件自然覆盖，跨窗口不重复注入。

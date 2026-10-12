@@ -185,7 +185,8 @@ async function runWithTools({
   sessionId = null,
   onDiaryWritten = null,
   snapshotV2 = null,
-  baseDir = null
+  baseDir = null,
+  signal = null
 }) {
   // 1. 加载 MCP 工具，转成 OpenAI tools[]（1007：快照优先，冻死）
   const openaiTools = await getToolsForSession(snapshotV2, baseDir, sessionId, serverClients);
@@ -200,7 +201,7 @@ async function runWithTools({
   // 2026-10-03：onDiaryWritten 必须进 toolCtx —— executeToolCalls 读的是 ctx.onDiaryWritten，
   // 而本函数的参数表此前根本不接受它、toolCtx 也不带，server.js 传的回调在签名这层就被丢掉，
   // 0929-03 那次「修复」实际从未生效：diary_add 写的日记两条路径都没落过时间线。
-  const toolCtx = { serverClients, routes, upstreamUrl, upstreamKey, model, sessionId, onDiaryWritten };
+  const toolCtx = { serverClients, routes, upstreamUrl, upstreamKey, model, sessionId, onDiaryWritten, signal };
 
   let working = messages.slice();
   let totalUsage = null;
@@ -235,6 +236,7 @@ async function runWithTools({
   }
 
   for (let round = 0; round < maxToolRounds + 1; round++) {
+    if (signal && signal.aborted) { const e = new Error("用户已停止生成"); e.name = "AbortError"; throw e; }
     if (clientGone) { console.log("[mcp] 客户端已断开，工具循环提前结束"); break; }
     rounds = round;
     const body = {
@@ -257,6 +259,11 @@ async function runWithTools({
     }
 
     const controller = new AbortController();
+    const _abortFromParent = () => controller.abort();
+    if (signal) {
+      if (signal.aborted) controller.abort();
+      else signal.addEventListener("abort", _abortFromParent, { once: true });
+    }
     const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
     let resp;
     try {
@@ -373,6 +380,7 @@ async function runWithTools({
 async function executeToolCalls(toolCalls, working, toolHistory, ctx, onEvent, nextIndex, afterSeg) {
   const { serverClients, routes, upstreamUrl, upstreamKey, model } = ctx;
   for (let _i = 0; _i < toolCalls.length; _i++) {
+    if (ctx.signal && ctx.signal.aborted) { const e = new Error("用户已停止生成"); e.name = "AbortError"; throw e; }
     const tc = toolCalls[_i];
     const fn = tc.function || {};
     const name = fn.name || "";
@@ -494,7 +502,8 @@ async function streamToolLoop({
   sessionId = null,
   onDiaryWritten = null,
   snapshotV2 = null,
-  baseDir = null
+  baseDir = null,
+  signal = null
 }) {
   const openaiTools = await getToolsForSession(snapshotV2, baseDir, sessionId, serverClients);
   // 1007-17 修复：同上——本函数返回值里也引用了 routes（原加载被 getToolsForSession 替换后
@@ -514,13 +523,19 @@ async function streamToolLoop({
   const emit = (evt) => { try { if (typeof onEvent === "function") onEvent(evt); } catch (e) { clientGone = true; } };
 
   for (let round = 0; round < maxToolRounds + 1; round++) {
-    // 客户端断开不中断循环——继续跑完上游请求
+    if (signal && signal.aborted) { const e = new Error("用户已停止生成"); e.name = "AbortError"; throw e; }
+    // 普通客户端断线不取消；只有明确的 stop API 会触发 signal。
     rounds = round;
     const body = { model, messages: working, stream: true, temperature, top_p, max_tokens };
     if (round < maxToolRounds && openaiTools.length > 0) { body.tools = openaiTools; body.tool_choice = "auto"; }
     else if (openaiTools.length > 0) { body.tools = openaiTools; body.tool_choice = "none"; }
 
     const controller = new AbortController();
+    const _abortFromParent = () => controller.abort();
+    if (signal) {
+      if (signal.aborted) controller.abort();
+      else signal.addEventListener("abort", _abortFromParent, { once: true });
+    }
     const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
     let resp;
     try {
@@ -530,7 +545,10 @@ async function streamToolLoop({
         body: JSON.stringify(body),
         signal: controller.signal
       });
-    } finally { clearTimeout(timer); }
+    } finally {
+      clearTimeout(timer);
+      // 保留 parent abort 监听直到流式 reader 结束；fetch 返回 headers 不代表正文已读完。
+    }
     if (!resp.ok) {
       const t = await resp.text().catch(() => "");
       // 2026-09-26：上游拉不到图片时整包 400，去图重试一次（与聊天侧图片降级同源保护）
@@ -677,6 +695,7 @@ async function streamToolLoop({
     if (!toolCalls.length) break;
 
     for (let i = 0; i < toolCalls.length; i++) {
+      if (signal && signal.aborted) { const e = new Error("用户已停止生成"); e.name = "AbortError"; throw e; }
       const tc = toolCalls[i];
       const fn = tc.function || {}; const name = fn.name || "";
       const args = _parseArgs(fn.arguments);
