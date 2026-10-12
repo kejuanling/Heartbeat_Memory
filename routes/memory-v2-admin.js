@@ -5,6 +5,7 @@
 const path = require("path");
 const { createStore } = require("../memory-v2");
 const v2vectors = require("../memory-v2-vectors");
+const memoryPoolIo = require("../lib/memory-pool-io");
 
 const KIND_MAP = { "关于她": "fact", "认账": "rule", "拓本": "fact", fact: "fact", rule: "rule", event: "event" }; // 旧池类名 → V2 kind（管理台表单仍传类名，落库前翻译；1002-14 删 quote/milestone，1005-19 加 event）
 
@@ -191,6 +192,41 @@ module.exports = function registerMemoryV2Admin(app, deps) {
       reply.send({ success: true, entry: r.entry });
     } catch (err) {
       reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // ---- 导出 / 导入（清洗记忆池用；逻辑在 lib/memory-pool-io.js，2026-10-11）----
+  // 导出：只导出 active；category = all / fact / rule / event
+  app.get("/admin/memory-v2/export", { preHandler: basicAuth }, async (req, reply) => {
+    try {
+      const out = memoryPoolIo.exportActive(store(), req.query && req.query.category);
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      reply.header("Content-Disposition", 'attachment; filename="memory_pool_' + out.category + "_" + stamp + '.json"');
+      reply.send(out);
+    } catch (err) {
+      reply.code(400).send({ error: err.message });
+    }
+  });
+
+  // 导入：dry_run 缺省或 true = 只预览（不写入任何数据）；dry_run === false 才真正写入（写入前先备份集合文件）
+  let importing = false;
+  app.post("/admin/memory-v2/import", { preHandler: basicAuth, bodyLimit: 20 * 1024 * 1024 }, async (req, reply) => {
+    if (importing) return reply.code(409).send({ error: "另一个导入正在进行，请稍后再试" });
+    importing = true;
+    try {
+      const b = req.body || {};
+      const entries = memoryPoolIo.extractEntries(b);
+      const dry = b.dry_run !== false;
+      const result = dry ? memoryPoolIo.previewImport(store(), entries) : memoryPoolIo.applyImport(store(), entries);
+      if (!dry) {
+        console.log("[memory-pool-io] 导入完成:", JSON.stringify({ total: result.total, failed: result.failed, update: result.update, create: result.create, archive: result.archive, revive: result.revive, unchanged: result.unchanged }), "备份:", result.backup);
+      }
+      reply.send({ success: true, dry_run: dry, result });
+    } catch (err) {
+      console.error("[memory-pool-io] 导入出错:", err.message);
+      reply.code(400).send({ error: err.message });
+    } finally {
+      importing = false;
     }
   });
 };

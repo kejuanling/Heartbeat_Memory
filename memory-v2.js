@@ -313,11 +313,23 @@ function createStore(opts = {}) {
   const readonly = opts.readonly != null ? !!opts.readonly : READONLY;
 
   let rows = null; // 惰性加载；加载后为唯一内存真身，写穿透落盘
+  // 2026-10-11：文件签名（mtime+size）。长期持有的实例（如准入模块的 mainStore）在别的实例/进程写盘后，
+  // 若继续用旧内存再写盘，会把别人的改动整个还原（管理台编辑、批量导入被静默覆盖）。
+  // 因此 load() 每次先比对签名：文件被别处改过就丢弃内存重读；自己写盘后更新签名。
+  let loadedSig = null;
+  function sigOf() {
+    try { const st = fs.statSync(collectionPath); return st.mtimeMs + ":" + st.size; } catch (_) { return null; }
+  }
 
   function load() {
-    if (rows) return rows;
+    if (rows) {
+      if (sigOf() === loadedSig) return rows;
+      rows = null; // 文件已被其它实例/进程改写：丢弃旧内存，下面重新读取
+    }
+    const sigBeforeRead = sigOf(); // 先取签名再读：读的过程中若又被改，下次 load() 会发现不一致并重读
     if (!fs.existsSync(collectionPath)) {
       rows = [];
+      loadedSig = sigBeforeRead;
       return rows;
     }
     try {
@@ -332,6 +344,7 @@ function createStore(opts = {}) {
     if (!Array.isArray(rows)) {
       throw new Error(`memory_v2 集合格式非法（应为数组）: ${collectionPath}`);
     }
+    loadedSig = sigBeforeRead;
     // 1002 第 4 项：存量条目补齐新增字段默认值（缺字段不报错），补齐后延迟落盘一次
     if (hydrateRows(rows) > 0) scheduleFlush();
     return rows;
@@ -340,6 +353,7 @@ function createStore(opts = {}) {
   function flush() {
     if (readonly) return;
     atomicWriteJson(collectionPath, rows);
+    loadedSig = sigOf(); // 自己写的，更新签名，避免下次 load() 误判为外部改动而重读
   }
 
   // 延迟合并落盘：2s 内的多次变更只写一次盘。用于 last_hit_at 打点与存量补字段迁移，
@@ -350,7 +364,11 @@ function createStore(opts = {}) {
     if (flushTimer) return;
     flushTimer = setTimeout(() => {
       flushTimer = null;
-      try { flush(); } catch (_) { /* 打点落盘失败不影响主链路 */ }
+      try {
+        const held = rows;
+        load(); // 2026-10-11：文件被别处改过则重读（丢弃本实例未落盘的命中打点，评估字段无伤），此时不再写盘，免得用旧内存覆盖别人的改动
+        if (rows === held) flush();
+      } catch (_) { /* 打点落盘失败不影响主链路 */ }
     }, 2000);
     if (flushTimer.unref) flushTimer.unref();
   }

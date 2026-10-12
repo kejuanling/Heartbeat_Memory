@@ -263,6 +263,10 @@
        <button type="button" class="mp-btn primary mp-add-ghost" onclick="openMemPoolAdd()" style="flex-shrink:0">＋ 新增记忆</button>
      </div>
    </div>
+   <div style="display:flex;gap:6px;justify-content:flex-end;align-items:center;margin:8px 2px 0">
+     <button type="button" class="mp-import-pair" onclick="openMemPoolExportPanel()" title="导出活跃记忆（完整原子记忆列表，JSON）" aria-label="导出">导出</button>
+     <button type="button" class="mp-import-pair" onclick="openMemPoolOverwritePanel()" title="覆盖导入：按 id 覆盖 / 新增 / 沉底 / 恢复（先预览再确认）" aria-label="覆盖导入">覆盖导入</button>
+   </div>
    <div id="mem-mempool-wrap">
       <div class="mp-head">
         <div id="mempool-clean-msg" style="width:100%;font-size:11px;color:var(--text3);min-height:0;margin-top:0"></div>
@@ -659,6 +663,28 @@
       <div class="mp-modal-actions">
         <button type="button" class="mp-btn" onclick="closeModal('mempoolExportModal')">取消</button>
         <button type="button" class="mp-btn primary" onclick="exportMemPool()">导出</button>
+      </div>
+    </div>
+  </div>
+    <div class="modal-overlay" id="mempoolOverwriteModal">
+    <div class="modal" style="max-width:min(94vw,720px)">
+      <div class="mp-modal-head">
+        <h3>覆盖导入 · 清洗记忆池</h3>
+        <button type="button" class="mp-modal-x" onclick="closeModal('mempoolOverwriteModal')">&times;</button>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:8px;line-height:1.7">
+        用「导出」得到的 JSON，改完再导回来。<br>
+        <b>有 id：按 id 覆盖</b>（正文 / 分类 / 备注 / 关键词 / 氛围 / 置顶等，文件里没写的字段不动）；<b>没有 id：新增</b>；<b>status 写 archived：沉底</b>；<b>status 写 active：恢复已沉底的</b>。已被取代的条目状态不动；id 找不到算失败（想新增请去掉 id）。<br>
+        先点「预览」看会发生什么（不写入任何数据），再点「确认导入」才真正写入，写入前自动备份。
+      </div>
+      <input type="file" id="mempool-ovr-file" accept=".json,application/json" onchange="onMemPoolOvrFile(this)" style="font-size:12px;margin-bottom:6px;max-width:100%">
+      <textarea id="mempool-ovr-ta" rows="3" oninput="onMemPoolOvrInput()" placeholder="也可以直接粘贴 JSON（导出文件的整体内容，或条目数组）" style="width:100%;font-size:12px;font-family:monospace;box-sizing:border-box;padding:10px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,0.85);color:var(--text2);resize:vertical"></textarea>
+      <div id="mempool-ovr-src" style="font-size:11px;color:var(--text3);min-height:14px;margin:4px 0"></div>
+      <div id="mempool-ovr-preview" style="font-size:12px;color:var(--text2);min-height:18px;margin:8px 0;max-height:38vh;overflow:auto;line-height:1.7"></div>
+      <div class="mp-modal-actions">
+        <button type="button" class="mp-btn" onclick="closeModal('mempoolOverwriteModal')">关闭</button>
+        <button type="button" class="mp-btn" onclick="previewMemPoolOverwrite()">预览</button>
+        <button type="button" class="mp-btn primary" id="mempool-ovr-do-btn" onclick="doMemPoolOverwrite()" style="display:none">确认导入</button>
       </div>
     </div>
   </div>
@@ -1499,5 +1525,53 @@
    </div>
    <div id="cloud-results" class="cloud-results"></div>
  </div>
- </body>
+
+<style id="admin-modal-polish-20261012">
+/* 管理台弹窗统一：保留现有配色与交互，仅整理尺寸、留白、滚动和移动端操作区 */
+.modal-overlay{padding:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom));overscroll-behavior:contain}
+.modal-overlay>.modal{
+  box-sizing:border-box;width:100%;max-width:min(560px,94vw);max-height:min(84dvh,820px);
+  padding:20px;border-radius:18px;overflow-x:hidden;overscroll-behavior:contain;
+  box-shadow:0 20px 64px rgba(35,25,25,.16),0 2px 10px rgba(35,25,25,.04);
+}
+.modal-overlay>.modal h3{line-height:1.45;letter-spacing:.01em}
+.modal-overlay>.modal input:not([type="checkbox"]):not([type="radio"]),
+.modal-overlay>.modal select,.modal-overlay>.modal textarea{
+  box-sizing:border-box;max-width:100%;min-width:0;border-radius:10px;
+  transition:border-color .16s ease,box-shadow .16s ease;
+}
+.modal-overlay>.modal input:focus-visible,.modal-overlay>.modal select:focus-visible,.modal-overlay>.modal textarea:focus-visible{
+  outline:none;border-color:var(--accent)!important;box-shadow:0 0 0 3px rgba(200,144,152,.13)
+}
+.modal-overlay .modal-actions,.modal-overlay .mp-modal-actions{gap:8px;flex-wrap:wrap}
+.modal-overlay .modal-actions .btn,.modal-overlay .mp-modal-actions .mp-btn{min-height:42px;border-radius:11px}
+.modal-overlay .mp-modal-head{position:sticky;top:-20px;z-index:3;margin:-2px 0 14px;padding:2px 0 10px;background:var(--card);border-bottom:1px solid var(--border)}
+.modal-overlay .mp-modal-fields{gap:10px}
+.modal-overlay .mp-modal-fields label{min-width:0;flex-wrap:wrap;line-height:1.5}
+.modal-overlay .mp-modal-fields input,.modal-overlay .mp-modal-fields select{min-height:38px;font-size:14px}
+.modal-overlay .mp-modal-x{flex:0 0 auto;min-width:36px;min-height:36px;display:inline-flex;align-items:center;justify-content:center}
+.modal-overlay .modal-edit-mem{min-height:0}
+.modal-overlay .modal-edit-mem textarea{max-width:100%;min-height:180px;max-height:48dvh;line-height:1.7}
+@media(max-width:600px){
+  .modal-overlay{align-items:center;padding:10px 10px max(10px,env(safe-area-inset-bottom))}
+  .modal-overlay>.modal{max-width:100%;max-height:calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 20px);padding:17px 15px;border-radius:16px}
+  .modal-overlay .mp-modal-head{top:-17px;margin-top:-1px}
+  .modal-overlay .modal-actions .btn,.modal-overlay .mp-modal-actions .mp-btn{flex:1;min-width:0;padding:10px 9px}
+  .modal-overlay .modal-edit-mem textarea{max-height:42dvh}
+}
+/* 管理台弹窗：轻触反馈、清晰焦点与更克制的悬停态 */
+.modal-overlay>.modal{overscroll-behavior:contain;-webkit-tap-highlight-color:transparent}
+.modal-overlay>.modal button,.modal-overlay .mp-btn,.modal-overlay .btn,.modal-overlay .mp-modal-x{transition:background-color .16s ease,border-color .16s ease,color .16s ease,box-shadow .16s ease,transform .12s ease}
+.modal-overlay>.modal button:focus-visible,.modal-overlay .mp-btn:focus-visible,.modal-overlay .btn:focus-visible,.modal-overlay .mp-modal-x:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.modal-overlay>.modal button:active,.modal-overlay .mp-btn:active,.modal-overlay .btn:active,.modal-overlay .mp-modal-x:active{transform:scale(.985)}
+.modal-overlay>.modal input:hover,.modal-overlay>.modal select:hover,.modal-overlay>.modal textarea:hover{border-color:rgba(200,144,152,.34)}
+.modal-overlay>.modal input[type="checkbox"],.modal-overlay>.modal input[type="radio"]{accent-color:var(--accent);cursor:pointer}
+.modal-overlay>.modal textarea{scrollbar-gutter:stable}
+.modal-overlay>.modal::-webkit-scrollbar,.modal-overlay textarea::-webkit-scrollbar{width:5px}
+.modal-overlay>.modal::-webkit-scrollbar-thumb,.modal-overlay textarea::-webkit-scrollbar-thumb{background:rgba(80,60,60,.18);border-radius:99px}
+@media(hover:none){.modal-overlay>.modal button:hover,.modal-overlay .mp-btn:hover,.modal-overlay .btn:hover{filter:none}}
+@media(prefers-reduced-motion:reduce){.modal-overlay>.modal,.modal-overlay input,.modal-overlay select,.modal-overlay textarea,.modal-overlay button,.modal-overlay .mp-btn,.modal-overlay .btn{transition:none!important}}
+</style>
+
+</body>
  </html>
