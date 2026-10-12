@@ -1544,7 +1544,18 @@ app.post("/v1/chat/completions", async (req, reply) => {
     // 字节层匹配不到完整标签，必须在 content 文本层过滤后再重组 SSE 事件。
     const contentFilter = createContentTagFilter();
     const thinkStripper = mcp.createThinkStripper();
-    const emitRawLine = (line) => reply.raw.write(line + "\n");
+    // 1012-01c：客户端断开后的 A 方案（与 MCP 路径 server.js streamDelta 同语义，1004-04 拍板）：
+    // 断开后不再 write——向半死 socket 写会抛错 → 走 catch 只落盘半截、上游连接还要空跑到超时；
+    // 改为静默丢弃下发但继续读完上游，流结束后按完整 fullRawSse 落盘。
+    // 修复「停止后有时完整落盘、有时只落半截」的双现象（取决于 nginx 何时掐断 gateway socket）。
+    let clientGone = false;
+    const _clientGoneMark = (why) => { if (!clientGone) { clientGone = true; console.warn("[stream] " + why + "，继续后台读完并完整落盘（A 方案）"); } };
+    const _clientAlive = () => !reply.raw.destroyed && !reply.raw.writableEnded && !reply.raw.writableFinished;
+    const safeWrite = (fn) => {
+      if (!_clientAlive()) { _clientGoneMark("客户端已断开"); return; }
+      try { fn(); } catch (e) { _clientGoneMark("客户端写失败（socket 半死）: " + e.message); }
+    };
+    const emitRawLine = (line) => safeWrite(() => reply.raw.write(line + "\n"));
     let sseBuffer = "";
     // UTF-8 流式解码：多字节字符（中文/emoji）可能被网络分包从字节中间切开，
     // 逐 chunk 独立 toString 会产出 U+FFFD 乱码并破坏 <memory>/<pin> 等标签的字节层匹配
@@ -1585,17 +1596,17 @@ app.post("/v1/chat/completions", async (req, reply) => {
             thinkStripper.push(filtered, (cleanText) => {
               if (!cleanText) return;
               delta.content = cleanText;
-              reply.raw.write("data: " + JSON.stringify(evt) + "\n\n");
+              safeWrite(() => reply.raw.write("data: " + JSON.stringify(evt) + "\n\n"));
             });
             const _td = thinkStripper.takeThinking();
             if (_td) {
-              reply.raw.write("data: " + JSON.stringify({
+              safeWrite(() => reply.raw.write("data: " + JSON.stringify({
                 id: "chatcmpl-direct",
                 object: "chat.completion.chunk",
                 created: Math.floor(Date.now() / 1000),
                 model: (body && body.model) || "",
                 choices: [{ index: 0, delta: { reasoning_content: _td }, finish_reason: null }]
-              }) + "\n\n");
+              }) + "\n\n"));
             }
           });
         } else {
@@ -1619,7 +1630,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
       if (_vis) {
         // 直通终止帧：final_content = 可见内容（剥日记块，与时间线落盘同口径），
         // 前端 _finalContent 优先采用，本地缓存与服务器字节级一致（顶层字段第三方客户端忽略，向后兼容）
-        reply.raw.write("data: " + JSON.stringify({
+        safeWrite(() => reply.raw.write("data: " + JSON.stringify({
           id: "chatcmpl-direct",
           object: "chat.completion.chunk",
           created: Math.floor(Date.now() / 1000),
@@ -1627,7 +1638,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
           choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
           usage: aiUsage || null,
           final_content: _vis
-        }) + "\n\n");
+        }) + "\n\n"));
       }
     }
     // 收尾：丢弃未闭合标签/残留前缀，转发剩余行，结束响应
