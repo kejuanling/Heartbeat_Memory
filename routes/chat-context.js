@@ -593,7 +593,7 @@ function createConversationBuilder(deps) {
         if (useFullCache) {
           incKey = _convCacheKey(sessionId, fp, incResult.blockFp, systemRaw);
           const incHit = _convCache.get(incKey);
-          if (incHit && !(opts && opts.noCache)) return incHit;
+          if (incHit && !(opts && opts.noCache) && !_snapshotPending) return incHit;
         }
         // 增量构建：head（块摘要/保留/前缀/间隙，_ctxRep 直接透传） + 尾部现算
         const sysPrep = systemRaw ? prepareMessageForLLM(systemRaw) : null;
@@ -620,7 +620,7 @@ function createConversationBuilder(deps) {
     }
     if (useFullCache && cacheKey) {
       const hit = _convCache.get(cacheKey);
-      if (hit && !(opts && opts.noCache)) return hit;
+      if (hit && !(opts && opts.noCache) && !_snapshotPending) return hit;
     }
     if (systemRaw) {
       const sysPrep = prepareMessageForLLM(systemRaw);
