@@ -13,13 +13,14 @@ function ok(name, fn) {
 
 const EXPECTED_ORDER = [
   "context_assembly", "system_instructions", "core_identity", "long_term_understanding",
-  "conversation_continuity", "relevant_memories",
+  "conversation_continuity", "starred_dialog", "relevant_memories",
 ];
 
-// 满配 fixture（六块全非空；1002-14 删 meaningful_moments 后为六块）
+// 满配 fixture（七类块全非空；含外置引导与标星对话）
 function fullInput() {
   return {
     pinnedEntries: [
+      { id: "pin0", content: "## Memory Handling Rule\nher present intent 优先。", target: "assembly", order: 0 },
       { id: "pin1", title: "记忆标签", content: "如果想存记忆，用记忆内联标签。", target: "instructions" },
       { id: "pin2", content: "回复她要简短有温度", target: "identity" },
       { id: "pin3", content: "你是我的锚", target: "retire" }, // 1002-14：moments_anchor target 随块一并删除
@@ -34,19 +35,21 @@ function fullInput() {
       { id: "mv2_f1", text: "她膝盖受过伤", kind: "fact", status: "active", anchor: true, created_at: "2026-09-03T00:00:00+08:00" },
       { id: "mv2_q1", text: "无论你怎么样我都选择接你", kind: "fact", status: "active", anchor: true, established_at: "2026-07-14T00:00:00+08:00", created_at: "2026-09-04T00:00:00+08:00" }, // 1002-14：原 quote，随分类删除并入 fact
       { id: "mv2_q2", text: "她对薄荷过敏", kind: "fact", status: "active", created_at: "2026-09-05T00:00:00+08:00" },
+      { id: "mv2_e1", text: "她对薄荷过敏", kind: "event", status: "active", triggers: ["薄荷"], created_at: "2026-09-06T00:00:00+08:00" },
     ],
+    starredLines: ["她标星保存的原话"],
     query: "她对薄荷过敏吗",
   };
 }
 
-ok("块顺序 = 0918 修订冻结顺序（1002-14 删 meaningful_moments，六块）", () => {
+ok("块顺序 = 当前七类块的冻结顺序（含 starred_dialog）", () => {
   const res = buildContextBlocks(fullInput());
   const keys = res.blocks.map(b => b.key);
   assert.deepStrictEqual(keys, EXPECTED_ORDER, "实际输出顺序");
   assert.deepStrictEqual(BLOCK_DEFS.map(d => d.key), EXPECTED_ORDER, "定义表顺序");
 });
 
-ok("schema：每块五键，非空块 tokens>0；current_state/recent_experience 已不存在", () => {
+ok("schema：七类块各五键，非空块 tokens>0；current_state/recent_experience 已不存在", () => {
   const res = buildContextBlocks(fullInput(), { includeEmpty: true });
   const keys = res.blocks.map(b => b.key);
   assert.ok(!keys.includes("current_state"), "0918 砍除");
@@ -72,16 +75,14 @@ ok("V2 空仓降级：Understanding/Relevant 省略；System Instructions/Identi
   assert.ok(!keys.includes("meaningful_moments"), "1002-14：块已删除");
 });
 
-ok("空块省略（默认，仅剩顶层引导）+ includeEmpty=true 时六块全在（empty:true, content:'', tokens:0）", () => {
-  const empty = { pinnedEntries: [], diaryEntries: [], memoriesV2: [], query: "" };
+ok("空块省略（无外置引导时无块注入）+ includeEmpty=true 时七类块全在", () => {
+  const empty = { pinnedEntries: [], diaryEntries: [], memoriesV2: [], starredLines: [], query: "" };
   const def = buildContextBlocks(empty).blocks;
-  assert.strictEqual(def.length, 1, "全空输入仅剩恒注入的顶层引导");
-  assert.strictEqual(def[0].key, "context_assembly");
+  assert.strictEqual(def.length, 0, "没有 assembly pinned 文案时，空引导块也省略");
   const res = buildContextBlocks(empty, { includeEmpty: true });
-  assert.strictEqual(res.blocks.length, 6);
+  assert.strictEqual(res.blocks.length, 7);
   for (const b of res.blocks) {
-    if (b.key === "context_assembly") { assert.strictEqual(b.empty, false); continue; }
-    assert.strictEqual(b.empty, true);
+    assert.strictEqual(b.empty, true, b.key + " 应为空");
     assert.strictEqual(b.content, "");
     assert.strictEqual(b.tokens, 0);
   }
@@ -106,7 +107,7 @@ ok("config 覆盖：门槛提高→核心层省略；diaryCount=1→只最新一
   assert.strictEqual(DEFAULT_CONFIG.diaryCount, 3, "默认篇数未被改");
 });
 
-ok("内容块标题仅一行（说明已上移顶层引导）；顶层块恒注入且含 Handling Rule", () => {
+ok("内容块标题仅一行；顶层引导由 assembly pinned 文案提供", () => {
   const res = buildContextBlocks(fullInput());
   const id = res.blocks.find(b => b.key === "core_identity");
   const lines = id.content.split("\n");
@@ -114,8 +115,8 @@ ok("内容块标题仅一行（说明已上移顶层引导）；顶层块恒注�
   assert.ok(lines[1].length > 0, "换行即内容");
   assert.ok(!id.content.includes("standing agreements"), "说明段不再重复（已上移）");
   const top = res.blocks.find(b => b.key === "context_assembly");
-  assert.ok(top, "顶层引导恒注入");
-  assert.ok(top.content.includes("## Memory Handling Rule"), "Handling Rule 并入顶层尾部");
+  assert.ok(top, "有 assembly pinned 文案时生成顶层引导");
+  assert.ok(top.content.includes("## Memory Handling Rule"), "Handling Rule 来自外置 pinned 文案");
   assert.ok(top.content.includes("her present intent"), "优先级总纲在");
 });
 
@@ -126,7 +127,7 @@ ok("条目标题 [xxx] 格式（0918：【】→[]）", () => {
   assert.ok(!sys.content.includes("【记忆标签】"), "旧【】格式已废");
 });
 
-ok("去重集成：Understanding anchor（原 quote）、rule 在 Identity、工具文档在 Instructions，均不入 Relevant", () => {
+ok("去重集成：anchor/rule/工具文档均不入 Relevant，event 检索命中", () => {
   const input = fullInput();
   input.query = "无论你怎么样 我都选择接你 睡前不许催她 薄荷 如果想存记忆";
   const res = buildContextBlocks(input);

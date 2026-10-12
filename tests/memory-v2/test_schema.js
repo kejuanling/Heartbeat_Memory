@@ -16,7 +16,6 @@ function baseFact(overrides = {}) {
   return {
     text: "她喝奶茶只要三分糖",
     kind: "fact",
-    subject: "user",
     origin: "manual",
     provenance: { method: "admin_form" },
     ...overrides,
@@ -32,12 +31,13 @@ const cases = [
     assert.ok(e.id.startsWith("mv2_") && e.id.length === "mv2_".length + 12, "id 形如 mv2_+12hex");
     assert.strictEqual(e.status, "active");
     assert.strictEqual(e.confidence, 0.8, "manual 默认 confidence 0.8");
-    assert.strictEqual(e.speaker, null);
+    assert.strictEqual("speaker" in e, false, "speaker 已从 schema 删除");
+    assert.strictEqual("subject" in e, false, "subject 已从 schema 删除");
     assert.strictEqual(e.direction, null);
     assert.strictEqual(e.created_at, e.content_updated_at, "创建时两时间戳相等");
     assert.ok(e.created_at.includes("T"), "时间戳为 ISO 形态");
-    assert.deepStrictEqual(e.related_subjects, []);
-    assert.deepStrictEqual(e.related_memories, []);
+    assert.strictEqual("related_subjects" in e, false, "related_subjects 已从 schema 删除");
+    assert.strictEqual("related_memories" in e, false, "related_memories 已从 schema 删除");
     assert.strictEqual(e.supersedes, null);
     assert.strictEqual(e.superseded_by, null);
     assert.strictEqual(e.superseded_reason, null);
@@ -68,12 +68,15 @@ const cases = [
     assert.strictEqual(r2.ok, true, r2.error);
   }],
 
-  ["枚举非法：kind / subject / origin 各自拒绝", () => {
-    for (const [field, value] of [["kind", "preference"], ["subject", "her"], ["origin", "star"]]) {
+  ["枚举非法：kind / origin 拒绝；旧 subject 字段被忽略", () => {
+    for (const [field, value] of [["kind", "preference"], ["origin", "star"]]) {
       const r = mv2.validateEntry(baseFact({ [field]: value }));
       assert.strictEqual(r.ok, false, `${field}=${value} 应被拒`);
       assert.ok(r.error.includes(field), r.error);
     }
+    const legacy = mv2.validateEntry(baseFact({ subject: "her" }));
+    assert.strictEqual(legacy.ok, true, legacy.error);
+    assert.strictEqual("subject" in legacy.entry, false, "旧字段不写入新 schema");
   }],
 
   ["1002-14：quote/milestone 分类已删——两种 kind 一律非法", () => {
@@ -87,14 +90,12 @@ const cases = [
     assert.strictEqual(r3.entry.established_at, "2026-07-14");
   }],
 
-  ["speaker 保留为历史字段（1002-14）：无 kind 联动，只校验枚举", () => {
-    const r1 = mv2.validateEntry(baseFact({ kind: "fact", subject: "user", speaker: "user", text: "她说过的话" }));
-    assert.strictEqual(r1.ok, true, r1.error);
-    assert.strictEqual(r1.entry.speaker, "user");
-    const r2 = mv2.validateEntry(baseFact({ kind: "fact", subject: "user", speaker: "ai", text: "我回的话" }));
-    assert.strictEqual(r2.ok, true, r2.error);
-    const r3 = mv2.validateEntry(baseFact({ kind: "fact", subject: "user", speaker: "xxx", text: "非法说话人" }));
-    assert.strictEqual(r3.ok, false, "speaker 非法应拒绝");
+  ["speaker 是已删除的历史字段：输入被忽略且不写入新条目", () => {
+    for (const speaker of ["user", "ai", "xxx"]) {
+      const r = mv2.validateEntry(baseFact({ speaker, text: "历史说话人字段" }));
+      assert.strictEqual(r.ok, true, r.error);
+      assert.strictEqual("speaker" in r.entry, false, "不应持久化 speaker");
+    }
   }],
 
   ["rule 的 direction：缺省通过 / 非法拒绝 / 合法保留", () => {
@@ -130,22 +131,14 @@ const cases = [
     assert.strictEqual(r2.entry.confidence, 0.7, "memory_tag 默认 0.7");
   }],
 
-  ["related_subjects：含主 subject / 非法枚举拒绝，合法通过且去重", () => {
-    const r1 = mv2.validateEntry(baseFact({ related_subjects: ["user"] }));
-    assert.strictEqual(r1.ok, false, "不得含主 subject");
-    const r2 = mv2.validateEntry(baseFact({ related_subjects: ["her"] }));
-    assert.strictEqual(r2.ok, false, "枚举外拒绝");
-    const r3 = mv2.validateEntry(baseFact({ related_subjects: ["self", "self", "relationship"] }));
-    assert.strictEqual(r3.ok, true, r3.error);
-    assert.deepStrictEqual(r3.entry.related_subjects, ["self", "relationship"]);
-  }],
-
-  ["related_memories：rel 非法拒绝，合法 {id,rel} 通过", () => {
-    const r1 = mv2.validateEntry(baseFact({ related_memories: [{ id: "mv2_x", rel: "likes" }] }));
-    assert.strictEqual(r1.ok, false);
-    const r2 = mv2.validateEntry(baseFact({ related_memories: [{ id: "mv2_x", rel: "pairs_with" }] }));
-    assert.strictEqual(r2.ok, true, r2.error);
-    assert.deepStrictEqual(r2.entry.related_memories, [{ id: "mv2_x", rel: "pairs_with" }]);
+  ["已删除的 related_subjects / related_memories 字段宽容忽略", () => {
+    const r = mv2.validateEntry(baseFact({
+      related_subjects: ["self", "relationship"],
+      related_memories: [{ id: "mv2_x", rel: "pairs_with" }],
+    }));
+    assert.strictEqual(r.ok, true, r.error);
+    assert.strictEqual("related_subjects" in r.entry, false);
+    assert.strictEqual("related_memories" in r.entry, false);
   }],
 
   ["provenance：缺失 / method 非法 / quote 超长 拒绝；合法通过", () => {
@@ -166,7 +159,7 @@ const cases = [
     assert.strictEqual(r1.ok, false, "note 超长拒绝");
     const r2 = mv2.validateEntry(baseFact({ schema_ver: 99, status: "archived" }));
     assert.strictEqual(r2.ok, true, r2.error);
-    assert.strictEqual(r2.entry.schema_ver, 1, "schema_ver 系统生成");
+    assert.strictEqual(r2.entry.schema_ver, C.SCHEMA_VER, "schema_ver 系统生成");
     assert.strictEqual(r2.entry.status, "active", "创建恒为 active，归档只能走状态机");
   }],
 ];

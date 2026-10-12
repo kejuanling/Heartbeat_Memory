@@ -72,7 +72,7 @@ test("新格式单工具（含失败）：组结构 + 失败标头 + reasoning �
   assertSanitizedKeys(out);
   const grp = out.find(m => m.role === "assistant" && m.tool_calls);
   assert.ok(grp, "应有带 tool_calls 的 assistant");
-  assert.equal(grp.content, "", "tool_calls 消息 content 应为空串");
+  assert.equal(grp.content, "没成，被掐了。", "assistant 正文应直接随 tool_calls 消息发送");
   assert.equal(grp.reasoning_content, "let me try the boil", "reasoning 应挂在 tool_calls 消息上");
   assert.equal(grp.tool_calls[0].function.name, "nostos_act");
   assert.deepEqual(JSON.parse(grp.tool_calls[0].function.arguments), rich[1].tools[0].args, "实参应原样回填");
@@ -81,7 +81,7 @@ test("新格式单工具（含失败）：组结构 + 失败标头 + reasoning �
   assert.ok(/状态：失败/.test(toolMsg.content), "error 非空应标失败");
   assert.ok(/This operation was aborted/.test(toolMsg.content), "失败应带错误信息");
   const tail = out.filter(m => m.role === "assistant" && !m.tool_calls);
-  assert.ok(tail.some(m => m.content === "没成，被掐了。"), "正文应保留为尾随 assistant 消息");
+  assert.ok(!tail.some(m => m.content === "没成，被掐了。"), "正文不应再生成重复的尾随 assistant 消息");
 });
 
 test("新格式四工具（两条同名同参同时间）：id 仍唯一、顺序保持", () => {

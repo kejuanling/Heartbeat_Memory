@@ -36,8 +36,11 @@ function mkBase(sid, opts) {
     fs.writeFileSync(path.join(data, "session_cfg", sid + ".json"), JSON.stringify({ cross_inject_enabled: opts.override }));
   }
   if (opts.snapshotBlocks) {
-    fs.writeFileSync(path.join(data, "session_inject_snapshots.json"), JSON.stringify({
-      sessions: { [sid]: { created_at: "2026-01-01T00:00:00.000Z", system_prompt: "", fixed_blocks: opts.snapshotBlocks } }
+    const snapDir = path.join(data, "session_ctx_snapshots_v2");
+    fs.mkdirSync(snapDir, { recursive: true });
+    fs.writeFileSync(path.join(snapDir, sid + ".json"), JSON.stringify({
+      v: 3, sessionId: sid, fixed_blocks: opts.snapshotBlocks, content: [], snap_point: 0,
+      inject_meta: { created_at: "2026-01-01T00:00:00.000Z" }
     }));
   }
   return dir;
@@ -73,14 +76,14 @@ async function test(name, fn) {
   console.log("  提示：断言按日记正文「" + DIARY_BODY + "」匹配，不按 \"Earlier Days\" 标题——");
   console.log("  context_assembly 每轮实时重建，其引导文案本身含 \"Earlier Days\" 字样。\n");
 
-  await test("A 快照模式 + override=false → 日记块被移除（存量会话关键场景）", async (keep) => {
+  await test("A 快照模式 + override=false → 所有跨窗口固定块被移除", async (keep) => {
     const sid = "s_test_off";
     const d = mkBase(sid, { override: false, snapshotBlocks: FAKE_BLOCKS });
     keep(d);
     const r = await rt.assembleAndApply(Object.assign({ baseDir: d, sessionId: sid }, BASE_OPTS));
     assert.ok(r.messages.length > 0, "应返回消息");
     assert.strictEqual(has(r.messages, DIARY_BODY), false, "override=false 时日记正文不该出现");
-    assert.strictEqual(has(r.messages, INSTR_BODY), true, "其它固定块应保留");
+    assert.strictEqual(has(r.messages, INSTR_BODY), false, "关闭开关后其它跨窗口固定块也应移除");
   });
 
   await test("B 快照模式 + override=null（跟随全局）→ 日记块保留", async (keep) => {
@@ -103,7 +106,7 @@ async function test(name, fn) {
     const sid = "s_test_restore";
     const d = mkBase(sid, { override: false, snapshotBlocks: FAKE_BLOCKS });
     keep(d);
-    const snapFile = path.join(d, "data", "session_inject_snapshots.json");
+    const snapFile = path.join(d, "data", "session_ctx_snapshots_v2", sid + ".json");
     const before = fs.readFileSync(snapFile, "utf8");
 
     const r1 = await rt.assembleAndApply(Object.assign({ baseDir: d, sessionId: sid }, BASE_OPTS));
@@ -131,14 +134,16 @@ async function test(name, fn) {
     assert.strictEqual(has(r.messages, DIARY_BODY), true, "默认应注入");
   });
 
-  await test("G 开关只砍日记块，其它固定块原样通过", async (keep) => {
+  await test("G 关闭开关时移除全部跨窗口固定块，只保留人设/对话消息", async (keep) => {
     const sid = "s_test_scope";
     const d = mkBase(sid, { override: false, snapshotBlocks: FAKE_BLOCKS });
     keep(d);
     const r = await rt.assembleAndApply(Object.assign({ baseDir: d, sessionId: sid }, BASE_OPTS));
     const dev = devTexts(r.messages);
     assert.ok(!dev.some((t) => t.indexOf(DIARY_BODY) >= 0), "日记块应消失");
-    assert.ok(dev.some((t) => t.indexOf(INSTR_BODY) >= 0), "system_instructions 应保留");
+    assert.ok(!dev.some((t) => t.indexOf(INSTR_BODY) >= 0), "system_instructions 也属于跨窗口注入，应移除");
+    assert.ok(!dev.some((t) => t.indexOf(CORE_BODY) >= 0), "core_identity 也应移除");
+    assert.ok(r.messages.some((m) => m && m.role === "system" && m.content === "人设"), "系统人设应保留");
     assert.ok(r.messages.some((m) => m && m.role === "user"), "真实对话消息不应被影响");
   });
 

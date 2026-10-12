@@ -13,7 +13,7 @@ const cases = [
   // ---- mock ----
   ["mock：完全一致 → duplicate 置信 1，包含合并文本", async () => {
     const r = await judge("只能我先说晚安", "只能我先说晚安", { mode: "mock" });
-    assert.deepStrictEqual(Object.keys(r).sort(), ["confidence", "merged_text", "reason", "relation"]);
+    assert.deepStrictEqual(Object.keys(r).sort(), ["confidence", "merged_text", "relation", "relation_reason", "suggested_kind", "suggested_kind_reason", "volatility", "volatility_reason", "worth", "worth_reason"]);
     assert.strictEqual(r.relation, "duplicate");
     assert.strictEqual(r.confidence, 1);
   }],
@@ -73,19 +73,21 @@ const cases = [
   ["parse：reason 缺失容错（默认空串）", () => {
     const r = parseJudgeOutput('{"relation":"coexist","confidence":0.8}');
     assert.strictEqual(r.ok, true);
-    assert.strictEqual(r.reason, "");
+    assert.strictEqual(r.relation_reason, "");
   }],
 
   // ---- llm 链路（fake callLLM，零网络）----
-  ["llm：callLLM 返回合法输出 → 三键结果", async () => {
+  ["llm：callLLM 返回合法输出 → 保留当前完整结果契约", async () => {
     let calls = 0;
     const r = await judge("她喜欢三分糖", "她喜欢三分糖，觉得全糖太甜", {
       mode: "llm",
-      callLLM: async () => { calls++; return '{"relation":"duplicate","confidence":0.85,"reason":"子集"}'; },
+      callLLM: async () => { calls++; return '{"relation":"duplicate","confidence":0.85,"reason":"子集","suggested_kind":"event","suggested_kind_reason":"具体事件"}'; },
     });
     assert.strictEqual(calls, 1);
     assert.strictEqual(r.relation, "duplicate");
     assert.strictEqual(r.confidence, 0.85);
+    assert.strictEqual(r.suggested_kind, "event", "LLM 结果应保留分类建议");
+    assert.strictEqual(r.suggested_kind_reason, "具体事件");
   }],
   ["llm：两次非法输出 → need_review 兜底且 callLLM 恰好两次", async () => {
     let calls = 0;
@@ -95,7 +97,9 @@ const cases = [
     });
     assert.strictEqual(calls, 2, "重试恰好一次");
     assert.strictEqual(r.relation, "need_review");
-    assert.ok(r.reason.includes("两次非法"), r.reason);
+    assert.strictEqual(r.suggested_kind, null);
+    assert.strictEqual(r.suggested_kind_reason, null);
+    assert.ok(r.relation_reason.includes("两次非法"), r.relation_reason);
   }],
   ["llm：第一次非法第二次合法 → 重试成功", async () => {
     let calls = 0;
@@ -109,12 +113,12 @@ const cases = [
   ["llm：callLLM 抛异常 → need_review 兜底", async () => {
     const r = await judge("A", "B", { mode: "llm", callLLM: async () => { throw new Error("上游超时"); } });
     assert.strictEqual(r.relation, "need_review");
-    assert.ok(r.reason.includes("callLLM 异常"), r.reason);
+    assert.ok(r.relation_reason.includes("callLLM 异常"), r.relation_reason);
   }],
   ["llm：未配置 callLLM → need_review（不炸）", async () => {
     const r = await judge("A", "B", { mode: "llm" });
     assert.strictEqual(r.relation, "need_review");
-    assert.ok(r.reason.includes("未配置"));
+    assert.ok(r.relation_reason.includes("未配置"));
   }],
   ["buildPrompt：含判断顺序/关系定义/输出格式/双条目", () => {
     const p = buildPrompt("候选文本", "既有文本", { existingKind: "fact", existingSubject: "user", existingStatus: "active", candidateKind: "fact", candidateSubject: "user" });

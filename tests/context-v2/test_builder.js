@@ -33,11 +33,11 @@ const memFull = [
   { id: "mv2_f2", text: "她在准备一场重要的考试", kind: "fact", status: "active", anchor: true, created_at: "2026-09-04T10:00:00+08:00" },
   { id: "mv2_f3", text: "她喜欢草莓", kind: "fact", status: "active", created_at: "2026-09-05T10:00:00+08:00" },
   { id: "mv2_f4", text: "她旧作息", kind: "fact", status: "superseded", anchor: true, created_at: "2026-09-06T10:00:00+08:00" },
-  { id: "mv2_f5", text: "她对薄荷过敏", kind: "fact", status: "active", created_at: "2026-09-07T10:00:00+08:00" },
-  { id: "mv2_f6", text: "她养了一只猫叫团子", kind: "fact", status: "active", created_at: "2026-09-08T10:00:00+08:00" },
-  { id: "mv2_q1", text: "无论你怎么样我都选择接你", kind: "quote", status: "active", anchor: true, established_at: "2026-07-14T21:00:00+08:00", created_at: "2026-09-09T10:00:00+08:00" },
-  { id: "mv2_q2", text: "标签什么的说了就死了", kind: "quote", status: "active", anchor: false, created_at: "2026-09-10T10:00:00+08:00" },
-  { id: "mv2_m1", text: "07-14 我们成为恋人", kind: "milestone", status: "active", anchor: true, established_at: "2026-07-14T00:00:00+08:00", created_at: "2026-09-11T10:00:00+08:00" },
+  { id: "mv2_f5", text: "她对薄荷过敏", kind: "event", status: "active", triggers: ["薄荷"], created_at: "2026-09-07T10:00:00+08:00" },
+  { id: "mv2_f6", text: "她养了一只猫叫团子", kind: "event", status: "active", triggers: ["猫"], created_at: "2026-09-08T10:00:00+08:00" },
+  { id: "mv2_q1", text: "无论你怎么样我都选择接你", kind: "fact", status: "active", anchor: true, established_at: "2026-07-14T21:00:00+08:00", created_at: "2026-09-09T10:00:00+08:00" },
+  { id: "mv2_q2", text: "标签什么的说了就死了", kind: "event", status: "active", triggers: ["标签"], anchor: false, created_at: "2026-09-10T10:00:00+08:00" },
+  { id: "mv2_m1", text: "07-14 我们成为恋人", kind: "event", status: "active", triggers: ["成为恋人"], anchor: true, established_at: "2026-07-14T00:00:00+08:00", created_at: "2026-09-11T10:00:00+08:00" },
 ];
 
 const diaryFull = [
@@ -137,7 +137,7 @@ ok("continuity: 无日记→空块省略", () => {
 // ============================================================
 // [5] Possibly Relevant Memories
 // ============================================================
-ok("relevant: 词面命中进、无关淘汰（minScore 宁缺毋滥）、日期后缀", () => {
+ok("relevant: event 的 trigger 命中、无关 event 淘汰、日期后缀", () => {
   const res = buildContextBlocks({ memoriesV2: memFull, query: "她对薄荷过敏这件事你知道吗" });
   const b = blockOf(res, "relevant_memories");
   assert.ok(b, "块应存在");
@@ -149,7 +149,7 @@ ok("relevant: 词面命中进、无关淘汰（minScore 宁缺毋滥）、日期
 ok("relevant: 固定块成员去重（核心 fact/rule/anchor/instructions 均不入检索结果）", () => {
   const mems = [
     { id: "core1", text: "她膝盖受过伤", kind: "fact", status: "active", anchor: true, created_at: "2026-09-01T00:00:00+08:00" },
-    { id: "pool1", text: "她膝盖受伤后的康复训练", kind: "fact", status: "active", created_at: "2026-09-02T00:00:00+08:00" },
+    { id: "pool1", text: "她膝盖受伤后的康复训练", kind: "event", status: "active", triggers: ["膝盖受伤"], created_at: "2026-09-02T00:00:00+08:00" },
   ];
   const res = buildContextBlocks({ pinnedEntries: [], memoriesV2: mems, query: "她膝盖受伤怎么样了" });
   const u = blockOf(res, "long_term_understanding");
@@ -167,8 +167,8 @@ ok("relevant: 空 query→空块；全部无关→空块省略", () => {
 
 ok("relevant: excludeIds 剥除（本会话已浮现时间线的记忆不再注入）", () => {
   const mems = [
-    { id: "floated", text: "她对薄荷过敏", kind: "fact", status: "active", created_at: "2026-09-01T00:00:00+08:00" },
-    { id: "fresh", text: "她对薄荷轻度过敏史", kind: "fact", status: "active", created_at: "2026-09-02T00:00:00+08:00" },
+    { id: "floated", text: "她对薄荷过敏", kind: "event", status: "active", triggers: ["薄荷"], created_at: "2026-09-01T00:00:00+08:00" },
+    { id: "fresh", text: "她对薄荷轻度过敏史", kind: "event", status: "active", triggers: ["薄荷"], created_at: "2026-09-02T00:00:00+08:00" },
   ];
   const res = buildContextBlocks({ memoriesV2: mems, query: "她对薄荷过敏吗", excludeIds: ["floated"] });
   const b = blockOf(res, "relevant_memories");
@@ -177,18 +177,16 @@ ok("relevant: excludeIds 剥除（本会话已浮现时间线的记忆不再注�
   assert.ok(b.content.includes("轻度过敏史"), "其他条目正常");
 });
 
-ok("relevant: 排序 score desc → 同分 id 升序打破并列（0920 删 priority 后）", () => {
+ok("relevant: 同分按 id 升序，默认每轮最多注入一条", () => {
   const mems = [
-    { id: "lo", text: "她喜欢喝咖啡", kind: "fact", status: "active", created_at: "2026-09-01T00:00:00+08:00" },
-    { id: "hi", text: "她喜欢喝可乐", kind: "fact", status: "active", created_at: "2026-09-02T00:00:00+08:00" },
+    { id: "lo", text: "她喜欢喝咖啡", kind: "event", status: "active", triggers: ["喜欢喝"], created_at: "2026-09-01T00:00:00+08:00" },
+    { id: "hi", text: "她喜欢喝可乐", kind: "event", status: "active", triggers: ["喜欢喝"], created_at: "2026-09-02T00:00:00+08:00" },
   ];
   const res = buildContextBlocks({ memoriesV2: mems, query: "她喜欢喝" });
   const b = blockOf(res, "relevant_memories");
   assert.ok(b, "块应存在");
-  const iHi = b.content.indexOf("她喜欢喝可乐");
-  const iLo = b.content.indexOf("她喜欢喝咖啡（");
-  assert.ok(iHi >= 0 && iLo >= 0, "两条都在");
-  assert.ok(iHi < iLo, "同分并列时 id 升序（hi<lo）在前");
+  assert.ok(b.content.includes("她喜欢喝可乐"), "同分时 id 较小的 hi 优先");
+  assert.ok(!b.content.includes("她喜欢喝咖啡"), "默认 topK=1，不同时注入第二条");
 });
 
 // ============================================================

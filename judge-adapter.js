@@ -186,12 +186,14 @@ async function judgeLLM(candidateText, existingText, opts = {}) {
     if (parsed.ok) {
       return { relation: parsed.relation, confidence: parsed.confidence, relation_reason: parsed.relation_reason,
                worth: parsed.worth, worth_reason: parsed.worth_reason,
-               volatility: parsed.volatility, volatility_reason: parsed.volatility_reason, merged_text: null };
+               volatility: parsed.volatility, volatility_reason: parsed.volatility_reason, merged_text: null,
+               suggested_kind: parsed.suggested_kind, suggested_kind_reason: parsed.suggested_kind_reason };
     }
     lastErr = parsed.error;
   }
   return { relation: "need_review", confidence: 0.5, relation_reason: "judge 输出两次非法已转人工（" + lastErr + "）",
-           worth: null, worth_reason: null, volatility: null, volatility_reason: null, merged_text: null };
+           worth: null, worth_reason: null, volatility: null, volatility_reason: null, merged_text: null,
+           suggested_kind: null, suggested_kind_reason: null };
 }
 
 // ---- 统一入口（恒 async；mock 立即兑现）----

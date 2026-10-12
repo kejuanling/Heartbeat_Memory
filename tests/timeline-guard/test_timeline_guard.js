@@ -51,6 +51,10 @@ const parts = [
   extractLine(src, "const _corruptBackupDone"),
   extractLine(src, "const TOMBSTONE_FILE"),
   extractLine(src, "const SESSION_TOMBSTONE_TTL_MS"),
+  // Guard files must stay inside each test's temporary cwd; avoid inheriting production __dirname.
+  'const TIMELINE_GUARD_DIR = path.join(process.cwd(), "data", "timeline_guard");',
+  'const TIMELINE_GUARD_KEEP = 3;',
+  extractFunction(src, "guardTimelineCopy"),
   extractFunction(sessionTokenSrc, "safeSessionToken"),
   extractFunction(jsonAtomicSrc, "writeJsonAtomic"),
   "const _writeJsonAtomicBase = writeJsonAtomic; // server.js 委托名的沙盒内对应",
@@ -83,6 +87,7 @@ function makeFsShim() {
     renameSync: nodeFs.renameSync,
     unlinkSync: nodeFs.unlinkSync,
     mkdirSync: nodeFs.mkdirSync,
+    ensureDirSync: (d) => nodeFs.mkdirSync(d, { recursive: true }),
     readJsonSync: (f) => JSON.parse(nodeFs.readFileSync(f, "utf-8")),
     writeJsonSync: (f, data, opts) => nodeFs.writeFileSync(f, JSON.stringify(data, null, (opts && opts.spaces) != null ? opts.spaces : 0), "utf-8"),
     copySync: (a, b) => nodeFs.copyFileSync(a, b),
