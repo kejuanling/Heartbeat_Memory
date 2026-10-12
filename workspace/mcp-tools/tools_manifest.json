@@ -1,6 +1,6 @@
 {
   "server": "小世界MCP工具集",
-  "generated_at": "2026-10-05 21:26:10",
+  "generated_at": "2026-10-12 01:48:25",
   "tools": [
     {
       "name": "context_digest",
@@ -357,6 +357,54 @@
       "enabled": true
     },
     {
+      "name": "memory_add",
+      "description": "使用本工具可提交一条记忆。提交后立即返回受理结果，门卫评分在后台进行；候选进入人工待审队列，只有人工批准后才会写入正式记忆池。kind 分类：fact/rule/event。kind 可省略，门卫会补充分类建议。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "想提交的记忆正文；基于真实对话，不编造"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "fact",
+              "rule",
+              "event"
+            ],
+            "description": "分类：fact=稳定事实（进 Long-term Understanding 总结素材）、rule=规则/边界/承诺（进 Core Identity 总结素材）、event=具体发生的事（关键词命中时注入）。可省略"
+          }
+        },
+        "required": [
+          "content"
+        ]
+      },
+      "defaultDescription": "使用本工具可提交一条记忆。提交后立即返回受理结果，门卫评分在后台进行；候选进入人工待审队列，只有人工批准后才会写入正式记忆池。kind 分类：fact/rule/event。kind 可省略，门卫会补充分类建议。",
+      "defaultInputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "想提交的记忆正文；基于真实对话，不编造"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "fact",
+              "rule",
+              "event"
+            ],
+            "description": "分类：fact=稳定事实（进 Long-term Understanding 总结素材）、rule=规则/边界/承诺（进 Core Identity 总结素材）、event=具体发生的事（关键词命中时注入）。可省略"
+          }
+        },
+        "required": [
+          "content"
+        ]
+      },
+      "enabled": true
+    },
+    {
       "name": "memory_pin",
       "description": "置顶或取消置顶一条记忆。",
       "inputSchema": {
@@ -414,7 +462,7 @@
           },
           "limit": {
             "type": "integer",
-            "description": "返回条数，默认5，最大50"
+            "description": "返回条数，默认5；不设固定最大值，受实际记忆池数量限制"
           }
         },
         "required": [
@@ -431,7 +479,7 @@
           },
           "limit": {
             "type": "integer",
-            "description": "返回条数，默认5，最大50"
+            "description": "返回条数，默认5；不设固定最大值，受实际记忆池数量限制"
           }
         },
         "required": [
@@ -643,6 +691,10 @@
           "sn": {
             "type": "integer",
             "description": "可选：要看的第几张（列表返回的 sn）"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "可选：列表返回张数（默认 10，最多 50）。不带 sn 时有效"
           },
           "session_id": {
             "type": "string",

@@ -148,6 +148,42 @@ const cases = [
     fs.removeSync(tmpDir);
   }],
 
+  ["memory_add 快速入待审：不等待门卫且不直入正式池，后台评分后安全补写", async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "mv2-pipeline-memory-add-"));
+    let releaseJudge;
+    let calls = 0;
+    const adm = createAdmission({
+      rootDir: tmpDir,
+      config: {
+        v2_enabled: true, v2_shadow: false, judge_mode: "llm",
+        paths: { collection: "memory_v2.json", review_queue: "memory_review_queue.json", shadow_collection: "memory_v2_shadow.json", shadow_queue: "memory_review_queue_shadow.json" },
+      },
+      callLLM: () => { calls++; return new Promise(resolve => { releaseJudge = resolve; }); },
+    });
+    const started = Date.now();
+    const r = adm.submitMemoryAdd({ content: "用户喜欢睡前听故事", kind: "fact" }, { sessionId: "session-memory-add-test" });
+    assert.ok(Date.now() - started < 500, "提交阶段不能等待 LLM");
+    assert.strictEqual(r.action, "review");
+    assert.ok(r.queue_id);
+    let q = fs.readJsonSync(adm.paths.main.review_queue);
+    assert.strictEqual(q.length, 1);
+    assert.strictEqual(q[0].judge_status, "pending");
+    assert.strictEqual(q[0].draft.source_session, "session-memory-add-test");
+    assert.strictEqual(fs.existsSync(adm.paths.main.collection) ? fs.readJsonSync(adm.paths.main.collection).length : 0, 0, "memory_add 不得直入正式池");
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.ok(calls >= 1, "后台应启动门卫评分");
+    // 在门卫返回前人工驳回，迟到评分不得复活/重写已裁决记录。
+    const rejected = adm.resolveReview(r.queue_id, "reject_with_reason", { note: "test race" });
+    assert.strictEqual(rejected.ok, true);
+    releaseJudge(JSON.stringify({ relation: "need_review", confidence: 0.7, worth: 0.8, worth_reason: "useful", volatility: "stable", volatility_reason: "stable", suggested_kind: "fact", suggested_kind_reason: "test" }));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    q = fs.readJsonSync(adm.paths.main.review_queue);
+    assert.strictEqual(q.some(x => x.id === r.queue_id), false, "人工驳回后评分结果不得重新写回队列");
+    assert.strictEqual(fs.existsSync(adm.paths.main.collection) ? fs.readJsonSync(adm.paths.main.collection).length : 0, 0, "驳回不入正式池");
+    adm.stopMemoryAddJudgeWorker();
+    fs.removeSync(tmpDir);
+  }],
+
   ["v2_shadow=false → 跳过不写任何文件", async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "mv2-pipeline-off-"));
     const adm = createAdmission({

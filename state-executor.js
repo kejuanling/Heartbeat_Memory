@@ -29,7 +29,8 @@ function createStateExecutor(opts = {}) {
   let queue = null;
 
   function loadQueue() {
-    if (queue) return queue;
+    // 每次操作都重新读盘，避免 admission/tag-parser/后台评分各自缓存队列后互相覆盖。
+    // 队列文件是跨入口共享状态，不能把首次加载的数组当作永久真身。
     if (!fs.existsSync(queuePath)) queue = [];
     else {
       try {
@@ -81,6 +82,11 @@ function createStateExecutor(opts = {}) {
       // 1004-04：judge 的纯信息输出 {worth, worth_reason, volatility, volatility_reason, similar[]}。
       // 只供待审页面展示（分数卡 + 相似清单 + 逐条沉底），judge 不参与任何入库决策。
       judge: meta.judge && typeof meta.judge === "object" ? meta.judge : null,
+      // memory_add 的门卫任务异步执行；这些字段用于持久化状态与失败恢复。
+      judge_status: meta.judge_status || (meta.judge ? "completed" : null),
+      judge_error: meta.judge_error || null,
+      judge_attempts: Number.isInteger(meta.judge_attempts) ? meta.judge_attempts : 0,
+      source: meta.source || null,
     };
     q.push(rec);
     flushQueue();
@@ -165,6 +171,36 @@ function createStateExecutor(opts = {}) {
     return { ok: false, error: "未知 decision: " + decision };
   }
 
+  // 后台门卫结果只允许写回仍在人工待审中的记录，且只更新评分字段，不覆盖人工编辑/裁决。
+  function updatePendingJudge(queueId, patch = {}) {
+    if (readonly) return { ok: false, error: "readonly" };
+    const q = loadQueue();
+    const idx = q.findIndex((x) => x.id === queueId);
+    if (idx < 0) return { ok: false, error: "not_found" };
+    const rec = q[idx];
+    if (rec.status !== "pending_review") return { ok: false, error: "already_resolved" };
+    if (patch.expectedText !== undefined && String(rec.draft && rec.draft.text || "") !== String(patch.expectedText)) {
+      return { ok: false, error: "candidate_changed" };
+    }
+    if (rec.source !== "memory_add" || !["pending", "running", "failed"].includes(rec.judge_status)) {
+      return { ok: false, error: "not_async_judge_job" };
+    }
+    if (patch.judge && typeof patch.judge === "object") {
+      rec.judge = patch.judge;
+      rec.draft = Object.assign({}, rec.draft || {}, { judge: patch.judge });
+      for (const k of ["worth", "worth_reason", "volatility", "volatility_reason"]) {
+        if (patch.judge[k] !== undefined) rec.draft[k] = patch.judge[k];
+      }
+    }
+    if (patch.details) rec.details = Array.isArray(rec.details) ? rec.details.concat(patch.details) : patch.details;
+    if (patch.judge_status) rec.judge_status = patch.judge_status;
+    if (patch.judge_error !== undefined) rec.judge_error = patch.judge_error;
+    if (patch.judge_attempts !== undefined) rec.judge_attempts = patch.judge_attempts;
+    rec.judge_updated_at = nowIso();
+    flushQueue();
+    return { ok: true, record: rec };
+  }
+
   // 1002-09 待审草稿编辑：仅改 pending_review 记录的 draft 白名单字段，不裁决不入库；
   // 编辑痕迹 push 进 details（路由回显 reasons），rec.edited 标记供前端展示
   function editQueue(queueId, patch = {}) {
@@ -205,7 +241,7 @@ function createStateExecutor(opts = {}) {
   }
 
   return {
-    admit, review, reject, setStatus, resolveQueue, listQueue, editQueue,
+    admit, review, reject, setStatus, resolveQueue, listQueue, editQueue, updatePendingJudge,
     paths: { collection: store.paths.collection, queue: queuePath },
     readonly,
   };

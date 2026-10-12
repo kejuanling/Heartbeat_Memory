@@ -37,6 +37,8 @@ module.exports = function registerMemoryReviewRoutes(app, { basicAuth, admission
       judge: q.judge || null,
       provenance: q.draft.provenance || null,
       reasons: q.details || [],
+      judge_status: q.judge_status || null,
+      judge_error: q.judge_error || null,
     }));
     return reply.send({ items, total: items.length });
   });

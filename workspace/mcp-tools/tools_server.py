@@ -747,7 +747,7 @@ def tool_memory_search(args):
         return {"error": "q 必填：检索记忆池的关键词或想问的问题"}
     limit = args.get("limit") or 5
     try:
-        limit = max(1, min(50, int(limit)))
+        limit = max(1, int(limit))
     except (TypeError, ValueError):
         limit = 5
     url = f"{BASE_URL}:3000/internal/memory-pool/retrieve?q=" + urllib.parse.quote(q) + "&limit=" + str(limit)
@@ -782,7 +782,7 @@ TOOLS["memory_search"] = {
         "type": "object",
         "properties": {
             "q": {"type": "string", "description": "检索关键词、问题或描述"},
-            "limit": {"type": "integer", "description": "返回条数，默认5，最大50"}
+            "limit": {"type": "integer", "description": "返回条数，默认5；不设固定最大值，受实际记忆池数量限制"}
         },
         "required": ["q"]
     },
@@ -1197,7 +1197,7 @@ def tool_memory_add(args):
 
 
 TOOLS["memory_add"] = {
-    "description": "使用本工具可提交一条记忆。kind 分类：fact/rule/event。fact 和 rule 分别会成为系统注入的两大块总结——「Long-term Understanding」和「Core Identity」——的素材，每次对话开头常驻注入；event 则是对方消息命中相关记忆关键词时直接注入对话。提交会走记忆流水线（分类校验 → 门卫打分 → 人工待审），不代表一定最终入池；kind 可省略，门卫会补分类建议。",
+    "description": "使用本工具可提交一条记忆。提交后立即返回受理结果，门卫评分在后台进行；候选进入人工待审队列，只有人工批准后才会写入正式记忆池。kind 分类：fact/rule/event。kind 可省略，门卫会补充分类建议。",
     "inputSchema": {
         "type": "object",
         "properties": {

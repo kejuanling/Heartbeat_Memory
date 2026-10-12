@@ -3507,18 +3507,20 @@ app.post("/internal/memory-pool/add", async (req, reply) => {
     const content = String(b.content || "").trim();
     if (!content) return reply.code(400).send({ error: "content 必填" });
     if (memoryV2Admission) {
-      const v2 = await memoryV2Admission.submitV2(
-        { content, category: b.category, kind: b.kind },
+      const v2 = await memoryV2Admission.submitMemoryAdd(
+        { content, kind: b.kind || b.category },
         { sessionId: String(b.session_id || "").trim() }
       );
-      if (v2.action !== "skipped_shadow_off") {
+      if (v2.action === "review") {
         return reply.send({
           success: true, v2: true, action: v2.action,
-          id: v2.entry_id || (v2.candidate ? v2.candidate.id : null) || null,
+          id: v2.candidate && v2.candidate.id || null,
           queue_id: v2.queue_id || null,
-          note: v2.action === "review" ? "已进 review 队列待人工裁决" : undefined,
+          note: "已进入人工待审队列，门卫评分在后台进行",
         });
       }
+      if (v2.action === "reject") return reply.code(400).send({ error: "记忆未受理", validation: v2.validation || null });
+      if (v2.action === "error") return reply.code(500).send({ error: v2.error || "记忆提交失败" });
     }
     // 2026-09-28：V1 记忆池删除，旧池直灌回滚通道移除——V2 admission 不可用即失败
     reply.code(503).send({ error: "V2 记忆通道未就绪" });

@@ -219,7 +219,7 @@ async function retrieveHybrid(rows, query, opts = {}) {
   const wl = (cfg.wordWeight >= 0) ? cfg.wordWeight : 0.5;
   const ws = (cfg.semWeight >= 0) ? cfg.semWeight : 0.3;
   const gate = (cfg.minScore >= 0) ? cfg.minScore : 0;
-  const topK = Math.min(Math.max(1, Number(opts.topK) || 5), 5); // 用户 1005 拍板：最多 5 条
+  const topK = Math.max(1, Number(opts.topK) || 5); // 返回条数由调用方指定，不设固定上限
   const pool = rows.filter(r => (!opts.pinnedOnly || r.anchor === true) && (!opts.kind || r.kind === opts.kind));
   if (!pool.length) return [];
   let semScores = null;

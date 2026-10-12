@@ -397,6 +397,117 @@ function createAdmission(opts = {}) {
     return { action: "skipped_v2_off", candidate: null, validation: null, audit_id: null };
   }
 
+  // memory_add 专用快速通道：基础校验后先持久化待审记录，绝不走自动 admit/reject 决策。
+  function submitMemoryAdd(body, ctx = {}) {
+    const b = body || {};
+    const text = strSafe(b.content || b.text);
+    if (!text || !String(text).trim()) {
+      return { action: "reject", candidate: null, validation: { allowed: false, matched_rules: ["V6"], reasons: ["V6 text 为空"] }, audit_id: null, notes: "content 为空" };
+    }
+    const cleanText = String(text).trim();
+    const rawKind = strSafe(b.kind) || null;
+    const kindVal = rawKind && ["fact", "rule", "event"].includes(rawKind) ? rawKind : null;
+    const provenance = buildProvenance({ origin: "manual", method: "admin_form", sessionId: strSafe(ctx.sessionId), msgId: null });
+    provenance.quote = cleanText.slice(0, 200);
+    const validation = validate({ text: cleanText, kind: kindVal, origin: "manual", speaker: null, direction: null, provenance, source: "manual" });
+    if (!validation.allowed) {
+      const auditRec = audit.append(audit.buildRecord({ candidateText: cleanText, origin: "manual", validator: validation, action: "reject", notes: { source: "memory_add", why: "validator 硬规则命中" } }));
+      return { action: "reject", candidate: { text: cleanText, kind: kindVal, provenance }, validation, audit_id: auditRec.ok ? auditRec.id : null };
+    }
+    if (cfg.v2_enabled !== true && cfg.v2_shadow !== true) {
+      return { action: "skipped_v2_off", candidate: null, validation, audit_id: null };
+    }
+    const draft = { text: cleanText, kind: kindVal, direction: null, speaker: null, origin: "manual", provenance };
+    if (strSafe(ctx.sessionId)) draft.source_session = strSafe(ctx.sessionId);
+    const auditRec = audit.append(audit.buildRecord({ candidateText: cleanText, origin: "manual", validator: validation, action: "review", notes: { source: "memory_add", async_judge: true, kind: kindVal, why: "memory_add 快速入待审，门卫后台评分" } }));
+    const execResult = mainExecutor.review(draft, "memory_add 已提交，门卫后台评分中；须人工审核", {
+      auditId: auditRec.ok ? auditRec.id : null,
+      details: validation.reasons.concat(["门卫评分排队中"]),
+      judge_status: judgeMode === "off" ? "completed" : "pending",
+      source: "memory_add",
+    });
+    if (!execResult.ok) return { action: "error", candidate: { text: cleanText, kind: kindVal, provenance }, validation, audit_id: auditRec.ok ? auditRec.id : null, error: execResult.error };
+    if (judgeMode !== "off") scheduleJudgeWorker();
+    return { action: "review", candidate: { text: cleanText, kind: kindVal, provenance }, validation, judge: "门卫后台评分中", judge_meta: null, audit_id: auditRec.ok ? auditRec.id : null, queue_id: execResult.queue_id, mode: "memory_add" };
+  }
+
+  const judgeJobsInFlight = new Set();
+  let judgeWorkerTimer = null;
+  let judgeWorkerRunning = false;
+  async function processMemoryAddJudge(rec) {
+    if (!rec || !rec.id || judgeJobsInFlight.has(rec.id)) return;
+    judgeJobsInFlight.add(rec.id);
+    try {
+      const attempt = (Number(rec.judge_attempts) || 0) + 1;
+      const claimed = mainExecutor.updatePendingJudge(rec.id, { judge_status: "running", judge_attempts: attempt, judge_error: null });
+      if (!claimed.ok) return;
+      const current = claimed.record;
+      const text = String(current.draft && current.draft.text || "");
+      const kind = current.draft && current.draft.kind || null;
+      let hits = [];
+      let searchError = null;
+      try { hits = await findSimilarExisting(mainStore, text); } catch (e) { searchError = (e && e.message) || String(e); }
+      let worth = null, worthReason = null, volatility = null, volatilityReason = null;
+      let suggestedKind = null, suggestedKindReason = null;
+      const similar = [];
+      if (!hits.length) {
+        const jr = await runJudge(text, null, kind, opts);
+        if (jr && jr.ok) {
+          worth = jr.worth; worthReason = jr.worth_reason; volatility = jr.volatility; volatilityReason = jr.volatility_reason;
+          suggestedKind = jr.suggested_kind || null; suggestedKindReason = jr.suggested_kind_reason || null;
+        } else if (!searchError) searchError = jr && jr.error || "judge 无结果";
+      } else {
+        for (const h of hits) {
+          const jr = await runJudge(text, h.entry, kind, opts);
+          const item = { id: h.entry.id, text: h.entry.text, kind: h.entry.kind, score: h.score, lit: h.lit, sem: h.sem, relation: null, relation_reason: null, judge_error: null };
+          if (jr && jr.ok) {
+            item.relation = jr.relation; item.relation_reason = jr.relation_reason; item.judge_confidence = jr.confidence;
+            if (worth == null && jr.worth != null) { worth = jr.worth; worthReason = jr.worth_reason; volatility = jr.volatility; volatilityReason = jr.volatility_reason; }
+            if (suggestedKind == null && jr.suggested_kind) { suggestedKind = jr.suggested_kind; suggestedKindReason = jr.suggested_kind_reason || null; }
+          } else {
+            item.judge_error = jr && jr.error || "judge 无结果";
+          }
+          similar.push(item);
+        }
+        if (!similar.some(x => x.relation || x.judge_confidence != null) && !searchError) searchError = "所有相似项评分失败";
+      }
+      if (searchError && worth == null && similar.every(x => !x.relation)) {
+        const retry = attempt < 3;
+        mainExecutor.updatePendingJudge(rec.id, { expectedText: text, judge_status: "failed", judge_error: searchError, details: ["门卫评分失败（第" + attempt + "次）: " + searchError] });
+        return;
+      }
+      const judge = { worth, worth_reason: worthReason, volatility, volatility_reason: volatilityReason, suggested_kind: suggestedKind, suggested_kind_reason: suggestedKindReason, similar };
+      const details = ["门卫后台评分完成" + (similar.length ? "（相似项 " + similar.length + " 条）" : "（未找到相似项）")];
+      if (searchError) details.push("评分存在部分错误: " + searchError);
+      mainExecutor.updatePendingJudge(rec.id, { expectedText: text, judge_status: "completed", judge, judge_error: searchError, details });
+    } catch (e) {
+      const attempt = Number(rec.judge_attempts) || 0;
+      mainExecutor.updatePendingJudge(rec.id, { expectedText: String(rec.draft && rec.draft.text || ""), judge_status: "failed", judge_attempts: attempt + 1, judge_error: (e && e.message) || String(e), details: ["门卫后台任务异常"] });
+    } finally {
+      judgeJobsInFlight.delete(rec.id);
+    }
+  }
+  async function runMemoryAddJudgeWorker() {
+    if (judgeWorkerRunning || judgeMode === "off") return;
+    judgeWorkerRunning = true;
+    try {
+      const jobs = mainExecutor.listQueue("pending_review").filter(q => q.source === "memory_add" && ["pending", "running", "failed"].includes(q.judge_status) && (Number(q.judge_attempts) || 0) < 3);
+      for (const job of jobs) {
+        if (job.judge_status === "failed" && job.judge_updated_at && Date.now() - new Date(job.judge_updated_at).getTime() < 30000) continue;
+        await processMemoryAddJudge(job);
+      }
+    } catch (e) {
+      console.error("[memory-add-judge] worker error:", (e && e.message) || e);
+    } finally { judgeWorkerRunning = false; }
+  }
+  function scheduleJudgeWorker() {
+    if (judgeWorkerTimer) return;
+    judgeWorkerTimer = setInterval(runMemoryAddJudgeWorker, 2000);
+    if (judgeWorkerTimer.unref) judgeWorkerTimer.unref();
+    // 尽快启动，但不阻塞当前工具/API 响应。
+    setImmediate(runMemoryAddJudgeWorker);
+  }
+
   // 1002-09 待审草稿编辑（review 路由用）：改 draft 不裁决，动作进审计
   function editQueue(queueId, patch = {}) {
     const r = mainExecutor.editQueue(queueId, patch);
@@ -431,6 +542,9 @@ function createAdmission(opts = {}) {
     submitManual,
     submitPromotion,
     submitV2,
+    submitMemoryAdd,
+    runMemoryAddJudgeWorker,
+    stopMemoryAddJudgeWorker: () => { if (judgeWorkerTimer) clearInterval(judgeWorkerTimer); judgeWorkerTimer = null; },
     resolveReview,
     editQueue,
     executor: shadowExecutor,
@@ -488,6 +602,8 @@ function createAdmission(opts = {}) {
     },
   };
   _lastAdmission = inst; // 模块级缓存最新实例：tag-parser 等轻量写者复用 executorMain（唯一写手）
+  // 启动时恢复上次进程退出前尚未完成的 memory_add 门卫任务。
+  if (judgeMode !== "off") scheduleJudgeWorker();
   return inst;
 }
 
