@@ -62,47 +62,66 @@ function appendPreview(baseDir, sessionId, query, hits) {
 }
 
 
-// 1010 需求3：标星的消息原文（跨窗口注入）。marks key = sha256(role+\0+正文) 前32位（与
-// context-replacements.contentKey 同口径）；遍历全部时间线文件，命中的真实消息收集原文。
-// 返回最近 N 条（按消息 time 排序，标星本身有限，默认全量），每条一行。
-function readStarredDialogLines(baseDir, loadTimeline) {
+// 标星跨窗口注入：marks 文件保存的原文是主数据源；仅旧记录缺原文时才回查时间线。
+// key 兼容旧版 contentKey 与新版 message id。按 role+正文指纹去重，避免复制窗口重复注入。
+function readStarredDialogLines(baseDir, loadTimeline, limit) {
   let marks = {};
   try {
     const d = JSON.parse(fs.readFileSync(path.join(baseDir, 'data', 'context_compaction_marks.json'), 'utf8'));
     if (d && d.marks && typeof d.marks === 'object') marks = d.marks;
   } catch (e) { return []; }
-  const markKeys = Object.keys(marks);
-  if (!markKeys.length) return [];
-  const contentKey = function (msg) {
-    const text = (msg && typeof msg.content === 'string') ? msg.content : '';
-    return crypto.createHash('sha256').update((msg && msg.role ? msg.role : '') + '\u0000' + text).digest('hex').slice(0, 32);
+  const entries = Object.entries(marks);
+  if (!entries.length) return [];
+
+  const contentKey = function (role, text) {
+    return crypto.createHash('sha256').update(String(role || '') + '\u0000' + String(text || '')).digest('hex').slice(0, 32);
   };
   const collect = [];
-  const files = [];
-  try { files.push('enhanced_messages.json'); } catch (e) {}
-  try {
-    const dir = fs.readdirSync(baseDir);
-    for (const f of dir) { if (/^enhanced_messages_s_.*\.json$/.test(f)) files.push(f); }
-  } catch (e) {}
+  const missing = [];
   const seen = new Set();
-  for (const f of files) {
-    let tl = [];
-    try { tl = JSON.parse(fs.readFileSync(path.join(baseDir, f), 'utf8')); } catch (e) { continue; }
-    if (!Array.isArray(tl)) continue;
-    for (const m of tl) {
-      if (!m || m.role === 'system' || m.role === 'developer' || m.role === 'tool' || m.kind === 'diary' || m.kind === 'noaction') continue;
-      if (!(m.content && typeof m.content === 'string' && String(m.content).trim())) continue;
-      const k = contentKey(m);
-      if (!markKeys.includes(k)) continue;
-      const key2 = String(m.id || '') + '|' + k;
-      if (seen.has(key2)) continue;
-      seen.add(key2);
-      collect.push({ time: String(m.time || ''), text: String(m.content).trim() });
+  function add(role, text, time, fallbackTime) {
+    if (typeof text !== 'string' || !text.trim()) return;
+    const k = contentKey(role, text);
+    if (seen.has(k)) return;
+    seen.add(k);
+    collect.push({ time: String(time || fallbackTime || ''), text: text.trim() });
+  }
+
+  for (const [key, entry] of entries) {
+    if (entry && typeof entry.content === 'string' && entry.content.trim()) {
+      add(entry.role || '', entry.content, entry.time || '', entry.markedAt || '');
+    } else {
+      missing.push(String(key));
+    }
+  }
+
+  // 只有旧标星条目缺少原文时，才扫描时间线。新记录通常直接从 marks.content 注入。
+  if (missing.length) {
+    const wanted = new Set(missing);
+    const files = ['enhanced_messages.json'];
+    try {
+      for (const f of fs.readdirSync(baseDir)) {
+        if (/^enhanced_messages_s_.*\.json$/.test(f)) files.push(f);
+      }
+    } catch (e) {}
+    for (const f of files) {
+      let tl = [];
+      try { tl = JSON.parse(fs.readFileSync(path.join(baseDir, f), 'utf8')); } catch (e) { continue; }
+      if (!Array.isArray(tl)) continue;
+      for (const m of tl) {
+        if (!m || ['system', 'developer', 'tool'].includes(m.role) || m.kind === 'diary' || m.kind === 'noaction') continue;
+        if (typeof m.content !== 'string' || !m.content.trim()) continue;
+        const byId = m.id != null && wanted.has(String(m.id));
+        const byContent = wanted.has(contentKey(m.role, m.content));
+        if (!byId && !byContent) continue;
+        add(m.role || '', m.content, m.time || '', '');
+      }
     }
   }
   collect.sort(function (a, b) { return (a.time < b.time) ? -1 : (a.time > b.time ? 1 : 0); });
-  const N = 20;
-  return collect.slice(-N).map(function (x) { return x.text; });
+  const n = Number(limit);
+  const selected = (Number.isFinite(n) && n > 0) ? collect.slice(-Math.min(10000, Math.floor(n))) : collect;
+  return selected.map(function (x) { return x.text; });
 }
 
 // 把 builder 输出套进消息：剔除旧 [永久上下文]/[跨窗口] developer 块 →
@@ -233,7 +252,10 @@ async function assembleAndApply(opts) {
     });
     // 1010 需求3：标星消息原文——装配层算好行传给 builder（builder 保持纯函数）。失败静默（空块自然被跳过）。
     //（最近对话已改为 1010-29 建会话时写进时间线，不再运行时组装。）
-    try { input.starredLines = readStarredDialogLines(opts.baseDir, opts.loadTimeline); } catch (e) { input.starredLines = []; }
+    try {
+      const _starLimit = require('./lib/session-cfg').createSessionCfg(opts.baseDir).readStarredDialogLimit(opts.sessionId);
+      input.starredLines = readStarredDialogLines(opts.baseDir, opts.loadTimeline, _starLimit);
+    } catch (e) { input.starredLines = readStarredDialogLines(opts.baseDir, opts.loadTimeline, 0); }
     if (relOn || relPreview) { if (!relOn) input.previewOnly = true; await attachVecScores(input); } else input.query = '';
     const built = buildContextBlocks(input);
 
@@ -359,4 +381,4 @@ function relevantEnabled(baseDir) {
   } catch (_) { return true; }
 }
 
-module.exports = { assembleAndApply, apply, floatMemoriesToTimeline, enabled, relevantEnabled };
+module.exports = { assembleAndApply, apply, floatMemoriesToTimeline, readStarredDialogLines, enabled, relevantEnabled };
