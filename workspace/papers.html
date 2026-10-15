@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>留纸 · 小世界</title>
+<title>AI Notebook · 小世界</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -75,15 +75,15 @@ h1{font-weight:600;font-size:1.5rem;letter-spacing:12px;color:#b07a6a;margin-bot
 <body>
 <div class="wrap">
   <a class="back" href="javascript:history.back()">← 返回</a>
-  <h1>留 纸</h1>
-  <div class="sub">谢写的故事 · 梦 · 随手创作（只落盘收藏，不进对话）</div>
+  <h1>AI 的 笔 记 本</h1>
+  <div class="sub">NOTEBOOK · 故事 · 梦 · 设定与收藏（只保存，不进对话）</div>
   <div id="list"><div class="empty">加载中…</div></div>
-  <div class="ft">🕊 小世界 · 留纸</div>
+  <div class="ft">🕊 小世界 · AI 的笔记本</div>
 </div>
 
 <div class="overlay" id="ov" onclick="if(event.target===this)hideSheet()">
   <div class="sheet">
-    <h2 id="sh-t">留纸</h2>
+    <h2 id="sh-t">AI 的笔记本</h2>
     <div class="m" id="sh-m"></div>
     <div class="c" id="sh-c"></div>
     <button class="close" onclick="hideSheet()">合上</button>
@@ -97,7 +97,7 @@ function load(){
   fetch('/papers/api/list').then(function(r){return r.json()}).then(function(j){
     PAPERS=j.papers||[];
     var el=document.getElementById('list');
-    if(!PAPERS.length){el.innerHTML='<div class="empty">还没有留过纸</div>';return}
+    if(!PAPERS.length){el.innerHTML='<div class="empty">笔记本还是空的</div>';return}
     el.innerHTML=PAPERS.map(function(p,i){
       var t=p.title||'(无标题)';
       /* 1009-10：留纸全局共享，不再显示会话/共享标记 */
@@ -112,7 +112,7 @@ function openPaper(i){
   fetch('/papers/api/read?id='+encodeURIComponent(p.id))
     .then(function(r){return r.json()})
     .then(function(j){
-      document.getElementById('sh-t').textContent=p.title||'留纸';
+      document.getElementById('sh-t').textContent=p.title||'AI 的笔记本';
       /* 1003-20：不显示会话编号 */
       document.getElementById('sh-m').textContent=(p.time||'');
       document.getElementById('sh-c').textContent=(j.content||'').replace(/^#[^\n]*\n/,'').trim();

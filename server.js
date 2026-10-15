@@ -6608,10 +6608,11 @@ app.post("/internal/paper", async (req, reply) => {
   try {
     const body = req.body || {};
     const r = require("./papers").savePaper({
-      content: body.content, title: body.title, sessionId: body.session_id,
+      content: body.content, title: body.title, tags: body.tags, sessionId: body.session_id,
     });
     if (!r || !r.ok) return reply.code(400).send({ error: (r && r.error) || "留纸失败" });
-    reply.send({ success: true, id: r.id, title: r.title, chars: r.chars, time: r.time });
+    reply.send({ success: true, id: r.id, title: r.title, tags: r.tags,
+      created_at: r.created_at, updated_at: r.updated_at, chars: r.chars, time: r.time });
   } catch (err) {
     console.error("[internal/paper] 留纸失败:", err);
     reply.code(500).send({ error: err.message });
@@ -6629,14 +6630,18 @@ app.get("/internal/paper/view", async (req, reply) => {
       // 1003-20：补创建时间（与列表同口径）
       const _tu = require("./time_utils");
       const _dp = _tu.getDatePartsInTimeZone(new Date(e.created_at), _tu.resolveTimeZone());
-      return reply.send({ id: e.id, title: e.title, time: _dp.year + "-" + _dp.month + "-" + _dp.day + " " + _dp.hour + ":" + _dp.minute, content: String(e.content || "").trim() });
+      return reply.send({ id: e.id, title: e.title || "", tags: Array.isArray(e.tags) ? e.tags : [],
+        created_at: e.created_at, updated_at: e.updated_at || e.created_at,
+        time: _dp.year + "-" + _dp.month + "-" + _dp.day + " " + _dp.hour + ":" + _dp.minute,
+        content: String(e.content || "").trim() });
     }
     // 1009-10：limit 控制列表张数（默认 10，上限 50），tools_server view_paper 透传
     let limit = parseInt(String((req.query || {}).limit || "10"), 10);
     if (!Number.isInteger(limit) || limit < 1) limit = 10;
     if (limit > 50) limit = 50;
     const list = papers.listPapers().slice(0, limit).map(e => ({
-      id: e.id, title: e.title, time: e.time,
+      id: e.id, title: e.title, tags: e.tags,
+      time: e.time, created_at: e.created_at, updated_at: e.updated_at,
     }));
     reply.send({ papers: list, total: papers.listPapers().length,
       message: "带 id=编号 可看对应那张全文；limit 控制列表张数（默认10，最多50）" });

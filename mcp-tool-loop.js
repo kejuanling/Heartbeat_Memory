@@ -37,7 +37,7 @@ const MAX_TOOL_RESULT_CHARS = 30000;
 
 // 会话级工具（2026-09-12）：执行时由服务端把当前聊天会话 id 强制注入参数 session_id（覆盖模型给的值，
 // 模型伪造无效）。工具端（tools_server.py）据此把日记/留纸写到对应会话目录。
-const SESSION_SCOPED_TOOLS = new Set(["diary_add", "leave_paper", "view_paper", "memory_add"]); // 1010-17：memory_add 提交的记忆自动带当前会话（source_session 溯源）
+const SESSION_SCOPED_TOOLS = new Set(["lovediary_add", "notebook_add", "notebook_list", "memory_add"]); // 1010-17：memory_add 提交的记忆自动带当前会话（source_session 溯源）
 function _injectSessionArg(name, args, sessionId) {
   if (sessionId && SESSION_SCOPED_TOOLS.has(name) && args && typeof args === "object" && !Array.isArray(args)) {
     args.session_id = String(sessionId);
@@ -51,7 +51,7 @@ function _injectSessionArg(name, args, sessionId) {
 // 主路径 —— 完全没有，导致流式对话里用 diary_add 工具写的日记从不落时间线。现由两条循环共用本函数，
 // 判定口径只有这一处，不会再漂移。
 function _notifyDiaryWritten(name, args, error, result, onDiaryWritten, sessionId) {
-  if (name !== "diary_add" || error || typeof onDiaryWritten !== "function") return;
+  if (name !== "lovediary_add" || error || typeof onDiaryWritten !== "function") return;
   const dText = (args && typeof args.content === "string" && args.content.trim()) ? args.content.trim() : "";
   if (!dText) return;
   // 2026-10-19：从工具回执解析新条目 id（tools_server.py 的 diary_add 返回 JSON 带 diary_id），

@@ -94,7 +94,7 @@ def run_cmd(cmd, timeout=10):
 TOOLS = {}
 
 # ── 2. 日记 ──
-def tool_diary_add(args):
+def tool_lovediary_add(args):
     content = (args.get("content") or "").strip()
     if not content:
         return {"error": "content 必填：要写入陪伴日记的正文"}
@@ -109,13 +109,13 @@ def tool_diary_add(args):
     # 2026-10-19：带回新条目 id——网关工具循环从回执解析出 diary_id，给时间线消息打外键
     return {"success": True, "message": "已写入陪伴日记", "diary_id": data.get("id")}
 
-def tool_diary_list(args):
+def tool_her_murmurs(args):
     count = args.get("count", 5)
     data = api_get(f"{BASE_URL}:8777/diary/api/entries")
     if "_error" in data:
         return {"error": data["_error"]}
     return {"entries": data[:count]}
-TOOLS["diary_list"] = {
+TOOLS["her_murmurs"] = {
     "description": "查看涵的日记列表（默认返回最近 5 条）",
     "inputSchema": {
         "type": "object",
@@ -123,17 +123,17 @@ TOOLS["diary_list"] = {
             "count": {"type": "integer", "description": "获取条数，默认5"}
         }
     },
-    "handler": tool_diary_list
+    "handler": tool_her_murmurs
 }
 
-def tool_diary_comment(args):
+def tool_reply_to_her(args):
     eid = args.get("id")
     text = args.get("text")
     if not eid or not text:
         return {"error": "缺少 id 或 text"}
     result = api_post(f"{BASE_URL}:8777/diary/api/entries/comment", {"id": eid, "text": text})
     return result
-TOOLS["diary_comment"] = {
+TOOLS["reply_to_her"] = {
     "description": "给涵的某条日记写评论，评论会通过 Bark 推送到她手机",
     "inputSchema": {
         "type": "object",
@@ -143,10 +143,10 @@ TOOLS["diary_comment"] = {
         },
         "required": ["id", "text"]
     },
-    "handler": tool_diary_comment
+    "handler": tool_reply_to_her
 }
 
-TOOLS["diary_add"] = {
+TOOLS["lovediary_add"] = {
     "description": "新增一条陪伴日记，追加到今天的日记文件（每个聊天窗口的日记分开存放，自动写入当前窗口名下；与该窗口自动唤醒写的日记同一份）。适用于：想主动记录此刻的想法、感受、对她说的话，或给今天留下一段陪伴记录时使用。",
     "inputSchema": {
         "type": "object",
@@ -156,12 +156,12 @@ TOOLS["diary_add"] = {
         },
         "required": ["content"]
     },
-    "handler": tool_diary_add
+    "handler": tool_lovediary_add
 }
 
 # ── 查看谢的日记（2026-09-16；2026-10-03 改走网关内部接口）──
 # 只返回正文（自带「## 时间」头 = 时间+正文），不再拼会话编号/文件路径；隐藏篇由网关字段过滤。
-def tool_diary_view(args):
+def tool_lovediary_list(args):
     qs = {}
     date = (args.get("date") or "").strip()
     if date:
@@ -177,7 +177,7 @@ def tool_diary_view(args):
         return {"error": data["_error"]}
     return data
 
-TOOLS["diary_view"] = {
+TOOLS["lovediary_list"] = {
     "description": "查看谢自己写过的陪伴日记。不带参数=返回最近 1 篇全文；带 date=YYYY-MM-DD 返回那一天；带 count=N 返回最近 N 篇（默认 1，最大 30）。日记按天存放，同一天的多个窗口内容会合并展示。",
     "inputSchema": {
         "type": "object",
@@ -186,41 +186,58 @@ TOOLS["diary_view"] = {
             "count": {"type": "integer", "description": "可选：不带 date 时，返回最近 N 篇日记，默认 1，最大 30"}
         }
     },
-    "handler": tool_diary_view
+    "handler": tool_lovediary_list
 }
 
 # ── 留纸（2026-09-12；2026-10-03 改走网关内部接口 data/papers.json）──
-def tool_leave_paper(args):
+def tool_notebook_add(args):
     content = (args.get("content") or "").strip()
     if not content:
         return {"error": "content 必填：要留纸的正文（故事/梦/随手创作等）"}
     title = (args.get("title") or "").strip()[:100]
+    def clean_meta_list(value):
+        if isinstance(value, str):
+            value = re.split(r"[,，、;；\n]+", value)
+        if not isinstance(value, list):
+            return []
+        out = []
+        for item in value:
+            item = str(item or "").strip()[:40]
+            if item and item not in out:
+                out.append(item)
+            if len(out) >= 20:
+                break
+        return out
+    tags = clean_meta_list(args.get("tags"))
     session_id = str(args.get("session_id") or "").strip()
     data = api_post_key("%s:3000/internal/paper" % BASE_URL,
-                        {"content": content, "title": title, "session_id": session_id or None})
+                        {"content": content, "title": title, "tags": tags, "session_id": session_id or None})
     if "_error" in data:
-        return {"error": "留纸失败: %s" % data["_error"]}
+        return {"error": "AI 的笔记本保存失败: %s" % data["_error"]}
     if not data.get("success"):
-        return {"error": "留纸失败: %s" % data}
+        return {"error": "AI 的笔记本保存失败: %s" % data}
     return {"success": True, "id": data.get("id"), "title": data.get("title"),
-            "message": ("已留纸：" + data.get("title", "")) if data.get("title") else "已留一张纸（只保存，不会进入对话上下文）"}
+            "tags": data.get("tags", []), "created_at": data.get("created_at"),
+            "updated_at": data.get("updated_at"),
+            "message": ("已存入 AI 的笔记本：" + data.get("title", "")) if data.get("title") else "已存入 AI 的笔记本（只保存，不会进入对话上下文）"}
 
-TOOLS["leave_paper"] = {
-    "description": "留一张纸：把一段创作（小故事、梦、随手写的文字等）单独保存成一张「纸」，只落盘收藏、不会进入对话上下文。适合内容较长、想留档又不打断聊天时使用；如果只是想顺手在回复里标记留档，也可以直接在回复末尾写 <paper/> 记号（整条回复会存成一张纸，可选 <paper title=\"标题\"/>）。",
+TOOLS["notebook_add"] = {
+    "description": "AI 的笔记本：把故事、梦、设定或其他想留存的内容单独保存，支持可选标签，内容不会注入对话上下文。也可以在回复末尾用 <paper/> 记号快速收藏整条回复（可选 <paper title=\"标题\"/>）。",
     "inputSchema": {
         "type": "object",
         "properties": {
             "content": {"type": "string", "description": "纸的正文（故事/梦/随手创作，建议单篇一两千字以内）"},
             "title": {"type": "string", "description": "可选：这张纸的标题"},
+            "tags": {"type": "array", "items": {"type": "string"}, "description": "可选：统一填写分类、标签和检索词，如故事、梦、世界观、角色设定；由 AI 按内容自行决定，不确定可省略"},
             "session_id": {"type": "string", "description": "内部参数：由系统自动注入当前窗口标识，无需填写"}
         },
         "required": ["content"]
     },
-    "handler": tool_leave_paper
+    "handler": tool_notebook_add
 }
 
 # ── 翻看留过的纸（2026-09-12；2026-10-03 改内部接口）：不带参数=列表（序号+时间+标题），带 sn=看对应那张全文 ──
-def tool_view_paper(args):
+def tool_notebook_list(args):
     if args.get("sn") in (None, ""):
         try:
             limit = int(args.get("limit") or 10)
@@ -236,8 +253,10 @@ def tool_view_paper(args):
         papers = data.get("papers") or []
         items = []
         for i, p in enumerate(papers[:limit], 1):
-            items.append({"sn": i, "time": p.get("time"),
-                          "title": p.get("title") or "(无标题)"})
+            items.append({"sn": i, "id": p.get("id"), "time": p.get("time"),
+                          "created_at": p.get("created_at") or p.get("time"),
+                          "updated_at": p.get("updated_at") or p.get("created_at") or p.get("time"),
+                          "title": p.get("title") or "(无标题)", "tags": p.get("tags") or []})
         return {"papers": items, "total": data.get("total") or len(items),
                 "message": "带 sn=序号 再调一次可看对应那张的全文；limit 可调返回张数（默认10，最多50）"}
     try:
@@ -255,10 +274,13 @@ def tool_view_paper(args):
     full = api_get_key("%s:3000/internal/paper/view?id=%s" % (BASE_URL, pid))
     if "_error" in full:
         return {"error": full["_error"]}
-    return {"file": pid, "content": full.get("content")}
+    return {"file": pid, "title": full.get("title") or "", "tags": full.get("tags") or [],
+            "created_at": full.get("created_at") or full.get("time"),
+            "updated_at": full.get("updated_at") or full.get("created_at") or full.get("time"),
+            "content": full.get("content")}
 
-TOOLS["view_paper"] = {
-    "description": "翻看自己留过的纸（leave_paper/<paper> 写的收藏）。不带参数调用=列出本窗口最近 10 张（序号+时间+标题/开头）；带 sn=序号 调用=看那一张的全文。",
+TOOLS["notebook_list"] = {
+    "description": "翻看自己留过的纸。不带参数列出最近 10 张（序号、标题、创建/更新时间、标签）；带 sn 看全文，结果包含标题、标签、创建/更新时间和正文。",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -267,7 +289,7 @@ TOOLS["view_paper"] = {
             "session_id": {"type": "string", "description": "内部参数：由系统自动注入当前窗口标识，无需填写"}
         }
     },
-    "handler": tool_view_paper
+    "handler": tool_notebook_list
 }
 
 # ── 心动时刻 ──
@@ -482,7 +504,7 @@ def tool_todo_add(args):
         payload["remind_at"] = remind_at
     return api_post(f"{BASE_URL}:8777/todo/api/todos/xie", payload)
 TOOLS["todo_add"] = {
-    "description": "谢意行新增一条今日待办事项",
+    "description": "新增一条待办；可选设置提醒时间，到点向涵发送手机推送提醒",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -754,7 +776,13 @@ def tool_memory_search(args):
         limit = max(1, int(limit))
     except (TypeError, ValueError):
         limit = 5
-    url = f"{BASE_URL}:3000/internal/memory-pool/retrieve?q=" + urllib.parse.quote(q) + "&limit=" + str(limit)
+    category = (args.get("category") or "").strip()
+    if category and category not in {"fact", "rule", "event"}:
+        return {"error": "category 仅支持 fact、rule、event"}
+    params = {"q": q, "limit": limit}
+    if category:
+        params["category"] = category
+    url = f"{BASE_URL}:3000/internal/memory-pool/retrieve?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, headers={"x-internal-key": INTERNAL_KEY})
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -781,12 +809,13 @@ def tool_memory_search(args):
 
 
 TOOLS["memory_search"] = {
-    "description": "检索长期记忆池：输入关键词、问题或模糊描述，返回最相关的几条记忆及 id。建议用完整的一句话描述想查的内容（例如\"她上次说想学画画那件事\"）：一句话比单个关键词更容易命中——短关键词主要靠字面匹配，一句话会带语义匹配，意思相近也能搜到。排序=词面命中与语义相关混合打分，相关度高的在前。id 交给 memory_pin 置顶/沉底，或交给 memory_update 改正文。这里查到的是已经进入长期记忆池的记忆，不是原始对话；要找原文用 context_search。",
+    "description": "检索长期记忆池，按关键词匹配所有分类（fact/rule/event），需要时可用 category 限定分类；返回匹配记忆及 id，可用于后续记忆操作。",
     "inputSchema": {
         "type": "object",
         "properties": {
             "q": {"type": "string", "description": "检索关键词、问题或描述"},
-            "limit": {"type": "integer", "description": "返回条数，默认5；不设固定最大值，受实际记忆池数量限制"}
+            "limit": {"type": "integer", "description": "返回条数，默认 5"},
+            "category": {"type": "string", "enum": ["fact", "rule", "event"], "description": "可选：按 fact/rule/event 分类筛选"}
         },
         "required": ["q"]
     },
@@ -1228,6 +1257,107 @@ TOOLS["memory_update"] = {
 }
 
 
+# ===== 统一工具集：把搜索、云服务器、网易云工具代理到本 MCP 入口 =====
+MCP_SERVERS_CONFIG_FILE = "/opt/dylan-heartbeat/mcp-servers.json"
+PROXY_TOOLS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "proxy_tools.json")
+
+def _read_proxy_server_configs():
+    try:
+        with open(MCP_SERVERS_CONFIG_FILE, encoding="utf-8") as f:
+            cfg = json.load(f)
+        return {str(s.get("name")): s for s in cfg.get("servers", []) if s.get("name")}
+    except Exception as e:
+        print("[proxy-tools] 读取 MCP 服务配置失败:", e, flush=True)
+        return {}
+
+def _parse_mcp_http_body(body, content_type):
+    text = (body or "").strip()
+    if not text:
+        return {}
+    if "text/event-stream" in (content_type or "") or "data:" in text:
+        data_lines = [line[5:].strip() for line in text.splitlines() if line.startswith("data:")]
+        text = next((line for line in reversed(data_lines) if line and line != "[DONE]"), "{}")
+    data = json.loads(text)
+    if isinstance(data, dict) and data.get("error"):
+        err = data["error"]
+        raise RuntimeError(str(err.get("message") or err))
+    return data
+
+def _proxy_mcp_rpc(server_cfg, method, params=None, request_id=1, session_id=None):
+    payload = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params or {}}
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "User-Agent": "Mozilla/5.0 (compatible; Unified-MCP-Toolset/1.0)",
+    }
+    headers.update(server_cfg.get("headers") or {})
+    if session_id:
+        headers["Mcp-Session-Id"] = session_id
+    req = urllib.request.Request(server_cfg["url"], data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=40) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            next_session = resp.headers.get("Mcp-Session-Id") or session_id
+            return _parse_mcp_http_body(body, resp.headers.get("Content-Type", "")), next_session
+    except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            detail = e.read().decode("utf-8", errors="replace")[:500]
+        except Exception:
+            pass
+        raise RuntimeError("上游 MCP HTTP %s: %s" % (e.code, detail or e.reason))
+
+def _proxy_mcp_tool(server_name, tool_name, args):
+    servers = _read_proxy_server_configs()
+    server_cfg = servers.get(server_name)
+    if not server_cfg or not server_cfg.get("url"):
+        return {"isError": True, "content": [{"type": "text", "text": "找不到上游 MCP 服务配置: " + server_name}]}
+    try:
+        _, session_id = _proxy_mcp_rpc(server_cfg, "initialize", {
+            "protocolVersion": "2025-03-26",
+            "capabilities": {},
+            "clientInfo": {"name": "unified-mcp-toolset", "version": "1.0.0"},
+        }, request_id=1)
+        try:
+            _proxy_mcp_rpc(server_cfg, "notifications/initialized", {}, request_id=2, session_id=session_id)
+        except Exception:
+            pass
+        response, _ = _proxy_mcp_rpc(server_cfg, "tools/call", {
+            "name": tool_name,
+            "arguments": args or {},
+        }, request_id=3, session_id=session_id)
+        if not isinstance(response, dict) or "result" not in response:
+            raise RuntimeError("上游 MCP 未返回 result")
+        return {"__mcp_raw_result__": response["result"]}
+    except Exception as e:
+        print("[proxy-tools] %s.%s 调用失败: %s" % (server_name, tool_name, e), flush=True)
+        return {"__mcp_raw_result__": {"isError": True, "content": [{"type": "text", "text": "%s 调用失败: %s" % (tool_name, e)}]}}
+
+def register_proxy_tools():
+    """从固定的工具清单注册代理工具；工具说明/schema 固定保存，不依赖上游启动时在线。"""
+    try:
+        with open(PROXY_TOOLS_FILE, encoding="utf-8") as f:
+            manifest = json.load(f)
+        count = 0
+        for item in manifest.get("tools", []):
+            name = item.get("toolName")
+            server_name = item.get("serverName")
+            if not name or not server_name:
+                continue
+            if name in TOOLS:
+                raise RuntimeError("代理工具名称冲突，拒绝覆盖本地工具: " + name)
+            def handler(args, _server=server_name, _name=name):
+                return _proxy_mcp_tool(_server, _name, args)
+            TOOLS[name] = {
+                "description": item.get("description") or ("代理调用 " + server_name + " 的 " + name),
+                "inputSchema": item.get("inputSchema") or {"type": "object", "properties": {}},
+                "handler": handler,
+            }
+            count += 1
+        print("[proxy-tools] 已注册 %d 个上游工具" % count, flush=True)
+    except Exception as e:
+        print("[proxy-tools] 注册代理工具失败: %s" % e, flush=True)
+
 # ===== MCP HTTP 处理器 =====
 class MCPHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
@@ -1320,6 +1450,9 @@ class MCPHandler(BaseHTTPRequestHandler):
                 }
             try:
                 result = TOOLS[tool_name]["handler"](args)
+                # 代理工具直接透传上游 MCP 的 result，避免把原始 content 再套一层 JSON 文本。
+                if isinstance(result, dict) and "__mcp_raw_result__" in result:
+                    return {"jsonrpc": "2.0", "id": req_id, "result": result["__mcp_raw_result__"]}
                 return {
                     "jsonrpc": "2.0", "id": req_id,
                     "result": {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}]}
@@ -1461,6 +1594,7 @@ def watch_config_loop():
 
 
 if __name__ == "__main__":
+    register_proxy_tools()
     apply_tools_config()
     write_tools_manifest()
     threading.Thread(target=watch_config_loop, daemon=True).start()

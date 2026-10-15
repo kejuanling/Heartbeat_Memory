@@ -32,21 +32,28 @@ function savePaper(opts) {
   if (!clean) return { ok: false, error: "内容为空" };
   const body = clean.slice(0, MAX_PAPER_CHARS);
   const title = String((opts && opts.title) || "").trim().slice(0, 100);
+  const cleanList = value => (Array.isArray(value) ? value : (typeof value === "string" ? value.split(/[,，、;；\n]+/) : []))
+    .map(v => String(v || "").trim()).filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).slice(0, 30).map(v => v.slice(0, 40));
+  // 一个 tags 字段统一承载分类、标签和检索词；不强制模型填写。
+  const tags = cleanList(opts && opts.tags);
   try {
-    const s = stamp(new Date());
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const s = stamp(now);
     const header = (title ? "# " + title + "\n\n" : "") + "（" + s.date + " " + s.hm + "）\n\n";
     const id = paperStore.addEntry(__dirname, {
-      title,
-      created_at: new Date().toISOString(),
+      title, tags,
+      created_at: nowIso, updated_at: nowIso,
       content: header + body + "\n",
     });
-    return { ok: true, id, title, chars: body.length, time: s.date + " " + s.hm };
+    return { ok: true, id, title, tags, chars: body.length, time: s.date + " " + s.hm,
+      created_at: nowIso, updated_at: nowIso };
   } catch (e) {
     return { ok: false, error: e.message || String(e) };
   }
 }
 
-// 全量列表（门户/管理台用）：data/papers.json 全部，id 倒序（最新在前），每张带 id/title/time/摘要
+// 全量列表（门户/管理台用）：data/papers.json 全部，id 倒序（最新在前），每张带标题、标签和创建/更新时间
 function listPapers(limit) {
   const tz = timeZone();
   const out = paperStore.listEntries(__dirname)
@@ -55,9 +62,9 @@ function listPapers(limit) {
     .map(e => {
       const p = getDatePartsInTimeZone(new Date(e.created_at), tz);
       return {
-        id: e.id, title: e.title || "",
+        id: e.id, title: e.title || "", tags: Array.isArray(e.tags) ? e.tags : [],
         time: p.year + "-" + p.month + "-" + p.day + " " + p.hour + ":" + p.minute,
-        created_at: e.created_at,
+        created_at: e.created_at, updated_at: e.updated_at || e.created_at,
         content: String(e.content || "").slice(0, 24000),
       };
     });
