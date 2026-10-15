@@ -476,14 +476,18 @@ def tool_todo_add(args):
     text = args.get("text")
     if not text:
         return {"error": "缺少 text"}
-    result = api_post(f"{BASE_URL}:8777/todo/api/todos/xie", {"text": text})
-    return result
+    payload = {"text": text}
+    remind_at = args.get("remind_at")
+    if remind_at:
+        payload["remind_at"] = remind_at
+    return api_post(f"{BASE_URL}:8777/todo/api/todos/xie", payload)
 TOOLS["todo_add"] = {
     "description": "谢意行新增一条今日待办事项",
     "inputSchema": {
         "type": "object",
         "properties": {
-            "text": {"type": "string", "description": "待办内容"}
+            "text": {"type": "string", "description": "待办内容"},
+            "remind_at": {"type": "string", "description": "可选提醒时间，格式 YYYY-MM-DD HH:mm，按项目 TIME_ZONE 时区；必须是未来时间"}
         },
         "required": ["text"]
     },

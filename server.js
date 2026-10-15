@@ -7162,6 +7162,66 @@ async function sendPushNotification({ title, body, sessionId, channel } = {}) {
       const br = await doBark();
       if (br.ok) return { ok: true, providerLabel: "Bark", fallback: "webpush", fallbackReason: (r && r.reason) || "webpush 失败" };
       return r;
+// 待办到点提醒：与 wake scheduler 独立，时间和发送状态保存在统一后端数据文件。
+const TODO_REMINDER_CLAIM_URL = "http://127.0.0.1:8777/todo/api/reminders/claim";
+const TODO_REMINDER_RESULT_URL = "http://127.0.0.1:8777/todo/api/reminders/result";
+let todoReminderScanRunning = false;
+async function scanTodoReminders() {
+  if (todoReminderScanRunning) return;
+  todoReminderScanRunning = true;
+  try {
+    const key = readEnvValue("INTERNAL_API_KEY");
+    if (!key) {
+      console.warn("[todo-reminder] INTERNAL_API_KEY 未配置，暂不扫描");
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    let response;
+    try {
+      response = await fetch(TODO_REMINDER_CLAIM_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Internal-Key": key },
+        body: JSON.stringify({ now_ms: Date.now() }),
+        signal: controller.signal
+      });
+    } finally { clearTimeout(timer); }
+    if (!response.ok) throw new Error("claim HTTP " + response.status);
+    const data = await response.json();
+    const reminders = Array.isArray(data.reminders) ? data.reminders : [];
+    for (const item of reminders) {
+      let pushResult = { ok: false, reason: "推送未执行" };
+      try {
+        const detail = String(item.text || "待办事项").replace(/^📌\s*/, "").trim();
+        pushResult = await sendPushNotification({
+          title: "待办提醒",
+          body: detail ? ("到时间啦：" + detail.slice(0, 350)) : "你有一条待办事项到时间啦。",
+          sessionId: latestRequestedSessionId(),
+          channel: "webpush"
+        });
+      } catch (e) {
+        pushResult = { ok: false, reason: e && e.message ? e.message : String(e) };
+      }
+      try {
+        const resultResponse = await fetch(TODO_REMINDER_RESULT_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Internal-Key": key },
+          body: JSON.stringify({ id: item.id, ok: !!(pushResult && pushResult.ok), error: pushResult && pushResult.reason })
+        });
+        if (!resultResponse.ok) throw new Error("result HTTP " + resultResponse.status);
+      } catch (e) {
+        // 结果写回失败时租约到期后自动重试；极端情况下可能重复推送，但不会永久丢提醒。
+        console.error("[todo-reminder] 状态写回失败 id=" + item.id + ": " + e.message);
+      }
+      console.log("[todo-reminder] id=" + item.id + " push=" + (!!(pushResult && pushResult.ok)) + (pushResult && pushResult.reason ? " reason=" + pushResult.reason : ""));
+    }
+  } catch (e) {
+    console.error("[todo-reminder] 扫描失败：", e && e.message ? e.message : e);
+  } finally {
+    todoReminderScanRunning = false;
+  }
+}
+
     }
     if (provider !== "bark") return { ok: false, reason: `不支持的 PUSH_PROVIDER：${provider}` };
     return await doBark();
@@ -7589,3 +7649,6 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err, address) => {
     }
   }, 3000);
 });
+      // 启动后先扫描一次；之后每 15 秒检查。调度只扫描落盘的 pending 提醒。
+      setTimeout(() => { scanTodoReminders(); }, 1500);
+      setInterval(() => { scanTodoReminders(); }, 15000).unref();

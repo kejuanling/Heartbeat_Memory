@@ -718,14 +718,100 @@ def todo_xie_todo():
         if text_xie: parts.append("我：" + text_xie)
         text = "\n".join(parts)
     if not text: return jsonify({"error": "empty"}), 400
+
+    # 可选提醒时间：按项目 TIME_ZONE 解析墙上时间；只接受明确的 YYYY-MM-DD HH:mm。
+    remind_at = str(body.get("remind_at") or "").strip()
+    remind_epoch_ms = None
+    if remind_at:
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", remind_at):
+            return jsonify({"error": "remind_at 格式应为 YYYY-MM-DD HH:mm（项目时区）"}), 400
+        try:
+            tz_name = _env_get('TIME_ZONE') or 'Asia/Shanghai'
+            tz = ZoneInfo(tz_name)
+            wall = datetime.datetime.strptime(remind_at, "%Y-%m-%d %H:%M").replace(tzinfo=tz)
+            # 回读校验，拒绝无效日期及夏令时不存在的墙上时间。
+            if wall.strftime("%Y-%m-%d %H:%M") != remind_at:
+                raise ValueError("invalid date")
+            remind_epoch_ms = int(wall.timestamp() * 1000)
+            if remind_epoch_ms <= int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000):
+                return jsonify({"error": "remind_at 必须是未来时间"}), 400
+        except Exception as exc:
+            return jsonify({"error": "remind_at 无效，请确认日期、时间及项目时区", "detail": str(exc)}), 400
+
     d = todo_load()
     today = datetime.date.today().isoformat()
     if today not in d["todos"]: d["todos"][today] = []
     tid = max((t['id'] for day in d['todos'].values() for t in day), default=0) + 1
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    d["todos"][today].append({"id": tid, "text": f"\U0001f4cc {text} {now}", "done": False, "by": "xie"})
+    item = {"id": tid, "text": f"\U0001f4cc {text} {now}", "done": False, "by": "xie"}
+    if remind_at:
+        item["remind_at"] = remind_at
+        item["remind_at_ms"] = remind_epoch_ms
+        item["reminder_status"] = "pending"
+    d["todos"][today].append(item)
     todo_save(d)
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "id": tid, "remind_at": remind_at or None})
+
+def _todo_reminder_authorized():
+    expected = _env_get('INTERNAL_API_KEY')
+    supplied = request.headers.get('X-Internal-Key', '')
+    return bool(expected and supplied and supplied == expected)
+
+@todo_bp.route('/todo/api/reminders/claim', methods=['POST'])
+def todo_claim_due_reminders():
+    # 由 gateway 带内部密钥轮询，防止公网调用者提前领取/改写提醒状态。
+    if not _todo_reminder_authorized(): return jsonify({"error": "unauthorized"}), 401
+    body = request.get_json(silent=True) or {}
+    now_ms = int(body.get("now_ms") or datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000)
+    lease_ms = 2 * 60 * 1000
+    d = todo_load()
+    claimed = []
+    for day in sorted((d.get("todos") or {}).keys()):
+        for item in d["todos"].get(day, []):
+            if item.get("done") or not item.get("remind_at_ms"):
+                continue
+            status = item.get("reminder_status", "pending")
+            if status == "sent":
+                continue
+            if status == "sending" and now_ms - int(item.get("reminder_claimed_at_ms") or 0) < lease_ms:
+                continue
+            if int(item.get("remind_at_ms") or 0) > now_ms:
+                continue
+            item["reminder_status"] = "sending"
+            item["reminder_claimed_at_ms"] = now_ms
+            claimed.append({"id": item.get("id"), "text": item.get("text", ""), "remind_at": item.get("remind_at")})
+    if claimed:
+        todo_save(d)
+    return jsonify({"reminders": claimed})
+
+@todo_bp.route('/todo/api/reminders/result', methods=['POST'])
+def todo_finish_reminder():
+    if not _todo_reminder_authorized(): return jsonify({"error": "unauthorized"}), 401
+    body = request.get_json(silent=True) or {}
+    tid = body.get("id")
+    ok = body.get("ok") is True
+    d = todo_load()
+    found = None
+    for day in (d.get("todos") or {}).values():
+        for item in day:
+            if item.get("id") == tid and item.get("remind_at_ms"):
+                found = item
+                break
+        if found: break
+    if not found:
+        return jsonify({"ok": True, "missing": True})
+    found["reminder_status"] = "sent" if ok else "pending"
+    found.pop("reminder_claimed_at_ms", None)
+    if ok:
+        found["reminder_sent_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    else:
+        found["reminder_last_error"] = str(body.get("error") or "push failed")[:300]
+    todo_save(d)
+    return jsonify({"ok": True, "status": found["reminder_status"]})
 
 @todo_bp.route('/todo/api/moments')
 def todo_get_moments():
