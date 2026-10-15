@@ -23,6 +23,16 @@ function timeZone() {
   try { return resolveTimeZone(process.env.TIME_ZONE || ""); } catch (e) { return "Asia/Shanghai"; }
 }
 
+// 「最近」的统一口径（2026-10-16）：按 updated_at（缺则 created_at）新到旧，平局再按 id 大到小。
+// 迁入的旧纸带着原日期，不会因为 id 大就挤到最前面。
+function recency(e) {
+  const t = Date.parse((e && (e.updated_at || e.created_at)) || "");
+  return Number.isFinite(t) ? t : 0;
+}
+function byRecent(a, b) {
+  return recency(b) - recency(a) || b.id - a.id;
+}
+
 function stamp(date) {
   const p = getDatePartsInTimeZone(date || new Date(), timeZone());
   return { date: p.year + "-" + p.month + "-" + p.day, hm: p.hour + ":" + p.minute };
@@ -40,17 +50,18 @@ function savePaper(opts) {
   // 一个 tags 字段统一承载分类、标签和检索词；不强制模型填写。
   const tags = cleanList(opts && opts.tags);
   const category = cleanCategory(opts && opts.category);
+  const reason = cleanReason(opts && opts.reason);
   try {
     const now = new Date();
     const nowIso = now.toISOString();
     const s = stamp(now);
     const header = (title ? "# " + title + "\n\n" : "") + "（" + s.date + " " + s.hm + "）\n\n";
     const id = paperStore.addEntry(baseDir(), {
-      title, tags, category,
+      title, tags, category, reason,
       created_at: nowIso, updated_at: nowIso,
       content: header + body + "\n",
     });
-    return { ok: true, id, title, tags, category, chars: body.length, time: s.date + " " + s.hm,
+    return { ok: true, id, title, tags, category, reason, chars: body.length, time: s.date + " " + s.hm,
       created_at: nowIso, updated_at: nowIso };
   } catch (e) {
     return { ok: false, error: e.message || String(e) };
@@ -62,7 +73,7 @@ function listPapers(limit) {
   const tz = timeZone();
   const out = paperStore.listEntries(baseDir())
     .slice()
-    .sort((a, b) => b.id - a.id)
+    .sort(byRecent)
     .map(e => {
       const p = getDatePartsInTimeZone(new Date(e.created_at), tz);
       return {
@@ -80,6 +91,11 @@ const UNCATEGORIZED = "未分类";
 
 function cleanCategory(value) {
   return String(value == null ? "" : value).trim().slice(0, 40);
+}
+
+// reason：为什么记这一篇（一句话，可选）
+function cleanReason(value) {
+  return String(value == null ? "" : value).replace(/\s+/g, " ").trim().slice(0, 200);
 }
 
 function cleanTags(value) {
@@ -124,12 +140,12 @@ function snippetOf(body, terms) {
 }
 
 function sortedEntries() {
-  return paperStore.listEntries(baseDir()).slice().sort((a, b) => b.id - a.id); // id 倒序 = 最新在前
+  return paperStore.listEntries(baseDir()).slice().sort(byRecent); // 按更新时间新到旧
 }
 
 function brief(e, preview) {
   return {
-    id: e.id, title: e.title || "", category: e.category || "",
+    id: e.id, title: e.title || "", category: e.category || "", reason: e.reason || "",
     tags: Array.isArray(e.tags) ? e.tags : [],
     created_at: e.created_at, updated_at: e.updated_at || e.created_at,
     length: String(e.content || "").length, preview,
@@ -152,7 +168,7 @@ function queryPapers(opts) {
   if (terms.length) {
     all = all.filter(e => {
       const body = splitHeader(e).body;
-      const hay = [e.title, e.category, (Array.isArray(e.tags) ? e.tags : []).join(" "), body].join("\n").toLowerCase();
+      const hay = [e.title, e.category, e.reason, (Array.isArray(e.tags) ? e.tags : []).join(" "), body].join("\n").toLowerCase();
       if (!terms.every(t => hay.includes(t))) return false;
       snippets.set(e.id, snippetOf(body, terms));
       return true;
@@ -185,8 +201,9 @@ function editPaper(opts) {
   const hasTitle = o.title !== undefined && o.title !== null;
   const hasCategory = o.category !== undefined && o.category !== null;
   const hasTags = o.tags !== undefined && o.tags !== null;
-  if (!hasContent && !hasTitle && !hasCategory && !hasTags) {
-    return { ok: false, error: "没有要改的内容：content / title / category / tags 至少给一个" };
+  const hasReason = o.reason !== undefined && o.reason !== null;
+  if (!hasContent && !hasTitle && !hasCategory && !hasTags && !hasReason) {
+    return { ok: false, error: "没有要改的内容：content / title / category / tags / reason 至少给一个" };
   }
   if (o.mode !== undefined && o.mode !== null && o.mode !== "" && o.mode !== "append" && o.mode !== "replace") {
     return { ok: false, error: "mode 只能是 append 或 replace" };
@@ -211,18 +228,50 @@ function editPaper(opts) {
   const newTitle = hasTitle ? String(o.title).trim().slice(0, 100) : String(e0.title || "");
   // 只有原来就带「# 标题」行、或这次显式改了标题，才写标题行；老条目没有的不凭空加
   const titleLine = newTitle && (parts.hadTitleLine || hasTitle) ? "# " + newTitle + "\n\n" : "";
-  const patch = { content: titleLine + parts.dateLine + body, updated_at: new Date().toISOString() };
+  const patch = { content: titleLine + parts.dateLine + body };
+  // 只改分类/标签/原因不算「内容更新」，不动 updated_at（目录里的更新日期保持真实）
+  if (hasContent || hasTitle) patch.updated_at = new Date().toISOString();
   if (hasTitle) patch.title = newTitle;
   if (hasCategory) patch.category = cleanCategory(o.category);
   if (hasTags) patch.tags = cleanTags(o.tags);
+  if (hasReason) patch.reason = cleanReason(o.reason);
   const e = paperStore.updateEntry(baseDir(), e0.id, patch, { reason: hasContent ? mode : "meta" });
   if (!e) return { ok: false, error: "纸不存在：id=" + o.id };
   return {
-    ok: true, id: e.id, title: e.title || "", category: e.category || "",
+    ok: true, id: e.id, title: e.title || "", category: e.category || "", reason: e.reason || "",
     tags: Array.isArray(e.tags) ? e.tags : [], updated_at: e.updated_at,
     length: String(e.content || "").length, previous_length: previousLength,
     mode: hasContent ? mode : null,
   };
 }
 
-module.exports = { savePaper, listPapers, queryPapers, categoryOverview, editPaper };
+// 2026-10-16 注入块「Notebook Index」用的目录行（装配层调用，builder 保持纯函数）。空本子返回 []。
+// 内容：说明 + 分类篇数 + 最近 n 篇（id｜标题｜分类｜更新日期）+ 取全文/搜索的提示。
+function indexLines(limit, base) {
+  let n = parseInt(limit, 10);
+  if (!Number.isInteger(n) || n < 1) n = 10;
+  if (n > 50) n = 50;
+  const all = paperStore.listEntries(base || baseDir()).slice().sort(byRecent);
+  if (!all.length) return [];
+  const counts = new Map();
+  for (const e of all) {
+    const k = e.category || UNCATEGORIZED;
+    counts.set(k, (counts.get(k) || 0) + 1);
+  }
+  const cats = Array.from(counts, ([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || (a.name < b.name ? -1 : 1))
+    .map(c => c.name + " " + c.count + " 篇").join("｜");
+  const tz = timeZone();
+  const recent = all.slice(0, n).map(e => {
+    const p = getDatePartsInTimeZone(new Date(e.updated_at || e.created_at), tz);
+    const title = oneLine(e.title) || "（无标题）";
+    return e.id + "｜" + title.slice(0, 60) + "｜" + (e.category || UNCATEGORIZED) + "｜" + p.year + "-" + p.month + "-" + p.day;
+  });
+  return [
+    "这是你的笔记本目录，会话建立时的快照，之后新增的可能不在里面。",
+    "分类：" + cats,
+    (all.length <= n ? "全部 " : "最近 ") + recent.length + " 篇（id｜标题｜分类｜更新日期）：",
+  ].concat(recent, ["读全文或搜索更早的：notebook action=list（带 id 读全文，带 q 搜索）。"]);
+}
+
+module.exports = { savePaper, listPapers, queryPapers, categoryOverview, editPaper, indexLines };

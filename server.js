@@ -2084,6 +2084,8 @@ async function snapshotStaleOf(sessionId) {
           let _blocksChanged = false;
           for (const fb of snap.fixed_blocks) {
             if (!fb || !fb.key) continue;
+            // 2026-10-16：notebook_index 是「会话建立时的目录快照」，AI 随手新增笔记就会变，不参与红点比对
+            if (fb.key === "notebook_index") continue;
             const _cur = _curMap[fb.key];
             if (typeof _cur !== "string" || !_cur) { _blocksChanged = true; break; }
             if (typeof fb.content === "string" && fb.content && !_cur.startsWith(fb.content)) { _blocksChanged = true; break; }
@@ -6608,10 +6610,10 @@ app.post("/internal/paper", async (req, reply) => {
   try {
     const body = req.body || {};
     const r = require("./papers").savePaper({
-      content: body.content, title: body.title, tags: body.tags, category: body.category, sessionId: body.session_id,
+      content: body.content, title: body.title, tags: body.tags, category: body.category, reason: body.reason, sessionId: body.session_id,
     });
     if (!r || !r.ok) return reply.code(400).send({ error: (r && r.error) || "留纸失败" });
-    reply.send({ success: true, id: r.id, title: r.title, tags: r.tags, category: r.category || "",
+    reply.send({ success: true, id: r.id, title: r.title, tags: r.tags, category: r.category || "", reason: r.reason || "",
       created_at: r.created_at, updated_at: r.updated_at, chars: r.chars, time: r.time });
   } catch (err) {
     console.error("[internal/paper] 留纸失败:", err);
@@ -6630,7 +6632,7 @@ app.get("/internal/paper/view", async (req, reply) => {
       // 1003-20：补创建时间（与列表同口径）
       const _tu = require("./time_utils");
       const _dp = _tu.getDatePartsInTimeZone(new Date(e.created_at), _tu.resolveTimeZone());
-      return reply.send({ id: e.id, title: e.title || "", category: e.category || "", tags: Array.isArray(e.tags) ? e.tags : [],
+      return reply.send({ id: e.id, title: e.title || "", category: e.category || "", reason: e.reason || "", tags: Array.isArray(e.tags) ? e.tags : [],
         created_at: e.created_at, updated_at: e.updated_at || e.created_at,
         time: _dp.year + "-" + _dp.month + "-" + _dp.day + " " + _dp.hour + ":" + _dp.minute,
         content: String(e.content || "").trim() });
@@ -6673,7 +6675,7 @@ app.post("/internal/paper/edit", async (req, reply) => {
   try {
     const b = req.body || {};
     const r = require("./papers").editPaper({
-      id: b.id, mode: b.mode, content: b.content, title: b.title, category: b.category, tags: b.tags,
+      id: b.id, mode: b.mode, content: b.content, title: b.title, category: b.category, tags: b.tags, reason: b.reason,
     });
     if (!r || !r.ok) return reply.code(400).send({ error: (r && r.error) || "编辑失败" });
     reply.send(Object.assign({ success: true }, r));

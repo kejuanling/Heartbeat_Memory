@@ -55,6 +55,7 @@ const BLOCK_DEFS = [
   { key: "long_term_understanding", title: "Long-term Understanding" },
   { key: "conversation_continuity", title: "Earlier Days" },
   { key: "starred_dialog", title: "Starred Dialog" },
+  { key: "notebook_index", title: "Notebook Index" },
   { key: "relevant_memories", title: "Possibly Relevant Memories" },
 ];
 
@@ -83,6 +84,7 @@ const HEADERS = {
   long_term_understanding: "## Long-term Understanding",
   conversation_continuity: "## Earlier Days",
   starred_dialog: "## Starred Dialog",
+  notebook_index: "## Notebook Index",
   relevant_memories: "## Possibly Relevant Memories",
 };
 
@@ -238,6 +240,14 @@ function buildStarredDialog(input, cfg) {
   return { lines: lines, fixedIds: [] };
 }
 
+// [5b] Notebook Index（2026-10-16）：AI 笔记本目录（分类篇数 + 最近 N 篇标题）。
+// 行由装配层（shadow.assembleInput → papers.indexLines）算好传入 input.notebookLines——builder 保持纯函数。
+// 随会话快照固化；本子为空则不注入。
+function buildNotebookIndex(input, cfg) {
+  const lines = (Array.isArray(input.notebookLines) ? input.notebookLines : []).map(strSafe).filter(Boolean);
+  return { lines: lines, fixedIds: [] };
+}
+
 // [6] Possibly Relevant Memories：V2 event 检索（1005-17 重写）。
 // 范围只留 event（"记住的一件事/做出来的东西"）——fact/rule 是"对人"的稳定信息，
 // 由 Core Identity / Long-term Understanding 常驻块覆盖；Relevant 是"对事"的浮动补充。
@@ -342,6 +352,7 @@ function buildContextBlocks(input, opts) {
   const fixedIdSet = new Set([].concat(sysIns.fixedIds, identity.fixedIds, understanding.fixedIds));
   const continuity = buildContinuity(input_, cfg);
   const starredDialog = buildStarredDialog(input_, cfg);
+  const notebookIndex = buildNotebookIndex(input_, cfg);
   const relevant = buildRelevant(input_, cfg, fixedIdSet);
   const relevantHits = relevant.hits || [];
 
@@ -352,6 +363,7 @@ function buildContextBlocks(input, opts) {
     long_term_understanding: understanding,
     conversation_continuity: continuity,
     starred_dialog: starredDialog,
+    notebook_index: notebookIndex,
     relevant_memories: relevant,
   };
 

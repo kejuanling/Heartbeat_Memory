@@ -221,15 +221,16 @@ def tool_notebook_add(args):
         return out
     tags = clean_meta_list(args.get("tags"))
     category = str(args.get("category") or "").strip()[:40]
+    reason = " ".join(str(args.get("reason") or "").split())[:200]
     session_id = str(args.get("session_id") or "").strip()
     data = api_post_key("%s:3000/internal/paper" % BASE_URL,
-                        {"content": content, "title": title, "tags": tags, "category": category, "session_id": session_id or None})
+                        {"content": content, "title": title, "tags": tags, "category": category, "reason": reason, "session_id": session_id or None})
     if "_error" in data:
         return {"error": "AI 的笔记本保存失败: %s" % data["_error"]}
     if not data.get("success"):
         return {"error": "AI 的笔记本保存失败: %s" % data}
     return {"success": True, "id": data.get("id"), "title": data.get("title"),
-            "category": data.get("category", category),
+            "category": data.get("category", category), "reason": data.get("reason", reason),
             "tags": data.get("tags", []), "created_at": data.get("created_at"),
             "updated_at": data.get("updated_at"),
             "message": ("已存入 AI 的笔记本：" + data.get("title", "")) if data.get("title") else "已存入 AI 的笔记本（只保存，不会进入对话上下文）"}
@@ -1374,7 +1375,7 @@ def tool_notebook_list_v2(args):
         if "_error" in full:
             return {"error": full["_error"]}
         return {"id": full.get("id"), "title": full.get("title") or "", "category": full.get("category") or "",
-                "tags": full.get("tags") or [],
+                "reason": full.get("reason") or "", "tags": full.get("tags") or [],
                 "created_at": full.get("created_at") or full.get("time"),
                 "updated_at": full.get("updated_at") or full.get("created_at") or full.get("time"),
                 "content": full.get("content")}
@@ -1410,19 +1411,19 @@ def tool_notebook_edit(args):
     if mode not in ("append", "replace"):
         return {"error": "mode 只能是 append 或 replace"}
     payload = {"id": pid, "mode": mode}
-    for k in ("content", "title", "category"):
+    for k in ("content", "title", "category", "reason"):
         if args.get(k) is not None:
             payload[k] = str(args.get(k))
     if args.get("tags") is not None:
         payload["tags"] = args.get("tags")
-    if not any(k in payload for k in ("content", "title", "category", "tags")):
-        return {"error": "没有要改的内容：content / title / category / tags 至少给一个"}
+    if not any(k in payload for k in ("content", "title", "category", "tags", "reason")):
+        return {"error": "没有要改的内容：content / title / category / tags / reason 至少给一个"}
     data = api_post_key("%s:3000/internal/paper/edit" % BASE_URL, payload)
     if "_error" in data:
         return {"error": "AI 的笔记本修改失败: %s" % data["_error"]}
     if not data.get("success"):
         return {"error": "AI 的笔记本修改失败: %s" % data}
-    return {"success": True, "id": data.get("id"), "title": data.get("title"), "category": data.get("category"),
+    return {"success": True, "id": data.get("id"), "title": data.get("title"), "category": data.get("category"), "reason": data.get("reason"),
             "tags": data.get("tags", []), "updated_at": data.get("updated_at"),
             "length": data.get("length"), "previous_length": data.get("previous_length"),
             "mode": data.get("mode"), "message": "已修改这一篇；修改前的版本已在后台留存"}
@@ -1440,7 +1441,7 @@ def tool_notebook(args):
 
 
 TOOLS["notebook"] = {
-    "description": "AI 的笔记本：收藏故事、梦、设定或其他想留存的内容，只保存，不注入对话上下文。也可以在回复末尾用 <paper/> 记号快速收藏整条回复（可选 <paper title=\"标题\"/>）。\naction=add：新增一篇；action=list：查看目录、按分类筛选或关键词搜索；action=edit：修改已有的一篇（追加内容、整篇覆盖，或只改标题/分类/标签）。\nlist 不带任何参数时，返回分类概览（每个分类有几篇）和最近 5 篇，先看概览再按分类深入；带 id 则返回那一篇的全文。\ncategory 是单值，用来归类（如 故事、梦、设定、随笔），尽量沿用概览里已有的分类，没有合适的再新建；tags 是多值，用来检索。",
+    "description": "AI 的笔记本，你随手记东西的地方：想留存但没那么重要的、零碎的、没整理过的都可以，创作、想法碎片、技术笔记、工作记录都行。上下文里若带有 Notebook Index 块，那就是目录快照；要读全文或找更早的，用 action=list。也可以在回复末尾用 <paper/> 记号快速收藏整条回复（可选 <paper title=\"标题\"/>）。\n要紧的、关于她和你们之间的事实与规则，用 memory，别记在这里。\naction=add：新增一篇；action=list：查看目录、按分类筛选或关键词搜索；action=edit：修改已有的一篇（追加内容、整篇覆盖，或只改标题/分类/标签/原因）。\nlist 不带任何参数时，返回分类概览（每个分类有几篇）和最近 5 篇；带 id 则返回那一篇的全文。\n标题就是标题，一眼能认出是哪篇，别写成摘要。reason 是可选的一句话，写为什么记这个，以后翻到时能想起来。category 是单值，用来归类，按内容起名、用你们自己的叫法（如 岛志、晨午报、技术笔记），尽量沿用概览里已有的分类，没有合适的再新建；tags 是多值，用来检索。",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -1449,6 +1450,7 @@ TOOLS["notebook"] = {
             "title": {"type": "string", "description": "add / edit：标题（可选）"},
             "category": {"type": "string", "description": "add / edit：分类；list：只列该分类"},
             "tags": {"type": "array", "items": {"type": "string"}, "description": "add / edit：标签与检索词"},
+            "reason": {"type": "string", "description": "add / edit：可选，一句话写为什么记这个"},
             "id": {"type": "integer", "description": "list：传入则返回该篇全文；edit：必填，要修改的那一篇（用列表里返回的 id）"},
             "q": {"type": "string", "description": "list：关键词搜索，匹配标题、分类、标签和正文，多个词用空格分隔（需同时命中），返回命中片段"},
             "limit": {"type": "integer", "description": "list：返回条数，默认 10，最多 50"},

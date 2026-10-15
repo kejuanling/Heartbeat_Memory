@@ -13,10 +13,10 @@ function ok(name, fn) {
 
 const EXPECTED_ORDER = [
   "context_assembly", "system_instructions", "core_identity", "long_term_understanding",
-  "conversation_continuity", "starred_dialog", "relevant_memories",
+  "conversation_continuity", "starred_dialog", "notebook_index", "relevant_memories",
 ];
 
-// 满配 fixture（七类块全非空；含外置引导与标星对话）
+// 满配 fixture（八类块全非空；含外置引导、标星对话与笔记本目录）
 function fullInput() {
   return {
     pinnedEntries: [
@@ -38,18 +38,19 @@ function fullInput() {
       { id: "mv2_e1", text: "她对薄荷过敏", kind: "event", status: "active", triggers: ["薄荷"], created_at: "2026-09-06T00:00:00+08:00" },
     ],
     starredLines: ["她标星保存的原话"],
+    notebookLines: ["这是你的笔记本目录，会话建立时的快照，之后新增的可能不在里面。", "分类：岛志 2 篇", "2｜岛志·第二页｜岛志｜2026-10-04"],
     query: "她对薄荷过敏吗",
   };
 }
 
-ok("块顺序 = 当前七类块的冻结顺序（含 starred_dialog）", () => {
+ok("块顺序 = 当前八类块的冻结顺序（含 starred_dialog、notebook_index）", () => {
   const res = buildContextBlocks(fullInput());
   const keys = res.blocks.map(b => b.key);
   assert.deepStrictEqual(keys, EXPECTED_ORDER, "实际输出顺序");
   assert.deepStrictEqual(BLOCK_DEFS.map(d => d.key), EXPECTED_ORDER, "定义表顺序");
 });
 
-ok("schema：七类块各五键，非空块 tokens>0；current_state/recent_experience 已不存在", () => {
+ok("schema：八类块各五键，非空块 tokens>0；current_state/recent_experience 已不存在", () => {
   const res = buildContextBlocks(fullInput(), { includeEmpty: true });
   const keys = res.blocks.map(b => b.key);
   assert.ok(!keys.includes("current_state"), "0918 砍除");
@@ -75,12 +76,12 @@ ok("V2 空仓降级：Understanding/Relevant 省略；System Instructions/Identi
   assert.ok(!keys.includes("meaningful_moments"), "1002-14：块已删除");
 });
 
-ok("空块省略（无外置引导时无块注入）+ includeEmpty=true 时七类块全在", () => {
+ok("空块省略（无外置引导时无块注入）+ includeEmpty=true 时八类块全在", () => {
   const empty = { pinnedEntries: [], diaryEntries: [], memoriesV2: [], starredLines: [], query: "" };
   const def = buildContextBlocks(empty).blocks;
   assert.strictEqual(def.length, 0, "没有 assembly pinned 文案时，空引导块也省略");
   const res = buildContextBlocks(empty, { includeEmpty: true });
-  assert.strictEqual(res.blocks.length, 7);
+  assert.strictEqual(res.blocks.length, 8);
   for (const b of res.blocks) {
     assert.strictEqual(b.empty, true, b.key + " 应为空");
     assert.strictEqual(b.content, "");

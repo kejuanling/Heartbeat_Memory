@@ -7978,7 +7978,7 @@ async function openSessionCrossInject(sid){
   // 8 键多选：锁死2 不可取消；curBlocks=null 时默认勾三项（与后端 DEFAULT 口径一致）
   const LOCKED=["system_instructions","state_machine"];
   const DEFAULTS=[["core_identity","Core Identity"],["long_term_understanding","Long-term Understanding"],["conversation_continuity","日记（Earlier Days）"]];
-  const OPTIONAL=[["starred_dialog","标星的对话"],["state_inherit","继承上个会话状态"],["recent_dialog","最近对话原文"]];
+  const OPTIONAL=[["starred_dialog","标星的对话"],["notebook_index","笔记本目录（最近10篇）"],["state_inherit","继承上个会话状态"],["recent_dialog","最近对话原文"]];
   const active=Array.isArray(curBlocks)?curBlocks:[];
   const blk=function(k,label,checked,locked){ return '<label class="np-blk"><input type="checkbox" value="'+k+'"'+(checked?" checked":"")+(locked?" disabled":"")+'> '+label+(locked?"（固定注入）":"")+'</label>'; };
   const blocksHtml='<div class="field" style="margin-top:12px"><label>注入内容（多选）</label><div class="np-blocks" id="xj-inject-blocks">'
@@ -8403,6 +8403,7 @@ async function newSession(){
       +'<label class="np-blk"><input type="checkbox" value="long_term_understanding" checked> Long-term Understanding</label>'
       +'<label class="np-blk"><input type="checkbox" value="conversation_continuity" checked> 日记（Earlier Days） <input type="number" id="np-diary-count" placeholder="跟随管理台" min="1" max="1000" style="width:82px;margin-left:6px" title="留空则跟随管理台全局篇数"> 篇</label>'
       +'<label class="np-blk"><input type="checkbox" value="starred_dialog"> 标星的对话 <input type="number" id="np-starred-limit" value="0" min="0" max="10000" style="width:64px;margin-left:6px" title="0 表示全量"> 条（0=全量）</label>'
+      +'<label class="np-blk"><input type="checkbox" value="notebook_index"> 笔记本目录（最近10篇）</label>'
       +'<label class="np-blk"><input type="checkbox" value="state_inherit"> 继承上个会话状态</label>'
       +'<label class="np-blk"><input type="checkbox" value="recent_dialog"> 最近对话原文<input type="number" id="np-recent-rounds" value="20" min="1" max="100" style="width:52px;margin-left:6px" title="继承轮数，1轮=2条"> 轮</label>'
       +'</div>'

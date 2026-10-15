@@ -274,7 +274,10 @@ function assembleInput(opts) {
   const diaryEntries = cutoffDate
     ? readDiaryEntriesForShadow(opts.baseDir).filter(e => e.date <= cutoffDate && !e.hidden && e.session !== selfSession)
     : [];
-  return { pinnedEntries, timeline, diaryEntries, memoriesV2, query, excludeIds, map: shadowMap, config: Object.assign({ diaryCount }, readRelevantCfg(dataDir)), summaryBlocks: readSummaryBlocks(dataDir), sessionId: opts.sessionId || null };
+  // 2026-10-16 Notebook Index：笔记本目录行（runtime 首次组装 / 红点比对 / 预览共用本函数，口径天然一致）
+  let notebookLines = [];
+  try { notebookLines = require('./papers').indexLines(10, opts.baseDir) || []; } catch (e) {}
+  return { pinnedEntries, timeline, diaryEntries, notebookLines, memoriesV2, query, excludeIds, map: shadowMap, config: Object.assign({ diaryCount }, readRelevantCfg(dataDir)), summaryBlocks: readSummaryBlocks(dataDir), sessionId: opts.sessionId || null };
 }
 
 module.exports = {
