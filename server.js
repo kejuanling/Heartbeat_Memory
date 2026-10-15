@@ -6608,10 +6608,10 @@ app.post("/internal/paper", async (req, reply) => {
   try {
     const body = req.body || {};
     const r = require("./papers").savePaper({
-      content: body.content, title: body.title, tags: body.tags, sessionId: body.session_id,
+      content: body.content, title: body.title, tags: body.tags, category: body.category, sessionId: body.session_id,
     });
     if (!r || !r.ok) return reply.code(400).send({ error: (r && r.error) || "留纸失败" });
-    reply.send({ success: true, id: r.id, title: r.title, tags: r.tags,
+    reply.send({ success: true, id: r.id, title: r.title, tags: r.tags, category: r.category || "",
       created_at: r.created_at, updated_at: r.updated_at, chars: r.chars, time: r.time });
   } catch (err) {
     console.error("[internal/paper] 留纸失败:", err);
@@ -6630,7 +6630,7 @@ app.get("/internal/paper/view", async (req, reply) => {
       // 1003-20：补创建时间（与列表同口径）
       const _tu = require("./time_utils");
       const _dp = _tu.getDatePartsInTimeZone(new Date(e.created_at), _tu.resolveTimeZone());
-      return reply.send({ id: e.id, title: e.title || "", tags: Array.isArray(e.tags) ? e.tags : [],
+      return reply.send({ id: e.id, title: e.title || "", category: e.category || "", tags: Array.isArray(e.tags) ? e.tags : [],
         created_at: e.created_at, updated_at: e.updated_at || e.created_at,
         time: _dp.year + "-" + _dp.month + "-" + _dp.day + " " + _dp.hour + ":" + _dp.minute,
         content: String(e.content || "").trim() });
@@ -6647,6 +6647,38 @@ app.get("/internal/paper/view", async (req, reply) => {
       message: "带 id=编号 可看对应那张全文；limit 控制列表张数（默认10，最多50）" });
   } catch (err) {
     console.error("[internal/paper/view] 读留纸失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
+
+// 2026-10-16 工具集 v2：notebook 工具的分类概览 / 查询搜索 / 编辑（鉴权同上，走全局 /internal 钩子）
+app.get("/internal/paper/overview", async (req, reply) => {
+  try {
+    reply.send(require("./papers").categoryOverview());
+  } catch (err) {
+    console.error("[internal/paper/overview] 失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
+app.get("/internal/paper/query", async (req, reply) => {
+  try {
+    const q = req.query || {};
+    reply.send(require("./papers").queryPapers({ q: q.q, category: q.category, limit: q.limit, offset: q.offset }));
+  } catch (err) {
+    console.error("[internal/paper/query] 失败:", err);
+    reply.code(500).send({ error: err.message });
+  }
+});
+app.post("/internal/paper/edit", async (req, reply) => {
+  try {
+    const b = req.body || {};
+    const r = require("./papers").editPaper({
+      id: b.id, mode: b.mode, content: b.content, title: b.title, category: b.category, tags: b.tags,
+    });
+    if (!r || !r.ok) return reply.code(400).send({ error: (r && r.error) || "编辑失败" });
+    reply.send(Object.assign({ success: true }, r));
+  } catch (err) {
+    console.error("[internal/paper/edit] 失败:", err);
     reply.code(500).send({ error: err.message });
   }
 });

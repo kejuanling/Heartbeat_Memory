@@ -110,17 +110,28 @@ def tool_lovediary_add(args):
     return {"success": True, "message": "已写入陪伴日记", "diary_id": data.get("id")}
 
 def tool_her_murmurs(args):
-    count = args.get("count", 5)
+    # 2026-10-16：默认只返回最近 1 条（原 5 条），可用 offset 翻页；接口返回本身就是从新到旧
+    try:
+        count = int(args.get("count", 1) or 1)
+    except (TypeError, ValueError):
+        count = 1
+    count = max(1, min(count, 50))
+    try:
+        offset = int(args.get("offset", 0) or 0)
+    except (TypeError, ValueError):
+        offset = 0
+    offset = max(0, offset)
     data = api_get(f"{BASE_URL}:8777/diary/api/entries")
     if "_error" in data:
         return {"error": data["_error"]}
-    return {"entries": data[:count]}
+    return {"entries": data[offset:offset + count]}
 TOOLS["her_murmurs"] = {
-    "description": "查看涵的日记列表（默认返回最近 5 条）",
+    "description": "查看她的碎碎念，从新到旧。默认返回最近 1 条，每条带 id，可用 count 调整条数、offset 翻页。想给某条留言时，把它的 id 传给 reply_to_her。",
     "inputSchema": {
         "type": "object",
         "properties": {
-            "count": {"type": "integer", "description": "获取条数，默认5"}
+            "count": {"type": "integer", "description": "获取条数，默认 1"},
+            "offset": {"type": "integer", "description": "跳过前面多少条，默认 0"}
         }
     },
     "handler": tool_her_murmurs
@@ -134,12 +145,12 @@ def tool_reply_to_her(args):
     result = api_post(f"{BASE_URL}:8777/diary/api/entries/comment", {"id": eid, "text": text})
     return result
 TOOLS["reply_to_her"] = {
-    "description": "给涵的某条日记写评论，评论会通过 Bark 推送到她手机",
+    "description": "给她的某条碎碎念留言，留言会通过 Bark 推送到她手机。id 来自 her_murmurs 返回的 id。",
     "inputSchema": {
         "type": "object",
         "properties": {
-            "id": {"type": "integer", "description": "日记ID"},
-            "text": {"type": "string", "description": "评论内容"}
+            "id": {"type": "integer", "description": "碎碎念 id（来自 her_murmurs）"},
+            "text": {"type": "string", "description": "留言内容"}
         },
         "required": ["id", "text"]
     },
@@ -209,14 +220,16 @@ def tool_notebook_add(args):
                 break
         return out
     tags = clean_meta_list(args.get("tags"))
+    category = str(args.get("category") or "").strip()[:40]
     session_id = str(args.get("session_id") or "").strip()
     data = api_post_key("%s:3000/internal/paper" % BASE_URL,
-                        {"content": content, "title": title, "tags": tags, "session_id": session_id or None})
+                        {"content": content, "title": title, "tags": tags, "category": category, "session_id": session_id or None})
     if "_error" in data:
         return {"error": "AI 的笔记本保存失败: %s" % data["_error"]}
     if not data.get("success"):
         return {"error": "AI 的笔记本保存失败: %s" % data}
     return {"success": True, "id": data.get("id"), "title": data.get("title"),
+            "category": data.get("category", category),
             "tags": data.get("tags", []), "created_at": data.get("created_at"),
             "updated_at": data.get("updated_at"),
             "message": ("已存入 AI 的笔记本：" + data.get("title", "")) if data.get("title") else "已存入 AI 的笔记本（只保存，不会进入对话上下文）"}
@@ -533,22 +546,31 @@ TOOLS["period_get"] = {
 }
 
 def tool_period_set(args):
-    on = args.get("on", True)
+    # 2026-10-16：on / date 必须明确给出（原先缺省=今天+开始，误调一下就写进月历）；返回里带修改前的状态
+    if args.get("on") is None or not str(args.get("date") or "").strip():
+        return {"error": "date 和 on 都必须明确给出：date=YYYY-MM-DD，on=true 表示开始 / false 表示结束"}
+    on = args.get("on")
     if isinstance(on, str):
-        on = on.lower() in ("true", "1", "yes", "开始", "on", "是")
-    date = str(args.get("date", "") or "").strip() or datetime.date.today().isoformat()
+        on = on.strip().lower() in ("true", "1", "yes", "开始", "on", "是")
+    date = str(args.get("date")).strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+        return {"error": "date 格式应为 YYYY-MM-DD，如 2026-10-16"}
+    before = api_get(f"{BASE_URL}:8777/monthly/api/records/{date}")
+    previous = before.get("period") if isinstance(before, dict) and "_error" not in before else None
     data = api_post(f"{BASE_URL}:8777/monthly/api/period/toggle", {"on": on, "date": date})
     if "_error" in data and "period" not in data:
         return {"error": data.get("_error", "未知错误"), "date": date, "on": on}
-    return {"ok": True, "date": date, "on": on, "message": "经期已" + ("开始" if on else "结束") + "记录"}
+    return {"ok": True, "date": date, "on": on, "previous": previous,
+            "message": "经期已" + ("开始" if on else "结束") + "记录"}
 TOOLS["period_set"] = {
-    "description": "设置经期状态：把某天标记为经期开始或结束（写入月历经期记录，前端月历会同步显示）。",
+    "description": "设置经期状态：把某天标记为经期开始或结束（写入月历经期记录，前端月历会同步显示）。仅在她明确告知经期开始或结束时使用，date 和 on 都必须明确给出；返回里带修改前的状态。",
     "inputSchema": {
         "type": "object",
         "properties": {
-            "on": {"type": "boolean", "description": "true=标记经期开始；false=标记经期结束。默认 true"},
-            "date": {"type": "string", "description": "日期 YYYY-MM-DD，默认今天"}
-        }
+            "on": {"type": "boolean", "description": "true=标记经期开始；false=标记经期结束"},
+            "date": {"type": "string", "description": "日期 YYYY-MM-DD"}
+        },
+        "required": ["on", "date"]
     },
     "handler": tool_period_set
 }
@@ -572,14 +594,14 @@ def _read_phone_state():
 
 
 def tool_phone_state(args):
-    def _flag(name):
-        v = args.get(name, True)
+    def _flag(name, default=True):
+        v = args.get(name, default)
         if isinstance(v, str):
             v = v.strip().lower() not in ("false", "0", "no", "off")
         return bool(v)
 
     weather = _flag("weather")
-    location = _flag("location")
+    location = _flag("location", False)  # 2026-10-16：位置默认不返回，需要时显式传 true
     try:
         n_app = int(args.get("app_records", 5))
     except (TypeError, ValueError):
@@ -619,12 +641,12 @@ def tool_phone_state(args):
     return result
 
 TOOLS["phone_state"] = {
-    "description": "看她现在的状态：电量、天气、位置、最近App记录。调用后会发「查岗」邮件触发手机立即上报，稍等几秒返回最新快照。",
+    "description": "查看她手机最近一次上报的状态：电量、天气、位置、最近 App 记录，并带上报时间（created_at，可据此判断数据新旧）。只在聊天确实需要（关心她的状态、判断她是否方便）时调用，不要每轮都查；位置默认不返回，需要时传 location=true。",
     "inputSchema": {
         "type": "object",
         "properties": {
             "weather": {"type": "boolean", "description": "是否要天气，默认 true"},
-            "location": {"type": "boolean", "description": "是否要位置，默认 true"},
+            "location": {"type": "boolean", "description": "是否要位置，默认 false，需要时传 true"},
             "app_records": {"type": "integer", "description": "附带最近App记录条数，默认 5，0=不带"}
         }
     },
@@ -1257,9 +1279,237 @@ TOOLS["memory_update"] = {
 }
 
 
+# ===== 工具集 v2 合并工具（2026-10-16）=====
+# memory / notebook / todo 各合成一个带 action 的工具，内部复用上面的原 handler。
+# 旧工具名（memory_add 等）在 tools_config.json 的 disabled 里停用；想回滚，把它们从 disabled 里删掉即可。
+# 合并前的旧工具名：不列出，但保持可调用（见 tools/call 分发处）
+LEGACY_TOOL_NAMES = frozenset({"memory_add", "memory_search", "memory_update", "notebook_add", "notebook_list", "todo_add", "todo_list"})
+
+
+def _pick_action(args, allowed):
+    action = str(args.get("action") or "").strip().lower()
+    if action not in allowed:
+        return None, {"error": "action 只能是 " + " / ".join(allowed)}
+    return action, None
+
+
+def tool_memory_sink(args):
+    mid = str(args.get("id") or "").strip()
+    if not mid:
+        return {"error": "id 必填：记忆 id（action=search 返回的 id 字段）"}
+    sunk = args.get("sunk")
+    if sunk is None:
+        sunk = True
+    elif isinstance(sunk, str):
+        sunk = sunk.strip().lower() not in ("false", "0", "no", "off")
+    # 只传 sunk、不传 pinned：网关据此只改沉底状态，不动置顶（置顶工具 memory_pin 保持停用）
+    data = {"id": mid, "sunk": bool(sunk)}
+    url = f"{BASE_URL}:3000/internal/memory-pool/pin"
+    req = urllib.request.Request(url,
+        data=json.dumps(data).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-internal-key": INTERNAL_KEY},
+        method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            out = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            out = json.loads(e.read().decode("utf-8"))
+        except Exception:
+            out = {"error": f"HTTP {e.code}"}
+    except Exception as e:
+        return {"error": str(e)}
+    if out.get("success"):
+        entry = out.get("entry") or {}
+        is_sunk = bool(entry.get("sunk"))
+        return {"success": True, "id": entry.get("id"), "sunk": is_sunk,
+                "content": (entry.get("content") or "")[:80],
+                "message": "已沉底：不再参与检索与浮现" if is_sunk else "已恢复：重新参与检索与浮现"}
+    return {"error": out.get("error", "操作失败")}
+
+
+def tool_memory(args):
+    action, err = _pick_action(args, ("add", "search", "update", "sink"))
+    if err:
+        return err
+    if action == "add":
+        return tool_memory_add(args)
+    if action == "search":
+        a = dict(args)
+        if a.get("kind") and not a.get("category"):
+            a["category"] = a["kind"]
+        return tool_memory_search(a)
+    if action == "update":
+        return tool_memory_update(args)
+    return tool_memory_sink(args)
+
+
+TOOLS["memory"] = {
+    "description": "长期记忆池。action=add：提交一条新记忆（提交后立即受理，门卫后台评分，进入人工待审队列，批准后才写入正式记忆池）；action=search：按关键词检索，返回匹配记忆及 id；action=update：用 id 整条覆盖某条记忆的正文（旧正文被整体替换，非追加）；action=sink：把某条记忆沉底，不再参与检索与浮现（sunk=false 可恢复）。\n使用规则：只记基于真实对话、以后仍然有用的内容，不编造。add 之前先 search 一次，已有相近记忆就用 update 修正，不要重复提交。某条记忆已经过时失效时用 sink，不要用 update 改成空话。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["add", "search", "update", "sink"], "description": "要执行的操作：add / search / update / sink"},
+            "content": {"type": "string", "description": "add：记忆正文（基于真实对话，不编造）；update：覆盖后的完整正文"},
+            "kind": {"type": "string", "enum": ["fact", "rule", "event"], "description": "分类：fact=稳定事实（进 Long-term Understanding 总结素材）、rule=规则/边界/承诺（进 Core Identity 总结素材）、event=具体发生的事（关键词命中时注入）。add 时可省略，门卫会补充分类建议；search 时作为分类筛选"},
+            "q": {"type": "string", "description": "search 必填：检索关键词、问题或描述"},
+            "limit": {"type": "integer", "description": "search 返回条数，默认 5"},
+            "id": {"type": "string", "description": "update / sink 必填：记忆 id（search 返回的 id 字段）"},
+            "sunk": {"type": "boolean", "description": "sink 时可选：true=沉底（默认），false=从沉底恢复"}
+        },
+        "required": ["action"]
+    },
+    "handler": tool_memory
+}
+
+
+def tool_notebook_list_v2(args):
+    pid = args.get("id")
+    if pid not in (None, ""):
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
+            return {"error": "id 需为列表返回的编号数字"}
+        full = api_get_key("%s:3000/internal/paper/view?id=%d" % (BASE_URL, pid))
+        if "_error" in full:
+            return {"error": full["_error"]}
+        return {"id": full.get("id"), "title": full.get("title") or "", "category": full.get("category") or "",
+                "tags": full.get("tags") or [],
+                "created_at": full.get("created_at") or full.get("time"),
+                "updated_at": full.get("updated_at") or full.get("created_at") or full.get("time"),
+                "content": full.get("content")}
+    q = str(args.get("q") or "").strip()
+    category = str(args.get("category") or "").strip()
+    has_paging = args.get("limit") not in (None, "") or args.get("offset") not in (None, "")
+    if not q and not category and not has_paging:
+        data = api_get_key("%s:3000/internal/paper/overview" % BASE_URL)
+        if "_error" in data:
+            return {"error": data["_error"]}
+        data["message"] = "先看分类概览；按 category 筛选、用 q 搜索，或传 id 看某一篇全文"
+        return data
+    params = {}
+    if q:
+        params["q"] = q
+    if category:
+        params["category"] = category
+    for k in ("limit", "offset"):
+        if args.get(k) not in (None, ""):
+            params[k] = args.get(k)
+    data = api_get_key("%s:3000/internal/paper/query?%s" % (BASE_URL, urllib.parse.urlencode(params)))
+    if "_error" in data:
+        return {"error": data["_error"]}
+    return data
+
+
+def tool_notebook_edit(args):
+    try:
+        pid = int(args.get("id"))
+    except (TypeError, ValueError):
+        return {"error": "id 必填：要修改的那一篇的编号（action=list 返回的 id）"}
+    mode = str(args.get("mode") or "append").strip().lower()
+    if mode not in ("append", "replace"):
+        return {"error": "mode 只能是 append 或 replace"}
+    payload = {"id": pid, "mode": mode}
+    for k in ("content", "title", "category"):
+        if args.get(k) is not None:
+            payload[k] = str(args.get(k))
+    if args.get("tags") is not None:
+        payload["tags"] = args.get("tags")
+    if not any(k in payload for k in ("content", "title", "category", "tags")):
+        return {"error": "没有要改的内容：content / title / category / tags 至少给一个"}
+    data = api_post_key("%s:3000/internal/paper/edit" % BASE_URL, payload)
+    if "_error" in data:
+        return {"error": "AI 的笔记本修改失败: %s" % data["_error"]}
+    if not data.get("success"):
+        return {"error": "AI 的笔记本修改失败: %s" % data}
+    return {"success": True, "id": data.get("id"), "title": data.get("title"), "category": data.get("category"),
+            "tags": data.get("tags", []), "updated_at": data.get("updated_at"),
+            "length": data.get("length"), "previous_length": data.get("previous_length"),
+            "mode": data.get("mode"), "message": "已修改这一篇；修改前的版本已在后台留存"}
+
+
+def tool_notebook(args):
+    action, err = _pick_action(args, ("add", "list", "edit"))
+    if err:
+        return err
+    if action == "add":
+        return tool_notebook_add(args)
+    if action == "list":
+        return tool_notebook_list_v2(args)
+    return tool_notebook_edit(args)
+
+
+TOOLS["notebook"] = {
+    "description": "AI 的笔记本：收藏故事、梦、设定或其他想留存的内容，只保存，不注入对话上下文。也可以在回复末尾用 <paper/> 记号快速收藏整条回复（可选 <paper title=\"标题\"/>）。\naction=add：新增一篇；action=list：查看目录、按分类筛选或关键词搜索；action=edit：修改已有的一篇（追加内容、整篇覆盖，或只改标题/分类/标签）。\nlist 不带任何参数时，返回分类概览（每个分类有几篇）和最近 5 篇，先看概览再按分类深入；带 id 则返回那一篇的全文。\ncategory 是单值，用来归类（如 故事、梦、设定、随笔），尽量沿用概览里已有的分类，没有合适的再新建；tags 是多值，用来检索。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["add", "list", "edit"], "description": "要执行的操作：add / list / edit"},
+            "content": {"type": "string", "description": "add：正文（建议单篇一两千字以内）；edit：要追加或覆盖的内容"},
+            "title": {"type": "string", "description": "add / edit：标题（可选）"},
+            "category": {"type": "string", "description": "add / edit：分类；list：只列该分类"},
+            "tags": {"type": "array", "items": {"type": "string"}, "description": "add / edit：标签与检索词"},
+            "id": {"type": "integer", "description": "list：传入则返回该篇全文；edit：必填，要修改的那一篇（用列表里返回的 id）"},
+            "q": {"type": "string", "description": "list：关键词搜索，匹配标题、分类、标签和正文，多个词用空格分隔（需同时命中），返回命中片段"},
+            "limit": {"type": "integer", "description": "list：返回条数，默认 10，最多 50"},
+            "offset": {"type": "integer", "description": "list：翻页偏移，默认 0"},
+            "mode": {"type": "string", "enum": ["append", "replace"], "description": "edit：append=追加到末尾（默认）；replace=整篇覆盖（覆盖前后台自动留存上一版）。只改标题/分类/标签时不用传 content"}
+        },
+        "required": ["action"]
+    },
+    "handler": tool_notebook
+}
+
+
+def tool_todo_delete(args):
+    try:
+        tid = int(args.get("id"))
+    except (TypeError, ValueError):
+        return {"error": "id 必填：待办 id（action=list 返回的 id）"}
+    data = api_get(f"{BASE_URL}:8777/todo/api/todos")
+    if isinstance(data, dict) and "_error" in data:
+        return {"error": data["_error"]}
+    items = data if isinstance(data, list) else []
+    target = next((t for t in items if t.get("id") == tid), None)
+    if target is None:
+        return {"error": "找不到未完成的待办：id=%d（先 action=list 看最新清单）" % tid}
+    res = api_post(f"{BASE_URL}:8777/todo/api/todos/delete", {"id": tid})
+    if "_error" in res:
+        return {"error": "删除失败: %s" % res["_error"]}
+    return {"ok": True, "id": tid, "text": str(target.get("text") or "")[:60], "message": "已删除待办"}
+
+
+def tool_todo(args):
+    action, err = _pick_action(args, ("add", "list", "delete"))
+    if err:
+        return err
+    if action == "add":
+        return tool_todo_add(args)
+    if action == "list":
+        return tool_todo_list(args)
+    return tool_todo_delete(args)
+
+
+TOOLS["todo"] = {
+    "description": "她的待办清单。action=add：新增一条（可选 remind_at 设提醒，到点向她手机推送）；action=list：查看未完成的待办，每条带 id；action=delete：按 id 删除一条。delete 只在她要求，或这件事已经办完、取消时使用。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["add", "list", "delete"], "description": "要执行的操作：add / list / delete"},
+            "text": {"type": "string", "description": "add 必填：待办内容"},
+            "remind_at": {"type": "string", "description": "add 可选：提醒时间，格式 YYYY-MM-DD HH:mm，按项目 TIME_ZONE 时区；必须是未来时间"},
+            "id": {"type": "integer", "description": "delete 必填：待办 id（action=list 返回）"}
+        },
+        "required": ["action"]
+    },
+    "handler": tool_todo
+}
+
+
 # ===== 统一工具集：把搜索、云服务器、网易云工具代理到本 MCP 入口 =====
 MCP_SERVERS_CONFIG_FILE = "/opt/dylan-heartbeat/mcp-servers.json"
 PROXY_TOOLS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "proxy_tools.json")
+NETEASE_XIE_PLAYLIST_ID = "18221908011"  # 「谢」歌单（上游 netease_playlist_add_songs 的固定目标歌单；模型不再传 playlistId）
 
 def _read_proxy_server_configs():
     try:
@@ -1347,6 +1597,10 @@ def register_proxy_tools():
             if name in TOOLS:
                 raise RuntimeError("代理工具名称冲突，拒绝覆盖本地工具: " + name)
             def handler(args, _server=server_name, _name=name):
+                # 2026-10-16：「谢」歌单固定，playlistId 由代理层统一补上（对外 schema 里已去掉该参数，传了也以此为准）
+                if _name == "netease_playlist_add_songs":
+                    args = dict(args or {})
+                    args["playlistId"] = NETEASE_XIE_PLAYLIST_ID
                 return _proxy_mcp_tool(_server, _name, args)
             TOOLS[name] = {
                 "description": item.get("description") or ("代理调用 " + server_name + " 的 " + name),
@@ -1443,13 +1697,18 @@ class MCPHandler(BaseHTTPRequestHandler):
         if method == "tools/call":
             tool_name = params.get("name")
             args = params.get("arguments", {})
-            if tool_name not in TOOLS:
+            # 2026-10-16：已有会话的快照里冻着旧工具名（memory_add 等，快照"冻死"不随工具集变）。
+            # 合并后旧名不再出现在 tools/list，但仍可调用，直接走原 handler——旧会话照常工作，缓存不用重建。
+            call_tool = TOOLS.get(tool_name)
+            if call_tool is None and tool_name in LEGACY_TOOL_NAMES:
+                call_tool = _TOOL_REGISTRY_SNAPSHOT.get(tool_name)
+            if call_tool is None or not call_tool.get("handler"):
                 return {
                     "jsonrpc": "2.0", "id": req_id,
                     "error": {"code": -32601, "message": f"未知工具: {tool_name}"}
                 }
             try:
-                result = TOOLS[tool_name]["handler"](args)
+                result = call_tool["handler"](args)
                 # 代理工具直接透传上游 MCP 的 result，避免把原始 content 再套一层 JSON 文本。
                 if isinstance(result, dict) and "__mcp_raw_result__" in result:
                     return {"jsonrpc": "2.0", "id": req_id, "result": result["__mcp_raw_result__"]}
