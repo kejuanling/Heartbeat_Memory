@@ -561,12 +561,12 @@ document.addEventListener('submit',function(e){e.preventDefault();},true);
  });
 
 
-function toast(msg){
-   const el=document.getElementById('toast');
-   if(!el) return;
-   el.textContent=msg;el.classList.add('show');
-   setTimeout(()=>el.classList.remove('show'),2200);
- }
+ function toast(msg){
+    const el=document.getElementById("toast");
+    if(!el) return;
+    el.textContent=String(msg==null?"":msg);el.classList.add("show");
+    clearTimeout(toast._timer);toast._timer=setTimeout(()=>el.classList.remove("show"),3200);
+  }
  
  function openModal(id){
    const el=document.getElementById(id);
@@ -962,11 +962,11 @@ function escapeHtml(s){
     method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({msg_id:msgId, key:key, marked:next})
   }).then(function(r){return r.json()}).then(function(d){
-     if(d && d.error){ alert('标记失败: '+d.error); return; }
+     if(d && d.error){ toast('标记失败: '+d.error); return; }
      btn.classList.toggle('on', next);
      btn.textContent = next ? '★' : '☆';
      btn.setAttribute('aria-pressed', next ? 'true' : 'false');
-   }).catch(function(e){ alert('标记失败: '+e.message); });
+   }).catch(function(e){ toast('标记失败: '+e.message); });
  }
 
  // 已标星消息卡片：加载列表
@@ -2006,11 +2006,11 @@ function ccArmAllGapAutoLoad(){
     method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({msg_id:(m.id||''), key:m.key, marked:next})
   }).then(function(r){return r.json()}).then(function(d){
-     if(d && d.error){ alert('标记失败: '+d.error); return; }
+     if(d && d.error){ toast('标记失败: '+d.error); return; }
      m.marked=next;
      if(AppState.ccMsgsHtmlCache[c.signature]) delete AppState.ccMsgsHtmlCache[c.signature];
      renderCompaction();
-   }).catch(function(e){ alert('标记失败: '+e.message); });
+   }).catch(function(e){ toast('标记失败: '+e.message); });
  }
  
  // 压缩块左滑显示「移除」
@@ -2332,6 +2332,7 @@ function ccArmAllGapAutoLoad(){
    if(header && header.setAttribute) header.setAttribute('aria-expanded', nowCollapsed ? 'true' : 'false');
    // 展开时拉取最新（折叠→展开瞬间 nowCollapsed=true）
    if(id==='summary-history' && nowCollapsed){ try{ loadSummaryHistory(); }catch(_){} }
+    if(id==='relevant-preview' && nowCollapsed){ try{ loadRelevantPreview(); }catch(_){} }
  }
  // 全局H2：问号图标说明弹窗（收集卡片内 .hint-body）
  function showHintCard(el){
@@ -2680,14 +2681,15 @@ function ccArmAllGapAutoLoad(){
         arr.slice().reverse().forEach(function(v){
           const t=String(v.text||'');
           const edited=v.edited_at?(' · <span style="color:var(--accent)">已编辑 '+escapeHtml(String(v.edited_at).slice(0,16).replace('T',' '))+'</span>'):'';
-          h+='<div class="sh-block"><div class="sh-head"><span>v'+v.version+'</span>'+
-            '<span class="sh-meta">'+escapeHtml(String(v.updated_at||'').slice(0,16).replace('T',' '))+' · '+(v.mode==='incremental'?'增量':'全量')+'</span>'+
-            '<span class="sh-sp"></span>'+
-            '<button class="sh-act" data-shact="edit" data-block="'+key+'" data-ver="'+v.version+'">编辑</button>'+
-            '<button class="sh-act" data-shact="del" data-block="'+key+'" data-ver="'+v.version+'">删除</button></div>'+
-            '<div class="sh-body"><div class="sh-fade">'+escapeHtml(t.slice(0,220))+'</div>'+
-            '<div class="sh-full" style="display:none">'+escapeHtml(t)+'</div>'+
-            '<div class="sh-toggle">展开全文 ▾</div></div></div>'+edited;
+          h+='<div class="sh-block"><div class="sh-head"><span class="sh-ver">v'+v.version+'</span>'+
+            '<span class="sh-meta">'+escapeHtml(String(v.updated_at||'').slice(0,16).replace('T',' '))+' · '+(v.mode==='incremental'?'增量':'全量')+edited+'</span></div>'+
+            '<div class="sh-actions">'+
+            '<button type="button" class="sh-act" data-shact="use" data-block="'+key+'" data-ver="'+v.version+'">使用此版本</button>'+
+            '<button type="button" class="sh-act" data-shact="edit" data-block="'+key+'" data-ver="'+v.version+'">编辑</button>'+
+            '<button type="button" class="sh-act" data-shact="del" data-block="'+key+'" data-ver="'+v.version+'">删除</button></div>'+
+            '<div class="sh-body"><div class="sh-fade">'+escapeHtml(t)+'</div>'+
+            '<div class="sh-full">'+escapeHtml(t)+'</div>'+
+            '<button type="button" class="sh-toggle" aria-expanded="false">展开全文 ↓</button></div></div>';
         });
       });
       box.innerHTML=h;
@@ -2697,12 +2699,30 @@ function ccArmAllGapAutoLoad(){
           const full=b?b.querySelector('.sh-full'):null;
           const fade=b?b.querySelector('.sh-fade'):null;
           if(!full) return;
-          const vis=full.style.display!=='none';
-          full.style.display=vis?'none':'block';
-          if(fade) fade.style.display=vis?'block':'none';
-          t.textContent=vis?'展开全文 ▾':'收起全文 ▴';
+          const vis=full.classList.contains('sh-open');
+          full.classList.toggle('sh-open',!vis);
+          if(fade) fade.style.display=vis?'-webkit-box':'none';
+          t.textContent=vis?'展开全文 ↓':'收起全文 ↑';
+          t.setAttribute('aria-expanded',String(!vis));
         });
       });
+      box.querySelectorAll('.sh-block').forEach(function(card){ card.dataset.search=(card.textContent+' '+card.querySelector('.sh-full').textContent).toLocaleLowerCase(); });
+      const search=document.getElementById('summary-history-search');
+      if(search && !search.dataset.bound){
+        search.dataset.bound='1';
+        search.addEventListener('input',function(){
+          const q=search.value.trim().toLocaleLowerCase();
+          box.querySelectorAll('.sh-sec').forEach(function(head){
+            let node=head.nextElementSibling, visible=0;
+            while(node && !node.classList.contains('sh-sec')){
+              if(node.classList.contains('sh-block')){ const show=!q || (node.dataset.search||'').includes(q); node.hidden=!show; if(show) visible++; }
+              node=node.nextElementSibling;
+            }
+            head.hidden=!!q && visible===0;
+          });
+        });
+      }
+      if(search) search.dispatchEvent(new Event('input'));
       box.querySelectorAll('[data-shact]').forEach(function(b){
         b.addEventListener('click', function(){ summaryHistoryAct(b); });
       });
@@ -2712,6 +2732,16 @@ function ccArmAllGapAutoLoad(){
   }
   async function summaryHistoryAct(btn){
     const act=btn.dataset.shact, block=btn.dataset.block, ver=btn.dataset.ver;
+    if(act==='use'){
+      if(!confirm('将 v'+ver+'（'+escapeHtml(SUMMARY_BLOCK_LABEL[block]||block)+'）设为当前总结缓存？已有会话快照不会改变；新建会话会使用此版本。')) return;
+      try{
+        const r=await apiRequest('POST', ADMIN_API+'/memory-summary/use-version', {block:block,version:Number(ver)}, { busy: btn });
+        if(!r.ok){ if(r.error) toast('使用失败:'+r.error); return; }
+        toast('已将 v'+ver+' 设为当前缓存；已有快照保持不变');
+        loadSummaryHistory(); loadSummaryConfig();
+      }catch(e){ toast('使用失败:'+e.message); }
+      return;
+    }
     if(act==='del'){
       if(!confirm('删除存档 v'+ver+'（'+escapeHtml(SUMMARY_BLOCK_LABEL[block]||block)+'）？只删存档，不影响当前缓存与注入。')) return;
       try{
