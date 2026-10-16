@@ -88,3 +88,6 @@ workspace/memories/
 workspace/monthly/
 workspace/system/
 workspace/decision-trail/
+
+# 2026-10-16：工作记录仅留本地，不入库、不推 GitHub
+agent每日工作记录/
