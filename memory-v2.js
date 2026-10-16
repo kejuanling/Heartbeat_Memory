@@ -23,7 +23,7 @@ const { nowIso } = require("./time_utils");
 const READONLY = process.env.MEMORY_V2_READONLY === "1";
 
 // ---- Schema v2.0 常量（冻结：改动任何枚举/语义必须升 schema_ver 并走迁移说明） ----
-// 1005-17：kind 扩展 event（向后兼容枚举扩展，fact/rule 语义不变；可选字段 triggers/vibe/source_session
+// 1005-17：kind 扩展 event（向后兼容枚举扩展，fact/rule 语义不变；triggers/vibe 仅 event 写入，source_session 可选
 // 同 1005-16 worth/volatility 先例按可选字段模式加，不升版本、不动存量数据）。
 const SCHEMA_VER = 2;
 const KINDS = ["fact", "rule", "event"];
@@ -209,7 +209,7 @@ function _buildEntry(input, cfg) {
   const sensitive = !!input.sensitive;
 
   let triggers = [];
-  if (input.triggers != null) {
+  if (kind === "event" && input.triggers != null) {
     if (!Array.isArray(input.triggers)) throw new Error("triggers 必须是字符串数组");
     const arr = input.triggers.map((t) => strOrNull(t)).filter(Boolean);
     for (const t of arr) if (t.length > TRIGGER_MAX) throw new Error(`triggers 项超长（>${TRIGGER_MAX}）`);
@@ -241,7 +241,7 @@ function _buildEntry(input, cfg) {
   }
   // 1005-17：vibe（可选，蒸馏产出，LLM 感受到的氛围质感）/ source_session（来源会话，蒸馏落库时反查）
   let vibe = null;
-  if (input.vibe != null) {
+  if (kind === "event" && input.vibe != null) {
     vibe = strOrNull(input.vibe);
     if (vibe && vibe.length > VIBE_MAX) throw new Error(`vibe 超长（>${VIBE_MAX}）`);
   }
@@ -268,8 +268,7 @@ function _buildEntry(input, cfg) {
     superseded_at: null,
     note,
     sensitive,
-    triggers,
-    vibe,
+    ...(kind === "event" ? { triggers, vibe } : {}),
     source_session,
     worth,
     worth_reason,
@@ -488,6 +487,8 @@ function createStore(opts = {}) {
         if (!KINDS.includes(v)) return fail("kind 非法: " + v);
         // 1002-14：quote/milestone 分类已删，kind 仅 fact/rule（speaker 字段 1005-16 已删）
         e.kind = v;
+        if (v !== "event") { e.triggers = []; e.vibe = null; }
+        else { if (!Array.isArray(e.triggers)) e.triggers = []; if (e.vibe === undefined) e.vibe = null; }
       } else if (k === "direction") {
         if (e.kind !== "rule") return fail("direction 仅 rule 可用");
         if (v != null && !DIRECTIONS.includes(v)) return fail("direction 非法: " + v);
@@ -536,6 +537,7 @@ function createStore(opts = {}) {
         e.volatility_reason = vr;
       }
     }
+    if (e.kind !== "event") { e.triggers = undefined; e.vibe = undefined; }
     flush();
     if (textChanged) scheduleVector(id); // 2026-09-28：正文变化即重算向量（异步）
     return { ok: true, entry: e };

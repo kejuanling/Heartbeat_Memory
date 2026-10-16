@@ -80,7 +80,7 @@ module.exports = function registerMemoryV2Admin(app, deps) {
   });
 
   // 相似分组（0919 第六个统计按钮）：活跃条目按语义向量聚类成组，供人工沉底重复条目。
-  // 阈值 ?th= 可调（0.5-0.99，默认 0.85）；embed-server 不可用时 503，前端显示提示。
+  // 阈值 ?th= 可调（0.5-0.99，默认 0.85）；向量服务不可用时返回 503。
   app.get("/admin/memory-v2/similar-groups", { preHandler: basicAuth }, async (req, reply) => {
     try {
       let th = Number(req.query.th);
@@ -90,7 +90,7 @@ module.exports = function registerMemoryV2Admin(app, deps) {
       const rows = s.list({ status: "active" });
       if (!rows.length) return reply.send({ success: true, threshold: th, group_count: 0, groups: [] });
       const ready = await v2vectors.ensureVectors(rows);
-      if (!ready) return reply.code(503).send({ error: "向量服务不可用（embed-server 熔断中），稍后再试" });
+      if (!ready) return reply.code(503).send({ error: "向量服务暂不可用，请稍后重试" });
       v2vectors.pruneVectors(rows); // 全量行清理已消失 id（检索等子集调用不做清理，防误删）
       const byId = new Map(rows.map((r) => [r.id, r]));
       const groups = v2vectors.similarGroups(rows, th).map((g) => ({

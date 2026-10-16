@@ -1,32 +1,34 @@
 "use strict";
 
 // ========================
-// Memory V2 向量旁路（0919 管理台「相似」分组用）
-// 职责单一：给 V2 活跃条目补算语义向量（embed-server bge-small-zh）+ 旁路缓存 + 相似分组聚类。
+// Memory V2 向量旁路：SiliconFlow BAAI/bge-m3 + 旁路缓存 + 相似分组聚类。
+// memory_search 只走关键词；向量仅用于 event 相关注入与管理台相似分组。
 // 铁律对齐 memory-v2.js：
 //   1. 只读集合本体——本模块绝不写 memory_v2.json / memory_review_queue.json；
-//   2. 唯一落盘是旁路缓存 data/memory_v2_vectors.json（形状同旧池 {id:{h指纹,v向量}}）；
-//   3. 嵌入文本 = kind + "：" + text（对齐旧池 category+"："+content 口径）。
-// embed-server 熔断/失败：ensureVectors 返回 false，路由向前端报「向量服务不可用」；
+//   2. 唯一落盘是旁路缓存 data/memory_v2_vectors.json（形状 {id:{h指纹,model:模型名,v向量}}）；
+//   3. 嵌入文本 = kind + "：" + text；只有 event 额外带 vibe。
+// SiliconFlow Embeddings API 失败：ensureVectors 返回 false，相关注入回落到词面路径；
 // 已完成批次已落盘，下次点击从断点续算。
 // ========================
 
 const fs = require("fs-extra");
 const path = require("path");
 const crypto = require("crypto");
-const embedClient = require("./utils/embed-client");
+const embedClient = require("./utils/memory-embed-client");
 
 const VECTOR_FILE = path.join(__dirname, "data", "memory_v2_vectors.json");
-const EMBED_BATCH_SIZE = 16; // 单次 embed 请求条数上限（50 条全量 4 批内完成）
+const VIBE_VECTOR_FILE = path.join(__dirname, "data", "memory_v2_vibe_vectors.json");
+const EMBED_BATCH_SIZE = 16; // 小批量请求，降低单次超时和速率限制风险
 const EMBED_TIMEOUT_MS = 12000;
 
 let vectorCache = null;
+let vibeVectorCache = null;
 
-// 1005-17：embed 文本拼 vibe（kind：text，情景：vibe）——语义向量带上氛围质感；
-// 注意：存量向量未含 vibe，重跑补标签后需重算向量才生效（改法：memory_v2_vectors.json 删除后自动补算）。
+// event 的 vibe 是注入链语义补充；fact/rule 不依赖 triggers/vibe。
 function embedText(r) {
-  const vibe = r && typeof r.vibe === "string" && r.vibe.trim() ? r.vibe.trim() : null;
-  return r.kind + "：" + r.text + (vibe ? "，情景：" + vibe : "");
+  const base = String(r && r.kind || "") + "：" + String(r && r.text || "");
+  const vibe = r && r.kind === "event" && typeof r.vibe === "string" && r.vibe.trim() ? r.vibe.trim() : null;
+  return base + (vibe ? "，情景：" + vibe : "");
 }
 
 function vecMap() {
@@ -43,16 +45,57 @@ function saveVecMap() {
   fs.renameSync(tmp, VECTOR_FILE);
 }
 
-// 内容指纹：kind/text 任一变化即视为失效（同旧池 entryHash 思路）
+// Separate cache for vibe-only relevance vectors; keep body vectors intact for admin similarity groups.
+function vibeVecMap() {
+  if (!vibeVectorCache) {
+    try { vibeVectorCache = fs.readJsonSync(VIBE_VECTOR_FILE); } catch (_) { vibeVectorCache = {}; }
+    if (!vibeVectorCache || typeof vibeVectorCache !== "object" || Array.isArray(vibeVectorCache)) vibeVectorCache = {};
+  }
+  return vibeVectorCache;
+}
+
+function saveVibeVecMap() {
+  const tmp = VIBE_VECTOR_FILE + ".tmp";
+  fs.writeJsonSync(tmp, vibeVectorCache);
+  fs.renameSync(tmp, VIBE_VECTOR_FILE);
+}
+
+function vibeText(r) { return String(r && r.vibe || "").trim(); }
+function vibeHash(r) {
+  return crypto.createHash("sha1").update(String(embedClient.EMBED_MODEL || "unknown") + "\u0000vibe\u0000" + vibeText(r)).digest("hex").slice(0, 16);
+}
+
+async function ensureVibeVectors(rows) {
+  const cache = vibeVecMap();
+  const eligible = (Array.isArray(rows) ? rows : []).filter(r => r && r.kind === "event" && vibeText(r));
+  const missing = eligible.filter(r => {
+    const c = cache[r.id];
+    return !c || c.model !== embedClient.EMBED_MODEL || c.h !== vibeHash(r) || !Array.isArray(c.v) || !c.v.length;
+  });
+  if (!missing.length) return true;
+  if (embedClient.fused()) return false;
+  for (let i = 0; i < missing.length; i += EMBED_BATCH_SIZE) {
+    const batch = missing.slice(i, i + EMBED_BATCH_SIZE);
+    const vecs = await embedClient.embedBatch(batch.map(vibeText), false, EMBED_TIMEOUT_MS);
+    if (!vecs || vecs.length !== batch.length) return false;
+    for (let j = 0; j < batch.length; j++) {
+      if (vecs[j] && vecs[j].length) cache[batch[j].id] = { h: vibeHash(batch[j]), model: embedClient.EMBED_MODEL, v: vecs[j] };
+    }
+    saveVibeVecMap();
+  }
+  return true;
+}
+
+// 指纹包含模型版本与实际嵌入文本；切模型/改正文/改 event vibe 都会自动失效。
 function entryHash(e) {
-  return crypto.createHash("sha1").update(String(e.kind || "") + "\u0000" + String(e.text || "")).digest("hex").slice(0, 12);
+  return crypto.createHash("sha1").update(String(embedClient.EMBED_MODEL || "unknown") + "\u0000" + embedText(e)).digest("hex").slice(0, 16);
 }
 
 function missingVectors(rows) {
   const m = vecMap();
   return rows.filter(function (r) {
     const c = m[r.id];
-    return !c || c.h !== entryHash(r) || !Array.isArray(c.v) || c.v.length === 0;
+    return !c || c.model !== embedClient.EMBED_MODEL || c.h !== entryHash(r) || !Array.isArray(c.v) || c.v.length === 0;
   });
 }
 
@@ -69,7 +112,7 @@ async function ensureVectors(rows) {
     if (!vecs || vecs.length !== batch.length) return false;
     const m = vecMap();
     batch.forEach(function (r, j) {
-      if (vecs[j] && vecs[j].length) m[r.id] = { h: entryHash(r), v: vecs[j] };
+      if (vecs[j] && vecs[j].length) m[r.id] = { h: entryHash(r), model: embedClient.EMBED_MODEL, v: vecs[j] };
     });
     saveVecMap();
   }
@@ -98,7 +141,7 @@ async function warmVectors() {
       if (!vecs || vecs.length !== batch.length) return completed > 0;
       const m = vecMap();
       batch.forEach(function (r, i) {
-        if (vecs[i] && vecs[i].length) m[r.id] = { h: entryHash(r), v: vecs[i] };
+        if (vecs[i] && vecs[i].length) m[r.id] = { h: entryHash(r), model: embedClient.EMBED_MODEL, v: vecs[i] };
       });
       saveVecMap();
       completed += batch.length;
@@ -141,7 +184,7 @@ function pairKey(a, b) { return a < b ? a + "|" + b : b + "|" + a; }
 function similarGroups(rows, threshold) {
   const m = vecMap();
   const items = rows
-    .map(function (r) { return { id: r.id, vec: (m[r.id] || {}).v }; })
+    .map(function (r) { const c = m[r.id] || {}; return { id: r.id, vec: c.model === embedClient.EMBED_MODEL ? c.v : null }; })
     .filter(function (x) { return Array.isArray(x.vec) && x.vec.length; });
   const parent = new Map(items.map(function (x) { return [x.id, x.id]; }));
   function find(x) {
@@ -180,13 +223,11 @@ function similarGroups(rows, threshold) {
   return groups;
 }
 
-// ---------------- 检索（0919 memory_search 数据源切 V2；0920 删重要级/时间衰减，用户拍板） ----------------
-// 权重：0.55 语义余弦(bge) + 0.20 字面；embed 不可用回落纯字面。字面分词用 V2 自有 adapter
-// （铁律：V2 不 require 旧池模块，故不直接复用旧池 contentSimilarity）。恒只读集合：不计数、不自动置顶。
+// ---------------- memory_search：纯关键词检索 ----------------
+// 不调用向量模型，也不读取 triggers/vibe；默认跨 fact/rule/event 全分类检索。
+// 使用关键词覆盖率 + 词频逆权重，降低常见中文双字词带来的误命中；完整短语命中优先。
+const { tokenize } = require("./context-v2-adapter");
 
-const { tokenize, similarity } = require("./context-v2-adapter");
-
-// 输出形状对齐旧池接口（memory_search 工具契约：id/content/category/pinned；importance 已删）
 function toItem(r) {
   return {
     id: r.id,
@@ -198,68 +239,46 @@ function toItem(r) {
   };
 }
 
-// 1003-08 用户拍板：memory_search 完全按关键词命中（去语义余弦）：
-// q 分词后逐条统计命中词元数（hits），0 命中不返回；排序 = 命中数降序，同级按最新在前。
-// 返回只保留 {id, content}（id 供 memory_pin/update；其余字段工具不再透传）。
-// 1005-19：检索工具独立配置（memory_search 段，默认词面0.5/语义0.3/无门槛/最多5条）
-function readMemorySearchCfg() {
-  try {
-    const c = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "memory_v2_config.json"), "utf-8"));
-    return (c && c.memory_search && typeof c.memory_search === "object") ? c.memory_search : {};
-  } catch (e) { return {}; }
-}
-
 async function retrieveHybrid(rows, query, opts = {}) {
   const q = String(query || "").trim();
   if (!q) return [];
-  // 1005-19 检索工具混合分升级（memory_search 主路径）：原实现是纯字面词元命中计数，名不副实。
-  // 现与相关注入同款混合分：词面分 = max(triggers 命中分, 全文双字词元交叠比例)（无标签存量记忆也能搜到），
-  // 语义分 = bge 余弦（复用 relevantScores，embed 不可用则纯词面），混合 = wordWeight×词面 + semWeight×语义。
-  const cfg = readMemorySearchCfg();
-  const wl = (cfg.wordWeight >= 0) ? cfg.wordWeight : 0.5;
-  const ws = (cfg.semWeight >= 0) ? cfg.semWeight : 0.3;
-  const gate = (cfg.minScore >= 0) ? cfg.minScore : 0;
-  const topK = Math.max(1, Number(opts.topK) || 5); // 返回条数由调用方指定，不设固定上限
-  const pool = rows.filter(r => (!opts.pinnedOnly || r.anchor === true) && (!opts.kind || r.kind === opts.kind));
+  const qset = new Set([...tokenize(q)].filter(x => x.length >= 2));
+  if (!qset.size) return [];
+  const topK = Math.max(1, Number(opts.topK) || 5);
+  const pool = (Array.isArray(rows) ? rows : []).filter(r =>
+    r && (!opts.pinnedOnly || r.anchor === true) && (!opts.kind || r.kind === opts.kind)
+  );
   if (!pool.length) return [];
-  let semScores = null;
-  try {
-    const sr = await relevantScores(pool, q);
-    if (sr && sr.ok) semScores = sr.scores;
-  } catch (e) { semScores = null; }
-  const qset = new Set([...tokenize(q)].filter(function (x) { return x.length >= 2; }));
+
+  const tokenSets = new Map();
+  const documentFrequency = new Map();
+  for (const r of pool) {
+    const words = new Set([...tokenize(r.text || "")].filter(x => x.length >= 2));
+    tokenSets.set(r.id, words);
+    for (const token of words) documentFrequency.set(token, (documentFrequency.get(token) || 0) + 1);
+  }
+  const weight = token => Math.log(1 + pool.length / ((documentFrequency.get(token) || 0) + 1));
+  let totalWeight = 0;
+  for (const token of qset) totalWeight += weight(token);
+  if (!totalWeight) return [];
+
   const scored = [];
   for (const r of pool) {
-    let lit = 0;
-    const tr = Array.isArray(r.triggers) ? r.triggers : [];
-    if (tr.length) {
-      for (const t of tr) {
-        const s = String(t || "").trim();
-        if (!s) continue;
-        if (q.indexOf(s) >= 0) { lit = 1; break; }
-        const tt = [...tokenize(s)].filter(function (x) { return x.length >= 2; });
-        if (tt.length && qset.size) {
-          let h = 0;
-          for (const x of tt) if (qset.has(x)) h++;
-          if (h > 0) lit = Math.max(lit, h / tt.length);
-        }
-      }
+    const text = String(r.text || "");
+    const phraseHit = text.toLowerCase().includes(q.toLowerCase());
+    const words = tokenSets.get(r.id) || new Set();
+    let hits = 0, matchedWeight = 0;
+    for (const token of qset) {
+      if (words.has(token)) { hits++; matchedWeight += weight(token); }
     }
-    if (!(lit > 0) && qset.size) {
-      const tw = new Set([...tokenize(r.text)].filter(function (x) { return x.length >= 2; }));
-      if (tw.size) {
-        let h = 0;
-        for (const x of qset) if (tw.has(x)) h++;
-        lit = Math.max(lit, h / qset.size);
-      }
-    }
-    if (!(lit > 0) && !semScores) continue; // 词面语义都拿不到分的不返回
-    const sem = semScores ? (semScores[r.id] != null ? semScores[r.id] : 0) : 0;
-    const score = Math.round((wl * lit + ws * sem) * 1000) / 1000;
-    if (score < gate) continue;
-    scored.push({ r, score });
+    const coverage = matchedWeight / totalWeight;
+    // 对非短语匹配要求至少命中两个词元（单词元查询除外），且覆盖至少一半查询权重；
+    // 避免“服务器重启”仅命中“服务器”就误召回学校服务器相关记忆。
+    if (!phraseHit && (hits < Math.min(2, qset.size) || coverage < 0.5)) continue;
+    scored.push({ r, score: phraseHit ? 1 + coverage : coverage, hits });
   }
-  scored.sort(function (a, b) { return b.score - a.score; });
+  scored.sort((a, b) => b.score - a.score || b.hits - a.hits ||
+    String(b.r.content_updated_at || b.r.created_at || "").localeCompare(String(a.r.content_updated_at || a.r.created_at || "")));
   return scored.slice(0, topK).map(s => ({ id: s.r.id, content: s.r.text }));
 }
 
@@ -295,16 +314,37 @@ async function relevantScores(rows, query) {
   if (!q) return { ok: false, scores: null };
   const ready = await ensureVectors(rows);
   if (!ready) return { ok: false, scores: null };
-  const qv = await embedClient.embedBatch([q], true, 8000); // 查询侧按 BGE 约定加指令前缀
+  const qv = await embedClient.embedBatch([q], true, EMBED_TIMEOUT_MS);
   if (!qv || !qv[0] || !qv[0].length) return { ok: false, scores: null };
   const m = vecMap();
   const scores = {};
   for (const r of rows) {
-    const v = (m[r.id] || {}).v;
-    if (!Array.isArray(v) || !v.length) continue; // 无向量条目不参与语义注入（宁缺毋滥）
+    const c = m[r.id] || {};
+    const v = c.model === embedClient.EMBED_MODEL ? c.v : null;
+    if (!Array.isArray(v) || !v.length) continue;
     scores[r.id] = Math.round(Math.max(0, cosine(qv[0], v)) * 1000) / 1000;
   }
   return { ok: true, scores };
 }
 
-module.exports = { ensureVectors, warmVectors, startWarmup, pruneVectors, similarGroups, retrieveHybrid, recent, breath, relevantScores };
+async function relevantVibeScores(rows, query) {
+  const q = String(query || "").trim();
+  if (!q) return { ok: false, scores: null };
+  const eligible = (Array.isArray(rows) ? rows : []).filter(r => r && r.kind === "event" && vibeText(r));
+  if (!eligible.length) return { ok: true, scores: {} };
+  const ready = await ensureVibeVectors(eligible);
+  if (!ready) return { ok: false, scores: null };
+  const qv = await embedClient.embedBatch([q], true, EMBED_TIMEOUT_MS);
+  if (!qv || !qv[0] || !qv[0].length) return { ok: false, scores: null };
+  const cache = vibeVecMap();
+  const scores = {};
+  for (const r of eligible) {
+    const c = cache[r.id] || {};
+    const v = c.model === embedClient.EMBED_MODEL && c.h === vibeHash(r) ? c.v : null;
+    if (!Array.isArray(v) || !v.length) continue;
+    scores[r.id] = Math.round(Math.max(0, cosine(qv[0], v)) * 1000) / 1000;
+  }
+  return { ok: true, scores };
+}
+
+module.exports = { ensureVectors, ensureVibeVectors, warmVectors, startWarmup, pruneVectors, similarGroups, retrieveHybrid, recent, breath, relevantScores, relevantVibeScores };

@@ -177,6 +177,21 @@ ok("relevant: excludeIds 剥除（本会话已浮现时间线的记忆不再注�
   assert.ok(b.content.includes("轻度过敏史"), "其他条目正常");
 });
 
+ok("relevant: vibe 语义只轻微调整排序，不突破词面门槛", () => {
+  const mems = [
+    { id: "a", text: "她喜欢喝咖啡", kind: "event", status: "active", triggers: ["喜欢喝"] },
+    { id: "b", text: "她喜欢喝可乐", kind: "event", status: "active", triggers: ["喜欢喝"] },
+    { id: "c", text: "服务器需要重启", kind: "event", status: "active", triggers: ["服务器"] },
+  ];
+  const opts = { memoriesV2: mems, query: "她喜欢喝", config: { relevantSemWeight: 0.05, relevantMinHybridScore: 0.30, relevantHybridTopK: 2, budgets: { relevant_memories: 400 } } };
+  const baseline = buildContextBlocks(opts).relevantHits;
+  const reranked = buildContextBlocks({ ...opts, vecScores: { a: 0.1, b: 0.9, c: 1 } }).relevantHits;
+  assert.deepStrictEqual(baseline.map(x => x.id), ["a", "b"], "无 vibe 时按稳定 id 顺序，不允许无关键词事件入围");
+  assert.deepStrictEqual(reranked.map(x => x.id), ["b", "a"], "vibe 可重排词面同分候选");
+  assert.ok(reranked.every(x => x.id !== "c"), "即使 vibe 得分最高也不得越过关键词硬门槛");
+  assert.ok(reranked[0].vibeScore <= 1 && reranked[0].wordScore === 0.5, "回传词面/语义分供预览诊断");
+});
+
 ok("relevant: 同分按 id 升序，默认每轮最多注入一条", () => {
   const mems = [
     { id: "lo", text: "她喜欢喝咖啡", kind: "event", status: "active", triggers: ["喜欢喝"], created_at: "2026-09-01T00:00:00+08:00" },

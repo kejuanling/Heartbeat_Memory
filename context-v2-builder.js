@@ -36,15 +36,12 @@ const DEFAULT_CONFIG = {
   diaryCount: 3,                   // Earlier Days 篇数（生产接线时同源管理台 cross_inject_diary_count）
   relevantTopK: 5,
   relevantMinScore: 0.30,          // 0918 用户拍板调高：命中即写入时间线永久在场，高门槛防膨胀
-  // 0920 混合模式（用户拍板「词面为主」）：input.vecScores（bge 余弦，调用方算好）在场时，
-  // Relevant 改混合打分——词面当门槛（无关闲聊的语义地板再高也进不来），混合分排序：
-  // 0.55 语义 + 0.25 词面（语义为主，0920 二次拍板；重要级×衰减项已删），≥0.28 入选，最多 3 条。
-  // 校准实测（旧公式口径）：相关命中 0.475-0.594、带门槛闲聊 ≤0.299；删项后相关命中约 ×0.8。vecScores 缺场回落字面（上行）。
-  relevantLitGate: 0.25,   // 2026-10-02 用户拍板 0.20→0.25：0.20 太频繁（换说法类全进来）；0.15(0920)→0.30(0921)→0.20(1001-10)→0.25(今)。第二道门混合分 ≥0.28 仍兜底
-  relevantMinHybridScore: 0.30,   // 1005-17 用户拍板 0.3（先试）；triggers 命中即 0.5 起，此门槛为保险丝
-  relevantHybridTopK: 1,          // 1005-17 用户拍板：每轮最多 1 条（有就递一条分高的，没有就不递）
-  relevantWordWeight: 0.5,        // 1005-17：混合分 = 词面×权重 + 语义×权重（管理台可调）
-  relevantSemWeight: 0.15,
+  // 相关记忆：triggers 词面硬门槛 + 词面主排序；vibe 向量只负责轻量重排。
+  relevantLitGate: 0.25,
+  relevantMinHybridScore: 0.30,
+  relevantHybridTopK: 1,
+  relevantWordWeight: 0.5,
+  relevantSemWeight: 0.05,
 };
 
 // ---- 块定义（顺序=组装顺序冻结；context_assembly 为顶层引导，恒注入）----
@@ -251,9 +248,8 @@ function buildNotebookIndex(input, cfg) {
 // [6] Possibly Relevant Memories：V2 event 检索（1005-17 重写）。
 // 范围只留 event（"记住的一件事/做出来的东西"）——fact/rule 是"对人"的稳定信息，
 // 由 Core Identity / Long-term Understanding 常驻块覆盖；Relevant 是"对事"的浮动补充。
-// 命中机制（用户拍板）：triggers 关键词命中为主——query 含 trigger 子串或双字词元交叠即入围；
-// 无 triggers 命中不入围（宁缺毋滥）。混合分 = 词面权重×词面分 + 语义权重×语义分（0.5/0.15 起步，
-// 管理台可调）；语义 = query 向量 vs 记忆向量（含 vibe）余弦——语义分低自然排不上去（vibe 拦截语境不搭的注入）。
+// 关键词是硬门槛、词面分主导排序；只有 event.vibe 向量可提供轻量重排，正文向量不参与。
+// vibe 缺失或向量服务失败时，完全按词面得分；语义最多贡献 0.05，不能抬高词面门槛。
 // 双重去重：fixedIdSet/excludeIds（已注入/浮现）+ source_session===当前会话（本会话发生的不重复注入）。
 // 每轮最多 1 条（topK 可调）；预算 relevant_memories 兜底。
 function buildRelevant(input, cfg, fixedIdSet) {
@@ -271,7 +267,9 @@ function buildRelevant(input, cfg, fixedIdSet) {
   if (!pool.length) return { lines: [], fixedIds: [] };
 
   const wLit = Number(cfg.relevantWordWeight); const wl = (wLit >= 0) ? wLit : 0.5;
-  const wSem = Number(cfg.relevantSemWeight); const ws = (wSem >= 0) ? wSem : 0.15;
+  // vibe 仅轻微调整排序（上限 0.05）；不参与是否通过关键词门槛的判断。
+  const wSem = Number(cfg.relevantSemWeight);
+  const ws = Math.min(0.05, Math.max(0, Number.isFinite(wSem) ? wSem : 0.05));
   const minScore = Number(cfg.relevantMinHybridScore); const gate = (minScore >= 0) ? minScore : 0.30;
   const maxK = Math.max(1, Math.floor(Number(cfg.relevantHybridTopK) || 1));
   const vecScores = (input.vecScores && typeof input.vecScores === "object") ? input.vecScores : null;
@@ -297,10 +295,12 @@ function buildRelevant(input, cfg, fixedIdSet) {
       }
     }
     if (!(lit > 0)) continue; // 无 triggers 命中不入围（存量未重跑完时注入自然为空，符合"重跑完才开注入"）
-    const sem = vecScores ? (vecScores[String(m.id)] != null ? vecScores[String(m.id)] : 0) : 0;
-    const score = Math.round((wl * lit + ws * sem) * 1000) / 1000;
-    if (score < gate) continue;
-    scored.push({ m, score });
+    // 词面分单独决定准入；语义仅用于同类候选间轻量重排。
+    const sem = vecScores && vecScores[String(m.id)] != null ? Math.max(0, Math.min(1, Number(vecScores[String(m.id)]) || 0)) : 0;
+    const baseScore = Math.round(wl * lit * 1000) / 1000;
+    if (baseScore < gate) continue;
+    const score = Math.round((baseScore + ws * sem) * 1000) / 1000;
+    scored.push({ m, score, baseScore, sem });
   }
   scored.sort((a, b) => b.score - a.score
     || String(a.m.id).localeCompare(String(b.m.id)));
@@ -315,7 +315,7 @@ function buildRelevant(input, cfg, fixedIdSet) {
     const cost = estimateTokens(line);
     if (used + cost > budget) break;
     lines.push(line);
-    hits.push({ id: String(s.m.id), text: s.m.text, kind: s.m.kind, established_at: s.m.established_at || null, created_at: s.m.created_at || null, score: s.score });
+    hits.push({ id: String(s.m.id), text: s.m.text, kind: s.m.kind, established_at: s.m.established_at || null, created_at: s.m.created_at || null, score: s.score, wordScore: s.baseScore, vibeScore: s.sem });
     used += cost;
   }
   // 1005-17 预览模式（previewOnly）：照常算 hits（观察"本应注入哪条"），但 lines 置空 = 不注入

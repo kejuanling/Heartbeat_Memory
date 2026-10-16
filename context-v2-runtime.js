@@ -3,7 +3,7 @@
 // 聊天与唤醒共用的 Context V2 运行时（0920 完全统一）：
 // 聊天（routes/chat.js）与唤醒（routes/wake-chat.js）调模型用的上下文组装，
 // 全部走本模块 assembleAndApply 同一入口——输入组装（shadow.assembleInput）→
-// bge 语义算分（vecScores，失败回落字面）→ buildContextBlocks → apply。
+// SiliconFlow BAAI/bge-m3 语义算分（仅 event，失败回落字面）→ buildContextBlocks → apply。
 // 同一时刻同一会话，两侧产出逐字一致（上游前缀缓存共享）。
 //
 // apply 的块插入（0919 修正版，0920 起聊天唤醒共用这一份）：
@@ -51,9 +51,9 @@ function appendPreview(baseDir, sessionId, query, hits) {
     arr.unshift({
       time: new Date().toISOString(),
       session: String(sessionId || '').slice(0, 40),
-      query: String(query || '').slice(0, 60),
+      query: String(query || '').slice(0, 500),
       hits: (hits || []).map(function (h) {
-        return { id: h && h.id, kind: h && h.kind, score: h && h.score, text: (h && h.text || '').slice(0, 80) };
+        return { id: h && h.id, kind: h && h.kind, score: h && h.score, wordScore: h && h.wordScore, vibeScore: h && h.vibeScore, text: (h && h.text || '').slice(0, 160) };
       }),
     });
     arr = arr.slice(0, 20);
@@ -179,14 +179,14 @@ function minimalAssembleInput(opts) {
   // 1002 §8 第 6 项：快照模式也要能重建两块总结（不能被快照冻住），故 pinned 与总结缓存都要读。
   // pinned 进 Core Identity 块（手工固定的人设常驻内容保留），总结替代条目原文直注。
   const pinnedData = shadow.readPinnedEntries(dataDir);
-  return { pinnedEntries: pinnedData.pinnedEntries, timeline: [], diaryEntries: [], memoriesV2: memoriesV2, query: query, excludeIds: excludeIds, config: Object.assign({ diaryCount: 0 }, readRelevantCfg(dataDir)), map: null, summaryBlocks: shadow.readSummaryBlocks(dataDir), sessionId: opts.sessionId || null };
+  return { pinnedEntries: pinnedData.pinnedEntries, timeline: [], diaryEntries: [], memoriesV2: memoriesV2, query: query, excludeIds: excludeIds, config: Object.assign({ diaryCount: 0 }, readRelevantCfg(opts.baseDir)), map: null, summaryBlocks: shadow.readSummaryBlocks(dataDir), sessionId: opts.sessionId || null };
 }
 
-// 语义算分（0919 注入语义升级：Relevant 打分用 bge 余弦；失败回落字面，注入不致全灭）
+// 语义算分（Relevant 仅对有 vibe 的 event 计算 vibe 向量；失败回落纯词面）
 async function attachVecScores(input) {
   try {
-    const activeRows = require('./memory-v2').createStore({ config: {} }).list({ status: 'active' });
-    const rs = await require('./memory-v2-vectors').relevantScores(activeRows, input.query);
+    const activeRows = require('./memory-v2').createStore({ config: {} }).list({ status: 'active' }).filter(r => r.kind === 'event' && typeof r.vibe === 'string' && r.vibe.trim());
+    const rs = await require('./memory-v2-vectors').relevantVibeScores(activeRows, input.query);
     if (rs && rs.ok) input.vecScores = rs.scores;
   } catch (e) {
     if (!_vecScoreWarned) {
@@ -236,8 +236,9 @@ async function assembleAndApply(opts) {
     const rel = built.blocks.find(function (b) { return b.key === 'relevant_memories' && !b.empty; });
     if (rel) blocks.push(rel);
     relevantHits = built.relevantHits || [];
-    // 1005-17 预览：记录本应注入条目后清空（不浮现、不打点）；真注入时此段不触发
-    if (relPreview && relevantHits.length) {
+    // 1005-17 预览：每轮都记录（即使命中为空），否则开关已开启但无命中时看起来像预览没运行。
+    // 只观察、不进 prompt、不浮现、不打点；真注入时此段不触发。
+    if (relPreview) {
       try { appendPreview(opts.baseDir, opts.sessionId, input.query, relevantHits); } catch (_) {}
       relevantHits = [];
     }
@@ -312,8 +313,9 @@ async function assembleAndApply(opts) {
         console.log('[ctx-v2] 状态机继承注入: session=' + opts.sessionId + ' <- ' + inh.session + '（' + String(inh.text).length + ' 字，一次性不固化）');
       }
     } catch (e) { console.warn('[ctx-v2] 状态机继承注入失败（跳过）:', e && e.message); }
-    // 1005-17 预览：记录本应注入条目后清空（不浮现、不打点）；真注入时此段不触发
-    if (relPreview && relevantHits.length) {
+    // 1005-17 预览：每轮都记录（即使命中为空），否则开关已开启但无命中时看起来像预览没运行。
+    // 只观察、不进 prompt、不浮现、不打点；真注入时此段不触发。
+    if (relPreview) {
       try { appendPreview(opts.baseDir, opts.sessionId, input.query, relevantHits); } catch (_) {}
       relevantHits = [];
     }

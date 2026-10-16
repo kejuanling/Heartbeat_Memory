@@ -2943,6 +2943,9 @@ function listMarked() {
       content: entry.content,
       key: key,
       markedAt: t || "",
+      // 1016-03：来源（chat / heart-moment）+ 心动标题，供标星管理分类显示
+      source: entry.source || "chat",
+      title: entry.momentTitle || "",
       // 无对应块信息，标记为"已存原文"
       chunk: null
     });
