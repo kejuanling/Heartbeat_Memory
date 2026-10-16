@@ -110,25 +110,9 @@ async function runWakeCompletion(deps, opts) {
       let blockContent = wakeBlock;
       if (persistWakeBlock) {
         try {
-          // 2026-09-28 防堆积：developer [唤醒] 块每次落盘前，先删掉时间线里旧的唤醒块
-          // （内容含「系统唤醒」特征），只保留最新一条。旧唤醒块是含当时时间戳的过期指令，
-          // 模型只需看到最新一条；否则每唤醒周期追加一条、且 developer 不在压缩范围
-          // （isCompressible 只认 user/assistant）永不压缩 → 无限堆积。
-          // 一次 load + filter + save（不逐条 deleteMessage，避免大量重复读写）；
-          // 静默保存不触发 sseNotify，新块由下方 appendMessages 统一通知。
-          try {
-            const tl = deps.loadTimeline(sessionId);
-            const kept = tl.filter(function (m) {
-              return !(m && m.role === "developer" && typeof m.content === "string" &&
-                m.content.indexOf("系统唤醒") >= 0);
-            });
-            if (kept.length !== tl.length) {
-              deps.saveTimeline(kept, sessionId);
-              console.log(`[wake-chat] 已清理旧 [唤醒] 块 ${tl.length - kept.length} 条（session ${sessionId}）`);
-            }
-          } catch (e) {
-            wakeLogWarn("清理旧 [唤醒] 块失败（跳过清理，仅追加新块）: " + e.message);
-          }
+          // 唤醒块是时间线中的普通历史指令：每轮只追加，不删除旧块。
+          // 旧块可由 context-replacements 在其进入被替换区间后随历史一起压缩。
+          // 不在 buildConversation 之后删时间线消息，避免快照 content/snap_point 与时间线错位。
           const created = deps.appendMessages(sessionId, [{ role: "developer", content: blockContent }]);
           wakeBlockId = (created && created[0] && created[0].id) || null;
           console.log(`[wake-chat] developer [唤醒] 块已落盘（session ${sessionId}，${blockContent.length} 字）`);

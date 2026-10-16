@@ -708,10 +708,10 @@ def todo_add_todo_han():
 
 @todo_bp.route('/todo/api/todos/xie', methods=['POST'])
 def todo_xie_todo():
-    body = request.json
-    text = body.get("text", "").strip()
-    text_han = body.get("text_han", "").strip()
-    text_xie = body.get("text_xie", "").strip()
+    body = request.get_json(silent=True) or {}
+    text = str(body.get("text") or "").strip()
+    text_han = str(body.get("text_han") or "").strip()
+    text_xie = str(body.get("text_xie") or "").strip()
     if not text and (text_han or text_xie):
         parts = []
         if text_han: parts.append("涵：" + text_han)
@@ -1149,6 +1149,31 @@ def _content_key(role, content):
     raw = (role or '') + '\x00' + text
     return hashlib.sha256(raw.encode('utf-8')).hexdigest()[:32]
 
+_MOMENT_TIME_RE = re.compile(r'(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})')
+
+def _moment_time_iso(moment):
+    """1016-03：心动的「原始时间」→ UTC ISO（与聊天标星的 time 同口径，便于统一排序）。
+    优先取正文里写着的对话时间（北京时间，如 2026-08-08 23:08），否则用心动的录入时间 ts（服务器本地 CST）。"""
+    cand = None
+    for k in ('text', 'text_xie', 'text_han'):
+        mm = _MOMENT_TIME_RE.search(str(moment.get(k) or ''))
+        if mm:
+            cand = mm.group(1) + 'T' + mm.group(2) + ':' + mm.group(3) + ':00'
+            break
+    if not cand:
+        cand = str(moment.get('ts') or '').strip()
+    if not cand:
+        return ''
+    try:
+        dt = datetime.datetime.fromisoformat(cand[:19])
+        dt = dt.replace(tzinfo=datetime.timezone(datetime.timedelta(hours=8)))
+        return dt.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+    except Exception:
+        return ''
+
+def _utc_now_iso():
+    return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+
 @todo_bp.route('/todo/api/moments/mark', methods=['POST'])
 def todo_mark_moment():
     data = request.get_json(silent=True) or {}
@@ -1169,7 +1194,7 @@ def todo_mark_moment():
     parts = []
     title = moment.get('title', '')
     if title:
-        parts.append('【心动时刻】' + title)
+        parts.append(title)
     text = moment.get('text', '')
     if text:
         parts.append(text)
@@ -1184,8 +1209,12 @@ def todo_mark_moment():
     key = _content_key(role, content)
     marks = _load_marks()
     if marked:
+        # 同一条心动只留一份（正文改过后重标，不会叠出两条）
+        for k in [k for k, e in marks.items() if isinstance(e, dict) and e.get('source') == 'heart-moment' and str(e.get('momentId')) == str(mid)]:
+            del marks[k]
         marks[key] = {
-            'markedAt': datetime.datetime.now().isoformat(),
+            'markedAt': _utc_now_iso(),
+            'time': _moment_time_iso(moment),
             'content': content,
             'role': role,
             'source': 'heart-moment',
@@ -1196,6 +1225,9 @@ def todo_mark_moment():
     else:
         if key in marks:
             del marks[key]
+        # 按 momentId 兜底清理：心动正文改过后内容键会变，仅按 key 删会删不掉
+        for k in [k for k, e in marks.items() if isinstance(e, dict) and e.get('source') == 'heart-moment' and str(e.get('momentId')) == str(mid)]:
+            del marks[k]
         msg = '已取消标星'
     _save_marks(marks)
     return jsonify({'ok': True, 'marked': marked, 'key': key, 'message': msg, 'total_marked': len(marks)})

@@ -73,9 +73,13 @@ def _safe_resolve(path: str, for_write: bool = False) -> Path:
     p = Path(path).expanduser()
     if not p.is_absolute():
         raise ValueError("请使用绝对路径，例如 /root/workspace/xxx")
+    # 先规范化 . / ..，再解析现存路径段，避免 relative_to 对未规范化路径误判。
+    p = Path(os.path.abspath(str(p)))
     missing = []
     cur = p
-    while not cur.exists():
+    while not cur.exists() and not cur.is_symlink():
+        if cur.parent == cur:
+            raise FileNotFoundError(f"无法解析路径: {path}")
         missing.insert(0, cur.name)
         cur = cur.parent
     resolved = cur.resolve(strict=True)
@@ -124,42 +128,187 @@ def _read_lines(p: Path, start_line: int, end_line: int, limit: int) -> str:
 
 
 @mcp.tool()
-def list_dir(path: str, depth: int = 1, show_hidden: bool = False) -> str:
-    """列出目录内容，返回带类型和文件大小的树状列表。depth 最多 4 层。"""
+def list_dir(path: str, depth: int = 1, show_hidden: bool = False, max_entries: int = 200) -> str:
+    """以紧凑树状结构列出目录。先列完当前目录，再展开子目录，避免大目录吞掉后续结果。
+    depth 最多 4 层；max_entries 限制总条目数。默认跳过常见依赖/缓存目录的展开，不跟随符号链接。"""
     depth = max(1, min(int(depth), 4))
+    max_entries = max(1, min(int(max_entries), MAX_LIST_ENTRIES))
     root = _safe_resolve(path)
     if not root.is_dir():
         return f"错误: 不是目录: {root}"
-    lines = []
+
+    # 这些目录通常体积巨大、对项目结构判断帮助不大；仍显示目录本身，但默认不递归展开。
+    skip_expand = {
+        'node_modules', '__pycache__', '.git', '.venv', 'venv', 'env',
+        'site-packages', '.cache', '.pytest_cache', '.mypy_cache', '.ruff_cache',
+        '.next', 'coverage', 'dist', 'build'
+    }
+    lines = [f"目录: {root}"]
     count = 0
+    truncated = False
 
-    def walk(d: Path, level: int) -> None:
-        nonlocal count
-        indent = "  " * level
+    def get_entries(d: Path):
         try:
-            entries = sorted(d.iterdir(), key=lambda x: (x.is_file(), x.name.lower()))
-        except PermissionError:
-            lines.append(f"{indent}[无权限读取]")
-            return
-        for entry in entries:
-            if count >= MAX_LIST_ENTRIES:
-                lines.append(f"{indent}…（条目过多已截断，建议用 search_text 或减小 depth）")
-                return
-            if entry.name.startswith(".") and not show_hidden:
-                continue
-            count += 1
+            entries = list(os.scandir(d))
+        except (PermissionError, OSError):
+            return None
+        entries = [e for e in entries if show_hidden or not e.name.startswith('.')]
+        def sort_key(e):
             try:
-                if entry.is_dir():
-                    lines.append(f"{indent}📁 {entry.name}/")
-                    if level < depth:
-                        walk(entry, level + 1)
+                if e.is_symlink():
+                    kind = 1
+                elif e.is_dir(follow_symlinks=False):
+                    kind = 0
                 else:
-                    lines.append(f"{indent}📄 {entry.name}  ({_fmt_size(entry.stat().st_size)})")
+                    kind = 2
             except OSError:
-                lines.append(f"{indent}❓ {entry.name}")
+                kind = 3
+            name = e.name.casefold()
+            backup_like = (
+                name.startswith(('backup_', 'backup-', 'archive', 'recovery_'))
+                or name.endswith(('.bak', '.old', '.orig', '.swp', '~', '.tar.gz', '.zip'))
+                or '.bak-' in name or '.bak.' in name
+            )
+            return (kind, 1 if backup_like else 0, name)
+        return sorted(entries, key=sort_key)
 
-    walk(root, 0)
-    return _truncate(f"📂 {root}\n" + "\n".join(lines))
+    def describe(entry, indent):
+        nonlocal count, truncated
+        if count >= max_entries:
+            truncated = True
+            return None
+        count += 1
+        prefix = '  ' * indent
+        try:
+            if entry.is_symlink():
+                try:
+                    target = os.readlink(entry.path)
+                except OSError:
+                    target = '?'
+                lines.append(f"{prefix}[LINK] {entry.name} -> {target}")
+                return None
+            if entry.is_dir(follow_symlinks=False):
+                suffix = '（默认不展开）' if entry.name in skip_expand else ''
+                lines.append(f"{prefix}[DIR]  {entry.name}/{suffix}")
+                return Path(entry.path) if entry.name not in skip_expand else None
+            try:
+                size = _fmt_size(entry.stat(follow_symlinks=False).st_size)
+            except OSError:
+                size = '大小未知'
+            lines.append(f"{prefix}[FILE] {entry.name} ({size})")
+        except OSError:
+            lines.append(f"{prefix}[?]    {entry.name}")
+        return None
+
+    # 每层先列出所有直接子项，再进入子目录，防止第一个大目录占满整个输出。
+    def walk(d: Path, level: int, indent: int):
+        nonlocal truncated
+        entries = get_entries(d)
+        if entries is None:
+            lines.append('  ' * indent + '[无法读取目录]')
+            return
+        children = []
+        per_dir_limit = 80
+        visible_entries = entries[:per_dir_limit]
+        for entry in visible_entries:
+            child = describe(entry, indent)
+            if child is not None and level < depth:
+                children.append((child, entry.name))
+            if truncated:
+                break
+        if len(entries) > len(visible_entries) and not truncated:
+            lines.append('  ' * indent + f'…本目录另有 {len(entries) - len(visible_entries)} 项未列出')
+        for child, name in children:
+            if truncated:
+                break
+            lines.append('  ' * indent + f'展开 {name}/')
+            walk(child, level + 1, indent + 1)
+
+    walk(root, 1, 0)
+    if truncated:
+        lines.append(f'…已达到 max_entries={max_entries} 条上限；可缩小 depth 或指定更具体的 path。')
+    return _truncate('\n'.join(lines))
+
+@mcp.tool()
+def find_files(pattern: str, path: str = "/root/workspace", max_results: int = 100,
+               include_hidden: bool = False, include_backups: bool = False) -> str:
+    """按文件名或通配符查找文件/目录，不搜索文件内容。默认跳过依赖、缓存和备份；返回路径、类型、大小。"""
+    target = _safe_resolve(path)
+    if not target.exists():
+        return f"错误: 路径不存在: {target}"
+    try:
+        matcher = re.compile(fnmatch.translate(pattern), re.IGNORECASE)
+    except re.error as e:
+        return f"文件名模式错误: {e}"
+    max_results = max(1, min(int(max_results), 500))
+    skip_dirs = {
+        ".git", "node_modules", "__pycache__", ".venv", "venv", "env",
+        "site-packages", ".cache", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+        ".next", "coverage", "dist", "build"
+    }
+    def is_backup(name: str) -> bool:
+        n = name.casefold()
+        return (n.startswith(("backup_", "backup-", "archive_", "recovery_"))
+                or n.endswith((".bak", ".old", ".orig", ".swp", "~", ".tar.gz", ".zip"))
+                or ".bak-" in n or ".bak." in n)
+    found = []
+    scanned = 0
+    scan_limit = 20000
+
+    def add_entry(p: Path, is_dir: bool):
+        try:
+            if is_dir:
+                found.append(f"[DIR]  {p}/")
+            else:
+                st = p.stat(follow_symlinks=False)
+                found.append(f"[FILE] {p} ({_fmt_size(st.st_size)})")
+        except OSError:
+            found.append(f"[?] {p}")
+
+    if target.is_file():
+        if matcher.fullmatch(target.name):
+            add_entry(target, False)
+    elif target.is_dir():
+        for dirpath, dirnames, filenames in os.walk(target, followlinks=False):
+            current = Path(dirpath)
+            dirnames[:] = sorted(
+                d for d in dirnames
+                if (include_hidden or not d.startswith("."))
+                and d not in skip_dirs
+                and (include_backups or not is_backup(d))
+                and not (current / d).is_symlink()
+            )
+            entries = [(name, True) for name in dirnames] + [(name, False) for name in filenames]
+            entries.sort(key=lambda item: (0 if item[1] else 1, item[0].casefold()))
+            for name, is_dir in entries:
+                if not include_hidden and name.startswith("."):
+                    continue
+                if not include_backups and is_backup(name):
+                    continue
+                scanned += 1
+                p = current / name
+                if p.is_symlink():
+                    continue
+                if matcher.fullmatch(name):
+                    add_entry(p, is_dir)
+                    if len(found) >= max_results:
+                        break
+                if scanned >= scan_limit:
+                    break
+            if len(found) >= max_results or scanned >= scan_limit:
+                break
+    else:
+        return f"错误: 不支持的路径类型: {target}"
+
+    lines = [f"文件名匹配: {pattern}", f"搜索范围: {target}", f"匹配数量: {len(found)}"]
+    lines.extend(found)
+    if len(found) >= max_results:
+        lines.append(f"…已达到 max_results={max_results} 上限")
+    if scanned >= scan_limit:
+        lines.append(f"…已扫描 {scan_limit} 项，搜索提前停止；可缩小 path 或使用更具体的 pattern")
+    if not found:
+        lines.append("没有找到匹配项")
+    return _truncate("\\n".join(lines))
 
 
 @mcp.tool()
@@ -180,7 +329,11 @@ def read_file(path: str, start_line: int = 1, end_line: int = 0) -> str:
 def write_file(path: str, content: str, mode: str = "overwrite") -> str:
     """写入或追加文件内容。除受保护的系统目录外均可写。mode: overwrite（覆盖）/ append（追加）/ create（仅新建）"""
     p = _safe_resolve(path, for_write=True)
-    mode = mode.lower()
+    mode = (mode or "overwrite").strip().lower()
+    if mode not in {"overwrite", "append", "create"}:
+        return "错误: mode 仅支持 overwrite、append、create"
+    if p.exists() and p.is_dir():
+        return f"错误: 目标是目录，不是文件: {p}"
     try:
         if mode == "append":
             with open(p, "a", encoding="utf-8") as f:
@@ -255,7 +408,8 @@ def search_text(pattern: str, path: str = "/root/workspace", file_filter: str = 
     def scan_file(fp: Path) -> None:
         if len(matches) >= max_results:
             return
-        if not fp.is_file():
+        # 不读取符号链接文件，避免搜索范围意外越过指定目录。
+        if fp.is_symlink() or not fp.is_file():
             return
         try:
             if os.path.getsize(fp) > 2 * 1024 * 1024:
@@ -297,8 +451,15 @@ def search_text(pattern: str, path: str = "/root/workspace", file_filter: str = 
 @mcp.tool()
 def file_info(path: str) -> str:
     """查看文件/目录信息：类型、大小、修改时间、权限。"""
-    p = _safe_resolve(path)
-    st = p.stat()
+    try:
+        p = _safe_resolve(path)
+        st = p.stat()
+    except FileNotFoundError:
+        return f"错误: 路径不存在: {path}"
+    except PermissionError as e:
+        return f"错误: 无权访问路径: {path}（{e}）"
+    except OSError as e:
+        return f"读取路径信息失败: {path}（{e}）"
     kind = "📁 目录" if p.is_dir() else "📄 文件"
     return (
         f"路径: {p}\n"
@@ -331,12 +492,17 @@ def run_command(command: str, cwd: str = "", timeout: int = 30) -> str:
         return f"⏱️ 命令超时（>{timeout} 秒）已终止。建议缩小操作范围或调大 timeout。"
     except Exception as e:
         return f"执行出错: {e}"
-    out = proc.stdout or ""
-    if proc.stderr:
-        out += "\n[stderr]\n" + proc.stderr
-    result = _truncate(out)
-    if proc.returncode != 0:
-        result += f"\n\n⚠️ 退出码: {proc.returncode}"
+    stdout = proc.stdout or ""
+    stderr = proc.stderr or ""
+    sections = []
+    if stdout.strip():
+        sections.append("[stdout]\\n" + stdout.rstrip())
+    if stderr.strip():
+        sections.append("[stderr]\\n" + stderr.rstrip())
+    if not sections:
+        sections.append("(命令未产生输出)")
+    result = _truncate("\\n\\n".join(sections))
+    result += f"\\n\\n退出码: {proc.returncode}"
     return result
 
 

@@ -122,7 +122,7 @@ function makeClient() {
     id: "srv_mock", name: "mock", enabled: true, connected: true, config: {},
     async connect() {}, 
     async listTools() {
-      return [{ name: "diary_add", description: "写日记", inputSchema: { type: "object", properties: { content: { type: "string" } } } }];
+      return [{ name: "lovediary_add", description: "写日记", inputSchema: { type: "object", properties: { content: { type: "string" } } } }];
     },
     async callTool(name, args) { return { content: [{ type: "text", text: this.lastResultJson }] }; }
   };
@@ -141,13 +141,13 @@ function testToolPath() {
     messages: [{ role: "user", content: "写日记" }], sessionId: "s_tool_fk",
     fetchFn: null, onEvent: null
   };
-  // 第 1 轮返回 diary_add 工具调用，第 2 轮起返回收尾正文（否则同一帧每轮重放，循环跑满 7 轮）
+  // 第 1 轮返回 lovediary_add 工具调用，第 2 轮起返回收尾正文（否则同一帧每轮重放，循环跑满 7 轮）
   function makeFetch(argJson) {
     let round = 0;
     return async () => {
       round++;
       return sseResponse(round === 1
-        ? [toolCallFrame("diary_add", argJson)]
+        ? [toolCallFrame("lovediary_add", argJson)]
         : [sseFrame({ content: "好" }, "stop"), "data: [DONE]\n\n"]);
     };
   }

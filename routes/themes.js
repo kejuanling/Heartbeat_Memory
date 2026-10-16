@@ -35,7 +35,7 @@ const MIME_EXT = {
   'text/plain': 'txt'
 };
 // 扩展名 → MIME 回查表（/uploads/:file 直出时定 Content-Type）
-const EXT_MIME = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', pdf: 'application/pdf', txt: 'text/plain' };
+const EXT_MIME = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', pdf: 'application/pdf', txt: 'text/plain', json: 'application/json', md: 'text/markdown', csv: 'text/csv', mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', mp4: 'video/mp4', zip: 'application/zip', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
 // 通用附件（/v1/upload-file）：mime → 扩展名白名单（映射外一律 .bin + octet-stream，防扩展名注入/可执行直出）
 const FILE_MIME_EXT = Object.assign({}, MIME_EXT, {
   'application/json': 'json',
@@ -45,8 +45,11 @@ const FILE_MIME_EXT = Object.assign({}, MIME_EXT, {
   'audio/wav': 'wav',
   'audio/mp4': 'm4a',
   'video/mp4': 'mp4',
-  'application/zip': 'zip'
+  'application/zip': 'zip',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx'
 });
+const FILE_EXT_MIME = Object.keys(FILE_MIME_EXT).reduce((out, mime) => { out[FILE_MIME_EXT[mime]] = mime; return out; }, {});
+const TEXT_PARSE_EXTS = new Set(['txt', 'md', 'markdown', 'csv', 'json', 'log', 'py', 'js', 'mjs', 'ts', 'tsx', 'jsx', 'html', 'htm', 'css', 'xml', 'yaml', 'yml', 'ini', 'conf', 'cfg', 'sh', 'bash', 'zsh', 'java', 'c', 'h', 'cpp', 'hpp', 'go', 'rs', 'sql', 'toml', 'env', 'properties', 'rst', 'tex', 'vue', 'svelte', 'dockerfile', 'gradle', 'lock']);
 // 展示用原始文件名净化：只留 basename、非法字符换下划线、截 80 字（落盘名是服务端生成的 file-*，不用它）
 function safeBaseName(name) {
   return path.basename(String(name || 'file')).replace(/[^\w.\-\u4e00-\u9fff]+/g, '_').slice(0, 80) || 'file';
@@ -119,10 +122,10 @@ module.exports = function registerThemeRoutes(app, deps) {
 
   // 通用附件转存（聊天窗口发 PDF/文本/音视频等）：body {name, mime, data(base64 无 dataURL 前缀)}
   // 上限与 /v1/upload-image 同一设置项（cfg.upload_max_mb）；前端 0910 已调用本路由但后端缺失（404），此处补齐。
-  // 1008-20 文档正文提取：PDF/docx 上传时解析正文存 <原文件>.txt 缓存，
-  // 供 LLM 上下文注入（模型只见文本；LLM 不解析 file 结构）。解析失败不阻塞上传，降级为元信息摘要。
+  // 附件预处理：PDF/DOCX 与文本文件必须在上传阶段确认正文可读取；失败时拒绝附件，避免模型只收到摘要却被误认为读过全文。
   const DOC_TEXT_MAX = 15000;
   async function extractDocTextToCache(fp, mime, name) {
+    let parser = null;
     try {
       let text = "";
       const ext = String(name || "").split(".").pop().toLowerCase();
@@ -144,8 +147,13 @@ module.exports = function registerThemeRoutes(app, deps) {
       console.log("[upload-file] 文档正文已提取: " + name + " → " + text.length + " 字");
       return true;
     } catch (e) {
-      console.warn("[upload-file] 文档正文提取失败（降级为摘要）: " + name + ": " + ((e && e.message) || e));
+      console.warn("[upload-file] 文档正文提取失败: " + name + ": " + ((e && e.message) || e));
       return false;
+    } finally {
+      // pdf-parse 2.x 要显式释放 parser/worker 资源，避免连续上传时累积占用。
+      if (parser && typeof parser.destroy === 'function') {
+        try { await parser.destroy(); } catch (e) { /* 清理失败不覆盖解析结果 */ }
+      }
     }
   }
 
@@ -167,18 +175,41 @@ module.exports = function registerThemeRoutes(app, deps) {
       reply.code(413).send({ ok: false, error: '文件过大（上限 ' + Math.floor(maxBytes / 1024 / 1024 * 10) / 10 + 'MB，可在聊天页设置调整）' });
       return;
     }
-    const mime = String(body.mime || 'application/octet-stream');
-    const ext = FILE_MIME_EXT[mime] || 'bin';
-    const outMime = EXT_MIME[ext] || FILE_MIME_EXT[mime] || 'application/octet-stream';
+    const mime = String(body.mime || 'application/octet-stream').toLowerCase();
+    const suppliedExt = String(body.name || '').split('.').pop().toLowerCase();
+    // PDF/DOCX 优先按扩展名进入对应解析器（解析器会验证内容）；其他类型优先用已知 MIME，缺失时再按受控扩展名白名单推断。
+    const ext = ((suppliedExt === 'pdf' || suppliedExt === 'docx') && FILE_EXT_MIME[suppliedExt])
+      ? suppliedExt
+      : (FILE_MIME_EXT[mime] || ((FILE_EXT_MIME[suppliedExt] || TEXT_PARSE_EXTS.has(suppliedExt)) ? suppliedExt : 'bin'));
+    const outMime = EXT_MIME[ext] || FILE_EXT_MIME[ext] || (TEXT_PARSE_EXTS.has(ext) ? 'text/plain' : '') || FILE_MIME_EXT[mime] || 'application/octet-stream';
     const keepName = safeBaseName(body.name);
     await fsp.ensureDir(uploadsDir);
     const name = 'file-' + Date.now().toString(36) + '-' + crypto.randomBytes(4).toString('hex') + '.' + ext;
-    await fsp.writeFile(path.join(uploadsDir, name), buf);
-    // 1008-20：PDF/docx 上传后同步提取正文缓存（await：用户随后的消息要能立刻读到内容）
-    if (ext === "pdf" || ext === "docx") {
-      await extractDocTextToCache(path.join(uploadsDir, name), outMime, name);
+    const fp = path.join(uploadsDir, name);
+    await fsp.writeFile(fp, buf);
+    let parseRequired = false;
+    let parseOk = true;
+    let parseError = '';
+    if (ext === 'pdf' || ext === 'docx') {
+      parseRequired = true;
+      parseOk = await extractDocTextToCache(fp, outMime, name);
+      parseError = '未能提取到正文，请确认文件有效且包含可提取文字';
+    } else if (TEXT_PARSE_EXTS.has(ext) || outMime.startsWith('text/') || outMime === 'application/json') {
+      parseRequired = true;
+      try {
+        const text = (await fsp.readFile(fp, 'utf8')).replace(/^\uFEFF/, '').replace(/\u0000/g, '').trim();
+        parseOk = !!text;
+      } catch (e) { parseOk = false; }
+      parseError = '未能读取到文本正文，请检查文件编码或内容';
     }
-    reply.send({ ok: true, name: keepName, url: imageAbsUrl(req, '/uploads/' + name), size: buf.length, mime: outMime });
+    if (parseRequired && !parseOk) {
+      // 解析失败不留下不可用附件，也不返回成功状态。
+      try { await fsp.remove(fp); } catch (e) {}
+      try { await fsp.remove(fp + '.txt'); } catch (e) {}
+      reply.code(422).send({ ok: false, error: parseError });
+      return;
+    }
+    reply.send({ ok: true, name: keepName, url: imageAbsUrl(req, '/uploads/' + name), size: buf.length, mime: outMime, parsed: parseRequired });
   });
 
   // 桌面图标换图（PWA 主屏图标）：前端 canvas 已居中裁方，body {icon192, icon512} 为两个 PNG dataURL，

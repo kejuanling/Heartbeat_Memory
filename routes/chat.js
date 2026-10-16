@@ -240,11 +240,6 @@ module.exports = function registerChatRoutes(app, deps) {
         if (!sid) continue;
         seen.add(sid);
         try {
-          // 1008-10：快照过期检测（重建快照红点），纯只读，不触碰会话数据
-          let _snapStale = false, _snapReasons = [];
-          if (deps.snapshotStaleOf) {
-            try { const _st = await deps.snapshotStaleOf(sid); _snapStale = !!(_st && _st.stale); _snapReasons = (_st && Array.isArray(_st.reasons)) ? _st.reasons : []; } catch (e) {}
-          }
           const filePath = path.join(baseDir, f);
           const st = fsp.statSync(filePath);
           const cached = sessionMetaCache.get(sid);
@@ -252,7 +247,7 @@ module.exports = function registerChatRoutes(app, deps) {
             let cPersona = '', cModel = '';
             const cBid = spMap[sid]; if (cBid) cPersona = pbNameOf(cBid);
             try { cModel = (deps.sessionModelNameOverride ? (deps.sessionModelNameOverride(sid) || '') : ''); } catch (e) { cModel = ''; }  // 0929-30: 无 override 返回空，前端显示「默认」
-            sessions.push({ id: sid, name: sid, total: cached.total, real: cached.real, last_time: cached.last_time, is_default: false, archived: archiveSet.has(sid), persona_name: cPersona, model_name: cModel, snap_stale: _snapStale, snap_stale_reasons: _snapReasons });
+            sessions.push({ id: sid, name: sid, total: cached.total, real: cached.real, last_time: cached.last_time, is_default: false, archived: archiveSet.has(sid), persona_name: cPersona, model_name: cModel });
             continue;
           }
           const arr = loadTimeline(sid);
@@ -263,7 +258,7 @@ module.exports = function registerChatRoutes(app, deps) {
           let persona = '', modelN = '';
           const bid = spMap[sid]; if (bid) persona = pbNameOf(bid);
           try { modelN = (deps.sessionModelNameOverride ? (deps.sessionModelNameOverride(sid) || '') : ''); } catch (e) { modelN = ''; }  // 0929-30: 无 override 返回空，前端显示「默认」
-          sessions.push({ id: sid, name: sid, total: meta.total, real: meta.real, last_time: meta.last_time, is_default: false, archived: archiveSet.has(sid), persona_name: persona, model_name: modelN, snap_stale: _snapStale, snap_stale_reasons: _snapReasons });
+          sessions.push({ id: sid, name: sid, total: meta.total, real: meta.real, last_time: meta.last_time, is_default: false, archived: archiveSet.has(sid), persona_name: persona, model_name: modelN });
         } catch (e) {}
       }
       // 清理已删除会话的缓存项，避免陈旧
@@ -274,6 +269,36 @@ module.exports = function registerChatRoutes(app, deps) {
     } catch (err) {
       console.error('[GET /v1/sessions] error:', err.message);
       reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // 快照过期状态按需检查：会话列表首屏只返回轻量元数据，不逐个重组上下文块。
+  // 前端打开单个会话菜单时才调用本接口，避免 N 个会话的快照核验拖慢列表响应。
+  app.get('/v1/sessions/:id/snapshot-stale', async (req, reply) => {
+    try {
+      const sid = String(req.params.id || '').trim();
+      if (!sid || !/^[A-Za-z0-9_-]+$/.test(sid)) {
+        return reply.code(400).send({ error: '非法会话ID' });
+      }
+      const filePath = (typeof timelineFileFor === 'function')
+        ? timelineFileFor(sid)
+        : path.join(baseDir, `enhanced_messages_${sid}.json`);
+      if (!fsp.existsSync(filePath)) {
+        return reply.code(404).send({ error: '会话不存在' });
+      }
+      let result = { stale: false, reasons: [] };
+      if (typeof deps.snapshotStaleOf === 'function') {
+        try { result = (await deps.snapshotStaleOf(sid)) || result; } catch (e) {}
+      }
+      return reply.send({
+        ok: true,
+        session_id: sid,
+        snap_stale: !!result.stale,
+        snap_stale_reasons: Array.isArray(result.reasons) ? result.reasons : []
+      });
+    } catch (err) {
+      console.error('[GET /v1/sessions/:id/snapshot-stale] error:', err.message);
+      return reply.code(500).send({ error: err.message });
     }
   });
 

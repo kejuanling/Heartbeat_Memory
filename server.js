@@ -548,7 +548,7 @@ function filePartSummary(part) {
 
 // ========================
 // 文件内容注入（2026-09-10 方案A）：文本类文件把正文读进模型上下文，
-// 让 AI 真正"看到"文件内容；非文本或读取失败降级为元信息摘要。
+// 让 AI 真正"看到"文件内容；非文本保留元信息摘要，正文读取失败会明确标注。
 // 仅 LLM 转发链路使用；时间线/日志仍走 filePartSummary 纯摘要，防 localStorage 膨胀。
 // ========================
 const UPLOADS_DIR = path.join(__dirname, "data", "uploads");
@@ -614,7 +614,7 @@ function readUploadedFileContent(fileObj, maxLen) {
     return s;
   } catch (e) { return null; }
 }
-// 文件 part -> LLM 文本：文本类注入正文，否则保持元信息摘要。
+// 文件 part -> LLM 文本：可读文本注入正文；必需正文缺失时显式告知，不再静默降级为摘要。
 function filePartTextForLLM(part) {
   const summary = filePartSummary(part);
   const f = part && typeof part === "object" && part.file ? part.file : null;
@@ -622,13 +622,13 @@ function filePartTextForLLM(part) {
   if (!isTextFilePart(f) && !isDocFilePart(f)) return summary;
   if (isTextFilePart(f)) {
     const content = readUploadedFileContent(f);
-    if (content === null || !content.trim()) return summary;
+    if (content === null || !content.trim()) return summary + "\n【正文读取失败：当前只有文件元信息，未读取到正文；不要声称已阅读文件全文。】";
     return summary + "\n【文件内容】\n" + content;
   }
-  // 1008-20：PDF/docx 读上传时提取的正文缓存；无缓存（旧文件/解析失败）保持元信息摘要
+  // 上传阶段应已提取 PDF/DOCX 正文；旧附件或缓存丢失时显式标注，绝不静默伪装成已读取全文。
   const docText = readDocCacheFile(f);
   if (docText && docText.trim()) return summary + "\n【文件内容】\n" + docText;
-  return summary;
+  return summary + "\n【正文读取失败：当前只有文件元信息，未读取到正文；不要声称已阅读文件全文。】";
 }
 
 function getTextFromContentPart(part) {
@@ -716,7 +716,7 @@ function prepareMessageForLLM(msg) {
   if (Array.isArray(msg.content) && shouldForwardMultimodalContent()) {
     // 2026-09-10：文件 part 上游模型不解析（可能拒收未知结构），转文本摘要；图片 part 原样透传。
     // 2026-09-10 方案A：文本类文件把正文读进上下文（readUploadedFileContent），AI 真正可见文件内容；
-    // 非文本或读取失败仍降级为元信息摘要；图片 part 原样透传。
+    // 非文本附件保持元信息摘要；文本/PDF/DOCX 正文缺失时注入明确警告，避免误称已读全文；图片 part 原样透传。
     if (!msg.content.some(isFileContentPart)) return msg;
     return { ...msg, content: msg.content.map(function (p) {
       if (isFileContentPart(p)) return { type: "text", text: filePartTextForLLM(p) };
@@ -3520,8 +3520,8 @@ app.post("/internal/context-mark", async (req, reply) => {
 
 // 记忆池检索：MCP 工具 memory_search 用（x-internal-key 鉴权）
 // 0919 用户拍板「换新」：数据源切 V2 集合（旧池退役为迁移源，不再写入）。
-// 检索公式（0920 删重要级/时间衰减，用户拍板）：0.55 语义余弦(bge-small-zh) + 0.20 字面；
-// embed-server 不可用自动降级纯字面（0.6/0.4）。category 兼容旧分类名 → V2 kind。
+// memory_search 纯关键词检索，不调用向量模型，不读取 triggers/vibe；默认跨 fact/rule/event。
+// category 兼容旧分类名 → V2 kind。向量模型只供 event 相关注入与管理台相似分组使用。
 // 恒只读：不计数、不自动置顶（旧池检索写状态的污染在 V2 结构性根除）。
 const MEMORY_CATEGORY_TO_KIND = { "关于她": "fact", "认账": "rule", "拓本": "fact", "压缩摘要": "fact", "对话碎片": "fact", "关于我们": "fact", "锚点": "fact", "信号": "fact", "对话摘要": "fact" };
 app.get("/internal/memory-pool/retrieve", async (req, reply) => {
@@ -4000,6 +4000,33 @@ function _writeSummaryHistory(h) {
 app.get("/admin/memory-summary/history", { preHandler: basicAuth }, async (req, reply) => {
   const h = _readSummaryHistory();
   reply.send({ core_identity: h.core_identity || [], understanding: h.understanding || [] });
+});
+// 将指定历史版本设为当前总结缓存：只替换 cache 的 text/lines，不碰快照文件、fingerprint 或 snapshot。
+// 已有会话继续使用冻结快照；新建会话才会从当前缓存读取该版本。
+app.post("/admin/memory-summary/use-version", { preHandler: basicAuth }, async (req, reply) => {
+  try {
+    const b = req.body || {};
+    const key = String(b.block || "").trim();
+    if (key !== "core_identity" && key !== "understanding") return reply.code(400).send({ error: "block 需为 core_identity 或 understanding" });
+    const ver = Number(b.version);
+    if (!Number.isInteger(ver) || ver < 1) return reply.code(400).send({ error: "version 需为正整数" });
+    const h = _readSummaryHistory();
+    const hit = (h[key] || []).find(e => Number(e.version) === ver);
+    if (!hit || !String(hit.text || "").trim()) return reply.code(404).send({ error: "版本不存在或正文为空：v" + ver });
+    const cacheFile = path.join(__dirname, "data", "memory_summary_cache.json");
+    let cache = {};
+    try { cache = JSON.parse(fs.readFileSync(cacheFile, "utf8")); } catch (_) {}
+    const prev = (cache && cache[key] && typeof cache[key] === "object") ? cache[key] : {};
+    const text = String(hit.text);
+    cache[key] = Object.assign({}, prev, {
+      text,
+      lines: text.split(/\r?\n/).map(s => s.trim()).filter(Boolean),
+      selected_history_version: ver,
+      selected_history_at: new Date().toISOString(),
+    });
+    fs.writeFileSync(cacheFile, JSON.stringify(cache, null, 2), "utf8");
+    reply.send({ ok: true, block: key, version: ver, chars: text.length, snapshot_changed: false });
+  } catch (err) { reply.code(500).send({ error: err.message }); }
 });
 app.post("/admin/memory-summary/history", { preHandler: basicAuth }, async (req, reply) => {
   const b = req.body || {};
@@ -7169,38 +7196,6 @@ function splitMultimodalContent(content) {
 // 推送（Bark / WebPush，与唤醒系统同一套配置）
 // sessionId：目标会话（WebPush 通道按会话定向订阅；bark 忽略此字段）。
 // 唤醒/告警类调用方必须传；后台回复类由 /v1/notify/reply-done 带入。
-async function sendPushNotification({ title, body, sessionId, channel } = {}) {
-  // 15s 超时：Bark 对端挂起时不能卡住免打扰释放等调用方
-  const pushController = new AbortController();
-  const pushTimer = setTimeout(() => pushController.abort(), 15000);
-  const doBark = async function () {
-    const barkKey = readEnvValue("BARK_KEY");
-    if (!barkKey) return { ok: false, reason: "Bark Key 未配置" };
-    const response = await fetch("https://api.day.app/push", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, body, device_key: barkKey, icon: readEnvValue("CUSTOM_ICON_URL") }),
-      signal: pushController.signal
-    });
-    const responseText = await response.text();
-    let result = {};
-    try { result = JSON.parse(responseText); } catch (e) {}
-    if (!response.ok || (result.code && result.code !== 200)) {
-      return { ok: false, reason: result.message || `HTTP ${response.status}` };
-    }
-    return { ok: true };
-  };
-  try {
-    // 2026-10-09 双渠道分流：channel 显式指定时按类型走（AI 消息提醒=webpush、后台告警=bark），
-    // 未指定时按 PUSH_PROVIDER 兜底（旧行为不变）。webpush 失败自动回退 Bark 保底，不漏提醒。
-    const provider = (channel || readEnvValue("PUSH_PROVIDER") || "bark").trim().toLowerCase();
-    if (provider === "webpush") {
-      const r = await require("./lib/webpush").sendToSession({ title, body, sessionId });
-      if (r && r.ok) return r;
-      // webpush 失败回退 Bark（timer 仍有效，bark 受 15s 超时保护；成功路径由 finally 统一清 timer）
-      const br = await doBark();
-      if (br.ok) return { ok: true, providerLabel: "Bark", fallback: "webpush", fallbackReason: (r && r.reason) || "webpush 失败" };
-      return r;
 // 待办到点提醒：与 wake scheduler 独立，时间和发送状态保存在统一后端数据文件。
 const TODO_REMINDER_CLAIM_URL = "http://127.0.0.1:8777/todo/api/reminders/claim";
 const TODO_REMINDER_RESULT_URL = "http://127.0.0.1:8777/todo/api/reminders/result";
@@ -7261,6 +7256,38 @@ async function scanTodoReminders() {
   }
 }
 
+async function sendPushNotification({ title, body, sessionId, channel } = {}) {
+  // 15s 超时：Bark 对端挂起时不能卡住免打扰释放等调用方
+  const pushController = new AbortController();
+  const pushTimer = setTimeout(() => pushController.abort(), 15000);
+  const doBark = async function () {
+    const barkKey = readEnvValue("BARK_KEY");
+    if (!barkKey) return { ok: false, reason: "Bark Key 未配置" };
+    const response = await fetch("https://api.day.app/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, body, device_key: barkKey, icon: readEnvValue("CUSTOM_ICON_URL") }),
+      signal: pushController.signal
+    });
+    const responseText = await response.text();
+    let result = {};
+    try { result = JSON.parse(responseText); } catch (e) {}
+    if (!response.ok || (result.code && result.code !== 200)) {
+      return { ok: false, reason: result.message || `HTTP ${response.status}` };
+    }
+    return { ok: true };
+  };
+  try {
+    // 2026-10-09 双渠道分流：channel 显式指定时按类型走（AI 消息提醒=webpush、后台告警=bark），
+    // 未指定时按 PUSH_PROVIDER 兜底（旧行为不变）。webpush 失败自动回退 Bark 保底，不漏提醒。
+    const provider = (channel || readEnvValue("PUSH_PROVIDER") || "bark").trim().toLowerCase();
+    if (provider === "webpush") {
+      const r = await require("./lib/webpush").sendToSession({ title, body, sessionId });
+      if (r && r.ok) return r;
+      // webpush 失败回退 Bark（timer 仍有效，bark 受 15s 超时保护；成功路径由 finally 统一清 timer）
+      const br = await doBark();
+      if (br.ok) return { ok: true, providerLabel: "Bark", fallback: "webpush", fallbackReason: (r && r.reason) || "webpush 失败" };
+      return r;
     }
     if (provider !== "bark") return { ok: false, reason: `不支持的 PUSH_PROVIDER：${provider}` };
     return await doBark();
@@ -7353,12 +7380,30 @@ app.put("/admin/chat-settings", { preHandler: basicAuth }, async (req, reply) =>
     if (!clean || typeof clean !== "object" || Array.isArray(clean)) clean = {};
     if (typeof body.api_key === "string" && body.api_key.trim()) clean.api_key = body.api_key;
     if (typeof body.system_prompt === "string") clean.system_prompt = body.system_prompt;
-    if (body.cfg && typeof body.cfg === "object") {
+    // 设置页只提交本次变化字段，按键合并到服务器权威配置；旧版 cfg 整包写入仍兼容，
+    // 但同样合并而不是整对象替换，避免旧浏览器/另一设备缺少新字段时把云端配置抹掉。
+    const cfgPatch = (body.cfg_patch && typeof body.cfg_patch === "object" && !Array.isArray(body.cfg_patch))
+      ? body.cfg_patch
+      : ((body.cfg && typeof body.cfg === "object" && !Array.isArray(body.cfg)) ? body.cfg : null);
+    if (cfgPatch) {
       const blocked = consoleOwnedCfgKeys();
-      const cfg = {};
-      for (const k of Object.keys(body.cfg)) {
+      const cfg = (clean.cfg && typeof clean.cfg === "object" && !Array.isArray(clean.cfg)) ? { ...clean.cfg } : {};
+      for (const k of Object.keys(cfgPatch)) {
+        const v = cfgPatch[k];
+        // 背景图/透明度按主题独立存放；用 dotted patch 精确设置或删除一项，
+        // 避免一个设备改 warm 主题时覆盖另一设备刚改的 dark 主题。
+        const bgMatch = /^(bg_by_theme|bg_opacity_by_theme)\.([a-z0-9_-]+)$/.exec(k);
+        if (bgMatch) {
+          const mapKey = bgMatch[1], themeKey = bgMatch[2];
+          if (blocked.has(mapKey)) continue;
+          const map = (cfg[mapKey] && typeof cfg[mapKey] === "object" && !Array.isArray(cfg[mapKey])) ? { ...cfg[mapKey] } : {};
+          if (v === null || v === undefined || v === "") delete map[themeKey];
+          else map[themeKey] = v;
+          cfg[mapKey] = map;
+          continue;
+        }
         if (blocked.has(k)) { console.warn("[chat-settings] 拦截管理台专属参数从设置页写入:", k); continue; }
-        cfg[k] = body.cfg[k];
+        cfg[k] = v;
       }
       clean.cfg = cfg;
     }
@@ -7536,6 +7581,14 @@ app.put("/admin/wake-locked", { preHandler: basicAuth }, async (req, reply) => {
 
 // 会话分支父级跨设备同步（存 data/session-branches.json）
 const SESSION_BRANCHES_FILE = path.join(__dirname, "data", "session-branches.json");
+// 2026-10-15：建立/更换分支映射时，子会话继承父会话的会话级注入配置
+// （data/session_cfg/<token>.json 整体复制：跨注入开关/注入块/标星条数/日记篇数）
+const inheritBranchCfg = function (child, parent) {
+  if (!child || !parent) return;
+  try {
+    if (sessionCfg.inheritFrom(parent, child)) console.log("[session-branches] " + child + " 继承父会话 " + parent + " 的注入配置");
+  } catch (e) { console.warn("[session-branches] 继承注入配置失败:", e.message); }
+};
 app.get("/admin/session-branches", { preHandler: basicAuth }, async (req, reply) => {
   try {
     let branches = {};
@@ -7561,7 +7614,8 @@ app.put("/admin/session-branches", { preHandler: basicAuth }, async (req, reply)
       if (body.set && typeof body.set === "object") {
         for (const k of Object.keys(body.set)) {
           const nv = normBranch(body.set[k]);
-          if (nv) branches[k] = nv; else delete branches[k];
+          if (nv) { branches[k] = nv; inheritBranchCfg(k, nv.fromSession); }
+          else delete branches[k];
         }
       }
       if (Array.isArray(body.unset)) {
@@ -7571,6 +7625,10 @@ app.put("/admin/session-branches", { preHandler: basicAuth }, async (req, reply)
       // 旧格式整表（兼容旧缓存页面）
       const clean = {};
       for (const k of Object.keys(body.branches)) { const nv = normBranch(body.branches[k]); if (nv) clean[k] = nv; }
+      for (const k of Object.keys(clean)) {
+        const prev = branches[k];
+        if (!prev || prev.fromSession !== clean[k].fromSession) inheritBranchCfg(k, clean[k].fromSession);
+      }
       branches = clean;
     }
     fs.writeFileSync(SESSION_BRANCHES_FILE, JSON.stringify(branches, null, 2), "utf-8");
@@ -7678,6 +7736,9 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err, address) => {
   setTimeout(() => {
     try {
       wakeScheduler.start();
+      // 启动后先扫描一次；之后每 15 秒检查。调度只扫描落盘的 pending 提醒。
+      setTimeout(() => { scanTodoReminders(); }, 1500);
+      setInterval(() => { scanTodoReminders(); }, 15000).unref();
       wakeUpLastHeartbeat = Date.now();
       try { if (memoryDistill) memoryDistill.start(); } catch (e) { console.error("[memory-distill] 启动失败:", e && e.message); }
       try { if (memorySummary) memorySummary.start(); } catch (e) { console.error("[memory-summary] 启动失败:", e && e.message); }
@@ -7688,6 +7749,3 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err, address) => {
     }
   }, 3000);
 });
-      // 启动后先扫描一次；之后每 15 秒检查。调度只扫描落盘的 pending 提醒。
-      setTimeout(() => { scanTodoReminders(); }, 1500);
-      setInterval(() => { scanTodoReminders(); }, 15000).unref();
